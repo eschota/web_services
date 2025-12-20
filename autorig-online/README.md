@@ -1,214 +1,419 @@
-# AutoRig Online
+# 🚀 AutoRig Online
 
-Automatic 3D model rigging service. Upload GLB, FBX, or OBJ models and get them rigged with 50+ animations.
+<div align="center">
 
-## Features
+![AutoRig Logo](https://img.shields.io/badge/AutoRig-Online-blue?style=for-the-badge&logo=blender&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat&logo=sqlite&logoColor=white)
 
-- Upload files or paste links
-- Automatic worker selection (least busy)
-- Real-time progress tracking
-- Google OAuth2 authentication
-- Free tier: 3 anonymous + 7 after login (10 total)
-- Admin panel for balance management
-- Dark/Light themes
-- English/Russian localization
+**Автоматический сервис риггинга 3D моделей**
 
-## Tech Stack
+*Загружайте GLB, FBX или OBJ модели и получайте их с риггингом и 50+ анимациями*
 
-- **Backend**: Python 3.11+, FastAPI, SQLAlchemy, SQLite
-- **Frontend**: Vanilla HTML/CSS/JS
-- **Auth**: Google OAuth2
-- **Server**: Nginx + Let's Encrypt
+[![GitHub Repo](https://img.shields.io/badge/GitHub-Repo-black?style=flat&logo=github)](https://github.com/eschota/web_services)
+[![Live Demo](https://img.shields.io/badge/Live-Demo-green?style=flat&logo=web)](https://autorig.online)
 
-## Project Structure
+</div>
+
+---
+
+## ✨ О проекте
+
+**AutoRig Online** - это инновационный веб-сервис для автоматического риггинга 3D моделей. Просто загрузите вашу модель или укажите ссылку, и система автоматически:
+
+- 🔄 Обработает модель с помощью ИИ
+- 🎭 Добавит профессиональный риггинг
+- 🎬 Сгенерирует 50+ разнообразных анимаций
+- 📦 Предоставит готовый результат для скачивания
+
+## 🌟 Возможности
+
+<table>
+  <tr>
+    <td align="center">
+      <h3>📤 Загрузка</h3>
+      <p>Загружайте файлы или вставляйте ссылки<br>Поддержка GLB, FBX, OBJ форматов</p>
+    </td>
+    <td align="center">
+      <h3>🤖 ИИ Обработка</h3>
+      <p>Автоматический выбор наименее загруженного воркера<br>Интеллектуальная балансировка нагрузки</p>
+    </td>
+    <td align="center">
+      <h3>📊 Мониторинг</h3>
+      <p>Отслеживание прогресса в реальном времени<br>Подробные статусы обработки</p>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <h3>🔐 Авторизация</h3>
+      <p>Google OAuth2 аутентификация<br>Безопасный вход через Google</p>
+    </td>
+    <td align="center">
+      <h3>🎁 Бесплатный тариф</h3>
+      <p>3 анонимные конверсии<br>+7 после входа (всего 10)</p>
+    </td>
+    <td align="center">
+      <h3>⚙️ Админ-панель</h3>
+      <p>Управление балансами пользователей<br>Мониторинг системы</p>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <h3>🌓 Темы</h3>
+      <p>Темная и светлая темы интерфейса<br>Адаптивный дизайн</p>
+    </td>
+    <td align="center">
+      <h3>🌍 Локализация</h3>
+      <p>Русский и английский языки<br>Полная поддержка i18n</p>
+    </td>
+    <td align="center">
+      <h3>📱 Адаптивность</h3>
+      <p>Работает на всех устройствах<br>Мобильная версия</p>
+    </td>
+  </tr>
+</table>
+
+## 🛠️ Технологии
+
+<div align="center">
+
+### Backend
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-000000?style=for-the-badge&logo=sqlalchemy&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
+
+### Frontend
+![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white)
+![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=white)
+
+### DevOps & Security
+![Nginx](https://img.shields.io/badge/Nginx-009639?style=for-the-badge&logo=nginx&logoColor=white)
+![Let's Encrypt](https://img.shields.io/badge/Let's_Encrypt-003A70?style=for-the-badge&logo=letsencrypt&logoColor=white)
+![Google OAuth](https://img.shields.io/badge/Google_OAuth-4285F4?style=for-the-badge&logo=google&logoColor=white)
+
+</div>
+
+### Архитектура
+- **Backend**: Python 3.11+ с FastAPI для высокопроизводительного API
+- **Database**: SQLite с SQLAlchemy ORM для надежного хранения данных
+- **Frontend**: Vanilla HTML/CSS/JS без тяжелых фреймворков
+- **Authentication**: Google OAuth2 для безопасной авторизации
+- **Server**: Nginx с SSL сертификатами Let's Encrypt
+
+## 📁 Структура проекта
 
 ```
 autorig-online/
-├── backend/
-│   ├── main.py          # FastAPI application
-│   ├── config.py        # Configuration
-│   ├── database.py      # SQLAlchemy models
-│   ├── models.py        # Pydantic schemas
-│   ├── auth.py          # Google OAuth2
-│   ├── workers.py       # Worker integration
-│   ├── tasks.py         # Task logic
-│   └── requirements.txt
-├── static/
-│   ├── css/styles.css   # Styles with themes
+├── 📂 backend/              # Python FastAPI сервер
+│   ├── main.py             # 🚀 Главное приложение FastAPI
+│   ├── config.py           # ⚙️ Конфигурация приложения
+│   ├── database.py         # 💾 Модели SQLAlchemy
+│   ├── models.py           # 📋 Pydantic схемы
+│   ├── auth.py             # 🔐 Google OAuth2 аутентификация
+│   ├── workers.py          # ⚡ Интеграция с воркерами
+│   ├── tasks.py            # 📝 Логика задач
+│   └── requirements.txt    # 📦 Python зависимости
+├── 📂 static/               # Статические файлы фронтенда
+│   ├── css/styles.css      # 🎨 Стили с темами
 │   ├── js/
-│   │   ├── app.js       # Main app logic
-│   │   ├── i18n.js      # Localization
-│   │   └── admin.js     # Admin panel
-│   ├── i18n/            # Translation files
-│   ├── index.html       # Landing page
-│   ├── task.html        # Task progress page
-│   ├── admin.html       # Admin panel
-│   └── robots.txt
-├── deploy/
-│   ├── autorig.service  # systemd unit
-│   └── nginx.conf       # Nginx config
-└── README.md
+│   │   ├── app.js          # 🎯 Основная логика приложения
+│   │   ├── i18n.js         # 🌍 Локализация
+│   │   └── admin.js        # 👑 Админ панель
+│   ├── i18n/               # Переводы
+│   ├── index.html          # 🏠 Главная страница
+│   ├── task.html           # 📊 Страница прогресса задач
+│   ├── admin.html          # 👑 Админ панель
+│   └── robots.txt          # 🤖 SEO для поисковиков
+├── 📂 deploy/               # Конфигурация развертывания
+│   ├── autorig.service     # 🔧 Systemd unit
+│   └── nginx.conf          # 🌐 Nginx конфигурация
+├── 📂 db/                   # База данных
+├── 📂 uploads/              # Временные загрузки
+└── 📄 README.md            # 📖 Документация
 ```
 
-## Deployment
+## 🚀 Быстрый старт
 
-### 1. Prerequisites
+### Для разработчиков
 
 ```bash
-# Update system
+# 1. Клонируйте репозиторий
+git clone https://github.com/eschota/web_services.git
+cd web_services/autorig-online
+
+# 2. Создайте виртуальное окружение
+python3.11 -m venv venv
+source venv/bin/activate  # или venv\Scripts\activate на Windows
+
+# 3. Установите зависимости
+pip install -r backend/requirements.txt
+
+# 4. Настройте переменные окружения
+cp backend/.env.example backend/.env
+# Отредактируйте .env файл с вашими ключами
+
+# 5. Запустите сервер разработки
+cd backend
+python main.py
+```
+
+Откройте [http://localhost:8000](http://localhost:8000) в браузере.
+
+## 🚀 Развертывание
+
+### 📋 Предварительные требования
+
+```bash
+# Обновление системы
 sudo apt update && sudo apt upgrade -y
 
-# Install Python and dependencies
+# Установка Python и зависимостей
 sudo apt install python3.11 python3.11-venv python3-pip nginx certbot python3-certbot-nginx -y
 ```
 
-### 2. Setup Application
+### ⚙️ Настройка приложения
 
 ```bash
-# Create directories
+# Создание директорий
 sudo mkdir -p /opt/autorig-online
 sudo mkdir -p /var/autorig/uploads
 
-# Copy files
+# Копирование файлов
 sudo cp -r /root/autorig-online/* /opt/autorig-online/
 
-# Create virtual environment
+# Создание виртуального окружения
 cd /opt/autorig-online
 sudo python3.11 -m venv venv
 sudo ./venv/bin/pip install -r backend/requirements.txt
 
-# Set permissions
+# Настройка прав доступа
 sudo chown -R www-data:www-data /opt/autorig-online
 sudo chown -R www-data:www-data /var/autorig
 ```
 
-### 3. Configure Environment
+### 🔧 Конфигурация окружения
 
-Create `/opt/autorig-online/backend/.env`:
+Создайте `/opt/autorig-online/backend/.env`:
 
 ```env
+# Настройки приложения
 APP_URL=https://autorig.online
 DEBUG=false
 SECRET_KEY=your-very-secret-random-key-here
 
+# База данных
 DATABASE_URL=sqlite+aiosqlite:///./db/autorig.db
 
+# Google OAuth2
 GOOGLE_CLIENT_ID=your-google-client-id-here
 GOOGLE_CLIENT_SECRET=your-google-client-secret-here
 GOOGLE_REDIRECT_URI=https://autorig.online/auth/callback
 
+# Администратор
 ADMIN_EMAIL=eschota@gmail.com
+
+# Загрузки
 UPLOAD_DIR=/var/autorig/uploads
+UPLOAD_TTL_HOURS=24
+MAX_UPLOAD_SIZE_MB=100
 ```
 
-### 4. Setup systemd Service
+### 🔄 Настройка systemd сервиса
 
 ```bash
+# Копирование конфигурации сервиса
 sudo cp /opt/autorig-online/deploy/autorig.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable autorig
 sudo systemctl start autorig
 ```
 
-### 5. Setup Nginx
+### 🌐 Настройка Nginx
 
 ```bash
-# Copy config
+# Копирование конфигурации
 sudo cp /opt/autorig-online/deploy/nginx.conf /etc/nginx/sites-available/autorig.online
 sudo ln -s /etc/nginx/sites-available/autorig.online /etc/nginx/sites-enabled/
 
-# Get SSL certificate
+# Получение SSL сертификата
 sudo certbot --nginx -d autorig.online -d www.autorig.online
 
-# Test and reload
+# Проверка и перезагрузка
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 6. Setup Upload Cleanup Cron
+### 🧹 Настройка очистки загрузок
 
 ```bash
-# Edit crontab
+# Редактирование crontab
 sudo crontab -e
 
-# Add line to clean uploads older than 24 hours
+# Добавление задачи очистки файлов старше 24 часов
 0 */6 * * * find /var/autorig/uploads -type f -mmin +1440 -delete
 0 */6 * * * find /var/autorig/uploads -type d -empty -delete
 ```
 
-## Environment Variables
+## 🔧 Переменные окружения
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `APP_URL` | Public URL of the site | `https://autorig.online` |
-| `DEBUG` | Enable debug mode | `false` |
-| `SECRET_KEY` | Secret key for sessions | Required |
-| `DATABASE_URL` | SQLite database path | `sqlite+aiosqlite:///./db/autorig.db` |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID | Required |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | Required |
-| `GOOGLE_REDIRECT_URI` | OAuth callback URL | `{APP_URL}/auth/callback` |
-| `ADMIN_EMAIL` | Admin user email | `eschota@gmail.com` |
-| `UPLOAD_DIR` | Upload directory | `/var/autorig/uploads` |
+| Переменная | Описание | По умолчанию |
+|------------|----------|--------------|
+| `APP_URL` | Публичный URL сайта | `https://autorig.online` |
+| `DEBUG` | Включить режим отладки | `false` |
+| `SECRET_KEY` | Секретный ключ для сессий | **Обязательно** |
+| `DATABASE_URL` | Путь к SQLite базе данных | `sqlite+aiosqlite:///./db/autorig.db` |
+| `GOOGLE_CLIENT_ID` | Google OAuth Client ID | **Обязательно** |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth Client Secret | **Обязательно** |
+| `GOOGLE_REDIRECT_URI` | URL обратного вызова OAuth | `{APP_URL}/auth/callback` |
+| `ADMIN_EMAIL` | Email администратора | `eschota@gmail.com` |
+| `UPLOAD_DIR` | Директория для загрузок | `/var/autorig/uploads` |
+| `UPLOAD_TTL_HOURS` | Время жизни загрузок (часы) | `24` |
+| `MAX_UPLOAD_SIZE_MB` | Максимальный размер файла (MB) | `100` |
 
-## API Endpoints
+## 🔌 API Endpoints
 
-### Public
+### 🌐 Публичные эндпоинты
 
-- `GET /` - Landing page
-- `GET /task?id=X` - Task progress page
-- `GET /auth/login` - Google OAuth login
-- `GET /auth/callback` - OAuth callback
-- `GET /auth/logout` - Logout
-- `GET /auth/me` - Current user info
-- `POST /api/task/create` - Create conversion task
-- `GET /api/task/{id}` - Get task status
-- `GET /api/history` - User task history
+| Метод | Эндпоинт | Описание |
+|-------|----------|----------|
+| `GET` | `/` | 🏠 Главная страница |
+| `GET` | `/task?id=X` | 📊 Страница прогресса задачи |
+| `GET` | `/auth/login` | 🔐 Вход через Google OAuth |
+| `GET` | `/auth/callback` | 🔄 Обратный вызов OAuth |
+| `GET` | `/auth/logout` | 🚪 Выход из системы |
+| `GET` | `/auth/me` | 👤 Информация о текущем пользователе |
+| `POST` | `/api/task/create` | ➕ Создание задачи конвертации |
+| `GET` | `/api/task/{id}` | 📋 Получение статуса задачи |
+| `GET` | `/api/history` | 📚 История задач пользователя |
 
-### Admin (requires `eschota@gmail.com`)
+### 👑 Админ эндпоинты *(требуется `eschota@gmail.com`)*
 
-- `GET /admin` - Admin panel
-- `GET /api/admin/users` - List users
-- `POST /api/admin/user/{id}/balance` - Update balance
+| Метод | Эндпоинт | Описание |
+|-------|----------|----------|
+| `GET` | `/admin` | 👑 Админ панель |
+| `GET` | `/api/admin/users` | 👥 Список пользователей |
+| `POST` | `/api/admin/user/{id}/balance` | 💰 Обновление баланса пользователя |
 
-## Workers
+## ⚡ Воркеры обработки
 
-Configured workers:
-- `http://5.129.157.224:5132/api-converter-glb`
-- `http://5.129.157.224:5279/api-converter-glb`
-- `http://5.129.157.224:5131/api-converter-glb`
-- `http://5.129.157.224:5533/api-converter-glb`
-- `http://5.129.157.224:5267/api-converter-glb`
+<div align="center">
 
-## Testing
+### 🖥️ Кластер воркеров
 
-### Test conversion with curl:
+| Статус | URL | Порт |
+|--------|-----|------|
+| 🟢 Активен | `http://5.129.157.224` | `:5132` |
+| 🟢 Активен | `http://5.129.157.224` | `:5279` |
+| 🟢 Активен | `http://5.129.157.224` | `:5131` |
+| 🟢 Активен | `http://5.129.157.224` | `:5533` |
+| 🟢 Активен | `http://5.129.157.224` | `:5267` |
+
+**Все воркеры обслуживают эндпоинт:** `/api-converter-glb`
+
+</div>
+
+## 🧪 Тестирование
+
+### Тест конвертации через curl:
 
 ```bash
-# Create task with link
+# Создание задачи с ссылкой
 curl -X POST https://autorig.online/api/task/create \
   -F "source=link" \
   -F "input_url=http://5.129.157.224:5267/converter/glb/56938dbb-7d33-4966-bb09-64e4d1fd9fbf/56938dbb-7d33-4966-bb09-64e4d1fd9fbf.glb" \
   -F "type=t_pose"
 
-# Check task status
+# Проверка статуса задачи
 curl https://autorig.online/api/task/{task_id}
 ```
 
-## Monitoring
+### 📤 Тест загрузки файла:
 
 ```bash
-# Check service status
+# Создание задачи с файлом
+curl -X POST https://autorig.online/api/task/create \
+  -F "source=file" \
+  -F "file=@model.glb" \
+  -F "type=a_pose"
+```
+
+## 📊 Мониторинг
+
+### 🔍 Проверка статуса сервисов
+
+```bash
+# Статус основного сервиса
 sudo systemctl status autorig
 
-# View logs
+# Логи приложения
 sudo journalctl -u autorig -f
 
-# Check nginx logs
+# Логи Nginx
 sudo tail -f /var/log/nginx/access.log
 sudo tail -f /var/log/nginx/error.log
 ```
 
-## License
+### 📈 Метрики системы
 
-Proprietary - All rights reserved
+```bash
+# Загрузка CPU и памяти
+top -p $(pgrep -f "python main.py")
+
+# Использование диска
+df -h /var/autorig/uploads
+
+# Количество активных задач
+curl https://autorig.online/api/admin/stats
+```
+
+## 🤝 Вклад в проект
+
+Мы приветствуем вклад в развитие AutoRig Online! Вот как вы можете помочь:
+
+### 📝 Как внести вклад:
+
+1. **Fork** репозиторий
+2. Создайте **feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Commit** изменения (`git commit -m 'Add amazing feature'`)
+4. **Push** в ветку (`git push origin feature/amazing-feature`)
+5. Откройте **Pull Request**
+
+### 🐛 Сообщить о баге
+
+Используйте [GitHub Issues](https://github.com/eschota/web_services/issues) для сообщений о багах:
+
+- Опишите проблему детально
+- Укажите шаги для воспроизведения
+- Добавьте скриншоты если возможно
+- Укажите версию браузера и ОС
+
+### 💡 Предложить фичу
+
+Хотите новую функцию? Откройте [GitHub Issue](https://github.com/eschota/web_services/issues) с меткой `enhancement`:
+
+- Опишите желаемую функциональность
+- Объясните зачем она нужна
+- Приведите примеры использования
+
+## 📜 Лицензия
+
+**Proprietary Software** - Все права защищены © 2024
+
+Этот проект является проприетарным ПО. Использование только с разрешения владельца.
+
+---
+
+<div align="center">
+
+**Сделано с ❤️ для 3D артистов и разработчиков**
+
+[![GitHub](https://img.shields.io/badge/GitHub-@eschota-black?style=flat&logo=github)](https://github.com/eschota)
+[![Website](https://img.shields.io/badge/Website-autorig.online-blue?style=flat&logo=web)](https://autorig.online)
+
+*Если проект оказался полезным, поставьте ⭐ репозиторию!*
+
+</div>
 
