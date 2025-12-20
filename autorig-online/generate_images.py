@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""
+RenderFin Image Generator for AutoRig Online
+Генерирует все необходимые изображения через RenderFin API
+"""
+
+import requests
+import time
+import os
+import json
+from pathlib import Path
+from typing import Dict, Optional
+
+# Конфигурация
+API_URL = "https://renderfin.com/api-render"
+BASE_DIR = Path(__file__).parent
+IMAGES_DIR = BASE_DIR / "static" / "images"
+USER_NAME = "autorig_online"
+
+# Список изображений для генерации
+IMAGES_TO_GENERATE = [
+    {
+        "name": "og-image.png",
+        "path": IMAGES_DIR / "og-image.png",
+        "prompt": "Professional Open Graph image for AutoRig Online. Dark background with gradient (indigo to purple). Center: 3D character wireframe or skeleton in T-pose. Text overlay: 'AutoRig Online - Automatic 3D Character Rigging'. Modern, clean design with subtle tech elements. Suitable for social media previews.",
+        "aspect_ratio": 1200 / 630,  # 1.904
+        "negative_prompt": "text, watermark, low quality, blurry"
+    },
+    {
+        "name": "hero-main.jpg",
+        "path": IMAGES_DIR / "hero" / "hero-main.jpg",
+        "prompt": "Hero image for 3D character rigging service. Abstract 3D wireframe character in T-pose, floating in dark space with indigo/purple gradient lighting. Modern, tech-forward aesthetic. Subtle particles or grid pattern. Professional, clean composition. Space for text overlay on left side.",
+        "aspect_ratio": 1920 / 1080,  # 1.777
+        "negative_prompt": "text, watermark, low quality, blurry, cluttered"
+    },
+    # Gallery images
+    {
+        "name": "fantasy-warrior.jpg",
+        "path": IMAGES_DIR / "gallery" / "fantasy-warrior.jpg",
+        "prompt": "Fantasy warrior 3D character in T-pose. Armor, weapons, detailed design. Professional game-ready model. Clean background, studio lighting. High quality render.",
+        "aspect_ratio": 1200 / 900,  # 1.333
+        "negative_prompt": "low quality, blurry, watermark, text"
+    },
+    {
+        "name": "cyberpunk-character.jpg",
+        "path": IMAGES_DIR / "gallery" / "cyberpunk-character.jpg",
+        "prompt": "Cyberpunk character 3D model. Mix of mechanical and organic elements. Futuristic design. Clean background, professional render.",
+        "aspect_ratio": 1200 / 900,  # 1.333
+        "negative_prompt": "low quality, blurry, watermark, text"
+    },
+    {
+        "name": "animal-companion.jpg",
+        "path": IMAGES_DIR / "gallery" / "animal-companion.jpg",
+        "prompt": "Quadruped animal companion 3D model. Dog or wolf-like creature in T-pose. Professional game character. Clean background.",
+        "aspect_ratio": 1200 / 900,  # 1.333
+        "negative_prompt": "low quality, blurry, watermark, text"
+    },
+    {
+        "name": "mecha-robot.jpg",
+        "path": IMAGES_DIR / "gallery" / "mecha-robot.jpg",
+        "prompt": "Mecha robot 3D character. Mechanical design with visible joints and armor. Professional game-ready model. Clean background.",
+        "aspect_ratio": 1200 / 900,  # 1.333
+        "negative_prompt": "low quality, blurry, watermark, text"
+    },
+    {
+        "name": "cartoon-character.jpg",
+        "path": IMAGES_DIR / "gallery" / "cartoon-character.jpg",
+        "prompt": "Stylized cartoon 3D character. Exaggerated proportions, friendly appearance. Game-ready model. Clean background.",
+        "aspect_ratio": 1200 / 900,  # 1.333
+        "negative_prompt": "low quality, blurry, watermark, text"
+    },
+    {
+        "name": "animation-showcase-thumb.jpg",
+        "path": IMAGES_DIR / "gallery" / "animation-showcase-thumb.jpg",
+        "prompt": "Thumbnail for animation showcase video. Multiple character poses in sequence showing walk cycle or action. Dynamic composition. Indigo/purple gradient background.",
+        "aspect_ratio": 1200 / 900,  # 1.333
+        "negative_prompt": "low quality, blurry, watermark, text"
+    },
+    # Process images
+    {
+        "name": "rigging-process.jpg",
+        "path": IMAGES_DIR / "process" / "rigging-process.jpg",
+        "prompt": "Infographic-style illustration showing 3D character rigging process. Before/after comparison: static model on left, rigged skeleton on right. Arrows showing transformation. Clean, modern design with indigo/purple color scheme. Professional, educational appearance.",
+        "aspect_ratio": 1200 / 800,  # 1.5
+        "negative_prompt": "low quality, blurry, watermark, text overlay"
+    },
+    {
+        "name": "comparison.jpg",
+        "path": IMAGES_DIR / "process" / "comparison.jpg",
+        "prompt": "Split-screen comparison illustration. Left side: traditional manual rigging (complex, time-consuming). Right side: automated AI rigging (fast, efficient). Use icons and simple graphics. Modern infographic style.",
+        "aspect_ratio": 1200 / 600,  # 2.0
+        "negative_prompt": "low quality, blurry, watermark"
+    },
+    {
+        "name": "technology.jpg",
+        "path": IMAGES_DIR / "process" / "technology.jpg",
+        "prompt": "Abstract visualization of AI/neural network processing 3D geometry. Wireframe mesh being analyzed, nodes and connections. Modern, tech-forward design. Indigo/purple color scheme. Professional, scientific appearance.",
+        "aspect_ratio": 1000 / 600,  # 1.666
+        "negative_prompt": "low quality, blurry, watermark, text"
+    },
+    # Screenshot
+    {
+        "name": "screenshot.png",
+        "path": IMAGES_DIR / "screenshot.png",
+        "prompt": "Screenshot mockup of AutoRig Online website. Show upload interface with 3D character preview. Modern, clean UI design. Browser window frame. Professional appearance.",
+        "aspect_ratio": 1920 / 1080,  # 1.777
+        "negative_prompt": "low quality, blurry, watermark"
+    },
+]
+
+
+def create_directories():
+    """Создает необходимые директории"""
+    directories = [
+        IMAGES_DIR,
+        IMAGES_DIR / "hero",
+        IMAGES_DIR / "gallery",
+        IMAGES_DIR / "process",
+    ]
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+    print(f"✓ Директории созданы")
+
+
+def generate_image(image_config: Dict) -> Optional[str]:
+    """
+    Генерирует одно изображение через RenderFin API
+    Возвращает URL готового изображения или None при ошибке
+    """
+    print(f"\n🔄 Генерация: {image_config['name']}")
+    print(f"   Aspect ratio: {image_config['aspect_ratio']:.3f}")
+    
+    # Подготовка запроса
+    payload = {
+        "prompt": image_config["prompt"],
+        "aspect_ratio": image_config["aspect_ratio"],
+        "user_name": USER_NAME
+    }
+    
+    if "negative_prompt" in image_config:
+        payload["negative_prompt"] = image_config["negative_prompt"]
+    
+    try:
+        # Отправка запроса на генерацию
+        print(f"   📤 Отправка запроса на генерацию...")
+        response = requests.post(API_URL, json=payload, timeout=30)
+        
+        if response.status_code != 200:
+            print(f"   ❌ Ошибка API: {response.status_code}")
+            print(f"   Ответ: {response.text}")
+            return None
+            
+            result = response.json()
+            
+        if "output_url" not in result:
+            print(f"   ❌ Неожиданный ответ API: {result}")
+                return None
+                
+        output_url = result["output_url"]
+        print(f"   ✅ Получен output_url: {output_url}")
+        print(f"   ⚠️  ВАЖНО: Файл еще не готов! Начинаем опрос каждые 15 секунд...")
+        
+        # Поллинг результата - опрашиваем output_url пока файл не будет готов
+        return poll_image_url(output_url)
+                
+        except requests.exceptions.RequestException as e:
+        print(f"   ❌ Ошибка запроса: {e}")
+            return None
+    except Exception as e:
+        print(f"   ❌ Неожиданная ошибка: {e}")
+    return None
+
+
+def poll_image_url(url: str, max_attempts: int = 40, delay: int = 15) -> Optional[str]:
+    """
+    Поллит URL изображения до готовности
+    Опрашивает output_url каждые 15 секунд пока файл не будет готов (статус 200)
+    """
+    print(f"   ⏳ Ожидание готовности файла (макс. {max_attempts * delay // 60} минут)...")
+    print(f"   🔄 Опрос каждые {delay} секунд...")
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            # Проверяем доступность файла через HEAD запрос
+            response = requests.head(url, timeout=10, allow_redirects=True)
+            
+            if response.status_code == 200:
+                # Файл готов!
+                elapsed_min = (attempt - 1) * delay // 60
+                elapsed_sec = (attempt - 1) * delay % 60
+                print(f"   ✅ Изображение готово! (попытка {attempt}, прошло ~{elapsed_min}м {elapsed_sec}с)")
+                return url
+            elif response.status_code == 404:
+                # Файл еще не готов (404 - не найден)
+                if attempt < max_attempts:
+                    elapsed_min = attempt * delay // 60
+                    elapsed_sec = attempt * delay % 60
+                    print(f"   ⏳ Попытка {attempt}/{max_attempts}... файл еще не готов (404), ждем {delay} сек (прошло ~{elapsed_min}м {elapsed_sec}с)")
+                    time.sleep(delay)
+                else:
+                    print(f"   ⚠️  Превышено время ожидания (файл все еще не готов после {max_attempts} попыток)")
+                    return None
+            else:
+                # Неожиданный статус
+                print(f"   ⚠️  Неожиданный статус {response.status_code}, продолжаем опрос...")
+                if attempt < max_attempts:
+                    time.sleep(delay)
+                else:
+                    return None
+                
+        except requests.exceptions.RequestException as e:
+            # Если ошибка сети, продолжаем попытки
+        if attempt < max_attempts:
+                print(f"   ⏳ Попытка {attempt}/{max_attempts}... ошибка сети ({type(e).__name__}), ждем {delay} сек")
+            time.sleep(delay)
+            else:
+                print(f"   ⚠️  Превышено время ожидания (ошибки сети: {e})")
+                return None
+    
+    return None
+
+
+def download_image(url: str, save_path: Path) -> bool:
+    """
+    Скачивает изображение по URL и сохраняет в файл
+    """
+    try:
+        print(f"   📥 Скачивание изображения...")
+        response = requests.get(url, timeout=60, stream=True)
+        response.raise_for_status()
+        
+        # Сохраняем файл
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        file_size = save_path.stat().st_size / 1024  # KB
+        print(f"   ✅ Сохранено: {save_path} ({file_size:.1f} KB)")
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ Ошибка скачивания: {e}")
+        return False
+
+
+def main():
+    """Основная функция"""
+    print("=" * 70)
+    print("RenderFin Image Generator для AutoRig Online")
+    print("=" * 70)
+    
+    # Создаем директории
+    create_directories()
+    
+    # Статистика
+    total = len(IMAGES_TO_GENERATE)
+    success = 0
+    failed = 0
+    skipped = 0
+    
+    # Генерируем каждое изображение
+    for idx, image_config in enumerate(IMAGES_TO_GENERATE, 1):
+        print(f"\n[{idx}/{total}] {image_config['name']}")
+        
+        # Пропускаем если файл уже существует
+        if image_config['path'].exists():
+            print(f"   ⏭️  Файл уже существует, пропускаем")
+            skipped += 1
+            continue
+        
+        # Генерируем изображение
+        image_url = generate_image(image_config)
+        
+        if image_url:
+            # Скачиваем изображение
+            if download_image(image_url, image_config['path']):
+                success += 1
+            else:
+                failed += 1
+                # Сохраняем URL для повторной попытки
+                print(f"   💾 URL сохранен для повторной попытки: {image_url}")
+        else:
+            failed += 1
+        
+        # Пауза между запросами (чтобы не перегружать API)
+        if idx < total:
+            print(f"   ⏸️  Пауза 3 секунды перед следующим изображением...")
+            time.sleep(3)
+    
+    # Итоговая статистика
+    print("\n" + "=" * 70)
+    print("ИТОГИ ГЕНЕРАЦИИ")
+    print("=" * 70)
+    print(f"Всего изображений: {total}")
+    print(f"✅ Успешно: {success}")
+    print(f"⏭️  Пропущено (уже существуют): {skipped}")
+    print(f"❌ Ошибок: {failed}")
+    print(f"⏱️  Примерное время: ~{total * 1} минута(ы)")
+    print("=" * 70)
+    
+    if failed > 0:
+        print("\n⚠️  Некоторые изображения не были сгенерированы.")
+        print("   Проверьте логи выше и повторите попытку для неудачных.")
+    else:
+        print("\n🎉 Все изображения успешно сгенерированы!")
+
+
+if __name__ == "__main__":
+    main()

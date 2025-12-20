@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T-Pose vs A-Pose: Which One Is Better for Auto-Rigging?</title>
+    <meta name="description" content="Complete guide to T-pose vs A-pose for character rigging. Learn which pose works better for auto-rigging, Unity Mecanim, and Unreal Engine compatibility.">
+    <meta name="keywords" content="t pose vs a pose, character rigging pose, t-pose rigging, a-pose rigging, unity mecaim pose, rigging pose comparison, auto rigging pose">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="T-Pose vs A-Pose: Which One Is Better for Auto-Rigging?">
+    <meta property="og:description" content="Learn the difference between T-pose and A-pose for character rigging. Which pose works better for auto-rigging and game engines?">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/t-pose-vs-a-pose">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "T-Pose vs A-Pose: Which One Is Better for Auto-Rigging?",
+        "description": "Complete comparison of T-pose vs A-pose for character rigging. Learn which pose works better for auto-rigging algorithms and game engines",
+        "author": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "datePublished": "2024-12-20",
+        "dateModified": "2024-12-20",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://autorig.online/t-pose-vs-a-pose"
+        },
+        "articleSection": "指南",
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "首页",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "T-Pose vs A-Pose",
+                    "item": "https://autorig.online/t-pose-vs-a-pose"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/glb-auto-rig" class="nav-link">GLB</a>
+                    <a href="/fbx-auto-rig" class="nav-link">FBX</a>
+                    <a href="/obj-auto-rig" class="nav-link">OBJ</a>
+                    <a href="/how-it-works" class="nav-link">如何工作</a>
+                    <a href="/faq" class="nav-link">FAQ</a>
+                    <a href="/t-pose-vs-a-pose-zh" class="nav-link active">T vs A Pose</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>T-Pose vs A-Pose: Which One Is Better for Auto-Rigging?</h1>
+                <p class="hero-subtitle">Complete guide to choosing between T-pose and A-pose for character rigging. Learn which pose works better for auto-rigging algorithms and game engines.</p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <img src="/static/images/icons/target.svg" alt="T-Pose" class="feature-icon" width="96" height="96">
+                        <span>Pose comparison</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/target.svg" alt="Target" class="feature-icon" width="96" height="96">
+                        <span>Auto-rigging tips</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <span>Engine compatibility</span>
+                    </div>
+                </div>
+
+                <a href="/" class="cta-button">Start 自动绑定</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Article Content -->
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <p>If you've ever tried auto-rigging and got weird shoulders, broken elbows, or twisted wrists, the starting pose is often the reason. The two most common bind poses are <strong>T-pose</strong> and <strong>A-pose</strong>. Both can work, but they behave differently for automatic skeleton fitting and skinning.</p>
+
+                <h2>What is a T-pose?</h2>
+                <p>A T-pose is the classic: arms straight out horizontally, forming a "T" shape. This pose makes limb lengths and joint directions very clear to algorithms because arms are fully extended and symmetrical.</p>
+
+                <h2>What is an A-pose?</h2>
+                <p>An A-pose keeps arms angled down (usually 30-45 degrees). Many manual rigs prefer A-pose because it can produce nicer shoulder deformation for certain characters.</p>
+
+                <h2>Why many auto-riggers prefer T-pose</h2>
+                <ul>
+                    <li><strong>Clear joint positions:</strong> shoulders, elbows, wrists are easier to detect</li>
+                    <li><strong>Symmetry:</strong> both arms align cleanly for left/right matching</li>
+                    <li><strong>Less ambiguity:</strong> fewer "almost" positions that confuse fitting</li>
+                </ul>
+
+                <h2>When A-pose can be better</h2>
+                <ul>
+                    <li>high shoulder realism is more important than speed</li>
+                    <li>your character has heavy clothing or armor around shoulders</li>
+                    <li>you plan to manually polish weights anyway</li>
+                </ul>
+
+                <h2>The practical rule</h2>
+                <p>If the tool expects T-pose, use T-pose. If you feed an A-pose into a system tuned for T-pose, you often get incorrect shoulder orientation, weird arm twist, or uneven skinning.</p>
+
+                <h2>Quick checklist for a "good T-pose"</h2>
+                <ul>
+                    <li>Arms at ~90° from torso (horizontal)</li>
+                    <li>Elbows straight (not hyper-bent)</li>
+                    <li>Hands neutral (not extreme claw)</li>
+                    <li>Feet flat, legs straight</li>
+                    <li>Model centered and scaled correctly</li>
+                </ul>
+
+                <p>If you're targeting fast auto-rigging and predictable exports, start with T-pose and keep geometry clean.</p>
+
+                <p><a href="/">Try auto-rigging a T-pose character</a></p>
+            </article>
+        </div>
+    </section>
+
+    <!-- Related Pages -->
+    <section class="related-section">
+        <div class="container">
+            <h2>相关指南</h2>
+            <p>Learn more about rigging poses and techniques:</p>
+            <div class="related-links">
+                <a href="/t-pose-rig" class="related-link">T-Pose Checklist</a>
+                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
+                <a href="/how-it-works" class="related-link">如何工作</a>
+                <a href="/faq" class="related-link">FAQ</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Choose the Right Pose?</h2>
+            <p>Get professional auto rigging results with the right starting pose. Free to try!</p>
+            <a href="/" class="cta-button">Start 自动绑定</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                        <span>AutoRig</span>
+                    </div>
+                    <p>Automatic 3D character rigging made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>服务</h4>
+                    <a href="/glb-auto-rig">GLB Auto Rig</a>
+                    <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                    <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                    <a href="/t-pose-rig">T-Pose Rig</a>
+                </div>
+                <div class="footer-section">
+                    <h4>指南</h4>
+                    <a href="/t-pose-vs-a-pose-zh">T vs A Pose</a>
+                    <a href="/how-it-works">如何工作</a>
+                    <a href="/faq">FAQ</a>
+                    <a href="/gallery">画廊</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="faviconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Simplified bone icon for favicon -->
+  <path d="M16 10 L18 15 L22 14 L21 18 L25 20 L23 24 L19 23 L17 28 L16 32 L15 28 L13 23 L9 24 L7 20 L11 18 L10 14 L14 15 Z" fill="url(#faviconGradient)"/>
+  <circle cx="16" cy="20" r="2" fill="url(#faviconGradient)"/>
+</svg>
+

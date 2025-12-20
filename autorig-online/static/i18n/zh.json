@@ -1,0 +1,70 @@
+{
+    "site_name": "AutoRig Online",
+    "hero_title": "自动3D模型绑定和动画",
+    "hero_subtitle": "上传您的GLB、FBX或OBJ模型，并在一分钟内获得50+动画。导出到Unity、Unreal Engine、3ds Max、Maya、Cinema 4D。",
+
+    "tab_upload": "上传文件",
+    "tab_link": "粘贴链接",
+
+    "upload_title": "将3D模型拖拽到此处",
+    "upload_subtitle": "GLB、FBX、OBJ最高100MB",
+    "upload_selected": "已选择文件",
+
+    "link_placeholder": "https://example.com/model.glb",
+    "link_label": "模型URL",
+
+    "tpose_notice": "为了获得最佳结果，模型应处于T-pose",
+
+    "btn_start": "开始绑定",
+    "btn_login": "通过Google登录",
+    "btn_login_continue": "登录以继续",
+
+    "feature_fast_title": "快速处理",
+    "feature_fast_desc": "只需几分钟即可获得rigged模型",
+    "feature_animations_title": "50+动画",
+    "feature_animations_desc": "为您的角色预配置动画",
+    "feature_formats_title": "多种格式",
+    "feature_formats_desc": "支持GLB、FBX和OBJ模型",
+
+    "queue_title": "队列状态",
+    "queue_active": "活跃任务",
+    "queue_waiting": "等待中",
+    "queue_servers": "服务器",
+
+    "history_title": "您的最近任务",
+
+    "credits_free": "剩余免费转换",
+    "credits_login_hint": "登录获取7次额外免费转换",
+
+    "footer_text": "AutoRig Online © 2025",
+
+    "guides_title": "指南和教程",
+    "guides_intro": "了解更多关于角色绑定、Unity/Unreal工作流程和最佳实践的信息",
+
+    "guide_mixamo_title": "Mixamo替代方案",
+    "guide_mixamo_desc": "作为Mixamo替代方案的专业自动绑定服务。获得带有50+动画的rigged角色。",
+
+    "guide_unity_title": "为Unity绑定GLB",
+    "guide_unity_desc": "为Unity Mecanim绑定GLB角色的完整工作流程。逐步Unity导入指南。",
+
+    "guide_unreal_title": "为Unreal绑定FBX",
+    "guide_unreal_desc": "如何为Unreal Engine准备和绑定FBX角色。Skeletal Mesh导入教程。",
+
+    "guide_tpose_title": "T-Pose vs A-Pose",
+    "guide_tpose_desc": "角色绑定中T-pose vs A-pose的比较。哪种姿势更适合自动绑定？",
+
+    "guide_formats_title": "GLB vs FBX",
+    "guide_formats_desc": "角色绑定和游戏开发的GLB vs FBX格式的完整比较。",
+
+    "guide_obj_title": "自动绑定OBJ",
+    "guide_obj_desc": "如何自动绑定OBJ角色。什么有效，什么无效，以及准备提示。",
+
+    "guide_retargeting_title": "动画重定向",
+    "guide_retargeting_desc": "Unity和Unreal动画重定向指南。自动绑定角色的简单管道。",
+
+    "read_guide": "阅读指南 →",
+
+    "nav_home": "首页",
+    "nav_guides": "指南",
+    "nav_gallery": "画廊"
+}

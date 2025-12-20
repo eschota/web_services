@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How Auto Rigging Works — 6-Step Character Rigging Process</title>
+    <meta name="description" content="Complete guide to AI-powered auto rigging: upload, analysis, bone generation, T-pose setup, animation integration, and export.">
+    <meta name="keywords" content="how auto rig works, 3d rigging process, character rigging steps, ai auto rigging, automatic rigging tutorial, rigging workflow">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="How AutoRig Works - AI-Powered 3D Character Rigging">
+    <meta property="og:description" content="Step-by-step guide to our automatic 3D character rigging process. From upload to download in minutes.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/how-it-works">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "HowTo",
+        "name": "How to Auto Rig 3D Characters",
+        "description": "Complete guide to automatic 3D character rigging using AI-powered technology",
+        "step": [
+            {
+                "@type": "HowToStep",
+                "position": 1,
+                "name": "Upload Your 3D Model",
+                "text": "Upload your GLB, FBX, or OBJ file. We support models up to 100MB with materials and textures."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 2,
+                "name": "AI Model Analysis",
+                "text": "Our AI analyzes your model geometry, topology, and proportions to plan the optimal bone structure."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 3,
+                "name": "Automatic Rigging",
+                "text": "AI generates professional bone hierarchy, joint placements, and skinning weights automatically."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 4,
+                "name": "T-Pose Setup",
+                "text": "Character is posed in industry-standard T-pose for maximum animation compatibility."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 5,
+                "name": "Animation Integration",
+                "text": "50+ professional animations are applied and optimized for your character."
+            },
+            {
+                "@type": "HowToStep",
+                "position": 6,
+                "name": "Quality Check & Export",
+                "text": "Final quality verification and export in your chosen format with all animations included."
+            }
+        ],
+        "totalTime": "PT15M",
+        "supply": [
+            "GLB, FBX, or OBJ 3D model file",
+            "Internet connection",
+            "Web browser"
+        ],
+        "tool": [
+            "AutoRig Online web service",
+            "AI-powered rigging engine"
+        ],
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "How It Works",
+                    "item": "https://autorig.online/how-it-works"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/glb-auto-rig" class="nav-link">GLB</a>
+                    <a href="/fbx-auto-rig" class="nav-link">FBX</a>
+                    <a href="/obj-auto-rig" class="nav-link">OBJ</a>
+                    <a href="/how-it-works" class="nav-link active">How It Works</a>
+                    <a href="/faq" class="nav-link">FAQ</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>How Auto Rigging Works — 6-Step Process</h1>
+                <p class="hero-subtitle">From static 3D model to fully animated character in 6 simple steps. Our AI-powered rigging technology makes professional character setup accessible to everyone.</p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <img src="/static/images/icons/ai.svg" alt="AI" class="feature-icon" width="48" height="48">
+                        <span>AI-powered</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="48" height="48">
+                        <span>5-15 minutes</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/target.svg" alt="Quality" class="feature-icon" width="48" height="48">
+                        <span>Professional quality</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Process Section -->
+    <section class="process-section">
+        <div class="container">
+            <h2>The Auto Rigging Process</h2>
+            <p class="process-intro">Our advanced AI system analyzes your 3D model and creates a professional rigging setup that rivals manual work from experienced animators.</p>
+
+            <!-- Process Visualization Image -->
+            <div style="margin: 3rem 0; text-align: center;">
+                <img src="/static/images/process/rigging-process.jpg" alt="3D Character Rigging Process" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            </div>
+
+            <div class="process-steps">
+
+                <div class="process-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>AI Model Analysis</h3>
+                        <p>Our deep learning algorithms analyze your model's geometry, topology, and proportions. The AI identifies optimal bone placement, joint locations, and deformation zones.</p>
+                        <div class="step-details">
+                            <strong>Analysis includes:</strong> Mesh topology, proportions, symmetry<br>
+                            <strong>AI processing:</strong> Deep learning geometry analysis<br>
+                            <strong>Duration:</strong> 1-2 minutes
+                        </div>
+                    </div>
+                </div>
+
+                <div class="process-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Automatic Bone Generation</h3>
+                        <p>Based on the analysis, our system creates a professional bone hierarchy with proper joint placement, IK setup, and deformation bones. The rigging follows industry standards.</p>
+                        <div class="step-details">
+                            <strong>Bone structure:</strong> Humanoid with IK bones<br>
+                            <strong>Joint placement:</strong> Anatomically correct<br>
+                            <strong>Deformation:</strong> Smooth skinning weights
+                        </div>
+                    </div>
+                </div>
+
+                <div class="process-step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h3>T-Pose Setup</h3>
+                        <p>Your character is posed in the industry-standard T-pose, which provides optimal compatibility with animation systems, motion capture data, and game engines.</p>
+                        <div class="step-details">
+                            <strong>Pose type:</strong> Professional T-pose<br>
+                            <strong>Compatibility:</strong> Unity Mecanim, Unreal Engine<br>
+                            <strong>Retargeting:</strong> Animation transfer ready
+                        </div>
+                    </div>
+                </div>
+
+                <div class="process-step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <h3>Animation Integration</h3>
+                        <p>We apply 50+ professionally created animations to your character. All animations are optimized and tested to ensure smooth playback and proper deformation.</p>
+                        <div class="step-details">
+                            <strong>Animation count:</strong> 50+ included<br>
+                            <strong>Types:</strong> Walk, run, jump, combat, idle<br>
+                            <strong>Quality:</strong> Game-ready, optimized
+                        </div>
+                    </div>
+                </div>
+
+                <div class="process-step">
+                    <div class="step-number">6</div>
+                    <div class="step-content">
+                        <h3>Quality Verification & Download</h3>
+                        <p>Final quality checks ensure everything works perfectly. Download your fully rigged and animated character in your preferred format.</p>
+                        <div class="step-details">
+                            <strong>Quality checks:</strong> Rig validation, animation testing<br>
+                            <strong>Export formats:</strong> GLB, FBX with animations<br>
+                            <strong>Ready to use:</strong> Import directly into engines
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technology Section -->
+    <section class="technology-section">
+        <div class="container">
+            <h2>Powered by Advanced AI Technology</h2>
+            
+            <!-- Technology Visualization Image -->
+            <div style="margin: 2rem 0; text-align: center;">
+                <img src="/static/images/process/technology.jpg" alt="AI Technology Visualization" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            </div>
+            
+            <div class="tech-grid">
+                <div class="tech-item">
+                    <h3>Deep Learning Analysis</h3>
+                    <p>Our neural networks analyze 3D geometry with computer vision techniques to understand model structure and optimal rigging points.</p>
+                </div>
+                <div class="tech-item">
+                    <h3>Procedural Rigging</h3>
+                    <p>Advanced algorithms create bone hierarchies that adapt to different character proportions and body types automatically.</p>
+                </div>
+                <div class="tech-item">
+                    <h3>Smart Skinning</h3>
+                    <p>AI-driven weight painting ensures smooth deformations and eliminates common rigging artifacts.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Time Comparison -->
+    <section class="comparison-section">
+        <div class="container">
+            <h2>Traditional vs Auto Rigging</h2>
+            
+            <!-- Comparison Image -->
+            <div style="margin: 2rem 0; text-align: center;">
+                <img src="/static/images/process/comparison.jpg" alt="Traditional vs Auto Rigging Comparison" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            </div>
+            
+            <div class="time-comparison">
+                <div class="comparison-item">
+                    <h3>Manual Rigging</h3>
+                    <div class="time">2-5 days</div>
+                    <ul>
+                        <li>Experienced rigger required</li>
+                        <li>Manual bone placement</li>
+                        <li>Trial and error process</li>
+                        <li>Expensive ($500-$2000)</li>
+                        <li>Limited to skilled professionals</li>
+                    </ul>
+                </div>
+                <div class="comparison-item featured">
+                    <h3>AutoRig AI</h3>
+                    <div class="time">5-15 minutes</div>
+                    <ul>
+                        <li>Anyone can use it</li>
+                        <li>AI-powered precision</li>
+                        <li>Consistent results</li>
+                        <li>Free to try (3 conversions)</li>
+                        <li>Available 24/7</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Related Pages -->
+    <section class="related-section">
+        <div class="container">
+            <h2>Related Pages</h2>
+            <p>Explore our rigging services and learn more:</p>
+            <div class="related-links">
+                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
+                <a href="/obj-auto-rig" class="related-link">OBJ Auto Rig</a>
+                <a href="/t-pose-rig" class="related-link">T-Pose Checklist</a>
+                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/gallery" class="related-link">Gallery</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Experience Auto Rigging?</h2>
+            <p>Upload your 3D model and see the power of AI-driven character rigging in action. Professional results in minutes.</p>
+            <a href="/" class="cta-button">Start Auto Rigging Now</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                        <span>AutoRig</span>
+                    </div>
+                    <p>Automatic 3D character rigging made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Services</h4>
+                    <a href="/glb-auto-rig">GLB Auto Rig</a>
+                    <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                    <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                    <a href="/t-pose-rig">T-Pose Rig</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Support</h4>
+                    <a href="/how-it-works">How It Works</a>
+                    <a href="/faq">FAQ</a>
+                    <a href="/gallery">Gallery</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

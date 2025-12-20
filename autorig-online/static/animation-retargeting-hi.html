@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retarget Animations in Unity & Unreal: Simple Pipeline for Auto-Rigged Characters</title>
+    <meta name="description" content="Complete guide to animation retargeting for auto-rigged characters. Learn Unity Mecanim and Unreal Engine retargeting workflows for professional results.">
+    <meta name="keywords" content="animation retargeting unity unreal, unity mecaim retargeting, unreal animation retargeting, character animation transfer, rig retargeting guide">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Retarget Animations in Unity & Unreal: Simple Pipeline for Auto-Rigged Characters">
+    <meta property="og:description" content="Complete guide to animation retargeting for auto-rigged characters in Unity and Unreal Engine with step-by-step workflows.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/animation-retargeting">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "Retarget Animations in Unity & Unreal: Simple Pipeline for Auto-Rigged Characters",
+        "description": "Complete guide to animation retargeting workflows for auto-rigged characters in Unity Mecanim and Unreal Engine",
+        "author": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "datePublished": "2024-12-20",
+        "dateModified": "2024-12-20",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://autorig.online/animation-retargeting"
+        },
+        "articleSection": "गाइड",
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "होम",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Animation Retargeting",
+                    "item": "https://autorig.online/animation-retargeting"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/glb-auto-rig" class="nav-link">GLB</a>
+                    <a href="/fbx-auto-rig" class="nav-link">FBX</a>
+                    <a href="/obj-auto-rig" class="nav-link">OBJ</a>
+                    <a href="/how-it-works" class="nav-link">कैसे काम करता है</a>
+                    <a href="/faq" class="nav-link">FAQ</a>
+                    <a href="/animation-retargeting-hi" class="nav-link active">Retargeting</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>Retarget Animations in Unity & Unreal: Simple Pipeline</h1>
+                <p class="hero-subtitle">Complete guide to animation retargeting for auto-rigged characters. Learn Unity Mecanim and Unreal Engine workflows for professional results.</p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <span>Unity & Unreal</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
+                        <span>Animation transfer</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Settings" class="feature-icon" width="96" height="96">
+                        <span>Pipeline guide</span>
+                    </div>
+                </div>
+
+                <a href="/" class="cta-button">Start ऑटो रिगिंग</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Article Content -->
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <p>Retargeting is the process of applying an animation from one character to another. If your character is auto-rigged, you usually want to reuse existing animation packs (walk/run/idle/combat) without reanimating everything from scratch.</p>
+
+                <h2>Why retargeting sometimes looks bad</h2>
+                <p>Most retargeting problems come from:</p>
+                <ul>
+                    <li>different base poses (T-pose vs A-pose)</li>
+                    <li>different proportions (very long arms/short legs)</li>
+                    <li>twisted joint orientations</li>
+                    <li>bad skin weights around shoulders/hips</li>
+                </ul>
+
+                <h2>Unity retargeting (Humanoid)</h2>
+                <p>Unity's Humanoid system can retarget animations between characters if the avatar mapping is correct.</p>
+                <ol>
+                    <li>Import your rigged character FBX.</li>
+                    <li>Set Rig → Animation Type → <strong>Humanoid</strong>.</li>
+                    <li>Configure avatar mapping and fix missing bones if needed.</li>
+                    <li>Import animation clips and set them to Humanoid.</li>
+                    <li>Apply clips to your character Animator Controller.</li>
+                </ol>
+
+                <h2>Unreal retargeting</h2>
+                <p>In Unreal, retargeting uses skeleton/IK rigs depending on engine version and workflow. The core idea is similar: define a mapping and reuse animations across compatible rigs.</p>
+
+                <h2>Best practice for predictable retargeting</h2>
+                <ul>
+                    <li>Use a consistent T-pose for all characters</li>
+                    <li>Keep scale and proportions within reasonable bounds</li>
+                    <li>Avoid extreme shoulder/hip offsets in the base mesh</li>
+                    <li>If needed, polish weights on shoulders and hips</li>
+                </ul>
+
+                <p>If you're building a character pipeline, the fastest path is: auto-rig in T-pose, export engine-friendly FBX, then retarget animations inside the engine.</p>
+
+                <p><a href="/"><strong>Auto-rig your character and start retargeting</strong></a></p>
+            </article>
+        </div>
+    </section>
+
+    <!-- Related Pages -->
+    <section class="related-section">
+        <div class="container">
+            <h2>संबंधित गाइड</h2>
+            <p>Learn more about animation and engine workflows:</p>
+            <div class="related-links">
+                <a href="/rig-glb-unity-hi" class="related-link">Unity GLB Guide</a>
+                <a href="/rig-fbx-unreal-hi" class="related-link">Unreal FBX Guide</a>
+                <a href="/glb-vs-fbx-hi" class="related-link">GLB vs FBX</a>
+                <a href="/how-it-works" class="related-link">कैसे काम करता है</a>
+                <a href="/faq" class="related-link">FAQ</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Master Animation Retargeting?</h2>
+            <p>Get auto-rigged characters ready for professional animation retargeting workflows.</p>
+            <a href="/" class="cta-button">Start ऑटो रिगिंग</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </div>
+                <p>Automatic 3D character rigging made simple.</p>
+            </div>
+            <div class="footer-section">
+                <h4>सर्विसेज</h4>
+                <a href="/glb-auto-rig">GLB Auto Rig</a>
+                <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                <a href="/t-pose-rig">T-Pose Rig</a>
+            </div>
+            <div class="footer-section">
+                <h4>गाइड</h4>
+                <a href="/animation-retargeting-hi">Animation Retargeting</a>
+                <a href="/how-it-works">कैसे काम करता है</a>
+                <a href="/faq">FAQ</a>
+                <a href="/gallery">गैलरी</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

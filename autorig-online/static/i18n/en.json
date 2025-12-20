@@ -1,0 +1,103 @@
+{
+    "site_name": "AutoRig Online",
+    "hero_title": "Automatic 3D Model Rigging",
+    "hero_subtitle": "Upload your GLB, FBX, or OBJ model and get it rigged with animations in minutes",
+    
+    "tab_upload": "Upload File",
+    "tab_link": "Paste Link",
+    
+    "upload_title": "Drop your 3D model here",
+    "upload_subtitle": "or click to browse (GLB, FBX, OBJ up to 100MB)",
+    "upload_selected": "Selected file",
+    
+    "link_placeholder": "https://example.com/model.glb",
+    "link_label": "Model URL",
+    
+    "tpose_notice": "Models must be in T-Pose for best results",
+    
+    "btn_start": "Start Rigging",
+    "btn_login": "Sign in with Google",
+    "btn_login_continue": "Sign in with Google to continue",
+    "btn_logout": "Sign out",
+    "btn_copy_all": "Copy All Links",
+    "btn_download_all": "Download All",
+    
+    "credits_free": "Free conversions left",
+    "credits_remaining": "Credits remaining",
+    "credits_login_hint": "Sign in for 7 more free conversions",
+    
+    "history_title": "Your Recent Tasks",
+    "history_empty": "No tasks yet. Start your first conversion!",
+    "history_view": "View",
+    
+    "task_title": "Conversion Progress",
+    "task_status_created": "Created",
+    "task_status_processing": "Processing",
+    "task_status_done": "Completed",
+    "task_status_error": "Error",
+    
+    "task_files_ready": "files ready",
+    "task_video_ready": "Video Preview",
+    "task_video_pending": "Video is being generated...",
+    
+    "error_no_file": "Please select a file or enter a URL",
+    "error_no_credits": "No credits remaining",
+    "error_login_required": "Please sign in to continue",
+    "error_payment_required": "Payment required. Contact support for more credits.",
+    "error_generic": "Something went wrong. Please try again.",
+    
+    "admin_title": "Admin Panel",
+    "admin_users": "Users",
+    "admin_search": "Search by email...",
+    "admin_balance": "Balance",
+    "admin_tasks": "Tasks",
+    "admin_save": "Save",
+    
+    "feature_fast_title": "Fast Processing",
+    "feature_fast_desc": "Get your rigged model in just a few minutes",
+    "feature_animations_title": "50+ Animations",
+    "feature_animations_desc": "Pre-configured animations for your character",
+    "feature_formats_title": "Multiple Formats",
+    "feature_formats_desc": "Support for GLB, FBX, and OBJ models",
+    
+    "queue_status": "Server Queue",
+    "queue_active": "Active",
+    "queue_pending": "In Queue",
+    "queue_wait": "Est. Wait",
+    "queue_servers": "Servers",
+    "queue_position": "Position in queue",
+    "queue_estimated": "Estimated time",
+    
+    "footer_text": "AutoRig Online © 2025",
+
+    "nav_home": "Home",
+    "nav_guides": "Guides",
+    "nav_gallery": "Gallery",
+
+    "guides_title": "Guides & Tutorials",
+    "guides_intro": "Learn more about character rigging, Unity/Unreal workflows, and best practices",
+
+    "guide_mixamo_title": "Mixamo Alternative",
+    "guide_mixamo_desc": "Professional auto rigging service as an alternative to Mixamo. Get rigged characters with 50+ animations.",
+
+    "guide_unity_title": "Rig GLB for Unity",
+    "guide_unity_desc": "Complete workflow to rig GLB characters for Unity Mecanim. Step-by-step Unity import guide.",
+
+    "guide_unreal_title": "Rig FBX for Unreal",
+    "guide_unreal_desc": "How to prepare and rig FBX characters for Unreal Engine. Tutorial for Skeletal Mesh import.",
+
+    "guide_tpose_title": "T-Pose vs A-Pose",
+    "guide_tpose_desc": "Comparison of T-pose vs A-pose for character rigging. Which pose works better for auto-rigging?",
+
+    "guide_formats_title": "GLB vs FBX",
+    "guide_formats_desc": "Complete comparison of GLB vs FBX formats for character rigging and game development.",
+
+    "guide_obj_title": "Auto Rig OBJ",
+    "guide_obj_desc": "How to auto rig OBJ characters. What works, what breaks, and preparation tips.",
+
+    "guide_retargeting_title": "Animation Retargeting",
+    "guide_retargeting_desc": "Guide to retargeting animations in Unity & Unreal. Simple pipeline for auto-rigged characters.",
+
+    "read_guide": "Read Guide →"
+}
+

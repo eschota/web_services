@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoRig Guides & Tutorials - Character Rigging Tutorials</title>
+    <meta name="description" content="Complete guides for character rigging, Unity Mecanim, Unreal Engine, and 3D animation workflows. Learn GLB/FBX rigging, T-pose setup, and animation retargeting.">
+    <meta name="keywords" content="character rigging guides, unity rigging tutorials, unreal rigging guides, GLB rigging, FBX rigging, animation retargeting, 3D character setup">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="AutoRig Guides & Tutorials - Character Rigging Tutorials">
+    <meta property="og:description" content="Complete guides for character rigging, Unity Mecanim, Unreal Engine, and 3D animation workflows.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/guides">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "AutoRig Guides & Tutorials",
+        "description": "Complete collection of character rigging guides and tutorials for Unity, Unreal Engine, and 3D animation workflows",
+        "url": "https://autorig.online/guides",
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Guides",
+                    "item": "https://autorig.online/guides"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/" class="nav-link" data-i18n="nav_home">Home</a>
+                    <a href="/guides" class="nav-link active" data-i18n="nav_guides">Guides</a>
+                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                </nav>
+
+                <div class="header-actions">
+                    <!-- Language Selector -->
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                <path d="M3 4.5L6 7.5L9 4.5"/>
+                            </svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+
+                    <!-- Theme Toggle -->
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                </div>
+                    <!-- Language Selector -->
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                <path d="M3 4.5L6 7.5L9 4.5"/>
+                            </svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+
+                    <!-- Theme Toggle -->
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1 data-i18n="guides_title">Guides & Tutorials</h1>
+                <p class="hero-subtitle" data-i18n="guides_intro">Learn more about character rigging, Unity/Unreal workflows, and best practices</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Guides Section -->
+    <section class="guides-section">
+        <div class="container">
+            <div class="guides-grid">
+                <div class="guide-card">
+                    <div class="guide-icon">🎭</div>
+                    <h3 data-i18n="guide_mixamo_title">Mixamo Alternative</h3>
+                    <p data-i18n="guide_mixamo_desc">Professional auto rigging service as an alternative to Mixamo. Get rigged characters with 50+ animations.</p>
+                    <a href="/mixamo-alternative" class="guide-link" data-i18n="read_guide">Read Guide →</a>
+                </div>
+
+                <div class="guide-card">
+                    <img src="/static/images/icons/tools.svg" alt="Engine" class="guide-icon" width="48" height="48">
+                    <h3 data-i18n="guide_unity_title">Rig GLB for Unity</h3>
+                    <p data-i18n="guide_unity_desc">Complete workflow to rig GLB characters for Unity Mecanim. Step-by-step Unity import guide.</p>
+                    <a href="/rig-glb-unity" class="guide-link" data-i18n="read_guide">Read Guide →</a>
+                </div>
+
+                <div class="guide-card">
+                    <img src="/static/images/icons/target.svg" alt="Target" class="guide-icon" width="48" height="48">
+                    <h3 data-i18n="guide_unreal_title">Rig FBX for Unreal</h3>
+                    <p data-i18n="guide_unreal_desc">How to prepare and rig FBX characters for Unreal Engine. Skeletal Mesh import tutorial.</p>
+                    <a href="/rig-fbx-unreal" class="guide-link" data-i18n="read_guide">Read Guide →</a>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-icon">📐</div>
+                    <h3 data-i18n="guide_tpose_title">T-Pose vs A-Pose</h3>
+                    <p data-i18n="guide_tpose_desc">Comparison of T-pose vs A-pose for character rigging. Which pose works better for auto-rigging?</p>
+                    <a href="/t-pose-vs-a-pose" class="guide-link" data-i18n="read_guide">Read Guide →</a>
+                </div>
+
+                <div class="guide-card">
+                    <div class="guide-icon">⚖️</div>
+                    <h3 data-i18n="guide_formats_title">GLB vs FBX</h3>
+                    <p data-i18n="guide_formats_desc">Complete comparison of GLB vs FBX formats for character rigging and game development.</p>
+                    <a href="/glb-vs-fbx" class="guide-link" data-i18n="read_guide">Read Guide →</a>
+                </div>
+
+                <div class="guide-card">
+                    <img src="/static/images/icons/formats.svg" alt="Formats" class="guide-icon" width="48" height="48">
+                    <h3 data-i18n="guide_obj_title">Auto Rig OBJ</h3>
+                    <p data-i18n="guide_obj_desc">How to auto rig OBJ characters. What works, what breaks, and preparation tips.</p>
+                    <a href="/auto-rig-obj" class="guide-link" data-i18n="read_guide">Read Guide →</a>
+                </div>
+
+                <div class="guide-card">
+                    <img src="/static/images/icons/animations.svg" alt="Animations" class="guide-icon" width="48" height="48">
+                    <h3 data-i18n="guide_retargeting_title">Animation Retargeting</h3>
+                    <p data-i18n="guide_retargeting_desc">Unity & Unreal animation retargeting guide. Simple pipeline for auto-rigged characters.</p>
+                    <a href="/animation-retargeting" class="guide-link" data-i18n="read_guide">Read Guide →</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                        <span>AutoRig</span>
+                    </div>
+                    <p>Automatic 3D character rigging made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Services</h4>
+                    <a href="/glb-auto-rig">GLB Auto Rig</a>
+                    <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                    <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                    <a href="/t-pose-rig">T-Pose Rig</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Guides</h4>
+                    <a href="/mixamo-alternative">Mixamo Alternative</a>
+                    <a href="/how-it-works">How It Works</a>
+                    <a href="/faq">FAQ</a>
+                    <a href="/gallery">Gallery</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script>
+        // Initialize everything after DOM is ready
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                await I18n.init();
+            } catch (error) {
+                console.error('Failed to initialize i18n:', error);
+            }
+
+            // Setup theme toggle
+            const themeToggle = document.getElementById('theme-toggle');
+            if (themeToggle) {
+                const savedTheme = localStorage.getItem('autorig_theme') || 'dark';
+                document.documentElement.setAttribute('data-theme', savedTheme);
+                themeToggle.textContent = savedTheme === 'dark' ? '🌙' : '☀️';
+
+                themeToggle.addEventListener('click', () => {
+                    const currentTheme = document.documentElement.getAttribute('data-theme');
+                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    document.documentElement.setAttribute('data-theme', newTheme);
+                    localStorage.setItem('autorig_theme', newTheme);
+                    themeToggle.textContent = newTheme === 'dark' ? '🌙' : '☀️';
+                });
+            }
+        });
+    </script>
+</body>
+</html>

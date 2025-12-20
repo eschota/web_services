@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How to Rig a GLB Character for Unity (Fast Workflow)</title>
+    <meta name="description" content="Complete guide to rigging GLB characters for Unity. Step-by-step workflow from T-pose preparation to Unity import and animation setup.">
+    <meta name="keywords" content="rig GLB for unity, unity GLB rigging, GLB to unity, unity character import, unity humanoid rig, unity animation import">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="How to Rig a GLB Character for Unity (Fast Workflow)">
+    <meta property="og:description" content="Step-by-step guide to rigging GLB characters for Unity. From T-pose preparation to Mecanim setup and animation import.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/rig-glb-unity">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "How to Rig a GLB Character for Unity (Fast Workflow)",
+        "description": "Complete step-by-step guide to rigging GLB characters for Unity engine with auto-rigging tools",
+        "author": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "datePublished": "2024-12-20",
+        "dateModified": "2024-12-20",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://autorig.online/rig-glb-unity"
+        },
+        "articleSection": "Tutorials",
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Главная",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "GLB Unity Guide",
+                    "item": "https://autorig.online/rig-glb-unity"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/glb-auto-rig" class="nav-link">GLB</a>
+                    <a href="/fbx-auto-rig" class="nav-link">FBX</a>
+                    <a href="/obj-auto-rig" class="nav-link">OBJ</a>
+                    <a href="/how-it-works" class="nav-link">Как работает</a>
+                    <a href="/faq" class="nav-link">FAQ</a>
+                    <a href="/rig-glb-unity-ru" class="nav-link active">Unity Guide</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>How to Rig a GLB Character for Unity</h1>
+                <p class="hero-subtitle">Complete step-by-step guide to rigging GLB characters for Unity. From T-pose preparation to Mecanim setup and animation import.</p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <span>Unity Mecanim</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
+                        <span>Fast workflow</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
+                        <span>Animation ready</span>
+                    </div>
+                </div>
+
+                <a href="/" class="cta-button">Start GLB Unity Rigging</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Article Content -->
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <p>GLB (glTF binary) is a great format for sharing characters, but many Unity pipelines still prefer rigged FBX for animation workflows. The usual goal is simple: take a GLB character in T-pose, auto-rig it, and import the animated result into Unity with minimal setup.</p>
+
+                <h2>Step 1: Prepare your GLB (T-pose checklist)</h2>
+                <ul>
+                    <li><strong>T-pose</strong>: arms straight out, legs straight, neutral stance</li>
+                    <li><strong>Centered model</strong>: character near origin, not 100 meters away</li>
+                    <li><strong>Apply transforms</strong>: avoid weird rotation/scale values</li>
+                    <li><strong>Clean mesh</strong>: fix flipped normals and non-manifold geometry if possible</li>
+                </ul>
+
+                <h2>Step 2: Auto-rig the GLB online</h2>
+                <p>On <strong>autorig.online</strong> you can upload a GLB file or paste a direct URL. The service creates a rig and provides Unity-friendly exports. Once the task completes, download the Unity export (usually FBX) plus any additional formats you need.</p>
+
+                <p><a href="/"><strong>Start rigging a GLB for Unity</strong></a></p>
+
+                <h2>Step 3: Import into Unity</h2>
+                <p>In Unity, import the resulting FBX. Then:</p>
+                <ol>
+                    <li>Select the FBX in the Project panel.</li>
+                    <li>Open the <strong>Rig</strong> tab in the Inspector.</li>
+                    <li>Set <strong>Animation Type</strong> to <strong>Humanoid</strong> (for humanoid characters).</li>
+                    <li>Click <strong>Apply</strong>.</li>
+                    <li>Open <strong>Configure</strong> and check the avatar mapping (Unity will show you if bones are missing).</li>
+                </ol>
+
+                <h2>Step 4: Test animations</h2>
+                <p>If your download includes multiple animations or an animation pack, import those clips and retarget them to your character's avatar. In Unity, Humanoid retargeting is usually the easiest way to reuse animations across characters.</p>
+
+                <h2>Common Unity import problems</h2>
+                <h3>Character is rotated or lying down</h3>
+                <p>This is usually a coordinate system mismatch. Check the FBX import settings, or rotate the root in your prefab. Keeping consistent forward axis in exports reduces this.</p>
+
+                <h3>Animations look broken</h3>
+                <p>Most often caused by a bad starting pose (not a real T-pose) or extreme proportions. Fix pose, re-export, and re-run the rig.</p>
+
+                <h3>Textures missing</h3>
+                <p>GLB textures can import differently than FBX materials. If you need perfect materials, you may have to reassign textures in Unity or export a Unity-ready package if your pipeline supports it.</p>
+
+                <h2>Best practice: keep the "rigged Unity FBX" as your source of truth</h2>
+                <p>Once you have a clean rigged FBX that Unity likes, use it as the baseline for animations and prefab setup. GLB is still great for distribution, but Unity workflows often behave best with FBX.</p>
+
+                <p><strong>Next step:</strong> read <a href="/t-pose-rig">T-pose checklist</a> or try <a href="/">rigging your GLB now</a>.</p>
+            </article>
+        </div>
+    </section>
+
+    <!-- Related Pages -->
+    <section class="related-section">
+        <div class="container">
+            <h2>Связанные руководства</h2>
+            <p>Learn more about Unity rigging and workflows:</p>
+            <div class="related-links">
+                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
+                <a href="/rig-fbx-unreal-ru" class="related-link">FBX Unreal Guide</a>
+                <a href="/t-pose-rig" class="related-link">T-Pose Guide</a>
+                <a href="/how-it-works" class="related-link">Как работает</a>
+                <a href="/faq" class="related-link">FAQ</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Rig GLB for Unity?</h2>
+            <p>Get your GLB character rigged and ready for Unity Mecanim. Professional results in minutes.</p>
+            <a href="/" class="cta-button">Start Unity GLB Rigging</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                        <span>AutoRig</span>
+                    </div>
+                    <p>Automatic 3D character rigging made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Сервисы</h4>
+                    <a href="/glb-auto-rig">GLB Auto Rig</a>
+                    <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                    <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                    <a href="/t-pose-rig">T-Pose Rig</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Руководства</h4>
+                    <a href="/rig-glb-unity-ru">Unity GLB Guide</a>
+                    <a href="/how-it-works">Как работает</a>
+                    <a href="/faq">FAQ</a>
+                    <a href="/gallery">Галерея</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

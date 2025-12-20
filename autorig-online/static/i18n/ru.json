@@ -1,0 +1,103 @@
+{
+    "site_name": "AutoRig Online",
+    "hero_title": "Автоматический Риггинг 3D Моделей",
+    "hero_subtitle": "Загрузите вашу GLB, FBX или OBJ модель и получите ригнутую модель с анимациями за минуты",
+    
+    "tab_upload": "Загрузить файл",
+    "tab_link": "Вставить ссылку",
+    
+    "upload_title": "Перетащите 3D модель сюда",
+    "upload_subtitle": "или нажмите для выбора (GLB, FBX, OBJ до 100МБ)",
+    "upload_selected": "Выбранный файл",
+    
+    "link_placeholder": "https://example.com/model.glb",
+    "link_label": "URL модели",
+    
+    "tpose_notice": "Для лучших результатов модель должна быть в T-Pose",
+    
+    "btn_start": "Начать риггинг",
+    "btn_login": "Войти через Google",
+    "btn_login_continue": "Войдите через Google чтобы продолжить",
+    "btn_logout": "Выйти",
+    "btn_copy_all": "Копировать все ссылки",
+    "btn_download_all": "Скачать всё",
+    
+    "credits_free": "Бесплатных конвертаций",
+    "credits_remaining": "Кредитов осталось",
+    "credits_login_hint": "Войдите для получения 7 дополнительных конвертаций",
+    
+    "history_title": "Ваши недавние задачи",
+    "history_empty": "Задач пока нет. Начните первую конвертацию!",
+    "history_view": "Открыть",
+    
+    "task_title": "Прогресс конвертации",
+    "task_status_created": "Создано",
+    "task_status_processing": "Обработка",
+    "task_status_done": "Завершено",
+    "task_status_error": "Ошибка",
+    
+    "task_files_ready": "файлов готово",
+    "task_video_ready": "Видео превью",
+    "task_video_pending": "Видео генерируется...",
+    
+    "error_no_file": "Выберите файл или введите URL",
+    "error_no_credits": "Кредиты закончились",
+    "error_login_required": "Войдите чтобы продолжить",
+    "error_payment_required": "Требуется оплата. Свяжитесь с поддержкой для получения кредитов.",
+    "error_generic": "Что-то пошло не так. Попробуйте ещё раз.",
+    
+    "admin_title": "Панель администратора",
+    "admin_users": "Пользователи",
+    "admin_search": "Поиск по email...",
+    "admin_balance": "Баланс",
+    "admin_tasks": "Задачи",
+    "admin_save": "Сохранить",
+    
+    "feature_fast_title": "Быстрая обработка",
+    "feature_fast_desc": "Получите ригнутую модель за несколько минут",
+    "feature_animations_title": "50+ анимаций",
+    "feature_animations_desc": "Готовые анимации для вашего персонажа",
+    "feature_formats_title": "Разные форматы",
+    "feature_formats_desc": "Поддержка GLB, FBX и OBJ моделей",
+    
+    "queue_status": "Очередь серверов",
+    "queue_active": "Активно",
+    "queue_pending": "В очереди",
+    "queue_wait": "Ожидание",
+    "queue_servers": "Серверы",
+    "queue_position": "Позиция в очереди",
+    "queue_estimated": "Примерное время",
+    
+    "footer_text": "AutoRig Online © 2025",
+
+    "guides_title": "Руководства и Туториалы",
+    "guides_intro": "Узнайте больше о rigging персонажей, рабочих процессах Unity/Unreal и лучших практиках",
+
+    "guide_mixamo_title": "Альтернатива Mixamo",
+    "guide_mixamo_desc": "Профессиональный сервис автоматического rigging как альтернатива Mixamo. Получите rigged персонажей с 50+ анимациями.",
+
+    "guide_unity_title": "Rig GLB для Unity",
+    "guide_unity_desc": "Полный рабочий процесс для rigging GLB персонажей для Unity Mecanim. Пошаговое руководство по импорту в Unity.",
+
+    "guide_unreal_title": "Rig FBX для Unreal",
+    "guide_unreal_desc": "Как подготовить и rig FBX персонажей для Unreal Engine. Туториал по импорту Skeletal Mesh.",
+
+    "guide_tpose_title": "T-Pose vs A-Pose",
+    "guide_tpose_desc": "Сравнение T-pose vs A-pose для rigging персонажей. Какая поза лучше работает для auto-rigging?",
+
+    "guide_formats_title": "GLB vs FBX",
+    "guide_formats_desc": "Полное сравнение форматов GLB vs FBX для rigging персонажей и разработки игр.",
+
+    "guide_obj_title": "Auto Rig OBJ",
+    "guide_obj_desc": "Как auto rig OBJ персонажей. Что работает, что ломается, и советы по подготовке.",
+
+    "guide_retargeting_title": "Animation Retargeting",
+    "guide_retargeting_desc": "Руководство по retargeting анимаций Unity & Unreal. Простой пайплайн для auto-rigged персонажей.",
+
+    "read_guide": "Читать Руководство →",
+
+    "nav_home": "Главная",
+    "nav_guides": "Руководства",
+    "nav_gallery": "Галерея"
+}
+

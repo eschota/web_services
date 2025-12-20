@@ -1,0 +1,14 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="queueGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Hourglass -->
+  <path d="M10 4 L10 8 L16 14 L22 8 L22 4 Z" fill="url(#queueGradient)"/>
+  <path d="M10 28 L10 24 L16 18 L22 24 L22 28 Z" fill="url(#queueGradient)"/>
+  <path d="M10 8 L10 12 L16 16 L22 12 L22 8 Z" fill="none" stroke="url(#queueGradient)" stroke-width="2"/>
+  <path d="M10 20 L10 24 L16 16 L22 24 L22 20 Z" fill="none" stroke="url(#queueGradient)" stroke-width="2"/>
+</svg>
+

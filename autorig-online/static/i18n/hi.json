@@ -1,0 +1,70 @@
+{
+    "site_name": "AutoRig Online",
+    "hero_title": "स्वचालित 3D मॉडल रिगिंग और एनिमेशन",
+    "hero_subtitle": "अपने GLB, FBX या OBJ मॉडल अपलोड करें और उन्हें 50+ एनिमेशन के साथ मिनटों में प्राप्त करें। Unity, Unreal Engine, 3ds Max, Maya, Cinema 4D में निर्यात करें।",
+
+    "tab_upload": "फाइल अपलोड करें",
+    "tab_link": "लिंक पेस्ट करें",
+
+    "upload_title": "3D मॉडल को यहां खींचें",
+    "upload_subtitle": "GLB, FBX, OBJ अधिकतम 100MB",
+    "upload_selected": "चयनित फाइल",
+
+    "link_placeholder": "https://example.com/model.glb",
+    "link_label": "मॉडल URL",
+
+    "tpose_notice": "सर्वोत्तम परिणामों के लिए, मॉडल T-pose में होना चाहिए",
+
+    "btn_start": "रिगिंग शुरू करें",
+    "btn_login": "Google के माध्यम से लॉगिन करें",
+    "btn_login_continue": "जारी रखने के लिए लॉगिन करें",
+
+    "feature_fast_title": "तेज प्रोसेसिंग",
+    "feature_fast_desc": "कुछ मिनटों में अपना rigged मॉडल प्राप्त करें",
+    "feature_animations_title": "50+ एनिमेशन",
+    "feature_animations_desc": "आपके कैरेक्टर के लिए पूर्व-कॉन्फ़िगर किए गए एनिमेशन",
+    "feature_formats_title": "एकाधिक फॉर्मेट",
+    "feature_formats_desc": "GLB, FBX और OBJ मॉडल का समर्थन",
+
+    "queue_title": "कतार स्थिति",
+    "queue_active": "सक्रिय कार्य",
+    "queue_waiting": "प्रतीक्षा में",
+    "queue_servers": "सर्वर",
+
+    "history_title": "आपके हाल के कार्य",
+
+    "credits_free": "मुफ्त रूपांतरण शेष",
+    "credits_login_hint": "7 और मुफ्त रूपांतरण के लिए साइन इन करें",
+
+    "footer_text": "AutoRig Online © 2025",
+
+    "guides_title": "गाइड और ट्यूटोरियल",
+    "guides_intro": "कैरेक्टर रिगिंग, Unity/Unreal वर्कफ्लो और बेस्ट प्रैक्टिस के बारे में और जानें",
+
+    "guide_mixamo_title": "Mixamo विकल्प",
+    "guide_mixamo_desc": "Mixamo के विकल्प के रूप में पेशेवर ऑटो रिगिंग सेवा। 50+ एनिमेशन के साथ rigged कैरेक्टर प्राप्त करें।",
+
+    "guide_unity_title": "Unity के लिए GLB रिग करें",
+    "guide_unity_desc": "Unity Mecanim के लिए GLB कैरेक्टर रिग करने का पूरा वर्कफ्लो। Unity इंपोर्ट के लिए स्टेप-बाय-स्टेप गाइड।",
+
+    "guide_unreal_title": "Unreal के लिए FBX रिग करें",
+    "guide_unreal_desc": "Unreal Engine के लिए FBX कैरेक्टर तैयार और रिग कैसे करें। Skeletal Mesh इंपोर्ट ट्यूटोरियल।",
+
+    "guide_tpose_title": "T-Pose vs A-Pose",
+    "guide_tpose_desc": "कैरेक्टर रिगिंग के लिए T-pose vs A-pose की तुलना। ऑटो-रिगिंग के लिए कौन सी पोज बेहतर काम करती है?",
+
+    "guide_formats_title": "GLB vs FBX",
+    "guide_formats_desc": "कैरेक्टर रिगिंग और गेम डेवलपमेंट के लिए GLB vs FBX फॉर्मेट की पूरी तुलना।",
+
+    "guide_obj_title": "OBJ ऑटो रिग करें",
+    "guide_obj_desc": "OBJ कैरेक्टर ऑटो रिग कैसे करें। क्या काम करता है, क्या टूटता है, और तैयारी टिप्स।",
+
+    "guide_retargeting_title": "एनिमेशन रिटारगेटिंग",
+    "guide_retargeting_desc": "Unity और Unreal एनिमेशन रिटारगेटिंग गाइड। ऑटो-रिग्ड कैरेक्टर के लिए साधारण पाइपलाइन।",
+
+    "read_guide": "गाइड पढ़ें →",
+
+    "nav_home": "होम",
+    "nav_guides": "गाइड",
+    "nav_gallery": "गैलरी"
+}

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T-Pose Rigging Checklist — Prepare Your Character for Auto-Rig</title>
+    <meta name="description" content="Simple checklist to prepare GLB/FBX/OBJ models for auto rigging: pose, scale, mesh issues, textures, and common errors.">
+    <meta name="keywords" content="t pose rig, t-pose rigging, character t-pose, t pose skeleton, animation ready t-pose, professional rigging t-pose">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="T-Pose Rigging Online - Professional Character Setup">
+    <meta property="og:description" content="Get your 3D characters rigged in perfect T-pose for professional animation. Unity, Unreal, and game engine ready.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/t-pose-rig">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "T-Pose Rigging Online",
+        "description": "Professional T-pose rigging service for 3D characters. Get perfectly posed skeletons ready for animation in Unity, Unreal Engine, and game development.",
+        "url": "https://autorig.online/t-pose-rig",
+        "mainEntity": {
+            "@type": "Service",
+            "name": "T-Pose Character Rigging",
+            "description": "Professional T-pose setup for 3D character animation",
+            "serviceType": "3D Animation Service",
+            "areaServed": "Worldwide",
+            "offers": {
+                "@type": "Offer",
+                "price": "0",
+                "priceCurrency": "USD"
+            },
+            "featureList": [
+                "Professional T-pose setup",
+                "Animation ready skeletons",
+                "Unity Mecanim compatible",
+                "Unreal Engine ready",
+                "IK bone structure",
+                "Industry standard posing"
+            ]
+        },
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "T-Pose Rig",
+                    "item": "https://autorig.online/t-pose-rig"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/glb-auto-rig" class="nav-link">GLB</a>
+                    <a href="/fbx-auto-rig" class="nav-link">FBX</a>
+                    <a href="/obj-auto-rig" class="nav-link">OBJ</a>
+                    <a href="/t-pose-rig" class="nav-link active">T-Pose</a>
+                    <a href="/how-it-works" class="nav-link">How It Works</a>
+                    <a href="/faq" class="nav-link">FAQ</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>T-Pose Rigging Checklist</h1>
+                <p class="hero-subtitle">Get your 3D characters rigged in perfect T-pose for professional animation. Industry-standard setup for Unity, Unreal Engine, and modern game development.</p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <img src="/static/images/icons/target.svg" alt="T-Pose" class="feature-icon" width="96" height="96">
+                        <span>Perfect T-pose</span>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">🎭</div>
+                        <span>Animation ready</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
+                        <span>Industry standard</span>
+                    </div>
+                </div>
+
+                <a href="/" class="cta-button">Start T-Pose Rigging</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Content Section -->
+    <section class="content-section">
+        <div class="container">
+            <div class="content-grid">
+                <div class="content-block">
+                    <h2>Why T-Pose Rigging Matters</h2>
+                    <p>The T-pose (standing position with arms extended horizontally) is the industry standard for character rigging and animation. It provides the optimal pose for:</p>
+
+                    <h3>Animation Benefits:</h3>
+                    <ul>
+                        <li><strong>Retargeting:</strong> Easy animation transfer between characters</li>
+                        <li><strong>IK Setup:</strong> Perfect for inverse kinematics</li>
+                        <li><strong>Mocap Data:</strong> Compatible with motion capture systems</li>
+                        <li><strong>Game Engines:</strong> Optimized for Unity and Unreal workflows</li>
+                    </ul>
+                </div>
+
+                <div class="content-block">
+                    <h2>T-Pose Rigging Features</h2>
+                    <div class="features-list">
+                        <div class="feature-item">
+                            <h4>Perfect Alignment</h4>
+                            <p>Mathematically precise T-pose with perfect symmetry</p>
+                        </div>
+                        <div class="feature-item">
+                            <h4>Industry Standard</h4>
+                            <p>Follows AAA game development rigging conventions</p>
+                        </div>
+                        <div class="feature-item">
+                            <h4>IK Ready</h4>
+                            <p>Inverse kinematics bones properly positioned</p>
+                        </div>
+                        <div class="feature-item">
+                            <h4>Animation Compatible</h4>
+                            <p>Works with all major animation packages</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- T-Pose vs A-Pose -->
+            <div class="comparison-section">
+                <h2>T-Pose vs A-Pose: Which is Right for You?</h2>
+                <div class="comparison-grid">
+                    <div class="comparison-item">
+                        <h3>T-Pose (Recommended)</h3>
+                        <ul>
+                            <li>✅ Industry standard</li>
+                            <li>✅ Perfect for IK rigging</li>
+                            <li>✅ Unity Mecanim compatible</li>
+                            <li>✅ Motion capture ready</li>
+                            <li>✅ Animation retargeting</li>
+                        </ul>
+                    </div>
+                    <div class="comparison-item">
+                        <h3>A-Pose (Relaxed)</h3>
+                        <ul>
+                            <li>✅ More natural appearance</li>
+                            <li>✅ Better for static poses</li>
+                            <li>✅ Some animation workflows</li>
+                            <li>❌ Less IK friendly</li>
+                            <li>❌ Limited retargeting</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Technical Details -->
+            <div class="technical-section">
+                <h2>Technical Specifications</h2>
+                <div class="specs-grid">
+                    <div class="spec-item">
+                        <h4>Bone Structure</h4>
+                        <ul>
+                            <li>Hip (Root)</li>
+                            <li>Spine (3-5 vertebrae)</li>
+                            <li>Neck & Head</li>
+                            <li>Arms & Legs (3 bones each)</li>
+                            <li>Hands & Feet</li>
+                        </ul>
+                    </div>
+                    <div class="spec-item">
+                        <h4>IK Setup</h4>
+                        <ul>
+                            <li>Foot IK bones</li>
+                            <li>Hand IK bones</li>
+                            <li>Knee/Elbow poles</li>
+                            <li>Head look-at target</li>
+                        </ul>
+                    </div>
+                    <div class="spec-item">
+                        <h4>Compatibility</h4>
+                        <ul>
+                            <li>Unity Humanoid</li>
+                            <li>Unreal Mannequin</li>
+                            <li>Maya HumanIK</li>
+                            <li>Blender Rigify</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Related Pages -->
+    <section class="related-section">
+        <div class="container">
+            <h2>Related Pages</h2>
+            <p>Explore rigging formats and learn more about our service:</p>
+            <div class="related-links">
+                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
+                <a href="/obj-auto-rig" class="related-link">OBJ Auto Rig</a>
+                <a href="/how-it-works" class="related-link">How It Works</a>
+                <a href="/faq" class="related-link">FAQ</a>
+                <a href="/gallery" class="related-link">Gallery</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Get Professional T-Pose Rigging</h2>
+            <p>Industry-standard character rigging with perfect T-pose setup. Ready for professional animation pipelines.</p>
+            <a href="/" class="cta-button">Start T-Pose Rigging Now</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                        <span>AutoRig</span>
+                    </div>
+                    <p>Automatic 3D character rigging made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Services</h4>
+                    <a href="/glb-auto-rig">GLB Auto Rig</a>
+                    <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                    <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                    <a href="/t-pose-rig">T-Pose Rig</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Support</h4>
+                    <a href="/how-it-works">How It Works</a>
+                    <a href="/faq">FAQ</a>
+                    <a href="/gallery">Gallery</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How to Rig an FBX Character for Unreal Engine</title>
+    <meta name="description" content="Complete guide to rigging FBX characters for Unreal Engine. Step-by-step workflow from T-pose preparation to Skeletal Mesh import and animation setup.">
+    <meta name="keywords" content="rig FBX for unreal, unreal FBX rigging, FBX to unreal, unreal skeletal mesh, unreal animation blueprint, unreal character import">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="How to Rig an FBX Character for Unreal Engine">
+    <meta property="og:description" content="Step-by-step guide to rigging FBX characters for Unreal Engine. From T-pose preparation to Skeletal Mesh setup and animation import.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/rig-fbx-unreal">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "How to Rig an FBX Character for Unreal Engine",
+        "description": "Complete step-by-step guide to rigging FBX characters for Unreal Engine with auto-rigging tools",
+        "author": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "datePublished": "2024-12-20",
+        "dateModified": "2024-12-20",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://autorig.online/rig-fbx-unreal"
+        },
+        "articleSection": "Tutorials",
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "FBX Unreal Guide",
+                    "item": "https://autorig.online/rig-fbx-unreal"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/glb-auto-rig" class="nav-link">GLB</a>
+                    <a href="/fbx-auto-rig" class="nav-link">FBX</a>
+                    <a href="/obj-auto-rig" class="nav-link">OBJ</a>
+                    <a href="/how-it-works" class="nav-link">How It Works</a>
+                    <a href="/faq" class="nav-link">FAQ</a>
+                    <a href="/rig-fbx-unreal" class="nav-link active">Unreal Guide</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>How to Rig an FBX Character for Unreal Engine</h1>
+                <p class="hero-subtitle">Complete guide to rigging FBX characters for Unreal Engine. From T-pose preparation to Skeletal Mesh setup and animation import.</p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <span>Unreal Engine</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
+                        <span>Skeletal Mesh</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
+                        <span>Animation Blueprint</span>
+                    </div>
+                </div>
+
+                <a href="/" class="cta-button">Start FBX Unreal Rigging</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Article Content -->
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <p>Unreal Engine pipelines often rely on FBX for skeletal meshes and animation imports. If you have a static FBX character (no skeleton), the fastest route is: make sure it's in a correct T-pose, run auto-rigging, then import the resulting skeletal FBX into Unreal as a Skeletal Mesh.</p>
+
+                <h2>Step 1: Make sure your FBX is in a clean T-pose</h2>
+                <ul>
+                    <li>arms straight out horizontally (not "almost T")</li>
+                    <li>legs straight, feet flat</li>
+                    <li>no extreme twists in shoulders/wrists</li>
+                    <li>apply transforms in your DCC if possible</li>
+                </ul>
+
+                <h2>Step 2: Auto-rig the FBX online</h2>
+                <p>Upload your FBX (or provide a direct link) on <strong>autorig.online</strong> and run the rig. After the task completes, download the Unreal-friendly FBX export.</p>
+
+                <p><a href="/"><strong>Rig an FBX for Unreal</strong></a></p>
+
+                <h2>Step 3: Import into Unreal</h2>
+                <ol>
+                    <li>In Unreal, go to Content Browser → Import.</li>
+                    <li>Select the rigged FBX export.</li>
+                    <li>Choose <strong>Skeletal Mesh</strong> (not Static Mesh).</li>
+                    <li>If there are animations included, enable <strong>Import Animations</strong>.</li>
+                    <li>Import and open the Skeletal Mesh asset to preview.</li>
+                </ol>
+
+                <h2>Step 4: Retargeting (optional)</h2>
+                <p>If you want to reuse animations from another character, Unreal's retargeting tools can map animations between skeletons. The better your base pose and proportions, the smoother retargeting will be.</p>
+
+                <h2>Common Unreal issues</h2>
+                <h3>Mesh is scaled wrong</h3>
+                <p>Scale mismatches come from inconsistent units. If you can, normalize the scale in your DCC before rigging.</p>
+
+                <h3>Skinning artifacts</h3>
+                <p>Auto skinning is a best-effort process. Heavy clothing, armor, or unusual topology can create deformations. For hero characters, use the auto-rig as a baseline and polish weights manually.</p>
+
+                <h3>Bone orientation warnings</h3>
+                <p>Unreal is picky about skeleton consistency. Use one consistent export path (same tool) for all your characters to avoid unexpected bone axis behavior.</p>
+
+                <p><strong>Tip:</strong> If you're seeing consistent issues, try improving the starting pose first. Pose quality matters more than people expect.</p>
+            </article>
+        </div>
+    </section>
+
+    <!-- Related Pages -->
+    <section class="related-section">
+        <div class="container">
+            <h2>Related Guides</h2>
+            <p>Learn more about Unreal rigging and workflows:</p>
+            <div class="related-links">
+                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
+                <a href="/rig-glb-unity" class="related-link">GLB Unity Guide</a>
+                <a href="/t-pose-rig" class="related-link">T-Pose Guide</a>
+                <a href="/how-it-works" class="related-link">How It Works</a>
+                <a href="/faq" class="related-link">FAQ</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Rig FBX for Unreal?</h2>
+            <p>Get your FBX character rigged and ready for Unreal Engine. Professional Skeletal Mesh setup.</p>
+            <a href="/" class="cta-button">Start Unreal FBX Rigging</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                        <span>AutoRig</span>
+                    </div>
+                    <p>Automatic 3D character rigging made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Services</h4>
+                    <a href="/glb-auto-rig">GLB Auto Rig</a>
+                    <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                    <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                    <a href="/t-pose-rig">T-Pose Rig</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Guides</h4>
+                    <a href="/rig-fbx-unreal">Unreal FBX Guide</a>
+                    <a href="/how-it-works">How It Works</a>
+                    <a href="/faq">FAQ</a>
+                    <a href="/gallery">Gallery</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

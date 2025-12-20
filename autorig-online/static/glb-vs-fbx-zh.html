@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB vs FBX for Characters: Which Format Should You Use?</title>
+    <meta name="description" content="Complete comparison of GLB vs FBX formats for 3D characters. Learn which format is better for rigging, Unity, Unreal Engine, and different workflows.">
+    <meta name="keywords" content="glb vs fbx, GLB FBX comparison, character formats, 3d file formats, unity formats, unreal formats, rigging formats">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="GLB vs FBX for Characters: Which Format Should You Use?">
+    <meta property="og:description" content="Compare GLB vs FBX formats for 3D characters. Learn which is better for rigging, Unity, Unreal Engine, and different pipelines.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/glb-vs-fbx">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+
+    <!-- Schema.org markup -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "GLB vs FBX for Characters: Which Format Should You Use?",
+        "description": "Complete comparison of GLB vs FBX formats for 3D character rigging and game development workflows",
+        "author": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": "AutoRig Online"
+        },
+        "datePublished": "2024-12-20",
+        "dateModified": "2024-12-20",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://autorig.online/glb-vs-fbx"
+        },
+        "articleSection": "指南",
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "首页",
+                    "item": "https://autorig.online"
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "GLB vs FBX",
+                    "item": "https://autorig.online/glb-vs-fbx"
+                }
+            ]
+        }
+    }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/glb-auto-rig" class="nav-link">GLB</a>
+                    <a href="/fbx-auto-rig" class="nav-link">FBX</a>
+                    <a href="/obj-auto-rig" class="nav-link">OBJ</a>
+                    <a href="/how-it-works" class="nav-link">如何工作</a>
+                    <a href="/faq" class="nav-link">FAQ</a>
+                    <a href="/glb-vs-fbx-zh" class="nav-link active">GLB vs FBX</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>GLB vs FBX for Characters: Which Format Should You Use?</h1>
+                <p class="hero-subtitle">Complete comparison of GLB vs FBX formats for 3D characters. Learn which is better for rigging, Unity, Unreal Engine, and different workflows.</p>
+
+                <div class="hero-features">
+                    <div class="feature">
+                        <div class="feature-icon">📊</div>
+                        <span>Format comparison</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Engine" class="feature-icon" width="96" height="96">
+                        <span>Engine compatibility</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/tools.svg" alt="Settings" class="feature-icon" width="96" height="96">
+                        <span>Workflow guide</span>
+                    </div>
+                </div>
+
+                <a href="/" class="cta-button">Start 自动绑定</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Article Content -->
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <p>GLB and FBX are both common character formats, but they're optimized for different parts of the pipeline. If your goal is to rig, animate, and move characters between tools, it helps to understand where each format shines.</p>
+
+                <h2>GLB (glTF binary): best for sharing and web workflows</h2>
+                <ul>
+                    <li>Compact and portable</li>
+                    <li>Great for web previews and sharing</li>
+                    <li>Often includes textures in a single package</li>
+                </ul>
+
+                <h2>FBX: best for DCC tools and game engine pipelines</h2>
+                <ul>
+                    <li>Widely used for skeletal animation workflows</li>
+                    <li>Works reliably with Unity/Unreal importers</li>
+                    <li>Common interchange format for rigged assets</li>
+                </ul>
+
+                <h2>Which one is better for auto-rigging?</h2>
+                <p>Auto-rigging depends more on your <strong>pose and topology</strong> than on file format. However, many production pipelines prefer the final output as FBX because that's what engines and animation tools expect.</p>
+
+                <h2>Recommended practical pipeline</h2>
+                <ol>
+                    <li>Start with GLB (easy to share) or FBX (engine-friendly), whichever you have.</li>
+                    <li>Auto-rig in T-pose.</li>
+                    <li>Download engine-friendly exports (Unity/Unreal FBX) for production.</li>
+                    <li>Keep GLB as a distribution format if needed.</li>
+                </ol>
+
+                <h2>Common issues when converting</h2>
+                <h3>Materials don't match</h3>
+                <p>Materials can differ across formats. GLB often keeps textures packaged, while FBX can require external texture paths or engine-side material setup.</p>
+
+                <h3>Axis/rotation differences</h3>
+                <p>Coordinate systems vary. A consistent export toolchain reduces surprises.</p>
+
+                <p><a href="/">Auto-rig your character now</a></p>
+            </article>
+        </div>
+    </section>
+
+    <!-- Related Pages -->
+    <section class="related-section">
+        <div class="container">
+            <h2>相关指南</h2>
+            <p>Learn more about formats and rigging:</p>
+            <div class="related-links">
+                <a href="/glb-auto-rig" class="related-link">GLB Auto Rig</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX Auto Rig</a>
+                <a href="/rig-glb-unity-zh" class="related-link">Unity GLB Guide</a>
+                <a href="/rig-fbx-unreal-zh" class="related-link">Unreal FBX Guide</a>
+                <a href="/how-it-works" class="related-link">如何工作</a>
+                <a href="/faq" class="related-link">FAQ</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <div class="container">
+            <h2>Ready to Choose the Right Format?</h2>
+            <p>Get professional auto rigging for GLB or FBX characters. Works with both formats!</p>
+            <a href="/" class="cta-button">Start 自动绑定</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="logo">
+                        <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                        <span>AutoRig</span>
+                    </div>
+                    <p>Automatic 3D character rigging made simple.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>服务</h4>
+                    <a href="/glb-auto-rig">GLB Auto Rig</a>
+                    <a href="/fbx-auto-rig">FBX Auto Rig</a>
+                    <a href="/obj-auto-rig">OBJ Auto Rig</a>
+                    <a href="/t-pose-rig">T-Pose Rig</a>
+                </div>
+                <div class="footer-section">
+                    <h4>指南</h4>
+                    <a href="/glb-vs-fbx-zh">GLB vs FBX</a>
+                    <a href="/how-it-works">如何工作</a>
+                    <a href="/faq">FAQ</a>
+                    <a href="/gallery">画廊</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 AutoRig Online. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

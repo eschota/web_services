@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Admin Panel | AutoRig.online</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+                
+                <div class="header-actions">
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    <a href="/" class="btn btn-secondary">← Back to Site</a>
+                    <a href="/auth/logout" class="btn btn-ghost">Sign out</a>
+                </div>
+            </div>
+        </div>
+    </header>
+    
+    <main class="container" style="padding-top: 2rem;">
+        <h1 data-i18n="admin_title">Admin Panel</h1>
+        
+        <!-- Stats -->
+        <div class="features mt-3" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="card" style="text-align: center;">
+                <div style="font-size: 2rem; font-weight: 700;" id="stat-users">-</div>
+                <div style="color: var(--text-muted);">Total Users</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div style="font-size: 2rem; font-weight: 700;" id="stat-tasks">-</div>
+                <div style="color: var(--text-muted);">Total Tasks</div>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div style="font-size: 2rem; font-weight: 700;" id="stat-credits">-</div>
+                <div style="color: var(--text-muted);">Total Credits</div>
+            </div>
+        </div>
+        
+        <!-- Users Table -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3 class="card-title" data-i18n="admin_users">Users</h3>
+                <div style="display: flex; gap: 1rem;">
+                    <input type="text" class="form-input" id="search-input" placeholder="Search by email..." style="width: 250px;">
+                </div>
+            </div>
+            
+            <div style="overflow-x: auto;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th data-sort="id">ID</th>
+                            <th data-sort="email">Email</th>
+                            <th data-sort="name">Name</th>
+                            <th data-sort="balance_credits">Balance</th>
+                            <th data-sort="total_tasks">Tasks</th>
+                            <th data-sort="last_login_at">Last Login</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table">
+                        <tr>
+                            <td colspan="7" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div class="flex justify-between items-center mt-3" id="pagination">
+                <span id="pagination-info" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+                <div class="flex gap-1">
+                    <button class="btn btn-secondary" id="prev-page" disabled>← Prev</button>
+                    <button class="btn btn-secondary" id="next-page" disabled>Next →</button>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Balance Modal -->
+    <div id="balance-modal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+        <div class="card" style="min-width: 400px;">
+            <h3>Edit Balance</h3>
+            <p style="color: var(--text-muted); margin-top: 0.5rem;" id="modal-email"></p>
+            
+            <div class="form-group mt-3">
+                <label class="form-label">Current Balance</label>
+                <div id="modal-current" style="font-size: 1.5rem; font-weight: 600;"></div>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Set Balance To</label>
+                <input type="number" class="form-input" id="modal-set-balance" placeholder="Enter new balance">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Or Add/Remove Credits</label>
+                <input type="number" class="form-input" id="modal-delta" placeholder="+10 or -5">
+            </div>
+            
+            <div class="flex gap-2 mt-3">
+                <button class="btn btn-primary" id="modal-save">Save Changes</button>
+                <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>AutoRig Online Admin © 2025</p>
+        </div>
+    </footer>
+    
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>
+

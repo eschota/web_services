@@ -1,0 +1,21 @@
+# AutoRig Online robots.txt
+User-agent: *
+Allow: /
+Allow: /glb-auto-rig
+Allow: /fbx-auto-rig
+Allow: /obj-auto-rig
+Allow: /how-it-works
+Allow: /faq
+
+# Disallow API and admin
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /task
+Disallow: /task/
+Disallow: /auth/
+Disallow: /u/
+
+# Sitemap
+Sitemap: https://autorig.online/sitemap.xml
+
