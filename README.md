@@ -115,7 +115,7 @@ python main.py
 
 <div align="center">
 
-**Евгений Щербаков**
+**Константин Ермолаев**
 
 [![Email](https://img.shields.io/badge/Email-eschota@gmail.com-red?style=flat&logo=gmail)](mailto:eschota@gmail.com)
 [![Telegram](https://img.shields.io/badge/Telegram-@eschota-blue?style=flat&logo=telegram)](https://t.me/eschota)
