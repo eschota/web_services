@@ -317,7 +317,9 @@
                     const createdAt = new Date(task.created_at).getTime();
                     const ageMs = Date.now() - createdAt;
                     const threeHoursMs = 3 * 60 * 60 * 1000;
-                    if (ageMs >= threeHoursMs) {
+                    const oneMinuteMs = 60 * 1000;
+                    const threshold = task.status === 'error' ? oneMinuteMs : threeHoursMs;
+                    if (ageMs >= threshold) {
                         restartBtn.classList.remove('hidden');
                     } else {
                         restartBtn.classList.add('hidden');

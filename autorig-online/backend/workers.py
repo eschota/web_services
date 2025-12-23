@@ -190,7 +190,7 @@ async def send_fbx_to_glb(worker_api_url: str, input_url: str) -> FbxToGlbResult
             response = await client.post(
                 endpoint,
                 json={"input_url": input_url},
-                timeout=30.0
+                timeout=90.0
             )
 
             if response.status_code != 200:

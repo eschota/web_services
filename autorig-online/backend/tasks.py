@@ -1,6 +1,7 @@
 """
 Task management for AutoRig Online
 """
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Optional, Tuple, List
@@ -9,7 +10,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import Task, User, AnonSession
+from database import Task, User, AnonSession, AsyncSessionLocal
 from config import WORKERS
 from workers import (
     select_best_worker,
@@ -74,6 +75,52 @@ async def _head_is_ready(url: str) -> bool:
         return False
 
 
+async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input_url: str) -> None:
+    """
+    Run FBX->GLB pre-conversion asynchronously after task creation/restart.
+    Writes fbx_glb_* fields into the task once the worker responds.
+    """
+    last_error = None
+    candidate_workers = [first_worker_url] + [w for w in WORKERS if w != first_worker_url]
+
+    async with AsyncSessionLocal() as db:
+        task = await get_task_by_id(db, task_id)
+        if not task:
+            return
+
+        # If task already has output_url or is terminal, don't redo
+        if task.status in ("done", "error") or task.fbx_glb_output_url:
+            return
+
+        for candidate in candidate_workers:
+            res = await send_fbx_to_glb(candidate, input_url)
+            if res.success:
+                task.worker_api = candidate
+                task.fbx_glb_model_name = res.model_name
+                task.fbx_glb_output_url = res.output_url
+                task.fbx_glb_ready = False
+                task.fbx_glb_error = None
+                task.updated_at = datetime.utcnow()
+                await db.commit()
+                return
+
+            last_error = res.error
+
+            # Endpoint missing? try next worker
+            if last_error and "HTTP 404" in last_error:
+                continue
+
+            # For other errors (timeouts, 5xx), still try other workers
+            continue
+
+        # No worker succeeded
+        task.status = "error"
+        task.fbx_glb_error = last_error or "FBX->GLB conversion failed"
+        task.error_message = task.fbx_glb_error
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+
+
 # =============================================================================
 # Task Creation
 # =============================================================================
@@ -107,40 +154,15 @@ async def create_conversion_task(
 
     # FBX requires pre-conversion step: FBX -> GLB
     if _is_fbx_url(input_url):
-        # Some workers may not have /api-converter-fbx-glb deployed yet (HTTP 404).
-        # Try the best worker first, then fall back to others until success.
-        candidate_workers = [worker_url] + [w for w in WORKERS if w != worker_url]
-        last_error = None
-
-        for candidate in candidate_workers:
-            fbx_res = await send_fbx_to_glb(candidate, input_url)
-            if fbx_res.success:
-                task.worker_api = candidate
-                task.fbx_glb_model_name = fbx_res.model_name
-                task.fbx_glb_output_url = fbx_res.output_url
-                task.fbx_glb_ready = False
-                task.status = "processing"
-                db.add(task)
-                await db.commit()
-                await db.refresh(task)
-                return task, None
-
-            last_error = fbx_res.error
-
-            # If endpoint missing, continue trying others
-            if last_error and "HTTP 404" in last_error:
-                continue
-
-            # For other errors (timeouts, 5xx), still try other workers as fallback
-            continue
-
-        # No worker succeeded
-        task.status = "error"
-        task.fbx_glb_error = last_error or "FBX->GLB conversion failed"
-        task.error_message = task.fbx_glb_error
+        # Do not block task creation on FBX->GLB conversion (can take 20-60+ seconds).
+        # Create task immediately and run pre-conversion asynchronously.
+        task.status = "processing"
         db.add(task)
         await db.commit()
-        return task, task.fbx_glb_error
+        await db.refresh(task)
+
+        asyncio.create_task(_start_fbx_preconvert_async(task.id, worker_url, input_url))
+        return task, None
 
     # Non-FBX: send to worker directly
     result = await send_task_to_worker(worker_url, input_url, task_type)

@@ -583,7 +583,8 @@ async def api_restart_task(
 ):
     """Restart task with the same task_id (available if older than 3 hours)"""
     from datetime import timedelta
-    from tasks import create_conversion_task
+    from tasks import _is_fbx_url, _start_fbx_preconvert_async
+    from workers import select_best_worker, send_task_to_worker
 
     task = await get_task_by_id(db, task_id)
     if not task:
@@ -601,8 +602,9 @@ async def api_restart_task(
 
     # Age gate: 3 hours
     task_age = datetime.utcnow() - task.created_at
-    if task_age < timedelta(hours=3):
-        remaining = timedelta(hours=3) - task_age
+    min_age = timedelta(minutes=1) if task.status == "error" else timedelta(hours=3)
+    if task_age < min_age:
+        remaining = min_age - task_age
         minutes = int(remaining.total_seconds() / 60)
         raise HTTPException(
             status_code=400,
@@ -635,35 +637,32 @@ async def api_restart_task(
     await db.commit()
     await db.refresh(task)
 
-    # Re-run pipeline by creating a new task and copying its runtime fields onto this one.
-    # We do this to reuse the same validated creation logic, but preserve task_id.
-    tmp_task, err = await create_conversion_task(
-        db, task.input_url, task.input_type or "t_pose", task.owner_type, task.owner_id
-    )
-    if err and not tmp_task:
-        raise HTTPException(status_code=500, detail=err)
+    # Start pipeline for the same task_id without blocking on FBX pre-conversion.
+    worker_url = await select_best_worker()
+    if not worker_url:
+        raise HTTPException(status_code=500, detail="No workers available")
 
-    # Copy runtime fields from tmp_task -> task and delete tmp_task
-    task.worker_api = tmp_task.worker_api
-    task.worker_task_id = tmp_task.worker_task_id
-    task.progress_page = tmp_task.progress_page
-    task.guid = tmp_task.guid
-    task.output_urls = tmp_task.output_urls
-    task.ready_urls = tmp_task.ready_urls
-    task.ready_count = tmp_task.ready_count
-    task.total_count = tmp_task.total_count
-    task.status = tmp_task.status
-    task.error_message = tmp_task.error_message
-    task.video_url = tmp_task.video_url
-    task.video_ready = tmp_task.video_ready
-    task.fbx_glb_output_url = tmp_task.fbx_glb_output_url
-    task.fbx_glb_model_name = tmp_task.fbx_glb_model_name
-    task.fbx_glb_ready = tmp_task.fbx_glb_ready
-    task.fbx_glb_error = tmp_task.fbx_glb_error
+    task.worker_api = worker_url
+    task.status = "processing"
 
-    await db.delete(tmp_task)
-    await db.commit()
-    await db.refresh(task)
+    if _is_fbx_url(task.input_url):
+        await db.commit()
+        await db.refresh(task)
+        asyncio.create_task(_start_fbx_preconvert_async(task.id, worker_url, task.input_url))
+    else:
+        result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+        if not result.success:
+            task.status = "error"
+            task.error_message = result.error
+        else:
+            task.worker_task_id = result.task_id
+            task.progress_page = result.progress_page
+            task.guid = result.guid
+            task.output_urls = result.output_urls
+            task.total_count = len(result.output_urls)
+            task.status = "processing"
+        await db.commit()
+        await db.refresh(task)
 
     return TaskCreateResponse(
         task_id=task.id,
