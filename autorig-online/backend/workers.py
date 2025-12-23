@@ -44,6 +44,16 @@ class WorkerTaskResult:
             self.output_urls = []
 
 
+@dataclass
+class FbxToGlbResult:
+    """Result from FBX -> GLB converter endpoint"""
+    success: bool
+    model_name: Optional[str] = None
+    output_url: Optional[str] = None
+    error: Optional[str] = None
+
+
+
 # =============================================================================
 # GUID Extraction
 # =============================================================================
@@ -163,6 +173,44 @@ async def send_task_to_worker(
             return WorkerTaskResult(success=False, error="Worker timeout")
         except Exception as e:
             return WorkerTaskResult(success=False, error=str(e))
+
+
+async def send_fbx_to_glb(worker_api_url: str, input_url: str) -> FbxToGlbResult:
+    """
+    Convert FBX to GLB using the same worker host, but different endpoint:
+    {worker_base}/api-converter-glb-to-fbx
+    Payload: { "input_url": "<fbx_url>" }
+    Response: { "model_name": "...", "output_url": "..." }
+    """
+    worker_base = get_worker_base_url(worker_api_url)
+    endpoint = f"{worker_base}/api-converter-glb-to-fbx"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                endpoint,
+                json={"input_url": input_url},
+                timeout=30.0
+            )
+
+            if response.status_code != 200:
+                return FbxToGlbResult(
+                    success=False,
+                    error=f"Worker returned HTTP {response.status_code}: {response.text[:200]}"
+                )
+
+            data = response.json() if response.content else {}
+            model_name = data.get("model_name")
+            output_url = data.get("output_url")
+
+            if not output_url:
+                return FbxToGlbResult(success=False, error="Worker response missing output_url")
+
+            return FbxToGlbResult(success=True, model_name=model_name, output_url=output_url)
+        except httpx.TimeoutException:
+            return FbxToGlbResult(success=False, error="Worker timeout")
+        except Exception as e:
+            return FbxToGlbResult(success=False, error=str(e))
 
 
 # =============================================================================

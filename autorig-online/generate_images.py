@@ -76,27 +76,98 @@ IMAGES_TO_GENERATE = [
         "aspect_ratio": 1200 / 900,  # 1.333
         "negative_prompt": "low quality, blurry, watermark, text"
     },
-    # Process images
+    # Process images for How It Works page
     {
-        "name": "rigging-process.jpg",
-        "path": IMAGES_DIR / "process" / "rigging-process.jpg",
-        "prompt": "Infographic-style illustration showing 3D character rigging process. Before/after comparison: static model on left, rigged skeleton on right. Arrows showing transformation. Clean, modern design with indigo/purple color scheme. Professional, educational appearance.",
-        "aspect_ratio": 1200 / 800,  # 1.5
-        "negative_prompt": "low quality, blurry, watermark, text overlay"
+        "name": "hero-overview.jpg",
+        "path": IMAGES_DIR / "process" / "hero-overview.jpg",
+        "prompt": "Abstract dark-themed illustration: 3D character silhouette in T-pose morphing into skeleton wireframe, then into geometric shapes representing outputs, with vertical frame for preview. Pure visual flow, no UI, no interface, minimal style, soft neon glow, dark background.",
+        "aspect_ratio": 21 / 9,  # 2.333
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
     },
     {
-        "name": "comparison.jpg",
-        "path": IMAGES_DIR / "process" / "comparison.jpg",
-        "prompt": "Split-screen comparison illustration. Left side: traditional manual rigging (complex, time-consuming). Right side: automated AI rigging (fast, efficient). Use icons and simple graphics. Modern infographic style.",
-        "aspect_ratio": 1200 / 600,  # 2.0
-        "negative_prompt": "low quality, blurry, watermark"
+        "name": "upload-ui.jpg",
+        "path": IMAGES_DIR / "process" / "upload-ui.jpg",
+        "prompt": "Abstract dark background with geometric shapes: large rounded rectangle with upload icon, smaller rectangle with link icon, circular button shape. Pure visual composition, no UI elements, no interface, minimal icons only, soft glow, dark theme.",
+        "aspect_ratio": 4 / 3,  # 1.333
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
     },
     {
-        "name": "technology.jpg",
-        "path": IMAGES_DIR / "process" / "technology.jpg",
-        "prompt": "Abstract visualization of AI/neural network processing 3D geometry. Wireframe mesh being analyzed, nodes and connections. Modern, tech-forward design. Indigo/purple color scheme. Professional, scientific appearance.",
-        "aspect_ratio": 1000 / 600,  # 1.666
-        "negative_prompt": "low quality, blurry, watermark, text"
+        "name": "analysis-visualization.jpg",
+        "path": IMAGES_DIR / "process" / "analysis-visualization.jpg",
+        "prompt": "Futuristic but clean visualization of a 3D humanoid mesh being analyzed: subtle wireframe overlay, highlighted joint landmarks at shoulders/elbows/hips/knees, soft scanning lines. Dark background, premium tech style, no readable text, no watermark.",
+        "aspect_ratio": 16 / 9,  # 1.777
+        "negative_prompt": "low quality, blurry, watermark, text, cluttered"
+    },
+    {
+        "name": "skeleton-overlay.jpg",
+        "path": IMAGES_DIR / "process" / "skeleton-overlay.jpg",
+        "prompt": "3D character silhouette with a clean skeleton rig overlay (spine, arms, legs) in a modern dark UI style. Subtle glow on bones, clean and professional, no watermark, no text.",
+        "aspect_ratio": 3 / 2,  # 1.5
+        "negative_prompt": "low quality, blurry, watermark, text, cluttered"
+    },
+    {
+        "name": "skinning-deformation.jpg",
+        "path": IMAGES_DIR / "process" / "skinning-deformation.jpg",
+        "prompt": "Split-screen illustration: left shows a character arm bending with visible deformation artifacts, right shows smooth deformation. Optionally include subtle weight heatmap colors on the mesh. Dark background, modern technical style, no watermark, no text.",
+        "aspect_ratio": 16 / 9,  # 1.777
+        "negative_prompt": "low quality, blurry, watermark, text, cluttered"
+    },
+    {
+        "name": "animation-preview.jpg",
+        "path": IMAGES_DIR / "process" / "animation-preview.jpg",
+        "prompt": "Vertical smartphone-like preview frame of a rigged 3D character performing a walk cycle, with small thumbnail strips below showing idle/run/jump poses. Dark UI, premium look, subtle glow, no watermark, no brand text.",
+        "aspect_ratio": 9 / 16,  # 0.5625
+        "negative_prompt": "low quality, blurry, watermark, text, cluttered"
+    },
+    {
+        "name": "downloads-panel.jpg",
+        "path": IMAGES_DIR / "process" / "downloads-panel.jpg",
+        "prompt": "Abstract dark background with four large geometric shapes in grid layout, each containing distinct file type icon and download arrow icon. Pure visual composition, no UI elements, no interface, minimal design, soft glow, dark theme.",
+        "aspect_ratio": 16 / 9,  # 1.777
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
+    },
+    {
+        "name": "three-pillars.jpg",
+        "path": IMAGES_DIR / "process" / "three-pillars.jpg",
+        "prompt": "Abstract dark background with three large icons arranged horizontally: analysis icon (magnifying glass or scan), construction icon (gears or build), skinning icon (mesh or weight). Pure visual composition, no UI elements, no interface, minimal design, soft neon glow, dark theme.",
+        "aspect_ratio": 3 / 1,  # 3.0
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
+    },
+    {
+        "name": "comparison-table.jpg",
+        "path": IMAGES_DIR / "process" / "comparison-table.jpg",
+        "prompt": "Abstract dark background with two vertical columns of icons. Left column: clock icon, dollar icon, person icon. Right column: speed icon, accessibility icon, consistency icon. Pure visual comparison, no UI elements, no interface, minimal icons only, dark theme.",
+        "aspect_ratio": 16 / 9,  # 1.777
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
+    },
+    {
+        "name": "t-pose-dont.jpg",
+        "path": IMAGES_DIR / "process" / "t-pose-dont.jpg",
+        "prompt": "Square split illustration: left shows correct T-pose humanoid silhouette with a check icon, right shows incorrect pose (arms angled down / asymmetry) with a cross icon. Dark background, clean minimal style, no watermark.",
+        "aspect_ratio": 1 / 1,  # 1.0
+        "negative_prompt": "low quality, blurry, watermark, text, cluttered"
+    },
+    # New images for improved page
+    {
+        "name": "pipeline-hero.jpg",
+        "path": IMAGES_DIR / "process" / "pipeline-hero.jpg",
+        "prompt": "Abstract dark-themed illustration: 3D character silhouette in T-pose morphing into skeleton wireframe, then transforming into geometric shapes representing file outputs, with a vertical frame showing animation preview. Pure visual flow, no UI elements, no interface, minimal premium style, soft neon glow, dark background.",
+        "aspect_ratio": 21 / 9,  # 2.333
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
+    },
+    {
+        "name": "progress-dashboard.jpg",
+        "path": IMAGES_DIR / "process" / "progress-dashboard.jpg",
+        "prompt": "Abstract dark background with horizontal progress bar gradient and geometric shapes representing file states. Some shapes glow bright (ready), others dim (pending). Pure visual representation, no UI elements, no interface, minimal icons only, dark theme, soft neon accents.",
+        "aspect_ratio": 4 / 3,  # 1.333
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
+    },
+    {
+        "name": "download-panel-new.jpg",
+        "path": IMAGES_DIR / "process" / "download-panel-new.jpg",
+        "prompt": "Abstract dark background with four large geometric shapes arranged in grid, each containing a distinct icon representing different file types. Minimal design, pure icons only, soft glow effects, no UI elements, no interface, dark theme.",
+        "aspect_ratio": 16 / 9,  # 1.777
+        "negative_prompt": "text, words, letters, numbers, labels, buttons, cards, UI, interface, dashboard, panel, readable, watermark, logo, brand, cluttered, low quality, blurry"
     },
     # Screenshot
     {
@@ -149,13 +220,13 @@ def generate_image(image_config: Dict) -> Optional[str]:
             print(f"   ❌ Ошибка API: {response.status_code}")
             print(f"   Ответ: {response.text}")
             return None
-            
-            result = response.json()
-            
+        
+        result = response.json()
+        
         if "output_url" not in result:
             print(f"   ❌ Неожиданный ответ API: {result}")
-                return None
-                
+            return None
+        
         output_url = result["output_url"]
         print(f"   ✅ Получен output_url: {output_url}")
         print(f"   ⚠️  ВАЖНО: Файл еще не готов! Начинаем опрос каждые 15 секунд...")
@@ -163,12 +234,12 @@ def generate_image(image_config: Dict) -> Optional[str]:
         # Поллинг результата - опрашиваем output_url пока файл не будет готов
         return poll_image_url(output_url)
                 
-        except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException as e:
         print(f"   ❌ Ошибка запроса: {e}")
-            return None
+        return None
     except Exception as e:
         print(f"   ❌ Неожиданная ошибка: {e}")
-    return None
+        return None
 
 
 def poll_image_url(url: str, max_attempts: int = 40, delay: int = 15) -> Optional[str]:
@@ -210,9 +281,9 @@ def poll_image_url(url: str, max_attempts: int = 40, delay: int = 15) -> Optiona
                 
         except requests.exceptions.RequestException as e:
             # Если ошибка сети, продолжаем попытки
-        if attempt < max_attempts:
+            if attempt < max_attempts:
                 print(f"   ⏳ Попытка {attempt}/{max_attempts}... ошибка сети ({type(e).__name__}), ждем {delay} сек")
-            time.sleep(delay)
+                time.sleep(delay)
             else:
                 print(f"   ⚠️  Превышено время ожидания (ошибки сети: {e})")
                 return None

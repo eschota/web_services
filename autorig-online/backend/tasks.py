@@ -3,19 +3,75 @@ Task management for AutoRig Online
 """
 import uuid
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
+from urllib.parse import urlparse
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession
+from config import WORKERS
 from workers import (
     select_best_worker,
     send_task_to_worker,
+    send_fbx_to_glb,
     check_urls_batch,
     check_video_availability,
     get_worker_base_url
 )
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+def find_file_by_pattern(ready_urls: List[str], pattern: str, quality: str = "100k") -> Optional[str]:
+    """
+    Find a file in ready_urls matching the pattern in the specified quality folder.
+    
+    Args:
+        ready_urls: List of ready file URLs
+        pattern: File extension or pattern to match (e.g., ".html", ".max", ".ma")
+        quality: Quality folder to search in ("100k", "10k", "1k")
+    
+    Returns:
+        First matching URL or None
+    """
+    quality_folder = f"_{quality}/"
+    
+    for url in ready_urls:
+        # Check if URL contains the quality folder and matches the pattern
+        if quality_folder in url and pattern in url:
+            return url
+    
+    # Fallback: try other qualities if 100k not found
+    if quality == "100k":
+        for fallback_quality in ["10k", "1k"]:
+            fallback_folder = f"_{fallback_quality}/"
+            for url in ready_urls:
+                if fallback_folder in url and pattern in url:
+                    return url
+    
+    return None
+
+
+def _is_fbx_url(input_url: str) -> bool:
+    """Return True if input_url path ends with .fbx (case-insensitive), ignoring query/fragment."""
+    try:
+        path = urlparse(input_url).path or ""
+    except Exception:
+        path = input_url or ""
+    return path.lower().endswith(".fbx")
+
+
+async def _head_is_ready(url: str) -> bool:
+    """Lightweight availability check for a single URL (HEAD 200)."""
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.head(url, timeout=5.0, follow_redirects=True)
+            return resp.status_code == 200
+    except Exception:
+        return False
 
 
 # =============================================================================
@@ -48,17 +104,54 @@ async def create_conversion_task(
         worker_api=worker_url,
         status="created"
     )
-    
-    # Send to worker
+
+    # FBX requires pre-conversion step: FBX -> GLB
+    if _is_fbx_url(input_url):
+        # Some workers may not have /api-converter-fbx-glb deployed yet (HTTP 404).
+        # Try the best worker first, then fall back to others until success.
+        candidate_workers = [worker_url] + [w for w in WORKERS if w != worker_url]
+        last_error = None
+
+        for candidate in candidate_workers:
+            fbx_res = await send_fbx_to_glb(candidate, input_url)
+            if fbx_res.success:
+                task.worker_api = candidate
+                task.fbx_glb_model_name = fbx_res.model_name
+                task.fbx_glb_output_url = fbx_res.output_url
+                task.fbx_glb_ready = False
+                task.status = "processing"
+                db.add(task)
+                await db.commit()
+                await db.refresh(task)
+                return task, None
+
+            last_error = fbx_res.error
+
+            # If endpoint missing, continue trying others
+            if last_error and "HTTP 404" in last_error:
+                continue
+
+            # For other errors (timeouts, 5xx), still try other workers as fallback
+            continue
+
+        # No worker succeeded
+        task.status = "error"
+        task.fbx_glb_error = last_error or "FBX->GLB conversion failed"
+        task.error_message = task.fbx_glb_error
+        db.add(task)
+        await db.commit()
+        return task, task.fbx_glb_error
+
+    # Non-FBX: send to worker directly
     result = await send_task_to_worker(worker_url, input_url, task_type)
-    
+
     if not result.success:
         task.status = "error"
         task.error_message = result.error
         db.add(task)
         await db.commit()
         return task, result.error
-    
+
     # Update task with worker response
     task.worker_task_id = result.task_id
     task.progress_page = result.progress_page
@@ -82,41 +175,87 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     Check and update task progress.
     Checks a batch of URLs and updates ready count.
     """
-    if task.status in ("done", "error"):
-        return task
+    # Track if task just completed
+    was_processing = task.status == "processing"
     
+    # FBX -> GLB stage (if applicable)
+    if task.status not in ("done", "error") and task.fbx_glb_output_url:
+        if not task.fbx_glb_ready:
+            is_ready = await _head_is_ready(task.fbx_glb_output_url)
+            if is_ready:
+                task.fbx_glb_ready = True
+                task.updated_at = datetime.utcnow()
+
+        # Start main pipeline once GLB is ready and main worker task not created yet
+        if task.fbx_glb_ready and not task.worker_task_id:
+            result = await send_task_to_worker(
+                task.worker_api,  # already selected at creation
+                task.fbx_glb_output_url,
+                task.input_type or "t_pose"
+            )
+            if not result.success:
+                task.status = "error"
+                task.error_message = result.error
+                await db.commit()
+                await db.refresh(task)
+                return task
+
+            task.worker_task_id = result.task_id
+            task.progress_page = result.progress_page
+            task.guid = result.guid
+            task.output_urls = result.output_urls
+            task.total_count = len(result.output_urls)
+            task.status = "processing"
+            task.updated_at = datetime.utcnow()
+
     # Get already ready URLs
     already_ready = set(task.ready_urls)
     
-    # Check new URLs
-    newly_ready, total_ready = await check_urls_batch(
-        task.output_urls, 
-        already_ready
-    )
+    # Check new URLs (only for processing tasks)
+    if task.status not in ("done", "error") and task.output_urls:
+        newly_ready, total_ready = await check_urls_batch(
+            task.output_urls, 
+            already_ready
+        )
+        
+        # Update task
+        if newly_ready:
+            current_ready = task.ready_urls
+            current_ready.extend(newly_ready)
+            task.ready_urls = current_ready
+        
+        task.ready_count = total_ready
+        task.updated_at = datetime.utcnow()
+        
+        # Check if all URLs are ready
+        if task.total_count > 0 and task.ready_count >= task.total_count:
+            task.status = "done"
     
-    # Update task
-    if newly_ready:
-        current_ready = task.ready_urls
-        current_ready.extend(newly_ready)
-        task.ready_urls = current_ready
-    
-    task.ready_count = total_ready
-    task.updated_at = datetime.utcnow()
-    
-    # Check if all URLs are ready
-    if task.total_count > 0 and task.ready_count >= task.total_count:
-        task.status = "done"
-    
-    # Check video availability
+    # Check video availability (for both processing and done tasks)
     if task.guid and not task.video_ready:
         worker_base = get_worker_base_url(task.worker_api)
         video_ready, video_url = await check_video_availability(task.guid, worker_base)
         if video_ready:
             task.video_ready = True
             task.video_url = video_url
+            task.updated_at = datetime.utcnow()
     
     await db.commit()
     await db.refresh(task)
+    
+    # Send email notification if task just completed (100%)
+    if was_processing and task.status == "done" and task.owner_type == "user":
+        try:
+            from email_service import send_task_completed_email
+            worker_base = get_worker_base_url(task.worker_api)
+            await send_task_completed_email(
+                to_email=task.owner_id,  # owner_id contains user email
+                task_id=task.id,
+                guid=task.guid,
+                worker_base=worker_base
+            )
+        except Exception as e:
+            print(f"[Tasks] Failed to send completion email for task {task.id}: {e}")
     
     return task
 
@@ -239,4 +378,133 @@ async def update_user_balance(
     await db.refresh(user)
     
     return user, old_balance, user.balance_credits
+
+
+# =============================================================================
+# Gallery Functions
+# =============================================================================
+async def get_gallery_items(
+    db: AsyncSession,
+    page: int = 1,
+    per_page: int = 12
+) -> Tuple[list, int]:
+    """
+    Get completed tasks with videos for public gallery.
+    Returns: (tasks, total_count)
+    """
+    from sqlalchemy import func
+    
+    # Count total completed tasks with video
+    count_result = await db.execute(
+        select(func.count(Task.id)).where(
+            Task.status == "done",
+            Task.video_ready == True
+        )
+    )
+    total = count_result.scalar() or 0
+    
+    # Get paginated results, newest first
+    offset = (page - 1) * per_page
+    result = await db.execute(
+        select(Task)
+        .where(
+            Task.status == "done",
+            Task.video_ready == True
+        )
+        .order_by(desc(Task.created_at))
+        .offset(offset)
+        .limit(per_page)
+    )
+    tasks = result.scalars().all()
+    
+    return list(tasks), total
+
+
+def format_time_ago(dt: datetime) -> str:
+    """Format datetime as human-readable time ago string"""
+    now = datetime.utcnow()
+    diff = now - dt
+    
+    seconds = diff.total_seconds()
+    
+    if seconds < 60:
+        return "just now"
+    elif seconds < 3600:
+        mins = int(seconds / 60)
+        return f"{mins}m ago"
+    elif seconds < 86400:
+        hours = int(seconds / 3600)
+        return f"{hours}h ago"
+    elif seconds < 604800:
+        days = int(seconds / 86400)
+        return f"{days}d ago"
+    else:
+        weeks = int(seconds / 604800)
+        return f"{weeks}w ago"
+
+
+# =============================================================================
+# Gallery Functions
+# =============================================================================
+async def get_gallery_items(
+    db: AsyncSession,
+    page: int = 1,
+    per_page: int = 12
+) -> Tuple[list, int]:
+    """
+    Get completed tasks with videos for public gallery.
+    Returns: (tasks, total_count)
+    """
+    from sqlalchemy import func
+    
+    # Count total completed tasks with video
+    count_result = await db.execute(
+        select(func.count(Task.id)).where(
+            Task.status == "done",
+            Task.video_ready == True
+        )
+    )
+    total = count_result.scalar() or 0
+    
+    # Get paginated results, newest first
+    offset = (page - 1) * per_page
+    result = await db.execute(
+        select(Task)
+        .where(
+            Task.status == "done",
+            Task.video_ready == True
+        )
+        .order_by(desc(Task.created_at))
+        .offset(offset)
+        .limit(per_page)
+    )
+    tasks = result.scalars().all()
+    
+    return list(tasks), total
+
+
+def format_time_ago(dt: datetime) -> str:
+    """Format datetime as human-readable time ago string"""
+    now = datetime.utcnow()
+    diff = now - dt
+    
+    seconds = diff.total_seconds()
+    
+    if seconds < 60:
+        return "just now"
+    elif seconds < 3600:
+        mins = int(seconds / 60)
+        return f"{mins}m ago"
+    elif seconds < 86400:
+        hours = int(seconds / 3600)
+        return f"{hours}h ago"
+    elif seconds < 604800:
+        days = int(seconds / 86400)
+        return f"{days}d ago"
+    elif seconds < 2592000:
+        weeks = int(seconds / 604800)
+        return f"{weeks}w ago"
+    else:
+        months = int(seconds / 2592000)
+        return f"{months}mo ago"
 

@@ -33,6 +33,11 @@ class TaskStatusResponse(BaseModel):
     ready_urls: List[str]
     video_ready: bool
     video_url: Optional[str]
+    # FBX -> GLB pre-conversion (only when input was .fbx)
+    fbx_glb_output_url: Optional[str] = None
+    fbx_glb_model_name: Optional[str] = None
+    fbx_glb_ready: Optional[bool] = None
+    fbx_glb_error: Optional[str] = None
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -120,6 +125,46 @@ class AdminBalanceResponse(BaseModel):
     email: str
     old_balance: int
     new_balance: int
+
+
+class AdminUserTaskItem(BaseModel):
+    """Task item for admin user tasks list"""
+    task_id: str
+    status: str
+    progress: int
+    ready_count: int
+    total_count: int
+    created_at: datetime
+    updated_at: datetime
+    input_url: Optional[str] = None
+
+
+class AdminUserTasksResponse(BaseModel):
+    """Response for admin user tasks list"""
+    tasks: List[AdminUserTaskItem]
+    total: int
+    page: int
+    per_page: int
+
+
+# =============================================================================
+# Gallery Schemas
+# =============================================================================
+class GalleryItem(BaseModel):
+    """Gallery item for public gallery"""
+    task_id: str
+    video_url: str
+    created_at: datetime
+    time_ago: str
+
+
+class GalleryResponse(BaseModel):
+    """Response for gallery"""
+    items: List[GalleryItem]
+    total: int
+    page: int
+    per_page: int
+    has_more: bool
 
 
 # =============================================================================

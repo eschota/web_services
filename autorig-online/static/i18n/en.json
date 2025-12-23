@@ -39,6 +39,14 @@
     "task_files_ready": "files ready",
     "task_video_ready": "Video Preview",
     "task_video_pending": "Video is being generated...",
+
+    "task_fbx_glb_title": "FBX → GLB",
+    "task_fbx_glb_pending": "Converting FBX to GLB...",
+    "task_fbx_glb_ready": "FBX converted to GLB",
+    "task_fbx_glb_error": "FBX → GLB conversion failed",
+    "task_fbx_glb_download": "Download GLB",
+
+    "btn_restart_task": "Restart task",
     
     "error_no_file": "Please select a file or enter a URL",
     "error_no_credits": "No credits remaining",

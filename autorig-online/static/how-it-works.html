@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>How Auto Rigging Works — 6-Step Character Rigging Process</title>
-    <meta name="description" content="Complete guide to AI-powered auto rigging: upload, analysis, bone generation, T-pose setup, animation integration, and export.">
+    <meta name="description" content="From a static 3D character to a rigged, animated export in six clear steps. Upload a GLB/FBX/OBJ in a clean T-Pose and get engine-ready results for Unity and Unreal.">
     <meta name="keywords" content="how auto rig works, 3d rigging process, character rigging steps, ai auto rigging, automatic rigging tutorial, rigging workflow">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="How AutoRig Works - AI-Powered 3D Character Rigging">
-    <meta property="og:description" content="Step-by-step guide to our automatic 3D character rigging process. From upload to download in minutes.">
+    <meta property="og:title" content="How AutoRig Works - 6-Step Character Rigging Process">
+    <meta property="og:description" content="From a static 3D character to a rigged, animated export in six clear steps. Upload a GLB/FBX/OBJ in a clean T-Pose and get engine-ready results for Unity and Unreal.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online/how-it-works">
     <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
@@ -20,54 +20,54 @@
         "@context": "https://schema.org",
         "@type": "HowTo",
         "name": "How to Auto Rig 3D Characters",
-        "description": "Complete guide to automatic 3D character rigging using AI-powered technology",
+        "description": "From a static 3D character to a rigged, animated export in six clear steps. Upload a GLB/FBX/OBJ in a clean T-Pose and get engine-ready results for Unity and Unreal.",
         "step": [
             {
                 "@type": "HowToStep",
                 "position": 1,
-                "name": "Upload Your 3D Model",
-                "text": "Upload your GLB, FBX, or OBJ file. We support models up to 100MB with materials and textures."
+                "name": "Upload Your Model",
+                "text": "Start by uploading your GLB, FBX, or OBJ file — or paste a direct download link. For best results, use a single character mesh in a clean T-Pose (arms straight, neutral stance)."
             },
             {
                 "@type": "HowToStep",
                 "position": 2,
-                "name": "AI Model Analysis",
-                "text": "Our AI analyzes your model geometry, topology, and proportions to plan the optimal bone structure."
+                "name": "Model Analysis (Structure & Proportions)",
+                "text": "The system examines your character's shape and proportions to understand where joints should be placed and how the mesh should deform."
             },
             {
                 "@type": "HowToStep",
                 "position": 3,
-                "name": "Automatic Rigging",
-                "text": "AI generates professional bone hierarchy, joint placements, and skinning weights automatically."
+                "name": "Skeleton & Bone Hierarchy Generation",
+                "text": "A skeleton is created: a bone hierarchy aligned to the body, with joint placement optimized for natural movement."
             },
             {
                 "@type": "HowToStep",
                 "position": 4,
-                "name": "T-Pose Setup",
-                "text": "Character is posed in industry-standard T-pose for maximum animation compatibility."
+                "name": "Skinning (Weights That Make It Move)",
+                "text": "The mesh is attached to the bones using skin weights. This step determines how cleanly shoulders, elbows, knees, and hips deform during animation."
             },
             {
                 "@type": "HowToStep",
                 "position": 5,
-                "name": "Animation Integration",
-                "text": "50+ professional animations are applied and optimized for your character."
+                "name": "Animation Integration (50+ Animations)",
+                "text": "The character is packaged with an animation set (walk/run/idle and more). You'll receive animated exports and a quick preview video."
             },
             {
                 "@type": "HowToStep",
                 "position": 6,
-                "name": "Quality Check & Export",
-                "text": "Final quality verification and export in your chosen format with all animations included."
+                "name": "Quality Check & Download",
+                "text": "Download your fully rigged and animated character. Typical results include GLB with animations, Unity FBX export, Unreal FBX export, and preview video."
             }
         ],
         "totalTime": "PT15M",
         "supply": [
-            "GLB, FBX, or OBJ 3D model file",
+            "GLB, FBX, or OBJ 3D model file in T-Pose",
             "Internet connection",
             "Web browser"
         ],
         "tool": [
             "AutoRig Online web service",
-            "AI-powered rigging engine"
+            "Automated rigging pipeline"
         ],
         "breadcrumb": {
             "@type": "BreadcrumbList",
@@ -96,6 +96,501 @@
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css">
+    
+    <!-- Custom Styles for How It Works Page -->
+    <style>
+        :root {
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --gradient-accent: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --gradient-dark: linear-gradient(135deg, #0c0c1d 0%, #1a1a2e 50%, #0c0c1d 100%);
+        }
+        
+        body {
+            background: var(--gradient-dark);
+            background-attachment: fixed;
+        }
+        
+        .hero {
+            position: relative;
+            padding: 6rem 0;
+            overflow: hidden;
+        }
+        
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at 30% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 50%, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+        
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+        
+        .hero h1 {
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1.5rem;
+            line-height: 1.2;
+        }
+        
+        .hero-subtitle {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 800px;
+            margin: 0 auto 3rem;
+            line-height: 1.6;
+        }
+        
+        .hero img {
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .hero img:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 25px 70px rgba(99, 102, 241, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+        
+        .free-usage-section {
+            position: relative;
+            padding: 5rem 0;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+            border-top: 1px solid rgba(99, 102, 241, 0.2);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+        }
+        
+        .free-usage-section h2 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .free-usage-card {
+            padding: 2.5rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+            border-radius: 20px;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .free-usage-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+        
+        .free-usage-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(99, 102, 241, 0.3);
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+        
+        .free-usage-card:hover::before {
+            transform: scaleX(1);
+        }
+        
+        .free-usage-card .number {
+            font-size: 3.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+            line-height: 1;
+        }
+        
+        .process-section {
+            padding: 6rem 0;
+            position: relative;
+        }
+        
+        .process-section h2 {
+            font-size: 3rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .process-intro {
+            text-align: center;
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            max-width: 900px;
+            margin: 0 auto 4rem;
+            line-height: 1.7;
+        }
+        
+        .process-step {
+            display: grid;
+            grid-template-columns: 80px 1fr;
+            gap: 2rem;
+            margin-bottom: 4rem;
+            padding: 2.5rem;
+            background: linear-gradient(135deg, rgba(26, 26, 46, 0.6) 0%, rgba(18, 18, 26, 0.8) 100%);
+            border-radius: 24px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .process-step::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, #6366f1, #8b5cf6);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .process-step:hover {
+            transform: translateX(10px);
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.2);
+        }
+        
+        .process-step:hover::before {
+            opacity: 1;
+        }
+        
+        .step-number {
+            width: 80px;
+            height: 80px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: white;
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.4);
+            position: relative;
+        }
+        
+        .step-number::after {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            opacity: 0.5;
+            filter: blur(10px);
+            z-index: -1;
+        }
+        
+        .step-content h3 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+        
+        .step-content p {
+            font-size: 1.1rem;
+            line-height: 1.7;
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+        
+        .step-details {
+            padding: 1.5rem;
+            background: rgba(99, 102, 241, 0.1);
+            border-radius: 12px;
+            border-left: 3px solid #6366f1;
+            margin-bottom: 1.5rem;
+        }
+        
+        .step-details strong {
+            color: var(--text-primary);
+        }
+        
+        .process-step img {
+            border-radius: 16px;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+            transition: transform 0.3s ease;
+        }
+        
+        .process-step img:hover {
+            transform: scale(1.02);
+        }
+        
+        .what-you-get-section {
+            padding: 6rem 0;
+            position: relative;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+        }
+        
+        .what-you-get-section h2 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .what-you-get-section ul li {
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            background: rgba(99, 102, 241, 0.1);
+            border-radius: 12px;
+            border-left: 3px solid #6366f1;
+            transition: all 0.3s ease;
+        }
+        
+        .what-you-get-section ul li:hover {
+            background: rgba(99, 102, 241, 0.2);
+            transform: translateX(5px);
+        }
+        
+        .what-you-get-section img {
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);
+        }
+        
+        .technology-section {
+            padding: 6rem 0;
+        }
+        
+        .technology-section h2 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+        
+        .tech-item {
+            padding: 2.5rem;
+            background: linear-gradient(135deg, rgba(26, 26, 46, 0.6) 0%, rgba(18, 18, 26, 0.8) 100%);
+            border-radius: 20px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            transition: all 0.3s ease;
+        }
+        
+        .tech-item:hover {
+            transform: translateY(-5px);
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 15px 40px rgba(99, 102, 241, 0.2);
+        }
+        
+        .tech-item h3 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+        
+        .comparison-section {
+            padding: 6rem 0;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(139, 92, 246, 0.02) 100%);
+        }
+        
+        .comparison-section h2 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .time-comparison {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 3rem;
+            margin-top: 3rem;
+        }
+        
+        .comparison-item {
+            padding: 3rem;
+            background: linear-gradient(135deg, rgba(26, 26, 46, 0.6) 0%, rgba(18, 18, 26, 0.8) 100%);
+            border-radius: 24px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            transition: all 0.3s ease;
+        }
+        
+        .comparison-item.featured {
+            border: 2px solid rgba(99, 102, 241, 0.5);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+            box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);
+        }
+        
+        .comparison-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 50px rgba(99, 102, 241, 0.3);
+        }
+        
+        .comparison-item .time {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 1rem 0;
+        }
+        
+        .mini-faq-section {
+            padding: 6rem 0;
+        }
+        
+        .mini-faq-section h2 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .faq-item {
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            margin-bottom: 1.5rem;
+            transition: all 0.3s ease;
+        }
+        
+        .faq-item:hover {
+            transform: translateX(5px);
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.2);
+        }
+        
+        .faq-item h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .notes-section {
+            padding: 6rem 0;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+        }
+        
+        .notes-section h2 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 3rem;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .notes-section ul li {
+            padding: 1.25rem;
+            background: rgba(99, 102, 241, 0.1);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            border-left: 3px solid #6366f1;
+            transition: all 0.3s ease;
+        }
+        
+        .notes-section ul li:hover {
+            background: rgba(99, 102, 241, 0.2);
+            transform: translateX(5px);
+        }
+        
+        .cta-section {
+            padding: 6rem 0;
+            text-align: center;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+        }
+        
+        .cta-section h2 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #ffffff 0%, #a0a0b0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            padding: 1.25rem 3rem;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.4);
+        }
+        
+        .cta-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(99, 102, 241, 0.5);
+        }
+        
+        @media (max-width: 768px) {
+            .process-step {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .step-number {
+                width: 60px;
+                height: 60px;
+                font-size: 2rem;
+            }
+        }
+    </style>
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -132,20 +627,33 @@
         <div class="container">
             <div class="hero-content">
                 <h1>How Auto Rigging Works — 6-Step Process</h1>
-                <p class="hero-subtitle">From static 3D model to fully animated character in 6 simple steps. Our AI-powered rigging technology makes professional character setup accessible to everyone.</p>
+                <p class="hero-subtitle">From a static 3D character to a rigged, animated export in six clear steps. Upload a GLB/FBX/OBJ in a clean T-Pose, watch real progress as output files appear, and download engine-ready results for Unity and Unreal.</p>
 
-                <div class="hero-features">
-                    <div class="feature">
-                        <img src="/static/images/icons/ai.svg" alt="AI" class="feature-icon" width="48" height="48">
-                        <span>AI-powered</span>
+                <!-- Pipeline Hero Image -->
+                <div style="margin: 3rem 0; text-align: center;">
+                    <img src="/static/images/process/pipeline-hero.jpg" alt="3D Character Auto-Rigging Pipeline" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Free Usage Section -->
+    <section class="free-usage-section">
+        <div class="container">
+            <h2 style="text-align: center; margin-bottom: 2rem;">Free Usage</h2>
+            <div style="max-width: 900px; margin: 0 auto; text-align: center;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 2rem; margin-top: 2rem;">
+                    <div class="free-usage-card">
+                        <div class="number">3</div>
+                        <p style="margin: 0; font-size: 1.1rem; color: var(--text-secondary);">Free conversions<br>without login</p>
                     </div>
-                    <div class="feature">
-                        <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="48" height="48">
-                        <span>5-15 minutes</span>
+                    <div class="free-usage-card">
+                        <div class="number">+7</div>
+                        <p style="margin: 0; font-size: 1.1rem; color: var(--text-secondary);">More free after<br>Google sign-in</p>
                     </div>
-                    <div class="feature">
-                        <img src="/static/images/icons/target.svg" alt="Quality" class="feature-icon" width="48" height="48">
-                        <span>Professional quality</span>
+                    <div class="free-usage-card">
+                        <div class="number">10</div>
+                        <p style="margin: 0; font-size: 1.1rem; color: var(--text-secondary);">Total free<br>conversions</p>
                     </div>
                 </div>
             </div>
@@ -156,24 +664,35 @@
     <section class="process-section">
         <div class="container">
             <h2>The Auto Rigging Process</h2>
-            <p class="process-intro">Our advanced AI system analyzes your 3D model and creates a professional rigging setup that rivals manual work from experienced animators.</p>
-
-            <!-- Process Visualization Image -->
-            <div style="margin: 3rem 0; text-align: center;">
-                <img src="/static/images/process/rigging-process.jpg" alt="3D Character Rigging Process" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
-            </div>
+            <p class="process-intro">Auto rigging is an automated pipeline: your model is analyzed, a skeleton is fitted, skin weights are applied, animation-ready exports are generated, and the final files are delivered. The goal is a fast, repeatable workflow that gets you from "static mesh" to "animated character" with minimal friction.</p>
 
             <div class="process-steps">
+                <div class="process-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Upload Your Model</h3>
+                        <p>Start by uploading your GLB, FBX, or OBJ file — or paste a direct download link. For best results, use a single character mesh in a clean T-Pose (arms straight, neutral stance).</p>
+                        <!-- Upload UI Image -->
+                        <div style="margin: 2rem 0; text-align: center;">
+                            <img src="/static/images/process/upload-ui.jpg" alt="Upload Interface">
+                        </div>
+                    </div>
+                </div>
 
                 <div class="process-step">
                     <div class="step-number">2</div>
                     <div class="step-content">
-                        <h3>AI Model Analysis</h3>
-                        <p>Our deep learning algorithms analyze your model's geometry, topology, and proportions. The AI identifies optimal bone placement, joint locations, and deformation zones.</p>
+                        <h3>Model Analysis (Structure & Proportions)</h3>
+                        <p>Next, the system examines your character's shape and proportions to understand where joints should be placed and how the mesh should deform. The better the input (pose, symmetry, clean geometry), the smoother the final rig.</p>
                         <div class="step-details">
-                            <strong>Analysis includes:</strong> Mesh topology, proportions, symmetry<br>
-                            <strong>AI processing:</strong> Deep learning geometry analysis<br>
-                            <strong>Duration:</strong> 1-2 minutes
+                            <strong>What matters most at this stage:</strong><br>
+                            • Clear silhouette and symmetry<br>
+                            • Reasonable human proportions (for humanoid rigs)<br>
+                            • Clean mesh (avoid broken normals, non-manifold geometry if possible)
+                        </div>
+                        <!-- Analysis Visualization Image -->
+                        <div style="margin: 2rem 0; text-align: center;">
+                            <img src="/static/images/process/analysis-visualization.jpg" alt="Model Analysis Visualization">
                         </div>
                     </div>
                 </div>
@@ -181,12 +700,17 @@
                 <div class="process-step">
                     <div class="step-number">3</div>
                     <div class="step-content">
-                        <h3>Automatic Bone Generation</h3>
-                        <p>Based on the analysis, our system creates a professional bone hierarchy with proper joint placement, IK setup, and deformation bones. The rigging follows industry standards.</p>
+                        <h3>Skeleton & Bone Hierarchy Generation</h3>
+                        <p>Once the character structure is understood, a skeleton is created: a bone hierarchy aligned to the body, with joint placement optimized for natural movement. This becomes the foundation for animation, retargeting, and engine import.</p>
                         <div class="step-details">
-                            <strong>Bone structure:</strong> Humanoid with IK bones<br>
-                            <strong>Joint placement:</strong> Anatomically correct<br>
-                            <strong>Deformation:</strong> Smooth skinning weights
+                            <strong>Typical output includes:</strong><br>
+                            • A humanoid bone structure<br>
+                            • A stable hierarchy suitable for animation playback<br>
+                            • Consistent alignment for exports
+                        </div>
+                        <!-- Skeleton Overlay Image -->
+                        <div style="margin: 2rem 0; text-align: center;">
+                            <img src="/static/images/process/skeleton-overlay.jpg" alt="Skeleton Overlay">
                         </div>
                     </div>
                 </div>
@@ -194,12 +718,17 @@
                 <div class="process-step">
                     <div class="step-number">4</div>
                     <div class="step-content">
-                        <h3>T-Pose Setup</h3>
-                        <p>Your character is posed in the industry-standard T-pose, which provides optimal compatibility with animation systems, motion capture data, and game engines.</p>
+                        <h3>Skinning (Weights That Make It Move)</h3>
+                        <p>A skeleton alone isn't enough — the mesh must be attached to the bones using skin weights. This step determines how cleanly shoulders, elbows, knees, and hips deform during animation.</p>
                         <div class="step-details">
-                            <strong>Pose type:</strong> Professional T-pose<br>
-                            <strong>Compatibility:</strong> Unity Mecanim, Unreal Engine<br>
-                            <strong>Retargeting:</strong> Animation transfer ready
+                            <strong>Good results depend on:</strong><br>
+                            • Clean topology around joints<br>
+                            • Symmetrical pose<br>
+                            • Avoiding extreme armor-like geometry (or expecting minor artifacts)
+                        </div>
+                        <!-- Skinning/Deformation Image -->
+                        <div style="margin: 2rem 0; text-align: center;">
+                            <img src="/static/images/process/skinning-deformation.jpg" alt="Skinning and Deformation">
                         </div>
                     </div>
                 </div>
@@ -207,12 +736,16 @@
                 <div class="process-step">
                     <div class="step-number">5</div>
                     <div class="step-content">
-                        <h3>Animation Integration</h3>
-                        <p>We apply 50+ professionally created animations to your character. All animations are optimized and tested to ensure smooth playback and proper deformation.</p>
+                        <h3>Animation Integration (50+ Animations)</h3>
+                        <p>After the rig is ready, the character is packaged with an animation set (walk/run/idle and more). This is where you go from "rigged" to "actually useful in a project."</p>
                         <div class="step-details">
-                            <strong>Animation count:</strong> 50+ included<br>
-                            <strong>Types:</strong> Walk, run, jump, combat, idle<br>
-                            <strong>Quality:</strong> Game-ready, optimized
+                            <strong>You'll receive:</strong><br>
+                            • Animated exports for common workflows<br>
+                            • A quick preview video of the result (_video.mp4) for sharing and fast review
+                        </div>
+                        <!-- Animation Preview Image -->
+                        <div style="margin: 2rem 0; text-align: center;">
+                            <img src="/static/images/process/animation-preview.jpg" alt="Animation Preview">
                         </div>
                     </div>
                 </div>
@@ -220,13 +753,48 @@
                 <div class="process-step">
                     <div class="step-number">6</div>
                     <div class="step-content">
-                        <h3>Quality Verification & Download</h3>
-                        <p>Final quality checks ensure everything works perfectly. Download your fully rigged and animated character in your preferred format.</p>
-                        <div class="step-details">
-                            <strong>Quality checks:</strong> Rig validation, animation testing<br>
-                            <strong>Export formats:</strong> GLB, FBX with animations<br>
-                            <strong>Ready to use:</strong> Import directly into engines
+                        <h3>Quality Check & Download</h3>
+                        <p>When the job completes, you'll see downloadable links. Progress is calculated from the number of output files already available for download — as files become ready, progress increases. This means you see real progress, not estimates.</p>
+                        <!-- Progress Dashboard Image -->
+                        <div style="margin: 2rem 0; text-align: center;">
+                            <img src="/static/images/process/progress-dashboard.jpg" alt="Progress Dashboard">
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- What You Get Section -->
+    <section class="what-you-get-section">
+        <div class="container">
+            <h2 style="text-align: center; margin-bottom: 3rem;">What You'll Receive</h2>
+            <div style="max-width: 1200px; margin: 0 auto;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center;">
+                    <div>
+                        <p style="font-size: 1.2rem; margin-bottom: 2.5rem; color: var(--text-secondary); line-height: 1.7;">Every completed job includes these engine-ready exports:</p>
+                        <ul style="list-style: none; padding: 0; font-size: 1.1rem;">
+                            <li>
+                                <span style="color: #6366f1; font-weight: bold; margin-right: 0.5rem;">✓</span>
+                                <strong style="color: var(--text-primary);">Rigged + animated GLB</strong> — ready for web, Unity, Unreal
+                            </li>
+                            <li>
+                                <span style="color: #6366f1; font-weight: bold; margin-right: 0.5rem;">✓</span>
+                                <strong style="color: var(--text-primary);">Unity FBX</strong> — optimized for Unity Mecanim
+                            </li>
+                            <li>
+                                <span style="color: #6366f1; font-weight: bold; margin-right: 0.5rem;">✓</span>
+                                <strong style="color: var(--text-primary);">Unreal FBX</strong> — ready for Unreal Engine
+                            </li>
+                            <li>
+                                <span style="color: #6366f1; font-weight: bold; margin-right: 0.5rem;">✓</span>
+                                <strong style="color: var(--text-primary);">Preview video (_video.mp4)</strong> — quick review and sharing
+                            </li>
+                        </ul>
+                    </div>
+                    <!-- Download Panel Image -->
+                    <div style="text-align: center;">
+                        <img src="/static/images/process/download-panel-new.jpg" alt="Download Panel">
                     </div>
                 </div>
             </div>
@@ -236,25 +804,26 @@
     <!-- Technology Section -->
     <section class="technology-section">
         <div class="container">
-            <h2>Powered by Advanced AI Technology</h2>
+            <h2>Powered by a Practical Automated Pipeline</h2>
+            <p class="process-intro">The goal is consistent, production-friendly results — not a pile of settings. The automated rigging pipeline focuses on three core capabilities:</p>
             
-            <!-- Technology Visualization Image -->
-            <div style="margin: 2rem 0; text-align: center;">
-                <img src="/static/images/process/technology.jpg" alt="AI Technology Visualization" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            <!-- Three Pillars Image -->
+            <div style="margin: 3rem 0; text-align: center;">
+                <img src="/static/images/process/three-pillars.jpg" alt="Three Core Capabilities" style="max-width: 100%; height: auto; border-radius: 20px; box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);">
             </div>
             
             <div class="tech-grid">
                 <div class="tech-item">
-                    <h3>Deep Learning Analysis</h3>
-                    <p>Our neural networks analyze 3D geometry with computer vision techniques to understand model structure and optimal rigging points.</p>
+                    <h3>Automatic Skeleton Fitting</h3>
+                    <p>The system identifies structure (limbs, torso, proportions) to place joints where movement should happen.</p>
                 </div>
                 <div class="tech-item">
-                    <h3>Procedural Rigging</h3>
-                    <p>Advanced algorithms create bone hierarchies that adapt to different character proportions and body types automatically.</p>
+                    <h3>Procedural Rig Construction</h3>
+                    <p>A consistent rig hierarchy is generated so exports behave predictably across models and projects.</p>
                 </div>
                 <div class="tech-item">
-                    <h3>Smart Skinning</h3>
-                    <p>AI-driven weight painting ensures smooth deformations and eliminates common rigging artifacts.</p>
+                    <h3>Automatic Skinning</h3>
+                    <p>Weights are produced to achieve usable deformations quickly, especially for common humanoid movement.</p>
                 </div>
             </div>
         </div>
@@ -263,35 +832,92 @@
     <!-- Time Comparison -->
     <section class="comparison-section">
         <div class="container">
-            <h2>Traditional vs Auto Rigging</h2>
+            <h2>Traditional Rigging vs Auto Rigging</h2>
+            <p class="process-intro">Manual rigging is powerful, but slow and expensive when you're iterating or working on many characters. Auto rigging is the fastest way to go from "model" to "animated testable character" — especially for prototypes, NPCs, and content pipelines.</p>
             
-            <!-- Comparison Image -->
-            <div style="margin: 2rem 0; text-align: center;">
-                <img src="/static/images/process/comparison.jpg" alt="Traditional vs Auto Rigging Comparison" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
+            <!-- Comparison Table Image -->
+            <div style="margin: 3rem 0; text-align: center;">
+                <img src="/static/images/process/comparison-table.jpg" alt="Traditional vs Auto Rigging Comparison" style="max-width: 100%; height: auto; border-radius: 20px; box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);">
             </div>
             
             <div class="time-comparison">
                 <div class="comparison-item">
-                    <h3>Manual Rigging</h3>
-                    <div class="time">2-5 days</div>
+                    <h3>Manual rigging</h3>
+                    <div class="time">2–5 days</div>
+                    <p style="margin-bottom: 1rem;">(often more with revisions)</p>
                     <ul>
-                        <li>Experienced rigger required</li>
-                        <li>Manual bone placement</li>
-                        <li>Trial and error process</li>
-                        <li>Expensive ($500-$2000)</li>
-                        <li>Limited to skilled professionals</li>
+                        <li>Requires an experienced rigger</li>
+                        <li>Can take days and usually costs significantly more than automated options</li>
+                        <li>Best for hero characters that need perfect deformation</li>
                     </ul>
                 </div>
                 <div class="comparison-item featured">
-                    <h3>AutoRig AI</h3>
-                    <div class="time">5-15 minutes</div>
+                    <h3>Auto rigging</h3>
+                    <div class="time">~5–15 minutes</div>
+                    <p style="margin-bottom: 1rem;">typical turnaround</p>
                     <ul>
-                        <li>Anyone can use it</li>
-                        <li>AI-powered precision</li>
-                        <li>Consistent results</li>
-                        <li>Free to try (3 conversions)</li>
-                        <li>Available 24/7</li>
+                        <li>Anyone can run it</li>
+                        <li>Consistent pipeline and outputs</li>
+                        <li>Perfect for quick iteration and production throughput</li>
                     </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Mini FAQ Section -->
+    <section class="mini-faq-section">
+        <div class="container">
+            <h2 style="text-align: center; margin-bottom: 3rem;">Frequently Asked Questions</h2>
+            <div style="max-width: 900px; margin: 0 auto;">
+                <div class="faq-item">
+                    <h3>How long does it take?</h3>
+                    <p style="margin: 0; color: var(--text-secondary); line-height: 1.7;">Typical jobs finish in ~5–15 minutes depending on complexity and current server load. Progress is calculated from the number of output files already available for download, so you see real progress, not estimates.</p>
+                </div>
+                <div class="faq-item">
+                    <h3>Why T-pose?</h3>
+                    <p style="margin: 0; color: var(--text-secondary); line-height: 1.7;">T-pose provides optimal compatibility with animation systems, motion capture data, and game engines. It ensures clean skeleton fitting and proper skinning weights.</p>
+                </div>
+                <div class="faq-item">
+                    <h3>What do I download?</h3>
+                    <p style="margin: 0; color: var(--text-secondary); line-height: 1.7;">You'll receive rigged + animated GLB, Unity FBX, Unreal FBX, and a preview video (_video.mp4). All files are engine-ready and organized for immediate use.</p>
+                </div>
+                <div class="faq-item">
+                    <h3>Do I need Blender/Maya?</h3>
+                    <p style="margin: 0; color: var(--text-secondary); line-height: 1.7;">No. The service works entirely in your browser. Upload your model, wait for processing, and download the results. No 3D software installation required.</p>
+                </div>
+                <div class="faq-item">
+                    <h3>What models don't work well?</h3>
+                    <p style="margin: 0; color: var(--text-secondary); line-height: 1.7;">Extremely stylized characters, non-humanoid shapes, or models with broken topology may produce minor artifacts. Auto rigging is a fast baseline — hero characters may still need manual polish for perfect deformation.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Notes Section -->
+    <section class="notes-section">
+        <div class="container">
+            <h2>Notes for Best Results</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center; max-width: 1200px; margin: 0 auto;">
+                <div>
+                    <ul style="list-style: none; padding: 0;">
+                        <li>
+                            <span style="color: #6366f1; font-weight: bold; margin-right: 0.75rem;">✓</span>
+                            Use a true T-Pose (symmetry matters)
+                        </li>
+                        <li>
+                            <span style="color: #6366f1; font-weight: bold; margin-right: 0.75rem;">✓</span>
+                            Keep one character per file when possible
+                        </li>
+                        <li>
+                            <span style="color: #6366f1; font-weight: bold; margin-right: 0.75rem;">✓</span>
+                            If the mesh is extremely stylized, expect small artifacts — auto rigging is a fast baseline, and hero characters may still need polish
+                        </li>
+                    </ul>
+                </div>
+                <!-- T-Pose Do/Don't Image -->
+                <div style="text-align: center;">
+                    <img src="/static/images/process/t-pose-dont.jpg" alt="T-Pose Do and Don't" style="max-width: 100%; height: auto; border-radius: 20px; box-shadow: 0 20px 60px rgba(99, 102, 241, 0.3);">
                 </div>
             </div>
         </div>
@@ -316,8 +942,8 @@
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container">
-            <h2>Ready to Experience Auto Rigging?</h2>
-            <p>Upload your 3D model and see the power of AI-driven character rigging in action. Professional results in minutes.</p>
+            <h2>Ready to rig your character?</h2>
+            <p>Upload a GLB/FBX/OBJ in T-Pose and get engine-ready exports in minutes.</p>
             <a href="/" class="cta-button">Start Auto Rigging Now</a>
         </div>
     </section>

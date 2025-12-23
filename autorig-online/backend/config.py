@@ -77,3 +77,9 @@ PROGRESS_CHECK_TIMEOUT = 5  # Timeout for HEAD requests in seconds
 # =============================================================================
 RATE_LIMIT_TASKS_PER_MINUTE = 5
 
+# =============================================================================
+# Email (Resend)
+# =============================================================================
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@autorig.online")
+

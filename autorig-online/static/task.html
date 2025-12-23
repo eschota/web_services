@@ -103,6 +103,19 @@
             <div class="alert alert-error hidden mt-3" id="error-container">
                 <span id="error-message"></span>
             </div>
+
+            <!-- FBX -> GLB Pre-conversion -->
+            <div class="mt-3 hidden" id="fbx-glb-step">
+                <h3 class="mb-2" data-i18n="task_fbx_glb_title">FBX → GLB</h3>
+                <div class="alert alert-info" id="fbx-glb-badge" style="display: inline-block;">
+                    <span id="fbx-glb-text" data-i18n="task_fbx_glb_pending">Converting FBX to GLB...</span>
+                </div>
+                <div class="mt-2" id="fbx-glb-link-container">
+                    <a id="fbx-glb-link" href="#" target="_blank" class="btn btn-ghost"
+                       style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
+                       data-i18n="task_fbx_glb_download">Download GLB</a>
+                </div>
+            </div>
             
             <!-- Video Preview -->
             <div class="video-preview hidden" id="video-container">
@@ -124,6 +137,9 @@
                 <button class="btn btn-secondary" id="download-all-btn" disabled>
                     <img src="/static/images/icons/download.svg" alt="Download" width="18" height="18" style="vertical-align: middle;">
                     <span data-i18n="btn_download_all">Download All</span>
+                </button>
+                <button class="btn btn-secondary hidden" id="restart-task-btn">
+                    <span data-i18n="btn_restart_task">Restart task</span>
                 </button>
             </div>
         </div>
@@ -260,6 +276,53 @@
                     document.getElementById('error-container').classList.remove('hidden');
                     document.getElementById('error-message').textContent = task.error_message;
                 }
+
+                // FBX -> GLB step UI
+                const fbxStep = document.getElementById('fbx-glb-step');
+                const fbxBadge = document.getElementById('fbx-glb-badge');
+                const fbxText = document.getElementById('fbx-glb-text');
+                const fbxLink = document.getElementById('fbx-glb-link');
+                const fbxLinkContainer = document.getElementById('fbx-glb-link-container');
+
+                const hasFbxStep = !!(task.fbx_glb_output_url || task.fbx_glb_model_name || task.fbx_glb_error || task.fbx_glb_ready === true);
+                if (hasFbxStep) {
+                    fbxStep.classList.remove('hidden');
+
+                    // Link (show as soon as we have it, even if not ready yet)
+                    if (task.fbx_glb_output_url) {
+                        fbxLink.href = task.fbx_glb_output_url;
+                        fbxLinkContainer.classList.remove('hidden');
+                    } else {
+                        fbxLinkContainer.classList.add('hidden');
+                    }
+
+                    fbxBadge.className = 'alert';
+                    if (task.fbx_glb_error) {
+                        fbxBadge.classList.add('alert-error');
+                        fbxText.textContent = t('task_fbx_glb_error');
+                    } else if (task.fbx_glb_ready) {
+                        fbxBadge.classList.add('alert-success');
+                        fbxText.textContent = t('task_fbx_glb_ready');
+                    } else {
+                        fbxBadge.classList.add('alert-info');
+                        fbxText.textContent = t('task_fbx_glb_pending');
+                    }
+                } else {
+                    fbxStep.classList.add('hidden');
+                }
+
+                // Restart button after 3 hours (always, even if done)
+                const restartBtn = document.getElementById('restart-task-btn');
+                if (task.created_at) {
+                    const createdAt = new Date(task.created_at).getTime();
+                    const ageMs = Date.now() - createdAt;
+                    const threeHoursMs = 3 * 60 * 60 * 1000;
+                    if (ageMs >= threeHoursMs) {
+                        restartBtn.classList.remove('hidden');
+                    } else {
+                        restartBtn.classList.add('hidden');
+                    }
+                }
                 
                 // Video - use proxy to avoid Mixed Content
                 if (task.video_ready) {
@@ -335,6 +398,30 @@
                                 a.click();
                             }, i * 500); // Stagger downloads
                         });
+                    }
+                });
+
+                document.getElementById('restart-task-btn').addEventListener('click', async () => {
+                    const btn = document.getElementById('restart-task-btn');
+                    btn.disabled = true;
+                    try {
+                        const resp = await fetch(`/api/task/${this.taskId}/restart`, { method: 'POST' });
+                        const data = await resp.json();
+                        if (!resp.ok) {
+                            alert(data.detail || t('error_generic'));
+                            return;
+                        }
+
+                        // Ensure polling is running again
+                        if (!this.pollInterval) {
+                            this.pollInterval = setInterval(() => this.fetchTask(), 2000);
+                        }
+                        await this.fetchTask();
+                    } catch (e) {
+                        console.error('Restart error:', e);
+                        alert(t('error_generic'));
+                    } finally {
+                        btn.disabled = false;
                     }
                 });
             },

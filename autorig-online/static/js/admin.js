@@ -10,6 +10,10 @@ const Admin = {
     sortDesc: true,
     searchQuery: '',
     selectedUser: null,
+    tasksCurrentPage: 1,
+    tasksPerPage: 20,
+    tasksTotal: 0,
+    selectedTasksUser: null,
     
     async init() {
         // Init i18n
@@ -41,6 +45,34 @@ const Admin = {
     },
     
     setupEventListeners() {
+        // Restart service
+        const restartBtn = document.getElementById('restart-service-btn');
+        restartBtn?.addEventListener('click', async () => {
+            const ok = confirm('Restart backend service now?');
+            if (!ok) return;
+
+            restartBtn.disabled = true;
+            restartBtn.textContent = 'Restarting...';
+            try {
+                const resp = await fetch('/api/admin/service/restart', { method: 'POST' });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    alert(data.detail || 'Failed to restart service');
+                    restartBtn.disabled = false;
+                    restartBtn.textContent = 'Restart service';
+                    return;
+                }
+
+                alert('Service restart scheduled. Page will reload in ~5 seconds.');
+                setTimeout(() => window.location.reload(), 5000);
+            } catch (e) {
+                console.error('Service restart error:', e);
+                alert('Failed to restart service');
+                restartBtn.disabled = false;
+                restartBtn.textContent = 'Restart service';
+            }
+        });
+
         // Search
         const searchInput = document.getElementById('search-input');
         let searchTimeout;
@@ -93,6 +125,30 @@ const Admin = {
                 this.closeModal();
             }
         });
+        
+        // Tasks modal
+        document.getElementById('tasks-modal-close').addEventListener('click', () => this.closeTasksModal());
+        document.getElementById('tasks-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'tasks-modal') {
+                this.closeTasksModal();
+            }
+        });
+        
+        // Tasks pagination
+        document.getElementById('tasks-prev-page').addEventListener('click', () => {
+            if (this.tasksCurrentPage > 1) {
+                this.tasksCurrentPage--;
+                this.loadUserTasks(this.selectedTasksUser.id);
+            }
+        });
+        
+        document.getElementById('tasks-next-page').addEventListener('click', () => {
+            const totalPages = Math.ceil(this.tasksTotal / this.tasksPerPage);
+            if (this.tasksCurrentPage < totalPages) {
+                this.tasksCurrentPage++;
+                this.loadUserTasks(this.selectedTasksUser.id);
+            }
+        });
     },
     
     async loadUsers() {
@@ -143,7 +199,7 @@ const Admin = {
         }
         
         tbody.innerHTML = users.map(user => `
-            <tr>
+            <tr style="cursor: pointer;" data-user-id="${user.id}" data-user-email="${user.email}">
                 <td>${user.id}</td>
                 <td>${user.email}</td>
                 <td>${user.name || '-'}</td>
@@ -154,12 +210,24 @@ const Admin = {
                 <td>${this.formatDate(user.last_login_at)}</td>
                 <td>
                     <button class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" 
-                            onclick="Admin.openBalanceModal(${user.id}, '${user.email}', ${user.balance_credits})">
+                            onclick="event.stopPropagation(); Admin.openBalanceModal(${user.id}, '${user.email}', ${user.balance_credits})">
                         Edit Balance
                     </button>
                 </td>
             </tr>
         `).join('');
+        
+        // Add click handlers to rows
+        tbody.querySelectorAll('tr[data-user-id]').forEach(row => {
+            row.addEventListener('click', (e) => {
+                // Don't open tasks modal if clicking on button
+                if (e.target.closest('button')) return;
+                
+                const userId = parseInt(row.getAttribute('data-user-id'));
+                const userEmail = row.getAttribute('data-user-email');
+                this.openTasksModal(userId, userEmail);
+            });
+        });
     },
     
     updatePagination() {
@@ -255,6 +323,165 @@ const Admin = {
         if (!dateStr) return '-';
         const date = new Date(dateStr);
         return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    },
+    
+    openTasksModal(userId, email) {
+        this.selectedTasksUser = { id: userId, email };
+        this.tasksCurrentPage = 1;
+        
+        document.getElementById('tasks-modal-email').textContent = email;
+        
+        const modal = document.getElementById('tasks-modal');
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        
+        // Load tasks
+        this.loadUserTasks(userId);
+    },
+    
+    closeTasksModal() {
+        const modal = document.getElementById('tasks-modal');
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        this.selectedTasksUser = null;
+        this.tasksCurrentPage = 1;
+        this.tasksTotal = 0;
+    },
+    
+    async loadUserTasks(userId) {
+        const tbody = document.getElementById('tasks-table');
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Loading...</td></tr>';
+        
+        try {
+            const params = new URLSearchParams({
+                page: this.tasksCurrentPage,
+                per_page: this.tasksPerPage
+            });
+            
+            const response = await fetch(`/api/admin/user/${userId}/tasks?${params}`);
+            
+            if (response.status === 403) {
+                window.location.href = '/';
+                return;
+            }
+            
+            if (!response.ok) {
+                throw new Error('Failed to load tasks');
+            }
+            
+            const data = await response.json();
+            this.tasksTotal = data.total;
+            
+            this.renderUserTasks(data.tasks);
+            this.updateTasksPagination();
+        } catch (error) {
+            console.error('Error loading tasks:', error);
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--error);">Failed to load tasks</td></tr>';
+        }
+    },
+    
+    renderUserTasks(tasks) {
+        const tbody = document.getElementById('tasks-table');
+        
+        if (tasks.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; color: var(--text-muted);">No tasks found</td>
+                </tr>
+            `;
+            return;
+        }
+        
+        tbody.innerHTML = tasks.map(task => {
+            const statusColor = {
+                'created': 'var(--text-muted)',
+                'processing': 'var(--accent)',
+                'done': 'var(--success)',
+                'error': 'var(--error)'
+            }[task.status] || 'var(--text-muted)';
+            
+            const progressPercent = task.progress || 0;
+            const progressBar = `
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div style="flex: 1; height: 8px; background: var(--bg-input); border-radius: 4px; overflow: hidden;">
+                        <div style="height: 100%; width: ${progressPercent}%; background: ${statusColor}; transition: width 0.3s;"></div>
+                    </div>
+                    <span style="font-size: 0.875rem; color: var(--text-secondary); min-width: 45px;">${progressPercent}%</span>
+                </div>
+            `;
+            
+            const inputUrlDisplay = task.input_url 
+                ? `<a href="${task.input_url}" target="_blank" style="color: var(--accent); text-decoration: none; max-width: 200px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${task.input_url}">${task.input_url.substring(0, 30)}...</a>`
+                : '-';
+            
+            return `
+                <tr>
+                    <td style="font-family: monospace; font-size: 0.875rem;">${task.task_id.substring(0, 8)}...</td>
+                    <td>
+                        <span style="color: ${statusColor}; font-weight: 500; text-transform: capitalize;">${task.status}</span>
+                    </td>
+                    <td style="min-width: 150px;">${progressBar}</td>
+                    <td style="font-size: 0.875rem;">${this.formatDate(task.created_at)}</td>
+                    <td style="font-size: 0.875rem;">${this.formatDate(task.updated_at)}</td>
+                    <td style="max-width: 200px;">${inputUrlDisplay}</td>
+                    <td style="text-align: center;">
+                        <span style="color: var(--text-secondary);">${task.ready_count}/${task.total_count}</span>
+                    </td>
+                    <td>
+                        <div class="flex gap-1" style="flex-wrap: wrap;">
+                            <a href="/task?id=${task.task_id}" target="_blank" class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+                                View Task
+                            </a>
+                            <button class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
+                                    onclick="Admin.restartTask('${task.task_id}', this)">
+                                Restart
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    },
+
+    async restartTask(taskId, btnEl) {
+        if (!taskId) return;
+        const ok = confirm(`Restart task ${taskId}?`);
+        if (!ok) return;
+
+        if (btnEl) btnEl.disabled = true;
+        try {
+            const resp = await fetch(`/api/task/${taskId}/restart`, { method: 'POST' });
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                alert(data.detail || 'Failed to restart task');
+                return;
+            }
+
+            alert(`Task restarted: ${taskId} (${data.status})`);
+
+            // Refresh tasks list
+            if (this.selectedTasksUser?.id) {
+                await this.loadUserTasks(this.selectedTasksUser.id);
+            }
+        } catch (e) {
+            console.error('Restart task error:', e);
+            alert('Failed to restart task');
+        } finally {
+            if (btnEl) btnEl.disabled = false;
+        }
+    },
+    
+    updateTasksPagination() {
+        const totalPages = Math.ceil(this.tasksTotal / this.tasksPerPage);
+        const start = (this.tasksCurrentPage - 1) * this.tasksPerPage + 1;
+        const end = Math.min(this.tasksCurrentPage * this.tasksPerPage, this.tasksTotal);
+        
+        document.getElementById('tasks-pagination-info').textContent = 
+            `Showing ${start}-${end} of ${this.tasksTotal} tasks`;
+        
+        document.getElementById('tasks-prev-page').disabled = this.tasksCurrentPage <= 1;
+        document.getElementById('tasks-next-page').disabled = this.tasksCurrentPage >= totalPages;
     }
 };
 

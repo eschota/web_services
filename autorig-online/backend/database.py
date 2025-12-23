@@ -100,6 +100,12 @@ class Task(Base):
     # Video
     video_url = Column(String(512), nullable=True)
     video_ready = Column(Boolean, default=False)
+
+    # FBX -> GLB pre-conversion (optional)
+    fbx_glb_output_url = Column(String(1024), nullable=True)
+    fbx_glb_model_name = Column(String(64), nullable=True)
+    fbx_glb_ready = Column(Boolean, default=False)
+    fbx_glb_error = Column(Text, nullable=True)
     
     @property
     def output_urls(self) -> list:
@@ -141,6 +147,21 @@ async def init_db():
     """Create all tables"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # Lightweight sqlite "migration" to add new columns without a migration framework.
+        # Safe to run repeatedly (errors are ignored when column already exists).
+        if "sqlite" in DATABASE_URL:
+            async def _try_add_column(sql: str):
+                try:
+                    await conn.exec_driver_sql(sql)
+                except Exception:
+                    # Column likely already exists, or DB doesn't support the statement.
+                    pass
+
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
 
 
 async def get_db():

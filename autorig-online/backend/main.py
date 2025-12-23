@@ -6,6 +6,7 @@ API for automatic 3D model rigging service.
 import os
 import uuid
 import shutil
+import asyncio
 from datetime import datetime
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFi
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -31,7 +33,9 @@ from models import (
     UserInfo, AnonInfo, AuthStatusResponse,
     AdminUserListItem, AdminUserListResponse,
     AdminBalanceUpdate, AdminBalanceResponse,
-    WorkerQueueInfo, QueueStatusResponse
+    AdminUserTaskItem, AdminUserTasksResponse,
+    WorkerQueueInfo, QueueStatusResponse,
+    GalleryItem, GalleryResponse
 )
 from workers import get_global_queue_status
 from auth import (
@@ -44,8 +48,71 @@ from auth import (
 from tasks import (
     create_conversion_task, update_task_progress,
     get_task_by_id, get_user_tasks,
-    get_all_users, update_user_balance
+    get_all_users, update_user_balance,
+    get_gallery_items, format_time_ago,
+    find_file_by_pattern
 )
+
+
+# =============================================================================
+# Background Task Worker
+# =============================================================================
+background_task_running = False
+
+async def background_task_updater():
+    """Background worker that updates all processing tasks periodically"""
+    from database import AsyncSessionLocal, Task
+    
+    global background_task_running
+    background_task_running = True
+    
+    print("[Background Worker] Started task updater")
+    
+    while background_task_running:
+        try:
+            async with AsyncSessionLocal() as db:
+                # Get all processing tasks
+                result = await db.execute(
+                    select(Task).where(Task.status == "processing")
+                )
+                processing_tasks = result.scalars().all()
+                
+                if processing_tasks:
+                    print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
+                    
+                    for task in processing_tasks:
+                        try:
+                            await update_task_progress(db, task)
+                        except Exception as e:
+                            print(f"[Background Worker] Error updating task {task.id}: {e}")
+                
+        except Exception as e:
+            print(f"[Background Worker] Error: {e}")
+        
+        # Wait 30 seconds between checks
+        await asyncio.sleep(30)
+    
+    print("[Background Worker] Stopped")
+
+
+async def restart_background_worker(app: FastAPI):
+    """Restart the in-process background worker task updater."""
+    global background_task_running
+
+    # Stop current loop and cancel current task (if any)
+    background_task_running = False
+    existing = getattr(app.state, "background_worker", None)
+    if existing:
+        existing.cancel()
+        try:
+            await existing
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[Background Worker] Failed to stop: {e}")
+
+    # Start a new worker (it will set background_task_running = True)
+    app.state.background_worker = asyncio.create_task(background_task_updater())
 
 
 # =============================================================================
@@ -54,12 +121,27 @@ from tasks import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown"""
+    global background_task_running
+    
     # Startup
     await init_db()
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+    # Start background worker
+    app.state.background_worker = asyncio.create_task(background_task_updater())
+    
     yield
+    
     # Shutdown
-    pass
+    background_task_running = False
+    background_worker = getattr(app.state, "background_worker", None)
+    if background_worker:
+        background_worker.cancel()
+    try:
+        if background_worker:
+            await background_worker
+    except asyncio.CancelledError:
+        pass
 
 
 limiter = Limiter(key_func=get_remote_address)
@@ -361,9 +443,50 @@ async def api_get_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Update progress if still processing
+    # Update progress if still processing, or check video for done tasks
     if task.status == "processing":
         task = await update_task_progress(db, task)
+    elif task.status == "done" and not task.video_ready:
+        # Check video availability for completed tasks
+        task = await update_task_progress(db, task)
+    
+    # Find viewer HTML file (_100k .html)
+    viewer_html_url = None
+    if task.ready_urls:
+        viewer_html_url = find_file_by_pattern(task.ready_urls, ".html", "100k")
+    
+    # Find quick download files
+    quick_downloads = {}
+    if task.ready_urls:
+        # 3ds Max
+        max_url = find_file_by_pattern(task.ready_urls, ".max", "100k")
+        if max_url:
+            quick_downloads["max"] = max_url
+        
+        # Maya
+        maya_url = find_file_by_pattern(task.ready_urls, ".ma", "100k")
+        if maya_url:
+            quick_downloads["maya"] = maya_url
+        
+        # Cinema 4D
+        c4d_url = find_file_by_pattern(task.ready_urls, ".c4d", "100k")
+        if c4d_url:
+            quick_downloads["cinema4d"] = c4d_url
+        
+        # Unity HDRP
+        unity_hdrp_url = find_file_by_pattern(task.ready_urls, ".hdrp.unitypackage", "100k")
+        if unity_hdrp_url:
+            quick_downloads["unity_hdrp"] = unity_hdrp_url
+        
+        # Unity Standard (if different from HDRP)
+        unity_url = find_file_by_pattern(task.ready_urls, ".unitypackage", "100k")
+        if unity_url and unity_url != unity_hdrp_url:
+            quick_downloads["unity"] = unity_url
+        
+        # Unreal Engine (FBX)
+        unreal_url = find_file_by_pattern(task.ready_urls, ".fbx", "100k")
+        if unreal_url:
+            quick_downloads["unreal"] = unreal_url
     
     return TaskStatusResponse(
         task_id=task.id,
@@ -374,9 +497,178 @@ async def api_get_task(
         ready_urls=task.ready_urls,
         video_ready=task.video_ready,
         video_url=task.video_url,
+        fbx_glb_output_url=task.fbx_glb_output_url,
+        fbx_glb_model_name=task.fbx_glb_model_name,
+        fbx_glb_ready=task.fbx_glb_ready,
+        fbx_glb_error=task.fbx_glb_error,
+        progress_page=task.progress_page,
+        viewer_html_url=viewer_html_url,
+        quick_downloads=quick_downloads if quick_downloads else None,
         error_message=task.error_message,
         created_at=task.created_at,
         updated_at=task.updated_at
+    )
+
+
+@app.post("/api/task/{task_id}/retry", response_model=TaskCreateResponse)
+async def api_retry_task(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Retry a stuck task (only if older than 2 hours and not done)"""
+    from datetime import timedelta
+    
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Check if task is owned by current user
+    anon_session = await get_anon_session(request, response, db)
+    is_owner = (
+        (user and task.owner_type == "user" and task.owner_id == user.email) or
+        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+    )
+    
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="Not authorized to retry this task")
+    
+    # Check if task is eligible for retry
+    if task.status == "done":
+        raise HTTPException(status_code=400, detail="Task already completed")
+    
+    task_age = datetime.utcnow() - task.created_at
+    if task_age < timedelta(hours=2):
+        remaining = timedelta(hours=2) - task_age
+        minutes = int(remaining.total_seconds() / 60)
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Task is too recent. Retry available in {minutes} minutes."
+        )
+    
+    # Re-send to worker
+    if not task.input_url:
+        raise HTTPException(status_code=400, detail="No input URL to retry")
+    
+    # Create new task (don't deduct credits - it's a retry)
+    new_task, error = await create_conversion_task(
+        db, task.input_url, task.input_type or "t_pose", 
+        task.owner_type, task.owner_id
+    )
+    
+    if error and not new_task:
+        raise HTTPException(status_code=500, detail=error)
+    
+    # Mark old task as error
+    task.status = "error"
+    task.error_message = f"Retried as task {new_task.id}"
+    await db.commit()
+    
+    return TaskCreateResponse(
+        task_id=new_task.id,
+        status=new_task.status,
+        message="Task resubmitted successfully"
+    )
+
+
+@app.post("/api/task/{task_id}/restart", response_model=TaskCreateResponse)
+async def api_restart_task(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Restart task with the same task_id (available if older than 3 hours)"""
+    from datetime import timedelta
+    from tasks import create_conversion_task
+
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Check ownership
+    anon_session = await get_anon_session(request, response, db)
+    is_admin = bool(user and user.email == ADMIN_EMAIL)
+    is_owner = (
+        (user and task.owner_type == "user" and task.owner_id == user.email) or
+        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+    )
+    if not (is_owner or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to restart this task")
+
+    # Age gate: 3 hours
+    task_age = datetime.utcnow() - task.created_at
+    if task_age < timedelta(hours=3):
+        remaining = timedelta(hours=3) - task_age
+        minutes = int(remaining.total_seconds() / 60)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task is too recent. Restart available in {minutes} minutes."
+        )
+
+    if not task.input_url:
+        raise HTTPException(status_code=400, detail="No input URL to restart")
+
+    # Reset fields (keep id/owner/input)
+    task.worker_api = None
+    task.worker_task_id = None
+    task.progress_page = None
+    task.guid = None
+    task.output_urls = []
+    task.ready_urls = []
+    task.ready_count = 0
+    task.total_count = 0
+    task.status = "created"
+    task.error_message = None
+    task.video_url = None
+    task.video_ready = False
+
+    # Reset FBX->GLB state
+    task.fbx_glb_output_url = None
+    task.fbx_glb_model_name = None
+    task.fbx_glb_ready = False
+    task.fbx_glb_error = None
+
+    await db.commit()
+    await db.refresh(task)
+
+    # Re-run pipeline by creating a new task and copying its runtime fields onto this one.
+    # We do this to reuse the same validated creation logic, but preserve task_id.
+    tmp_task, err = await create_conversion_task(
+        db, task.input_url, task.input_type or "t_pose", task.owner_type, task.owner_id
+    )
+    if err and not tmp_task:
+        raise HTTPException(status_code=500, detail=err)
+
+    # Copy runtime fields from tmp_task -> task and delete tmp_task
+    task.worker_api = tmp_task.worker_api
+    task.worker_task_id = tmp_task.worker_task_id
+    task.progress_page = tmp_task.progress_page
+    task.guid = tmp_task.guid
+    task.output_urls = tmp_task.output_urls
+    task.ready_urls = tmp_task.ready_urls
+    task.ready_count = tmp_task.ready_count
+    task.total_count = tmp_task.total_count
+    task.status = tmp_task.status
+    task.error_message = tmp_task.error_message
+    task.video_url = tmp_task.video_url
+    task.video_ready = tmp_task.video_ready
+    task.fbx_glb_output_url = tmp_task.fbx_glb_output_url
+    task.fbx_glb_model_name = tmp_task.fbx_glb_model_name
+    task.fbx_glb_ready = tmp_task.fbx_glb_ready
+    task.fbx_glb_error = tmp_task.fbx_glb_error
+
+    await db.delete(tmp_task)
+    await db.commit()
+    await db.refresh(task)
+
+    return TaskCreateResponse(
+        task_id=task.id,
+        status=task.status,
+        message="Task restarted successfully"
     )
 
 
@@ -415,6 +707,36 @@ async def api_get_history(
         total=total,
         page=page,
         per_page=per_page
+    )
+
+
+@app.get("/api/gallery", response_model=GalleryResponse)
+async def api_get_gallery(
+    page: int = 1,
+    per_page: int = 12,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get public gallery of completed tasks with videos"""
+    tasks, total = await get_gallery_items(db, page, per_page)
+    
+    items = [
+        GalleryItem(
+            task_id=t.id,
+            video_url=f"/api/video/{t.id}",  # Use proxy URL
+            created_at=t.created_at,
+            time_ago=format_time_ago(t.created_at)
+        )
+        for t in tasks
+    ]
+    
+    has_more = (page * per_page) < total
+    
+    return GalleryResponse(
+        items=items,
+        total=total,
+        page=page,
+        per_page=per_page,
+        has_more=has_more
     )
 
 
@@ -509,6 +831,76 @@ async def api_admin_update_balance(
     )
 
 
+@app.get("/api/admin/user/{user_id}/tasks", response_model=AdminUserTasksResponse)
+async def api_admin_user_tasks(
+    user_id: int,
+    page: int = 1,
+    per_page: int = 20,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get tasks for a specific user (admin only)"""
+    # Get user by ID
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get user tasks
+    tasks, total = await get_user_tasks(
+        db, owner_type="user", owner_id=user.email, page=page, per_page=per_page
+    )
+    
+    return AdminUserTasksResponse(
+        tasks=[
+            AdminUserTaskItem(
+                task_id=task.id,
+                status=task.status,
+                progress=task.progress,
+                ready_count=task.ready_count,
+                total_count=task.total_count,
+                created_at=task.created_at,
+                updated_at=task.updated_at,
+                input_url=task.input_url
+            )
+            for task in tasks
+        ],
+        total=total,
+        page=page,
+        per_page=per_page
+    )
+
+
+@app.post("/api/admin/service/restart")
+async def api_admin_restart_service(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """
+    Restart backend service (admin only).
+    Implementation: restart background worker in-process, then terminate the process.
+    With systemd Restart=always, the service will come back up automatically.
+    """
+    import os
+    import signal
+
+    # Best-effort: restart background worker now (useful if process doesn't restart immediately)
+    try:
+        await restart_background_worker(request.app)
+    except Exception as e:
+        print(f"[Admin] Failed to restart background worker: {e}")
+
+    async def _terminate_soon():
+        await asyncio.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    asyncio.create_task(_terminate_soon())
+    return {"ok": True, "message": "Service restart scheduled"}
+
+
 # =============================================================================
 # Upload Serving
 # =============================================================================
@@ -522,17 +914,17 @@ async def serve_upload(token: str, filename: str):
 
 
 # =============================================================================
-# Video Proxy (to avoid Mixed Content issues)
+# File & Video Proxy (to avoid Mixed Content issues)
 # =============================================================================
+import httpx
+from fastapi.responses import StreamingResponse
+
 @app.get("/api/video/{task_id}")
 async def proxy_video(
     task_id: str,
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy video from worker to serve over HTTPS"""
-    import httpx
-    from fastapi.responses import StreamingResponse
-    
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -554,6 +946,249 @@ async def proxy_video(
             "Cache-Control": "public, max-age=86400"
         }
     )
+
+
+@app.get("/api/file/{task_id}/{file_index}")
+async def proxy_file(
+    task_id: str,
+    file_index: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy file from worker to serve over HTTPS"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    ready_urls = task.ready_urls
+    if file_index < 0 or file_index >= len(ready_urls):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    file_url = ready_urls[file_index]
+    filename = file_url.split("/")[-1]
+    
+    # Determine content type
+    ext = filename.split(".")[-1].lower()
+    content_types = {
+        "glb": "model/gltf-binary",
+        "fbx": "application/octet-stream",
+        "blend": "application/x-blender",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "mp4": "video/mp4",
+        "mov": "video/quicktime",
+    }
+    content_type = content_types.get(ext, "application/octet-stream")
+    
+    async def stream_file():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", file_url, timeout=120.0) as response:
+                if response.status_code != 200:
+                    return
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    yield chunk
+    
+    return StreamingResponse(
+        stream_file(),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "public, max-age=86400"
+        }
+    )
+
+
+@app.get("/api/task/{task_id}/viewer")
+async def api_proxy_viewer(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy 3D viewer HTML file from worker to avoid mixed content issues"""
+    import re
+    from urllib.parse import urlparse, urljoin
+    
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Find viewer HTML file
+    viewer_url = None
+    if task.ready_urls:
+        viewer_url = find_file_by_pattern(task.ready_urls, ".html", "100k")
+    
+    if not viewer_url:
+        raise HTTPException(status_code=404, detail="Viewer file not found")
+    
+    # Get base URL from viewer_url (e.g., http://5.129.157.224:5132)
+    parsed = urlparse(viewer_url)
+    worker_base = f"{parsed.scheme}://{parsed.netloc}"
+    
+    # Proxy the HTML file
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(viewer_url, timeout=30.0, follow_redirects=True)
+            response.raise_for_status()
+            
+            # Get HTML content
+            html_content = response.text
+            
+            # Replace relative paths with proxy URLs
+            # Extract GUID from viewer URL
+            guid_match = re.search(r'/converter/glb/([a-f0-9\-]+)/', viewer_url)
+            if guid_match:
+                guid = guid_match.group(1)
+            else:
+                guid = task.guid or task_id
+            
+            converter_base = f"/converter/glb/{guid}"
+            from urllib.parse import quote
+            
+            # Strategy: Replace paths in two passes to avoid recursion
+            # First pass: Find and replace paths that are NOT inside viewer-resource URLs
+            # Use negative lookahead to ensure we don't touch already replaced paths
+            
+            # Replace absolute paths: "/converter/glb/..." 
+            # Only match if NOT followed by viewer-resource in the same attribute/string
+            def replace_absolute_path(match):
+                quote_char = match.group(1)
+                path = match.group(2)
+                # Double check - if path somehow contains our proxy, skip
+                if '/api/task/' in path or 'viewer-resource' in path:
+                    return match.group(0)
+                encoded_path = quote(path, safe='/')
+                return f'{quote_char}/api/task/{task_id}/viewer-resource?path={encoded_path}{quote_char}'
+            
+            # Use negative lookahead to avoid matching inside already replaced URLs
+            html_content = re.sub(
+                r'(["\'])(/converter/glb/[^"\']+)(["\'])(?![^"\']*viewer-resource)',
+                replace_absolute_path,
+                html_content
+            )
+            
+            # Replace relative paths: "./file.mview", "../file.mview"
+            def replace_relative_path(match):
+                quote_char = match.group(1)
+                rel_path = match.group(2).lstrip('./')
+                if '/api/task/' in rel_path or 'viewer-resource' in rel_path:
+                    return match.group(0)
+                if not rel_path.startswith(guid):
+                    full_path = f"{converter_base}/{guid}_100k/{rel_path}"
+                else:
+                    full_path = f"{converter_base}/{rel_path}"
+                encoded_path = quote(full_path, safe='/')
+                return f'{quote_char}/api/task/{task_id}/viewer-resource?path={encoded_path}{quote_char}'
+            
+            html_content = re.sub(
+                r'(["\'])(\.?\.?/[^"\']+\.(mview|json|png|jpg|jpeg|webp)[^"\']*)(["\'])(?![^"\']*viewer-resource)',
+                replace_relative_path,
+                html_content
+            )
+            
+            # Handle bare filenames (e.g., "model.mview")
+            def replace_bare_filename(match):
+                quote_char = match.group(1)
+                filename = match.group(2)
+                closing_quote = match.group(3)
+                if '/api/task/' in filename or 'viewer-resource' in filename:
+                    return match.group(0)
+                full_path = f"{converter_base}/{guid}_100k/{filename}"
+                encoded_path = quote(full_path, safe='/')
+                return f'{quote_char}/api/task/{task_id}/viewer-resource?path={encoded_path}{closing_quote}'
+            
+            html_content = re.sub(
+                r'(["\'])([^/"\']+\.(mview|json|png|jpg|jpeg|webp))(["\'])(?![^"\']*viewer-resource)',
+                replace_bare_filename,
+                html_content
+            )
+            
+            # Handle paths in JavaScript (src=, href=, etc.) - be more careful
+            def replace_js_path(match):
+                attr = match.group(1)
+                path = match.group(2)
+                if '/api/task/' in path or 'viewer-resource' in path:
+                    return match.group(0)
+                encoded_path = quote(path, safe='/')
+                return f'{attr}="/api/task/{task_id}/viewer-resource?path={encoded_path}"'
+            
+            html_content = re.sub(
+                r'(src|href|url|load)\s*[:=]\s*["\']?(/converter/glb/[^"\'\s\)]+)["\']?(?![^"\']*viewer-resource)',
+                replace_js_path,
+                html_content
+            )
+            
+            # Return as HTML with proper headers
+            return Response(
+                content=html_content,
+                media_type="text/html",
+                headers={
+                    "X-Frame-Options": "SAMEORIGIN",
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"Failed to fetch viewer: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=e.response.status_code, detail="Viewer not available")
+
+
+@app.get("/api/task/{task_id}/viewer-resource")
+async def api_proxy_viewer_resource(
+    task_id: str,
+    path: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy resources (like .mview files) for the 3D viewer"""
+    from urllib.parse import unquote
+    
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Get worker base URL
+    if not task.worker_api:
+        raise HTTPException(status_code=404, detail="Worker info not found")
+    
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    
+    # Decode path (in case it was double-encoded or has quotes)
+    path = unquote(path)
+    # Remove any leading/trailing quotes that might have been included
+    path = path.strip("'\"")
+    
+    # Construct full URL
+    resource_url = f"{worker_base}{path}"
+    
+    # Proxy the resource
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(resource_url, timeout=30.0, follow_redirects=True)
+            response.raise_for_status()
+            
+            # Determine content type
+            content_type = response.headers.get("content-type", "application/octet-stream")
+            if not content_type or content_type == "application/octet-stream":
+                if path.endswith(".mview"):
+                    content_type = "application/octet-stream"
+                elif path.endswith(".png"):
+                    content_type = "image/png"
+                elif path.endswith(".jpg") or path.endswith(".jpeg"):
+                    content_type = "image/jpeg"
+                elif path.endswith(".json"):
+                    content_type = "application/json"
+            
+            return Response(
+                content=response.content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"Failed to fetch resource: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=e.response.status_code, detail="Resource not available")
 
 
 # =============================================================================
@@ -590,249 +1225,32 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
 
 # SEO pages
 @app.get("/glb-auto-rig")
-async def glb_auto_rig():
-    """Serve GLB auto rig landing page"""
-    return FileResponse(str(STATIC_DIR / "glb-auto-rig.html"))
-
 @app.get("/fbx-auto-rig")
-async def fbx_auto_rig():
-    """Serve FBX auto rig landing page"""
-    return FileResponse(str(STATIC_DIR / "fbx-auto-rig.html"))
-
 @app.get("/obj-auto-rig")
-async def obj_auto_rig():
-    """Serve OBJ auto rig landing page"""
-    return FileResponse(str(STATIC_DIR / "obj-auto-rig.html"))
-
-@app.get("/t-pose-rig")
-async def t_pose_rig():
-    """Serve T-pose rig landing page"""
-    return FileResponse(str(STATIC_DIR / "t-pose-rig.html"))
-
 @app.get("/how-it-works")
-async def how_it_works():
-    """Serve how it works page"""
-    return FileResponse(str(STATIC_DIR / "how-it-works.html"))
-
 @app.get("/faq")
-async def faq():
-    """Serve FAQ page"""
-    return FileResponse(str(STATIC_DIR / "faq.html"))
+async def seo_pages():
+    """Serve SEO landing pages (redirect to main for now)"""
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
-@app.get("/gallery")
-async def gallery():
-    """Serve gallery page"""
-    return FileResponse(str(STATIC_DIR / "gallery.html"))
 
-@app.get("/g/{item_id}")
-async def gallery_item(item_id: str):
-    """Serve gallery item pages"""
-    return FileResponse(str(STATIC_DIR / "g-template.html"))
+# Sitemap and robots.txt
+@app.get("/sitemap.xml")
+async def sitemap():
+    """Serve sitemap.xml for SEO"""
+    return FileResponse(
+        str(STATIC_DIR / "sitemap.xml"),
+        media_type="application/xml"
+    )
 
-@app.get("/guides")
-async def guides():
-    """Serve guides page"""
-    return FileResponse(str(STATIC_DIR / "guides.html"))
 
-# Guide pages
-@app.get("/mixamo-alternative")
-async def mixamo_alternative():
-    """Serve mixamo-alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative.html"))
-
-@app.get("/rig-glb-unity")
-async def rig_glb_unity():
-    """Serve rig-glb-unity page"""
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity.html"))
-
-@app.get("/rig-fbx-unreal")
-async def rig_fbx_unreal():
-    """Serve rig-fbx-unreal page"""
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal.html"))
-
-@app.get("/t-pose-vs-a-pose")
-async def t_pose_vs_a_pose():
-    """Serve t-pose-vs-a-pose page"""
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose.html"))
-
-@app.get("/glb-vs-fbx")
-async def glb_vs_fbx():
-    """Serve glb-vs-fbx page"""
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx.html"))
-
-@app.get("/auto-rig-obj")
-async def auto_rig_obj():
-    """Serve auto-rig-obj page"""
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj.html"))
-
-@app.get("/animation-retargeting")
-async def animation_retargeting():
-    """Serve animation-retargeting page"""
-    return FileResponse(str(STATIC_DIR / "animation-retargeting.html"))
-
-@app.get("/mixamo-alternative-ru")
-async def mixamo_alternative_ru():
-    """Serve RU mixamo-alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-ru.html"))
-
-@app.get("/mixamo-alternative-zh")
-async def mixamo_alternative_zh():
-    """Serve ZH mixamo-alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-zh.html"))
-
-@app.get("/mixamo-alternative-hi")
-async def mixamo_alternative_hi():
-    """Serve HI mixamo-alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-hi.html"))
-
-@app.get("/rig-glb-unity-ru")
-async def rig_glb_unity_ru():
-    """Serve RU rig-glb-unity page"""
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-ru.html"))
-
-@app.get("/rig-glb-unity-zh")
-async def rig_glb_unity_zh():
-    """Serve ZH rig-glb-unity page"""
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-zh.html"))
-
-@app.get("/rig-glb-unity-hi")
-async def rig_glb_unity_hi():
-    """Serve HI rig-glb-unity page"""
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-hi.html"))
-
-@app.get("/rig-fbx-unreal-ru")
-async def rig_fbx_unreal_ru():
-    """Serve RU rig-fbx-unreal page"""
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-ru.html"))
-
-@app.get("/rig-fbx-unreal-zh")
-async def rig_fbx_unreal_zh():
-    """Serve ZH rig-fbx-unreal page"""
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-zh.html"))
-
-@app.get("/rig-fbx-unreal-hi")
-async def rig_fbx_unreal_hi():
-    """Serve HI rig-fbx-unreal page"""
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-hi.html"))
-
-@app.get("/t-pose-vs-a-pose-ru")
-async def t_pose_vs_a_pose_ru():
-    """Serve RU t-pose-vs-a-pose page"""
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-ru.html"))
-
-@app.get("/t-pose-vs-a-pose-zh")
-async def t_pose_vs_a_pose_zh():
-    """Serve ZH t-pose-vs-a-pose page"""
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-zh.html"))
-
-@app.get("/t-pose-vs-a-pose-hi")
-async def t_pose_vs_a_pose_hi():
-    """Serve HI t-pose-vs-a-pose page"""
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-hi.html"))
-
-@app.get("/glb-vs-fbx-ru")
-async def glb_vs_fbx_ru():
-    """Serve RU glb-vs-fbx page"""
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-ru.html"))
-
-@app.get("/glb-vs-fbx-zh")
-async def glb_vs_fbx_zh():
-    """Serve ZH glb-vs-fbx page"""
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-zh.html"))
-
-@app.get("/glb-vs-fbx-hi")
-async def glb_vs_fbx_hi():
-    """Serve HI glb-vs-fbx page"""
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-hi.html"))
-
-@app.get("/auto-rig-obj-ru")
-async def auto_rig_obj_ru():
-    """Serve RU auto-rig-obj page"""
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-ru.html"))
-
-@app.get("/auto-rig-obj-zh")
-async def auto_rig_obj_zh():
-    """Serve ZH auto-rig-obj page"""
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-zh.html"))
-
-@app.get("/auto-rig-obj-hi")
-async def auto_rig_obj_hi():
-    """Serve HI auto-rig-obj page"""
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-hi.html"))
-
-@app.get("/animation-retargeting-ru")
-async def animation_retargeting_ru():
-    """Serve RU animation-retargeting page"""
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-ru.html"))
-
-@app.get("/animation-retargeting-zh")
-async def animation_retargeting_zh():
-    """Serve ZH animation-retargeting page"""
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-zh.html"))
-
-@app.get("/animation-retargeting-hi")
-async def animation_retargeting_hi():
-    """Serve HI animation-retargeting page"""
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-hi.html"))
-@app.get("/mixamo-alternative")
-async def mixamo_alternative():
-    """Serve Mixamo alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative.html"))
-
-@app.get("/mixamo-alternative-ru")
-async def mixamo_alternative_ru():
-    """Serve Russian Mixamo alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-ru.html"))
-
-@app.get("/mixamo-alternative-zh")
-async def mixamo_alternative_zh():
-    """Serve Chinese Mixamo alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-zh.html"))
-
-@app.get("/mixamo-alternative-hi")
-async def mixamo_alternative_hi():
-    """Serve Hindi Mixamo alternative page"""
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-hi.html"))
-
-@app.get("/rig-glb-unity-ru")
-async def rig_glb_unity_ru():
-    """Serve Russian GLB Unity guide"""
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-ru.html"))
-
-@app.get("/rig-fbx-unreal-ru")
-async def rig_fbx_unreal_ru():
-    """Serve Russian FBX Unreal guide"""
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-ru.html"))
-
-@app.get("/rig-glb-unity")
-async def rig_glb_unity():
-    """Serve GLB Unity rigging guide"""
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity.html"))
-
-@app.get("/rig-fbx-unreal")
-async def rig_fbx_unreal():
-    """Serve FBX Unreal rigging guide"""
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal.html"))
-
-@app.get("/t-pose-vs-a-pose")
-async def t_pose_vs_a_pose():
-    """Serve T-pose vs A-pose guide"""
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose.html"))
-
-@app.get("/glb-vs-fbx")
-async def glb_vs_fbx():
-    """Serve GLB vs FBX comparison"""
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx.html"))
-
-@app.get("/auto-rig-obj")
-async def auto_rig_obj():
-    """Serve OBJ auto rigging guide"""
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj.html"))
-
-@app.get("/animation-retargeting")
-async def animation_retargeting():
-    """Serve animation retargeting guide"""
-    return FileResponse(str(STATIC_DIR / "animation-retargeting.html"))
+@app.get("/robots.txt")
+async def robots():
+    """Serve robots.txt for crawlers"""
+    return FileResponse(
+        str(STATIC_DIR / "robots.txt"),
+        media_type="text/plain"
+    )
 
 
 # =============================================================================

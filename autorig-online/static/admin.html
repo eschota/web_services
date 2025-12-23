@@ -26,6 +26,7 @@
                 
                 <div class="header-actions">
                     <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    <button class="btn btn-secondary" id="restart-service-btn">Restart service</button>
                     <a href="/" class="btn btn-secondary">← Back to Site</a>
                     <a href="/auth/logout" class="btn btn-ghost">Sign out</a>
                 </div>
@@ -117,6 +118,50 @@
             <div class="flex gap-2 mt-3">
                 <button class="btn btn-primary" id="modal-save">Save Changes</button>
                 <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tasks Modal -->
+    <div id="tasks-modal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 2rem;">
+        <div class="card" style="min-width: 900px; max-width: 1200px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div>
+                    <h3>User Tasks</h3>
+                    <p style="color: var(--text-muted); margin-top: 0.5rem;" id="tasks-modal-email"></p>
+                </div>
+                <button class="btn btn-ghost" id="tasks-modal-close" style="padding: 0.5rem;">✕</button>
+            </div>
+            
+            <div style="overflow-x: auto; flex: 1; min-height: 0;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Created</th>
+                            <th>Updated</th>
+                            <th>Input URL</th>
+                            <th>Files</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-table">
+                        <tr>
+                            <td colspan="8" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Tasks Pagination -->
+            <div class="flex justify-between items-center mt-3" id="tasks-pagination">
+                <span id="tasks-pagination-info" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+                <div class="flex gap-1">
+                    <button class="btn btn-secondary" id="tasks-prev-page" disabled>← Prev</button>
+                    <button class="btn btn-secondary" id="tasks-next-page" disabled>Next →</button>
+                </div>
             </div>
         </div>
     </div>

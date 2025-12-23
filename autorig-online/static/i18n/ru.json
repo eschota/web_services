@@ -39,6 +39,14 @@
     "task_files_ready": "файлов готово",
     "task_video_ready": "Видео превью",
     "task_video_pending": "Видео генерируется...",
+
+    "task_fbx_glb_title": "FBX → GLB",
+    "task_fbx_glb_pending": "Конвертация FBX в GLB...",
+    "task_fbx_glb_ready": "FBX сконвертирован в GLB",
+    "task_fbx_glb_error": "Ошибка конвертации FBX → GLB",
+    "task_fbx_glb_download": "Скачать GLB",
+
+    "btn_restart_task": "Перезапустить задачу",
     
     "error_no_file": "Выберите файл или введите URL",
     "error_no_credits": "Кредиты закончились",
