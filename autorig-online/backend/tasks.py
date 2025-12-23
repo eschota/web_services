@@ -160,11 +160,6 @@ async def create_conversion_task(
     Create a new conversion task.
     Returns: (task, error_message)
     """
-    # Select best worker
-    worker_url = await select_best_worker()
-    if not worker_url:
-        return None, "No workers available"
-    
     # Create task record
     task_id = str(uuid.uuid4())
     task = Task(
@@ -173,44 +168,51 @@ async def create_conversion_task(
         owner_id=owner_id,
         input_url=input_url,
         input_type=task_type,
-        worker_api=worker_url,
         status="created"
     )
 
-    # FBX requires pre-conversion step: FBX -> GLB
-    if _is_fbx_url(input_url):
-        # Do not block task creation on FBX->GLB conversion (can take 20-60+ seconds).
-        # Create task immediately and run pre-conversion asynchronously.
-        task.status = "processing"
-        db.add(task)
-        await db.commit()
-        await db.refresh(task)
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    
+    return task, None
 
-        asyncio.create_task(_start_fbx_preconvert_async(task.id, worker_url, input_url))
+
+async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) -> Tuple[Task, Optional[str]]:
+    """
+    Start a queued (status=created) task on a specific worker.
+    For FBX inputs: starts FBX->GLB pre-step asynchronously and returns immediately.
+    For non-FBX: sends task to worker immediately.
+    Returns: (task, error_message)
+    """
+    task.worker_api = worker_url
+    task.status = "processing"
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(task)
+
+    if _is_fbx_url(task.input_url or ""):
+        asyncio.create_task(_start_fbx_preconvert_async(task.id, worker_url, task.input_url))
         return task, None
 
-    # Non-FBX: send to worker directly
-    result = await send_task_to_worker(worker_url, input_url, task_type)
-
+    result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
     if not result.success:
         task.status = "error"
         task.error_message = result.error
-        db.add(task)
+        task.updated_at = datetime.utcnow()
         await db.commit()
+        await db.refresh(task)
         return task, result.error
 
-    # Update task with worker response
     task.worker_task_id = result.task_id
     task.progress_page = result.progress_page
     task.guid = result.guid
     task.output_urls = result.output_urls
     task.total_count = len(result.output_urls)
     task.status = "processing"
-    
-    db.add(task)
+    task.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(task)
-    
     return task, None
 
 

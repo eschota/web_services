@@ -46,7 +46,7 @@ from auth import (
     get_remaining_credits_anon, decrement_user_credits
 )
 from tasks import (
-    create_conversion_task, update_task_progress,
+    create_conversion_task, update_task_progress, start_task_on_worker,
     get_task_by_id, get_user_tasks,
     get_all_users, update_user_balance,
     get_gallery_items, format_time_ago,
@@ -71,6 +71,32 @@ async def background_task_updater():
     while background_task_running:
         try:
             async with AsyncSessionLocal() as db:
+                # Dispatch queued tasks (status=created) to actually free workers
+                try:
+                    queue_status = await get_global_queue_status()
+                    free_workers = [
+                        w for w in queue_status.workers
+                        if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)
+                    ]
+
+                    if free_workers:
+                        # Pull up to N queued tasks
+                        queued_result = await db.execute(
+                            select(Task)
+                            .where(Task.status == "created")
+                            .order_by(Task.created_at)
+                            .limit(len(free_workers))
+                        )
+                        queued_tasks = queued_result.scalars().all()
+
+                        for task, worker in zip(queued_tasks, free_workers):
+                            try:
+                                await start_task_on_worker(db, task, worker.url)
+                            except Exception as e:
+                                print(f"[Background Worker] Error dispatching task {task.id}: {e}")
+                except Exception as e:
+                    print(f"[Background Worker] Queue dispatch error: {e}")
+
                 # Get all processing tasks
                 result = await db.execute(
                     select(Task).where(Task.status == "processing")
