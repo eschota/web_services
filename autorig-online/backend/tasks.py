@@ -98,10 +98,35 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
                 task.worker_api = candidate
                 task.fbx_glb_model_name = res.model_name
                 task.fbx_glb_output_url = res.output_url
-                task.fbx_glb_ready = False
+                # If worker returns output_url, assume file is ready (no HEAD/GET checks).
+                task.fbx_glb_ready = True
                 task.fbx_glb_error = None
                 task.updated_at = datetime.utcnow()
                 await db.commit()
+                await db.refresh(task)
+
+                # Start main pipeline immediately (do not wait for next poll).
+                if not task.worker_task_id and task.fbx_glb_output_url:
+                    result = await send_task_to_worker(
+                        task.worker_api,
+                        task.fbx_glb_output_url,
+                        task.input_type or "t_pose"
+                    )
+                    if not result.success:
+                        task.status = "error"
+                        task.error_message = result.error
+                        task.updated_at = datetime.utcnow()
+                        await db.commit()
+                        return
+
+                    task.worker_task_id = result.task_id
+                    task.progress_page = result.progress_page
+                    task.guid = result.guid
+                    task.output_urls = result.output_urls
+                    task.total_count = len(result.output_urls)
+                    task.status = "processing"
+                    task.updated_at = datetime.utcnow()
+                    await db.commit()
                 return
 
             last_error = res.error
@@ -202,11 +227,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     
     # FBX -> GLB stage (if applicable)
     if task.status not in ("done", "error") and task.fbx_glb_output_url:
+        # If worker returned output_url, assume ready (no HEAD/GET checks).
         if not task.fbx_glb_ready:
-            is_ready = await _head_is_ready(task.fbx_glb_output_url)
-            if is_ready:
-                task.fbx_glb_ready = True
-                task.updated_at = datetime.utcnow()
+            task.fbx_glb_ready = True
+            task.updated_at = datetime.utcnow()
 
         # Start main pipeline once GLB is ready and main worker task not created yet
         if task.fbx_glb_ready and not task.worker_task_id:
