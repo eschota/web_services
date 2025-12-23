@@ -105,12 +105,18 @@ async def background_task_updater():
                 
                 if processing_tasks:
                     print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
-                    
-                    for task in processing_tasks:
-                        try:
-                            await update_task_progress(db, task)
-                        except Exception as e:
-                            print(f"[Background Worker] Error updating task {task.id}: {e}")
+
+                    # Update tasks concurrently (bounded) so the loop doesn't take minutes when many tasks are processing
+                    semaphore = asyncio.Semaphore(8)
+
+                    async def _update_one(t: Task):
+                        async with semaphore:
+                            try:
+                                await update_task_progress(db, t)
+                            except Exception as e:
+                                print(f"[Background Worker] Error updating task {t.id}: {e}")
+
+                    await asyncio.gather(*[_update_one(t) for t in processing_tasks])
                 
         except Exception as e:
             print(f"[Background Worker] Error: {e}")
