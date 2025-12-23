@@ -107,3 +107,12 @@ Thumbs.db
 
 # SSH keys
 .ssh/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python venv
+autorig-online/venv/
