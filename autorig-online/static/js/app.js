@@ -385,10 +385,22 @@ const App = {
             const response = await fetch('/api/queue/status');
             const data = await response.json();
             
+            const formatWait = (seconds) => {
+                const s = Number(seconds || 0);
+                if (s < 60) return t('queue_wait_lt1min');
+                if (s < 3600) {
+                    const minutes = Math.ceil(s / 60);
+                    return t('queue_wait_minutes', { minutes: String(minutes) });
+                }
+                const hours = Math.floor(s / 3600);
+                const minutes = Math.floor((s % 3600) / 60);
+                return t('queue_wait_hours', { hours: String(hours), minutes: String(minutes) });
+            };
+
             // Update values
             activeEl.textContent = data.total_active;
             pendingEl.textContent = data.total_pending;
-            waitEl.textContent = data.estimated_wait_formatted;
+            waitEl.textContent = formatWait(data.estimated_wait_seconds);
             serversEl.textContent = `${data.available_workers}/${data.total_workers}`;
             
             // Add warning class if queue is long

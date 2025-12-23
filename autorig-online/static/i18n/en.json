@@ -35,6 +35,7 @@
     "task_status_processing": "Processing",
     "task_status_done": "Completed",
     "task_status_error": "Error",
+    "task_status_restarting": "Restarting...",
     
     "task_files_ready": "files ready",
     "task_video_ready": "Video Preview",
@@ -47,6 +48,7 @@
     "task_fbx_glb_download": "Download GLB",
 
     "btn_restart_task": "Restart task",
+    "btn_restart_task_working": "Restarting...",
     
     "error_no_file": "Please select a file or enter a URL",
     "error_no_credits": "No credits remaining",
@@ -75,6 +77,9 @@
     "queue_servers": "Servers",
     "queue_position": "Position in queue",
     "queue_estimated": "Estimated time",
+    "queue_wait_lt1min": "< 1 min",
+    "queue_wait_minutes": "~{minutes} min",
+    "queue_wait_hours": "~{hours}h {minutes}m",
     
     "footer_text": "AutoRig Online © 2025",
 

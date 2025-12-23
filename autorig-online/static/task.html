@@ -405,12 +405,20 @@
 
                 document.getElementById('restart-task-btn').addEventListener('click', async () => {
                     const btn = document.getElementById('restart-task-btn');
+                    const statusBadge = document.getElementById('status-badge');
+                    const statusText = document.getElementById('status-text');
+                    const prevText = btn.textContent;
                     btn.disabled = true;
+                    btn.textContent = t('btn_restart_task_working');
+                    statusBadge.className = 'alert alert-info';
+                    statusText.textContent = t('task_status_restarting');
                     try {
                         const resp = await fetch(`/api/task/${this.taskId}/restart`, { method: 'POST' });
-                        const data = await resp.json();
+                        const raw = await resp.text();
+                        let data = {};
+                        try { data = raw ? JSON.parse(raw) : {}; } catch (_) { data = {}; }
                         if (!resp.ok) {
-                            alert(data.detail || t('error_generic'));
+                            alert(data.detail || raw || t('error_generic'));
                             return;
                         }
 
@@ -424,6 +432,7 @@
                         alert(t('error_generic'));
                     } finally {
                         btn.disabled = false;
+                        btn.textContent = prevText;
                     }
                 });
             },
@@ -455,7 +464,17 @@
                     
                     activeEl.textContent = data.total_active;
                     pendingEl.textContent = data.total_pending;
-                    waitEl.textContent = data.estimated_wait_formatted;
+                    const s = Number(data.estimated_wait_seconds || 0);
+                    if (s < 60) {
+                        waitEl.textContent = t('queue_wait_lt1min');
+                    } else if (s < 3600) {
+                        const minutes = Math.ceil(s / 60);
+                        waitEl.textContent = t('queue_wait_minutes', { minutes: String(minutes) });
+                    } else {
+                        const hours = Math.floor(s / 3600);
+                        const minutes = Math.floor((s % 3600) / 60);
+                        waitEl.textContent = t('queue_wait_hours', { hours: String(hours), minutes: String(minutes) });
+                    }
                     serversEl.textContent = `${data.available_workers}/${data.total_workers}`;
                     
                     // Color coding
