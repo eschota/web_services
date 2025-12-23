@@ -39,7 +39,9 @@ const I18n = {
      */
     async loadTranslations(lang) {
         try {
-            const response = await fetch(`/static/i18n/${lang}.json`);
+            // NOTE: /static/ is served with long-lived immutable caching in nginx.
+            // For translations we want updates to propagate immediately, so bypass cache.
+            const response = await fetch(`/static/i18n/${lang}.json`, { cache: 'no-store' });
             if (response.ok) {
                 this.translations = await response.json();
             } else {

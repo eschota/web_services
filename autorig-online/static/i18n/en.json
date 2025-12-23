@@ -106,6 +106,27 @@
     "guide_retargeting_title": "Animation Retargeting",
     "guide_retargeting_desc": "Guide to retargeting animations in Unity & Unreal. Simple pipeline for auto-rigged characters.",
 
-    "read_guide": "Read Guide →"
+    "read_guide": "Read Guide →",
+
+    "gallery_title": "🎬 Recent Rigged Models",
+    "gallery_subtitle": "Real results from our users",
+
+    "formats_title": "Supported Export Formats",
+    "formats_desc": "We support conversion to all major 3D software and game engines:",
+
+    "services_title": "Our Services",
+    "service_rig_title": "🦴 Automatic Rigging",
+    "service_rig_desc": "AI-powered bone generation and skinning for your 3D characters",
+    "service_anim_title": "🎬 Animation Library",
+    "service_anim_desc": "50+ pre-configured animations including walk, run, jump, and more",
+    "service_retopo_title": "🔄 Auto Retopology",
+    "service_retopo_desc": "Automatic mesh optimization and retopology for better performance",
+    "service_convert_title": "🔀 Format Conversion",
+    "service_convert_desc": "Convert between GLB, FBX, OBJ, and export to Unity, Unreal, 3ds Max, Maya, Cinema 4D",
+
+    "api_title": "🔌 REST API for Developers",
+    "api_desc": "Integrate AutoRig into your pipeline with our REST API. Automate uploads, task tracking, and result downloads in your tools and services.",
+    "api_contact": "For API access and integration details, please contact:",
+    "api_contact_btn": "Contact on Telegram"
 }
 
