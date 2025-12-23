@@ -6,6 +6,7 @@ import re
 import asyncio
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
+import random
 
 import httpx
 
@@ -241,6 +242,10 @@ async def check_urls_batch(
     
     if not urls_to_check:
         return [], len(already_ready)
+
+    # Shuffle so we don't get stuck checking the same early URLs that may be generated last.
+    # This allows progress to advance as soon as *any* outputs become available.
+    random.shuffle(urls_to_check)
     
     newly_ready = []
     
