@@ -1,0 +1,89 @@
+https://autorig.online — web-сервис, который делает авто-риг 3D моделей пользователей (GLB/FBX/OBJ) через пул воркеров-конвертеров.
+
+## Архитектура (высокоуровнево)
+- **Frontend**: статические страницы из `autorig-online/static/` (главная, страница таска, админка).
+  - **Главная**: `autorig-online/static/index.html`, логика `autorig-online/static/js/app.js`
+  - **Task page**: `autorig-online/static/task.html`
+  - **Admin**: `autorig-online/static/admin.html`, логика `autorig-online/static/js/admin.js`
+- **Backend**: FastAPI `autorig-online/backend/main.py` + SQLite `autorig-online/backend/database.py`
+  - Хранит пользователей/кредиты/таски, раздает задачи на воркеры, обновляет прогресс в фоне, шлет email о готовности.
+- **Workers**: внешние сервисы конвертации/рига (пул серверов).
+  - Список воркеров и базовый endpoint: `autorig-online/backend/config.py` (`WORKERS`).
+
+## Воркеры (ключевая логика)
+### Основной процесс (GLB/OBJ/FBX после pre-step)
+- Backend отправляет задачу на воркер (один из `WORKERS`) и получает:
+  - `worker_task_id`
+  - `guid`
+  - `output_urls` (список потенциальных выходных файлов по разным форматам/LOD)
+  - `progress_page` (если есть)
+- Далее backend **не “ждет” воркер**, а периодически проверяет, какие `output_urls` уже доступны, увеличивая `ready_count`, `progress` и заполняя `ready_urls`.
+
+### FBX → GLB pre-step (только если вход .fbx)
+- Если входной файл `.fbx`, добавляется этап **FBX→GLB** на тех же воркерах, но через другой endpoint:
+  - `/api-converter-glb-to-fbx` (по факту конвертит FBX→GLB и возвращает `output_url` на `.glb`)
+- Важно: если воркер вернул `output_url`, считаем, что `.glb` уже готов (не делаем HEAD/GET проверки) и запускаем основной пайплайн сразу на этой ссылке.
+- На странице таска показывается отдельный блок статуса **FBX → GLB** + ссылка на скачивание `.glb`.
+
+### Очередь и “свободные воркеры”
+- Сервера `5/5` в UI = воркеры отвечают, но не значит что они свободны.
+- Чтобы не копить очередь на стороне воркеров, реализована **backend-очередь**:
+  - `Task.status="created"` = задача ожидает раздачи.
+  - Background dispatcher раз в ~30 сек смотрит статус воркеров и отправляет `created` задачи только на реально свободные.
+- Глобальный статус очереди: backend агрегирует данные воркеров и отдает `GET /api/queue/status`.
+  - UI форматирует `estimated_wait_seconds` локализованно на фронте (не использует `estimated_wait_formatted`).
+
+## Background worker в бекенде (гарантия “залил и ушел”)
+- В FastAPI есть in-process background loop (`background_task_updater()` в `autorig-online/backend/main.py`):
+  - раздает queued задачи на свободные воркеры,
+  - обновляет прогресс всех `processing` задач,
+  - делает это **параллельно с ограничением** (bounded concurrency), чтобы цикл не растягивался на минуты при большом числе задач.
+- Backend должен продолжать работу **без фронтенда**: прогресс должен обновляться в БД, и email должен уходить при `done`.
+- Рестарт сервера/сервиса:
+  - временно прерывает in-process фоновые `asyncio` таски,
+  - но состояние задач в БД сохраняется, и после старта сервис продолжает обновления.
+  - возможный edge-case: если перезапуск случился в момент FBX pre-step (async task), задача может потребовать ручного restart.
+
+## Таски (UX + API)
+- Т1. Страница таска (`autorig-online/static/task.html`) показывает:
+  - интерактивный прогресс бар,
+  - статус очереди,
+  - список готовых файлов,
+  - генерацию видео-превью (когда готово),
+  - отдельный блок FBX→GLB (если применимо).
+- Т2. Restart task:
+  - Появляется по таймауту (для `error` — 1 мин).
+  - Рестарт выполняется **с тем же `task_id`** (сброс состояния и повторный запуск пайплайна).
+- Admin может:
+  - смотреть таски пользователя,
+  - рестартить,
+  - удалять таски,
+  - рестартить сервис (чтобы применить изменения).
+
+## Админка
+- UI: `autorig-online/static/admin.html` + `autorig-online/static/js/admin.js`
+- Backend endpoints в `autorig-online/backend/main.py`:
+  - список пользователей, баланс, список тасков
+  - restart task
+  - delete task (`DELETE /api/admin/task/{task_id}`)
+  - restart service (`POST /api/admin/service/restart`)
+
+## Монетизация / кредиты (фримиум)
+- Фримиум модель:
+  - `free_credits_for_new_users` (анон) = `ANON_FREE_LIMIT` (сейчас 3)
+  - кредиты пользователя = `users.balance_credits`
+  - списание кредита при создании таска — на бекенде.
+- Важно: при 0 кредитов у залогиненного юзера UI ведет на `/buy-credits`.
+
+## Оплата (Gumroad)
+- Источник истины: **только webhook** `POST /api-gumroad` (form-urlencoded).
+- Idempotency по `sale_id` (повторные пинги не начисляют).
+- Привязка покупки к пользователю: `url_params[userid]` = **email пользователя** (не Gumroad email).
+- Gumroad email сохраняется отдельно как `users.gumroad_email` (не ключ идентификации).
+- BuyCredits:
+  - `/buy-credits` — страница покупки + API keys
+  - `/payment/success` — информационная страница (не начисляет кредиты)
+
+## Деплой и статика (важный момент)
+- В проде nginx/сайт могут отдавать статику из `/opt/autorig-online/static`, а рабочая копия лежит в `/root/autorig-online`.
+- Значит для обновления UI надо деплоить изменения в `/opt/autorig-online/...` и (если нужно) рестартить `autorig.service`.
