@@ -1254,27 +1254,72 @@ async def proxy_video(
     """Serve task video.
 
     Priority:
-    1) If cached locally: /var/autorig/videos/{task_id}.mp4 -> FileResponse (Range supported)
-    2) Else download from worker to cache, then FileResponse
+    1) If cached locally: /var/autorig/videos/{task_id}.mp4 (supports Range for Chrome/Edge)
+    2) Else download from worker to cache, then serve from local cache
     """
     import os
+    import re
     import httpx
+    from fastapi.responses import StreamingResponse
 
-    # Local cache (runtime)
     cache_dir = "/var/autorig/videos"
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"{task_id}.mp4")
 
+    def _serve_cached() -> Response:
+        file_size = os.path.getsize(cache_path)
+        range_header = request.headers.get("range")
+
+        base_headers = {
+            "Content-Disposition": f"inline; filename={task_id}_video.mp4",
+            "Cache-Control": "public, max-age=86400",
+            "Accept-Ranges": "bytes",
+        }
+
+        # HEAD without Range
+        if request.method == "HEAD" and not range_header:
+            return Response(status_code=200, headers={**base_headers, "Content-Length": str(file_size)})
+
+        if not range_header:
+            return FileResponse(cache_path, media_type="video/mp4", headers={**base_headers, "Content-Length": str(file_size)})
+
+        m = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if not m:
+            return FileResponse(cache_path, media_type="video/mp4", headers={**base_headers, "Content-Length": str(file_size)})
+
+        start = int(m.group(1))
+        end = int(m.group(2)) if m.group(2) else (file_size - 1)
+        if start >= file_size:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}", **base_headers})
+
+        end = min(end, file_size - 1)
+        length = end - start + 1
+
+        headers = {
+            **base_headers,
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Content-Length": str(length),
+        }
+
+        if request.method == "HEAD":
+            return Response(status_code=206, headers=headers)
+
+        def iterfile():
+            with open(cache_path, "rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(1024 * 256, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        return StreamingResponse(iterfile(), status_code=206, media_type="video/mp4", headers=headers)
+
     # Serve cached if present
     if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
-        return FileResponse(
-            cache_path,
-            media_type="video/mp4",
-            headers={
-                "Content-Disposition": f"inline; filename={task_id}_video.mp4",
-                "Cache-Control": "public, max-age=86400"
-            }
-        )
+        return _serve_cached()
 
     task = await get_task_by_id(db, task_id)
     if not task:
@@ -1310,14 +1355,7 @@ async def proxy_video(
     if not (os.path.exists(cache_path) and os.path.getsize(cache_path) > 0):
         raise HTTPException(status_code=404, detail="Video not available")
 
-    return FileResponse(
-        cache_path,
-        media_type="video/mp4",
-        headers={
-            "Content-Disposition": f"inline; filename={task_id}_video.mp4",
-            "Cache-Control": "public, max-age=86400"
-        }
-    )
+    return _serve_cached()
 
 
 @app.get("/api/file/{task_id}/{file_index}")
