@@ -991,7 +991,7 @@ async def api_get_gallery(
     )
 
 
-@app.get("/api/thumb/{task_id}")
+@app.api_route("/api/thumb/{task_id}", methods=["GET", "HEAD"])
 async def api_task_thumbnail(task_id: str, db: AsyncSession = Depends(get_db)):
     """Return cached JPEG thumbnail for a task (gallery preview)."""
     import os
