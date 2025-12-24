@@ -374,7 +374,7 @@ const App = {
             console.error('Failed to load gallery:', e);
             grid.innerHTML = `<div class="card" style="padding: 1rem; color: var(--text-muted)">-</div>`;
         }
-    }
+    },
     async loadHistory() {
         const container = document.getElementById('history-list');
         if (!container) return;
