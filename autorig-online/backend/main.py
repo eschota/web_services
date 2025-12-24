@@ -1345,6 +1345,7 @@ async def proxy_video(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
     if not task.video_url:
         raise HTTPException(status_code=404, detail="Video not available")
 
@@ -1354,30 +1355,7 @@ async def proxy_video(
         await cache_task_video_by_id(task_id)
     except Exception:
         # Fallback: inline download (no lock)
-        # If cached file exists, usually serve immediately.
-    # BUT: if HDRP preview exists, and our cache was created earlier from a fallback image,
-    # refresh once when the remote Content-Length differs from local size.
-    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
-        try:
-            local_size = os.path.getsize(cache_path)
-            if remote_url and (target_name in remote_url):
-                async with httpx.AsyncClient() as client:
-                    h = await client.head(remote_url, timeout=10.0, follow_redirects=True)
-                    if h.status_code == 200:
-                        cl = h.headers.get('content-length')
-                        if cl and cl.isdigit() and int(cl) != local_size:
-                            # Refresh cache with the HDRP thumbnail
-                            r2 = await client.get(remote_url, timeout=30.0, follow_redirects=True)
-                            if r2.status_code == 200 and r2.content:
-                                with open(tmp_path, 'wb') as f:
-                                    f.write(r2.content)
-                                os.replace(tmp_path, cache_path)
-        except Exception:
-            pass
-
-        return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
-
-    tmp_path = cache_path + ".tmp"
+        tmp_path = cache_path + ".tmp"
         try:
             async with httpx.AsyncClient() as client:
                 async with client.stream("GET", task.video_url, timeout=120.0, follow_redirects=True) as r:
