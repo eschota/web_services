@@ -1008,6 +1008,7 @@ async def api_task_thumbnail(task_id: str, db: AsyncSession = Depends(get_db)):
     cache_dir = "/var/autorig/thumbnails"
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"{task_id}.jpg")
+    tmp_path = cache_path + ".tmp"
 
     # Prefer HDRP preview render from task output URLs
     target_name = "Unity_HDRP_Render_2_view.jpg"
@@ -1053,7 +1054,6 @@ async def api_task_thumbnail(task_id: str, db: AsyncSession = Depends(get_db)):
 
         return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
-    tmp_path = cache_path + ".tmp"
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(remote_url, timeout=30.0, follow_redirects=True)
