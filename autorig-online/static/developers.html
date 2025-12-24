@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Developers | AutoRig.online</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container">
+      <div class="header-inner">
+        <a href="/" class="logo">
+          <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40" />
+          <span>AutoRig</span>
+        </a>
+        <nav class="nav">
+          <a href="/guides" class="nav-link" data-i18n="nav_guides">Guides</a>
+          <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+          <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
+          <a href="/developers" class="nav-link active" data-i18n="nav_api">API</a>
+        </nav>
+        <div class="header-actions">
+          <div class="lang-selector">
+            <button class="lang-btn">
+              <span>EN</span>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+            </button>
+            <div class="lang-dropdown">
+              <button class="lang-option" data-lang="en">English</button>
+              <button class="lang-option" data-lang="ru">Русский</button>
+              <button class="lang-option" data-lang="zh">中文</button>
+              <button class="lang-option" data-lang="hi">हिंदी</button>
+            </div>
+          </div>
+          <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main style="padding: 3rem 0;">
+    <div class="container" style="max-width: 980px;">
+      <div class="card" style="padding: 2rem;">
+        <h1 style="margin-top:0;" data-i18n="api_page_title">REST API</h1>
+        <p style="color: var(--text-secondary);" data-i18n="api_page_desc">
+          Use AutoRig REST API to automate uploads, task tracking, and result downloads.
+        </p>
+
+        <div class="alert alert-info" style="margin-top: 1rem;">
+          <span data-i18n="api_contact">For API access and integration details, please contact:</span>
+          <strong style="margin-left: 0.5rem;">eschota@gmail.com</strong>
+        </div>
+
+        <div class="card" style="padding: 1.25rem; margin-top: 1rem;">
+          <div style="font-weight: 600;" data-i18n="api_keys_where_title">API Keys</div>
+          <div style="color: var(--text-secondary); margin-top: 0.5rem;" data-i18n="api_keys_where_desc">
+            API keys are generated on the Buy page.
+          </div>
+          <div style="margin-top: 0.75rem;">
+            <a class="btn btn-primary" href="/buy-credits" data-i18n="nav_buy">Buy</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="container"><p data-i18n="footer_text">AutoRig Online © 2025</p></div>
+  </footer>
+
+  <script src="/static/js/i18n.js"></script>
+  <script>
+    function setTheme(theme){
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem('autorig_theme', theme);
+      const toggle=document.getElementById('theme-toggle');
+      if(toggle) toggle.textContent = theme === 'dark' ? '☀️' : '🌙';
+    }
+    function setupThemeToggle(){
+      const saved=localStorage.getItem('autorig_theme')||'dark';
+      setTheme(saved);
+      const toggle=document.getElementById('theme-toggle');
+      toggle?.addEventListener('click',()=>{
+        const cur=document.documentElement.getAttribute('data-theme');
+        setTheme(cur==='dark'?'light':'dark');
+      });
+    }
+    function setupLangSelector(){
+      const btn=document.querySelector('.lang-btn');
+      const dropdown=document.querySelector('.lang-dropdown');
+      btn?.addEventListener('click',()=>dropdown?.classList.toggle('open'));
+      document.querySelectorAll('.lang-option').forEach(opt=>{
+        opt.addEventListener('click', async ()=>{
+          const lang=opt.getAttribute('data-lang');
+          await I18n.setLanguage(lang);
+          dropdown?.classList.remove('open');
+        });
+      });
+    }
+    document.addEventListener('DOMContentLoaded', async ()=>{
+      await I18n.init();
+      setupThemeToggle();
+      setupLangSelector();
+    });
+  </script>
+</body>
+</html>

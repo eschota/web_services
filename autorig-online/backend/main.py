@@ -1489,6 +1489,14 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
     return FileResponse(str(STATIC_DIR / "admin.html"))
 
 
+
+
+
+
+@app.get("/developers")
+async def developers_page():
+    """Serve Developers / API info page"""
+    return FileResponse(str(STATIC_DIR / "developers.html"))
 @app.get("/buy-credits")
 async def buy_credits_page():
     """Serve Buy Credits page"""
