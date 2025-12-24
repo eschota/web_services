@@ -1008,9 +1008,26 @@ async def api_task_thumbnail(task_id: str, db: AsyncSession = Depends(get_db)):
     if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
         return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
-    worker_base = get_worker_base_url(task.worker_api)
-    guid = task.guid
-    remote_url = f"{worker_base}/converter/glb/{guid}/{guid}_100k/{guid}_VRayCam001_view.jpg"
+    # Prefer HDRP preview render from task output URLs
+    target_name = "Unity_HDRP_Render_2_view.jpg"
+    remote_url = None
+
+    for u in (task.ready_urls or []):
+        if target_name in u:
+            remote_url = u
+            break
+
+    if not remote_url:
+        for u in (task.output_urls or []):
+            if target_name in u:
+                remote_url = u
+                break
+
+    # Fallback (legacy) if HDRP preview not present
+    if not remote_url:
+        worker_base = get_worker_base_url(task.worker_api)
+        guid = task.guid
+        remote_url = f"{worker_base}/converter/glb/{guid}/{guid}_100k/{guid}_VRayCam001_view.jpg"
 
     tmp_path = cache_path + ".tmp"
     try:
