@@ -384,7 +384,7 @@ const App = {
                 }
             });
 
-            // Lazy video: only create/load/play on hover (keeps CPU low and shows correct vertical preview)
+            // Lazy video: create/load on hover AND autoplay when visible (IntersectionObserver)
             grid.querySelectorAll('a[data-task-id]').forEach(card => {
                 const media = card.querySelector('.media');
                 const thumb = media?.querySelector('img');
@@ -419,6 +419,69 @@ const App = {
                 card.addEventListener('mouseenter', startVideo);
                 card.addEventListener('mouseleave', stopVideo);
             });
+
+            // Autoplay previews when they enter viewport (muted inline videos).
+            // Limits concurrent playback to keep CPU low.
+            const MAX_AUTOPLAY = 2;
+            const playing = new Set();
+
+            const ensureAutoplayBudget = () => {
+                while (playing.size > MAX_AUTOPLAY) {
+                    const first = playing.values().next().value;
+                    if (!first) break;
+                    try { first.pause(); } catch (_) {}
+                    try { first.removeAttribute('src'); first.load(); } catch (_) {}
+                    try { first.remove(); } catch (_) {}
+                    playing.delete(first);
+                }
+            };
+
+            if ('IntersectionObserver' in window) {
+                const observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        const card = entry.target;
+                        const media = card.querySelector('.media');
+                        const thumb = media?.querySelector('img');
+                        if (!media) return;
+
+                        const videoUrl = card.getAttribute('data-video-url');
+                        const existing = media.querySelector('video');
+
+                        if (entry.isIntersecting) {
+                            // Start autoplay if not already playing
+                            if (!existing && videoUrl) {
+                                const v = document.createElement('video');
+                                v.src = videoUrl;
+                                v.muted = true;
+                                v.playsInline = true;
+                                v.loop = true;
+                                v.preload = 'metadata';
+                                v.style.position = 'absolute';
+                                v.style.inset = '0';
+                                v.style.width = '100%';
+                                v.style.height = '100%';
+                                v.style.objectFit = 'cover';
+                                media.appendChild(v);
+                                if (thumb) thumb.style.visibility = 'hidden';
+                                playing.add(v);
+                                ensureAutoplayBudget();
+                                v.play().catch(() => { /* ignore autoplay block */ });
+                            }
+                        } else {
+                            // Stop when leaving viewport
+                            if (existing) {
+                                try { existing.pause(); } catch (_) {}
+                                try { existing.removeAttribute('src'); existing.load(); } catch (_) {}
+                                existing.remove();
+                                playing.delete(existing);
+                                if (thumb) thumb.style.visibility = 'visible';
+                            }
+                        }
+                    });
+                }, { root: null, threshold: 0.55 });
+
+                grid.querySelectorAll('a[data-task-id]').forEach(card => observer.observe(card));
+            }
 
         } catch (e) {
             console.error('Failed to load gallery:', e);
