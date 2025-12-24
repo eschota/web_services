@@ -30,6 +30,8 @@ const App = {
         
         // Load history
         this.loadHistory();
+        // Load gallery preview
+        this.loadGalleryPreview();
         
         // Load queue status
         this.loadQueueStatus();
@@ -335,6 +337,44 @@ const App = {
     /**
      * Load task history
      */
+
+
+    /**
+     * Load public gallery preview (recent completed tasks with videos)
+     */
+    async loadGalleryPreview() {
+        const grid = document.getElementById('gallery-preview-grid');
+        if (!grid) return;
+
+        try {
+            const resp = await fetch('/api/gallery?per_page=6');
+            const data = await resp.json();
+            const items = (data && data.items) ? data.items : [];
+
+            if (!items.length) {
+                grid.innerHTML = `<div class="card" style="padding: 1rem; color: var(--text-muted)">—</div>`;
+                return;
+            }
+
+            grid.innerHTML = items.map(it => {
+                const taskUrl = `/task?id=${it.task_id}`;
+                const videoUrl = it.video_url;
+                const timeAgo = it.time_ago || '';
+                return `
+                    <a href="${taskUrl}" class="card" style="display:block; padding: 0.75rem; text-decoration:none;">
+                        <video src="${videoUrl}" muted playsinline loop autoplay style="width:100%; border-radius: var(--radius-sm); background: #000;"></video>
+                        <div style="margin-top: 0.5rem; display:flex; justify-content: space-between; gap: 0.75rem; align-items: center;">
+                            <div style="color: var(--text-secondary); font-size: 0.875rem;">${timeAgo}</div>
+                            <div class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">View</div>
+                        </div>
+                    </a>
+                `;
+            }).join('');
+        } catch (e) {
+            console.error('Failed to load gallery:', e);
+            grid.innerHTML = `<div class="card" style="padding: 1rem; color: var(--text-muted)">-</div>`;
+        }
+    }
     async loadHistory() {
         const container = document.getElementById('history-list');
         if (!container) return;
