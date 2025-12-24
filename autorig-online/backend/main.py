@@ -43,7 +43,7 @@ from models import (
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse
 )
-from workers import get_global_queue_status
+from workers import get_global_queue_status, get_worker_base_url
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -973,6 +973,7 @@ async def api_get_gallery(
         GalleryItem(
             task_id=t.id,
             video_url=f"/api/video/{t.id}",  # Use proxy URL
+            thumbnail_url=f"/api/thumb/{t.id}",
             created_at=t.created_at,
             time_ago=format_time_ago(t.created_at)
         )
@@ -988,6 +989,45 @@ async def api_get_gallery(
         per_page=per_page,
         has_more=has_more
     )
+
+
+@app.get("/api/thumb/{task_id}")
+async def api_task_thumbnail(task_id: str, db: AsyncSession = Depends(get_db)):
+    """Return cached JPEG thumbnail for a task (gallery preview)."""
+    import os
+    import httpx
+
+    task = await get_task_by_id(db, task_id)
+    if not task or not task.guid or not task.worker_api:
+        raise HTTPException(status_code=404, detail="Thumbnail not available")
+
+    # Local cache (runtime)
+    cache_dir = "/var/autorig/thumbnails"
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{task_id}.jpg")
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+        return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    worker_base = get_worker_base_url(task.worker_api)
+    guid = task.guid
+    remote_url = f"{worker_base}/converter/glb/{guid}/{guid}_100k/{guid}_VRayCam001_view.jpg"
+
+    tmp_path = cache_path + ".tmp"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(remote_url, timeout=30.0, follow_redirects=True)
+            if r.status_code != 200 or not r.content:
+                raise HTTPException(status_code=404, detail="Thumbnail not available")
+            with open(tmp_path, "wb") as f:
+                f.write(r.content)
+        os.replace(tmp_path, cache_path)
+        return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 # =============================================================================

@@ -359,10 +359,11 @@ const App = {
             grid.innerHTML = items.map(it => {
                 const taskUrl = `/task?id=${it.task_id}`;
                 const videoUrl = it.video_url;
+                const thumbUrl = it.thumbnail_url || `/api/thumb/${it.task_id}`;
                 const timeAgo = it.time_ago || '';
                 return `
-                    <a href="${taskUrl}" class="card" style="display:block; padding: 0.75rem; text-decoration:none;">
-                        <video src="${videoUrl}" muted playsinline preload="none" style="width:100%; border-radius: var(--radius-sm); background: #000;"></video>
+                    <a href="${taskUrl}" class="card" data-task-id="${it.task_id}" data-video-url="${videoUrl}" style="display:block; padding: 0.75rem; text-decoration:none;">
+                        <div class="media" style="position:relative; width:100%; aspect-ratio: 9 / 16; overflow:hidden; border-radius: var(--radius-sm); background:#000;"><img src="${thumbUrl}" loading="lazy" style="position:absolute; inset:0; width:100%; height:100%; object-fit: cover;" alt="" /></div>
                         <div style="margin-top: 0.5rem; display:flex; justify-content: space-between; gap: 0.75rem; align-items: center;">
                             <div style="color: var(--text-secondary); font-size: 0.875rem;">${timeAgo}</div>
                             <div class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">View</div>
@@ -371,19 +372,40 @@ const App = {
                 `;
             }).join('');
 
-            // Prevent high CPU: play previews only on hover (no autoplay).
-            grid.querySelectorAll('video').forEach(v => {
-                v.addEventListener('mouseenter', async () => {
-                    try {
-                        await v.play();
-                    } catch (_) { /* ignore */ }
-                });
-                v.addEventListener('mouseleave', () => {
-                    try {
-                        v.pause();
-                        v.currentTime = 0;
-                    } catch (_) { /* ignore */ }
-                });
+            // Lazy video: only create/load/play on hover (keeps CPU low and shows correct vertical preview)
+            grid.querySelectorAll('a[data-task-id]').forEach(card => {
+                const media = card.querySelector('.media');
+                const thumb = media?.querySelector('img');
+                const videoUrl = card.getAttribute('data-video-url');
+
+                const startVideo = async () => {
+                    if (!media || !videoUrl) return;
+                    if (media.querySelector('video')) return;
+                    const v = document.createElement('video');
+                    v.src = videoUrl;
+                    v.muted = true;
+                    v.playsInline = true;
+                    v.preload = 'metadata';
+                    v.style.position = 'absolute';
+                    v.style.inset = '0';
+                    v.style.width = '100%';
+                    v.style.height = '100%';
+                    v.style.objectFit = 'cover';
+                    media.appendChild(v);
+                    try { await v.play(); } catch (_) { /* ignore */ }
+                };
+
+                const stopVideo = () => {
+                    const v = media?.querySelector('video');
+                    if (!v) return;
+                    try { v.pause(); } catch (_) {}
+                    try { v.removeAttribute('src'); v.load(); } catch (_) {}
+                    v.remove();
+                    if (thumb) thumb.style.visibility = 'visible';
+                };
+
+                card.addEventListener('mouseenter', startVideo);
+                card.addEventListener('mouseleave', stopVideo);
             });
 
         } catch (e) {

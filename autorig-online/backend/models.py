@@ -176,6 +176,7 @@ class GalleryItem(BaseModel):
     """Gallery item for public gallery"""
     task_id: str
     video_url: str
+    thumbnail_url: str
     created_at: datetime
     time_ago: str
 
