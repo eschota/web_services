@@ -132,6 +132,32 @@
 
     "nav_home": "Главная",
     "nav_guides": "Руководства",
-    "nav_gallery": "Галерея"
+    "nav_gallery": "Галерея",
+    "nav_buy": "Купить",
+
+    "buy_title": "Купить кредиты",
+    "buy_subtitle": "Кредиты нужны, чтобы запускать задачи рига. Выбери пакет ниже.",
+    "buy_notice": "Кредиты начисляются автоматически в течение 1–2 минут после оплаты. Никакие файлы не будут скачаны.",
+    "buy_btn": "Купить",
+    "buy_login_required": "Пожалуйста, войди, чтобы купить кредиты.",
+
+    "payment_success_title": "Оплата прошла успешно",
+    "payment_success_desc": "Оплата прошла успешно. Кредиты появятся в ближайшее время (обычно 1–2 минуты).",
+    "payment_success_back": "На главную",
+    "payment_success_buy": "Купить ещё",
+
+    "api_access_title": "API доступ",
+    "api_access_desc": "Сгенерируй API ключ для использования REST API AutoRig из внешних инструментов.",
+    "api_access_generate": "Сгенерировать API Key",
+    "api_access_refresh": "Обновить",
+    "api_access_key_once": "Твой API ключ (показывается один раз):",
+    "api_access_keys": "Твои ключи",
+    "api_access_loading": "Загрузка...",
+    "api_access_no_keys": "API ключей ещё нет.",
+    "api_access_login_required": "Войди, чтобы управлять API ключами.",
+    "api_access_revoke": "Отозвать",
+    "api_access_revoke_confirm": "Отозвать этот API ключ?",
+    "api_access_copied": "Скопировано",
+    "btn_copy": "Копировать"
 }
 

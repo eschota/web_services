@@ -92,6 +92,28 @@ class AuthStatusResponse(BaseModel):
 
 
 # =============================================================================
+# API Key Schemas
+# =============================================================================
+class ApiKeyItem(BaseModel):
+    """API key metadata (masked)."""
+    id: int
+    key_prefix: str
+    created_at: datetime
+    revoked_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+
+
+class ApiKeyListResponse(BaseModel):
+    keys: List[ApiKeyItem]
+
+
+class ApiKeyCreateResponse(BaseModel):
+    """Returned only once at creation/regeneration."""
+    api_key: str
+    key: ApiKeyItem
+
+
+# =============================================================================
 # Admin Schemas
 # =============================================================================
 class AdminUserListItem(BaseModel):

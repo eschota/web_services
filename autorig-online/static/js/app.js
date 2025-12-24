@@ -108,8 +108,10 @@ const App = {
                 startBtn.textContent = t('btn_login_continue');
                 startBtn.onclick = () => window.location.href = '/auth/login';
             } else if (this.state.creditsRemaining <= 0) {
-                startBtn.textContent = t('error_payment_required');
-                startBtn.disabled = true;
+                // Logged-in users with 0 credits should be redirected to Buy Credits page (no front-end credit logic)
+                startBtn.textContent = t('nav_buy');
+                startBtn.disabled = false;
+                startBtn.onclick = () => window.location.href = '/buy-credits';
             } else {
                 startBtn.textContent = t('btn_start');
                 startBtn.disabled = false;
@@ -314,7 +316,7 @@ const App = {
                     alert(t('error_login_required'));
                     window.location.href = '/auth/login';
                 } else if (response.status === 402) {
-                    alert(t('error_payment_required'));
+                    window.location.href = '/buy-credits';
                 } else {
                     alert(data.detail || t('error_generic'));
                 }

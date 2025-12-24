@@ -43,6 +43,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=True)
     picture = Column(String(512), nullable=True)
+    gumroad_email = Column(String(255), nullable=True)
     balance_credits = Column(Integer, default=0)
     total_tasks = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -140,6 +141,37 @@ class Session(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class GumroadSale(Base):
+    """
+    Gumroad ping record (idempotency + audit).
+    sale_id is unique and used to ignore duplicate webhook deliveries.
+    """
+    __tablename__ = "gumroad_sales"
+
+    sale_id = Column(String(255), primary_key=True)
+    user_email = Column(String(255), nullable=True, index=True)
+    product_permalink = Column(String(255), nullable=True)
+    gumroad_email = Column(String(255), nullable=True)
+    price = Column(String(64), nullable=True)
+    quantity = Column(Integer, nullable=True)
+    refunded = Column(Boolean, default=False)
+    test = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ApiKey(Base):
+    """User API keys (stored hashed)."""
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    key_prefix = Column(String(16), nullable=False, index=True)
+    key_hash = Column(String(64), nullable=False, index=True)  # sha256 hex
+    created_at = Column(DateTime, default=datetime.utcnow)
+    revoked_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+
+
 # =============================================================================
 # Database Initialization
 # =============================================================================
@@ -157,6 +189,7 @@ async def init_db():
                 except Exception:
                     # Column likely already exists, or DB doesn't support the statement.
                     pass
+            await _try_add_column("ALTER TABLE users ADD COLUMN gumroad_email VARCHAR(255)")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")

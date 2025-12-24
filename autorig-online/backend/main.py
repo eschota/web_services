@@ -9,6 +9,9 @@ import shutil
 import asyncio
 from datetime import datetime
 from typing import Optional
+import hashlib
+import hmac
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
@@ -16,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -24,13 +28,15 @@ from config import (
     APP_NAME, APP_URL, DEBUG, SECRET_KEY,
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
     RATE_LIMIT_TASKS_PER_MINUTE, ADMIN_EMAIL,
-    ANON_FREE_LIMIT
+    ANON_FREE_LIMIT,
+    GUMROAD_PRODUCT_CREDITS
 )
-from database import init_db, get_db, User, AnonSession
+from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey
 from models import (
     TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
     UserInfo, AnonInfo, AuthStatusResponse,
+    ApiKeyItem, ApiKeyListResponse, ApiKeyCreateResponse,
     AdminUserListItem, AdminUserListResponse,
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
@@ -210,7 +216,45 @@ async def get_current_user(
     """Get current authenticated user from session cookie"""
     session_token = request.cookies.get(SESSION_COOKIE)
     if not session_token:
-        return None
+        # API Key auth fallback (REST API usage)
+        api_key = request.headers.get("x-api-key")
+        auth = request.headers.get("authorization") or ""
+        if not api_key and auth.lower().startswith("bearer "):
+            api_key = auth.split(" ", 1)[1].strip()
+
+        if not api_key:
+            return None
+
+        # Expected format: ar_<prefix>_<secret>
+        prefix = None
+        if api_key.startswith("ar_") and api_key.count("_") >= 2:
+            try:
+                prefix = api_key.split("_", 2)[1]
+            except Exception:
+                prefix = None
+        if not prefix:
+            return None
+
+        key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        krs = await db.execute(
+            select(ApiKey).where(
+                ApiKey.key_prefix == prefix,
+                ApiKey.revoked_at.is_(None)
+            )
+        )
+        key_rec = krs.scalar_one_or_none()
+        if not key_rec:
+            return None
+        if not hmac.compare_digest(key_rec.key_hash, key_hash):
+            return None
+
+        urs = await db.execute(select(User).where(User.id == key_rec.user_id))
+        user = urs.scalar_one_or_none()
+        if user:
+            key_rec.last_used_at = datetime.utcnow()
+            await db.commit()
+        return user
+
     return await get_user_by_session(db, session_token)
 
 
@@ -376,6 +420,97 @@ async def auth_me(
 
 
 # =============================================================================
+# API Keys (User)
+# =============================================================================
+def _make_api_key() -> tuple[str, str, str]:
+    """
+    Returns (api_key_plain, prefix, sha256_hex_hash).
+    api_key format: ar_<prefix>_<secret>
+    """
+    secret = secrets.token_urlsafe(32)
+    prefix = secret[:8]
+    api_key = f"ar_{prefix}_{secret}"
+    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    return api_key, prefix, key_hash
+
+
+@app.get("/api/user/api-keys", response_model=ApiKeyListResponse)
+async def api_list_api_keys(
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    rs = await db.execute(select(ApiKey).where(ApiKey.user_id == user.id).order_by(ApiKey.created_at.desc()))
+    keys = rs.scalars().all()
+    return ApiKeyListResponse(
+        keys=[
+            ApiKeyItem(
+                id=k.id,
+                key_prefix=k.key_prefix,
+                created_at=k.created_at,
+                revoked_at=k.revoked_at,
+                last_used_at=k.last_used_at
+            )
+            for k in keys
+        ]
+    )
+
+
+@app.post("/api/user/api-keys", response_model=ApiKeyCreateResponse)
+async def api_create_api_key(
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    # Revoke existing active keys (keep history)
+    rs = await db.execute(
+        select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.revoked_at.is_(None))
+    )
+    active = rs.scalars().all()
+    now = datetime.utcnow()
+    for k in active:
+        k.revoked_at = now
+
+    api_key, prefix, key_hash = _make_api_key()
+    rec = ApiKey(user_id=user.id, key_prefix=prefix, key_hash=key_hash)
+    db.add(rec)
+    await db.commit()
+    await db.refresh(rec)
+
+    return ApiKeyCreateResponse(
+        api_key=api_key,
+        key=ApiKeyItem(
+            id=rec.id,
+            key_prefix=rec.key_prefix,
+            created_at=rec.created_at,
+            revoked_at=rec.revoked_at,
+            last_used_at=rec.last_used_at
+        )
+    )
+
+
+@app.post("/api/user/api-keys/{key_id}/revoke", status_code=200)
+async def api_revoke_api_key(
+    key_id: int,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    rs = await db.execute(select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == user.id))
+    rec = rs.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if rec.revoked_at is None:
+        rec.revoked_at = datetime.utcnow()
+        await db.commit()
+    return {"ok": True, "key_id": key_id}
+
+
+# =============================================================================
 # Task Endpoints
 # =============================================================================
 @app.post("/api/task/create", response_model=TaskCreateResponse)
@@ -459,6 +594,83 @@ async def api_create_task(
         status=task.status,
         message=error
     )
+
+
+# =============================================================================
+# Gumroad (Payments)
+# =============================================================================
+@app.post("/api-gumroad")
+async def api_gumroad_ping(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Gumroad Ping webhook (application/x-www-form-urlencoded).
+    Credits are granted ONLY from this endpoint (idempotent via sale_id).
+    """
+    form = await request.form()
+    sale_id = (form.get("sale_id") or "").strip()
+    product_permalink = (form.get("product_permalink") or "").strip()
+    gumroad_email = (form.get("email") or "").strip()
+    refunded = str(form.get("refunded") or "").lower() == "true"
+    test = str(form.get("test") or "").lower() == "true"
+    # per spec: url_params[userid] binds purchase to the user; you confirmed it is user email
+    user_identifier = (form.get("url_params[userid]") or "").strip()
+    price = (form.get("price") or "").strip()
+    quantity_raw = (form.get("quantity") or "").strip()
+    try:
+        quantity = int(quantity_raw) if quantity_raw else None
+    except Exception:
+        quantity = None
+
+    if not sale_id:
+        raise HTTPException(status_code=400, detail="Missing sale_id")
+
+    # Idempotency: save the ping; duplicates must not re-credit
+    sale = GumroadSale(
+        sale_id=sale_id,
+        user_email=user_identifier or None,
+        product_permalink=product_permalink or None,
+        gumroad_email=gumroad_email or None,
+        price=price or None,
+        quantity=quantity,
+        refunded=refunded,
+        test=test
+    )
+    db.add(sale)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return {"ok": True, "duplicate": True}
+
+    # Validate userid
+    if not user_identifier:
+        print(f"[Gumroad] Missing url_params[userid] for sale_id={sale_id}")
+        return {"ok": False, "error": "missing_userid"}
+
+    # Ignore test/refunded
+    if test or refunded:
+        return {"ok": True, "credited": False}
+
+    credits = GUMROAD_PRODUCT_CREDITS.get(product_permalink)
+    if not credits:
+        print(f"[Gumroad] Unknown product_permalink={product_permalink} sale_id={sale_id}")
+        return {"ok": False, "error": "unknown_product"}
+
+    # userid = user email
+    urs = await db.execute(select(User).where(User.email == user_identifier))
+    user = urs.scalar_one_or_none()
+    if not user:
+        print(f"[Gumroad] User not found for userid(email)={user_identifier} sale_id={sale_id}")
+        return {"ok": False, "error": "user_not_found"}
+
+    user.balance_credits += credits
+    if gumroad_email:
+        user.gumroad_email = gumroad_email
+    await db.commit()
+
+    return {"ok": True, "credited": True, "credits_added": credits, "user_email": user.email}
 
 
 @app.get("/api/task/{task_id}", response_model=TaskStatusResponse)
@@ -1268,6 +1480,18 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
     if not user or user.email != ADMIN_EMAIL:
         return RedirectResponse(url="/auth/login")
     return FileResponse(str(STATIC_DIR / "admin.html"))
+
+
+@app.get("/buy-credits")
+async def buy_credits_page():
+    """Serve Buy Credits page"""
+    return FileResponse(str(STATIC_DIR / "buy-credits.html"))
+
+
+@app.get("/payment/success")
+async def payment_success_page():
+    """Serve payment success info page (no credit logic here)."""
+    return FileResponse(str(STATIC_DIR / "payment-success.html"))
 
 
 # SEO pages

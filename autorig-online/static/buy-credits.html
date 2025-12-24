@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buy Credits | AutoRig.online</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
+                    <span>AutoRig</span>
+                </a>
+
+                <nav class="nav">
+                    <a href="/" class="nav-link" data-i18n="nav_home">Home</a>
+                    <a href="/guides" class="nav-link" data-i18n="nav_guides">Guides</a>
+                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                    <a href="/buy-credits" class="nav-link active" data-i18n="nav_buy">Buy</a>
+                </nav>
+
+                <div class="header-actions">
+                    <div class="credits-badge">
+                        <span id="credits-label" data-i18n="credits_remaining">Credits remaining</span>
+                        <span class="count" id="credits-count">-</span>
+                    </div>
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                <path d="M3 4.5L6 7.5L9 4.5"/>
+                            </svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main style="padding: 3rem 0;">
+        <div class="container" style="max-width: 980px;">
+            <div class="card" style="padding: 2rem;">
+                <h1 style="margin-top: 0;" data-i18n="buy_title">Buy Credits</h1>
+                <p style="color: var(--text-secondary);" data-i18n="buy_subtitle">
+                    Credits are used to start rigging tasks. You can buy a bundle below.
+                </p>
+                <p style="color: var(--text-muted); margin-top: 0.5rem;" data-i18n="buy_notice">
+                    Credits are added automatically within 1–2 minutes after payment. No files will be downloaded.
+                </p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem;">
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 style="margin-top: 0;">100 credits</h3>
+                    <button class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                </div>
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 style="margin-top: 0;">500 credits</h3>
+                    <button class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                </div>
+                <div class="card" style="padding: 1.5rem;">
+                    <h3 style="margin-top: 0;">1000 credits</h3>
+                    <button class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                </div>
+            </div>
+
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="api_access_title">API Access</h2>
+                <p style="color: var(--text-secondary);" data-i18n="api_access_desc">
+                    Generate an API key to use AutoRig REST API from external tools.
+                </p>
+
+                <div style="display:flex; gap: 0.75rem; align-items:center; flex-wrap: wrap; margin-top: 1rem;">
+                    <button class="btn btn-secondary" id="btn-generate-key" data-i18n="api_access_generate">Generate API Key</button>
+                    <button class="btn btn-ghost" id="btn-refresh-keys" data-i18n="api_access_refresh">Refresh</button>
+                </div>
+
+                <div id="api-key-once" class="alert alert-info hidden" style="margin-top: 1rem;">
+                    <div style="display:flex; gap: 0.75rem; align-items:center; justify-content: space-between; flex-wrap: wrap;">
+                        <div>
+                            <div style="font-weight: 600;" data-i18n="api_access_key_once">Your API key (shown once):</div>
+                            <code id="api-key-plain" style="display:block; margin-top:0.5rem; word-break: break-all;"></code>
+                        </div>
+                        <button class="btn btn-ghost" id="btn-copy-key" data-i18n="btn_copy">Copy</button>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1rem;">
+                    <div style="font-weight:600; margin-bottom: 0.5rem;" data-i18n="api_access_keys">Your keys</div>
+                    <div id="api-keys-list" style="color: var(--text-muted);">-</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p data-i18n="footer_text">AutoRig Online © 2025</p>
+        </div>
+    </footer>
+
+    <script src="/static/js/i18n.js"></script>
+    <script>
+        async function loadAuth() {
+            const resp = await fetch('/auth/me');
+            return await resp.json();
+        }
+
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('autorig_theme', theme);
+            const toggle = document.getElementById('theme-toggle');
+            if (toggle) toggle.textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
+
+        function setupThemeToggle() {
+            const savedTheme = localStorage.getItem('autorig_theme') || 'dark';
+            setTheme(savedTheme);
+            const toggle = document.getElementById('theme-toggle');
+            toggle?.addEventListener('click', () => {
+                const current = document.documentElement.getAttribute('data-theme');
+                setTheme(current === 'dark' ? 'light' : 'dark');
+            });
+        }
+
+        function setupLangSelector() {
+            const btn = document.querySelector('.lang-btn');
+            const dropdown = document.querySelector('.lang-dropdown');
+            btn?.addEventListener('click', () => dropdown?.classList.toggle('open'));
+            document.querySelectorAll('.lang-option').forEach(opt => {
+                opt.addEventListener('click', async () => {
+                    const lang = opt.getAttribute('data-lang');
+                    await I18n.setLanguage(lang);
+                    dropdown?.classList.remove('open');
+                });
+            });
+        }
+
+        async function updateCreditsUI() {
+            try {
+                const data = await loadAuth();
+                const creditsEl = document.getElementById('credits-count');
+                const labelEl = document.getElementById('credits-label');
+                if (labelEl) labelEl.textContent = t('credits_remaining');
+                if (creditsEl) creditsEl.textContent = data.credits_remaining ?? '-';
+                window.__authedUser = data.user || null;
+            } catch (e) {
+                console.error('Auth load failed:', e);
+            }
+        }
+
+        function gumroadUrl(permalink, useridEmail) {
+            const base = `https://u3d.gumroad.com/l/${permalink}`;
+            const params = new URLSearchParams();
+            if (useridEmail) params.set('userid', useridEmail);
+            return `${base}?${params.toString()}`;
+        }
+
+        function setupBuyButtons() {
+            const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
+            const go = (p) => {
+                const uid = getUserid();
+                if (!uid) {
+                    alert(t('buy_login_required'));
+                    window.location.href = '/auth/login';
+                    return;
+                }
+                window.location.href = gumroadUrl(p, uid);
+            };
+            document.getElementById('buy-100')?.addEventListener('click', () => go('autorig-100'));
+            document.getElementById('buy-500')?.addEventListener('click', () => go('autorig-500'));
+            document.getElementById('buy-1000')?.addEventListener('click', () => go('autorig-1000'));
+        }
+
+        async function loadApiKeys() {
+            const listEl = document.getElementById('api-keys-list');
+            listEl.textContent = t('api_access_loading');
+            const resp = await fetch('/api/user/api-keys');
+            if (!resp.ok) {
+                listEl.textContent = t('api_access_login_required');
+                return;
+            }
+            const data = await resp.json();
+            if (!data.keys || data.keys.length === 0) {
+                listEl.textContent = t('api_access_no_keys');
+                return;
+            }
+            listEl.innerHTML = data.keys.map(k => {
+                const revoked = k.revoked_at ? ' (revoked)' : '';
+                return `
+                    <div style="display:flex; align-items:center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+                        <div>
+                            <div><span style="color: var(--text-secondary);">ar_${k.key_prefix}_…</span>${revoked}</div>
+                            <div style="color: var(--text-muted); font-size: 0.85rem;">${new Date(k.created_at).toLocaleString()}</div>
+                        </div>
+                        ${k.revoked_at ? '' : `<button class="btn btn-ghost" data-key-id="${k.id}">${t('api_access_revoke')}</button>`}
+                    </div>
+                `;
+            }).join('');
+            listEl.querySelectorAll('button[data-key-id]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.getAttribute('data-key-id');
+                    if (!confirm(t('api_access_revoke_confirm'))) return;
+                    await fetch(`/api/user/api-keys/${id}/revoke`, { method: 'POST' });
+                    await loadApiKeys();
+                });
+            });
+        }
+
+        async function generateApiKey() {
+            const resp = await fetch('/api/user/api-keys', { method: 'POST' });
+            if (!resp.ok) {
+                alert(t('api_access_login_required'));
+                window.location.href = '/auth/login';
+                return;
+            }
+            const data = await resp.json();
+            const box = document.getElementById('api-key-once');
+            const code = document.getElementById('api-key-plain');
+            code.textContent = data.api_key;
+            box.classList.remove('hidden');
+            await loadApiKeys();
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await I18n.init();
+            setupThemeToggle();
+            setupLangSelector();
+            await updateCreditsUI();
+            setupBuyButtons();
+
+            document.getElementById('btn-refresh-keys')?.addEventListener('click', loadApiKeys);
+            document.getElementById('btn-generate-key')?.addEventListener('click', generateApiKey);
+            document.getElementById('btn-copy-key')?.addEventListener('click', async () => {
+                const v = document.getElementById('api-key-plain').textContent;
+                await navigator.clipboard.writeText(v);
+                alert(t('api_access_copied'));
+            });
+
+            await loadApiKeys();
+        });
+    </script>
+</body>
+</html>
+

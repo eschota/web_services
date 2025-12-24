@@ -83,3 +83,13 @@ RATE_LIMIT_TASKS_PER_MINUTE = 5
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@autorig.online")
 
+# =============================================================================
+# Gumroad
+# =============================================================================
+# Gumroad product_permalink -> credits mapping
+GUMROAD_PRODUCT_CREDITS = {
+    "autorig-100": 100,
+    "autorig-500": 500,
+    "autorig-1000": 1000,
+}
+
