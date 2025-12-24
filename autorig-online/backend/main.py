@@ -1008,8 +1008,6 @@ async def api_task_thumbnail(task_id: str, db: AsyncSession = Depends(get_db)):
     cache_dir = "/var/autorig/thumbnails"
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"{task_id}.jpg")
-    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
-        return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
     # Prefer HDRP preview render from task output URLs
     target_name = "Unity_HDRP_Render_2_view.jpg"
@@ -1031,6 +1029,29 @@ async def api_task_thumbnail(task_id: str, db: AsyncSession = Depends(get_db)):
         worker_base = get_worker_base_url(task.worker_api)
         guid = task.guid
         remote_url = f"{worker_base}/converter/glb/{guid}/{guid}_100k/{guid}_VRayCam001_view.jpg"
+
+    # If cached file exists, usually serve immediately.
+    # BUT: if HDRP preview exists, and our cache was created earlier from a fallback image,
+    # refresh once when the remote Content-Length differs from local size.
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+        try:
+            local_size = os.path.getsize(cache_path)
+            if remote_url and (target_name in remote_url):
+                async with httpx.AsyncClient() as client:
+                    h = await client.head(remote_url, timeout=10.0, follow_redirects=True)
+                    if h.status_code == 200:
+                        cl = h.headers.get('content-length')
+                        if cl and cl.isdigit() and int(cl) != local_size:
+                            # Refresh cache with the HDRP thumbnail
+                            r2 = await client.get(remote_url, timeout=30.0, follow_redirects=True)
+                            if r2.status_code == 200 and r2.content:
+                                with open(tmp_path, 'wb') as f:
+                                    f.write(r2.content)
+                                os.replace(tmp_path, cache_path)
+        except Exception:
+            pass
+
+        return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
     tmp_path = cache_path + ".tmp"
     try:
@@ -1333,7 +1354,30 @@ async def proxy_video(
         await cache_task_video_by_id(task_id)
     except Exception:
         # Fallback: inline download (no lock)
-        tmp_path = cache_path + ".tmp"
+        # If cached file exists, usually serve immediately.
+    # BUT: if HDRP preview exists, and our cache was created earlier from a fallback image,
+    # refresh once when the remote Content-Length differs from local size.
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+        try:
+            local_size = os.path.getsize(cache_path)
+            if remote_url and (target_name in remote_url):
+                async with httpx.AsyncClient() as client:
+                    h = await client.head(remote_url, timeout=10.0, follow_redirects=True)
+                    if h.status_code == 200:
+                        cl = h.headers.get('content-length')
+                        if cl and cl.isdigit() and int(cl) != local_size:
+                            # Refresh cache with the HDRP thumbnail
+                            r2 = await client.get(remote_url, timeout=30.0, follow_redirects=True)
+                            if r2.status_code == 200 and r2.content:
+                                with open(tmp_path, 'wb') as f:
+                                    f.write(r2.content)
+                                os.replace(tmp_path, cache_path)
+        except Exception:
+            pass
+
+        return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+
+    tmp_path = cache_path + ".tmp"
         try:
             async with httpx.AsyncClient() as client:
                 async with client.stream("GET", task.video_url, timeout=120.0, follow_redirects=True) as r:
