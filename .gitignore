@@ -116,3 +116,6 @@ __pycache__/
 
 # Python venv
 autorig-online/venv/
+venv/
+autorig-online/backend/db/
+uploads/

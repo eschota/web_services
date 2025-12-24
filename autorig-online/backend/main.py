@@ -112,17 +112,24 @@ async def background_task_updater():
                 if processing_tasks:
                     print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
 
-                    # Update tasks concurrently (bounded) so the loop doesn't take minutes when many tasks are processing
+                    # Update tasks concurrently (bounded). IMPORTANT: each update uses its own DB session
+                    # (AsyncSession is not safe to share across concurrent tasks).
                     semaphore = asyncio.Semaphore(8)
+                    task_ids = [t.id for t in processing_tasks]
 
-                    async def _update_one(t: Task):
+                    async def _update_one(task_id: str):
                         async with semaphore:
                             try:
-                                await update_task_progress(db, t)
+                                async with AsyncSessionLocal() as db2:
+                                    rs = await db2.execute(select(Task).where(Task.id == task_id))
+                                    t2 = rs.scalar_one_or_none()
+                                    if not t2:
+                                        return
+                                    await update_task_progress(db2, t2)
                             except Exception as e:
-                                print(f"[Background Worker] Error updating task {t.id}: {e}")
+                                print(f"[Background Worker] Error updating task {task_id}: {e}")
 
-                    await asyncio.gather(*[_update_one(t) for t in processing_tasks])
+                    await asyncio.gather(*[_update_one(tid) for tid in task_ids])
                 
         except Exception as e:
             print(f"[Background Worker] Error: {e}")
