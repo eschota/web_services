@@ -436,6 +436,10 @@ const Admin = {
                                     onclick="Admin.restartTask('${task.task_id}', this)">
                                 Restart
                             </button>
+                            <button class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; color: var(--error); border-color: rgba(239,71,111,0.35);"
+                                    onclick="Admin.deleteTask('${task.task_id}', this)">
+                                Delete
+                            </button>
                         </div>
                     </td>
                 </tr>
@@ -467,6 +471,35 @@ const Admin = {
         } catch (e) {
             console.error('Restart task error:', e);
             alert('Failed to restart task');
+        } finally {
+            if (btnEl) btnEl.disabled = false;
+        }
+    },
+
+    async deleteTask(taskId, btnEl) {
+        if (!taskId) return;
+        const ok = confirm(`Delete task ${taskId}? This cannot be undone.`);
+        if (!ok) return;
+
+        if (btnEl) btnEl.disabled = true;
+        try {
+            const resp = await fetch(`/api/admin/task/${taskId}`, { method: 'DELETE' });
+            const raw = await resp.text();
+            let data = {};
+            try { data = raw ? JSON.parse(raw) : {}; } catch (_) { data = {}; }
+
+            if (!resp.ok) {
+                alert(data.detail || raw || 'Failed to delete task');
+                return;
+            }
+
+            alert(`Task deleted: ${taskId}`);
+            if (this.selectedTasksUser?.id) {
+                await this.loadUserTasks(this.selectedTasksUser.id);
+            }
+        } catch (e) {
+            console.error('Delete task error:', e);
+            alert('Failed to delete task');
         } finally {
             if (btnEl) btnEl.disabled = false;
         }

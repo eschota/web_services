@@ -905,6 +905,22 @@ async def api_admin_user_tasks(
     )
 
 
+@app.delete("/api/admin/task/{task_id}")
+async def api_admin_delete_task(
+    task_id: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a task by id (admin only)."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    await db.delete(task)
+    await db.commit()
+    return {"ok": True, "task_id": task_id}
+
+
 @app.post("/api/admin/service/restart")
 async def api_admin_restart_service(
     request: Request,
