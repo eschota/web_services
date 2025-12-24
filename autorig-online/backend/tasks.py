@@ -23,6 +23,67 @@ from workers import (
 
 
 # =============================================================================
+# Local Media Cache (Runtime)
+# =============================================================================
+_VIDEO_CACHE_DIR = "/var/autorig/videos"
+_video_cache_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_video_cache_lock(task_id: str) -> asyncio.Lock:
+    # Best-effort in-process lock to avoid double-downloads
+    lock = _video_cache_locks.get(task_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _video_cache_locks[task_id] = lock
+    return lock
+
+
+async def cache_task_video_by_id(task_id: str) -> None:
+    """
+    Cache task video to local disk:
+      /var/autorig/videos/{task_id}.mp4
+    Safe to call multiple times; uses in-process lock and file existence check.
+    """
+    import os
+    import httpx
+
+    os.makedirs(_VIDEO_CACHE_DIR, exist_ok=True)
+    final_path = os.path.join(_VIDEO_CACHE_DIR, f"{task_id}.mp4")
+    tmp_path = final_path + ".tmp"
+
+    if os.path.exists(final_path) and os.path.getsize(final_path) > 0:
+        return
+
+    lock = _get_video_cache_lock(task_id)
+    async with lock:
+        if os.path.exists(final_path) and os.path.getsize(final_path) > 0:
+            return
+
+        async with AsyncSessionLocal() as db:
+            task = await get_task_by_id(db, task_id)
+            if not task or not task.video_url:
+                return
+
+            try:
+                async with httpx.AsyncClient() as client:
+                    async with client.stream("GET", task.video_url, timeout=120.0, follow_redirects=True) as r:
+                        if r.status_code != 200:
+                            return
+                        with open(tmp_path, "wb") as f:
+                            async for chunk in r.aiter_bytes(chunk_size=1024 * 256):
+                                if chunk:
+                                    f.write(chunk)
+                if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                    os.replace(tmp_path, final_path)
+            finally:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+
+
+# =============================================================================
 # Helper Functions
 # =============================================================================
 def find_file_by_pattern(ready_urls: List[str], pattern: str, quality: str = "100k") -> Optional[str]:
@@ -174,6 +235,7 @@ async def create_conversion_task(
     db.add(task)
     await db.commit()
     await db.refresh(task)
+
     
     return task, None
 
@@ -280,6 +342,7 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             task.status = "done"
     
     # Check video availability (for both processing and done tasks)
+    prev_video_ready = bool(task.video_ready)
     if task.guid and not task.video_ready:
         worker_base = get_worker_base_url(task.worker_api)
         video_ready, video_url = await check_video_availability(task.guid, worker_base)
@@ -290,6 +353,13 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     
     await db.commit()
     await db.refresh(task)
+
+    # Warm up local MP4 cache asynchronously when video becomes ready
+    try:
+        if (not prev_video_ready) and task.video_ready and task.video_url:
+            asyncio.create_task(cache_task_video_by_id(task.id))
+    except Exception:
+        pass
     
     # Send email notification if task just completed (100%)
     if was_processing and task.status == "done" and task.owner_type == "user":

@@ -171,6 +171,9 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    os.makedirs("/var/autorig/videos", exist_ok=True)
+    os.makedirs("/var/autorig/thumbnails", exist_ok=True)
+
     
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
@@ -1242,27 +1245,73 @@ async def serve_upload(token: str, filename: str):
 import httpx
 from fastapi.responses import StreamingResponse
 
-@app.get("/api/video/{task_id}")
+@app.api_route("/api/video/{task_id}", methods=["GET", "HEAD"])
 async def proxy_video(
     task_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Proxy video from worker to serve over HTTPS"""
+    """Serve task video.
+
+    Priority:
+    1) If cached locally: /var/autorig/videos/{task_id}.mp4 -> FileResponse (Range supported)
+    2) Else download from worker to cache, then FileResponse
+    """
+    import os
+    import httpx
+
+    # Local cache (runtime)
+    cache_dir = "/var/autorig/videos"
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{task_id}.mp4")
+
+    # Serve cached if present
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
+        return FileResponse(
+            cache_path,
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f"inline; filename={task_id}_video.mp4",
+                "Cache-Control": "public, max-age=86400"
+            }
+        )
+
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
     if not task.video_url:
         raise HTTPException(status_code=404, detail="Video not available")
-    
-    async def stream_video():
-        async with httpx.AsyncClient() as client:
-            async with client.stream("GET", task.video_url, timeout=60.0) as response:
-                async for chunk in response.aiter_bytes(chunk_size=65536):
-                    yield chunk
-    
-    return StreamingResponse(
-        stream_video(),
+
+    # Best-effort in-process lock via tasks.cache_task_video_by_id
+    try:
+        from tasks import cache_task_video_by_id
+        await cache_task_video_by_id(task_id)
+    except Exception:
+        # Fallback: inline download (no lock)
+        tmp_path = cache_path + ".tmp"
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream("GET", task.video_url, timeout=120.0, follow_redirects=True) as r:
+                    if r.status_code != 200:
+                        raise HTTPException(status_code=502, detail="Failed to fetch video")
+                    with open(tmp_path, "wb") as f:
+                        async for chunk in r.aiter_bytes(chunk_size=1024 * 256):
+                            if chunk:
+                                f.write(chunk)
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                os.replace(tmp_path, cache_path)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+
+    if not (os.path.exists(cache_path) and os.path.getsize(cache_path) > 0):
+        raise HTTPException(status_code=404, detail="Video not available")
+
+    return FileResponse(
+        cache_path,
         media_type="video/mp4",
         headers={
             "Content-Disposition": f"inline; filename={task_id}_video.mp4",
