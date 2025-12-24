@@ -372,6 +372,18 @@ const App = {
                 `;
             }).join('');
 
+            // Fade-in lazy thumbnails (styles.css keeps lazy images at opacity:0 until .loaded)
+            const imgs = grid.querySelectorAll('img[loading="lazy"]');
+            imgs.forEach(img => {
+                const markLoaded = () => img.classList.add('loaded');
+                img.addEventListener('load', markLoaded, { once: true });
+                img.addEventListener('error', markLoaded, { once: true });
+                if (img.complete) {
+                    // cached image may already be complete
+                    markLoaded();
+                }
+            });
+
             // Lazy video: only create/load/play on hover (keeps CPU low and shows correct vertical preview)
             grid.querySelectorAll('a[data-task-id]').forEach(card => {
                 const media = card.querySelector('.media');
