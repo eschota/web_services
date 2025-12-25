@@ -172,6 +172,18 @@ class ApiKey(Base):
     last_used_at = Column(DateTime, nullable=True)
 
 
+class TelegramChat(Base):
+    """Telegram chat subscription for notifications (/start)."""
+    __tablename__ = "telegram_chats"
+
+    chat_id = Column(Integer, primary_key=True)  # Telegram chat id (can be negative for groups)
+    chat_type = Column(String(32), nullable=True)  # private/group/supergroup/channel
+    title = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
+
+
 # =============================================================================
 # Database Initialization
 # =============================================================================
