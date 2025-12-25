@@ -21,6 +21,8 @@ from workers import (
     get_worker_base_url
 )
 
+from telegram_bot import broadcast_task_done
+
 
 # =============================================================================
 # Local Media Cache (Runtime)
@@ -358,6 +360,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     try:
         if (not prev_video_ready) and task.video_ready and task.video_url:
             asyncio.create_task(cache_task_video_by_id(task.id))
+            try:
+                asyncio.create_task(broadcast_task_done(task.id))
+            except Exception:
+                pass
     except Exception:
         pass
     
