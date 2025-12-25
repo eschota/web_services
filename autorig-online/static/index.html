@@ -23,7 +23,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=lazyfix-1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=support-1">
     
     <!-- Schema.org SoftwareApplication markup -->
     <script type="application/ld+json">
@@ -163,17 +163,29 @@
                     
                     <!-- Upload Panel -->
                     <div id="upload-panel">
-                        <div class="upload-zone" id="upload-zone">
-                            <img src="/static/images/icons/upload.svg" alt="Upload" class="upload-zone-icon" width="64" height="64">
-                            <div class="upload-zone-title" data-i18n="upload_title">Drop your 3D model here</div>
-                            <div class="upload-zone-subtitle" data-i18n="upload_subtitle">or click to browse (GLB, FBX, OBJ up to 100MB)</div>
-                            
-                            <div class="upload-zone-file hidden" id="file-info">
-                                <span>📄</span>
-                                <span id="file-name"></span>
-                                <img src="/static/images/icons/close.svg" alt="Remove" class="remove" id="remove-file" width="20" height="20">
+                        <div class="upload-row">
+                            <div class="upload-zone" id="upload-zone">
+                                <img src="/static/images/icons/upload.svg" alt="Upload" class="upload-zone-icon" width="64" height="64">
+                                <div class="upload-zone-title" data-i18n="upload_title">Drop your 3D model here</div>
+                                <div class="upload-zone-subtitle" data-i18n="upload_subtitle">or click to browse (GLB, FBX, OBJ up to 100MB)</div>
+
+                                <div class="upload-zone-file hidden" id="file-info">
+                                    <span>📄</span>
+                                    <span id="file-name"></span>
+                                    <img src="/static/images/icons/close.svg" alt="Remove" class="remove" id="remove-file" width="20" height="20">
+                                </div>
                             </div>
+
+                            <aside class="support-card" aria-label="Support">
+                                <div class="support-card-title" data-i18n="support_questions_title">Have questions?</div>
+                                <div class="support-card-desc" data-i18n="support_questions_desc">Join our Telegram support group</div>
+                                <a class="support-card-qr" href="https://t.me/autorigonline" target="_blank" rel="noopener noreferrer" aria-label="Telegram QR">
+                                    <img src="/static/images/telegram_qr.png" alt="Telegram QR" width="256" height="256" loading="lazy">
+                                </a>
+                                <a class="btn btn-ghost support-card-cta" href="https://t.me/autorigonline" target="_blank" rel="noopener noreferrer" data-i18n="support_questions_cta">Open Telegram</a>
+                            </aside>
                         </div>
+
                         <input type="file" id="file-input" accept=".glb,.fbx,.obj" hidden>
                     </div>
                     
@@ -314,7 +326,7 @@
     
     <!-- Scripts -->
     <script src="/static/js/i18n.js"></script>
-    <script src="/static/js/app.js?v=thumbs-6"></script>
+    <script src="/static/js/app.js?v=support-1"></script>
 </body>
 </html>
 

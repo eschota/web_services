@@ -395,6 +395,70 @@ h3 { font-size: 1.25rem; }
 /* =============================================================================
    Upload Zone
    ============================================================================= */
+
+/* =============================================================================
+   Upload + Support block
+   ============================================================================= */
+.upload-row {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.support-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    box-shadow: var(--shadow);
+}
+
+.support-card-title {
+    font-weight: 600;
+}
+
+.support-card-desc {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.support-card-qr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    background: rgba(0,0,0,0.2);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+
+.support-card-qr img {
+    width: 100%;
+    height: auto;
+    max-width: 220px;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.support-card-cta {
+    width: 100%;
+    justify-content: center;
+}
+
+@media (max-width: 768px) {
+    .upload-row {
+        grid-template-columns: 1fr;
+    }
+
+    .support-card {
+        box-shadow: none;
+    }
+}
+
 .upload-zone {
     border: 2px dashed var(--border);
     border-radius: var(--radius-lg);
