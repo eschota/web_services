@@ -59,6 +59,8 @@ from tasks import (
     find_file_by_pattern
 )
 
+from telegram_bot import broadcast_new_task, broadcast_task_done
+
 
 # =============================================================================
 # Background Task Worker
@@ -593,6 +595,12 @@ async def api_create_task(
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
     
+    # Telegram notify (best-effort, async)
+    try:
+        asyncio.create_task(broadcast_new_task(task.id, final_url, type))
+    except Exception:
+        pass
+
     # Deduct credit
     if user:
         await decrement_user_credits(db, user)
@@ -815,6 +823,12 @@ async def api_retry_task(
     if error and not new_task:
         raise HTTPException(status_code=500, detail=error)
     
+    # Telegram notify (best-effort, async)
+    try:
+        asyncio.create_task(broadcast_new_task(new_task.id, new_task.input_url, new_task.input_type))
+    except Exception:
+        pass
+
     # Mark old task as error
     task.status = "error"
     task.error_message = f"Retried as task {new_task.id}"
