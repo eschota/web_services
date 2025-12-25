@@ -1184,12 +1184,9 @@ h3 { font-size: 1.25rem; }
 
 
 /* Lazy loading support */
+/* IMPORTANT: do not hide all lazy images globally (can cause permanent black thumbs if .loaded is missed).
+   If you want fade-in for a specific image, apply your own class and transition there. */
 img[loading="lazy"] {
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-img[loading="lazy"].loaded {
     opacity: 1;
 }
 

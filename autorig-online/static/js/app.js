@@ -363,7 +363,7 @@ const App = {
                 const timeAgo = it.time_ago || '';
                 return `
                     <a href="${taskUrl}" class="card" data-task-id="${it.task_id}" data-video-url="${videoUrl}" style="display:block; padding: 0.75rem; text-decoration:none;">
-                        <div class="media" style="position:relative; width:100%; aspect-ratio: 9 / 16; overflow:hidden; border-radius: var(--radius-sm); background:#000;"><img src="${thumbUrl}" loading="lazy" style="position:absolute; inset:0; width:100%; height:100%; object-fit: cover;" alt="" /></div>
+                        <div class="media" style="position:relative; width:100%; aspect-ratio: 9 / 16; overflow:hidden; border-radius: var(--radius-sm); background:#000;"><img src="${thumbUrl}" loading="lazy" style="position:absolute; inset:0; width:100%; height:100%; object-fit: cover; z-index:2;" alt="" /></div>
                         <div style="margin-top: 0.5rem; display:flex; justify-content: space-between; gap: 0.75rem; align-items: center;">
                             <div style="color: var(--text-secondary); font-size: 0.875rem;">${timeAgo}</div>
                             <div class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">View</div>
@@ -403,7 +403,15 @@ const App = {
                     v.style.width = '100%';
                     v.style.height = '100%';
                     v.style.objectFit = 'cover';
+                    v.style.zIndex = '1';
                     media.appendChild(v);
+                    // Keep thumb visible until the video actually starts producing frames
+                    if (thumb) {
+                        thumb.style.transition = 'opacity 0.15s';
+                        thumb.style.opacity = '1';
+                    }
+                    v.addEventListener('playing', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
+                    v.addEventListener('loadeddata', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
                     try { await v.play(); } catch (_) { /* ignore */ }
                 };
 
@@ -413,7 +421,9 @@ const App = {
                     try { v.pause(); } catch (_) {}
                     try { v.removeAttribute('src'); v.load(); } catch (_) {}
                     v.remove();
-                    if (thumb) thumb.style.visibility = 'visible';
+                    if (thumb) {
+                        thumb.style.opacity = '1';
+                    }
                 };
 
                 card.addEventListener('mouseenter', startVideo);
@@ -461,8 +471,14 @@ const App = {
                                 v.style.width = '100%';
                                 v.style.height = '100%';
                                 v.style.objectFit = 'cover';
+                                v.style.zIndex = '1';
                                 media.appendChild(v);
-                                if (thumb) thumb.style.visibility = 'hidden';
+                                if (thumb) {
+                                    thumb.style.transition = 'opacity 0.15s';
+                                    thumb.style.opacity = '1';
+                                }
+                                v.addEventListener('playing', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
+                                v.addEventListener('loadeddata', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
                                 playing.add(v);
                                 ensureAutoplayBudget();
                                 v.play().catch(() => { /* ignore autoplay block */ });
@@ -474,7 +490,7 @@ const App = {
                                 try { existing.removeAttribute('src'); existing.load(); } catch (_) {}
                                 existing.remove();
                                 playing.delete(existing);
-                                if (thumb) thumb.style.visibility = 'visible';
+                                if (thumb) thumb.style.opacity = '1';
                             }
                         }
                     });
