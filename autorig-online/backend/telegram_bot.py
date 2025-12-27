@@ -129,7 +129,21 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
-async def broadcast_task_done(task_id: str) -> None:
+def _format_duration(seconds: int | None) -> str:
+    if seconds is None:
+        return ""
+    s = max(0, int(seconds))
+    h = s // 3600
+    m = (s % 3600) // 60
+    sec = s % 60
+    if h > 0:
+        return f"{h}h {m}m {sec}s"
+    if m > 0:
+        return f"{m}m {sec}s"
+    return f"{sec}s"
+
+
+async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = None) -> None:
     token = _get_token()
     if not token:
         return
@@ -139,17 +153,22 @@ async def broadcast_task_done(task_id: str) -> None:
     bot = Bot(token=token)
     url = _task_url(task_id)
 
-    # Ensure local MP4 cache exists
+    # Ensure local cache exists (final format: mp4)
     try:
         from tasks import cache_task_video_by_id
         await cache_task_video_by_id(task_id)
     except Exception:
         pass
 
-    video_path = f"/var/autorig/videos/{task_id}.mp4"
-    if not os.path.exists(video_path) or os.path.getsize(video_path) <= 0:
+    dur = _format_duration(duration_seconds)
+    stats_line = f"\n⏱ {dur}" if dur else ""
+
+    mp4_path = f"/var/autorig/videos/{task_id}.mp4"
+    video_path = mp4_path if (os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 0) else None
+
+    if not video_path:
         # Fallback: at least notify completion
-        text = f"✅ Task completed\n{url}"
+        text = f"✅ Task completed\n{url}{stats_line}"
         chat_ids = await get_active_chat_ids()
         if not chat_ids:
             return
@@ -176,7 +195,7 @@ async def broadcast_task_done(task_id: str) -> None:
                         return await bot.send_video(
                             chat_id=chat_id,
                             video=f,
-                            caption=f"✅ Task completed\n{url}",
+                            caption=f"✅ Task completed\n{url}{stats_line}",
                             supports_streaming=True,
                         )
                     finally:

@@ -51,8 +51,8 @@ class User(Base):
     
     @property
     def is_admin(self) -> bool:
-        from config import ADMIN_EMAIL
-        return self.email == ADMIN_EMAIL
+        from config import ADMIN_EMAILS
+        return (self.email or "").strip().lower() in ADMIN_EMAILS
 
 
 class AnonSession(Base):
@@ -97,6 +97,10 @@ class Task(Base):
     # Status
     status = Column(String(20), default="created")  # created, processing, done, error
     error_message = Column(Text, nullable=True)
+    
+    # Retry/timeout tracking
+    retry_count = Column(Integer, default=0)
+    started_at = Column(DateTime, nullable=True)  # When task started processing
     
     # Video
     video_url = Column(String(512), nullable=True)

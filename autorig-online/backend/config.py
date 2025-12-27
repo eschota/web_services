@@ -38,7 +38,18 @@ GOOGLE_REDIRECT_URI = os.getenv(
 # =============================================================================
 # Admin
 # =============================================================================
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "eschota@gmail.com")
+def _norm_email(s: str) -> str:
+    return (s or "").strip().lower()
+
+
+# Code-defined admin list (requested)
+ADMIN_EMAILS = {
+    _norm_email("eschota@gmail.com"),
+    _norm_email("vladkcg@gmail.com"),
+}
+
+# Backwards compat (some code still references ADMIN_EMAIL)
+ADMIN_EMAIL = _norm_email(os.getenv("ADMIN_EMAIL", "eschota@gmail.com"))
 
 # =============================================================================
 # Workers (Converters)

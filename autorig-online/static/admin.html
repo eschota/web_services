@@ -20,8 +20,8 @@
         <div class="container">
             <div class="header-inner">
                 <a href="/" class="logo">
-                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
-                    <span>AutoRig</span>
+                    <img src="/static/images/logo/autorig-logo.png" srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x" alt="Autorig.Online" class="logo-img" height="120">
+                    
                 </a>
                 
                 <div class="header-actions">
@@ -41,41 +41,48 @@
         <div class="features mt-3" style="grid-template-columns: repeat(3, 1fr);">
             <div class="card" style="text-align: center;">
                 <div style="font-size: 2rem; font-weight: 700;" id="stat-users">-</div>
-                <div style="color: var(--text-muted);">Total Users</div>
+                <div style="color: var(--text-muted);" id="stat-users-label">Total Users</div>
             </div>
             <div class="card" style="text-align: center;">
                 <div style="font-size: 2rem; font-weight: 700;" id="stat-tasks">-</div>
-                <div style="color: var(--text-muted);">Total Tasks</div>
+                <div style="color: var(--text-muted);" id="stat-tasks-label">Total Tasks</div>
             </div>
             <div class="card" style="text-align: center;">
                 <div style="font-size: 2rem; font-weight: 700;" id="stat-credits">-</div>
-                <div style="color: var(--text-muted);">Total Credits</div>
+                <div style="color: var(--text-muted);" id="stat-credits-label">Total Credits</div>
             </div>
         </div>
         
         <!-- Users Table -->
         <div class="card mt-4">
             <div class="card-header">
-                <h3 class="card-title" data-i18n="admin_users">Users</h3>
-                <div style="display: flex; gap: 1rem;">
-                    <input type="text" class="form-input" id="search-input" placeholder="Search by email..." style="width: 250px;">
+                <div style="display:flex; align-items:center; gap: 0.75rem;">
+                    <h3 class="card-title" data-i18n="admin_users" id="admin-table-title">Users</h3>
+                    <div class="flex gap-1" style="flex-wrap: wrap;">
+                        <button class="btn btn-secondary" id="tab-users" style="padding: 0.35rem 0.6rem; font-size: 0.85rem;">Users</button>
+                        <button class="btn btn-secondary" id="tab-anon" style="padding: 0.35rem 0.6rem; font-size: 0.85rem;">Anon Sessions</button>
+                        <button class="btn btn-secondary" id="tab-tasks" style="padding: 0.35rem 0.6rem; font-size: 0.85rem;">Tasks</button>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 1rem; align-items: center;">
+                    <!-- Status filter (only visible on Tasks tab) -->
+                    <select class="form-input hidden" id="status-filter" style="width: 160px; padding: 0.4rem 0.6rem;">
+                        <option value="">All statuses</option>
+                        <option value="processing">Processing</option>
+                        <option value="created">Queue (created)</option>
+                        <option value="done">Done</option>
+                        <option value="error">Error</option>
+                    </select>
+                    <input type="text" class="form-input" id="search-input" placeholder="Search..." style="width: 250px;">
                 </div>
             </div>
             
             <div style="overflow-x: auto;">
                 <table class="admin-table">
                     <thead>
-                        <tr>
-                            <th data-sort="id">ID</th>
-                            <th data-sort="email">Email</th>
-                            <th data-sort="name">Name</th>
-                            <th data-sort="balance_credits">Balance</th>
-                            <th data-sort="total_tasks">Tasks</th>
-                            <th data-sort="last_login_at">Last Login</th>
-                            <th>Actions</th>
-                        </tr>
+                        <tr id="admin-table-head"></tr>
                     </thead>
-                    <tbody id="users-table">
+                    <tbody id="admin-table-body">
                         <tr>
                             <td colspan="7" style="text-align: center; color: var(--text-muted);">Loading...</td>
                         </tr>
@@ -127,7 +134,7 @@
         <div class="card" style="min-width: 900px; max-width: 1200px; max-height: 90vh; display: flex; flex-direction: column;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <div>
-                    <h3>User Tasks</h3>
+                    <h3 id="tasks-modal-title">Tasks</h3>
                     <p style="color: var(--text-muted); margin-top: 0.5rem;" id="tasks-modal-email"></p>
                 </div>
                 <button class="btn btn-ghost" id="tasks-modal-close" style="padding: 0.5rem;">✕</button>
@@ -174,7 +181,7 @@
     </footer>
     
     <script src="/static/js/i18n.js"></script>
-    <script src="/static/js/admin.js"></script>
+    <script src="/static/js/admin.js?v=tasks-default"></script>
 </body>
 </html>
 

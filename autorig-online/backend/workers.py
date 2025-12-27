@@ -45,16 +45,6 @@ class WorkerTaskResult:
             self.output_urls = []
 
 
-@dataclass
-class FbxToGlbResult:
-    """Result from FBX -> GLB converter endpoint"""
-    success: bool
-    model_name: Optional[str] = None
-    output_url: Optional[str] = None
-    error: Optional[str] = None
-
-
-
 # =============================================================================
 # GUID Extraction
 # =============================================================================
@@ -133,7 +123,9 @@ async def send_task_to_worker(
         try:
             payload = {
                 "input_url": input_url,
-                "type": task_type
+                "type": task_type,
+                # Unified pipeline: workers expect an explicit mode.
+                "mode": "only_rig",
             }
             
             response = await client.post(
@@ -174,44 +166,6 @@ async def send_task_to_worker(
             return WorkerTaskResult(success=False, error="Worker timeout")
         except Exception as e:
             return WorkerTaskResult(success=False, error=str(e))
-
-
-async def send_fbx_to_glb(worker_api_url: str, input_url: str) -> FbxToGlbResult:
-    """
-    Convert FBX to GLB using the same worker host, but different endpoint:
-    {worker_base}/api-converter-glb-to-fbx
-    Payload: { "input_url": "<fbx_url>" }
-    Response: { "model_name": "...", "output_url": "..." }
-    """
-    worker_base = get_worker_base_url(worker_api_url)
-    endpoint = f"{worker_base}/api-converter-glb-to-fbx"
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                endpoint,
-                json={"input_url": input_url},
-                timeout=90.0
-            )
-
-            if response.status_code != 200:
-                return FbxToGlbResult(
-                    success=False,
-                    error=f"Worker returned HTTP {response.status_code}: {response.text[:200]}"
-                )
-
-            data = response.json() if response.content else {}
-            model_name = data.get("model_name")
-            output_url = data.get("output_url")
-
-            if not output_url:
-                return FbxToGlbResult(success=False, error="Worker response missing output_url")
-
-            return FbxToGlbResult(success=True, model_name=model_name, output_url=output_url)
-        except httpx.TimeoutException:
-            return FbxToGlbResult(success=False, error="Worker timeout")
-        except Exception as e:
-            return FbxToGlbResult(success=False, error=str(e))
 
 
 # =============================================================================
@@ -278,23 +232,31 @@ async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[boo
     Check if video file is available.
     Returns: (is_ready, video_url)
     
-    Video is located at: {worker_base}/converter/glb/{guid}/{guid}_video.mp4
+    Video is located at: {worker_base}/converter/glb/{guid}/... (multiple variants).
     worker_base_url is already without /api-converter-glb (e.g., http://5.129.157.224:5267)
     """
     if not guid:
         return False, None
     
+    candidates = [
+        f"{worker_base_url}/converter/glb/{guid}/{guid}_video.mp4",
+        f"{worker_base_url}/converter/glb/{guid}/{guid}_video.mov",
+        f"{worker_base_url}/converter/glb/{guid}/{guid}_video_horiz.mp4",
+        f"{worker_base_url}/converter/glb/{guid}/{guid}_video_horiz.mov",
+    ]
+
     try:
-        # worker_base_url is already the base (e.g., http://5.129.157.224:5267)
-        video_url = f"{worker_base_url}/converter/glb/{guid}/{guid}_video.mp4"
-        
         async with httpx.AsyncClient() as client:
-            response = await client.head(video_url, timeout=5.0, follow_redirects=True)
-            if response.status_code == 200:
-                return True, video_url
-    except Exception as e:
+            for video_url in candidates:
+                try:
+                    response = await client.head(video_url, timeout=5.0, follow_redirects=True)
+                    if response.status_code == 200:
+                        return True, video_url
+                except Exception:
+                    continue
+    except Exception:
         pass
-    
+
     return False, None
 
 

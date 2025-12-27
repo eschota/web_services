@@ -33,11 +33,11 @@ class TaskStatusResponse(BaseModel):
     ready_urls: List[str]
     video_ready: bool
     video_url: Optional[str]
-    # FBX -> GLB pre-conversion (only when input was .fbx)
-    fbx_glb_output_url: Optional[str] = None
-    fbx_glb_model_name: Optional[str] = None
-    fbx_glb_ready: Optional[bool] = None
-    fbx_glb_error: Optional[str] = None
+    # Debug / worker assignment (needed for interactive progress)
+    worker_api: Optional[str] = None
+    worker_task_id: Optional[str] = None
+    guid: Optional[str] = None
+    progress_page: Optional[str] = None
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -56,6 +56,29 @@ class TaskHistoryItem(BaseModel):
 class TaskHistoryResponse(BaseModel):
     """Response for task history"""
     tasks: List[TaskHistoryItem]
+    total: int
+    page: int
+    per_page: int
+
+
+# =============================================================================
+# Task Owner List (public, by task_id)
+# =============================================================================
+class OwnerTaskListItem(BaseModel):
+    """Task item for 'owner tasks' list"""
+    task_id: str
+    status: str
+    progress: int
+    created_at: datetime
+    video_ready: bool
+    thumbnail_url: str
+
+
+class OwnerTaskListResponse(BaseModel):
+    """Response: list of tasks for the owner of a given task_id"""
+    owner_type: str
+    owner_id: str
+    tasks: List[OwnerTaskListItem]
     total: int
     page: int
     per_page: int
@@ -167,6 +190,92 @@ class AdminUserTasksResponse(BaseModel):
     total: int
     page: int
     per_page: int
+
+
+# =============================================================================
+# Admin (Anon Sessions)
+# =============================================================================
+class AdminAnonSessionListItem(BaseModel):
+    """Anon session item for admin list"""
+    anon_id: str
+    free_used: int
+    created_at: datetime
+    last_seen_at: datetime
+    total_tasks: int
+
+
+class AdminAnonSessionListResponse(BaseModel):
+    """Response for admin anon sessions list"""
+    sessions: List[AdminAnonSessionListItem]
+    total: int
+    page: int
+    per_page: int
+
+
+class AdminAnonSessionTaskItem(BaseModel):
+    """Task item for admin anon session tasks list"""
+    task_id: str
+    status: str
+    progress: int
+    ready_count: int
+    total_count: int
+    created_at: datetime
+    updated_at: datetime
+    input_url: Optional[str] = None
+
+
+class AdminAnonSessionTasksResponse(BaseModel):
+    """Response for admin anon session tasks list"""
+    tasks: List[AdminAnonSessionTaskItem]
+    total: int
+    page: int
+    per_page: int
+
+
+class AdminTaskOwnerResponse(BaseModel):
+    """Owner info for a task (admin)."""
+    task_id: str
+    owner_type: str
+    owner_id: str
+    user_id: Optional[int] = None
+    created_at: datetime
+    status: str
+
+
+class AdminTaskListItem(BaseModel):
+    """Task item for admin tasks list"""
+    task_id: str
+    status: str
+    progress: int
+    ready_count: int
+    total_count: int
+    created_at: datetime
+    updated_at: datetime
+    worker_api: Optional[str] = None
+    guid: Optional[str] = None
+    owner_type: str
+    owner_id: str
+    owner_name: Optional[str] = None  # User name or "Anonymous"
+    input_url: Optional[str] = None
+    retry_count: int = 0
+    started_at: Optional[datetime] = None
+
+
+class AdminTaskStatusCounts(BaseModel):
+    """Status counts for admin tasks"""
+    processing: int = 0
+    created: int = 0
+    done: int = 0
+    error: int = 0
+
+
+class AdminTaskListResponse(BaseModel):
+    """Response for admin tasks list"""
+    tasks: List[AdminTaskListItem]
+    total: int
+    page: int
+    per_page: int
+    status_counts: AdminTaskStatusCounts
 
 
 # =============================================================================

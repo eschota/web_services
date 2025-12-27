@@ -3,9 +3,10 @@
  */
 
 const Admin = {
+    view: 'users', // 'users' | 'anon' | 'tasks'
     currentPage: 1,
     perPage: 20,
-    totalUsers: 0,
+    totalItems: 0,
     sortBy: 'created_at',
     sortDesc: true,
     searchQuery: '',
@@ -13,7 +14,9 @@ const Admin = {
     tasksCurrentPage: 1,
     tasksPerPage: 20,
     tasksTotal: 0,
-    selectedTasksUser: null,
+    selectedTasksOwner: null, // { type: 'user'|'anon', id: string|number, label: string }
+    tasksStatusFilter: '', // '' = all, 'processing', 'created', 'done', 'error'
+    statusCounts: { processing: 0, created: 0, done: 0, error: 0 },
     
     async init() {
         // Init i18n
@@ -22,8 +25,8 @@ const Admin = {
         // Setup theme
         this.setupTheme();
         
-        // Load users
-        await this.loadUsers();
+        // Default: tasks view (sorted by date, newest first)
+        this.applyView('tasks');
         
         // Setup event listeners
         this.setupEventListeners();
@@ -81,37 +84,38 @@ const Admin = {
             searchTimeout = setTimeout(() => {
                 this.searchQuery = searchInput.value;
                 this.currentPage = 1;
-                this.loadUsers();
+                this.loadList();
             }, 300);
         });
         
-        // Sort headers
-        document.querySelectorAll('[data-sort]').forEach(th => {
-            th.addEventListener('click', () => {
+        // Sort headers (delegated; headers are dynamic per view)
+        document.getElementById('admin-table-head')?.addEventListener('click', (e) => {
+            const th = e.target.closest('[data-sort]');
+            if (!th) return;
                 const field = th.getAttribute('data-sort');
+            if (!field) return;
                 if (this.sortBy === field) {
                     this.sortDesc = !this.sortDesc;
                 } else {
                     this.sortBy = field;
                     this.sortDesc = true;
                 }
-                this.loadUsers();
-            });
+            this.loadList();
         });
         
         // Pagination
         document.getElementById('prev-page').addEventListener('click', () => {
             if (this.currentPage > 1) {
                 this.currentPage--;
-                this.loadUsers();
+                this.loadList();
             }
         });
         
         document.getElementById('next-page').addEventListener('click', () => {
-            const totalPages = Math.ceil(this.totalUsers / this.perPage);
+            const totalPages = Math.ceil(this.totalItems / this.perPage);
             if (this.currentPage < totalPages) {
                 this.currentPage++;
-                this.loadUsers();
+                this.loadList();
             }
         });
         
@@ -138,7 +142,7 @@ const Admin = {
         document.getElementById('tasks-prev-page').addEventListener('click', () => {
             if (this.tasksCurrentPage > 1) {
                 this.tasksCurrentPage--;
-                this.loadUserTasks(this.selectedTasksUser.id);
+                this.loadOwnerTasks();
             }
         });
         
@@ -146,9 +150,124 @@ const Admin = {
             const totalPages = Math.ceil(this.tasksTotal / this.tasksPerPage);
             if (this.tasksCurrentPage < totalPages) {
                 this.tasksCurrentPage++;
-                this.loadUserTasks(this.selectedTasksUser.id);
+                this.loadOwnerTasks();
             }
         });
+
+        // Tabs
+        document.getElementById('tab-users')?.addEventListener('click', () => this.applyView('users'));
+        document.getElementById('tab-anon')?.addEventListener('click', () => this.applyView('anon'));
+        document.getElementById('tab-tasks')?.addEventListener('click', () => this.applyView('tasks'));
+
+        // Status filter (for tasks view)
+        document.getElementById('status-filter')?.addEventListener('change', (e) => {
+            this.tasksStatusFilter = e.target.value;
+            this.currentPage = 1;
+            this.loadList();
+        });
+    },
+
+    applyView(view) {
+        this.view = view;
+        this.currentPage = 1;
+        this.sortDesc = true;
+        this.searchQuery = '';
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) searchInput.value = '';
+
+        const statusFilter = document.getElementById('status-filter');
+        const title = document.getElementById('admin-table-title');
+        const ul = document.getElementById('stat-users-label');
+        const tl = document.getElementById('stat-tasks-label');
+        const cl = document.getElementById('stat-credits-label');
+
+        if (view === 'users') {
+            this.sortBy = 'created_at';
+            if (title) title.textContent = 'Users';
+            if (searchInput) searchInput.placeholder = 'Search by email...';
+            if (ul) ul.textContent = 'Total Users';
+            if (tl) tl.textContent = 'Total Tasks';
+            if (cl) cl.textContent = 'Total Credits';
+            if (statusFilter) statusFilter.classList.add('hidden');
+        } else if (view === 'anon') {
+            this.sortBy = 'last_seen_at';
+            if (title) title.textContent = 'Anon Sessions';
+            if (searchInput) searchInput.placeholder = 'Search by anon id...';
+            if (ul) ul.textContent = 'Total Anon Sessions';
+            if (tl) tl.textContent = 'Tasks (page)';
+            if (cl) cl.textContent = '-';
+            if (statusFilter) statusFilter.classList.add('hidden');
+        } else if (view === 'tasks') {
+            this.sortBy = 'created_at';
+            this.tasksStatusFilter = '';
+            if (statusFilter) {
+                statusFilter.classList.remove('hidden');
+                statusFilter.value = '';
+            }
+            if (title) title.textContent = 'All Tasks';
+            if (searchInput) searchInput.placeholder = 'Search...';
+            if (ul) ul.textContent = 'Processing';
+            if (tl) tl.textContent = 'Queue';
+            if (cl) cl.textContent = 'Done';
+        }
+
+        // active styles
+        const btnUsers = document.getElementById('tab-users');
+        const btnAnon = document.getElementById('tab-anon');
+        const btnTasks = document.getElementById('tab-tasks');
+        [btnUsers, btnAnon, btnTasks].forEach(btn => {
+            if (!btn) return;
+            const isActive = (btn.id === 'tab-users' && view === 'users') ||
+                             (btn.id === 'tab-anon' && view === 'anon') ||
+                             (btn.id === 'tab-tasks' && view === 'tasks');
+            btn.classList.toggle('btn-primary', isActive);
+            btn.classList.toggle('btn-secondary', !isActive);
+        });
+
+        this.renderListHeader();
+        this.loadList();
+    },
+
+    renderListHeader() {
+        const head = document.getElementById('admin-table-head');
+        if (!head) return;
+        if (this.view === 'users') {
+            head.innerHTML = `
+                <th data-sort="id">ID</th>
+                <th data-sort="email">Email</th>
+                <th data-sort="name">Name</th>
+                <th data-sort="balance_credits">Balance</th>
+                <th data-sort="total_tasks">Tasks</th>
+                <th data-sort="last_login_at">Last Login</th>
+                <th>Actions</th>
+            `;
+        } else if (this.view === 'anon') {
+            head.innerHTML = `
+                <th data-sort="anon_id">Anon ID</th>
+                <th data-sort="free_used">Free Used</th>
+                <th data-sort="total_tasks">Tasks</th>
+                <th data-sort="created_at">Created</th>
+                <th data-sort="last_seen_at">Last Seen</th>
+                <th>Actions</th>
+            `;
+        } else if (this.view === 'tasks') {
+            head.innerHTML = `
+                <th style="width:60px;">Preview</th>
+                <th data-sort="id">Task ID</th>
+                <th>Owner</th>
+                <th data-sort="status">Status</th>
+                <th>Progress</th>
+                <th>Worker</th>
+                <th data-sort="created_at">Created</th>
+                <th>Actions</th>
+            `;
+        }
+    },
+
+    async loadList() {
+        if (this.view === 'users') return await this.loadUsers();
+        if (this.view === 'anon') return await this.loadAnonSessions();
+        if (this.view === 'tasks') return await this.loadAllTasks();
     },
     
     async loadUsers() {
@@ -176,18 +295,18 @@ const Admin = {
             }
             
             const data = await response.json();
-            this.totalUsers = data.total;
+            this.totalItems = data.total;
             
             this.renderUsers(data.users);
             this.updatePagination();
-            this.updateStats(data);
+            this.updateStatsUsers(data);
         } catch (error) {
             console.error('Error loading users:', error);
         }
     },
     
     renderUsers(users) {
-        const tbody = document.getElementById('users-table');
+        const tbody = document.getElementById('admin-table-body');
         
         if (users.length === 0) {
             tbody.innerHTML = `
@@ -225,38 +344,209 @@ const Admin = {
                 
                 const userId = parseInt(row.getAttribute('data-user-id'));
                 const userEmail = row.getAttribute('data-user-email');
-                this.openTasksModal(userId, userEmail);
+                this.openUserTasksModal(userId, userEmail);
             });
         });
     },
     
     updatePagination() {
-        const totalPages = Math.ceil(this.totalUsers / this.perPage);
-        const start = (this.currentPage - 1) * this.perPage + 1;
-        const end = Math.min(this.currentPage * this.perPage, this.totalUsers);
+        const totalPages = Math.ceil(this.totalItems / this.perPage);
+        const start = this.totalItems > 0 ? (this.currentPage - 1) * this.perPage + 1 : 0;
+        const end = Math.min(this.currentPage * this.perPage, this.totalItems);
+
+        let label = 'items';
+        if (this.view === 'users') label = 'users';
+        else if (this.view === 'anon') label = 'anon sessions';
+        else if (this.view === 'tasks') label = 'tasks';
         
-        document.getElementById('pagination-info').textContent = 
-            `Showing ${start}-${end} of ${this.totalUsers} users`;
+        document.getElementById('pagination-info').textContent = `Showing ${start}-${end} of ${this.totalItems} ${label}`;
         
         document.getElementById('prev-page').disabled = this.currentPage <= 1;
         document.getElementById('next-page').disabled = this.currentPage >= totalPages;
     },
     
-    updateStats(data) {
+    updateStatsUsers(data) {
         document.getElementById('stat-users').textContent = data.total;
-        
-        // Calculate totals from visible data (simplified)
         let totalTasks = 0;
         let totalCredits = 0;
         data.users.forEach(u => {
             totalTasks += u.total_tasks;
             totalCredits += u.balance_credits;
         });
-        
-        // For accurate stats, we'd need a separate API endpoint
-        // For now, show approximate based on current page
         document.getElementById('stat-tasks').textContent = totalTasks + '+';
         document.getElementById('stat-credits').textContent = totalCredits + '+';
+    },
+
+    updateStatsAnon(data) {
+        document.getElementById('stat-users').textContent = data.total;
+        let tasksOnPage = 0;
+        (data.sessions || []).forEach(s => { tasksOnPage += (s.total_tasks || 0); });
+        document.getElementById('stat-tasks').textContent = String(tasksOnPage);
+        document.getElementById('stat-credits').textContent = '-';
+    },
+
+    updateStatsTasks(data) {
+        const sc = data.status_counts || {};
+        document.getElementById('stat-users').textContent = sc.processing || 0;
+        document.getElementById('stat-tasks').textContent = sc.created || 0;
+        document.getElementById('stat-credits').textContent = sc.done || 0;
+    },
+
+    async loadAllTasks() {
+        const tbody = document.getElementById('admin-table-body');
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Loading...</td></tr>';
+        try {
+            const params = new URLSearchParams({
+                page: this.currentPage,
+                per_page: this.perPage,
+                sort_by: this.sortBy,
+                sort_desc: this.sortDesc
+            });
+            if (this.tasksStatusFilter) params.append('status', this.tasksStatusFilter);
+
+            const response = await fetch(`/api/admin/tasks?${params}`);
+            if (response.status === 403) {
+                window.location.href = '/';
+                return;
+            }
+            if (!response.ok) throw new Error('Failed to load tasks');
+
+            const data = await response.json();
+            this.totalItems = data.total;
+            this.statusCounts = data.status_counts || {};
+            this.renderAllTasks(data.tasks || []);
+            this.updatePagination();
+            this.updateStatsTasks(data);
+        } catch (e) {
+            console.error('Error loading tasks:', e);
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--error);">Failed to load tasks</td></tr>';
+        }
+    },
+
+    renderAllTasks(tasks) {
+        const tbody = document.getElementById('admin-table-body');
+        if (!tasks || tasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--text-muted);">No tasks found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = tasks.map(t => {
+            const statusColor = {
+                processing: 'var(--info)',
+                created: 'var(--warning)',
+                done: 'var(--success)',
+                error: 'var(--error)'
+            }[t.status] || 'var(--text-muted)';
+
+            const workerPort = t.worker_api ? t.worker_api.split(':').pop().split('/')[0] : '-';
+            const ownerDisplay = t.owner_name || t.owner_id;
+            const thumbUrl = `/api/thumb/${t.task_id}`;
+
+            return `
+                <tr>
+                    <td>
+                        <img src="${thumbUrl}" alt="" style="width:50px; height:50px; object-fit:cover; border-radius:6px; background:#222;"
+                             onerror="this.src='/static/images/placeholder-thumb.svg'">
+                    </td>
+                    <td style="font-family: monospace; font-size: 0.8rem;" title="${t.task_id}">${t.task_id.substring(0, 8)}...</td>
+                    <td>
+                        <span style="font-size: 0.85rem;">${ownerDisplay}</span>
+                        <div style="font-size: 0.7rem; color: var(--text-muted);">${t.owner_type}</div>
+                    </td>
+                    <td>
+                        <span style="color: ${statusColor}; font-weight: 600;">${t.status}</span>
+                        ${t.retry_count > 0 ? `<div style="font-size: 0.7rem; color: var(--warning);">retry: ${t.retry_count}</div>` : ''}
+                    </td>
+                    <td>${t.ready_count}/${t.total_count}</td>
+                    <td style="font-size: 0.8rem;">${workerPort}</td>
+                    <td style="font-size: 0.85rem;">${this.formatDate(t.created_at)}</td>
+                    <td>
+                        <div style="display: flex; gap: 0.25rem;">
+                            <a href="/task?id=${t.task_id}" target="_blank" class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Open</a>
+                            <button class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem; color: var(--error); border-color: var(--error);"
+                                    onclick="Admin.deleteTask('${t.task_id}')">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    },
+
+    async deleteTask(taskId) {
+        if (!confirm(`Delete task ${taskId.substring(0, 8)}...? This cannot be undone.`)) return;
+
+        try {
+            const response = await fetch(`/api/admin/task/${taskId}`, { method: 'DELETE' });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.detail || 'Failed to delete task');
+            }
+            alert('Task deleted');
+            this.loadList();
+        } catch (e) {
+            console.error('Delete error:', e);
+            alert('Failed to delete task: ' + e.message);
+        }
+    },
+
+    async loadAnonSessions() {
+        const tbody = document.getElementById('admin-table-body');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading...</td></tr>';
+        try {
+            const params = new URLSearchParams({
+                page: this.currentPage,
+                per_page: this.perPage,
+                sort_by: this.sortBy,
+                sort_desc: this.sortDesc
+            });
+            if (this.searchQuery) params.append('query', this.searchQuery);
+
+            const response = await fetch(`/api/admin/anon-sessions?${params}`);
+            if (response.status === 403) {
+                window.location.href = '/';
+                return;
+            }
+            if (!response.ok) throw new Error('Failed to load anon sessions');
+            const data = await response.json();
+            this.totalItems = data.total;
+            this.renderAnonSessions(data.sessions || []);
+            this.updatePagination();
+            this.updateStatsAnon(data);
+        } catch (e) {
+            console.error('Error loading anon sessions:', e);
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--error);">Failed to load anon sessions</td></tr>';
+        }
+    },
+
+    renderAnonSessions(sessions) {
+        const tbody = document.getElementById('admin-table-body');
+        if (!sessions || sessions.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">No anon sessions found</td></tr>';
+            return;
+        }
+        tbody.innerHTML = sessions.map(s => `
+            <tr style="cursor: pointer;" data-anon-id="${s.anon_id}">
+                <td style="font-family: monospace; font-size: 0.875rem;" title="${s.anon_id}">${s.anon_id.substring(0, 8)}...</td>
+                <td>${s.free_used}</td>
+                <td>${s.total_tasks}</td>
+                <td>${this.formatDate(s.created_at)}</td>
+                <td>${this.formatDate(s.last_seen_at)}</td>
+                <td>
+                    <button class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
+                            onclick="event.stopPropagation(); Admin.openAnonTasksModal('${s.anon_id}')">
+                        View Tasks
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        tbody.querySelectorAll('tr[data-anon-id]').forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('button')) return;
+                const anonId = row.getAttribute('data-anon-id');
+                this.openAnonTasksModal(anonId);
+            });
+        });
     },
     
     openBalanceModal(userId, email, currentBalance) {
@@ -312,7 +602,7 @@ const Admin = {
             alert(`Balance updated: ${result.old_balance} → ${result.new_balance}`);
             
             this.closeModal();
-            this.loadUsers();
+            this.loadList();
         } catch (error) {
             console.error('Error saving balance:', error);
             alert('Failed to update balance');
@@ -325,10 +615,12 @@ const Admin = {
         return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
     
-    openTasksModal(userId, email) {
-        this.selectedTasksUser = { id: userId, email };
+    openUserTasksModal(userId, email) {
+        this.selectedTasksOwner = { type: 'user', id: userId, label: email };
         this.tasksCurrentPage = 1;
         
+        const titleEl = document.getElementById('tasks-modal-title');
+        if (titleEl) titleEl.textContent = 'User Tasks';
         document.getElementById('tasks-modal-email').textContent = email;
         
         const modal = document.getElementById('tasks-modal');
@@ -336,16 +628,37 @@ const Admin = {
         modal.style.display = 'flex';
         
         // Load tasks
-        this.loadUserTasks(userId);
+        this.loadOwnerTasks();
+    },
+
+    openAnonTasksModal(anonId) {
+        this.selectedTasksOwner = { type: 'anon', id: anonId, label: anonId };
+        this.tasksCurrentPage = 1;
+        const titleEl = document.getElementById('tasks-modal-title');
+        if (titleEl) titleEl.textContent = 'Anon Session Tasks';
+        document.getElementById('tasks-modal-email').textContent = anonId;
+
+        const modal = document.getElementById('tasks-modal');
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+
+        this.loadOwnerTasks();
     },
     
     closeTasksModal() {
         const modal = document.getElementById('tasks-modal');
         modal.classList.add('hidden');
         modal.style.display = 'none';
-        this.selectedTasksUser = null;
+        this.selectedTasksOwner = null;
         this.tasksCurrentPage = 1;
         this.tasksTotal = 0;
+    },
+
+    async loadOwnerTasks() {
+        const owner = this.selectedTasksOwner;
+        if (!owner) return;
+        if (owner.type === 'user') return await this.loadUserTasks(owner.id);
+        return await this.loadAnonTasks(owner.id);
     },
     
     async loadUserTasks(userId) {
@@ -376,6 +689,32 @@ const Admin = {
             this.updateTasksPagination();
         } catch (error) {
             console.error('Error loading tasks:', error);
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--error);">Failed to load tasks</td></tr>';
+        }
+    },
+
+    async loadAnonTasks(anonId) {
+        const tbody = document.getElementById('tasks-table');
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">Loading...</td></tr>';
+
+        try {
+            const params = new URLSearchParams({
+                page: this.tasksCurrentPage,
+                per_page: this.tasksPerPage
+            });
+
+            const response = await fetch(`/api/admin/anon-session/${encodeURIComponent(anonId)}/tasks?${params}`);
+            if (response.status === 403) {
+                window.location.href = '/';
+                return;
+            }
+            if (!response.ok) throw new Error('Failed to load tasks');
+            const data = await response.json();
+            this.tasksTotal = data.total;
+            this.renderUserTasks(data.tasks); // same shape
+            this.updateTasksPagination();
+        } catch (error) {
+            console.error('Error loading anon tasks:', error);
             tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--error);">Failed to load tasks</td></tr>';
         }
     },
@@ -432,6 +771,10 @@ const Admin = {
                             <a href="/task?id=${task.task_id}" target="_blank" class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
                                 View Task
                             </a>
+                            <button class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
+                                    onclick="Admin.showTaskOwner('${task.task_id}', this)">
+                                Owner
+                            </button>
                             <button class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
                                     onclick="Admin.restartTask('${task.task_id}', this)">
                                 Restart
@@ -445,6 +788,28 @@ const Admin = {
                 </tr>
             `;
         }).join('');
+    },
+
+    async showTaskOwner(taskId, btnEl) {
+        if (!taskId) return;
+        if (btnEl) btnEl.disabled = true;
+        try {
+            const resp = await fetch(`/api/admin/task/${taskId}/owner`);
+            const data = await resp.json();
+            if (!resp.ok) {
+                alert(data.detail || 'Failed to load owner');
+                return;
+            }
+            const who = data.owner_type === 'user'
+                ? `user: ${data.owner_id}${data.user_id ? ` (id=${data.user_id})` : ''}`
+                : `anon: ${data.owner_id}`;
+            alert(`${taskId}\n${who}`);
+        } catch (e) {
+            console.error('Owner lookup error:', e);
+            alert('Failed to load owner');
+        } finally {
+            if (btnEl) btnEl.disabled = false;
+        }
     },
 
     async restartTask(taskId, btnEl) {
@@ -465,9 +830,7 @@ const Admin = {
             alert(`Task restarted: ${taskId} (${data.status})`);
 
             // Refresh tasks list
-            if (this.selectedTasksUser?.id) {
-                await this.loadUserTasks(this.selectedTasksUser.id);
-            }
+            await this.loadOwnerTasks();
         } catch (e) {
             console.error('Restart task error:', e);
             alert('Failed to restart task');
@@ -494,9 +857,7 @@ const Admin = {
             }
 
             alert(`Task deleted: ${taskId}`);
-            if (this.selectedTasksUser?.id) {
-                await this.loadUserTasks(this.selectedTasksUser.id);
-            }
+            await this.loadOwnerTasks();
         } catch (e) {
             console.error('Delete task error:', e);
             alert('Failed to delete task');

@@ -18,6 +18,7 @@
     "btn_start": "रिगिंग शुरू करें",
     "btn_login": "Google के माध्यम से लॉगिन करें",
     "btn_login_continue": "जारी रखने के लिए लॉगिन करें",
+    "btn_owner_tasks": "सभी कार्य",
 
     "feature_fast_title": "तेज प्रोसेसिंग",
     "feature_fast_desc": "कुछ मिनटों में अपना rigged मॉडल प्राप्त करें",

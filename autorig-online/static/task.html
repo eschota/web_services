@@ -29,8 +29,8 @@
         <div class="container">
             <div class="header-inner">
                 <a href="/" class="logo">
-                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
-                    <span>AutoRig</span>
+                    <img src="/static/images/logo/autorig-logo.png" srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x" alt="Autorig.Online" class="logo-img" height="120">
+                    
                 </a>
                 
                 <div class="header-actions">
@@ -57,13 +57,33 @@
     <main class="container-sm" style="padding-top: 2rem;">
         <!-- Task Card -->
         <div class="card">
-            <h2 data-i18n="task_title">Conversion Progress</h2>
-            
-            <!-- Status Badge -->
-            <div class="mt-2" id="status-container">
-                <span class="alert alert-info" id="status-badge" style="display: inline-block;">
-                    <span id="status-text">Processing...</span>
-                </span>
+            <!-- Task header title (always fully visible) -->
+            <h2 data-i18n="task_title" style="margin: 0 0 0.75rem 0;">
+                Conversion Progress
+            </h2>
+            <div id="task-run-state" style="margin: -0.25rem 0 0.75rem; font-size: 0.9rem; color: var(--text-muted);"></div>
+
+            <!-- Header actions row (one line): buttons + status -->
+            <div style="display: flex; justify-content: flex-start; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                <div class="flex gap-2" style="align-items: center; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" id="owner-tasks-btn"
+                            style="padding: 0.55rem 0.9rem; border-color: var(--warning); color: var(--warning); background: rgba(245, 158, 11, 0.08); white-space: nowrap;">
+                        <span aria-hidden="true" style="font-size: 1.8rem; line-height: 1; display: inline-block;">📋</span>
+                        <span data-i18n="btn_owner_tasks" style="display: inline-block;">All tasks</span>
+                    </button>
+                    <button class="btn btn-secondary hidden" id="restart-task-btn"
+                            style="padding: 0.55rem 0.9rem; border-color: var(--error); color: var(--error); background: rgba(239, 68, 68, 0.08); white-space: nowrap;">
+                        <span aria-hidden="true" style="font-size: 1.8rem; line-height: 1; display: inline-block;">🔄</span>
+                        <span data-i18n="btn_restart_task" style="display: inline-block;">Restart task</span>
+                    </button>
+
+                    <!-- Status Badge (in header row) -->
+                    <div id="status-container" style="white-space: nowrap; display: inline-flex; align-items: center;">
+                        <span class="alert alert-info" id="status-badge" style="display: inline-block; margin: 0;">
+                            <span id="status-text">Processing...</span>
+                        </span>
+                    </div>
+                </div>
             </div>
             
             <!-- Queue Status (compact) -->
@@ -90,6 +110,15 @@
             <!-- Progress -->
             <div class="progress-container" id="progress-container">
                 <div class="progress-percent" id="progress-percent">0%</div>
+                <div id="progress-log" class="hidden"
+                     style="margin: 0.5rem 0 0.25rem; padding: 0.75rem 1rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.18); cursor: pointer;">
+                    <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.75rem;">
+                        <div style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Log</div>
+                        <div id="progress-log-hint" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Click to expand</div>
+                    </div>
+                    <pre id="progress-log-text"
+                         style="margin-top: 0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; font-size: 0.8rem; line-height: 1.35; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; overflow: hidden; max-height: 3.2em; transition: max-height 0.25s ease;"></pre>
+                </div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
                 </div>
@@ -104,52 +133,46 @@
                 <span id="error-message"></span>
             </div>
 
-            <!-- FBX -> GLB Pre-conversion -->
-            <div class="mt-3 hidden" id="fbx-glb-step">
-                <h3 class="mb-2" data-i18n="task_fbx_glb_title">FBX → GLB</h3>
-                <div class="alert alert-info" id="fbx-glb-badge" style="display: inline-block;">
-                    <span id="fbx-glb-text" data-i18n="task_fbx_glb_pending">Converting FBX to GLB...</span>
-                </div>
-                <div class="mt-2" id="fbx-glb-link-container">
-                    <a id="fbx-glb-link" href="#" target="_blank" class="btn btn-ghost"
-                       style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"
-                       data-i18n="task_fbx_glb_download">Download GLB</a>
-                </div>
-            </div>
-            
             <!-- Video Preview -->
             <div class="video-preview hidden" id="video-container">
-                <h3 class="mb-2" data-i18n="task_video_ready">Video Preview</h3>
+                <!-- Model Viewer (GLB) -->
+                <div id="model-viewer-wrap" class="hidden" style="margin-bottom: 1rem;">
+                    <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem;">
+                        <div style="font-weight: 600; font-size: 1.1rem;">🎮 3D Preview</div>
+                        <div id="model-viewer-status" style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">Loading...</div>
+                    </div>
+                    <div style="display:flex; gap: 0.5rem; align-items:center; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                        <label style="font-size: 0.85rem; color: var(--text-muted);">Animation:</label>
+                        <select id="anim-select" class="hidden" style="padding: 0.5rem 0.75rem; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary);">
+                        </select>
+                        <button id="anim-play-btn" class="btn btn-secondary hidden" style="padding: 0.45rem 0.8rem;">Play</button>
+                        <button id="anim-pause-btn" class="btn btn-secondary hidden" style="padding: 0.45rem 0.8rem;">Pause</button>
+                    </div>
+                    <div id="model-viewer" style="width: 100%; height: 420px; border-radius: 12px; background: #000; border: 1px solid rgba(255,255,255,0.08); overflow: hidden;"></div>
+                </div>
+                <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 0.5rem;">🎬 Video Preview</div>
                 <video id="video-player" controls autoplay muted loop playsinline 
-                       style="width: 100%; max-height: 500px; border-radius: 12px; background: #000;"></video>
+                       style="width: 100%; height: auto; max-height: 70vh; object-fit: contain; border-radius: 12px; background: #000; display: block;"></video>
+                <div id="hdrp-renders" class="hidden"
+                     style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.75rem;">
+                    <!-- HDRP renders injected by JS -->
+                </div>
             </div>
             
             <div class="alert alert-info hidden mt-3" id="video-pending">
                 <span data-i18n="task_video_pending">Video is being generated...</span>
             </div>
             
-            <!-- Actions -->
-            <div class="flex gap-2 mt-3" id="actions-container">
-                <button class="btn btn-primary" id="copy-all-btn" disabled>
-                    <img src="/static/images/icons/copy.svg" alt="Copy" width="18" height="18" style="vertical-align: middle;">
-                    <span data-i18n="btn_copy_all">Copy All Links</span>
-                </button>
-                <button class="btn btn-secondary" id="download-all-btn" disabled>
-                    <img src="/static/images/icons/download.svg" alt="Download" width="18" height="18" style="vertical-align: middle;">
-                    <span data-i18n="btn_download_all">Download All</span>
-                </button>
-                <button class="btn btn-secondary hidden" id="restart-task-btn">
-                    <span data-i18n="btn_restart_task">Restart task</span>
-                </button>
-            </div>
+            <!-- Actions removed (buttons moved into header) -->
         </div>
         
         <!-- Files List -->
         <div class="card mt-3">
             <div class="card-header">
-                <h3 class="card-title">Files (<span id="files-count">0</span>)</h3>
+                <h3 class="card-title">Downloads (<span id="files-count">0</span>)</h3>
             </div>
-            <ul class="file-list" id="file-list">
+            <ul class="file-list" id="file-list"
+                style="max-height: none; overflow: visible; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem;">
                 <!-- Skeleton loading -->
                 <li class="file-item">
                     <div class="skeleton skeleton-text" style="width: 200px;"></div>
@@ -160,6 +183,57 @@
             </ul>
         </div>
     </main>
+
+    <!-- Owner Tasks Modal -->
+    <div id="owner-tasks-modal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 2rem;">
+        <div class="card" style="min-width: 900px; max-width: 1100px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div>
+                    <h3 id="owner-tasks-title">All tasks</h3>
+                    <p style="color: var(--text-muted); margin-top: 0.5rem;" id="owner-tasks-subtitle"></p>
+                </div>
+                <button class="btn btn-ghost" id="owner-tasks-close" style="padding: 0.5rem;">✕</button>
+            </div>
+
+            <div style="overflow-x: auto; flex: 1; min-height: 0;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Preview</th>
+                            <th>ID</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="owner-tasks-table">
+                        <tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="flex justify-between items-center mt-3" id="owner-tasks-pagination">
+                <span id="owner-tasks-pagination-info" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+                <div class="flex gap-1">
+                    <button class="btn btn-secondary" id="owner-tasks-prev" disabled>← Prev</button>
+                    <button class="btn btn-secondary" id="owner-tasks-next" disabled>Next →</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Preview Modal (HDRP renders) -->
+    <div id="image-preview-modal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 1100; padding: 1.5rem;">
+        <div style="position: relative; max-width: 95vw; max-height: 95vh;">
+            <button class="btn btn-ghost" id="image-preview-close"
+                    style="position: absolute; top: -0.25rem; right: -0.25rem; padding: 0.5rem; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.12);">
+                ✕
+            </button>
+            <img id="image-preview-img" alt="preview"
+                 style="display: block; max-width: 95vw; max-height: 95vh; width: auto; height: auto; border-radius: 12px; background: #000; border: 1px solid rgba(255,255,255,0.08);">
+        </div>
+    </div>
     
     <!-- Footer -->
     <footer class="footer">
@@ -175,6 +249,9 @@
             taskId: null,
             pollInterval: null,
             task: null,
+            ownerTasksPage: 1,
+            ownerTasksPerPage: 12,
+            ownerTasksTotal: 0,
             
             async init() {
                 // Init i18n
@@ -202,6 +279,9 @@
                 
                 // Setup buttons
                 this.setupButtons();
+
+                // Progress log polling (every 10s while page is open)
+                this.startProgressLogPolling();
             },
             
             setupTheme() {
@@ -264,51 +344,64 @@
                     statusBadge.classList.add('alert-info');
                     statusText.textContent = t('task_status_created');
                 }
+
+                // Title helper: started vs queued
+                const runStateEl = document.getElementById('task-run-state');
+                if (runStateEl) {
+                    const lang = (localStorage.getItem('autorig_lang') || 'en').toLowerCase();
+                    const isRu = lang.startsWith('ru');
+                    let stateText = '';
+                    const hasWorker = !!task.worker_api;
+                    const hasStarted = task.status === 'processing' && hasWorker && (!!task.worker_task_id || !!task.guid);
+                    if (hasStarted) stateText = isRu ? 'Прогресс конвертации — задача запущена' : 'Conversion Progress — task is running';
+                    else if (task.status === 'created' || task.status === 'processing') stateText = isRu ? 'Прогресс конвертации — задача в очереди' : 'Conversion Progress — task is queued';
+                    else if (task.status === 'done') stateText = isRu ? 'Прогресс конвертации — завершено' : 'Conversion Progress — completed';
+                    else if (task.status === 'error') stateText = isRu ? 'Прогресс конвертации — ошибка' : 'Conversion Progress — error';
+                    runStateEl.textContent = stateText;
+                }
                 
                 // Progress
                 document.getElementById('progress-percent').textContent = task.progress + '%';
                 document.getElementById('progress-fill').style.width = task.progress + '%';
                 document.getElementById('ready-count').textContent = task.ready_count;
                 document.getElementById('total-count').textContent = task.total_count;
+
+                // Tooltip: worker_api + guid on hover for debugging (when running)
+                const pc = document.getElementById('progress-container');
+                if (pc) {
+                    const guid = task.guid || (() => {
+                        const urls = []
+                            .concat(task.ready_urls || [])
+                            .concat(task.output_urls || [])
+                            .concat(task.video_url ? [task.video_url] : []);
+                        for (const u of urls) {
+                            const fn = String(u || '').split('/').pop() || '';
+                            const m = fn.match(/^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_/);
+                            if (m) return m[1];
+                        }
+                        return '';
+                    })();
+                    const hasWorker = !!task.worker_api;
+                    const hasStarted = task.status === 'processing' && hasWorker && (!!task.worker_task_id || !!task.guid);
+                    if (hasStarted) {
+                        pc.title = `worker_api: ${task.worker_api}\nGUID: ${guid || '-'}`;
+                    } else if (task.status === 'created' || task.status === 'processing') {
+                        pc.title = 'Worker not assigned yet';
+                    } else {
+                        pc.title = '';
+                    }
+                }
+
+                // Progress log (only when done and 100%)
+                this.updateProgressLog(task);
                 
                 // Error
                 if (task.error_message) {
                     document.getElementById('error-container').classList.remove('hidden');
                     document.getElementById('error-message').textContent = task.error_message;
-                }
-
-                // FBX -> GLB step UI
-                const fbxStep = document.getElementById('fbx-glb-step');
-                const fbxBadge = document.getElementById('fbx-glb-badge');
-                const fbxText = document.getElementById('fbx-glb-text');
-                const fbxLink = document.getElementById('fbx-glb-link');
-                const fbxLinkContainer = document.getElementById('fbx-glb-link-container');
-
-                const hasFbxStep = !!(task.fbx_glb_output_url || task.fbx_glb_model_name || task.fbx_glb_error || task.fbx_glb_ready === true);
-                if (hasFbxStep) {
-                    fbxStep.classList.remove('hidden');
-
-                    // Link (show as soon as we have it, even if not ready yet)
-                    if (task.fbx_glb_output_url) {
-                        fbxLink.href = task.fbx_glb_output_url;
-                        fbxLinkContainer.classList.remove('hidden');
-                    } else {
-                        fbxLinkContainer.classList.add('hidden');
-                    }
-
-                    fbxBadge.className = 'alert';
-                    if (task.fbx_glb_error) {
-                        fbxBadge.classList.add('alert-error');
-                        fbxText.textContent = t('task_fbx_glb_error');
-                    } else if (task.fbx_glb_ready) {
-                        fbxBadge.classList.add('alert-success');
-                        fbxText.textContent = t('task_fbx_glb_ready');
-                    } else {
-                        fbxBadge.classList.add('alert-info');
-                        fbxText.textContent = t('task_fbx_glb_pending');
-                    }
                 } else {
-                    fbxStep.classList.add('hidden');
+                    document.getElementById('error-container').classList.add('hidden');
+                    document.getElementById('error-message').textContent = '';
                 }
 
                 // Restart button after 3 hours (always, even if done)
@@ -332,6 +425,8 @@
                     document.getElementById('video-pending').classList.add('hidden');
                     const video = document.getElementById('video-player');
                     const proxyUrl = `/api/video/${this.taskId}`;
+                    // Use HDRP render thumbnail as poster for the video (fast preview while loading).
+                    video.poster = `/api/thumb/${this.taskId}`;
                     if (!video.src.includes(this.taskId)) {
                         video.src = proxyUrl;
                         video.load();
@@ -341,19 +436,161 @@
                     document.getElementById('video-pending').classList.remove('hidden');
                 }
                 
+                // HDRP renders row (under video)
+                this.updateHdrpRenders(task.ready_urls);
+
                 // Files list
                 this.updateFileList(task.ready_urls);
-                
-                // Buttons
-                const copyBtn = document.getElementById('copy-all-btn');
-                const downloadBtn = document.getElementById('download-all-btn');
-                
-                if (task.ready_urls && task.ready_urls.length > 0) {
-                    copyBtn.disabled = false;
-                    downloadBtn.disabled = false;
+
+            },
+
+            progressLogLoaded: false,
+            progressLogExpanded: false,
+            progressLogData: null,
+
+            async updateProgressLog(task) {
+                const box = document.getElementById('progress-log');
+                const pre = document.getElementById('progress-log-text');
+                const hint = document.getElementById('progress-log-hint');
+                if (!box || !pre || !hint) return;
+
+                // Show log for any task that is not error (processing/done), and let refreshProgressLog() fetch it.
+                if (task && task.status !== 'error') {
+                    if (this.progressLogData) box.classList.remove('hidden');
                 }
             },
+
+            async refreshProgressLog() {
+                const box = document.getElementById('progress-log');
+                const pre = document.getElementById('progress-log-text');
+                const hint = document.getElementById('progress-log-hint');
+                if (!box || !pre || !hint) return;
+                if (!this.taskId) return;
+
+                // Only poll while page has a task and it's not error
+                if (!this.task || this.task.status === 'error') {
+                    box.classList.add('hidden');
+                    pre.textContent = '';
+                    this.progressLogData = null;
+                    return;
+                }
+
+                const wantFull = !!this.progressLogExpanded;
+                const url = wantFull
+                    ? `/api/task/${this.taskId}/progress_log?full=1`
+                    : `/api/task/${this.taskId}/progress_log`;
+
+                try {
+                    const resp = await fetch(url, { cache: 'no-store' });
+                    const data = await resp.json();
+                    // Backend always returns 200; but guard anyway.
+                    if (!resp.ok || !data) return;
+
+                    // If log isn't available yet, show a friendly message (no errors)
+                    if (data.available === false) {
+                        const lang = (localStorage.getItem('autorig_lang') || 'en').toLowerCase();
+                        const isRu = lang.startsWith('ru');
+                        const msg = data.state === 'queued'
+                            ? (isRu ? 'Ожидаем запуск задачи на воркере…' : 'Waiting for worker to start…')
+                            : (isRu ? 'Лог еще не опубликован воркером…' : 'Log is not published yet…');
+                        box.classList.remove('hidden');
+                        hint.textContent = isRu ? 'Клик — раскрыть' : 'Click to expand';
+                        pre.textContent = msg;
+                        pre.style.maxHeight = `3.2em`;
+                        pre.style.overflow = 'hidden';
+                        this.progressLogData = null;
+                        return;
+                    }
+
+                    this.progressLogData = data;
+                    box.classList.remove('hidden');
+                    this.renderProgressLog();
+                } catch (_) {
+                    // ignore transient errors
+                }
+            },
+
+            renderProgressLog() {
+                const box = document.getElementById('progress-log');
+                const pre = document.getElementById('progress-log-text');
+                const hint = document.getElementById('progress-log-hint');
+                if (!box || !pre || !hint || !this.progressLogData) return;
+
+                const tail = (this.progressLogData.tail_lines || []).join('\n');
+                let full = this.progressLogData.full_text || '';
+                if (this.progressLogData.truncated) {
+                    full = full + '\n… (truncated)';
+                }
+
+                const text = this.progressLogExpanded ? full : tail;
+                pre.textContent = text || '';
+
+                hint.textContent = this.progressLogExpanded ? 'Click to collapse' : 'Click to expand';
+
+                // Auto-fit height to content by measuring scrollHeight
+                requestAnimationFrame(() => {
+                    const target = pre.scrollHeight;
+                    if (this.progressLogExpanded) {
+                        const maxPx = Math.floor(window.innerHeight * 0.6);
+                        pre.style.maxHeight = `${Math.min(target, maxPx)}px`;
+                        pre.style.overflow = 'auto';
+                        // Keep at bottom for real-time logs
+                        pre.scrollTop = pre.scrollHeight;
+                    } else {
+                        pre.style.maxHeight = `3.2em`;
+                        pre.style.overflow = 'hidden';
+                    }
+                });
+            },
             
+            updateHdrpRenders(urls) {
+                const rendersEl = document.getElementById('hdrp-renders');
+                const videoContainer = document.getElementById('video-container');
+                if (!rendersEl) return;
+
+                // Only show under the video block
+                if (!videoContainer || videoContainer.classList.contains('hidden')) {
+                    rendersEl.classList.add('hidden');
+                    rendersEl.innerHTML = '';
+                    return;
+                }
+
+                if (!urls || urls.length === 0) {
+                    rendersEl.classList.add('hidden');
+                    rendersEl.innerHTML = '';
+                    return;
+                }
+
+                const matches = [];
+                urls.forEach((url, idx) => {
+                    const filename = (url || '').split('/').pop() || '';
+                    const m = filename.match(/_Unity_HDRP_Render_([1-3])_view\.jpe?g$/i);
+                    if (!m) return;
+                    const n = Number(m[1]);
+                    if (!Number.isFinite(n) || n < 1 || n > 3) return;
+                    matches[n - 1] = { idx, filename };
+                });
+
+                const items = matches.filter(Boolean);
+                if (items.length === 0) {
+                    rendersEl.classList.add('hidden');
+                    rendersEl.innerHTML = '';
+                    return;
+                }
+
+                rendersEl.classList.remove('hidden');
+                rendersEl.innerHTML = items.map(({ idx, filename }) => {
+                    const src = `/api/file/${this.taskId}/${idx}`;
+                    return `
+                        <img src="${src}"
+                             alt="${filename}"
+                             loading="lazy"
+                             onerror="this.style.display='none'"
+                             style="width: 100%; height: 220px; object-fit: cover; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: #000;">
+                    `;
+                }).join('');
+            },
+
             updateFileList(urls) {
                 const list = document.getElementById('file-list');
                 const count = document.getElementById('files-count');
@@ -363,46 +600,99 @@
                     count.textContent = '0';
                     return;
                 }
-                
-                count.textContent = urls.length;
-                
-                list.innerHTML = urls.map(url => {
-                    const filename = url.split('/').pop();
+
+                const blenderIcon = '/static/images/icons/blender_logo.png';
+                const unityIcon = '/static/images/icons/Unity_Logo.png';
+
+                const items = [];
+                urls.forEach((url, idx) => {
+                    const filename = (url || '').split('/').pop() || '';
+
+                    // Hide video artifacts (video is already shown on page)
+                    if (/_video\.(mp4|mov)$/i.test(filename)) return;
+                    if (/_video_poster\.jpe?g$/i.test(filename)) return;
+
+                    // HDRP renders are shown as images under the video (not in file list)
+                    if (/_Unity_HDRP_Render_[1-3]_view\.jpe?g$/i.test(filename)) return;
+
+                    let displayName = filename;
+                    let icon = null;
+                    let downloadName = filename;
+
+                    if (/_rigged\.blend$/i.test(filename)) {
+                        displayName = 'Blender Rig';
+                        icon = blenderIcon;
+                        downloadName = 'Blender_Rig.blend';
+                    } else if (/_all_animations\.blend$/i.test(filename)) {
+                        displayName = 'Blender Animations';
+                        icon = blenderIcon;
+                        downloadName = 'Blender_Animations.blend';
+                    } else if (/_all_animations_unity\.fbx$/i.test(filename)) {
+                        displayName = 'Animations.FBX';
+                        downloadName = 'Animations.fbx';
+                    } else if (/_hdrp\.unitypackage$/i.test(filename)) {
+                        displayName = 'Unity HDRP Package';
+                        icon = unityIcon;
+                        downloadName = 'Unity_HDRP_Package.unitypackage';
+                    }
+
+                    items.push({
+                        idx,
+                        filename,
+                        displayName,
+                        icon,
+                        downloadName,
+                    });
+                });
+
+                count.textContent = String(items.length);
+                // Make grid columns "divisible" by number of items to avoid layouts like 3+1 for 4 items.
+                try {
+                    const n = items.length;
+                    const w = window.innerWidth || 1200;
+                    const maxCols = w >= 1200 ? 4 : (w >= 900 ? 3 : (w >= 650 ? 2 : 1));
+                    let cols = 1;
+                    if (n === 4) {
+                        cols = 2; // 2x2 looks best for 4
+                    } else if (n >= 2) {
+                        const divisors = [4, 3, 2].filter(d => n % d === 0);
+                        cols = divisors.length ? divisors[0] : Math.min(n, 3);
+                    }
+                    cols = Math.max(1, Math.min(cols, maxCols));
+                    list.style.gridTemplateColumns = `repeat(${cols}, minmax(220px, 1fr))`;
+                } catch (_) {}
+                if (items.length === 0) {
+                    list.innerHTML = `<li class="file-item" style="color: var(--text-muted)">Waiting for files...</li>`;
+                    return;
+                }
+
+                list.innerHTML = items.map(item => {
+                    const proxyUrl = `/api/file/${this.taskId}/${item.idx}`;
+                    const iconHtml = item.icon
+                        ? `<img src="${item.icon}" alt="" aria-hidden="true" style="height: 1.2em; width: auto; object-fit: contain; display: block;">`
+                        : '';
                     return `
-                        <li class="file-item">
-                            <span class="file-item-name">${filename}</span>
-                            <div class="file-item-status ready">
-                                <a href="${url}" target="_blank" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Download</a>
+                        <li class="file-item"
+                            style="flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 0.75rem; padding: 1rem; margin-bottom: 0;">
+                            <div style="display: flex; align-items: center; gap: 0.6rem; width: 100%; font-size: 1.05rem;">
+                                ${iconHtml}
+                                <div style="display: flex; flex-direction: column; gap: 0.15rem; min-width: 0;">
+                                    <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                        ${item.displayName}
+                                    </div>
+                                </div>
                             </div>
+                            <a href="${proxyUrl}" download="${item.downloadName}" class="btn btn-secondary"
+                               style="width: 100%; justify-content: center; padding: 0.55rem 0.9rem; font-size: 0.875rem;">
+                                <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18">
+                                Download
+                            </a>
                         </li>
                     `;
                 }).join('');
             },
             
             setupButtons() {
-                document.getElementById('copy-all-btn').addEventListener('click', () => {
-                    if (this.task && this.task.ready_urls) {
-                        const text = this.task.ready_urls.join('\n');
-                        navigator.clipboard.writeText(text).then(() => {
-                            alert('Links copied to clipboard!');
-                        });
-                    }
-                });
-                
-                document.getElementById('download-all-btn').addEventListener('click', () => {
-                    if (this.task && this.task.ready_urls) {
-                        // Download each file
-                        this.task.ready_urls.forEach((url, i) => {
-                            setTimeout(() => {
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = url.split('/').pop();
-                                a.click();
-                            }, i * 500); // Stagger downloads
-                        });
-                    }
-                });
-
                 document.getElementById('restart-task-btn').addEventListener('click', async () => {
                     const btn = document.getElementById('restart-task-btn');
                     const statusBadge = document.getElementById('status-badge');
@@ -435,6 +725,153 @@
                         btn.textContent = prevText;
                     }
                 });
+
+                // Owner tasks modal
+                document.getElementById('owner-tasks-btn')?.addEventListener('click', () => this.openOwnerTasksModal());
+                document.getElementById('owner-tasks-close')?.addEventListener('click', () => this.closeOwnerTasksModal());
+                document.getElementById('owner-tasks-modal')?.addEventListener('click', (e) => {
+                    if (e.target.id === 'owner-tasks-modal') this.closeOwnerTasksModal();
+                });
+                document.getElementById('owner-tasks-prev')?.addEventListener('click', () => {
+                    if (this.ownerTasksPage > 1) {
+                        this.ownerTasksPage--;
+                        this.loadOwnerTasks();
+                    }
+                });
+                document.getElementById('owner-tasks-next')?.addEventListener('click', () => {
+                    const totalPages = Math.ceil(this.ownerTasksTotal / this.ownerTasksPerPage);
+                    if (this.ownerTasksPage < totalPages) {
+                        this.ownerTasksPage++;
+                        this.loadOwnerTasks();
+                    }
+                });
+
+                // Progress log toggle
+                document.getElementById('progress-log')?.addEventListener('click', () => {
+                    this.progressLogExpanded = !this.progressLogExpanded;
+                    this.renderProgressLog();
+                    // When expanding, refetch full log immediately
+                    this.refreshProgressLog();
+                });
+
+                // HDRP image preview (click to open lightbox)
+                const renders = document.getElementById('hdrp-renders');
+                renders?.addEventListener('click', (e) => {
+                    const t = e.target;
+                    if (!(t instanceof HTMLImageElement)) return;
+                    this.openImagePreview(t.src);
+                });
+
+                const imgModal = document.getElementById('image-preview-modal');
+                document.getElementById('image-preview-close')?.addEventListener('click', () => this.closeImagePreview());
+                imgModal?.addEventListener('click', (e) => {
+                    if (e.target && e.target.id === 'image-preview-modal') this.closeImagePreview();
+                });
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') this.closeImagePreview();
+                });
+            },
+
+            openImagePreview(src) {
+                const modal = document.getElementById('image-preview-modal');
+                const img = document.getElementById('image-preview-img');
+                if (!modal || !img) return;
+                img.src = src;
+                modal.classList.remove('hidden');
+                modal.style.display = 'flex';
+            },
+
+            closeImagePreview() {
+                const modal = document.getElementById('image-preview-modal');
+                const img = document.getElementById('image-preview-img');
+                if (img) img.src = '';
+                if (!modal) return;
+                modal.classList.add('hidden');
+                modal.style.display = 'none';
+            },
+
+            openOwnerTasksModal() {
+                this.ownerTasksPage = 1;
+                const modal = document.getElementById('owner-tasks-modal');
+                modal.classList.remove('hidden');
+                modal.style.display = 'flex';
+                this.loadOwnerTasks();
+            },
+
+            closeOwnerTasksModal() {
+                const modal = document.getElementById('owner-tasks-modal');
+                modal.classList.add('hidden');
+                modal.style.display = 'none';
+            },
+
+            formatDate(dateStr) {
+                if (!dateStr) return '-';
+                const d = new Date(dateStr);
+                return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            },
+
+            async loadOwnerTasks() {
+                const tbody = document.getElementById('owner-tasks-table');
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Loading...</td></tr>';
+                try {
+                    const params = new URLSearchParams({
+                        page: this.ownerTasksPage,
+                        per_page: this.ownerTasksPerPage
+                    });
+                    const resp = await fetch(`/api/task/${this.taskId}/owner_tasks?${params}`);
+                    if (!resp.ok) throw new Error('Failed to load owner tasks');
+                    const data = await resp.json();
+                    this.ownerTasksTotal = data.total || 0;
+
+                    const subtitle = document.getElementById('owner-tasks-subtitle');
+                    if (subtitle) {
+                        // owner_id can be email for user owners; don't show it publicly
+                        subtitle.textContent = data.owner_type === 'user' ? 'Owner: user' : 'Owner: anon';
+                    }
+
+                    const placeholder = '/static/images/placeholder-thumb.svg';
+                    const rows = (data.tasks || []).map(t => {
+                        const statusColor = {
+                            'created': 'var(--text-muted)',
+                            'processing': 'var(--accent)',
+                            'done': 'var(--success)',
+                            'error': 'var(--error)'
+                        }[t.status] || 'var(--text-muted)';
+
+                        const thumb = t.thumbnail_url || placeholder;
+                        return `
+                            <tr>
+                                <td style="width: 140px;">
+                                    <img src="${thumb}" onerror="this.onerror=null;this.src='${placeholder}';"
+                                         alt="thumb" style="width: 120px; height: 68px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); background: #000;">
+                                </td>
+                                <td style="font-family: monospace; font-size: 0.875rem;">${t.task_id.substring(0,8)}...</td>
+                                <td><span style="color: ${statusColor}; font-weight: 500; text-transform: capitalize;">${t.status}</span></td>
+                                <td>${t.progress || 0}%</td>
+                                <td style="font-size: 0.875rem;">${this.formatDate(t.created_at)}</td>
+                                <td>
+                                    <a href="/task?id=${t.task_id}" target="_blank" class="btn btn-secondary"
+                                       style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Open</a>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    tbody.innerHTML = rows.length
+                        ? rows.join('')
+                        : '<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">No tasks found</td></tr>';
+
+                    const totalPages = Math.ceil((this.ownerTasksTotal || 0) / this.ownerTasksPerPage);
+                    const start = (this.ownerTasksPage - 1) * this.ownerTasksPerPage + 1;
+                    const end = Math.min(this.ownerTasksPage * this.ownerTasksPerPage, this.ownerTasksTotal || 0);
+                    document.getElementById('owner-tasks-pagination-info').textContent =
+                        `Showing ${this.ownerTasksTotal ? start : 0}-${this.ownerTasksTotal ? end : 0} of ${this.ownerTasksTotal} tasks`;
+                    document.getElementById('owner-tasks-prev').disabled = this.ownerTasksPage <= 1;
+                    document.getElementById('owner-tasks-next').disabled = this.ownerTasksPage >= (totalPages || 1);
+                } catch (e) {
+                    console.error('Owner tasks load error:', e);
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--error);">Failed to load tasks</td></tr>';
+                }
             },
             
             showError(message) {
@@ -448,6 +885,24 @@
                     clearInterval(this.pollInterval);
                     this.pollInterval = null;
                 }
+            },
+
+            progressLogInterval: null,
+            startProgressLogPolling() {
+                if (this.progressLogInterval) return;
+                const tick = async () => {
+                    try { await this.refreshProgressLog(); } catch (_) {}
+                };
+                tick();
+                this.progressLogInterval = setInterval(tick, 10000);
+
+                // Cleanup on unload
+                window.addEventListener('beforeunload', () => {
+                    try {
+                        if (this.progressLogInterval) clearInterval(this.progressLogInterval);
+                        this.progressLogInterval = null;
+                    } catch (_) {}
+                }, { once: true });
             },
             
             async loadQueueStatus() {
@@ -496,6 +951,274 @@
         };
         
         document.addEventListener('DOMContentLoaded', () => TaskPage.init());
+    </script>
+
+    <!-- Three.js Viewer (ES Modules) -->
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+          }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+        import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
+        import { RGBELoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/RGBELoader.js';
+        import { EXRLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/EXRLoader.js';
+
+        const params = new URLSearchParams(window.location.search);
+        const taskId = params.get('id');
+
+        const wrap = document.getElementById('model-viewer-wrap');
+        const host = document.getElementById('model-viewer');
+        const statusEl = document.getElementById('model-viewer-status');
+        const sel = document.getElementById('anim-select');
+        const playBtn = document.getElementById('anim-play-btn');
+        const pauseBtn = document.getElementById('anim-pause-btn');
+
+        if (!taskId || !wrap || !host || !statusEl) {
+            // nothing to do
+        } else {
+            // ============================================================
+            // LIGHTING & RENDERER CONFIG (edit values here)
+            // ============================================================
+            const LIGHTING_CONFIG = {
+                // HDR Environment (IBL reflections)
+                hdrPath: '/static/ibl/DefaultHDRISky.exr',
+                envIntensity: 1.0,          // scene.environmentIntensity (Three.js r152+)
+
+                // Tone mapping
+                toneMapping: THREE.ACESFilmicToneMapping,
+                toneMappingExposure: 1.0,   // overall brightness
+
+                // Directional "sun" light
+                sunColor: 0xffffff,
+                sunIntensity: 0.8,
+                sunPosition: [3, 5, 2],     // x, y, z
+
+                // Ambient fill
+                ambientColor: 0xffffff,
+                ambientIntensity: 0.3,
+
+                // Hemisphere light (sky/ground)
+                hemiSkyColor: 0xffffff,
+                hemiGroundColor: 0x222233,
+                hemiIntensity: 0.25,
+
+                // Background
+                bgColor: 0x1a1a2e,           // scene background color
+            };
+            // ============================================================
+
+            let started = false;
+            let mixer = null;
+            let animations = [];
+            let currentAction = null;
+            const clock = new THREE.Clock();
+
+            function setStatus(s) { statusEl.textContent = s; }
+
+            function play(name) {
+                if (!mixer || !animations.length) return;
+                const clip = animations.find(c => c.name === name) || animations[0];
+                if (!clip) return;
+                const next = mixer.clipAction(clip);
+                next.reset().fadeIn(0.2).play();
+                if (currentAction && currentAction !== next) currentAction.fadeOut(0.2);
+                currentAction = next;
+                mixer.timeScale = 1;
+            }
+
+            async function loadEnvironment(scene) {
+                const url = LIGHTING_CONFIG.hdrPath;
+                setStatus('Loading IBL...');
+
+                // Use EXRLoader for .exr (RGBELoader is still imported/available as required stack).
+                const tryEXR = () => new Promise((resolve) => {
+                    const exr = new EXRLoader();
+                    exr.load(url, (t) => {
+                        t.mapping = THREE.EquirectangularReflectionMapping;
+                        scene.environment = t;
+                        // Set envIntensity if supported (Three.js r152+)
+                        if ('environmentIntensity' in scene) {
+                            scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
+                        }
+                        console.log('[Viewer] EXR environment loaded');
+                        resolve(true);
+                    }, undefined, (err) => {
+                        console.warn('[Viewer] EXR load failed:', err);
+                        resolve(false);
+                    });
+                });
+
+                const tryRGBE = () => new Promise((resolve) => {
+                    const rgbe = new RGBELoader();
+                    rgbe.load(url.replace('.exr', '.hdr'), (t) => {
+                        t.mapping = THREE.EquirectangularReflectionMapping;
+                        scene.environment = t;
+                        if ('environmentIntensity' in scene) {
+                            scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
+                        }
+                        console.log('[Viewer] HDR environment loaded');
+                        resolve(true);
+                    }, undefined, () => resolve(false));
+                });
+
+                const okExr = await tryEXR();
+                if (okExr) return true;
+                const okHdr = await tryRGBE();
+                return okHdr;
+            }
+
+            async function initViewer() {
+                if (started) return;
+                started = true;
+
+                wrap.classList.remove('hidden');
+                setStatus('Loading...');
+
+                const scene = new THREE.Scene();
+                scene.background = new THREE.Color(LIGHTING_CONFIG.bgColor);
+
+                // Renderer (PBR critical settings from config)
+                const renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+                renderer.outputColorSpace = THREE.SRGBColorSpace;
+                renderer.toneMapping = LIGHTING_CONFIG.toneMapping;
+                renderer.toneMappingExposure = LIGHTING_CONFIG.toneMappingExposure;
+                renderer.physicallyCorrectLights = true;
+
+                host.innerHTML = '';
+                host.appendChild(renderer.domElement);
+
+                const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+                camera.position.set(0, 1.5, 3);
+
+                const controls = new OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.08;
+                controls.target.set(0, 1.0, 0);
+                
+                // Auto-rotate: ~10 sec per full rotation (360° / 10s = 36°/s)
+                // OrbitControls autoRotateSpeed is in units where 1.0 = 30°/s
+                // So for 36°/s we need 36/30 = 1.2
+                controls.autoRotate = true;
+                controls.autoRotateSpeed = 1.2;
+                
+                // Stop auto-rotate on user interaction
+                const stopAutoRotate = () => { controls.autoRotate = false; };
+                renderer.domElement.addEventListener('pointerdown', stopAutoRotate, { once: true });
+                renderer.domElement.addEventListener('wheel', stopAutoRotate, { once: true });
+                
+                controls.update();
+
+                // Required stack: TransformControls (initialized, viewer-only for now)
+                const transform = new TransformControls(camera, renderer.domElement);
+                transform.enabled = false;
+                scene.add(transform);
+
+                // Lighting setup (from LIGHTING_CONFIG)
+                const sunLight = new THREE.DirectionalLight(LIGHTING_CONFIG.sunColor, LIGHTING_CONFIG.sunIntensity);
+                sunLight.position.set(...LIGHTING_CONFIG.sunPosition);
+                scene.add(sunLight);
+
+                const ambientLight = new THREE.AmbientLight(LIGHTING_CONFIG.ambientColor, LIGHTING_CONFIG.ambientIntensity);
+                scene.add(ambientLight);
+
+                const hemiLight = new THREE.HemisphereLight(
+                    LIGHTING_CONFIG.hemiSkyColor,
+                    LIGHTING_CONFIG.hemiGroundColor,
+                    LIGHTING_CONFIG.hemiIntensity
+                );
+                scene.add(hemiLight);
+
+                function resize() {
+                    const w = host.clientWidth || 640;
+                    const h = host.clientHeight || 420;
+                    camera.aspect = w / h;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(w, h, false);
+                }
+                window.addEventListener('resize', resize);
+                resize();
+
+                await loadEnvironment(scene);
+
+                setStatus('Loading GLB...');
+                const loader = new GLTFLoader();
+                const glbUrl = `/api/task/${taskId}/model.glb`;
+                const gltf = await new Promise((resolve, reject) => {
+                    loader.load(glbUrl, resolve, undefined, reject);
+                }).catch((e) => {
+                    setStatus('Model not found');
+                    throw e;
+                });
+
+                const model = gltf.scene;
+                scene.add(model);
+
+                // Frame model
+                try {
+                    const box = new THREE.Box3().setFromObject(model);
+                    const size = box.getSize(new THREE.Vector3()).length();
+                    const center = box.getCenter(new THREE.Vector3());
+                    model.position.sub(center);
+                    controls.target.set(0, 0, 0);
+                    controls.update();
+                    camera.position.set(0, 1.5, Math.max(2.5, size * 0.9));
+                } catch (_) {}
+
+                animations = gltf.animations || [];
+                mixer = animations.length ? new THREE.AnimationMixer(model) : null;
+
+                // UI for animations
+                if (sel && playBtn && pauseBtn && animations.length) {
+                    sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+                    sel.classList.remove('hidden');
+                    playBtn.classList.remove('hidden');
+                    pauseBtn.classList.remove('hidden');
+                    sel.addEventListener('change', () => play(sel.value));
+                    playBtn.addEventListener('click', () => play(sel.value));
+                    pauseBtn.addEventListener('click', () => { if (mixer) mixer.timeScale = 0; });
+                    try { play(sel.value); } catch (_) {}
+                } else {
+                    sel?.classList.add('hidden');
+                    playBtn?.classList.add('hidden');
+                    pauseBtn?.classList.add('hidden');
+                }
+
+                setStatus(animations.length ? 'Ready' : 'Ready (no animations)');
+
+                // Render loop
+                function loop() {
+                    requestAnimationFrame(loop);
+                    const dt = clock.getDelta();
+                    if (mixer) mixer.update(dt);
+                    controls.update();
+                    renderer.render(scene, camera);
+                }
+                loop();
+            }
+
+            // Init once task is done (best-effort)
+            async function waitDoneAndInit() {
+                try {
+                    const r = await fetch(`/api/task/${taskId}`);
+                    const t = await r.json();
+                    if (t && t.status === 'done') {
+                        await initViewer();
+                        return;
+                    }
+                } catch (_) {}
+                // If not done yet, we can still try init later (task page polls anyway)
+                setTimeout(waitDoneAndInit, 2000);
+            }
+
+            waitDoneAndInit();
+        }
     </script>
 </body>
 </html>

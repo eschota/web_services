@@ -5,9 +5,8 @@ import asyncio
 import uuid
 from datetime import datetime
 from typing import Optional, Tuple, List
-from urllib.parse import urlparse
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession, AsyncSessionLocal
@@ -15,7 +14,6 @@ from config import WORKERS
 from workers import (
     select_best_worker,
     send_task_to_worker,
-    send_fbx_to_glb,
     check_urls_batch,
     check_video_availability,
     get_worker_base_url
@@ -43,28 +41,46 @@ def _get_video_cache_lock(task_id: str) -> asyncio.Lock:
 async def cache_task_video_by_id(task_id: str) -> None:
     """
     Cache task video to local disk:
-      /var/autorig/videos/{task_id}.mp4
+      /var/autorig/videos/{task_id}.{ext} (mp4/mov)
     Safe to call multiple times; uses in-process lock and file existence check.
     """
     import os
     import httpx
 
     os.makedirs(_VIDEO_CACHE_DIR, exist_ok=True)
-    final_path = os.path.join(_VIDEO_CACHE_DIR, f"{task_id}.mp4")
-    tmp_path = final_path + ".tmp"
-
-    if os.path.exists(final_path) and os.path.getsize(final_path) > 0:
+    # Prefer mp4 if already cached; otherwise allow mov.
+    cached_mp4 = os.path.join(_VIDEO_CACHE_DIR, f"{task_id}.mp4")
+    cached_mov = os.path.join(_VIDEO_CACHE_DIR, f"{task_id}.mov")
+    if os.path.exists(cached_mp4) and os.path.getsize(cached_mp4) > 0:
+        return
+    if os.path.exists(cached_mov) and os.path.getsize(cached_mov) > 0:
         return
 
     lock = _get_video_cache_lock(task_id)
     async with lock:
-        if os.path.exists(final_path) and os.path.getsize(final_path) > 0:
+        if os.path.exists(cached_mp4) and os.path.getsize(cached_mp4) > 0:
+            return
+        if os.path.exists(cached_mov) and os.path.getsize(cached_mov) > 0:
             return
 
         async with AsyncSessionLocal() as db:
             task = await get_task_by_id(db, task_id)
             if not task or not task.video_url:
                 return
+
+            # Determine extension from remote URL
+            ext = ".mp4"
+            try:
+                url = (task.video_url or "").lower()
+                if url.endswith(".mov"):
+                    ext = ".mov"
+                elif url.endswith(".mp4"):
+                    ext = ".mp4"
+            except Exception:
+                ext = ".mp4"
+
+            final_path = os.path.join(_VIDEO_CACHE_DIR, f"{task_id}{ext}")
+            tmp_path = final_path + ".tmp"
 
             try:
                 async with httpx.AsyncClient() as client:
@@ -83,6 +99,20 @@ async def cache_task_video_by_id(task_id: str) -> None:
                         os.remove(tmp_path)
                 except Exception:
                     pass
+
+
+def _pick_video_from_urls(urls: List[str]) -> Optional[str]:
+    """Pick best video URL from a list of URLs (final format: prefer *_video.mp4)."""
+    if not urls:
+        return None
+    for u in urls:
+        if "_video.mp4" in u:
+            return u
+    # Minimal fallback: any mp4
+    for u in urls:
+        if u.lower().endswith(".mp4"):
+            return u
+    return None
 
 
 # =============================================================================
@@ -116,97 +146,6 @@ def find_file_by_pattern(ready_urls: List[str], pattern: str, quality: str = "10
                     return url
     
     return None
-
-
-def _is_fbx_url(input_url: str) -> bool:
-    """Return True if input_url path ends with .fbx (case-insensitive), ignoring query/fragment."""
-    try:
-        path = urlparse(input_url).path or ""
-    except Exception:
-        path = input_url or ""
-    return path.lower().endswith(".fbx")
-
-
-async def _head_is_ready(url: str) -> bool:
-    """Lightweight availability check for a single URL (HEAD 200)."""
-    import httpx
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.head(url, timeout=5.0, follow_redirects=True)
-            return resp.status_code == 200
-    except Exception:
-        return False
-
-
-async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input_url: str) -> None:
-    """
-    Run FBX->GLB pre-conversion asynchronously after task creation/restart.
-    Writes fbx_glb_* fields into the task once the worker responds.
-    """
-    last_error = None
-    candidate_workers = [first_worker_url] + [w for w in WORKERS if w != first_worker_url]
-
-    async with AsyncSessionLocal() as db:
-        task = await get_task_by_id(db, task_id)
-        if not task:
-            return
-
-        # If task already has output_url or is terminal, don't redo
-        if task.status in ("done", "error") or task.fbx_glb_output_url:
-            return
-
-        for candidate in candidate_workers:
-            res = await send_fbx_to_glb(candidate, input_url)
-            if res.success:
-                task.worker_api = candidate
-                task.fbx_glb_model_name = res.model_name
-                task.fbx_glb_output_url = res.output_url
-                # If worker returns output_url, assume file is ready (no HEAD/GET checks).
-                task.fbx_glb_ready = True
-                task.fbx_glb_error = None
-                task.updated_at = datetime.utcnow()
-                await db.commit()
-                await db.refresh(task)
-
-                # Start main pipeline immediately (do not wait for next poll).
-                if not task.worker_task_id and task.fbx_glb_output_url:
-                    result = await send_task_to_worker(
-                        task.worker_api,
-                        task.fbx_glb_output_url,
-                        task.input_type or "t_pose"
-                    )
-                    if not result.success:
-                        task.status = "error"
-                        task.error_message = result.error
-                        task.updated_at = datetime.utcnow()
-                        await db.commit()
-                        return
-
-                    task.worker_task_id = result.task_id
-                    task.progress_page = result.progress_page
-                    task.guid = result.guid
-                    task.output_urls = result.output_urls
-                    task.total_count = len(result.output_urls)
-                    task.status = "processing"
-                    task.updated_at = datetime.utcnow()
-                    await db.commit()
-                return
-
-            last_error = res.error
-
-            # Endpoint missing? try next worker
-            if last_error and "HTTP 404" in last_error:
-                continue
-
-            # For other errors (timeouts, 5xx), still try other workers
-            continue
-
-        # No worker succeeded
-        task.status = "error"
-        task.fbx_glb_error = last_error or "FBX->GLB conversion failed"
-        task.error_message = task.fbx_glb_error
-        task.updated_at = datetime.utcnow()
-        await db.commit()
 
 
 # =============================================================================
@@ -245,39 +184,47 @@ async def create_conversion_task(
 async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) -> Tuple[Task, Optional[str]]:
     """
     Start a queued (status=created) task on a specific worker.
-    For FBX inputs: starts FBX->GLB pre-step asynchronously and returns immediately.
-    For non-FBX: sends task to worker immediately.
+    Unified worker pipeline for all input formats.
     Returns: (task, error_message)
     """
-    task.worker_api = worker_url
-    task.status = "processing"
+    candidate_workers = [worker_url] + [w for w in WORKERS if w != worker_url]
+
+    last_error: Optional[str] = None
+    for candidate in candidate_workers:
+        result = await send_task_to_worker(candidate, task.input_url, task.input_type or "t_pose")
+        if result.success:
+            # Some workers return wildcard URL patterns (e.g. "*") as placeholders.
+            # They are not real files and will never become HEAD/GET=200, so we must
+            # exclude them from progress tracking to allow tasks to complete.
+            filtered_output_urls = [u for u in (result.output_urls or []) if "*" not in u]
+            task.worker_api = candidate
+            task.worker_task_id = result.task_id
+            task.progress_page = result.progress_page
+            task.guid = result.guid
+            task.output_urls = filtered_output_urls
+            task.total_count = len(filtered_output_urls)
+            task.status = "processing"
+            task.started_at = datetime.utcnow()  # Track when processing started
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            return task, None
+
+        last_error = result.error
+        # If endpoint missing on this worker, try another.
+        if last_error and "HTTP 404" in last_error:
+            continue
+        # For other errors (timeouts, 5xx), still try other workers.
+        continue
+
+    task.status = "error"
+    task.error_message = last_error
     task.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(task)
+    return task, last_error
 
-    if _is_fbx_url(task.input_url or ""):
-        asyncio.create_task(_start_fbx_preconvert_async(task.id, worker_url, task.input_url))
-        return task, None
-
-    result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
-    if not result.success:
-        task.status = "error"
-        task.error_message = result.error
-        task.updated_at = datetime.utcnow()
-        await db.commit()
-        await db.refresh(task)
-        return task, result.error
-
-    task.worker_task_id = result.task_id
-    task.progress_page = result.progress_page
-    task.guid = result.guid
-    task.output_urls = result.output_urls
-    task.total_count = len(result.output_urls)
-    task.status = "processing"
-    task.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(task)
-    return task, None
+    # Unreachable; return happens inside loop above.
 
 
 # =============================================================================
@@ -290,43 +237,19 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     """
     # Track if task just completed
     was_processing = task.status == "processing"
-    
-    # FBX -> GLB stage (if applicable)
-    if task.status not in ("done", "error") and task.fbx_glb_output_url:
-        # If worker returned output_url, assume ready (no HEAD/GET checks).
-        if not task.fbx_glb_ready:
-            task.fbx_glb_ready = True
-            task.updated_at = datetime.utcnow()
-
-        # Start main pipeline once GLB is ready and main worker task not created yet
-        if task.fbx_glb_ready and not task.worker_task_id:
-            result = await send_task_to_worker(
-                task.worker_api,  # already selected at creation
-                task.fbx_glb_output_url,
-                task.input_type or "t_pose"
-            )
-            if not result.success:
-                task.status = "error"
-                task.error_message = result.error
-                await db.commit()
-                await db.refresh(task)
-                return task
-
-            task.worker_task_id = result.task_id
-            task.progress_page = result.progress_page
-            task.guid = result.guid
-            task.output_urls = result.output_urls
-            task.total_count = len(result.output_urls)
-            task.status = "processing"
-            task.updated_at = datetime.utcnow()
 
     # Get already ready URLs
     already_ready = set(task.ready_urls)
     
     # Check new URLs (only for processing tasks)
     if task.status not in ("done", "error") and task.output_urls:
+        # Do not track wildcard patterns like "..._*.png" as real outputs.
+        check_urls = [u for u in (task.output_urls or []) if "*" not in u]
+        # Keep total_count consistent with what we actually check.
+        if task.total_count != len(check_urls):
+            task.total_count = len(check_urls)
         newly_ready, total_ready = await check_urls_batch(
-            task.output_urls, 
+            check_urls,
             already_ready
         )
         
@@ -346,26 +269,57 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     # Check video availability (for both processing and done tasks)
     prev_video_ready = bool(task.video_ready)
     if task.guid and not task.video_ready:
-        worker_base = get_worker_base_url(task.worker_api)
-        video_ready, video_url = await check_video_availability(task.guid, worker_base)
-        if video_ready:
+        # Prefer a known URL from ready_urls/output_urls first.
+        v = _pick_video_from_urls(task.ready_urls or [])
+        if v:
             task.video_ready = True
-            task.video_url = video_url
+            task.video_url = v
             task.updated_at = datetime.utcnow()
+        else:
+            v2 = _pick_video_from_urls(task.output_urls or [])
+            if v2:
+                # If it's only in output_urls, it might not exist yet; verify via HEAD.
+                try:
+                    import httpx
+                    async with httpx.AsyncClient() as client:
+                        h = await client.head(v2, timeout=5.0, follow_redirects=True)
+                        if h.status_code == 200:
+                            task.video_ready = True
+                            task.video_url = v2
+                            task.updated_at = datetime.utcnow()
+                except Exception:
+                    pass
+
+        # Fallback: old-style known naming on worker base (mp4/mov variants)
+        if not task.video_ready:
+            worker_base = get_worker_base_url(task.worker_api)
+            video_ready, video_url = await check_video_availability(task.guid, worker_base)
+            if video_ready:
+                task.video_ready = True
+                task.video_url = video_url
+                task.updated_at = datetime.utcnow()
     
     await db.commit()
     await db.refresh(task)
 
-    # Warm up local MP4 cache asynchronously when video becomes ready
+    # Warm up local MP4 cache asynchronously when video becomes ready.
+    # IMPORTANT: do NOT notify Telegram here, иначе будет дубль с notify-on-done ниже.
     try:
         if (not prev_video_ready) and task.video_ready and task.video_url:
             asyncio.create_task(cache_task_video_by_id(task.id))
-            try:
-                asyncio.create_task(broadcast_task_done(task.id))
-            except Exception:
-                pass
     except Exception:
         pass
+
+    # Telegram notify on completion (even if video is still being cached).
+    if was_processing and task.status == "done":
+        try:
+            duration_seconds = int((datetime.utcnow() - task.created_at).total_seconds())
+        except Exception:
+            duration_seconds = None
+        try:
+            asyncio.create_task(broadcast_task_done(task.id, duration_seconds=duration_seconds))
+        except Exception:
+            pass
     
     # Send email notification if task just completed (100%)
     if was_processing and task.status == "done" and task.owner_type == "user":
@@ -471,6 +425,57 @@ async def get_all_users(
     users = result.scalars().all()
     
     return list(users), total
+
+
+async def get_anon_sessions(
+    db: AsyncSession,
+    search: Optional[str] = None,
+    sort_by: str = "last_seen_at",
+    sort_desc: bool = True,
+    page: int = 1,
+    per_page: int = 20
+) -> Tuple[list[tuple[AnonSession, int]], int]:
+    """
+    Get anon sessions with task counts (admin).
+    Returns: ([(anon_session, total_tasks)], total_sessions)
+    """
+    # Total sessions count
+    count_q = select(func.count(AnonSession.anon_id))
+    if search:
+        count_q = count_q.where(AnonSession.anon_id.ilike(f"%{search}%"))
+    total_res = await db.execute(count_q)
+    total = int(total_res.scalar() or 0)
+
+    # Main query
+    task_count = func.count(Task.id).label("total_tasks")
+    q = (
+        select(AnonSession, task_count)
+        .select_from(AnonSession)
+        .outerjoin(
+            Task,
+            and_(Task.owner_type == "anon", Task.owner_id == AnonSession.anon_id),
+        )
+        .group_by(AnonSession.anon_id)
+    )
+
+    if search:
+        q = q.where(AnonSession.anon_id.ilike(f"%{search}%"))
+
+    # Sorting
+    if sort_by == "total_tasks":
+        sort_col = task_count
+    else:
+        sort_col = getattr(AnonSession, sort_by, AnonSession.last_seen_at)
+
+    q = q.order_by(desc(sort_col) if sort_desc else sort_col)
+
+    # Pagination
+    offset = (page - 1) * per_page
+    q = q.offset(offset).limit(per_page)
+
+    res = await db.execute(q)
+    rows = res.all()  # list[(AnonSession, int)]
+    return [(r[0], int(r[1] or 0)) for r in rows], total
 
 
 async def update_user_balance(
