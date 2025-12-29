@@ -65,6 +65,16 @@ class AnonSession(Base):
     last_seen_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TaskLike(Base):
+    """Like on a task (by registered user)"""
+    __tablename__ = "task_likes"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Task(Base):
     """Conversion task"""
     __tablename__ = "tasks"

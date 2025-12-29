@@ -36,7 +36,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH
 )
-from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey
+from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike
 from models import (
     TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
@@ -46,7 +46,7 @@ from models import (
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
     WorkerQueueInfo, QueueStatusResponse,
-    GalleryItem, GalleryResponse
+    GalleryItem, GalleryResponse, LikeResponse
 )
 from workers import get_global_queue_status
 from auth import (
@@ -867,6 +867,16 @@ async def api_get_task(
         if unreal_url:
             quick_downloads["unreal"] = unreal_url
     
+    # prepared.glb ready if:
+    # - _model_prepared.glb exists in ready_urls (worker uploaded it)
+    # - OR for FBX tasks: fbx_glb_ready == True
+    # - OR fallback: guid is not None and model uploaded to worker
+    prepared_glb_ready = (
+        any('_model_prepared.glb' in url.lower() for url in (task.ready_urls or [])) or
+        task.fbx_glb_ready or 
+        (task.guid is not None and task.status != 'created')
+    )
+    
     return TaskStatusResponse(
         task_id=task.id,
         status=task.status,
@@ -883,6 +893,7 @@ async def api_get_task(
         progress_page=task.progress_page,
         viewer_html_url=viewer_html_url,
         quick_downloads=quick_downloads if quick_downloads else None,
+        prepared_glb_ready=prepared_glb_ready,
         error_message=task.error_message,
         created_at=task.created_at,
         updated_at=task.updated_at
@@ -1090,21 +1101,87 @@ async def api_get_history(
 
 @app.get("/api/gallery", response_model=GalleryResponse)
 async def api_get_gallery(
+    request: Request,
     page: int = 1,
     per_page: int = 12,
+    sort: str = "likes",
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get public gallery of completed tasks with videos"""
-    tasks, total = await get_gallery_items(db, page, per_page)
+    from sqlalchemy import func, desc
+    from database import Task
+    
+    # Get current user email for liked_by_me check
+    user_email = user.email if user else None
+    
+    # Count total completed tasks with video
+    count_result = await db.execute(
+        select(func.count(Task.id)).where(
+            Task.status == "done",
+            Task.video_ready == True
+        )
+    )
+    total = count_result.scalar() or 0
+    
+    # Get task IDs with like counts
+    offset = (page - 1) * per_page
+    
+    if sort == "likes":
+        # Sort by like count (descending), then by date
+        result = await db.execute(
+            select(
+                Task,
+                func.count(TaskLike.id).label('like_count')
+            )
+            .outerjoin(TaskLike, Task.id == TaskLike.task_id)
+            .where(Task.status == "done", Task.video_ready == True)
+            .group_by(Task.id)
+            .order_by(desc('like_count'), desc(Task.created_at))
+            .offset(offset)
+            .limit(per_page)
+        )
+    else:
+        # Sort by date (newest first)
+        result = await db.execute(
+            select(
+                Task,
+                func.count(TaskLike.id).label('like_count')
+            )
+            .outerjoin(TaskLike, Task.id == TaskLike.task_id)
+            .where(Task.status == "done", Task.video_ready == True)
+            .group_by(Task.id)
+            .order_by(desc(Task.created_at))
+            .offset(offset)
+            .limit(per_page)
+        )
+    
+    rows = result.all()
+    
+    # Get user's likes if logged in
+    user_likes = set()
+    if user_email:
+        task_ids = [row[0].id for row in rows]
+        if task_ids:
+            likes_result = await db.execute(
+                select(TaskLike.task_id).where(
+                    TaskLike.user_email == user_email,
+                    TaskLike.task_id.in_(task_ids)
+                )
+            )
+            user_likes = set(r[0] for r in likes_result.all())
     
     items = [
         GalleryItem(
             task_id=t.id,
-            video_url=f"/api/video/{t.id}",  # Use proxy URL
+            video_url=f"/api/video/{t.id}",
+            thumbnail_url=f"/api/thumb/{t.id}",
             created_at=t.created_at,
-            time_ago=format_time_ago(t.created_at)
+            time_ago=format_time_ago(t.created_at),
+            like_count=like_count,
+            liked_by_me=t.id in user_likes
         )
-        for t in tasks
+        for t, like_count in rows
     ]
     
     has_more = (page * per_page) < total
@@ -1115,6 +1192,56 @@ async def api_get_gallery(
         page=page,
         per_page=per_page,
         has_more=has_more
+    )
+
+
+@app.post("/api/gallery/{task_id}/like", response_model=LikeResponse)
+async def api_toggle_like(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Toggle like on a task (requires authentication)"""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Check if task exists
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Check if already liked
+    existing = await db.execute(
+        select(TaskLike).where(
+            TaskLike.task_id == task_id,
+            TaskLike.user_email == user.email
+        )
+    )
+    existing_like = existing.scalar_one_or_none()
+    
+    if existing_like:
+        # Unlike
+        await db.delete(existing_like)
+        await db.commit()
+        liked_by_me = False
+    else:
+        # Like
+        new_like = TaskLike(task_id=task_id, user_email=user.email)
+        db.add(new_like)
+        await db.commit()
+        liked_by_me = True
+    
+    # Get updated like count
+    from sqlalchemy import func
+    count_result = await db.execute(
+        select(func.count(TaskLike.id)).where(TaskLike.task_id == task_id)
+    )
+    like_count = count_result.scalar() or 0
+    
+    return LikeResponse(
+        task_id=task_id,
+        like_count=like_count,
+        liked_by_me=liked_by_me
     )
 
 
@@ -1583,6 +1710,189 @@ async def api_proxy_viewer_resource(
             raise HTTPException(status_code=502, detail=f"Failed to fetch resource: {str(e)}")
         except httpx.HTTPStatusError as e:
             raise HTTPException(status_code=e.response.status_code, detail="Resource not available")
+
+
+# =============================================================================
+# Model File Proxy Endpoints (for 3D viewer)
+# =============================================================================
+def _find_file_in_ready_urls(ready_urls: list, pattern: str) -> Optional[str]:
+    """Find a file in ready_urls matching the pattern (case-insensitive)"""
+    pattern_lower = pattern.lower()
+    for url in ready_urls:
+        if pattern_lower in url.lower():
+            return url
+    return None
+
+
+async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
+    """Stream a model file from worker"""
+    async def stream_file():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", url, timeout=120.0, follow_redirects=True) as response:
+                if response.status_code != 200:
+                    return
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    yield chunk
+    
+    # Determine content type
+    ext = filename.split(".")[-1].lower()
+    content_types = {
+        "glb": "model/gltf-binary",
+        "fbx": "application/octet-stream",
+    }
+    content_type = content_types.get(ext, "application/octet-stream")
+    
+    return StreamingResponse(
+        stream_file(),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+
+@app.get("/api/task/{task_id}/model.glb")
+async def api_proxy_model_glb(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy the main model GLB file from worker"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if not task.guid or not task.worker_api:
+        raise HTTPException(status_code=404, detail="Model not available yet")
+    
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
+    
+    return await _proxy_model_file(model_url, f"{task_id}_model.glb")
+
+
+@app.get("/api/task/{task_id}/animations.glb")
+async def api_proxy_animations_glb(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy animations GLB file from worker (searches ready_urls or fallback to model.glb)"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if not task.guid or not task.worker_api:
+        raise HTTPException(status_code=404, detail="Model not available yet")
+    
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    
+    # Try to find animations GLB in ready_urls
+    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations")
+    if animations_url and animations_url.lower().endswith(".glb"):
+        return await _proxy_model_file(animations_url, f"{task_id}_animations.glb")
+    
+    # Fallback: try main model GLB
+    model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
+    return await _proxy_model_file(model_url, f"{task_id}_animations.glb")
+
+
+@app.get("/api/task/{task_id}/animations.fbx")
+async def api_proxy_animations_fbx(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy animations FBX file from worker (searches ready_urls)"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if not task.guid or not task.worker_api:
+        raise HTTPException(status_code=404, detail="Model not available yet")
+    
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    
+    # Try to find animations FBX in ready_urls (_all_animations_unity.fbx)
+    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations_unity.fbx")
+    if animations_url:
+        return await _proxy_model_file(animations_url, f"{task_id}_animations.fbx")
+    
+    # Try alternative pattern (_all_animations.fbx)
+    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations.fbx")
+    if animations_url:
+        return await _proxy_model_file(animations_url, f"{task_id}_animations.fbx")
+    
+    # Try to construct URL based on GUID pattern
+    fbx_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_100k/{task.guid}_all_animations_unity.fbx"
+    return await _proxy_model_file(fbx_url, f"{task_id}_animations.fbx")
+
+
+@app.get("/api/task/{task_id}/prepared.glb")
+async def api_proxy_prepared_glb(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy prepared GLB file (_model_prepared.glb from worker or fallbacks)"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # 1. Try to find _model_prepared.glb in ready_urls (best option for preview)
+    prepared_url = _find_file_in_ready_urls(task.ready_urls or [], "_model_prepared.glb")
+    if prepared_url:
+        return await _proxy_model_file(prepared_url, f"{task_id}_prepared.glb")
+    
+    # 2. For FBX tasks, use fbx_glb_output_url
+    if task.fbx_glb_output_url and task.fbx_glb_ready:
+        return await _proxy_model_file(task.fbx_glb_output_url, f"{task_id}_prepared.glb")
+    
+    # 3. Final fallback: original model GLB (uploaded model before processing)
+    if not task.guid or not task.worker_api:
+        raise HTTPException(status_code=404, detail="Model not available yet")
+    
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
+    
+    return await _proxy_model_file(model_url, f"{task_id}_prepared.glb")
+
+
+@app.get("/api/thumb/{task_id}")
+async def api_proxy_thumb(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy video poster/thumbnail image from worker"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Try to find _video_poster.jpg in ready_urls
+    poster_url = _find_file_in_ready_urls(task.ready_urls or [], "_video_poster.jpg")
+    if not poster_url:
+        # Try alternative pattern
+        poster_url = _find_file_in_ready_urls(task.ready_urls or [], "_poster.jpg")
+    
+    if not poster_url:
+        raise HTTPException(status_code=404, detail="Thumbnail not available")
+    
+    # Download and return the image (not streaming - more compatible with HTTP/2)
+    async with httpx.AsyncClient() as client:
+        response = await client.get(poster_url, timeout=30.0, follow_redirects=True)
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Thumbnail not available")
+        
+        return Response(
+            content=response.content,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
 
 
 # =============================================================================

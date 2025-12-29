@@ -38,6 +38,14 @@ class TaskStatusResponse(BaseModel):
     fbx_glb_model_name: Optional[str] = None
     fbx_glb_ready: Optional[bool] = None
     fbx_glb_error: Optional[str] = None
+    # Worker progress page URL
+    progress_page: Optional[str] = None
+    # 3D viewer HTML URL
+    viewer_html_url: Optional[str] = None
+    # Quick download links for different formats
+    quick_downloads: Optional[dict] = None
+    # Whether prepared.glb is ready for early preview
+    prepared_glb_ready: Optional[bool] = None
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -176,8 +184,11 @@ class GalleryItem(BaseModel):
     """Gallery item for public gallery"""
     task_id: str
     video_url: str
+    thumbnail_url: Optional[str] = None
     created_at: datetime
     time_ago: str
+    like_count: int = 0
+    liked_by_me: bool = False
 
 
 class GalleryResponse(BaseModel):
@@ -187,6 +198,13 @@ class GalleryResponse(BaseModel):
     page: int
     per_page: int
     has_more: bool
+
+
+class LikeResponse(BaseModel):
+    """Response for like action"""
+    task_id: str
+    like_count: int
+    liked_by_me: bool
 
 
 # =============================================================================

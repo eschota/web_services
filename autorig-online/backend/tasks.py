@@ -486,69 +486,6 @@ def format_time_ago(dt: datetime) -> str:
     elif seconds < 604800:
         days = int(seconds / 86400)
         return f"{days}d ago"
-    else:
-        weeks = int(seconds / 604800)
-        return f"{weeks}w ago"
-
-
-# =============================================================================
-# Gallery Functions
-# =============================================================================
-async def get_gallery_items(
-    db: AsyncSession,
-    page: int = 1,
-    per_page: int = 12
-) -> Tuple[list, int]:
-    """
-    Get completed tasks with videos for public gallery.
-    Returns: (tasks, total_count)
-    """
-    from sqlalchemy import func
-    
-    # Count total completed tasks with video
-    count_result = await db.execute(
-        select(func.count(Task.id)).where(
-            Task.status == "done",
-            Task.video_ready == True
-        )
-    )
-    total = count_result.scalar() or 0
-    
-    # Get paginated results, newest first
-    offset = (page - 1) * per_page
-    result = await db.execute(
-        select(Task)
-        .where(
-            Task.status == "done",
-            Task.video_ready == True
-        )
-        .order_by(desc(Task.created_at))
-        .offset(offset)
-        .limit(per_page)
-    )
-    tasks = result.scalars().all()
-    
-    return list(tasks), total
-
-
-def format_time_ago(dt: datetime) -> str:
-    """Format datetime as human-readable time ago string"""
-    now = datetime.utcnow()
-    diff = now - dt
-    
-    seconds = diff.total_seconds()
-    
-    if seconds < 60:
-        return "just now"
-    elif seconds < 3600:
-        mins = int(seconds / 60)
-        return f"{mins}m ago"
-    elif seconds < 86400:
-        hours = int(seconds / 3600)
-        return f"{hours}h ago"
-    elif seconds < 604800:
-        days = int(seconds / 86400)
-        return f"{days}d ago"
     elif seconds < 2592000:
         weeks = int(seconds / 604800)
         return f"{weeks}w ago"
