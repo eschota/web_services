@@ -158,6 +158,21 @@
     "api_access_revoke": "Отозвать",
     "api_access_revoke_confirm": "Отозвать этот API ключ?",
     "api_access_copied": "Скопировано",
-    "btn_copy": "Копировать"
+    "btn_copy": "Копировать",
+
+    "btn_download": "Скачать",
+    "btn_purchase": "Купить",
+    "btn_buy_credits": "Купить кредиты",
+    "btn_login_to_purchase": "Войдите для покупки",
+    "btn_owner_tasks": "Все задачи",
+    
+    "purchase_all_bundle": "Получить все файлы пакетом",
+    "purchase_save_credits": "Сэкономьте кредиты с пакетным предложением!",
+    "purchase_buy_all": "Купить всё",
+    "purchase_confirm_file": "Купить файл",
+    "purchase_confirm_all": "Купить все файлы за",
+    
+    "credits": "кредитов",
+    "credit": "кредит"
 }
 

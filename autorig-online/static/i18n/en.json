@@ -158,6 +158,21 @@
     "api_title": "🔌 REST API for Developers",
     "api_desc": "Integrate AutoRig into your pipeline with our REST API. Automate uploads, task tracking, and result downloads in your tools and services.",
     "api_contact": "For API access and integration details, please contact:",
-    "api_contact_btn": "Contact on Telegram"
+    "api_contact_btn": "Contact on Telegram",
+
+    "btn_download": "Download",
+    "btn_purchase": "Purchase",
+    "btn_buy_credits": "Buy Credits",
+    "btn_login_to_purchase": "Sign in to purchase",
+    "btn_owner_tasks": "All tasks",
+    
+    "purchase_all_bundle": "Get All Files Bundle",
+    "purchase_save_credits": "Save credits with a bundle deal!",
+    "purchase_buy_all": "Buy All",
+    "purchase_confirm_file": "Purchase file",
+    "purchase_confirm_all": "Purchase all files for",
+    
+    "credits": "credits",
+    "credit": "credit"
 }
 

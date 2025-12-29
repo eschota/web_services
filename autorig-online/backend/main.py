@@ -36,7 +36,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH
 )
-from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike
+from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase
 from models import (
     TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
@@ -46,7 +46,8 @@ from models import (
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
     WorkerQueueInfo, QueueStatusResponse,
-    GalleryItem, GalleryResponse, LikeResponse
+    GalleryItem, GalleryResponse, LikeResponse,
+    PurchaseStateResponse, PurchaseRequest, PurchaseResponse
 )
 from workers import get_global_queue_status
 from auth import (
@@ -1059,6 +1060,194 @@ async def api_restart_task(
         status=task.status,
         message="Task restarted successfully"
     )
+
+
+# =============================================================================
+# File Purchase Endpoints
+# =============================================================================
+@app.get("/api/task/{task_id}/purchases", response_model=PurchaseStateResponse)
+async def api_get_purchase_state(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get purchase state for a task"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = await get_anon_session(request, response, db)
+    
+    # Check if user is owner
+    is_owner = (
+        (user and task.owner_type == "user" and task.owner_id == user.email) or
+        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+    )
+    
+    # Check if user is admin
+    is_admin = bool(user and user.email == ADMIN_EMAIL)
+    
+    # If owner or admin, they have access to all files
+    if is_owner or is_admin:
+        return PurchaseStateResponse(
+            purchased_all=True,
+            purchased_files=[],
+            is_owner=True,
+            login_required=False,
+            user_credits=user.balance_credits if user else 0
+        )
+    
+    # For non-owners, check purchases
+    if not user:
+        return PurchaseStateResponse(
+            purchased_all=False,
+            purchased_files=[],
+            is_owner=False,
+            login_required=True,
+            user_credits=0
+        )
+    
+    # Get user's purchases for this task
+    result = await db.execute(
+        select(TaskFilePurchase).where(
+            TaskFilePurchase.task_id == task_id,
+            TaskFilePurchase.user_email == user.email
+        )
+    )
+    purchases = result.scalars().all()
+    
+    # Check if "all files" was purchased (file_index is NULL)
+    purchased_all = any(p.file_index is None for p in purchases)
+    purchased_indices = [p.file_index for p in purchases if p.file_index is not None]
+    
+    return PurchaseStateResponse(
+        purchased_all=purchased_all,
+        purchased_files=purchased_indices,
+        is_owner=False,
+        login_required=False,
+        user_credits=user.balance_credits
+    )
+
+
+@app.post("/api/task/{task_id}/purchases", response_model=PurchaseResponse)
+async def api_purchase_files(
+    task_id: str,
+    purchase_req: PurchaseRequest,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Purchase files for a task"""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = await get_anon_session(request, response, db)
+    
+    # Check if user is owner - they already have access
+    is_owner = (
+        (user and task.owner_type == "user" and task.owner_id == user.email) or
+        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+    )
+    
+    if is_owner:
+        return PurchaseResponse(
+            success=True,
+            purchased_files=[],
+            purchased_all=True,
+            credits_remaining=user.balance_credits
+        )
+    
+    # Check existing purchases
+    result = await db.execute(
+        select(TaskFilePurchase).where(
+            TaskFilePurchase.task_id == task_id,
+            TaskFilePurchase.user_email == user.email
+        )
+    )
+    existing = result.scalars().all()
+    already_all = any(p.file_index is None for p in existing)
+    already_indices = {p.file_index for p in existing if p.file_index is not None}
+    
+    if already_all:
+        return PurchaseResponse(
+            success=True,
+            purchased_files=list(already_indices),
+            purchased_all=True,
+            credits_remaining=user.balance_credits
+        )
+    
+    # Handle "buy all" request
+    if purchase_req.all:
+        cost = 3
+        if user.balance_credits < cost:
+            raise HTTPException(status_code=402, detail="Insufficient credits")
+        
+        # Deduct credits
+        user.balance_credits -= cost
+        
+        # Create purchase record for "all files"
+        purchase = TaskFilePurchase(
+            task_id=task_id,
+            user_email=user.email,
+            file_index=None,  # NULL means all files
+            credits_spent=cost
+        )
+        db.add(purchase)
+        await db.commit()
+        
+        return PurchaseResponse(
+            success=True,
+            purchased_files=list(already_indices),
+            purchased_all=True,
+            credits_remaining=user.balance_credits
+        )
+    
+    # Handle individual file purchase
+    if purchase_req.file_indices:
+        new_indices = [i for i in purchase_req.file_indices if i not in already_indices]
+        
+        if not new_indices:
+            return PurchaseResponse(
+                success=True,
+                purchased_files=list(already_indices),
+                purchased_all=False,
+                credits_remaining=user.balance_credits
+            )
+        
+        cost = len(new_indices)  # 1 credit per file
+        if user.balance_credits < cost:
+            raise HTTPException(status_code=402, detail="Insufficient credits")
+        
+        # Deduct credits
+        user.balance_credits -= cost
+        
+        # Create purchase records
+        for idx in new_indices:
+            purchase = TaskFilePurchase(
+                task_id=task_id,
+                user_email=user.email,
+                file_index=idx,
+                credits_spent=1
+            )
+            db.add(purchase)
+        
+        await db.commit()
+        
+        return PurchaseResponse(
+            success=True,
+            purchased_files=list(already_indices | set(new_indices)),
+            purchased_all=False,
+            credits_remaining=user.balance_credits
+        )
+    
+    raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
 
 
 @app.get("/api/history", response_model=TaskHistoryResponse)

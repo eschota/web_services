@@ -208,6 +208,32 @@ class LikeResponse(BaseModel):
 
 
 # =============================================================================
+# Purchase Schemas
+# =============================================================================
+class PurchaseStateResponse(BaseModel):
+    """Purchase state for a task"""
+    purchased_all: bool = False
+    purchased_files: List[int] = []
+    is_owner: bool = False
+    login_required: bool = False
+    user_credits: int = 0
+
+
+class PurchaseRequest(BaseModel):
+    """Request to purchase files"""
+    file_indices: Optional[List[int]] = None
+    all: Optional[bool] = None
+
+
+class PurchaseResponse(BaseModel):
+    """Response after purchase"""
+    success: bool
+    purchased_files: List[int]
+    purchased_all: bool
+    credits_remaining: int
+
+
+# =============================================================================
 # Worker Schemas
 # =============================================================================
 class WorkerStatus(BaseModel):

@@ -1112,21 +1112,15 @@
                 // HDRP renders row (under video)
                 this.updateHdrpRenders(task.ready_urls);
                 
-                // Files list
+                // Files list - always visible, purchase buttons shown for non-owners
                 const downloadsCard = document.getElementById('downloads-card');
-                const canViewDownloads = !!(task && task.can_view_downloads);
                 if (downloadsCard) {
-                    downloadsCard.classList.toggle('hidden', !canViewDownloads);
+                    // Show downloads section when task has any progress
+                    const hasFiles = task.ready_urls && task.ready_urls.length > 0;
+                    const isProcessing = task.status === 'processing' || task.status === 'done';
+                    downloadsCard.classList.toggle('hidden', !hasFiles && !isProcessing);
                 }
-                if (canViewDownloads) {
                 this.updateFileList(task.ready_urls, task);
-                } else {
-                    // Hide any stale content from previous tasks / cached state
-                    const list = document.getElementById('file-list');
-                    const count = document.getElementById('files-count');
-                    if (list) list.innerHTML = '';
-                    if (count) count.textContent = '0';
-                }
 
             },
 
@@ -1471,8 +1465,9 @@
                 }
                 
                 const blenderIcon = '/static/images/icons/blender_logo.png';
-                const unityIcon = '/static/images/icons/Unity_Logo.png';
-                const glbIcon = '/static/images/icons/glb_icon.svg';
+                const unityIcon = '/static/images/icons/unity-logo.png';
+                const glbIcon = '/static/images/formats/glb.svg';
+                const fbxIcon = '/static/images/formats/fbx.svg';
 
                 const items = [];
                 
@@ -1493,7 +1488,7 @@
                         idx: -2,
                         directUrl: `/api/task/${this.taskId}/animations.fbx`,
                         displayName: 'All Animations (FBX)',
-                        icon: null,
+                        icon: fbxIcon,
                         downloadName: 'All_Animations.fbx',
                     });
                     

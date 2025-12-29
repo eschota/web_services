@@ -75,6 +75,18 @@ class TaskLike(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TaskFilePurchase(Base):
+    """Purchase of task files (by registered user)"""
+    __tablename__ = "task_file_purchases"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    file_index = Column(Integer, nullable=True)  # NULL means "all files"
+    credits_spent = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Task(Base):
     """Conversion task"""
     __tablename__ = "tasks"
