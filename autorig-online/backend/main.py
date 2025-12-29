@@ -12,6 +12,9 @@ from typing import Optional
 import hashlib
 import hmac
 import secrets
+import json
+import tempfile
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
@@ -29,7 +32,9 @@ from config import (
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
     RATE_LIMIT_TASKS_PER_MINUTE, ADMIN_EMAIL,
     ANON_FREE_LIMIT,
-    GUMROAD_PRODUCT_CREDITS
+    GUMROAD_PRODUCT_CREDITS,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
+    VIEWER_DEFAULT_SETTINGS_PATH
 )
 from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey
 from models import (
@@ -58,6 +63,112 @@ from tasks import (
     get_gallery_items, format_time_ago,
     find_file_by_pattern
 )
+
+
+# =============================================================================
+# Viewer Settings Defaults (global file + fallback)
+# =============================================================================
+DEFAULT_VIEWER_SETTINGS: dict = {
+    "mainLightIntensity": 3.0,
+    "envIntensity": 1.0,
+    "reflectionIntensity": 3.0,
+    "modelRotation": "z180",
+    "bgColor": "#000000",
+    "groundColor": "#222222",
+    "groundSize": 1.0,
+    "shadowIntensity": 0.5,
+    "shadowRadius": 1.0,
+    "sunRotation": 45.0,
+    "sunInclination": 45.0,
+    "timeOfDay": 12.0,
+    "ambientColor": "#ffffff",
+    "ambientIntensity": 0.3,
+    "fogColor": "#000000",
+    "fogDensity": 0.0,
+    "lightingPreset": "day",
+    "camera": {
+        "position": {"x": 0, "y": 1.6, "z": 3.5},
+        "target": {"x": 0, "y": 1.0, "z": 0},
+    },
+    "syncAdjChannel": False,
+    "bloom": {"strength": 0.0, "threshold": 0.8, "radius": 0.4},
+    "adjustments": {
+        "albedo": {
+            "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "mode": 0,
+            "maskColor": "#ffffff", "softness": 0.5, "emissiveMult": 2.0,
+            "blendColor": "#ffffff", "invert": False
+        },
+        "ao": {
+            "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "mode": 0,
+            "maskColor": "#ffffff", "softness": 0.5, "emissiveMult": 2.0,
+            "blendColor": "#ffffff", "invert": False
+        },
+        "normal": {
+            "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "mode": 0,
+            "maskColor": "#ffffff", "softness": 0.5, "emissiveMult": 2.0,
+            "blendColor": "#ffffff", "invert": False
+        },
+        "roughness": {
+            "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "mode": 0,
+            "maskColor": "#ffffff", "softness": 0.5, "emissiveMult": 2.0,
+            "blendColor": "#ffffff", "invert": False
+        },
+        "metalness": {
+            "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "mode": 0,
+            "maskColor": "#ffffff", "softness": 0.5, "emissiveMult": 2.0,
+            "blendColor": "#ffffff", "invert": False
+        },
+        "emissive": {
+            "brightness": 1.0, "contrast": 1.0, "saturation": 1.0, "mode": 0,
+            "maskColor": "#ffffff", "softness": 0.5, "emissiveMult": 2.0,
+            "blendColor": "#ffffff", "invert": False
+        },
+    },
+    "aoSettings": {"samples": 32, "radius": 0.15, "intensity": 1.5},
+}
+
+
+def _read_json_file(path: str) -> Optional[dict]:
+    try:
+        p = Path(path)
+        if not p.exists():
+            return None
+        raw = p.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+        return None
+    except Exception as e:
+        print(f"[ViewerDefaults] Failed to read json file {path}: {e}")
+        return None
+
+
+def _atomic_write_json_file(path: str, data: dict) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
+    tmp_fd = None
+    tmp_path = None
+    try:
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp", dir=str(p.parent))
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp_fd = None
+        os.replace(tmp_path, str(p))
+        tmp_path = None
+    finally:
+        if tmp_fd is not None:
+            try:
+                os.close(tmp_fd)
+            except Exception:
+                pass
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 # =============================================================================
@@ -288,6 +399,30 @@ async def require_admin(
     if user.email != ADMIN_EMAIL:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
+    # Basic safety: limit payload size so we can't be spammed with huge JSON
+    max_bytes = 256 * 1024
+    if len(body_bytes) > max_bytes:
+        raise HTTPException(status_code=413, detail="Viewer settings payload too large")
+    try:
+        data = json.loads(body_bytes.decode("utf-8") if isinstance(body_bytes, (bytes, bytearray)) else body_bytes)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Viewer settings must be a JSON object")
+    return data
+
+
+def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optional[AnonSession]) -> bool:
+    if user and user.email == ADMIN_EMAIL:
+        return True
+    if user and task.owner_type == "user" and task.owner_id == user.email:
+        return True
+    if anon_session and task.owner_type == "anon" and task.owner_id == anon_session.anon_id:
+        return True
+    return False
 
 
 # =============================================================================
@@ -1448,6 +1583,203 @@ async def api_proxy_viewer_resource(
             raise HTTPException(status_code=502, detail=f"Failed to fetch resource: {str(e)}")
         except httpx.HTTPStatusError as e:
             raise HTTPException(status_code=e.response.status_code, detail="Resource not available")
+
+
+# =============================================================================
+# Telegram Web App
+# =============================================================================
+def validate_telegram_init_data(init_data: str) -> Optional[dict]:
+    """Validate Telegram Web App init data and return user info if valid"""
+    if not TELEGRAM_BOT_TOKEN:
+        return None
+    
+    from urllib.parse import parse_qs, unquote
+    import json
+    
+    try:
+        # Parse init_data
+        parsed = dict(parse_qs(init_data, keep_blank_values=True))
+        parsed = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+        
+        # Get hash from data
+        received_hash = parsed.pop('hash', None)
+        if not received_hash:
+            return None
+        
+        # Create data check string (sorted alphabetically)
+        data_check_string = '\n'.join(
+            f"{k}={v}" for k, v in sorted(parsed.items())
+        )
+        
+        # Create secret key
+        secret_key = hmac.new(
+            b"WebAppData",
+            TELEGRAM_BOT_TOKEN.encode(),
+            hashlib.sha256
+        ).digest()
+        
+        # Calculate hash
+        calculated_hash = hmac.new(
+            secret_key,
+            data_check_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        # Validate
+        if calculated_hash != received_hash:
+            return None
+        
+        # Parse user data
+        user_data = parsed.get('user')
+        if user_data:
+            return json.loads(unquote(user_data))
+        
+        return parsed
+    except Exception as e:
+        print(f"[Telegram] Validation error: {e}")
+        return None
+
+
+@app.post("/api/telegram/auth")
+async def telegram_auth(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Authenticate user via Telegram Web App"""
+    try:
+        body = await request.json()
+        init_data = body.get('initData', '')
+        
+        user_data = validate_telegram_init_data(init_data)
+        if not user_data:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Invalid Telegram data"}
+            )
+        
+        telegram_id = user_data.get('id')
+        first_name = user_data.get('first_name', '')
+        last_name = user_data.get('last_name', '')
+        username = user_data.get('username', '')
+        
+        return {
+            "success": True,
+            "telegram_id": telegram_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
+            "full_name": f"{first_name} {last_name}".strip()
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"error": str(e)}
+        )
+
+
+@app.get("/api/telegram/config")
+async def telegram_config():
+    """Get Telegram bot configuration for frontend"""
+    return {
+        "bot_username": TELEGRAM_BOT_USERNAME,
+        "webapp_url": APP_URL
+    }
+
+
+# =============================================================================
+# Viewer Settings (per-task + global defaults)
+# =============================================================================
+@app.get("/api/viewer-default-settings")
+async def api_get_viewer_default_settings():
+    """Public: get global default viewer settings JSON."""
+    data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
+    if not data:
+        data = DEFAULT_VIEWER_SETTINGS
+    return data
+
+
+@app.post("/api/admin/viewer-default-settings")
+async def api_set_viewer_default_settings(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """Admin-only: overwrite global default viewer settings JSON file."""
+    body = await request.body()
+    settings = _validate_viewer_settings_payload(body)
+    try:
+        _atomic_write_json_file(VIEWER_DEFAULT_SETTINGS_PATH, settings)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save default settings: {e}")
+    return {"ok": True}
+
+
+@app.get("/api/task/{task_id}/viewer-settings")
+async def api_get_task_viewer_settings(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get viewer settings for a task.
+
+    - If requester is owner/admin: return per-task settings if present, otherwise global defaults.
+    - If requester is not owner/admin: return ONLY global defaults (do not leak per-task settings).
+    """
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+
+    is_owner_or_admin = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
+    if is_owner_or_admin and getattr(task, "viewer_settings", None):
+        try:
+            data = json.loads(task.viewer_settings)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            # Corrupt JSON in DB: ignore and fallback to defaults.
+            pass
+
+    data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
+    if not data:
+        data = DEFAULT_VIEWER_SETTINGS
+    return data
+
+
+@app.post("/api/task/{task_id}/viewer-settings")
+async def api_set_task_viewer_settings(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner/admin: save per-task viewer settings JSON."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to update viewer settings")
+
+    body = await request.body()
+    settings = _validate_viewer_settings_payload(body)
+    task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+    await db.commit()
+    return {"ok": True}
 
 
 # =============================================================================

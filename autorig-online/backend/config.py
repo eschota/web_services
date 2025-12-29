@@ -66,6 +66,15 @@ UPLOAD_TTL_HOURS = 24
 MAX_UPLOAD_SIZE_MB = 100
 
 # =============================================================================
+# Viewer Defaults (3D viewer settings)
+# =============================================================================
+# Global default viewer settings JSON file (admin can overwrite via API).
+VIEWER_DEFAULT_SETTINGS_PATH = os.getenv(
+    "VIEWER_DEFAULT_SETTINGS_PATH",
+    "/var/autorig/viewer_default_settings.json"
+)
+
+# =============================================================================
 # Progress Check Settings
 # =============================================================================
 PROGRESS_BATCH_SIZE = 15  # Number of URLs to check per batch
@@ -92,4 +101,10 @@ GUMROAD_PRODUCT_CREDITS = {
     "autorig-500": 500,
     "autorig-1000": 1000,
 }
+
+# =============================================================================
+# Telegram Bot
+# =============================================================================
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "AutoRigOnlineBot")
 

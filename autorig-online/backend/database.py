@@ -107,6 +107,9 @@ class Task(Base):
     fbx_glb_model_name = Column(String(64), nullable=True)
     fbx_glb_ready = Column(Boolean, default=False)
     fbx_glb_error = Column(Text, nullable=True)
+
+    # Viewer settings (JSON string). Used by task.html to persist viewer state per-task.
+    viewer_settings = Column(Text, nullable=True)
     
     @property
     def output_urls(self) -> list:
@@ -195,6 +198,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_settings TEXT")
 
 
 async def get_db():
