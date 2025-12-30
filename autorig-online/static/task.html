@@ -23,8 +23,32 @@
         gtag('config', 'G-T4E781EHE4');
     </script>
     
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
     <!-- Loading Overlay Styles -->
     <style>
+        /* WebApp Mode - минимальный UI для Telegram (только viewer) */
+        body.webapp-mode .header { display: none !important; }
+        body.webapp-mode .queue-status-compact { display: none !important; }
+        body.webapp-mode #progress-log { display: none !important; }
+        body.webapp-mode #admin-input-url-row { display: none !important; }
+        body.webapp-mode #owner-tasks-btn { display: none !important; }
+        body.webapp-mode #restart-task-btn { display: none !important; }
+        body.webapp-mode #change-rig-btn { display: none !important; }
+        body.webapp-mode #task-run-state { display: none !important; }
+        body.webapp-mode footer { display: none !important; }
+        body.webapp-mode main { padding-top: 0.5rem !important; }
+        body.webapp-mode .card:first-child h2 { display: none !important; }
+        body.webapp-mode #progress-container { margin-bottom: 0.5rem; }
+        body.webapp-mode #telegram-share-btn { display: inline-flex !important; }
+        /* Hide downloads and video player in webapp mode - only 3D viewer */
+        body.webapp-mode #downloads-card { display: none !important; }
+        body.webapp-mode #video-player { display: none !important; }
+        body.webapp-mode #video-preview-title { display: none !important; }
+        body.webapp-mode #hdrp-renders { display: none !important; }
+        body.webapp-mode #video-pending { display: none !important; }
+        
         .viewer-loading-overlay {
             position: absolute;
             top: 0;
@@ -73,6 +97,54 @@
             font-size: 1rem;
             opacity: 0.8;
         }
+        
+        /* Texture Gallery */
+        .texture-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+        .texture-tile {
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s;
+            background: rgba(var(--bg-secondary-rgb, 30, 30, 35), 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .texture-tile:hover {
+            transform: scale(1.05);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+        .texture-tile img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            display: block;
+            background: #111;
+        }
+        .texture-tile .label {
+            padding: 0.5rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .texture-tile .download-btn {
+            display: block;
+            padding: 0.4rem;
+            text-align: center;
+            font-size: 0.75rem;
+            background: var(--accent);
+            color: #fff;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .texture-tile .download-btn:hover {
+            background: var(--accent-hover);
+        }
     </style>
 </head>
 <body>
@@ -115,11 +187,11 @@
             </h2>
             <div id="task-run-state" style="margin: -0.25rem 0 0.75rem; font-size: 0.9rem; color: var(--text-muted);"></div>
 
-            <!-- Admin-only: Input URL -->
+            <!-- Admin-only: Input URL + Worker Progress -->
             <div id="admin-input-url-row" class="hidden"
                  style="margin: -0.25rem 0 0.85rem; padding: 0.65rem 0.85rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14);">
                 <div style="display:flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;">
-                    <div style="min-width: 200px;">
+                    <div style="min-width: 200px; flex: 1;">
                         <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">Input URL (admin)</div>
                         <a id="admin-input-url-link" href="#" target="_blank"
                            style="color: var(--accent); text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
@@ -130,6 +202,14 @@
                             style="padding: 0.35rem 0.6rem; font-size: 0.85rem; white-space: nowrap;">
                         Copy
                     </button>
+                </div>
+                <!-- Worker Progress Page link -->
+                <div id="admin-worker-progress-row" class="hidden" style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.08);">
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">🔧 Worker Progress Page</div>
+                    <a id="admin-worker-progress-link" href="#" target="_blank"
+                       style="color: #f59e0b; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: 0.9rem;">
+                        -
+                    </a>
                 </div>
             </div>
 
@@ -184,10 +264,24 @@
                      style="margin: 0.5rem 0 0.25rem; padding: 0.75rem 1rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.18); cursor: pointer;">
                     <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.75rem;">
                         <div style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Log</div>
-                        <div id="progress-log-hint" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Click to expand</div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <button id="progress-log-copy" type="button" 
+                                    style="padding: 0.25rem 0.5rem; font-size: 0.7rem; border-radius: 4px; 
+                                           background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); 
+                                           color: var(--text-muted); cursor: pointer;"
+                                    onclick="event.stopPropagation();" data-i18n="log_copy">Copy</button>
+                            <div id="progress-log-hint" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Click to expand</div>
+                        </div>
                     </div>
                     <pre id="progress-log-text"
                          style="margin-top: 0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; font-size: 0.8rem; line-height: 1.35; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; overflow: hidden; max-height: 3.2em; transition: max-height 0.25s ease;"></pre>
+                </div>
+                <div id="progress-failure" class="hidden"
+                     style="margin: 0.5rem 0; padding: 0.75rem 1rem; border-radius: 8px; 
+                            background: rgba(239, 71, 111, 0.15); border: 1px solid rgba(239, 71, 111, 0.3);
+                            color: #ef476f; font-size: 0.85rem; font-weight: 500;">
+                    <span style="margin-right: 0.5rem;">⚠️</span>
+                    <span id="progress-failure-text"></span>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
@@ -768,7 +862,7 @@
                 </button>
                     </div>
             </div>
-                <div style="font-weight: 600; font-size: 1.1rem; margin-bottom: 0.5rem;">🎬 Video Preview</div>
+                <div id="video-preview-title" style="font-weight: 600; font-size: 1.1rem; margin-bottom: 0.5rem;">🎬 Video Preview</div>
                 <video id="video-player" controls autoplay muted loop playsinline 
                        style="width: 100%; height: auto; max-height: 70vh; object-fit: contain; border-radius: 12px; background: #000; display: block;"></video>
                 <div id="hdrp-renders" class="hidden"
@@ -794,7 +888,7 @@
                 </button>
             </div>
             <ul class="file-list" id="file-list"
-                style="max-height: none; overflow: visible; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem;">
+                style="max-height: none; overflow: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem;">
                 <!-- Skeleton loading -->
                 <li class="file-item">
                     <div class="skeleton skeleton-text" style="width: 200px;"></div>
@@ -803,6 +897,14 @@
                     <div class="skeleton skeleton-text" style="width: 180px;"></div>
                 </li>
             </ul>
+        </div>
+        
+        <!-- Additional Content (Textures) -->
+        <div class="card mt-3" id="additional-content-section" style="display: none;">
+            <div class="card-header">
+                <h3 class="card-title">🖼️ Additional Content</h3>
+            </div>
+            <div id="texture-gallery" class="texture-gallery"></div>
         </div>
     </main>
 
@@ -877,6 +979,8 @@
             // Visual progress derived from progress log (does NOT change backend/DB state)
             lastVisualProgress: 0,
             lastLogLineCount: 0,
+            // Cache for file list to avoid unnecessary re-renders
+            lastFileListHash: null,
             
             async init() {
                 // Init i18n
@@ -885,9 +989,21 @@
                 // Setup theme
                 this.setupTheme();
                 
-                // Get task ID from URL
+                // Get task ID from URL (sanitize to handle malformed URLs like ?id=xxx?mode=webapp)
                 const params = new URLSearchParams(window.location.search);
-                this.taskId = params.get('id');
+                const rawId = params.get('id') || '';
+                this.taskId = rawId.split('?')[0];
+                
+                // Check webapp mode
+                this.isWebAppMode = params.get('mode') === 'webapp';
+                if (this.isWebAppMode) {
+                    document.body.classList.add('webapp-mode');
+                    // Init Telegram Web App if available
+                    if (window.Telegram?.WebApp) {
+                        window.Telegram.WebApp.ready();
+                        window.Telegram.WebApp.expand();
+                    }
+                }
                 
                 if (!this.taskId) {
                     this.showError('No task ID provided');
@@ -904,9 +1020,11 @@
                 await this.fetchTask();
                 this.pollInterval = setInterval(() => this.fetchTask(), 2000);
                 
-                // Load queue status
-                this.loadQueueStatus();
-                setInterval(() => this.loadQueueStatus(), 10000);
+                // Load queue status (skip in webapp mode)
+                if (!this.isWebAppMode) {
+                    this.loadQueueStatus();
+                    setInterval(() => this.loadQueueStatus(), 10000);
+                }
                 
                 // Setup buttons
                 this.setupButtons();
@@ -1000,6 +1118,8 @@
                 const adminRow = document.getElementById('admin-input-url-row');
                 const adminLink = document.getElementById('admin-input-url-link');
                 const adminCopy = document.getElementById('admin-input-url-copy');
+                const adminWorkerRow = document.getElementById('admin-worker-progress-row');
+                const adminWorkerLink = document.getElementById('admin-worker-progress-link');
                 if (adminRow && adminLink && adminCopy) {
                     const inputUrl = task && task.input_url ? String(task.input_url) : '';
                     if (inputUrl) {
@@ -1007,6 +1127,18 @@
                         adminLink.href = inputUrl;
                         adminLink.textContent = inputUrl;
                         adminLink.title = inputUrl;
+                        
+                        // Worker Progress Page link (admin)
+                        const progressPage = task && task.progress_page ? String(task.progress_page) : '';
+                        if (progressPage && adminWorkerRow && adminWorkerLink) {
+                            adminWorkerRow.classList.remove('hidden');
+                            adminWorkerLink.href = progressPage;
+                            adminWorkerLink.textContent = progressPage;
+                            adminWorkerLink.title = progressPage;
+                        } else if (adminWorkerRow) {
+                            adminWorkerRow.classList.add('hidden');
+                        }
+                        
                         if (!adminCopy.__wired) {
                             adminCopy.__wired = true;
                             adminCopy.addEventListener('click', async (e) => {
@@ -1120,7 +1252,9 @@
                     const isProcessing = task.status === 'processing' || task.status === 'done';
                     downloadsCard.classList.toggle('hidden', !hasFiles && !isProcessing);
                 }
-                this.updateFileList(task.ready_urls, task);
+                // Use output_urls for Downloads (all expected files), fallback to ready_urls
+                const downloadUrls = (task.output_urls && task.output_urls.length > 0) ? task.output_urls : task.ready_urls;
+                this.updateFileList(downloadUrls, task, task.ready_urls || []);
 
             },
 
@@ -1313,6 +1447,20 @@
                         pre.style.overflow = 'hidden';
                     }
                 });
+
+                // Show FAILURE message if present in log
+                const failureBox = document.getElementById('progress-failure');
+                const failureText = document.getElementById('progress-failure-text');
+                if (failureBox && failureText) {
+                    const fullText = this.progressLogData.full_text || tail;
+                    const failureMatch = fullText.match(/FAILURE:\s*(.+)/i);
+                    if (failureMatch) {
+                        failureText.textContent = failureMatch[1];
+                        failureBox.classList.remove('hidden');
+                    } else {
+                        failureBox.classList.add('hidden');
+                    }
+                }
             },
             
             updateHdrpRenders(urls) {
@@ -1454,13 +1602,26 @@
                 }
             },
 
-            updateFileList(urls, task) {
+            updateFileList(urls, task, readyUrls = []) {
                 const list = document.getElementById('file-list');
                 const count = document.getElementById('files-count');
+                
+                // Calculate hash of current data to avoid unnecessary re-renders
+                const currentHash = JSON.stringify(urls || []) + JSON.stringify(readyUrls || []) + (task?.status || '');
+                if (this.lastFileListHash === currentHash && list.children.length > 0) {
+                    return; // Data hasn't changed, skip re-render
+                }
+                this.lastFileListHash = currentHash;
+                
+                // Create a set of ready filenames for fast lookup
+                const readyFilenames = new Set(
+                    readyUrls.map(url => (url || '').trim().split('/').pop())
+                );
                 
                 if (!urls || urls.length === 0) {
                     list.innerHTML = `<li class="file-item" style="color: var(--text-muted)">Waiting for files...</li>`;
                     count.textContent = '0';
+                    this.renderTextureGallery([]);
                     return;
                 }
                 
@@ -1468,127 +1629,139 @@
                 const unityIcon = '/static/images/icons/unity-logo.png';
                 const glbIcon = '/static/images/formats/glb.svg';
                 const fbxIcon = '/static/images/formats/fbx.svg';
+                const objIcon = '/static/images/formats/obj.svg';
+                
+                // Function to remove GUID prefix from filename
+                // Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx_filename.ext -> filename.ext
+                const cleanFilename = (filename) => {
+                    return filename.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, '');
+                };
+                
+                // Function to get icon based on file extension
+                const getIconForFile = (filename) => {
+                    const ext = filename.split('.').pop().toLowerCase();
+                    if (ext === 'blend') return blenderIcon;
+                    if (ext === 'glb' || ext === 'gltf') return glbIcon;
+                    if (ext === 'fbx') return fbxIcon;
+                    if (ext === 'obj') return objIcon;
+                    if (ext === 'unitypackage') return unityIcon;
+                    if (ext === 'max' || ext === 'ma' || ext === 'c4d') return null;
+                    return null;
+                };
 
                 const items = [];
+                const textures = []; // Collect textures separately
                 
-                // Add new pipeline files (GLB from our endpoints)
-                if (task && task.prepared_glb_ready) {
-                    items.push({
-                        idx: -1, // Special marker for direct URL
-                        directUrl: `/api/task/${this.taskId}/prepared.glb`,
-                        displayName: 'Prepared Model (GLB)',
-                        icon: glbIcon,
-                        downloadName: 'Model_Prepared.glb',
-                    });
-                }
+                // Texture patterns to filter into separate gallery
+                const texturePatterns = [
+                    /_Roughness\.jpe?g$/i,
+                    /_Metallic\.jpe?g$/i,
+                    /_Normal\.jpe?g$/i,
+                    /_texture\.jpe?g$/i,
+                    /_AO\.jpe?g$/i,
+                    /_BaseColor\.jpe?g$/i,
+                    /_Albedo\.jpe?g$/i,
+                    /_Diffuse\.jpe?g$/i,
+                    /_Specular\.jpe?g$/i,
+                    /_Height\.jpe?g$/i,
+                    /_Displacement\.jpe?g$/i,
+                    /_Emissive\.jpe?g$/i,
+                ];
                 
-                // Add animations GLB/FBX if task is done
-                if (task && task.status === 'done') {
-                    items.push({
-                        idx: -2,
-                        directUrl: `/api/task/${this.taskId}/animations.fbx`,
-                        displayName: 'All Animations (FBX)',
-                        icon: fbxIcon,
-                        downloadName: 'All_Animations.fbx',
-                    });
-                    
-                    items.push({
-                        idx: -3,
-                        directUrl: `/api/task/${this.taskId}/model.glb`,
-                        displayName: 'Rigged Model (GLB)',
-                        icon: glbIcon,
-                        downloadName: 'Rigged_Model.glb',
-                    });
-                }
-                
+                // First, expand any concatenated URLs (bug in data - some URLs got merged)
+                const guidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/gi;
+                const expandedUrls = [];
                 urls.forEach((url, idx) => {
-                    const filename = (url || '').split('/').pop() || '';
+                    const urlClean = (url || '').trim();
+                    const rawFilename = urlClean.split('/').pop() || '';
+                    // Check if filename contains multiple GUIDs (concatenated URLs)
+                    const guidMatches = rawFilename.match(guidPattern);
+                    if (guidMatches && guidMatches.length > 1) {
+                        // Split on GUID pattern, keeping the GUID with each part
+                        const parts = rawFilename.split(guidPattern).filter(Boolean);
+                        guidMatches.forEach((guid, i) => {
+                            if (parts[i]) {
+                                const baseUrl = urlClean.substring(0, urlClean.lastIndexOf('/') + 1);
+                                expandedUrls.push({ url: baseUrl + guid + parts[i], idx: idx + '_' + i });
+                            }
+                        });
+                    } else {
+                        expandedUrls.push({ url: urlClean, idx });
+                    }
+                });
+                
+                expandedUrls.forEach(({ url: urlClean, idx }) => {
+                    const rawFilename = urlClean.split('/').pop() || '';
+                    const filename = cleanFilename(rawFilename);
 
                     // Hide video artifacts (video is already shown on page)
                     if (/_video\.(mp4|mov)$/i.test(filename)) return;
                     if (/_video_poster\.jpe?g$/i.test(filename)) return;
+                    if (/video\.(mp4|mov)$/i.test(filename)) return;
+                    if (/video_poster\.jpe?g$/i.test(filename)) return;
 
                     // HDRP renders are shown as images under the video (not in file list)
                     if (/_Unity_HDRP_Render_[1-3]_view\.jpe?g$/i.test(filename)) return;
+                    if (/Unity_HDRP_Render_[1-3]_view\.jpe?g$/i.test(filename)) return;
+                    
+                    // Hide _model_prepared.glb - used for viewer, not for download
+                    if (/model_prepared\.glb$/i.test(filename)) return;
 
-                    let displayName = filename;
-                    let icon = null;
-                    let downloadName = filename;
-
-                    if (/_rigged\.blend$/i.test(filename)) {
-                        displayName = 'Blender Rig';
-                        icon = blenderIcon;
-                        downloadName = 'Blender_Rig.blend';
-                    } else if (/_all_animations\.blend$/i.test(filename)) {
-                        displayName = 'Blender Animations';
-                        icon = blenderIcon;
-                        downloadName = 'Blender_Animations.blend';
-                    } else if (/_all_animations_unity\.fbx$/i.test(filename)) {
-                        // Skip - already added above as direct URL
-                        return;
-                    } else if (/_hdrp\.unitypackage$/i.test(filename)) {
-                        displayName = 'Unity HDRP Package';
-                        icon = unityIcon;
-                        downloadName = 'Unity_HDRP_Package.unitypackage';
+                    // Collect textures for preview gallery (they also appear in Downloads)
+                    if (texturePatterns.some(p => p.test(filename))) {
+                        const textureProxyUrl = `/api/file/${this.taskId}/download/${encodeURIComponent(rawFilename)}`;
+                        textures.push({ url: textureProxyUrl, filename, idx });
+                        // Don't return - textures should also be in Downloads list
                     }
+
+                    // Use cleaned filename as display name and download name
+                    const displayName = filename;
+                    const icon = getIconForFile(filename);
+                    const downloadName = filename;
+                    // Use proxy URL to avoid mixed content (HTTPS site, HTTP worker)
+                    const proxyUrl = `/api/file/${this.taskId}/download/${encodeURIComponent(rawFilename)}`;
 
                     items.push({
                         idx,
+                        url: proxyUrl,
                         filename,
                         displayName,
                         icon,
                         downloadName,
+                        isReady: readyFilenames.has(rawFilename),
                     });
                 });
+                
+                // Render texture gallery
+                this.renderTextureGallery(textures);
 
                 count.textContent = String(items.length);
-                // Make grid columns "divisible" by number of items to avoid layouts like 3+1 for 4 items.
-                try {
-                    const n = items.length;
-                    const w = window.innerWidth || 1200;
-                    const maxCols = w >= 1200 ? 4 : (w >= 900 ? 3 : (w >= 650 ? 2 : 1));
-                    let cols = 1;
-                    if (n === 4) {
-                        cols = 2; // 2x2 looks best for 4
-                    } else if (n >= 2) {
-                        const divisors = [4, 3, 2].filter(d => n % d === 0);
-                        cols = divisors.length ? divisors[0] : Math.min(n, 3);
-                    }
-                    cols = Math.max(1, Math.min(cols, maxCols));
-                    list.style.gridTemplateColumns = `repeat(${cols}, minmax(220px, 1fr))`;
-                } catch (_) {}
+                // Use auto-fill grid for responsive layout
+                list.style.gridTemplateColumns = `repeat(auto-fill, minmax(150px, 1fr))`;
                 if (items.length === 0) {
                     list.innerHTML = `<li class="file-item" style="color: var(--text-muted)">Waiting for files...</li>`;
                     return;
                 }
 
-                // Check if user can download (owner or purchased all or admin)
-                const canDownloadAll = this.purchaseState.is_owner || this.purchaseState.purchased_all;
-                const purchasedIndices = new Set(this.purchaseState.purchased_files || []);
+                // Check if user can download (owner or admin has purchased_all=true, others must purchase)
+                const canDownloadAll = this.purchaseState.purchased_all || this.purchaseState.is_owner;
                 
-                // Add "Buy All" button at the top if not owner and not purchased all
+                // Add "Unlock Downloads" button at the top if not purchased
                 let buyAllHtml = '';
                 if (!canDownloadAll && items.length > 0) {
-                    const hasCredits = this.purchaseState.user_credits >= 3;
+                    const hasCredits = this.purchaseState.user_credits >= 1;
                     buyAllHtml = `
-                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.25rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent);">
-                            <div style="font-size: 1.1rem; font-weight: 600; color: var(--accent);">
-                                💎 ${t('purchase_all_bundle')}
-                            </div>
-                            <div style="font-size: 0.9rem; color: var(--text-secondary);">
-                                ${t('purchase_save_credits')}
+                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent);">
+                            <div style="font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);">
+                                Unlock all downloads for this model
                             </div>
                             <button onclick="TaskUI.purchaseAll()" class="btn btn-primary" 
-                                    style="width: 100%; justify-content: center; padding: 0.65rem 1rem; font-size: 0.95rem;"
+                                    style="width: 100%; justify-content: center; padding: 0.75rem 1rem; font-size: 1rem; gap: 0.5rem;"
                                     ${(hasCredits || this.purchaseState.login_required) ? '' : 'disabled'}>
-                                <span style="font-size: 1.2rem;">🛒</span>
-                                ${t('purchase_buy_all')} — 3 ${t('credits')}
+                                <span style="font-size: 1.5rem;">💎</span>
+                                <span style="font-weight: 700; font-size: 1.1rem;">1</span>
+                                <span>${t('btn_download_all')}</span>
                             </button>
-                            ${!hasCredits && !this.purchaseState.login_required ? `
-                                <a href="/buy-credits" class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 0.5rem; font-size: 0.85rem;">
-                                    ${t('btn_buy_credits')}
-                                </a>
-                            ` : ''}
                             ${this.purchaseState.login_required ? `
                                 <a href="/auth/login" class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 0.5rem; font-size: 0.85rem;">
                                     ${t('btn_login_to_purchase')}
@@ -1599,59 +1772,57 @@
                 }
 
                 const filesHtml = items.map((item, displayIdx) => {
-                    // Use directUrl if available, otherwise proxy URL
-                    const downloadUrl = item.directUrl || `/api/file/${this.taskId}/${item.idx}`;
+                    // Use direct URL from output_urls
+                    const downloadUrl = item.url;
                     const iconHtml = item.icon
-                        ? `<img src="${item.icon}" alt="" aria-hidden="true" style="height: 1.2em; width: auto; object-fit: contain; display: block;" onerror="this.style.display='none'">`
+                        ? `<img src="${item.icon}" alt="" aria-hidden="true" style="height: 2.5em; width: auto; object-fit: contain; display: block;" onerror="this.style.display='none'">`
                         : '';
                     
-                    // Check if this specific file can be downloaded
-                    const canDownloadThis = canDownloadAll || purchasedIndices.has(item.idx);
-                    
-                    if (canDownloadThis) {
-                        // Show download button
-                        return `
-                            <li class="file-item"
-                                style="flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 0.75rem; padding: 1rem; margin-bottom: 0;">
-                                <div style="display: flex; align-items: center; gap: 0.6rem; width: 100%; font-size: 1.05rem;">
+                    if (canDownloadAll) {
+                        if (item.isReady) {
+                            // Show download button - vertical layout: icon, filename, button
+                            return `
+                                <li class="file-item"
+                                    style="flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; margin-bottom: 0; text-align: center; min-width: 0;">
                                     ${iconHtml}
-                                    <div style="display: flex; flex-direction: column; gap: 0.15rem; min-width: 0;">
-                                        <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                            ${item.displayName}
-                                        </div>
+                                    <div style="font-weight: 700; color: var(--accent); font-size: 0.95rem; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3;" title="${item.displayName}">
+                                        ${item.displayName}
                                     </div>
-                                </div>
-                                <a href="${downloadUrl}" download="${item.downloadName}" class="btn btn-secondary"
-                                   style="width: 100%; justify-content: center; padding: 0.55rem 0.9rem; font-size: 0.875rem;">
-                                    <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18">
-                                    ${t('btn_download')}
-                                </a>
-                            </li>
-                        `;
+                                    <a href="${downloadUrl}" download="${item.downloadName}" class="btn btn-secondary"
+                                       style="padding: 0.4rem 0.6rem; font-size: 0.75rem; margin-top: 0.25rem;">
+                                        <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="14" height="14">
+                                        ${t('btn_download')}
+                                    </a>
+                                </li>
+                            `;
+                        } else {
+                            // File not ready yet - show processing state
+                            return `
+                                <li class="file-item"
+                                    style="flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; margin-bottom: 0; text-align: center; min-width: 0; opacity: 0.7;">
+                                    ${iconHtml}
+                                    <div style="font-weight: 700; color: var(--accent); font-size: 0.95rem; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3;" title="${item.displayName}">
+                                        ${item.displayName}
+                                    </div>
+                                    <span class="btn btn-secondary"
+                                          style="padding: 0.4rem 0.6rem; font-size: 0.75rem; margin-top: 0.25rem; cursor: wait;">
+                                        ⏳ Processing...
+                                    </span>
+                                </li>
+                            `;
+                        }
                     } else {
-                        // Show purchase button with price
-                        const hasOneCredit = this.purchaseState.user_credits >= 1;
+                        // Show locked state - need to purchase first
                         return `
                             <li class="file-item"
-                                style="flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 0.75rem; padding: 1rem; margin-bottom: 0; opacity: 0.9;">
-                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; font-size: 1.05rem;">
-                                    <div style="display: flex; align-items: center; gap: 0.6rem;">
-                                        ${iconHtml}
-                                        <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                            ${item.displayName}
-                                        </div>
-                                    </div>
-                                    <div style="font-size: 0.85rem; font-weight: 600; color: var(--accent); background: rgba(var(--accent-rgb), 0.15); padding: 0.25rem 0.5rem; border-radius: 6px;">
-                                        💎 1 ${t('credit')}
-                                    </div>
+                                style="flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; margin-bottom: 0; text-align: center; opacity: 0.6; min-width: 0;">
+                                ${iconHtml}
+                                <div style="font-weight: 700; color: var(--accent); font-size: 0.95rem; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3;" title="${item.displayName}">
+                                    ${item.displayName}
                                 </div>
-                                <button onclick="TaskUI.purchaseFile(${item.idx}, '${item.displayName.replace(/'/g, "\\'")}')" 
-                                        class="btn btn-primary"
-                                        style="width: 100%; justify-content: center; padding: 0.55rem 0.9rem; font-size: 0.875rem;"
-                                        ${(hasOneCredit || this.purchaseState.login_required) ? '' : 'disabled'}>
-                                    <span style="font-size: 1.1rem;">🛒</span>
-                                    ${t('btn_purchase')}
-                                </button>
+                                <span class="btn btn-secondary" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; margin-top: 0.25rem; cursor: not-allowed;">
+                                    🔒 Locked
+                                </span>
                             </li>
                         `;
                     }
@@ -1660,6 +1831,39 @@
                 list.innerHTML = buyAllHtml + filesHtml;
             },
             
+            renderTextureGallery(textures) {
+                const section = document.getElementById('additional-content-section');
+                const gallery = document.getElementById('texture-gallery');
+                
+                if (!textures || textures.length === 0) {
+                    if (section) section.style.display = 'none';
+                    if (gallery) gallery.innerHTML = '';
+                    return;
+                }
+                
+                // Show the section
+                if (section) section.style.display = 'block';
+                
+                // Render texture tiles (preview only, no download buttons - download is in Downloads section)
+                const html = textures.map(tex => {
+                    // Extract texture type from filename (e.g., "model_Normal.jpg" -> "Normal")
+                    const match = tex.filename.match(/_([A-Za-z]+)\.jpe?g$/i);
+                    const textureType = match ? match[1] : 'Texture';
+                    
+                    // Use direct URL for display
+                    const imgUrl = tex.url;
+                    
+                    return `
+                        <div class="texture-tile" onclick="TaskUI.openImagePreview('${imgUrl}')">
+                            <img src="${imgUrl}" alt="${textureType}" loading="lazy">
+                            <div class="label">${textureType}</div>
+                        </div>
+                    `;
+                }).join('');
+                
+                if (gallery) gallery.innerHTML = html;
+            },
+
             setupButtons() {
                 document.getElementById('restart-task-btn').addEventListener('click', async () => {
                     const btn = document.getElementById('restart-task-btn');
@@ -1720,6 +1924,21 @@
                     this.renderProgressLog();
                     // When expanding, refetch full log immediately
                     this.refreshProgressLog();
+                });
+
+                // Progress log copy button
+                document.getElementById('progress-log-copy')?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const full = this.progressLogData?.full_text || 
+                                 (this.progressLogData?.tail_lines || []).join('\n');
+                    if (full) {
+                        navigator.clipboard.writeText(full).then(() => {
+                            const btn = e.target;
+                            const original = btn.textContent;
+                            btn.textContent = t('log_copied');
+                            setTimeout(() => btn.textContent = t('log_copy'), 1500);
+                        });
+                    }
                 });
 
                 // HDRP image preview (click to open lightbox)
@@ -1953,7 +2172,8 @@
         window.THREE = THREE;
 
         const params = new URLSearchParams(window.location.search);
-        const taskId = params.get('id');
+        const rawTaskId = params.get('id') || '';
+        const taskId = rawTaskId.split('?')[0];  // Sanitize malformed URLs
 
         const wrap = document.getElementById('model-viewer-wrap');
         const host = document.getElementById('model-viewer');
@@ -3912,7 +4132,7 @@
             let animationsLoaded = false;
             let free3dModelLoaded = false;
 
-            // Init viewer: first try prepared.glb (early preview), then animations.glb when done
+            // Init viewer: Free3D loads immediately, others wait for prepared/done
             async function waitAndInitViewer() {
                 try {
                     console.log('[Viewer] Polling task status...');
@@ -3920,7 +4140,33 @@
                     const t = await r.json();
                     console.log('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready);
 
-                    // 1. If task is done, load final model and stop polling if successful
+                    const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
+
+                    // 1. FREE3D: Load immediately from free3d.online (no waiting for worker)
+                    if (isFree3DTask && !free3dModelLoaded) {
+                        console.log('[Viewer] Free3D task detected - loading directly from free3d.online...');
+                        
+                        // Default to X -90 fix for Free3D models
+                        if (viewerState.modelRotation === 'none' || viewerState.modelRotation === 'z180') {
+                            console.log('[Viewer] Defaulting Free3D to X -90 rotation');
+                            viewerState.modelRotation = 'x90_neg';
+                            updateViewerUI();
+                        }
+
+                        const urlMatch = t.input_url.match(/\/data\/([a-f0-9-]+)\//i);
+                        if (urlMatch) {
+                            const guid = urlMatch[1];
+                            const proxyUrl = `/api/free3d/glb/${guid}/${guid}.glb`;
+                            const ok = await loadModel(proxyUrl, 'Free3D Model');
+                            if (ok) {
+                                free3dModelLoaded = true;
+                                preparedLoaded = true;
+                                console.log('[Viewer] ✓ Free3D model loaded immediately');
+                            }
+                        }
+                    }
+
+                    // 2. If task is done, load final model (with animations if available)
                     if (t && t.status === 'done' && !finalLoaded) {
                         console.log('[Viewer] Task is done! Loading final animations/model...');
                         let ok = false;
@@ -3960,32 +4206,10 @@
                         }
                     }
 
-                    // 2. Otherwise, check for early previews
-                    const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
-                    
-                    if (isFree3DTask && !free3dModelLoaded) {
-                        console.log('[Viewer] Detected Free3D model, loading directly as preview...');
-                        
-                        // Default to X -90 fix for Free3D models if not already set by user
-                        if (viewerState.modelRotation === 'none' || viewerState.modelRotation === 'z180') {
-                            console.log('[Viewer] Defaulting Free3D to X -90 rotation');
-                            viewerState.modelRotation = 'x90_neg';
-                            updateViewerUI();
-                        }
-
-                        const urlMatch = t.input_url.match(/\/data\/([a-f0-9-]+)\//i);
-                        if (urlMatch) {
-                            const guid = urlMatch[1];
-                            const proxyUrl = `/api/free3d/glb/${guid}/${guid}.glb`;
-                            const ok = await loadModel(proxyUrl, 'Free3D Model');
-                            if (ok) {
-                                free3dModelLoaded = true;
-                                preparedLoaded = true;
-                            }
-                        }
-                    }
-                    else if (t && t.prepared_glb_ready && !preparedLoaded && !isFree3DTask) {
-                        console.log('[Viewer] Attempting to load prepared model...');
+                    // 3. For non-Free3D tasks: load prepared model as early preview ONLY if task is not done yet
+                    // (If task is already done, we should have loaded animations above)
+                    if (!isFree3DTask && t && t.status !== 'done' && t.prepared_glb_ready && !preparedLoaded) {
+                        console.log('[Viewer] Task still processing, loading prepared model as preview...');
                         const ok = await loadModel(`/api/task/${taskId}/prepared.glb`, 'Prepared Model');
                         if (ok) preparedLoaded = true;
                     }
@@ -4001,6 +4225,35 @@
 
             console.log('[Viewer] Starting viewer initialization...');
             waitAndInitViewer();
+        }
+    </script>
+
+    <!-- Telegram WebApp Integration -->
+    <script>
+        window.TelegramApp = {
+            shareTask(taskId) {
+                const webappUrl = `${window.location.origin}/task?id=${taskId}&mode=webapp`;
+                
+                if (window.Telegram?.WebApp) {
+                    // Inside Telegram - use switchInlineQuery to share
+                    window.Telegram.WebApp.switchInlineQuery(webappUrl, ['users', 'groups', 'channels']);
+                } else {
+                    // Outside Telegram - open Telegram share URL
+                    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(webappUrl)}&text=${encodeURIComponent('Check out this 3D model!')}`;
+                    window.open(shareUrl, '_blank');
+                }
+            },
+            hapticFeedback(type) {
+                if (window.Telegram?.WebApp?.HapticFeedback) {
+                    if (type === 'success') window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+                    else if (type === 'error') window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
+                }
+            }
+        };
+        
+        // Log if running as Telegram WebApp
+        if (window.Telegram?.WebApp?.initData) {
+            console.log('[Telegram] Running as Telegram WebApp');
         }
     </script>
 </body>

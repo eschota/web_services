@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, JSONResponse, FileResponse
+from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -30,7 +30,7 @@ from slowapi.errors import RateLimitExceeded
 from config import (
     APP_NAME, APP_URL, DEBUG, SECRET_KEY,
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
-    RATE_LIMIT_TASKS_PER_MINUTE, ADMIN_EMAIL,
+    RATE_LIMIT_TASKS_PER_MINUTE, ADMIN_EMAILS,
     ANON_FREE_LIMIT,
     GUMROAD_PRODUCT_CREDITS,
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
@@ -45,6 +45,7 @@ from models import (
     AdminUserListItem, AdminUserListResponse,
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
+    AdminStatsResponse, AdminTaskListItem, AdminTaskListResponse,
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse, LikeResponse,
     PurchaseStateResponse, PurchaseRequest, PurchaseResponse
@@ -62,6 +63,7 @@ from tasks import (
     get_task_by_id, get_user_tasks,
     get_all_users, update_user_balance,
     get_gallery_items, format_time_ago,
+    find_and_reset_stale_tasks,
     find_file_by_pattern
 )
 
@@ -176,20 +178,27 @@ def _atomic_write_json_file(path: str, data: dict) -> None:
 # Background Task Worker
 # =============================================================================
 background_task_running = False
+background_worker_cycle_count = 0  # Track cycles for periodic stale task checks
 
 async def background_task_updater():
     """Background worker that updates all processing tasks periodically"""
     from database import AsyncSessionLocal, Task
+    from config import STALE_CHECK_INTERVAL_CYCLES
     
-    global background_task_running
+    global background_task_running, background_worker_cycle_count
     background_task_running = True
+    background_worker_cycle_count = 0
     
     print("[Background Worker] Started task updater")
     
     while background_task_running:
         try:
+            background_worker_cycle_count += 1
+            
             async with AsyncSessionLocal() as db:
-                # Dispatch queued tasks (status=created) to actually free workers
+                # =============================================================
+                # 1. Dispatch queued tasks (status=created) to free workers
+                # =============================================================
                 try:
                     queue_status = await get_global_queue_status()
                     free_workers = [
@@ -215,7 +224,20 @@ async def background_task_updater():
                 except Exception as e:
                     print(f"[Background Worker] Queue dispatch error: {e}")
 
-                # Get all processing tasks
+                # =============================================================
+                # 2. Check for stale tasks periodically
+                # =============================================================
+                if background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0:
+                    try:
+                        reset_count = await find_and_reset_stale_tasks(db)
+                        if reset_count > 0:
+                            print(f"[Background Worker] Auto-reset {reset_count} stale task(s)")
+                    except Exception as e:
+                        print(f"[Background Worker] Stale task check error: {e}")
+
+                # =============================================================
+                # 3. Update progress for all processing tasks
+                # =============================================================
                 result = await db.execute(
                     select(Task).where(Task.status == "processing")
                 )
@@ -225,16 +247,22 @@ async def background_task_updater():
                     print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
 
                     # Update tasks concurrently (bounded) so the loop doesn't take minutes when many tasks are processing
+                    # IMPORTANT: Each task gets its own DB session to avoid SQLAlchemy transaction conflicts
                     semaphore = asyncio.Semaphore(8)
 
-                    async def _update_one(t: Task):
+                    async def _update_one(task_id: str):
                         async with semaphore:
                             try:
-                                await update_task_progress(db, t)
+                                async with AsyncSessionLocal() as task_db:
+                                    task = await get_task_by_id(task_db, task_id)
+                                    if task and task.status == "processing":
+                                        await update_task_progress(task_db, task)
                             except Exception as e:
-                                print(f"[Background Worker] Error updating task {t.id}: {e}")
+                                print(f"[Background Worker] Error updating task {task_id}: {e}")
 
-                    await asyncio.gather(*[_update_one(t) for t in processing_tasks])
+                    # Pass task IDs, not task objects (to get fresh data in each session)
+                    task_ids = [t.id for t in processing_tasks]
+                    await asyncio.gather(*[_update_one(tid) for tid in task_ids])
                 
         except Exception as e:
             print(f"[Background Worker] Error: {e}")
@@ -279,6 +307,13 @@ async def lifespan(app: FastAPI):
     
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
+    
+    # Send Telegram startup notification (fire-and-forget)
+    try:
+        from telegram_bot import broadcast_server_startup
+        asyncio.create_task(broadcast_server_startup())
+    except Exception as e:
+        print(f"[Telegram] Failed to send startup notification: {e}")
     
     yield
     
@@ -397,7 +432,7 @@ async def require_admin(
     """Require admin access"""
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user.email != ADMIN_EMAIL:
+    if user.email not in ADMIN_EMAILS:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
@@ -417,7 +452,7 @@ def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
 
 
 def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optional[AnonSession]) -> bool:
-    if user and user.email == ADMIN_EMAIL:
+    if user and user.email in ADMIN_EMAILS:
         return True
     if user and task.owner_type == "user" and task.owner_id == user.email:
         return True
@@ -705,8 +740,9 @@ async def api_create_task(
         with open(filepath, "wb") as f:
             f.write(content)
         
-        # Generate public URL
-        final_url = f"{APP_URL}/u/{upload_token}/{filename}"
+        # Generate public URL (URL-encode filename for special chars, spaces, cyrillic)
+        from urllib.parse import quote
+        final_url = f"{APP_URL}/u/{upload_token}/{quote(filename)}"
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
@@ -724,6 +760,24 @@ async def api_create_task(
         await decrement_user_credits(db, user)
     else:
         await increment_anon_usage(db, anon_session.anon_id)
+    
+    # Try to dispatch immediately to a free worker (don't wait for background cycle)
+    try:
+        queue_status = await get_global_queue_status()
+        free_worker = next(
+            (w for w in queue_status.workers 
+             if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)),
+            None
+        )
+        if free_worker:
+            # Refresh task from DB and dispatch
+            await db.refresh(task)
+            if task.status == "created":
+                await start_task_on_worker(db, task, free_worker.url)
+                print(f"[Immediate Dispatch] Task {task.id} sent to {free_worker.url}")
+    except Exception as e:
+        # Don't fail task creation if immediate dispatch fails - background worker will pick it up
+        print(f"[Immediate Dispatch] Failed for task {task.id}: {e}")
     
     return TaskCreateResponse(
         task_id=task.id,
@@ -884,9 +938,11 @@ async def api_get_task(
         progress=task.progress,
         ready_count=task.ready_count,
         total_count=task.total_count,
+        output_urls=task.output_urls,
         ready_urls=task.ready_urls,
         video_ready=task.video_ready,
         video_url=task.video_url,
+        input_url=task.input_url,
         fbx_glb_output_url=task.fbx_glb_output_url,
         fbx_glb_model_name=task.fbx_glb_model_name,
         fbx_glb_ready=task.fbx_glb_ready,
@@ -899,6 +955,113 @@ async def api_get_task(
         created_at=task.created_at,
         updated_at=task.updated_at
     )
+
+
+@app.get("/api/task/{task_id}/progress_log")
+async def api_task_progress_log(
+    task_id: str,
+    full: Optional[int] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get task progress log from worker"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Need guid and worker_api to fetch log
+    if not task.guid or not task.worker_api:
+        return {"available": False, "state": task.status}
+    
+    # Construct log URL on worker
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    log_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_progress.txt"
+    
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(log_url, timeout=5.0)
+            
+            if resp.status_code == 404:
+                # Log not created yet
+                return {"available": False, "state": task.status}
+            
+            if resp.status_code != 200:
+                return {"available": False, "state": task.status, "error": f"HTTP {resp.status_code}"}
+            
+            # Normalize line endings (Windows -> Unix)
+            full_text = resp.text.replace('\r\n', '\n').replace('\r', '\n')
+            lines = full_text.strip().split('\n') if full_text.strip() else []
+            
+            # Return last N lines as tail, full text if requested
+            tail_count = 10
+            tail_lines = lines[-tail_count:] if len(lines) > tail_count else lines
+            
+            return {
+                "available": True,
+                "state": task.status,
+                "full_text": full_text if full else None,
+                "tail_lines": tail_lines,
+                "total_lines": len(lines),
+                "truncated": len(lines) > tail_count and not full
+            }
+    except Exception as e:
+        print(f"[Progress Log] Error fetching log for task {task_id}: {e}")
+        return {"available": False, "state": task.status, "error": str(e)}
+
+
+@app.get("/api/task/{task_id}/worker_files")
+async def api_task_worker_files(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get list of files from worker for this task"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if not task.guid or not task.worker_api:
+        return {"available": False, "files": []}
+    
+    # Fetch from worker's model-files API
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    # worker_base is like http://x.x.x.x:port/converter/glb, API is at /api-converter-glb
+    api_base = worker_base.replace('/converter/glb', '')
+    files_url = f"{api_base}/api-converter-glb/model-files/{task.guid}"
+    
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(files_url, timeout=5.0)
+            
+            if resp.status_code != 200:
+                return {"available": False, "files": [], "error": f"HTTP {resp.status_code}"}
+            
+            data = resp.json()
+            
+            # Flatten files from all folders
+            all_files = []
+            for folder_name, folder_data in data.get('folders', {}).items():
+                for f in folder_data.get('files', []):
+                    rel_path = f.get('rel_path', '')
+                    all_files.append({
+                        "name": f.get('name'),
+                        "folder": folder_name,
+                        "type": f.get('type'),
+                        "size": f.get('size'),
+                        "url": f"{worker_base}/converter/glb/{task.guid}/{rel_path}"
+                    })
+            
+            return {
+                "available": True,
+                "exists": data.get('exists', False),
+                "files": all_files,
+                "totals": data.get('totals', {})
+            }
+    except Exception as e:
+        print(f"[Worker Files] Error fetching files for task {task_id}: {e}")
+        return {"available": False, "files": [], "error": str(e)}
 
 
 @app.post("/api/task/{task_id}/retry", response_model=TaskCreateResponse)
@@ -974,7 +1137,6 @@ async def api_restart_task(
 ):
     """Restart task with the same task_id (available if older than 3 hours)"""
     from datetime import timedelta
-    from tasks import _is_fbx_url, _start_fbx_preconvert_async
     from workers import select_best_worker, send_task_to_worker
 
     task = await get_task_by_id(db, task_id)
@@ -983,7 +1145,7 @@ async def api_restart_task(
 
     # Check ownership
     anon_session = await get_anon_session(request, response, db)
-    is_admin = bool(user and user.email == ADMIN_EMAIL)
+    is_admin = bool(user and user.email in ADMIN_EMAILS)
     is_owner = (
         (user and task.owner_type == "user" and task.owner_id == user.email) or
         (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
@@ -1036,24 +1198,20 @@ async def api_restart_task(
     task.worker_api = worker_url
     task.status = "processing"
 
-    if _is_fbx_url(task.input_url):
-        await db.commit()
-        await db.refresh(task)
-        asyncio.create_task(_start_fbx_preconvert_async(task.id, worker_url, task.input_url))
+    # Send directly to worker - workers handle GLB/FBX/OBJ natively
+    result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+    if not result.success:
+        task.status = "error"
+        task.error_message = result.error
     else:
-        result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
-        if not result.success:
-            task.status = "error"
-            task.error_message = result.error
-        else:
-            task.worker_task_id = result.task_id
-            task.progress_page = result.progress_page
-            task.guid = result.guid
-            task.output_urls = result.output_urls
-            task.total_count = len(result.output_urls)
-            task.status = "processing"
-        await db.commit()
-        await db.refresh(task)
+        task.worker_task_id = result.task_id
+        task.progress_page = result.progress_page
+        task.guid = result.guid
+        task.output_urls = result.output_urls
+        task.total_count = len(result.output_urls)
+        task.status = "processing"
+    await db.commit()
+    await db.refresh(task)
 
     return TaskCreateResponse(
         task_id=task.id,
@@ -1087,10 +1245,10 @@ async def api_get_purchase_state(
     )
     
     # Check if user is admin
-    is_admin = bool(user and user.email == ADMIN_EMAIL)
-    
-    # If owner or admin, they have access to all files
-    if is_owner or is_admin:
+    is_admin = bool(user and user.email in ADMIN_EMAILS)
+
+    # Only admin or owner has free access to all files
+    if is_admin or is_owner:
         return PurchaseStateResponse(
             purchased_all=True,
             purchased_files=[],
@@ -1183,9 +1341,9 @@ async def api_purchase_files(
             credits_remaining=user.balance_credits
         )
     
-    # Handle "buy all" request
+    # Handle "buy all" request (1 credit for full task access)
     if purchase_req.all:
-        cost = 3
+        cost = 1
         if user.balance_credits < cost:
             raise HTTPException(status_code=402, detail="Insufficient credits")
         
@@ -1467,6 +1625,41 @@ async def api_queue_status():
 # =============================================================================
 # Admin Endpoints
 # =============================================================================
+@app.get("/api/admin/stats", response_model=AdminStatsResponse)
+async def api_admin_stats(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get admin dashboard stats (admin only)"""
+    from sqlalchemy import func
+    from database import Task
+    
+    # Count total users
+    users_count = await db.execute(select(func.count(User.id)))
+    total_users = users_count.scalar() or 0
+    
+    # Count total credits across all users
+    credits_sum = await db.execute(select(func.sum(User.balance_credits)))
+    total_credits = credits_sum.scalar() or 0
+    
+    # Count tasks by status
+    tasks_by_status = {}
+    for status in ["created", "processing", "done", "error"]:
+        count_result = await db.execute(
+            select(func.count(Task.id)).where(Task.status == status)
+        )
+        tasks_by_status[status] = count_result.scalar() or 0
+    
+    total_tasks = sum(tasks_by_status.values())
+    
+    return AdminStatsResponse(
+        total_users=total_users,
+        total_tasks=total_tasks,
+        tasks_by_status=tasks_by_status,
+        total_credits=total_credits
+    )
+
+
 @app.get("/api/admin/users", response_model=AdminUserListResponse)
 async def api_admin_users(
     query: Optional[str] = None,
@@ -1568,6 +1761,79 @@ async def api_admin_user_tasks(
     )
 
 
+@app.get("/api/admin/tasks", response_model=AdminTaskListResponse)
+async def api_admin_all_tasks(
+    status: Optional[str] = None,
+    query: Optional[str] = None,
+    sort_by: str = "created_at",
+    sort_desc: bool = True,
+    page: int = 1,
+    per_page: int = 20,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all tasks with filtering, sorting, and pagination (admin only)"""
+    from sqlalchemy import func, or_, desc
+    from database import Task
+    
+    # Base query
+    base_query = select(Task)
+    
+    # Filter by status
+    if status and status in ["created", "processing", "done", "error"]:
+        base_query = base_query.where(Task.status == status)
+    
+    # Search by task_id or owner_id
+    if query:
+        search_pattern = f"%{query}%"
+        base_query = base_query.where(
+            or_(
+                Task.id.ilike(search_pattern),
+                Task.owner_id.ilike(search_pattern)
+            )
+        )
+    
+    # Count total
+    count_query = select(func.count()).select_from(base_query.subquery())
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+    
+    # Sort
+    sort_column = getattr(Task, sort_by, Task.created_at)
+    if sort_desc:
+        base_query = base_query.order_by(desc(sort_column))
+    else:
+        base_query = base_query.order_by(sort_column)
+    
+    # Paginate
+    offset = (page - 1) * per_page
+    result = await db.execute(base_query.offset(offset).limit(per_page))
+    tasks = result.scalars().all()
+    
+    return AdminTaskListResponse(
+        tasks=[
+            AdminTaskListItem(
+                task_id=t.id,
+                owner_type=t.owner_type,
+                owner_id=t.owner_id,
+                status=t.status,
+                progress=t.progress,
+                ready_count=t.ready_count,
+                total_count=t.total_count,
+                input_url=t.input_url,
+                worker_api=t.worker_api,
+                video_ready=t.video_ready,
+                created_at=t.created_at,
+                updated_at=t.updated_at
+            )
+            for t in tasks
+        ],
+        total=total,
+        page=page,
+        per_page=per_page
+    )
+
+
 @app.delete("/api/admin/task/{task_id}")
 async def api_admin_delete_task(
     task_id: str,
@@ -1609,6 +1875,42 @@ async def api_admin_restart_service(
 
     asyncio.create_task(_terminate_soon())
     return {"ok": True, "message": "Service restart scheduled"}
+
+
+@app.delete("/api/admin/tasks/all")
+async def api_admin_delete_all_tasks(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete ALL tasks from database and restart service (admin only).
+    DANGEROUS: This action cannot be undone!
+    """
+    import os
+    import signal
+    from database import Task
+    from sqlalchemy import delete
+    
+    # Count tasks before deletion
+    from sqlalchemy import func
+    count_result = await db.execute(select(func.count(Task.id)))
+    total_deleted = count_result.scalar() or 0
+    
+    # Delete all tasks
+    await db.execute(delete(Task))
+    await db.commit()
+    
+    print(f"[Admin] Deleted ALL {total_deleted} tasks by {admin.email}")
+    
+    # Schedule service restart
+    async def _terminate_soon():
+        await asyncio.sleep(1.0)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    asyncio.create_task(_terminate_soon())
+    
+    return {"ok": True, "deleted_count": total_deleted, "message": "All tasks deleted. Service restarting..."}
 
 
 # =============================================================================
@@ -1703,6 +2005,69 @@ async def proxy_file(
         media_type=content_type,
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "public, max-age=86400"
+        }
+    )
+
+
+@app.get("/api/file/{task_id}/download/{filename:path}")
+async def proxy_file_by_name(
+    task_id: str,
+    filename: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Proxy file from worker by filename to serve over HTTPS"""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Search in output_urls first, then ready_urls
+    file_url = None
+    all_urls = (task.output_urls or []) + (task.ready_urls or [])
+    
+    for url in all_urls:
+        url_clean = url.strip()
+        if url_clean.endswith(filename) or filename in url_clean.split('/')[-1]:
+            file_url = url_clean
+            break
+    
+    if not file_url:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Clean filename for download (remove GUID)
+    clean_filename = filename
+    import re
+    clean_filename = re.sub(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', '', filename, flags=re.IGNORECASE)
+    
+    # Determine content type
+    ext = clean_filename.split(".")[-1].lower()
+    content_types = {
+        "glb": "model/gltf-binary",
+        "gltf": "model/gltf+json",
+        "fbx": "application/octet-stream",
+        "blend": "application/x-blender",
+        "unitypackage": "application/octet-stream",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "mp4": "video/mp4",
+        "mov": "video/quicktime",
+    }
+    content_type = content_types.get(ext, "application/octet-stream")
+    
+    async def stream_file():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", file_url, timeout=120.0) as response:
+                if response.status_code != 200:
+                    return
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    yield chunk
+    
+    return StreamingResponse(
+        stream_file(),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename={clean_filename}",
             "Cache-Control": "public, max-age=86400"
         }
     )
@@ -1904,25 +2269,35 @@ async def api_proxy_viewer_resource(
 # =============================================================================
 # Model File Proxy Endpoints (for 3D viewer)
 # =============================================================================
-def _find_file_in_ready_urls(ready_urls: list, pattern: str) -> Optional[str]:
-    """Find a file in ready_urls matching the pattern (case-insensitive)"""
+def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = None) -> Optional[str]:
+    """Find a file in ready_urls matching the pattern (case-insensitive).
+    
+    Args:
+        ready_urls: List of URLs to search
+        pattern: Pattern to match (case-insensitive)
+        extension: Optional extension filter (e.g., ".glb") - must match exactly
+    
+    Returns:
+        First matching URL (trimmed) or None
+    """
     pattern_lower = pattern.lower()
     for url in ready_urls:
-        if pattern_lower in url.lower():
-            return url
+        url_clean = url.strip()  # Remove trailing whitespace
+        if pattern_lower in url_clean.lower():
+            if extension:
+                if url_clean.lower().endswith(extension.lower()):
+                    return url_clean
+            else:
+                return url_clean
     return None
 
 
 async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
-    """Stream a model file from worker"""
-    async def stream_file():
-        async with httpx.AsyncClient() as client:
-            async with client.stream("GET", url, timeout=120.0, follow_redirects=True) as response:
-                if response.status_code != 200:
-                    return
-                async for chunk in response.aiter_bytes(chunk_size=65536):
-                    yield chunk
+    """Proxy a model file from worker with streaming and Content-Length.
     
+    Uses streaming to avoid timeout on slow workers, but forwards Content-Length
+    from upstream so clients know the file size.
+    """
     # Determine content type
     ext = filename.split(".")[-1].lower()
     content_types = {
@@ -1931,14 +2306,41 @@ async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
     }
     content_type = content_types.get(ext, "application/octet-stream")
     
+    # Create client that lives through the response
+    client = httpx.AsyncClient()
+    
+    async def stream_file():
+        try:
+            async with client.stream("GET", url, timeout=300.0, follow_redirects=True) as response:
+                if response.status_code != 200:
+                    return
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    yield chunk
+        finally:
+            await client.aclose()
+    
+    # Get Content-Length from HEAD request (fast)
+    content_length = None
+    try:
+        async with httpx.AsyncClient() as head_client:
+            head_resp = await head_client.head(url, timeout=10.0, follow_redirects=True)
+            if head_resp.status_code == 200:
+                content_length = head_resp.headers.get("content-length")
+    except Exception:
+        pass  # Content-Length is optional, continue without it
+    
+    headers = {
+        "Content-Disposition": f"attachment; filename={filename}",
+        "Cache-Control": "public, max-age=3600",
+        "Access-Control-Allow-Origin": "*"
+    }
+    if content_length:
+        headers["Content-Length"] = content_length
+
     return StreamingResponse(
         stream_file(),
         media_type=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}",
-            "Cache-Control": "public, max-age=3600",
-            "Access-Control-Allow-Origin": "*"
-        }
+        headers=headers
     )
 
 
@@ -1978,9 +2380,9 @@ async def api_proxy_animations_glb(
     from workers import get_worker_base_url
     worker_base = get_worker_base_url(task.worker_api)
     
-    # Try to find animations GLB in ready_urls
-    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations")
-    if animations_url and animations_url.lower().endswith(".glb"):
+    # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
+    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations", ".glb")
+    if animations_url:
         return await _proxy_model_file(animations_url, f"{task_id}_animations.glb")
     
     # Fallback: try main model GLB
@@ -2029,20 +2431,29 @@ async def api_proxy_prepared_glb(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    from workers import get_worker_base_url
+    
     # 1. Try to find _model_prepared.glb in ready_urls (best option for preview)
     prepared_url = _find_file_in_ready_urls(task.ready_urls or [], "_model_prepared.glb")
     if prepared_url:
         return await _proxy_model_file(prepared_url, f"{task_id}_prepared.glb")
     
-    # 2. For FBX tasks, use fbx_glb_output_url
+    # 2. Fallback: try direct URL to _model_prepared.glb on worker
+    if task.guid and task.worker_api:
+        worker_base = get_worker_base_url(task.worker_api)
+        direct_prepared_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_model_prepared.glb"
+        result = await _proxy_model_file(direct_prepared_url, f"{task_id}_prepared.glb")
+        if result.status_code == 200:
+            return result
+    
+    # 3. For FBX tasks, use fbx_glb_output_url
     if task.fbx_glb_output_url and task.fbx_glb_ready:
         return await _proxy_model_file(task.fbx_glb_output_url, f"{task_id}_prepared.glb")
     
-    # 3. Final fallback: original model GLB (uploaded model before processing)
+    # 4. Final fallback: original model GLB (uploaded model before processing)
     if not task.guid or not task.worker_api:
         raise HTTPException(status_code=404, detail="Model not available yet")
     
-    from workers import get_worker_base_url
     worker_base = get_worker_base_url(task.worker_api)
     model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
     
@@ -2082,6 +2493,92 @@ async def api_proxy_thumb(
                 "Access-Control-Allow-Origin": "*"
             }
         )
+
+
+# =============================================================================
+# Free3D Model Search Proxy
+# =============================================================================
+
+FREE3D_BASE_URL = "https://free3d.online"
+
+@app.get("/api/free3d/search")
+async def api_free3d_search(
+    q: str = "",
+    query: str = "",
+    topK: int = 20,
+    type: Optional[int] = None,
+    mode: str = "clip"
+):
+    """Proxy search requests to free3d.online API"""
+    search_query = q or query
+    if not search_query:
+        return {"results": []}
+    
+    params = {
+        "q": search_query,
+        "topK": min(topK, 100)
+    }
+    if type is not None:
+        params["type"] = type
+    if mode:
+        params["mode"] = mode
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"{FREE3D_BASE_URL}/api-embeddings/", params=params)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[Free3D] Search error: {e}")
+        return {"results": [], "error": str(e)}
+
+
+@app.get("/api/free3d/image/{guid}/{filename}")
+async def api_free3d_image(guid: str, filename: str):
+    """Proxy image files from free3d.online"""
+    url = f"{FREE3D_BASE_URL}/data/{guid}/{filename}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            
+            content_type = resp.headers.get("content-type", "image/jpeg")
+            return Response(
+                content=resp.content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+    except Exception as e:
+        print(f"[Free3D] Image proxy error: {e}")
+        raise HTTPException(status_code=404, detail="Image not found")
+
+
+@app.get("/api/free3d/glb/{guid}/{filename}")
+async def api_free3d_glb(guid: str, filename: str):
+    """Proxy GLB model files from free3d.online"""
+    url = f"{FREE3D_BASE_URL}/data/{guid}/{filename}"
+    
+    async def stream_file():
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    return
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
+    
+    return StreamingResponse(
+        stream_file(),
+        media_type="model/gltf-binary",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
 
 
 # =============================================================================
@@ -2300,17 +2797,131 @@ async def index():
 
 
 @app.get("/task")
-async def task_page():
-    """Serve task page"""
-    return FileResponse(str(STATIC_DIR / "task.html"))
+async def task_page(
+    id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Serve task page with dynamic OG meta tags for Telegram/social sharing"""
+    
+    # Read base template
+    task_html_path = STATIC_DIR / "task.html"
+    html_content = task_html_path.read_text(encoding="utf-8")
+    
+    # If no task_id, return default page
+    if not id:
+        return HTMLResponse(content=html_content)
+    
+    task_id = id
+    base_url = APP_URL or "https://autorig.online"
+    
+    # Try to get task info for better OG tags
+    task_title = "Rigged 3D Model"
+    task_description = "View this rigged 3D character with 50+ animations"
+    has_video = False
+    has_thumb = False
+    
+    try:
+        from database import Task
+        result = await db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+        
+        if task:
+            if task.status == "done":
+                task_title = "✅ Rigged 3D Model Ready"
+                task_description = "3D character rigged with skeleton and 50+ animations. Download in GLB, FBX, OBJ formats."
+            elif task.status == "processing":
+                task_title = "⏳ Rigging in Progress..."
+                task_description = "3D model is being rigged with AI. View live progress."
+            elif task.status == "error":
+                task_title = "❌ Rigging Failed"
+                task_description = "There was an error processing this model."
+            
+            # Check if video exists
+            video_path = f"/var/autorig/videos/{task_id}.mp4"
+            has_video = os.path.exists(video_path) and os.path.getsize(video_path) > 0
+            
+            # Assume thumb exists if task has ready_urls
+            has_thumb = bool(task.ready_urls)
+    except Exception as e:
+        print(f"[Task Page] Error getting task info: {e}")
+    
+    # Build OG meta tags
+    og_tags = f'''
+    <!-- Open Graph / Telegram / Social -->
+    <meta property="og:type" content="{'video.other' if has_video else 'website'}">
+    <meta property="og:url" content="{base_url}/task?id={task_id}">
+    <meta property="og:title" content="{task_title} | AutoRig.online">
+    <meta property="og:description" content="{task_description}">
+    <meta property="og:site_name" content="AutoRig.online">'''
+    
+    # Add image/video tags
+    if has_thumb:
+        og_tags += f'''
+    <meta property="og:image" content="{base_url}/api/thumb/{task_id}">
+    <meta property="og:image:width" content="640">
+    <meta property="og:image:height" content="360">'''
+    
+    if has_video:
+        og_tags += f'''
+    <meta property="og:video" content="{base_url}/api/video/{task_id}">
+    <meta property="og:video:secure_url" content="{base_url}/api/video/{task_id}">
+    <meta property="og:video:type" content="video/mp4">
+    <meta property="og:video:width" content="640">
+    <meta property="og:video:height" content="360">'''
+    
+    # Twitter Card tags
+    if has_video:
+        og_tags += f'''
+    <meta name="twitter:card" content="player">
+    <meta name="twitter:player" content="{base_url}/api/video/{task_id}">
+    <meta name="twitter:player:width" content="640">
+    <meta name="twitter:player:height" content="360">'''
+    elif has_thumb:
+        og_tags += f'''
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="{base_url}/api/thumb/{task_id}">'''
+    else:
+        og_tags += '''
+    <meta name="twitter:card" content="summary">'''
+    
+    og_tags += f'''
+    <meta name="twitter:title" content="{task_title} | AutoRig.online">
+    <meta name="twitter:description" content="{task_description}">
+    '''
+    
+    # Inject OG tags after <meta name="robots">
+    html_content = html_content.replace(
+        '<meta name="robots" content="noindex, nofollow">',
+        f'<meta name="robots" content="noindex, nofollow">{og_tags}'
+    )
+    
+    # Update <title> tag to be dynamic
+    html_content = html_content.replace(
+        '<title>Task Progress | AutoRig.online</title>',
+        f'<title>{task_title} | AutoRig.online</title>'
+    )
+    
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/admin")
 async def admin_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin page"""
-    if not user or user.email != ADMIN_EMAIL:
+    if not user or user.email not in ADMIN_EMAILS:
         return RedirectResponse(url="/auth/login")
     return FileResponse(str(STATIC_DIR / "admin.html"))
+
+
+@app.get("/gallery")
+async def gallery_page():
+    """Serve Gallery page"""
+    return FileResponse(str(STATIC_DIR / "gallery.html"))
+
+
+@app.get("/guides")
+async def guides_page():
+    """Serve Guides page"""
+    return FileResponse(str(STATIC_DIR / "guides.html"))
 
 
 @app.get("/buy-credits")

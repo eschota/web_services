@@ -175,14 +175,15 @@ async def create_conversion_task(
     await db.commit()
     await db.refresh(task)
     
+    # Note: Telegram notification moved to start_task_on_worker (when we have progress_page)
+    
     return task, None
 
 
 async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) -> Tuple[Task, Optional[str]]:
     """
     Start a queued (status=created) task on a specific worker.
-    For FBX inputs: starts FBX->GLB pre-step asynchronously and returns immediately.
-    For non-FBX: sends task to worker immediately.
+    Workers accept GLB, FBX, OBJ directly via input_url.
     Returns: (task, error_message)
     """
     task.worker_api = worker_url
@@ -191,10 +192,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     await db.commit()
     await db.refresh(task)
 
-    if _is_fbx_url(task.input_url or ""):
-        asyncio.create_task(_start_fbx_preconvert_async(task.id, worker_url, task.input_url))
-        return task, None
-
+    # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
     if not result.success:
         task.status = "error"
@@ -213,6 +211,20 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     task.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(task)
+    
+    # Telegram notification (fire-and-forget) - now we have progress_page
+    try:
+        from telegram_bot import broadcast_new_task
+        # Construct progress_page URL from worker_api and guid
+        worker_base = get_worker_base_url(worker_url)
+        progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+        print(f"[Tasks] Scheduling Telegram notification for new task {task.id}")
+        asyncio.create_task(broadcast_new_task(task.id, task.input_url, task.input_type, progress_url))
+    except Exception as e:
+        print(f"[Telegram] Failed to notify new task: {e}")
+        import traceback
+        traceback.print_exc()
+    
     return task, None
 
 
@@ -226,35 +238,7 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     """
     # Track if task just completed
     was_processing = task.status == "processing"
-    
-    # FBX -> GLB stage (if applicable)
-    if task.status not in ("done", "error") and task.fbx_glb_output_url:
-        # If worker returned output_url, assume ready (no HEAD/GET checks).
-        if not task.fbx_glb_ready:
-            task.fbx_glb_ready = True
-            task.updated_at = datetime.utcnow()
-
-        # Start main pipeline once GLB is ready and main worker task not created yet
-        if task.fbx_glb_ready and not task.worker_task_id:
-            result = await send_task_to_worker(
-                task.worker_api,  # already selected at creation
-                task.fbx_glb_output_url,
-                task.input_type or "t_pose"
-            )
-            if not result.success:
-                task.status = "error"
-                task.error_message = result.error
-                await db.commit()
-                await db.refresh(task)
-                return task
-
-            task.worker_task_id = result.task_id
-            task.progress_page = result.progress_page
-            task.guid = result.guid
-            task.output_urls = result.output_urls
-            task.total_count = len(result.output_urls)
-            task.status = "processing"
-            task.updated_at = datetime.utcnow()
+    previous_ready_count = task.ready_count
 
     # Get already ready URLs
     already_ready = set(task.ready_urls)
@@ -274,6 +258,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         
         task.ready_count = total_ready
         task.updated_at = datetime.utcnow()
+        
+        # Track last progress time (when ready_count actually increased)
+        if total_ready > previous_ready_count:
+            task.last_progress_at = datetime.utcnow()
         
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
@@ -305,7 +293,108 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         except Exception as e:
             print(f"[Tasks] Failed to send completion email for task {task.id}: {e}")
     
+    # Telegram notification if task just completed
+    if was_processing and task.status == "done":
+        try:
+            from telegram_bot import broadcast_task_done
+            duration = None
+            if task.created_at:
+                duration = int((datetime.utcnow() - task.created_at).total_seconds())
+            # Construct progress_page URL
+            progress_url = None
+            if task.guid and task.worker_api:
+                worker_base = get_worker_base_url(task.worker_api)
+                progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+            print(f"[Tasks] Scheduling Telegram done notification for task {task.id}")
+            asyncio.create_task(broadcast_task_done(task.id, duration_seconds=duration, progress_page=progress_url))
+        except Exception as e:
+            print(f"[Telegram] Failed to notify done: {e}")
+            import traceback
+            traceback.print_exc()
+    
     return task
+
+
+# =============================================================================
+# Stale Task Detection & Auto-Restart
+# =============================================================================
+async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
+    """
+    Reset a stale task for re-processing.
+    Returns True if task was reset, False if max restarts exceeded.
+    """
+    from config import MAX_TASK_RESTARTS
+    
+    # Check if we've exceeded max restarts
+    current_restarts = task.restart_count or 0
+    if current_restarts >= MAX_TASK_RESTARTS:
+        # Mark as error - too many restarts
+        task.status = "error"
+        task.error_message = f"Task failed after {current_restarts} automatic restart attempts. Worker may be unavailable."
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+        print(f"[Stale Task] Task {task.id} marked as error after {current_restarts} restarts")
+        return False
+    
+    # Reset task for re-processing
+    task.status = "created"
+    task.ready_count = 0
+    task.ready_urls = []
+    task.output_urls = []
+    task.total_count = 0
+    task.worker_api = None
+    task.worker_task_id = None
+    task.progress_page = None
+    task.guid = None
+    task.video_ready = False
+    task.video_url = None
+    task.error_message = None
+    task.restart_count = current_restarts + 1
+    task.last_progress_at = None
+    task.updated_at = datetime.utcnow()
+    
+    await db.commit()
+    print(f"[Stale Task] Task {task.id} reset for re-processing (restart #{task.restart_count})")
+    return True
+
+
+async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
+    """
+    Find all stale processing tasks and reset them.
+    Returns number of tasks reset.
+    """
+    from config import STALE_TASK_TIMEOUT_MINUTES
+    from datetime import timedelta
+    
+    cutoff_time = datetime.utcnow() - timedelta(minutes=STALE_TASK_TIMEOUT_MINUTES)
+    
+    # Find processing tasks that haven't made progress
+    result = await db.execute(
+        select(Task).where(
+            Task.status == "processing",
+        )
+    )
+    processing_tasks = result.scalars().all()
+    
+    reset_count = 0
+    for task in processing_tasks:
+        # Determine the reference time for staleness
+        # Use last_progress_at if available, otherwise use updated_at or created_at
+        reference_time = task.last_progress_at or task.updated_at or task.created_at
+        
+        # Check if task is stale
+        if reference_time and reference_time < cutoff_time:
+            # Additional check: verify worker files are actually not accessible
+            if task.output_urls and task.ready_count == 0:
+                # Task has URLs but none are ready - likely worker lost the task
+                print(f"[Stale Task] Detected stale task {task.id}: "
+                      f"no progress since {reference_time}, "
+                      f"ready_count={task.ready_count}/{task.total_count}")
+                
+                if await reset_stale_task(db, task):
+                    reset_count += 1
+    
+    return reset_count
 
 
 # =============================================================================
