@@ -141,6 +141,19 @@
 
     "gallery_title": "🎬 Recent Rigged Models",
     "gallery_subtitle": "Real results from our users",
+    "gallery_page_title": "Gallery",
+    "gallery_page_subtitle": "Real completed tasks. Sort by likes or newest.",
+    "gallery_all_works": "All works",
+    "gallery_total": "Total: {count}",
+    "gallery_sort_label": "Sort:",
+    "gallery_sort_likes": "Top liked",
+    "gallery_sort_date": "Newest",
+    "gallery_prev": "Prev",
+    "gallery_next": "Next",
+    "gallery_page": "Page {page}",
+    "gallery_loading": "Loading…",
+    "gallery_empty": "No works yet",
+    "gallery_open": "Open",
 
     "formats_title": "Supported Export Formats",
     "formats_desc": "We support conversion to all major 3D software and game engines:",
@@ -161,18 +174,40 @@
     "api_contact_btn": "Contact on Telegram",
 
     "btn_download": "Download",
-    "btn_purchase": "Purchase",
+    "btn_purchase": "Download",
     "btn_buy_credits": "Buy Credits",
-    "btn_login_to_purchase": "Sign in to purchase",
+    "btn_login_to_purchase": "Sign in to download",
     "btn_owner_tasks": "All tasks",
+    "btn_download_all": "Download All",
     
-    "purchase_all_bundle": "Get All Files Bundle",
-    "purchase_save_credits": "Save credits with a bundle deal!",
-    "purchase_buy_all": "Buy All",
-    "purchase_confirm_file": "Purchase file",
-    "purchase_confirm_all": "Purchase all files for",
+    "purchase_all_bundle": "Download All Files",
+    "purchase_save_credits": "Save 6 credits with bundle!",
+    "purchase_buy_all": "Download All",
+    "purchase_confirm_file": "Download file",
+    "purchase_confirm_all": "Download all files for",
     
     "credits": "credits",
-    "credit": "credit"
+    "credit": "credit",
+
+    "support_questions_title": "Have questions?",
+    "support_questions_desc": "Join our Telegram support group",
+    "support_questions_cta": "Open Telegram",
+    "gallery_view_all_plain": "View all",
+    "gallery_view_all": "View all ({count})",
+
+    "free3d_search_label": "Search Free 3D Models",
+    "free3d_cat_characters": "Characters",
+    "free3d_cat_animals": "Animals",
+    "free3d_cat_vehicles": "Vehicles",
+    "free3d_cat_weapons": "Weapons",
+    "free3d_cat_props": "Props",
+    "free3d_cat_all": "All",
+    "free3d_search_placeholder": "girl, robot, warrior...",
+    "free3d_searching": "Searching...",
+    "free3d_no_results": "No models found. Try a different search.",
+    "free3d_confirm_create": "Add model \"{title}\" to rigging queue?",
+
+    "log_copy": "Copy",
+    "log_copied": "Copied!"
 }
 

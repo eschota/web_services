@@ -94,6 +94,36 @@
         </div>
     </header>
 
+    <!-- Free3D Model Search -->
+    <section class="free3d-search">
+        <div class="container">
+            <div class="free3d-search-row">
+                <label for="free3d-search-input" class="free3d-search-label" data-i18n="free3d_search_label">Search Free 3D Models</label>
+                <select id="free3d-category-select" class="free3d-category-select">
+                    <option value="characters" selected data-i18n="free3d_cat_characters">Characters</option>
+                    <option value="animals" data-i18n="free3d_cat_animals">Animals</option>
+                    <option value="vehicles" data-i18n="free3d_cat_vehicles">Vehicles</option>
+                    <option value="weapons" data-i18n="free3d_cat_weapons">Weapons</option>
+                    <option value="props" data-i18n="free3d_cat_props">Props</option>
+                    <option value="all" data-i18n="free3d_cat_all">All</option>
+                </select>
+                <div class="free3d-input-group">
+                    <input type="text" 
+                           id="free3d-search-input" 
+                           class="free3d-search-input" 
+                           data-i18n-placeholder="free3d_search_placeholder"
+                           placeholder="girl, robot, warrior..."
+                           autocomplete="off">
+                    <button type="button" class="free3d-randomize-btn" id="free3d-randomize-btn" title="Random search">🎲</button>
+                </div>
+                <span class="free3d-search-status hidden" id="free3d-search-status" data-i18n="free3d_searching">Searching...</span>
+            </div>
+            <div class="free3d-results hidden" id="free3d-results">
+                <!-- Horizontal scrollable preview strip populated by JS -->
+            </div>
+        </div>
+    </section>
+
     <main>
         <section class="hero">
         <div class="container">

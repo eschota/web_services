@@ -417,3 +417,28 @@ curl https://autorig.online/api/admin/stats
 
 </div>
 
+
+## Telegram Web App Integration
+
+### Setup Bot (one-time)
+1. Open @BotFather in Telegram
+2. `/newbot` → create bot or use existing
+3. `/mybots` → select your bot → **Bot Settings** → **Menu Button** → **Configure menu button**
+4. Set URL: `https://autorig.online`
+5. Copy bot token and add to `.env`:
+   ```
+   TELEGRAM_BOT_TOKEN=your_token_here
+   TELEGRAM_BOT_USERNAME=YourBotName
+   ```
+6. Restart service: `systemctl restart autorig`
+
+### How it works
+- Users open bot → click Menu button → opens autorig.online as Web App
+- Web App automatically expands and applies Telegram theme
+- Share button appears when task is complete
+- Back button navigates history or closes Web App
+- Haptic feedback on task completion/error
+
+### Deep links
+- Open specific task: `https://t.me/YourBotName/app?startapp=task_TASKID`
+- Main page: `https://t.me/YourBotName/app`

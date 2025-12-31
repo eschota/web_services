@@ -23,7 +23,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css?v=free3d-glass">
     
     <!-- Schema.org SoftwareApplication markup -->
     <script type="application/ld+json">
@@ -83,14 +83,18 @@
         <div class="container">
             <div class="header-inner">
                 <a href="/" class="logo">
-                    <img src="/static/images/logo/logo.svg" alt="AutoRig" class="logo-icon" width="40" height="40">
-                    <span>AutoRig</span>
+                    <img src="/static/images/logo/autorig-logo.png" 
+                         srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x"
+                         alt="Autorig.Online" 
+                         class="logo-img" 
+                         height="120">
                 </a>
 
                 <nav class="nav">
                     <a href="/guides" class="nav-link" data-i18n="nav_guides">Guides</a>
                     <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
                     <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
+                    <a href="/developers" class="nav-link" data-i18n="nav_api">API</a>
                 </nav>
                 
                 <div class="header-actions">
@@ -141,18 +145,43 @@
         </div>
     </header>
     
-    <main>
-        <!-- Hero Section -->
-        <section class="hero">
-            <div class="container">
-                <h1><span class="text-gradient" data-i18n="hero_title">Automatic 3D Model Rigging</span></h1>
-                <p data-i18n="hero_subtitle">Upload your GLB, FBX, or OBJ model and get it rigged with animations in minutes</p>
+    <!-- Free3D Model Search -->
+    <section class="free3d-search">
+        <div class="container">
+            <div class="free3d-search-row">
+                <label for="free3d-search-input" class="free3d-search-label" data-i18n="free3d_search_label">Search Free 3D Models</label>
+                <select id="free3d-category-select" class="free3d-category-select">
+                    <option value="characters" selected data-i18n="free3d_cat_characters">Characters</option>
+                    <option value="animals" data-i18n="free3d_cat_animals">Animals</option>
+                    <option value="vehicles" data-i18n="free3d_cat_vehicles">Vehicles</option>
+                    <option value="weapons" data-i18n="free3d_cat_weapons">Weapons</option>
+                    <option value="props" data-i18n="free3d_cat_props">Props</option>
+                    <option value="all" data-i18n="free3d_cat_all">All</option>
+                </select>
+                <div class="free3d-input-group">
+                    <input type="text" 
+                           id="free3d-search-input" 
+                           class="free3d-search-input" 
+                           data-i18n-placeholder="free3d_search_placeholder"
+                           placeholder="girl, robot, warrior..."
+                           autocomplete="off">
+                    <button type="button" class="free3d-randomize-btn" id="free3d-randomize-btn" title="Random search">🎲</button>
+                </div>
+                <span class="free3d-search-status hidden" id="free3d-search-status" data-i18n="free3d_searching">Searching...</span>
             </div>
-        </section>
-        
+            <div class="free3d-results hidden" id="free3d-results">
+                <!-- Horizontal scrollable preview strip populated by JS -->
+            </div>
+        </div>
+    </section>
+    
+    <main>
         <!-- Conversion Form -->
         <section class="container-sm">
             <div class="card">
+                <h1 style="text-align: center; margin: 0 0 1.5rem 0; font-size: 1.75rem;">
+                    <span class="text-gradient" data-i18n="hero_title">Automatic 3D Model Rigging</span>
+                </h1>
                 <form id="convert-form">
                     <!-- Tabs -->
                     <div class="tabs">
@@ -162,17 +191,29 @@
                     
                     <!-- Upload Panel -->
                     <div id="upload-panel">
-                        <div class="upload-zone" id="upload-zone">
-                            <img src="/static/images/icons/upload.svg" alt="Upload" class="upload-zone-icon" width="64" height="64">
-                            <div class="upload-zone-title" data-i18n="upload_title">Drop your 3D model here</div>
-                            <div class="upload-zone-subtitle" data-i18n="upload_subtitle">or click to browse (GLB, FBX, OBJ up to 100MB)</div>
-                            
-                            <div class="upload-zone-file hidden" id="file-info">
-                                <span>📄</span>
-                                <span id="file-name"></span>
-                                <img src="/static/images/icons/close.svg" alt="Remove" class="remove" id="remove-file" width="20" height="20">
+                        <div class="upload-row">
+                            <div class="upload-zone" id="upload-zone">
+                                <img src="/static/images/icons/upload.svg" alt="Upload" class="upload-zone-icon" width="64" height="64">
+                                <div class="upload-zone-title" data-i18n="upload_title">Drop your 3D model here</div>
+                                <div class="upload-zone-subtitle" data-i18n="upload_subtitle">or click to browse (GLB, FBX, OBJ up to 100MB)</div>
+
+                                <div class="upload-zone-file hidden" id="file-info">
+                                    <span>📄</span>
+                                    <span id="file-name"></span>
+                                    <img src="/static/images/icons/close.svg" alt="Remove" class="remove" id="remove-file" width="20" height="20">
+                                </div>
                             </div>
+
+                            <aside class="support-card" aria-label="Support">
+                                <div class="support-card-title" data-i18n="support_questions_title">Have questions?</div>
+                                <div class="support-card-desc" data-i18n="support_questions_desc">Join our Telegram support group</div>
+                                <a class="support-card-qr" href="https://t.me/autorigonline" target="_blank" rel="noopener noreferrer" aria-label="Telegram QR">
+                                    <img src="/static/images/telegram_qr.jpg" alt="Telegram QR" width="256" height="256" loading="lazy">
+                                </a>
+                                <a class="btn btn-ghost support-card-cta" href="https://t.me/autorigonline" target="_blank" rel="noopener noreferrer" data-i18n="support_questions_cta">Open Telegram</a>
+                            </aside>
                         </div>
+
                         <input type="file" id="file-input" accept=".glb,.fbx,.obj" hidden>
                     </div>
                     
@@ -227,6 +268,22 @@
                 </form>
             </div>
         </section>
+
+        <!-- Gallery Preview -->
+        <section class="container mt-4">
+            <div class="card" style="padding: 2rem;">
+                <div class="card-header" style="padding: 0; margin-bottom: 1rem; display:flex; align-items:flex-start; justify-content: space-between; gap: 1rem;">
+                    <div>
+                        <h3 class="card-title" style="margin: 0;" data-i18n="gallery_title">🎬 Recent Rigged Models</h3>
+                        <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary);" data-i18n="gallery_subtitle">Real results from our users</p>
+                    </div>
+                    <a href="/gallery" class="btn btn-ghost" id="gallery-view-all-link" data-i18n="gallery_view_all_plain">View all</a>
+                </div>
+                <div class="features" id="gallery-preview-grid" style="margin: 0;">
+                    <div class="card" style="padding: 1rem; color: var(--text-muted);">Loading…</div>
+                </div>
+            </div>
+        </section>
         
         <!-- Features -->
         <section class="container">
@@ -248,7 +305,29 @@
                 </div>
             </div>
         </section>
-        
+
+        <!-- Formats -->
+        <section class="container mt-4">
+            <div class="card" style="padding: 2rem;">
+                <h3 class="card-title" style="margin-top: 0;" data-i18n="formats_title">Supported Export Formats</h3>
+                <p style="color: var(--text-secondary);" data-i18n="formats_desc">We support conversion to all major 3D software and game engines:</p>
+                <div class="features" style="margin: 1rem 0 0 0;">
+                    <div class="card" style="padding: 1.25rem;">
+                        <div style="font-weight: 600;">DCC</div>
+                        <div style="color: var(--text-secondary); margin-top: 0.5rem;">3ds Max • Maya • Cinema 4D</div>
+                    </div>
+                    <div class="card" style="padding: 1.25rem;">
+                        <div style="font-weight: 600;">Game Engines</div>
+                        <div style="color: var(--text-secondary); margin-top: 0.5rem;">Unity HDRP • Unity • Unreal (FBX)</div>
+                    </div>
+                    <div class="card" style="padding: 1.25rem;">
+                        <div style="font-weight: 600;">Web / Exchange</div>
+                        <div style="color: var(--text-secondary); margin-top: 0.5rem;">GLB • FBX • OBJ</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- History -->
         <section class="container-sm mt-4">
             <div class="card">
@@ -273,7 +352,7 @@
     
     <!-- Scripts -->
     <script src="/static/js/i18n.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=likes-2"></script>
 </body>
 </html>
 

@@ -6,7 +6,7 @@ from typing import Optional
 import json
 
 from sqlalchemy import (
-    Column, String, Integer, Boolean, DateTime, Text, 
+    Column, String, Integer, BigInteger, Boolean, DateTime, Text, 
     create_engine, event
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -51,8 +51,8 @@ class User(Base):
     
     @property
     def is_admin(self) -> bool:
-        from config import ADMIN_EMAIL
-        return self.email == ADMIN_EMAIL
+        from config import ADMIN_EMAILS
+        return self.email in ADMIN_EMAILS
 
 
 class AnonSession(Base):
@@ -119,6 +119,10 @@ class Task(Base):
     # Status
     status = Column(String(20), default="created")  # created, processing, done, error
     error_message = Column(Text, nullable=True)
+    
+    # Auto-restart tracking for stale tasks
+    restart_count = Column(Integer, default=0)  # Number of times task was auto-restarted
+    last_progress_at = Column(DateTime, nullable=True)  # Last time progress changed
     
     # Video
     video_url = Column(String(512), nullable=True)
@@ -195,6 +199,18 @@ class ApiKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     revoked_at = Column(DateTime, nullable=True)
     last_used_at = Column(DateTime, nullable=True)
+
+
+class TelegramChat(Base):
+    """Telegram chat subscribed to notifications"""
+    __tablename__ = "telegram_chats"
+    
+    chat_id = Column(BigInteger, primary_key=True)
+    chat_type = Column(String(50), nullable=True)
+    title = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
 
 
 # =============================================================================

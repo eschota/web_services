@@ -26,6 +26,7 @@
                 
                 <div class="header-actions">
                     <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    <button class="btn btn-ghost" id="delete-all-tasks-btn" style="color: var(--error); border-color: rgba(239,71,111,0.35);">🗑️ Delete ALL Tasks</button>
                     <button class="btn btn-secondary" id="restart-service-btn">Restart service</button>
                     <a href="/" class="btn btn-secondary">← Back to Site</a>
                     <a href="/auth/logout" class="btn btn-ghost">Sign out</a>
@@ -38,7 +39,7 @@
         <h1 data-i18n="admin_title">Admin Panel</h1>
         
         <!-- Stats -->
-        <div class="features mt-3" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="features mt-3" style="grid-template-columns: repeat(4, 1fr);">
             <div class="card" style="text-align: center;">
                 <div style="font-size: 2rem; font-weight: 700;" id="stat-users">-</div>
                 <div style="color: var(--text-muted);">Total Users</div>
@@ -51,44 +52,113 @@
                 <div style="font-size: 2rem; font-weight: 700;" id="stat-credits">-</div>
                 <div style="color: var(--text-muted);">Total Credits</div>
             </div>
+            <div class="card" style="text-align: center;">
+                <div style="font-size: 1.25rem; font-weight: 600;">
+                    <span id="stat-processing" style="color: var(--accent);">-</span> / 
+                    <span id="stat-done" style="color: var(--success);">-</span> / 
+                    <span id="stat-error" style="color: var(--error);">-</span>
+                </div>
+                <div style="color: var(--text-muted); font-size: 0.875rem;">Processing / Done / Error</div>
+            </div>
         </div>
         
-        <!-- Users Table -->
-        <div class="card mt-4">
-            <div class="card-header">
-                <h3 class="card-title" data-i18n="admin_users">Users</h3>
-                <div style="display: flex; gap: 1rem;">
-                    <input type="text" class="form-input" id="search-input" placeholder="Search by email..." style="width: 250px;">
+        <!-- Tabs -->
+        <div class="admin-tabs mt-4" style="display: flex; gap: 0; border-bottom: 2px solid var(--border-color);">
+            <button class="admin-tab active" data-tab="users" style="padding: 0.75rem 1.5rem; background: transparent; border: none; border-bottom: 2px solid var(--accent); margin-bottom: -2px; color: var(--accent); font-weight: 600; cursor: pointer;">
+                👥 Users
+            </button>
+            <button class="admin-tab" data-tab="tasks" style="padding: 0.75rem 1.5rem; background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                📋 All Tasks
+            </button>
+        </div>
+        
+        <!-- Users Tab Content -->
+        <div id="tab-users" class="tab-content">
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h3 class="card-title" data-i18n="admin_users">Users</h3>
+                    <div style="display: flex; gap: 1rem;">
+                        <input type="text" class="form-input" id="search-input" placeholder="Search by email..." style="width: 250px;">
+                    </div>
+                </div>
+                
+                <div style="overflow-x: auto;">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="id">ID</th>
+                                <th data-sort="email">Email</th>
+                                <th data-sort="name">Name</th>
+                                <th data-sort="balance_credits">Balance</th>
+                                <th data-sort="total_tasks">Tasks</th>
+                                <th data-sort="last_login_at">Last Login</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                <div class="flex justify-between items-center mt-3" id="pagination">
+                    <span id="pagination-info" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+                    <div class="flex gap-1">
+                        <button class="btn btn-secondary" id="prev-page" disabled>← Prev</button>
+                        <button class="btn btn-secondary" id="next-page" disabled>Next →</button>
+                    </div>
                 </div>
             </div>
-            
-            <div style="overflow-x: auto;">
-                <table class="admin-table">
-                    <thead>
-                        <tr>
-                            <th data-sort="id">ID</th>
-                            <th data-sort="email">Email</th>
-                            <th data-sort="name">Name</th>
-                            <th data-sort="balance_credits">Balance</th>
-                            <th data-sort="total_tasks">Tasks</th>
-                            <th data-sort="last_login_at">Last Login</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="users-table">
-                        <tr>
-                            <td colspan="7" style="text-align: center; color: var(--text-muted);">Loading...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            
-            <!-- Pagination -->
-            <div class="flex justify-between items-center mt-3" id="pagination">
-                <span id="pagination-info" style="color: var(--text-muted); font-size: 0.875rem;"></span>
-                <div class="flex gap-1">
-                    <button class="btn btn-secondary" id="prev-page" disabled>← Prev</button>
-                    <button class="btn btn-secondary" id="next-page" disabled>Next →</button>
+        </div>
+        
+        <!-- Tasks Tab Content -->
+        <div id="tab-tasks" class="tab-content" style="display: none;">
+            <div class="card mt-4">
+                <div class="card-header" style="flex-wrap: wrap; gap: 1rem;">
+                    <h3 class="card-title">All Tasks</h3>
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                        <select class="form-input" id="tasks-status-filter" style="width: 150px;">
+                            <option value="">All statuses</option>
+                            <option value="created">Created</option>
+                            <option value="processing">Processing</option>
+                            <option value="done">Done</option>
+                            <option value="error">Error</option>
+                        </select>
+                        <input type="text" class="form-input" id="tasks-search-input" placeholder="Search by task ID or owner..." style="width: 280px;">
+                    </div>
+                </div>
+                
+                <div style="overflow-x: auto;">
+                    <table class="admin-table" style="min-width: 900px;">
+                        <thead>
+                            <tr>
+                                <th style="width: 60px;">Preview</th>
+                                <th data-sort-tasks="id" style="width: 100px;">Task ID</th>
+                                <th data-sort-tasks="owner_id">Owner</th>
+                                <th data-sort-tasks="status" style="width: 90px;">Status</th>
+                                <th style="width: 130px;">Progress</th>
+                                <th data-sort-tasks="created_at" style="width: 140px;">Created</th>
+                                <th style="width: 100px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="all-tasks-table">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Tasks Pagination -->
+                <div class="flex justify-between items-center mt-3" id="all-tasks-pagination">
+                    <span id="all-tasks-pagination-info" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+                    <div class="flex gap-1">
+                        <button class="btn btn-secondary" id="all-tasks-prev-page" disabled>← Prev</button>
+                        <button class="btn btn-secondary" id="all-tasks-next-page" disabled>Next →</button>
+                    </div>
                 </div>
             </div>
         </div>

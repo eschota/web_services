@@ -30,9 +30,12 @@ class TaskStatusResponse(BaseModel):
     progress: int
     ready_count: int
     total_count: int
-    ready_urls: List[str]
+    output_urls: List[str] = []  # All expected output files
+    ready_urls: List[str]  # Files that are ready for download
     video_ready: bool
     video_url: Optional[str]
+    # Input URL (for Free3D models viewer loads directly from this)
+    input_url: Optional[str] = None
     # FBX -> GLB pre-conversion (only when input was .fbx)
     fbx_glb_output_url: Optional[str] = None
     fbx_glb_model_name: Optional[str] = None
@@ -172,6 +175,38 @@ class AdminUserTaskItem(BaseModel):
 class AdminUserTasksResponse(BaseModel):
     """Response for admin user tasks list"""
     tasks: List[AdminUserTaskItem]
+    total: int
+    page: int
+    per_page: int
+
+
+class AdminStatsResponse(BaseModel):
+    """Response for admin dashboard stats"""
+    total_users: int
+    total_tasks: int
+    tasks_by_status: dict  # {"created": 5, "processing": 2, "done": 100, "error": 3}
+    total_credits: int
+
+
+class AdminTaskListItem(BaseModel):
+    """Task item for admin all-tasks list"""
+    task_id: str
+    owner_type: str
+    owner_id: str
+    status: str
+    progress: int
+    ready_count: int
+    total_count: int
+    input_url: Optional[str] = None
+    worker_api: Optional[str] = None
+    video_ready: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminTaskListResponse(BaseModel):
+    """Response for admin all-tasks list"""
+    tasks: List[AdminTaskListItem]
     total: int
     page: int
     per_page: int

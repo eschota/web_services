@@ -52,9 +52,11 @@
     /* Dark Theme (default) */
     --bg-primary: #0a0a0f;
     --bg-secondary: #12121a;
-    --bg-card: #1a1a24;
-    --bg-card-hover: #22222e;
-    --bg-input: #16161e;
+    --bg-card: rgba(26, 26, 36, 0.75);
+    --bg-card-hover: rgba(34, 34, 46, 0.85);
+    --bg-input: rgba(22, 22, 30, 0.8);
+    --glass-blur: 12px;
+    --glass-border: rgba(255, 255, 255, 0.08);
     
     --text-primary: #f0f0f5;
     --text-secondary: #a0a0b0;
@@ -88,9 +90,11 @@
 [data-theme="light"] {
     --bg-primary: #f5f5f8;
     --bg-secondary: #ffffff;
-    --bg-card: #ffffff;
-    --bg-card-hover: #f0f0f5;
-    --bg-input: #f8f8fa;
+    --bg-card: rgba(255, 255, 255, 0.7);
+    --bg-card-hover: rgba(240, 240, 245, 0.85);
+    --bg-input: rgba(248, 248, 250, 0.8);
+    --glass-blur: 12px;
+    --glass-border: rgba(0, 0, 0, 0.08);
     
     --text-primary: #1a1a2e;
     --text-secondary: #4a4a5a;
@@ -133,8 +137,25 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* Background pattern */
+/* Parallax background image */
 body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('/static/images/bg/background.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: -2;
+}
+
+/* Soft gradient overlay */
+body::after {
     content: '';
     position: fixed;
     top: 0;
@@ -143,9 +164,16 @@ body::before {
     height: 100%;
     background-image: 
         radial-gradient(circle at 20% 30%, var(--accent-glow) 0%, transparent 50%),
-        radial-gradient(circle at 80% 70%, rgba(99, 102, 241, 0.1) 0%, transparent 40%);
+        radial-gradient(circle at 80% 70%, rgba(99, 102, 241, 0.08) 0%, transparent 40%);
     pointer-events: none;
     z-index: -1;
+}
+
+/* High-DPI background */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    body::before {
+        background-image: url('/static/images/bg/background@2x.jpg');
+    }
 }
 
 a {
@@ -197,13 +225,14 @@ h3 { font-size: 1.25rem; }
    Header
    ============================================================================= */
 .header {
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--glass-border);
     padding: 1rem 0;
     position: sticky;
     top: 0;
     z-index: 100;
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 
 .header-inner {
@@ -229,6 +258,13 @@ h3 { font-size: 1.25rem; }
     display: flex;
     align-items: center;
     justify-content: center;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.logo-img {
+    height: 120px;
+    width: auto;
     object-fit: contain;
     flex-shrink: 0;
 }
@@ -332,10 +368,12 @@ h3 { font-size: 1.25rem; }
    ============================================================================= */
 .card {
     background: var(--bg-card);
-    border: 1px solid var(--border);
+    border: 1px solid var(--glass-border);
     border-radius: var(--radius-lg);
     padding: 1.5rem;
     transition: all var(--transition);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 
 .card:hover {
@@ -382,6 +420,40 @@ h3 { font-size: 1.25rem; }
     transition: all var(--transition);
 }
 
+.form-select {
+    width: 100%;
+    padding: 0.875rem 2.5rem 0.875rem 1rem;
+    font-size: 1rem;
+    font-family: inherit;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    transition: all var(--transition);
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+        linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position:
+        calc(100% - 18px) calc(50% - 2px),
+        calc(100% - 12px) calc(50% - 2px);
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+}
+
+.form-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.form-select:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
 .form-input:focus {
     outline: none;
     border-color: var(--accent);
@@ -395,14 +467,82 @@ h3 { font-size: 1.25rem; }
 /* =============================================================================
    Upload Zone
    ============================================================================= */
+
+/* =============================================================================
+   Upload + Support block
+   ============================================================================= */
+.upload-row {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.support-card {
+    background: var(--bg-card);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.support-card-title {
+    font-weight: 600;
+}
+
+.support-card-desc {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.support-card-qr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    background: rgba(0,0,0,0.2);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+
+.support-card-qr img {
+    width: 100%;
+    height: auto;
+    max-width: 220px;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.support-card-cta {
+    width: 100%;
+    justify-content: center;
+}
+
+@media (max-width: 768px) {
+    .upload-row {
+        grid-template-columns: 1fr;
+    }
+
+    .support-card {
+        box-shadow: none;
+    }
+}
+
 .upload-zone {
-    border: 2px dashed var(--border);
+    border: 2px dashed var(--glass-border);
     border-radius: var(--radius-lg);
     padding: 3rem 2rem;
     text-align: center;
     cursor: pointer;
     transition: all var(--transition);
     background: var(--bg-input);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 
 .upload-zone:hover,
@@ -566,10 +706,13 @@ h3 { font-size: 1.25rem; }
     justify-content: space-between;
     padding: 0.75rem 1rem;
     background: var(--bg-input);
+    border: 1px solid var(--glass-border);
     border-radius: var(--radius-sm);
     margin-bottom: 0.5rem;
     font-size: 0.875rem;
     transition: all var(--transition);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 
 .file-item:hover {
@@ -856,6 +999,8 @@ h3 { font-size: 1.25rem; }
     border-radius: var(--radius);
     margin-bottom: 1rem;
     font-size: 0.9375rem;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 
 .alert-info {
@@ -913,9 +1058,12 @@ h3 { font-size: 1.25rem; }
     text-align: center;
     padding: 2rem 0;
     margin-top: 4rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--glass-border);
     color: var(--text-muted);
     font-size: 0.875rem;
+    background: var(--bg-card);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 
 /* =============================================================================
@@ -928,6 +1076,210 @@ h3 { font-size: 1.25rem; }
 
 .fade-in {
     animation: fadeIn 0.3s ease;
+}
+
+/* =============================================================================
+   Dynamic Gallery Page
+   ============================================================================= */
+.gallery-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+}
+
+.gallery-grid-dyn {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.gallery-card {
+    display: block;
+    padding: 0.75rem;
+    background: var(--bg-card);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    transition: all var(--transition);
+}
+
+.gallery-card:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow);
+    transform: translateY(-2px);
+}
+
+.gallery-card-media {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: #000;
+}
+
+.gallery-card-media img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 250ms ease;
+}
+
+.gallery-card-media img.loaded {
+    opacity: 1;
+}
+
+.gallery-card-meta {
+    margin-top: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.gallery-time {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.like-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.35);
+    color: #fff;
+    cursor: pointer;
+    user-select: none;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.like-btn:hover {
+    background: rgba(0,0,0,0.5);
+}
+
+.like-btn.liked {
+    border-color: rgba(239, 68, 68, 0.45);
+    background: rgba(239, 68, 68, 0.22);
+}
+
+.like-heart {
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.like-count {
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.gallery-pagination {
+    margin-top: 1.25rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+/* =============================================================================
+   API / Developers page
+   ============================================================================= */
+.api-toc {
+    margin-top: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.api-section {
+    scroll-margin-top: 100px;
+}
+
+.api-h {
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.api-p {
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+}
+
+.api-pill {
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    background: rgba(0,0,0,0.18);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.api-tabs {
+    margin-top: 0.75rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.api-tab-btn.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.api-tab-panels {
+    margin-top: 0.75rem;
+}
+
+.api-panel {
+    display: none;
+}
+
+.api-panel.active {
+    display: block;
+}
+
+.api-code-wrap {
+    position: relative;
+    margin-top: 0.75rem;
+}
+
+.api-code {
+    margin: 0;
+    padding: 0.9rem 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(0,0,0,0.18);
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-secondary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.85rem;
+    line-height: 1.35;
+}
+
+.api-copy {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.85rem;
 }
 
 /* =============================================================================
@@ -1184,12 +1536,9 @@ h3 { font-size: 1.25rem; }
 
 
 /* Lazy loading support */
+/* IMPORTANT: do not hide all lazy images globally (can cause permanent black thumbs if .loaded is missed).
+   If you want fade-in for a specific image, apply your own class and transition there. */
 img[loading="lazy"] {
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-img[loading="lazy"].loaded {
     opacity: 1;
 }
 
@@ -1212,3 +1561,347 @@ img[loading="lazy"].loaded {
     }
 }
 
+/* =============================================================================
+   Free3D Model Search - Glassmorphism Style
+   ============================================================================= */
+
+.free3d-search {
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.08) 0%, transparent 100%);
+    padding: 1.25rem 0 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    position: relative;
+}
+
+.free3d-search::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(99, 102, 241, 0.15), transparent);
+    pointer-events: none;
+}
+
+.free3d-search-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
+}
+
+.free3d-search-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.free3d-search-label::before {
+    content: '🔍';
+    font-size: 1rem;
+}
+
+/* Category dropdown */
+.free3d-category-select {
+    padding: 0.6rem 2rem 0.6rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='%23888'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+}
+
+.free3d-category-select:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.free3d-category-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.free3d-category-select option {
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+.free3d-input-group {
+    display: flex;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 200px;
+    max-width: 400px;
+}
+
+.free3d-search-input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.6rem 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: all var(--transition);
+}
+
+.free3d-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2), 
+                0 4px 20px rgba(99, 102, 241, 0.15);
+}
+
+.free3d-search-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Randomize button */
+.free3d-randomize-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-md);
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all var(--transition);
+    flex-shrink: 0;
+}
+
+.free3d-randomize-btn:hover {
+    background: rgba(99, 102, 241, 0.2);
+    border-color: var(--accent);
+    transform: rotate(180deg);
+}
+
+.free3d-randomize-btn:active {
+    transform: rotate(360deg) scale(0.95);
+}
+
+.free3d-search-status {
+    font-size: 0.8rem;
+    color: var(--accent);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.free3d-search-status::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1); }
+}
+
+/* Results horizontal strip - Glass style */
+.free3d-results {
+    margin-top: 1rem;
+    padding: 1.25rem 1rem;
+    overflow-x: auto;
+    overflow-y: visible;
+    display: flex;
+    gap: 1rem;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 102, 241, 0.4) transparent;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05),
+                0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.free3d-results::-webkit-scrollbar {
+    height: 8px;
+}
+
+.free3d-results::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.free3d-results::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, var(--accent), rgba(99, 102, 241, 0.6));
+    border-radius: 4px;
+}
+
+.free3d-results::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+}
+
+/* Individual model item - Glass card */
+.free3d-item {
+    flex-shrink: 0;
+    width: 180px;
+    cursor: pointer;
+    position: relative;
+    border-radius: var(--radius-md);
+    overflow: visible;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    z-index: 1;
+}
+
+.free3d-item:hover {
+    transform: translateY(-4px);
+    z-index: 10;
+}
+
+.free3d-item-inner {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    transition: all 0.35s var(--transition);
+    position: relative;
+}
+
+.free3d-item-inner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.4) 100%);
+    opacity: 0;
+    transition: opacity var(--transition);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.free3d-item:hover .free3d-item-inner {
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3), 
+                0 0 0 2px var(--accent);
+}
+
+.free3d-item:hover .free3d-item-inner::before {
+    opacity: 1;
+}
+
+.free3d-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.free3d-item-title {
+    margin-top: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+/* Click hint on hover */
+.free3d-item::after {
+    content: '+ Add';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    background: var(--accent);
+    color: white;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-weight: 600;
+    opacity: 0;
+    transition: all 0.2s ease;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.free3d-item:hover::after {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+/* No results message */
+.free3d-no-results {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    width: 100%;
+    font-style: italic;
+}
+
+/* Mobile adjustments for Free3D search */
+@media (max-width: 768px) {
+    .free3d-search-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.6rem;
+    }
+
+    .free3d-search-label {
+        justify-content: center;
+    }
+
+    .free3d-category-select {
+        width: 100%;
+    }
+
+    .free3d-search-input {
+        max-width: none;
+        flex: 1;
+    }
+
+    .free3d-search-input-row {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .free3d-results {
+        padding: 1rem 0.75rem;
+    }
+
+    .free3d-item {
+        width: 140px;
+    }
+
+    .free3d-item:hover {
+        transform: translateY(-2px);
+    }
+}

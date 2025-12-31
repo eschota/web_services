@@ -2250,24 +2250,29 @@ export class ViewerControls {
 
     /**
      * Focus camera on model (center view)
+     * Camera positioned at 6 meters from center
      */
     focusOnModel(resetAngle = false) {
         if (!this.model || !this.camera) return;
         
         const box = new THREE.Box3().setFromObject(this.model);
         const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z);
         
-        // Position camera to see the whole model
-        const distance = maxDim * 2.0;
+        // Fixed distance of 6 meters from model center
+        const distance = 6;
         
         if (resetAngle) {
-            // Nice diagonal starting view
-            this.camera.position.set(maxDim * 1.5, center.y + maxDim, maxDim * 2.5);
+            // Nice diagonal starting view at 6m distance
+            // Position: slightly to the side and above, looking at center
+            const angle = Math.PI / 6; // 30 degrees
+            this.camera.position.set(
+                Math.sin(angle) * distance,
+                center.y + distance * 0.3,
+                Math.cos(angle) * distance
+            );
         } else {
             const direction = this.camera.getWorldDirection(new THREE.Vector3());
-            // Keep current viewing angle, just adjust distance
+            // Keep current viewing angle, set to 6m distance
             this.camera.position.copy(center).sub(direction.multiplyScalar(distance));
         }
         
@@ -2283,7 +2288,7 @@ export class ViewerControls {
             this.flyState.euler.y = this.camera.rotation.y;
         }
         
-        console.log('[ViewerControls] Focused on model (center.y=' + center.y + ')');
+        console.log('[ViewerControls] Focused on model at 6m distance (center.y=' + center.y + ')');
     }
 
     /**

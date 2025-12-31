@@ -128,12 +128,14 @@ async def send_task_to_worker(
     input_url: str, 
     task_type: str = "t_pose"
 ) -> WorkerTaskResult:
-    """Send conversion task to worker"""
+    """Send conversion task to worker. Always uses mode: only_rig"""
     async with httpx.AsyncClient() as client:
         try:
+            # Standard payload for all file types - workers handle GLB/FBX/OBJ
             payload = {
                 "input_url": input_url,
-                "type": task_type
+                "type": task_type,
+                "mode": "only_rig"
             }
             
             response = await client.post(

@@ -38,7 +38,11 @@ GOOGLE_REDIRECT_URI = os.getenv(
 # =============================================================================
 # Admin
 # =============================================================================
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "eschota@gmail.com")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "eschota@gmail.com")  # Legacy, kept for compatibility
+ADMIN_EMAILS = [
+    "eschota@gmail.com",
+    "vladkcg@gmail.com",
+]
 
 # =============================================================================
 # Workers (Converters)
@@ -55,8 +59,8 @@ WORKERS = [
 # Limits
 # =============================================================================
 ANON_FREE_LIMIT = 3  # Free conversions for anonymous users
-USER_FREE_LIMIT = 10  # Total free conversions after login (including anon used)
-USER_BONUS_AFTER_LOGIN = 7  # Additional credits after login
+USER_FREE_LIMIT = 30  # Total free credits after login (30 credits for all registered users)
+USER_BONUS_AFTER_LOGIN = 27  # Additional credits after login (30 - max anon used)
 
 # =============================================================================
 # Upload Settings
@@ -80,6 +84,13 @@ VIEWER_DEFAULT_SETTINGS_PATH = os.getenv(
 PROGRESS_BATCH_SIZE = 15  # Number of URLs to check per batch
 PROGRESS_CONCURRENCY = 10  # Max concurrent HEAD requests
 PROGRESS_CHECK_TIMEOUT = 5  # Timeout for HEAD requests in seconds
+
+# =============================================================================
+# Stale Task Detection & Auto-Restart
+# =============================================================================
+STALE_TASK_TIMEOUT_MINUTES = 10  # Task is "stale" if no progress for this long
+MAX_TASK_RESTARTS = 3  # Maximum number of auto-restarts before marking as error
+STALE_CHECK_INTERVAL_CYCLES = 2  # Check for stale tasks every N background worker cycles
 
 # =============================================================================
 # Rate Limiting

@@ -264,6 +264,9 @@ const App = {
             fileName.textContent = file.name;
             fileInfo.classList.remove('hidden');
         }
+        
+        // Auto-submit immediately after file selection
+        this.submitTask();
     },
     
     /**
@@ -666,41 +669,79 @@ const App = {
         debounceTimer: null,
         isSearching: false,
         hasFocusedOnce: false,
-        // Random character keywords for auto-search
-        characterKeywords: [
-            'girl', 'alien', 'robot', 'humanoid', 'man', 
-            'warrior', 'soldier', 'knight', 'zombie', 'monster',
-            'superhero', 'ninja', 'wizard', 'character', 'woman'
-        ]
+        keywords: [], // Loaded from external file
+        keywordsLoaded: false
+    },
+
+    /**
+     * Load keywords from external JSON file
+     */
+    async loadFree3DKeywords() {
+        if (this.free3dState.keywordsLoaded) return;
+        try {
+            const resp = await fetch('/static/data/search-keywords.json');
+            const data = await resp.json();
+            if (data.keywords && data.keywords.length > 0) {
+                this.free3dState.keywords = data.keywords;
+            }
+            this.free3dState.keywordsLoaded = true;
+        } catch (e) {
+            console.warn('Failed to load search keywords:', e);
+            // Fallback keywords
+            this.free3dState.keywords = ['girl', 'robot', 'warrior', 'alien', 'monster'];
+            this.free3dState.keywordsLoaded = true;
+        }
     },
 
     /**
      * Get random character keyword
      */
     getRandomCharacterKeyword() {
-        const keywords = this.free3dState.characterKeywords;
+        const keywords = this.free3dState.keywords;
+        if (!keywords.length) return 'character';
         return keywords[Math.floor(Math.random() * keywords.length)];
+    },
+
+    /**
+     * Trigger random search
+     */
+    triggerRandomSearch() {
+        const input = document.getElementById('free3d-search-input');
+        if (!input) return;
+        
+        const randomKeyword = this.getRandomCharacterKeyword();
+        input.value = randomKeyword;
+        this.free3dState.lastQuery = randomKeyword;
+        this.searchFree3D(randomKeyword);
     },
 
     /**
      * Initialize Free3D search functionality
      */
-    initFree3DSearch() {
+    async initFree3DSearch() {
         const input = document.getElementById('free3d-search-input');
         const categorySelect = document.getElementById('free3d-category-select');
         const results = document.getElementById('free3d-results');
         const status = document.getElementById('free3d-search-status');
+        const randomizeBtn = document.getElementById('free3d-randomize-btn');
         
         if (!input || !results) return;
+
+        // Load keywords from file
+        await this.loadFree3DKeywords();
+
+        // Randomize button click
+        if (randomizeBtn) {
+            randomizeBtn.addEventListener('click', () => {
+                this.triggerRandomSearch();
+            });
+        }
 
         // Auto-search on first focus with random keyword
         input.addEventListener('focus', () => {
             if (!this.free3dState.hasFocusedOnce && !input.value.trim()) {
                 this.free3dState.hasFocusedOnce = true;
-                const randomKeyword = this.getRandomCharacterKeyword();
-                input.value = randomKeyword;
-                this.free3dState.lastQuery = randomKeyword;
-                this.searchFree3D(randomKeyword);
+                this.triggerRandomSearch();
             }
         });
 
@@ -775,7 +816,7 @@ const App = {
 
         try {
             // Use our backend proxy to avoid CORS issues
-            const url = `/api/free3d/search?q=${encodeURIComponent(searchQuery)}&topK=10`;
+            const url = `/api/free3d/search?q=${encodeURIComponent(searchQuery)}&topK=50`;
             const response = await fetch(url);
             const data = await response.json();
 
