@@ -119,11 +119,6 @@ const App = {
             if (this.state.loginRequired) {
                 startBtn.textContent = t('btn_login_continue');
                 startBtn.onclick = () => window.location.href = '/auth/login';
-            } else if (this.state.creditsRemaining <= 0) {
-                // Logged-in users with 0 credits should be redirected to Buy Credits page (no front-end credit logic)
-                startBtn.textContent = t('nav_buy');
-                startBtn.disabled = false;
-                startBtn.onclick = () => window.location.href = '/buy-credits';
             } else {
                 startBtn.textContent = t('btn_start');
                 startBtn.disabled = false;
@@ -361,7 +356,7 @@ const App = {
 
         try {
             // Homepage preview should show top liked by default
-            const resp = await fetch('/api/gallery?per_page=8&sort=likes');
+            const resp = await fetch('/api/gallery?per_page=10&sort=likes');
             const data = await resp.json();
             const items = (data && data.items) ? data.items : [];
             const total = (data && typeof data.total === 'number') ? data.total : null;
@@ -382,180 +377,21 @@ const App = {
                 return;
             }
 
-            grid.innerHTML = items.map(it => {
-                const taskUrl = `/task?id=${it.task_id}`;
-                const videoUrl = it.video_url;
-                const thumbUrl = it.thumbnail_url || `/api/thumb/${it.task_id}`;
-                const timeAgo = it.time_ago || '';
-                const likeCount = (typeof it.like_count === 'number') ? it.like_count : 0;
-                const liked = !!it.liked_by_me;
-                return `
-                    <a href="${taskUrl}" class="card" data-task-id="${it.task_id}" data-video-url="${videoUrl}" style="display:block; padding: 0.75rem; text-decoration:none;">
-                        <div class="media" style="position:relative; width:100%; aspect-ratio: 9 / 16; overflow:hidden; border-radius: var(--radius-sm); background:#000;">
-                            <img src="${thumbUrl}" loading="lazy" style="position:absolute; inset:0; width:100%; height:100%; object-fit: cover; z-index:2;" alt="" />
-                            <button class="like-btn ${liked ? 'liked' : ''}" type="button" data-like-task="${it.task_id}" style="position:absolute; top:0.5rem; right:0.5rem; z-index:10;">
-                                <span class="like-heart">♥</span>
-                                <span class="like-count">${likeCount}</span>
-                            </button>
+            // Use TaskCard component if available
+            if (typeof TaskCard !== 'undefined') {
+                grid.innerHTML = items.map(it => TaskCard.render(it, { currentSort: 'likes' })).join('');
+                TaskCard.attachHandlers(grid, { currentSort: 'likes' });
+            } else {
+                // Fallback if TaskCard not loaded
+                grid.innerHTML = items.map(it => {
+                    const taskUrl = `/task?id=${it.task_id}`;
+                    const thumbUrl = it.thumbnail_url || `/api/thumb/${it.task_id}`;
+                    return `<a href="${taskUrl}" style="display:block; border-radius:12px; overflow:hidden;">
+                        <div style="position:relative; width:100%; aspect-ratio: 9 / 16; background:#111;">
+                            <img src="${thumbUrl}" style="width:100%; height:100%; object-fit: cover;" alt="" />
                         </div>
-                        <div style="margin-top: 0.5rem; display:flex; justify-content: space-between; gap: 0.75rem; align-items: center;">
-                            <div style="color: var(--text-secondary); font-size: 0.875rem;">${timeAgo}</div>
-                            <div class="btn btn-ghost" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">View</div>
-                        </div>
-                    </a>
-                `;
-            }).join('');
-
-            // Like buttons handler
-            grid.querySelectorAll('[data-like-task]').forEach(btn => {
-                btn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const userInfo = document.getElementById('user-info');
-                    const isAuthed = userInfo && !userInfo.classList.contains('hidden');
-                    if (!isAuthed) {
-                        window.location.href = '/auth/login';
-                        return;
-                    }
-                    const taskId = btn.getAttribute('data-like-task');
-                    try {
-                        const r = await fetch(`/api/gallery/${taskId}/like`, { method: 'POST' });
-                        if (r.status === 401) { window.location.href = '/auth/login'; return; }
-                        const d = await r.json();
-                        btn.classList.toggle('liked', !!d.liked_by_me);
-                        const cnt = btn.querySelector('.like-count');
-                        if (cnt) cnt.textContent = String(d.like_count ?? 0);
-                    } catch (err) {
-                        console.error('Like failed:', err);
-                    }
-                });
-            });
-
-            // Fade-in lazy thumbnails (styles.css keeps lazy images at opacity:0 until .loaded)
-            const imgs = grid.querySelectorAll('img[loading="lazy"]');
-            imgs.forEach(img => {
-                const markLoaded = () => img.classList.add('loaded');
-                img.addEventListener('load', markLoaded, { once: true });
-                img.addEventListener('error', markLoaded, { once: true });
-                if (img.complete) {
-                    // cached image may already be complete
-                    markLoaded();
-                }
-            });
-
-            // Lazy video: create/load on hover AND autoplay when visible (IntersectionObserver)
-            grid.querySelectorAll('a[data-task-id]').forEach(card => {
-                const media = card.querySelector('.media');
-                const thumb = media?.querySelector('img');
-                const videoUrl = card.getAttribute('data-video-url');
-
-                const startVideo = async () => {
-                    if (!media || !videoUrl) return;
-                    if (media.querySelector('video')) return;
-                    const v = document.createElement('video');
-                    v.src = videoUrl;
-                    v.muted = true;
-                    v.playsInline = true;
-                    v.preload = 'metadata';
-                    v.style.position = 'absolute';
-                    v.style.inset = '0';
-                    v.style.width = '100%';
-                    v.style.height = '100%';
-                    v.style.objectFit = 'cover';
-                    v.style.zIndex = '1';
-                    media.appendChild(v);
-                    // Keep thumb visible until the video actually starts producing frames
-                    if (thumb) {
-                        thumb.style.transition = 'opacity 0.15s';
-                        thumb.style.opacity = '1';
-                    }
-                    v.addEventListener('playing', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
-                    v.addEventListener('loadeddata', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
-                    try { await v.play(); } catch (_) { /* ignore */ }
-                };
-
-                const stopVideo = () => {
-                    const v = media?.querySelector('video');
-                    if (!v) return;
-                    try { v.pause(); } catch (_) {}
-                    try { v.removeAttribute('src'); v.load(); } catch (_) {}
-                    v.remove();
-                    if (thumb) {
-                        thumb.style.opacity = '1';
-                    }
-                };
-
-                card.addEventListener('mouseenter', startVideo);
-                card.addEventListener('mouseleave', stopVideo);
-            });
-
-            // Autoplay previews when they enter viewport (muted inline videos).
-            // Limits concurrent playback to keep CPU low.
-            const MAX_AUTOPLAY = 2;
-            const playing = new Set();
-
-            const ensureAutoplayBudget = () => {
-                while (playing.size > MAX_AUTOPLAY) {
-                    const first = playing.values().next().value;
-                    if (!first) break;
-                    try { first.pause(); } catch (_) {}
-                    try { first.removeAttribute('src'); first.load(); } catch (_) {}
-                    try { first.remove(); } catch (_) {}
-                    playing.delete(first);
-                }
-            };
-
-            if ('IntersectionObserver' in window) {
-                const observer = new IntersectionObserver((entries) => {
-                    entries.forEach(entry => {
-                        const card = entry.target;
-                        const media = card.querySelector('.media');
-                        const thumb = media?.querySelector('img');
-                        if (!media) return;
-
-                        const videoUrl = card.getAttribute('data-video-url');
-                        const existing = media.querySelector('video');
-
-                        if (entry.isIntersecting) {
-                            // Start autoplay if not already playing
-                            if (!existing && videoUrl) {
-                                const v = document.createElement('video');
-                                v.src = videoUrl;
-                                v.muted = true;
-                                v.playsInline = true;
-                                v.loop = true;
-                                v.preload = 'metadata';
-                                v.style.position = 'absolute';
-                                v.style.inset = '0';
-                                v.style.width = '100%';
-                                v.style.height = '100%';
-                                v.style.objectFit = 'cover';
-                                v.style.zIndex = '1';
-                                media.appendChild(v);
-                                if (thumb) {
-                                    thumb.style.transition = 'opacity 0.15s';
-                                    thumb.style.opacity = '1';
-                                }
-                                v.addEventListener('playing', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
-                                v.addEventListener('loadeddata', () => { if (thumb) thumb.style.opacity = '0'; }, { once: true });
-                                playing.add(v);
-                                ensureAutoplayBudget();
-                                v.play().catch(() => { /* ignore autoplay block */ });
-                            }
-                        } else {
-                            // Stop when leaving viewport
-                            if (existing) {
-                                try { existing.pause(); } catch (_) {}
-                                try { existing.removeAttribute('src'); existing.load(); } catch (_) {}
-                                existing.remove();
-                                playing.delete(existing);
-                                if (thumb) thumb.style.opacity = '1';
-                            }
-                        }
-                    });
-                }, { root: null, threshold: 0.55 });
-
-                grid.querySelectorAll('a[data-task-id]').forEach(card => observer.observe(card));
+                    </a>`;
+                }).join('');
             }
 
         } catch (e) {
@@ -566,27 +402,36 @@ const App = {
     async loadHistory() {
         const container = document.getElementById('history-list');
         if (!container) return;
-        
+
         try {
             const response = await fetch('/api/history?per_page=5');
             const data = await response.json();
-            
+
             if (data.tasks.length === 0) {
                 container.innerHTML = `<p class="text-center" style="color: var(--text-muted)">${t('history_empty')}</p>`;
                 return;
             }
-            
-            container.innerHTML = data.tasks.map(task => `
-                <a href="/task?id=${task.task_id}" class="history-item">
-                    <div class="history-item-info">
-                        <span class="history-item-status ${task.status}"></span>
-                        <span>${task.status === 'done' ? t('task_status_done') : 
-                               task.status === 'processing' ? `${task.progress}%` : 
-                               t('task_status_' + task.status)}</span>
+
+            container.innerHTML = data.tasks.map(task => {
+                const hasThumbnail = task.status === 'done' && task.thumbnail_url;
+                const thumbHtml = hasThumbnail 
+                    ? `<div class="history-item-thumb"><img src="${task.thumbnail_url}" alt="" loading="lazy" onload="this.classList.add('loaded')"></div>` 
+                    : '';
+                
+                return `
+                <a href="/task?id=${task.task_id}" class="history-item ${hasThumbnail ? 'has-thumb' : ''}">
+                    ${thumbHtml}
+                    <div class="history-item-content">
+                        <div class="history-item-info">
+                            <span class="history-item-status ${task.status}"></span>
+                            <span>${task.status === 'done' ? t('task_status_done') :
+                                   task.status === 'processing' ? `${task.progress}%` :
+                                   t('task_status_' + task.status)}</span>
+                        </div>
+                        <span class="history-item-date">${this.formatDate(task.created_at)}</span>
                     </div>
-                    <span class="history-item-date">${this.formatDate(task.created_at)}</span>
                 </a>
-            `).join('');
+            `}).join('');
         } catch (error) {
             console.error('Failed to load history:', error);
         }

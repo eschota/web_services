@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -34,9 +35,10 @@ from config import (
     ANON_FREE_LIMIT,
     GUMROAD_PRODUCT_CREDITS,
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
-    VIEWER_DEFAULT_SETTINGS_PATH
+    VIEWER_DEFAULT_SETTINGS_PATH,
+    MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS
 )
-from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase
+from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase, Scene, SceneLike
 from models import (
     TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
@@ -47,8 +49,12 @@ from models import (
     AdminUserTaskItem, AdminUserTasksResponse,
     AdminStatsResponse, AdminTaskListItem, AdminTaskListResponse,
     WorkerQueueInfo, QueueStatusResponse,
-    GalleryItem, GalleryResponse, LikeResponse,
-    PurchaseStateResponse, PurchaseRequest, PurchaseResponse
+    GalleryItem, GalleryResponse, LikeResponse, TaskCardInfo,
+    PurchaseStateResponse, PurchaseRequest, PurchaseResponse,
+    # Scene models
+    SceneCreateRequest, SceneAddModelRequest, SceneUpdateRequest,
+    SceneResponse, SceneModelInfo, TransformData,
+    SceneListItem, SceneListResponse, SceneLikeResponse
 )
 from workers import get_global_queue_status
 from auth import (
@@ -236,6 +242,18 @@ async def background_task_updater():
                         print(f"[Background Worker] Stale task check error: {e}")
 
                 # =============================================================
+                # 2.5. Disk space cleanup (every CLEANUP_CHECK_INTERVAL_CYCLES cycles)
+                # =============================================================
+                if background_worker_cycle_count % CLEANUP_CHECK_INTERVAL_CYCLES == 0:
+                    try:
+                        from main import cleanup_disk_space
+                        result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB)
+                        if result["deleted_count"] > 0:
+                            print(f"[Background Worker] Disk cleanup: freed {result['freed_gb']:.2f} GB, deleted {result['deleted_count']} items")
+                    except Exception as e:
+                        print(f"[Background Worker] Disk cleanup error: {e}")
+
+                # =============================================================
                 # 3. Update progress for all processing tasks
                 # =============================================================
                 result = await db.execute(
@@ -337,6 +355,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Add GZip compression for responses > 500 bytes
+# GLB files compress very well (50-70% size reduction)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
 
@@ -465,12 +487,16 @@ def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optiona
 # Authentication Endpoints
 # =============================================================================
 @app.get("/auth/login")
-async def auth_login(request: Request):
+async def auth_login(request: Request, next: Optional[str] = None):
     """Redirect to Google OAuth"""
     state = str(uuid.uuid4())
-    # Could store state in session for verification
     auth_url = get_google_auth_url(state)
-    return RedirectResponse(url=auth_url)
+    
+    response = RedirectResponse(url=auth_url)
+    # Save return URL in cookie (max 5 minutes) for redirect after OAuth
+    if next and next.startswith("/"):  # Security: only allow relative URLs
+        response.set_cookie("auth_next", next, max_age=300, httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/auth/callback")
@@ -521,8 +547,14 @@ async def auth_callback(
     # Create session
     session_token = await create_session(db, user.id)
     
-    # Set session cookie
-    redirect = RedirectResponse(url="/", status_code=302)
+    # Get return URL from cookie (saved during /auth/login)
+    next_url = request.cookies.get("auth_next", "/")
+    # Security: ensure it's a relative URL
+    if not next_url.startswith("/"):
+        next_url = "/"
+    
+    # Set session cookie and redirect to original page
+    redirect = RedirectResponse(url=next_url, status_code=302)
     redirect.set_cookie(
         SESSION_COOKIE,
         session_token,
@@ -531,6 +563,8 @@ async def auth_callback(
         secure=True,
         samesite="lax"
     )
+    # Clean up auth_next cookie
+    redirect.delete_cookie("auth_next")
     
     return redirect
 
@@ -700,21 +734,11 @@ async def api_create_task(
     # Get anon session
     anon_session = await get_anon_session(request, response, db)
     
-    # Check limits
+    # Task creation is free for everyone
     if user:
-        if not can_create_task_user(user):
-            raise HTTPException(
-                status_code=402,
-                detail="No credits remaining. Payment required."
-            )
         owner_type = "user"
         owner_id = user.email
     else:
-        if not can_create_task_anon(anon_session):
-            raise HTTPException(
-                status_code=401,
-                detail="Free limit reached. Please sign in with Google to continue."
-            )
         owner_type = "anon"
         owner_id = anon_session.anon_id
     
@@ -754,12 +778,6 @@ async def api_create_task(
     
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
-    
-    # Deduct credit
-    if user:
-        await decrement_user_credits(db, user)
-    else:
-        await increment_anon_usage(db, anon_session.anon_id)
     
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
     try:
@@ -925,11 +943,11 @@ async def api_get_task(
     # prepared.glb ready if:
     # - _model_prepared.glb exists in ready_urls (worker uploaded it)
     # - OR for FBX tasks: fbx_glb_ready == True
-    # - OR fallback: guid is not None and model uploaded to worker
+    # NOTE: Removed fallback (guid is not None and status != 'created') as it
+    # caused false positives - returned True before _model_prepared.glb actually exists
     prepared_glb_ready = (
         any('_model_prepared.glb' in url.lower() for url in (task.ready_urls or [])) or
-        task.fbx_glb_ready or 
-        (task.guid is not None and task.status != 'created')
+        task.fbx_glb_ready
     )
     
     return TaskStatusResponse(
@@ -952,6 +970,7 @@ async def api_get_task(
         quick_downloads=quick_downloads if quick_downloads else None,
         prepared_glb_ready=prepared_glb_ready,
         error_message=task.error_message,
+        guid=task.guid,
         created_at=task.created_at,
         updated_at=task.updated_at
     )
@@ -1135,7 +1154,7 @@ async def api_restart_task(
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Restart task with the same task_id (available if older than 3 hours)"""
+    """Restart task with the same task_id (available after 1 minute)"""
     from datetime import timedelta
     from workers import select_best_worker, send_task_to_worker
 
@@ -1153,9 +1172,9 @@ async def api_restart_task(
     if not (is_owner or is_admin):
         raise HTTPException(status_code=403, detail="Not authorized to restart this task")
 
-    # Age gate: 3 hours
+    # Age gate: 1 minute
     task_age = datetime.utcnow() - task.created_at
-    min_age = timedelta(minutes=1) if task.status == "error" else timedelta(hours=3)
+    min_age = timedelta(minutes=1)
     if task_age < min_age:
         remaining = min_age - task_age
         minutes = int(remaining.total_seconds() / 60)
@@ -1166,6 +1185,9 @@ async def api_restart_task(
 
     if not task.input_url:
         raise HTTPException(status_code=400, detail="No input URL to restart")
+
+    # Increment version (restart_count)
+    task.restart_count = (task.restart_count or 0) + 1
 
     # Reset fields (keep id/owner/input)
     task.worker_api = None
@@ -1186,6 +1208,27 @@ async def api_restart_task(
     task.fbx_glb_model_name = None
     task.fbx_glb_ready = False
     task.fbx_glb_error = None
+    
+    # Clear ALL local caches for this task (so fresh files are downloaded)
+    try:
+        import pathlib
+        import shutil
+        static_dir = pathlib.Path(__file__).parent.parent / "static"
+        
+        # 1. Clear GLB cache (prepared.glb, animations.glb)
+        glb_cache = static_dir / "glb_cache"
+        for cache_file in glb_cache.glob(f"{task_id}_*.glb"):
+            cache_file.unlink()
+            print(f"[Restart] Deleted cached GLB: {cache_file.name}")
+        
+        # 2. Clear task files cache (downloads: videos, zips, individual files)
+        task_cache = static_dir / "tasks" / task_id
+        if task_cache.exists():
+            shutil.rmtree(task_cache)
+            print(f"[Restart] Deleted task cache folder: {task_cache.name}")
+            
+    except Exception as e:
+        print(f"[Restart] Failed to clear caches: {e}")
 
     await db.commit()
     await db.refresh(task)
@@ -1198,8 +1241,62 @@ async def api_restart_task(
     task.worker_api = worker_url
     task.status = "processing"
 
+    # Parse transform params from request body (if any)
+    transform_params = None
+    try:
+        body = await request.body()
+        if body:
+            import json as json_module
+            body_data = json_module.loads(body)
+            if isinstance(body_data, dict):
+                # Extract transform params if present
+                if any(k in body_data for k in ("local_position", "local_rotation", "local_scale")):
+                    transform_params = {
+                        "local_position": body_data.get("local_position"),
+                        "local_rotation": body_data.get("local_rotation"),
+                        "local_scale": body_data.get("local_scale")
+                    }
+                    print(f"[Restart] Transform params from request: {transform_params}")
+    except Exception as e:
+        print(f"[Restart] Could not parse body: {e}")
+
+    # Fallback: read from saved viewer_settings if no transforms in request
+    if not transform_params and task.viewer_settings:
+        try:
+            settings = json.loads(task.viewer_settings)
+            mt = settings.get("modelTransform")
+            if mt and isinstance(mt, dict):
+                pos = mt.get("position", {})
+                rot = mt.get("rotation", {})
+                scale = mt.get("scale", {})
+                # Only use if any value is non-default
+                has_transform = (
+                    any(v != 0 for v in [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)]) or
+                    any(v != 0 for v in [rot.get("x", 0), rot.get("y", 0), rot.get("z", 0)]) or
+                    any(v != 1 for v in [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)])
+                )
+                if has_transform:
+                    rad_to_deg = 180 / 3.14159265359
+                    transform_params = {
+                        "local_position": [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)],
+                        "local_rotation": [
+                            rot.get("x", 0) * rad_to_deg,
+                            rot.get("y", 0) * rad_to_deg,
+                            rot.get("z", 0) * rad_to_deg
+                        ],
+                        "local_scale": [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)]
+                    }
+                    print(f"[Restart] Transform params from viewer_settings: {transform_params}")
+        except Exception as e:
+            print(f"[Restart] Could not read viewer_settings: {e}")
+
     # Send directly to worker - workers handle GLB/FBX/OBJ natively
-    result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+    result = await send_task_to_worker(
+        worker_url, 
+        task.input_url, 
+        task.input_type or "t_pose",
+        transform_params=transform_params
+    )
     if not result.success:
         task.status = "error"
         task.error_message = result.error
@@ -1244,19 +1341,6 @@ async def api_get_purchase_state(
         (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
     )
     
-    # Check if user is admin
-    is_admin = bool(user and user.email in ADMIN_EMAILS)
-
-    # Only admin or owner has free access to all files
-    if is_admin or is_owner:
-        return PurchaseStateResponse(
-            purchased_all=True,
-            purchased_files=[],
-            is_owner=True,
-            login_required=False,
-            user_credits=user.balance_credits if user else 0
-        )
-    
     # For non-owners, check purchases
     if not user:
         return PurchaseStateResponse(
@@ -1283,7 +1367,7 @@ async def api_get_purchase_state(
     return PurchaseStateResponse(
         purchased_all=purchased_all,
         purchased_files=purchased_indices,
-        is_owner=False,
+        is_owner=is_owner,
         login_required=False,
         user_credits=user.balance_credits
     )
@@ -1308,19 +1392,11 @@ async def api_purchase_files(
 
     anon_session = await get_anon_session(request, response, db)
     
-    # Check if user is owner - they already have access
+    # Check if user is owner (owners must still purchase to download)
     is_owner = (
         (user and task.owner_type == "user" and task.owner_id == user.email) or
         (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
     )
-    
-    if is_owner:
-        return PurchaseResponse(
-            success=True,
-            purchased_files=[],
-            purchased_all=True,
-            credits_remaining=user.balance_credits
-        )
     
     # Check existing purchases
     result = await db.execute(
@@ -1347,8 +1423,17 @@ async def api_purchase_files(
         if user.balance_credits < cost:
             raise HTTPException(status_code=402, detail="Insufficient credits")
         
-        # Deduct credits
+        # Deduct credits from buyer
         user.balance_credits -= cost
+        
+        # Credit task owner (if they have a user account)
+        if task.owner_type == "user" and task.owner_id:
+            owner_result = await db.execute(
+                select(User).where(User.email == task.owner_id)
+            )
+            task_owner = owner_result.scalar_one_or_none()
+            if task_owner and task_owner.id != user.id:  # Don't credit yourself
+                task_owner.balance_credits += 1
         
         # Create purchase record for "all files"
         purchase = TaskFilePurchase(
@@ -1383,8 +1468,17 @@ async def api_purchase_files(
         if user.balance_credits < cost:
             raise HTTPException(status_code=402, detail="Insufficient credits")
         
-        # Deduct credits
+        # Deduct credits from buyer
         user.balance_credits -= cost
+        
+        # Credit task owner (if they have a user account)
+        if task.owner_type == "user" and task.owner_id:
+            owner_result = await db.execute(
+                select(User).where(User.email == task.owner_id)
+            )
+            task_owner = owner_result.scalar_one_or_none()
+            if task_owner and task_owner.id != user.id:  # Don't credit yourself
+                task_owner.balance_credits += cost  # Same amount as buyer spent
         
         # Create purchase records
         for idx in new_indices:
@@ -1427,7 +1521,7 @@ async def api_get_history(
         owner_id = anon_session.anon_id
     
     tasks, total = await get_user_tasks(db, owner_type, owner_id, page, per_page)
-    
+
     return TaskHistoryResponse(
         tasks=[
             TaskHistoryItem(
@@ -1436,7 +1530,8 @@ async def api_get_history(
                 progress=t.progress,
                 created_at=t.created_at,
                 input_url=t.input_url,
-                video_ready=t.video_ready
+                video_ready=t.video_ready,
+                thumbnail_url=f"/api/thumb/{t.id}" if t.status == "done" and t.video_ready else None
             )
             for t in tasks
         ],
@@ -1452,28 +1547,32 @@ async def api_get_gallery(
     page: int = 1,
     per_page: int = 12,
     sort: str = "likes",
+    author: Optional[str] = None,  # Filter by author email
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get public gallery of completed tasks with videos"""
-    from sqlalchemy import func, desc
-    from database import Task
-    
+    from sqlalchemy import func, desc, distinct
+    from database import Task, TaskFilePurchase
+
     # Get current user email for liked_by_me check
     user_email = user.email if user else None
-    
-    # Count total completed tasks with video
+
+    # Build base conditions
+    base_conditions = [Task.status == "done", Task.video_ready == True]
+    if author:
+        base_conditions.append(Task.owner_type == "user")
+        base_conditions.append(Task.owner_id == author)
+
+    # Count total completed tasks with video (with author filter if present)
     count_result = await db.execute(
-        select(func.count(Task.id)).where(
-            Task.status == "done",
-            Task.video_ready == True
-        )
+        select(func.count(Task.id)).where(*base_conditions)
     )
     total = count_result.scalar() or 0
-    
+
     # Get task IDs with like counts
     offset = (page - 1) * per_page
-    
+
     if sort == "likes":
         # Sort by like count (descending), then by date
         result = await db.execute(
@@ -1482,21 +1581,37 @@ async def api_get_gallery(
                 func.count(TaskLike.id).label('like_count')
             )
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
-            .where(Task.status == "done", Task.video_ready == True)
+            .where(*base_conditions)
             .group_by(Task.id)
             .order_by(desc('like_count'), desc(Task.created_at))
             .offset(offset)
             .limit(per_page)
         )
+    elif sort == "sales":
+        # Sort by sales count (descending), then by date
+        result = await db.execute(
+            select(
+                Task,
+                func.count(TaskLike.id).label('like_count'),
+                func.count(distinct(TaskFilePurchase.user_email)).label('sales_count')
+            )
+            .outerjoin(TaskLike, Task.id == TaskLike.task_id)
+            .outerjoin(TaskFilePurchase, Task.id == TaskFilePurchase.task_id)
+            .where(*base_conditions)
+            .group_by(Task.id)
+            .order_by(desc('sales_count'), desc(Task.created_at))
+            .offset(offset)
+            .limit(per_page)
+        )
     else:
-        # Sort by date (newest first)
+        # Sort by date (newest first) - default
         result = await db.execute(
             select(
                 Task,
                 func.count(TaskLike.id).label('like_count')
             )
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
-            .where(Task.status == "done", Task.video_ready == True)
+            .where(*base_conditions)
             .group_by(Task.id)
             .order_by(desc(Task.created_at))
             .offset(offset)
@@ -1504,19 +1619,40 @@ async def api_get_gallery(
         )
     
     rows = result.all()
+    task_ids = [row[0].id for row in rows]
     
     # Get user's likes if logged in
     user_likes = set()
-    if user_email:
-        task_ids = [row[0].id for row in rows]
-        if task_ids:
-            likes_result = await db.execute(
-                select(TaskLike.task_id).where(
-                    TaskLike.user_email == user_email,
-                    TaskLike.task_id.in_(task_ids)
-                )
+    if user_email and task_ids:
+        likes_result = await db.execute(
+            select(TaskLike.task_id).where(
+                TaskLike.user_email == user_email,
+                TaskLike.task_id.in_(task_ids)
             )
-            user_likes = set(r[0] for r in likes_result.all())
+        )
+        user_likes = set(r[0] for r in likes_result.all())
+    
+    # Get sales counts per task (count unique buyers, not individual file purchases)
+    sales_counts = {}
+    if task_ids:
+        sales_result = await db.execute(
+            select(
+                TaskFilePurchase.task_id,
+                func.count(distinct(TaskFilePurchase.user_email)).label('sales_count')
+            )
+            .where(TaskFilePurchase.task_id.in_(task_ids))
+            .group_by(TaskFilePurchase.task_id)
+        )
+        sales_counts = {r[0]: r[1] for r in sales_result.all()}
+    
+    # Get author nicknames for user-owned tasks
+    author_nicknames = {}
+    owner_emails = [row[0].owner_id for row in rows if row[0].owner_type == "user"]
+    if owner_emails:
+        users_result = await db.execute(
+            select(User.email, User.nickname).where(User.email.in_(owner_emails))
+        )
+        author_nicknames = {r[0]: r[1] for r in users_result.all()}
     
     items = [
         GalleryItem(
@@ -1526,7 +1662,10 @@ async def api_get_gallery(
             created_at=t.created_at,
             time_ago=format_time_ago(t.created_at),
             like_count=like_count,
-            liked_by_me=t.id in user_likes
+            liked_by_me=t.id in user_likes,
+            sales_count=sales_counts.get(t.id, 0),
+            author_email=t.owner_id if t.owner_type == "user" else None,
+            author_nickname=author_nicknames.get(t.owner_id) if t.owner_type == "user" else None
         )
         for t, like_count in rows
     ]
@@ -1539,6 +1678,71 @@ async def api_get_gallery(
         page=page,
         per_page=per_page,
         has_more=has_more
+    )
+
+
+@app.get("/api/task/{task_id}/card", response_model=TaskCardInfo)
+async def api_get_task_card(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get task card info (likes, sales, author) for display"""
+    from sqlalchemy import func, distinct
+    from database import Task, TaskFilePurchase
+    
+    # Get task
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Get like count
+    like_result = await db.execute(
+        select(func.count(TaskLike.id)).where(TaskLike.task_id == task_id)
+    )
+    like_count = like_result.scalar() or 0
+    
+    # Check if current user liked
+    liked_by_me = False
+    if user:
+        user_like = await db.execute(
+            select(TaskLike).where(
+                TaskLike.task_id == task_id,
+                TaskLike.user_email == user.email
+            )
+        )
+        liked_by_me = user_like.scalar_one_or_none() is not None
+    
+    # Get sales count (unique buyers)
+    sales_result = await db.execute(
+        select(func.count(distinct(TaskFilePurchase.user_email))).where(
+            TaskFilePurchase.task_id == task_id
+        )
+    )
+    sales_count = sales_result.scalar() or 0
+    
+    # Get author info
+    author_email = None
+    author_nickname = None
+    if task.owner_type == "user":
+        author_email = task.owner_id
+        # Get nickname from User
+        user_result = await db.execute(
+            select(User.nickname).where(User.email == task.owner_id)
+        )
+        row = user_result.first()
+        if row:
+            author_nickname = row[0]
+    
+    return TaskCardInfo(
+        task_id=task_id,
+        like_count=like_count,
+        liked_by_me=liked_by_me,
+        sales_count=sales_count,
+        author_email=author_email,
+        author_nickname=author_nickname,
+        time_ago=format_time_ago(task.created_at),
+        version=(task.restart_count or 0) + 1
     )
 
 
@@ -1913,6 +2117,209 @@ async def api_admin_delete_all_tasks(
     return {"ok": True, "deleted_count": total_deleted, "message": "All tasks deleted. Service restarting..."}
 
 
+@app.post("/api/admin/cleanup")
+async def api_admin_cleanup(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """
+    Manually trigger disk cleanup (admin only).
+    Deletes oldest task files until MIN_FREE_SPACE_GB is available.
+    """
+    import shutil
+    
+    # Get current disk stats
+    disk_usage = shutil.disk_usage("/")
+    initial_free_gb = disk_usage.free / (1024**3)
+    
+    # Run cleanup
+    from main import cleanup_disk_space
+    result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB)
+    
+    # Get final disk stats
+    disk_usage = shutil.disk_usage("/")
+    final_free_gb = disk_usage.free / (1024**3)
+    
+    print(f"[Admin] Manual disk cleanup by {admin.email}: deleted {result['deleted_count']} items, freed {result['freed_gb']:.2f} GB")
+    
+    return {
+        "ok": True,
+        "initial_free_gb": round(initial_free_gb, 2),
+        "final_free_gb": round(final_free_gb, 2),
+        "freed_gb": round(result["freed_gb"], 2),
+        "deleted_count": result["deleted_count"],
+        "target_free_gb": MIN_FREE_SPACE_GB,
+        "deleted_items": result.get("deleted_items", [])[:20]  # Limit to first 20 items
+    }
+
+
+@app.get("/api/admin/disk-stats")
+async def api_admin_disk_stats(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """
+    Get disk usage statistics (admin only).
+    """
+    import shutil
+    
+    disk_usage = shutil.disk_usage("/")
+    
+    # Count items in each cleanable directory
+    task_cache_count = len(list(TASK_CACHE_DIR.iterdir())) if TASK_CACHE_DIR.exists() else 0
+    glb_cache_count = len(list(GLB_CACHE_DIR.iterdir())) if GLB_CACHE_DIR.exists() else 0
+    
+    upload_dir = pathlib.Path(UPLOAD_DIR)
+    upload_count = len(list(upload_dir.iterdir())) if upload_dir.exists() else 0
+    
+    videos_dir = pathlib.Path("/var/autorig/videos")
+    videos_count = len(list(videos_dir.iterdir())) if videos_dir.exists() else 0
+    
+    return {
+        "ok": True,
+        "disk": {
+            "total_gb": round(disk_usage.total / (1024**3), 2),
+            "used_gb": round(disk_usage.used / (1024**3), 2),
+            "free_gb": round(disk_usage.free / (1024**3), 2),
+            "percent_used": round(disk_usage.used / disk_usage.total * 100, 1)
+        },
+        "cleanable_items": {
+            "task_cache": task_cache_count,
+            "glb_cache": glb_cache_count,
+            "uploads": upload_count,
+            "videos": videos_count
+        },
+        "settings": {
+            "min_free_space_gb": MIN_FREE_SPACE_GB,
+            "cleanup_interval_cycles": CLEANUP_CHECK_INTERVAL_CYCLES,
+            "min_age_hours": CLEANUP_MIN_AGE_HOURS
+        }
+    }
+
+
+@app.post("/api/admin/tasks/restart-incomplete")
+async def api_admin_restart_incomplete_tasks(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Restart all incomplete tasks (status: created, processing, error).
+    Admin only. No age gate. Runs in background to avoid timeout.
+    """
+    from database import Task
+    
+    # Count incomplete tasks
+    result = await db.execute(
+        select(Task).where(Task.status.in_(["created", "processing", "error"]))
+    )
+    incomplete_tasks = result.scalars().all()
+    task_count = len(incomplete_tasks)
+    
+    if task_count == 0:
+        return {"ok": True, "restarted_count": 0, "message": "No incomplete tasks found"}
+    
+    # Get task IDs to restart
+    task_ids = [t.id for t in incomplete_tasks]
+    admin_email = admin.email
+    
+    # Run restart in background
+    async def restart_tasks_background():
+        from database import AsyncSessionLocal, Task
+        from workers import select_best_worker, send_task_to_worker
+        from telegram_bot import broadcast_task_restarted, broadcast_bulk_restart_summary
+        
+        async with AsyncSessionLocal() as bg_db:
+            restarted = 0
+            errors = []
+            
+            for task_id in task_ids:
+                try:
+                    # Re-fetch task in this session
+                    result = await bg_db.execute(select(Task).where(Task.id == task_id))
+                    task = result.scalar_one_or_none()
+                    if not task:
+                        continue
+                    
+                    if not task.input_url:
+                        errors.append(f"{task_id[:8]}: no input URL")
+                        continue
+                    
+                    # Reset task fields
+                    task.worker_api = None
+                    task.worker_task_id = None
+                    task.progress_page = None
+                    task.guid = None
+                    task.output_urls = []
+                    task.ready_urls = []
+                    task.ready_count = 0
+                    task.total_count = 0
+                    task.status = "created"
+                    task.error_message = None
+                    task.video_url = None
+                    task.video_ready = False
+                    task.fbx_glb_output_url = None
+                    task.fbx_glb_model_name = None
+                    task.fbx_glb_ready = False
+                    task.fbx_glb_error = None
+                    
+                    # Select worker and send task
+                    worker_url = await select_best_worker()
+                    if not worker_url:
+                        task.status = "error"
+                        task.error_message = "No workers available"
+                        errors.append(f"{task_id[:8]}: no workers")
+                        await bg_db.commit()
+                        continue
+                    
+                    task.worker_api = worker_url
+                    task.status = "processing"
+                    
+                    send_result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+                    if not send_result.success:
+                        task.status = "error"
+                        task.error_message = send_result.error
+                        errors.append(f"{task_id[:8]}: {send_result.error}")
+                    else:
+                        task.worker_task_id = send_result.task_id
+                        task.progress_page = send_result.progress_page
+                        task.guid = send_result.guid
+                        task.output_urls = send_result.output_urls
+                        task.total_count = len(send_result.output_urls)
+                        task.status = "processing"
+                        restarted += 1
+                        
+                        # Send Telegram notification for each restarted task
+                        try:
+                            await broadcast_task_restarted(task_id, reason="admin bulk restart", admin_email=admin_email)
+                        except Exception as e:
+                            print(f"[Admin] Failed to send restart notification: {e}")
+                    
+                    await bg_db.commit()
+                    
+                except Exception as e:
+                    errors.append(f"{task_id[:8]}: {str(e)}")
+            
+            print(f"[Admin] Background restart complete: {restarted}/{len(task_ids)} tasks by {admin_email}")
+            if errors:
+                print(f"[Admin] Restart errors: {errors}")
+            
+            # Send summary notification
+            try:
+                await broadcast_bulk_restart_summary(len(task_ids), restarted, errors, admin_email)
+            except Exception as e:
+                print(f"[Admin] Failed to send bulk restart summary: {e}")
+    
+    # Start background task
+    asyncio.create_task(restart_tasks_background())
+    
+    return {
+        "ok": True,
+        "total_incomplete": task_count,
+        "message": f"Restarting {task_count} incomplete tasks in background..."
+    }
+
+
 # =============================================================================
 # Upload Serving
 # =============================================================================
@@ -1960,10 +2367,43 @@ async def proxy_video(
     )
 
 
+def _is_preview_asset(filename: str) -> bool:
+    name = (filename or "").lower()
+    if name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".html", ".mview", ".json")):
+        return True
+    if name.endswith(".glb") and ("model_prepared" in name or "prepared" in name):
+        return True
+    return False
+
+
+async def _has_paid_access(
+    db: AsyncSession,
+    user: Optional[User],
+    task_id: str,
+    file_index: Optional[int]
+) -> bool:
+    if not user:
+        return False
+    result = await db.execute(
+        select(TaskFilePurchase).where(
+            TaskFilePurchase.task_id == task_id,
+            TaskFilePurchase.user_email == user.email
+        )
+    )
+    purchases = result.scalars().all()
+    if any(p.file_index is None for p in purchases):
+        return True
+    if file_index is None:
+        return False
+    purchased_indices = {p.file_index for p in purchases if p.file_index is not None}
+    return file_index in purchased_indices
+
+
 @app.get("/api/file/{task_id}/{file_index}")
 async def proxy_file(
     task_id: str,
     file_index: int,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy file from worker to serve over HTTPS"""
@@ -1978,19 +2418,47 @@ async def proxy_file(
     file_url = ready_urls[file_index]
     filename = file_url.split("/")[-1]
     
+    # Clean filename for download (remove GUID)
+    clean_filename = filename
+    import re
+    clean_filename = re.sub(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', '', filename, flags=re.IGNORECASE)
+    
     # Determine content type
-    ext = filename.split(".")[-1].lower()
+    ext = clean_filename.split(".")[-1].lower()
     content_types = {
         "glb": "model/gltf-binary",
+        "gltf": "model/gltf+json",
         "fbx": "application/octet-stream",
         "blend": "application/x-blender",
+        "unitypackage": "application/octet-stream",
         "png": "image/png",
         "jpg": "image/jpeg",
         "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "gif": "image/gif",
         "mp4": "video/mp4",
         "mov": "video/quicktime",
+        "json": "application/json",
     }
     content_type = content_types.get(ext, "application/octet-stream")
+    
+    # Allow preview assets without purchase; require purchase for downloads
+    if not _is_preview_asset(clean_filename):
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required to download files")
+        has_access = await _has_paid_access(db, user, task_id, file_index)
+        if not has_access:
+            raise HTTPException(status_code=402, detail="Payment required to download files")
+    
+    # Serve from local cache if present
+    cached_path = TASK_CACHE_DIR / task_id / clean_filename
+    if cached_path.exists():
+        return FileResponse(
+            cached_path,
+            media_type=content_type,
+            filename=clean_filename,
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
     
     async def stream_file():
         async with httpx.AsyncClient() as client:
@@ -2004,7 +2472,7 @@ async def proxy_file(
         stream_file(),
         media_type=content_type,
         headers={
-            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Disposition": f"attachment; filename={clean_filename}",
             "Cache-Control": "public, max-age=86400"
         }
     )
@@ -2014,6 +2482,7 @@ async def proxy_file(
 async def proxy_file_by_name(
     task_id: str,
     filename: str,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy file from worker by filename to serve over HTTPS"""
@@ -2039,6 +2508,15 @@ async def proxy_file_by_name(
     import re
     clean_filename = re.sub(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', '', filename, flags=re.IGNORECASE)
     
+    # Determine index in download list (for purchase checks)
+    download_urls = (task.output_urls or []) if (task.output_urls and len(task.output_urls) > 0) else (task.ready_urls or [])
+    file_index = None
+    for idx, url in enumerate(download_urls):
+        url_clean = (url or "").strip()
+        if url_clean.endswith(filename) or filename in url_clean.split('/')[-1]:
+            file_index = idx
+            break
+    
     # Determine content type
     ext = clean_filename.split(".")[-1].lower()
     content_types = {
@@ -2050,10 +2528,31 @@ async def proxy_file_by_name(
         "png": "image/png",
         "jpg": "image/jpeg",
         "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "gif": "image/gif",
         "mp4": "video/mp4",
         "mov": "video/quicktime",
+        "json": "application/json",
     }
     content_type = content_types.get(ext, "application/octet-stream")
+    
+    # Allow preview assets without purchase; require purchase for downloads
+    if not _is_preview_asset(clean_filename):
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required to download files")
+        has_access = await _has_paid_access(db, user, task_id, file_index)
+        if not has_access:
+            raise HTTPException(status_code=402, detail="Payment required to download files")
+    
+    # Serve from local cache if present
+    cached_path = TASK_CACHE_DIR / task_id / clean_filename
+    if cached_path.exists():
+        return FileResponse(
+            cached_path,
+            media_type=content_type,
+            filename=clean_filename,
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
     
     async def stream_file():
         async with httpx.AsyncClient() as client:
@@ -2071,6 +2570,70 @@ async def proxy_file_by_name(
             "Cache-Control": "public, max-age=86400"
         }
     )
+
+
+@app.get("/api/task/{task_id}/cached-files")
+async def api_task_cached_files(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get list of cached files for a task.
+    Returns files from /static/tasks/{task_id}/ if cached,
+    otherwise triggers caching and returns status.
+    """
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    cache_dir = TASK_CACHE_DIR / task_id
+    
+    # If files are already cached, return them
+    if cache_dir.exists():
+        files = []
+        total_size = 0
+        from urllib.parse import quote
+        for f in sorted(cache_dir.iterdir()):
+            if f.is_file() and not f.name.endswith('.tmp'):
+                size = f.stat().st_size
+                total_size += size
+                files.append({
+                    "name": f.name,
+                    "size": size,
+                    "url": f"/api/file/{task_id}/download/{quote(f.name)}"
+                })
+        
+        if files:
+            return {
+                "cached": True,
+                "task_id": task_id,
+                "files": files,
+                "total_size": total_size,
+                "file_count": len(files)
+            }
+    
+    # If task is done but not cached yet, trigger caching
+    if task.status == "done" and task.ready_urls:
+        # Start caching in background
+        result = await cache_task_files(task_id, task.ready_urls, task.guid)
+        return {
+            "cached": result["cached"],
+            "task_id": task_id,
+            "files": result["files"],
+            "total_size": sum(f["size"] for f in result["files"]),
+            "file_count": len(result["files"]),
+            "errors": result.get("errors", [])
+        }
+    
+    # Task not ready yet
+    return {
+        "cached": False,
+        "task_id": task_id,
+        "files": [],
+        "total_size": 0,
+        "file_count": 0,
+        "message": "Task not completed yet" if task.status != "done" else "No files to cache"
+    }
 
 
 @app.get("/api/task/{task_id}/viewer")
@@ -2293,10 +2856,10 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
 
 
 async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
-    """Proxy a model file from worker with streaming and Content-Length.
+    """Proxy a model file from worker with streaming.
     
-    Uses streaming to avoid timeout on slow workers, but forwards Content-Length
-    from upstream so clients know the file size.
+    Uses streaming to avoid timeout on slow workers.
+    GZip middleware will compress responses automatically.
     """
     # Determine content type
     ext = filename.split(".")[-1].lower()
@@ -2314,34 +2877,114 @@ async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
             async with client.stream("GET", url, timeout=300.0, follow_redirects=True) as response:
                 if response.status_code != 200:
                     return
-                async for chunk in response.aiter_bytes(chunk_size=65536):
+                # Use larger chunks for better throughput
+                async for chunk in response.aiter_bytes(chunk_size=131072):  # 128KB chunks
                     yield chunk
         finally:
             await client.aclose()
     
-    # Get Content-Length from HEAD request (fast)
-    content_length = None
-    try:
-        async with httpx.AsyncClient() as head_client:
-            head_resp = await head_client.head(url, timeout=10.0, follow_redirects=True)
-            if head_resp.status_code == 200:
-                content_length = head_resp.headers.get("content-length")
-    except Exception:
-        pass  # Content-Length is optional, continue without it
-    
     headers = {
-        "Content-Disposition": f"attachment; filename={filename}",
-        "Cache-Control": "public, max-age=3600",
-        "Access-Control-Allow-Origin": "*"
+        "Content-Disposition": f"inline; filename={filename}",
+        "Cache-Control": "public, max-age=86400",  # 24 hours cache
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff"
     }
-    if content_length:
-        headers["Content-Length"] = content_length
+    # Note: Don't set Content-Length as GZip middleware will change the size
 
     return StreamingResponse(
         stream_file(),
         media_type=content_type,
         headers=headers
     )
+
+
+def _validate_glb(data: bytes) -> bool:
+    """Validate GLB file is complete and not corrupted.
+    
+    GLB header format (12 bytes):
+    - bytes 0-3: magic "glTF" (0x46546C67)
+    - bytes 4-7: version (should be 2)
+    - bytes 8-11: total file length (little endian)
+    """
+    if len(data) < 12:
+        return False
+    # Check magic header
+    if data[:4] != b'glTF':
+        return False
+    # Check version (should be 1 or 2)
+    version = int.from_bytes(data[4:8], 'little')
+    if version not in (1, 2):
+        return False
+    # Check file length matches header
+    expected_length = int.from_bytes(data[8:12], 'little')
+    if len(data) != expected_length:
+        print(f"[GLB Validate] Length mismatch: header says {expected_length}, actual {len(data)}")
+        return False
+    return True
+
+
+async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:
+    """
+    Get GLB file from local cache, or download and cache it.
+    Returns FileResponse for cached file, or None if download failed.
+    Validates GLB integrity before caching and when serving.
+    """
+    cache_path = GLB_CACHE_DIR / f"{task_id}_{cache_name}.glb"
+    
+    # Check if already cached
+    if cache_path.exists():
+        # Validate cached file is not corrupted
+        try:
+            cached_data = cache_path.read_bytes()
+            if not _validate_glb(cached_data):
+                print(f"[GLB Cache] Cached file corrupted, deleting: {cache_path.name}")
+                cache_path.unlink()
+            else:
+                return FileResponse(
+                    path=str(cache_path),
+                    media_type="model/gltf-binary",
+                    filename=f"{task_id}_{cache_name}.glb",
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "Access-Control-Allow-Origin": "*",
+                    }
+                )
+        except Exception as e:
+            print(f"[GLB Cache] Error validating cached file: {e}")
+            try:
+                cache_path.unlink()
+            except:
+                pass
+    
+    # Download and cache
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=120.0, follow_redirects=True)
+            if response.status_code != 200:
+                return None
+            
+            # Validate before caching
+            if not _validate_glb(response.content):
+                print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
+                return None
+            
+            # Write to cache file
+            cache_path.write_bytes(response.content)
+            print(f"[GLB Cache] Cached valid GLB: {cache_path.name} ({len(response.content)} bytes)")
+            
+            return FileResponse(
+                path=str(cache_path),
+                media_type="model/gltf-binary",
+                filename=f"{task_id}_{cache_name}.glb",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+    except Exception as e:
+        print(f"[GLB Cache] Failed to cache {cache_name} for {task_id}: {e}")
+        return None
 
 
 @app.get("/api/task/{task_id}/model.glb")
@@ -2369,7 +3012,7 @@ async def api_proxy_animations_glb(
     task_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """Proxy animations GLB file from worker (searches ready_urls or fallback to model.glb)"""
+    """Get animations GLB file with server-side caching"""
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -2377,16 +3020,36 @@ async def api_proxy_animations_glb(
     if not task.guid or not task.worker_api:
         raise HTTPException(status_code=404, detail="Model not available yet")
     
+    # Check cache first (fastest path)
+    cache_path = GLB_CACHE_DIR / f"{task_id}_animations.glb"
+    if cache_path.exists():
+        return FileResponse(
+            path=str(cache_path),
+            media_type="model/gltf-binary",
+            filename=f"{task_id}_animations.glb",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    
     from workers import get_worker_base_url
     worker_base = get_worker_base_url(task.worker_api)
     
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
     animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations", ".glb")
     if animations_url:
-        return await _proxy_model_file(animations_url, f"{task_id}_animations.glb")
+        result = await _get_cached_glb(task_id, animations_url, "animations")
+        if result:
+            return result
     
     # Fallback: try main model GLB
     model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
+    result = await _get_cached_glb(task_id, model_url, "animations")
+    if result:
+        return result
+    
+    # Last resort: stream without caching
     return await _proxy_model_file(model_url, f"{task_id}_animations.glb")
 
 
@@ -2426,38 +3089,51 @@ async def api_proxy_prepared_glb(
     task_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """Proxy prepared GLB file (_model_prepared.glb from worker or fallbacks)"""
+    """Get prepared GLB file with server-side caching for fast loading"""
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     from workers import get_worker_base_url
     
+    # Check cache first (fastest path)
+    cache_path = GLB_CACHE_DIR / f"{task_id}_prepared.glb"
+    if cache_path.exists():
+        return FileResponse(
+            path=str(cache_path),
+            media_type="model/gltf-binary",
+            filename=f"{task_id}_prepared.glb",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    
     # 1. Try to find _model_prepared.glb in ready_urls (best option for preview)
     prepared_url = _find_file_in_ready_urls(task.ready_urls or [], "_model_prepared.glb")
     if prepared_url:
-        return await _proxy_model_file(prepared_url, f"{task_id}_prepared.glb")
+        result = await _get_cached_glb(task_id, prepared_url, "prepared")
+        if result:
+            return result
     
     # 2. Fallback: try direct URL to _model_prepared.glb on worker
     if task.guid and task.worker_api:
         worker_base = get_worker_base_url(task.worker_api)
         direct_prepared_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_model_prepared.glb"
-        result = await _proxy_model_file(direct_prepared_url, f"{task_id}_prepared.glb")
-        if result.status_code == 200:
+        result = await _get_cached_glb(task_id, direct_prepared_url, "prepared")
+        if result:
             return result
     
     # 3. For FBX tasks, use fbx_glb_output_url
     if task.fbx_glb_output_url and task.fbx_glb_ready:
-        return await _proxy_model_file(task.fbx_glb_output_url, f"{task_id}_prepared.glb")
+        result = await _get_cached_glb(task_id, task.fbx_glb_output_url, "prepared")
+        if result:
+            return result
     
-    # 4. Final fallback: original model GLB (uploaded model before processing)
-    if not task.guid or not task.worker_api:
-        raise HTTPException(status_code=404, detail="Model not available yet")
-    
-    worker_base = get_worker_base_url(task.worker_api)
-    model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
-    
-    return await _proxy_model_file(model_url, f"{task_id}_prepared.glb")
+    # 4. Prepared model not available yet - return 404
+    # NOTE: Don't fall back to original model ({guid}.glb) as it's not "prepared" 
+    # and would cause viewer to set preparedLoaded=true, skipping the actual prepared version
+    raise HTTPException(status_code=404, detail="Prepared model not available yet")
 
 
 @app.get("/api/thumb/{task_id}")
@@ -2785,6 +3461,301 @@ async def api_set_task_viewer_settings(
 import pathlib
 BASE_DIR = pathlib.Path(__file__).parent.parent
 STATIC_DIR = BASE_DIR / "static"
+TASK_CACHE_DIR = STATIC_DIR / "tasks"  # Cached task files for download
+GLB_CACHE_DIR = STATIC_DIR / "glb_cache"  # Cached GLB files for fast loading
+
+# Ensure cache directories exist
+TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# =============================================================================
+# Task File Caching (replaces ZIP downloads)
+# =============================================================================
+import re as _re_module
+
+def _clean_filename_for_cache(url: str, guid: str = None) -> str:
+    """
+    Extract and clean filename from URL for caching.
+    Removes GUID prefix from filename for cleaner downloads.
+    """
+    # Get filename from URL path
+    from urllib.parse import urlparse, unquote
+    path = urlparse(url).path
+    filename = unquote(path.split('/')[-1])
+    
+    # Remove GUID prefix if present (e.g., "abc123-def456_model.glb" -> "model.glb")
+    if guid:
+        # Pattern: {guid}_ at the start of filename
+        guid_pattern = _re_module.compile(rf'^{_re_module.escape(guid)}_', _re_module.IGNORECASE)
+        filename = guid_pattern.sub('', filename)
+    
+    # Also remove any UUID-like prefix
+    uuid_pattern = _re_module.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_', _re_module.IGNORECASE)
+    filename = uuid_pattern.sub('', filename)
+    
+    return filename
+
+
+async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> dict:
+    """
+    Download ready files from worker and cache them in static directory.
+    Returns dict with cached file info.
+    
+    Args:
+        task_id: Task ID for cache directory
+        ready_urls: List of URLs to download
+        guid: Optional GUID to strip from filenames
+    
+    Returns:
+        {"cached": True/False, "files": [...], "errors": [...]}
+    """
+    import httpx
+    
+    cache_dir = TASK_CACHE_DIR / task_id
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    cached_files = []
+    errors = []
+    
+    from urllib.parse import quote
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        for url in ready_urls:
+            try:
+                filename = _clean_filename_for_cache(url, guid)
+                filepath = cache_dir / filename
+                
+                # Skip if already cached
+                if filepath.exists():
+                    cached_files.append({
+                        "name": filename,
+                        "size": filepath.stat().st_size,
+                        "url": f"/api/file/{task_id}/download/{quote(filename)}"
+                    })
+                    continue
+                
+                # Download file
+                response = await client.get(url, follow_redirects=True)
+                if response.status_code == 200:
+                    # Write to temp file first, then rename (atomic)
+                    temp_path = filepath.with_suffix('.tmp')
+                    temp_path.write_bytes(response.content)
+                    temp_path.rename(filepath)
+                    
+                    cached_files.append({
+                        "name": filename,
+                        "size": len(response.content),
+                        "url": f"/api/file/{task_id}/download/{quote(filename)}"
+                    })
+                    print(f"[Cache] Cached {filename} for task {task_id} ({len(response.content)} bytes)")
+                else:
+                    errors.append(f"HTTP {response.status_code} for {filename}")
+                    
+            except Exception as e:
+                errors.append(f"Error caching {url}: {str(e)}")
+                print(f"[Cache] Error caching file for task {task_id}: {e}")
+    
+    return {
+        "cached": len(cached_files) > 0,
+        "files": cached_files,
+        "errors": errors
+    }
+
+
+async def cleanup_old_cached_files(max_age_days: int = 30):
+    """
+    Remove cached task files older than max_age_days.
+    Called periodically by background worker.
+    """
+    from datetime import timedelta
+    
+    if not TASK_CACHE_DIR.exists():
+        return 0
+    
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    cutoff_timestamp = cutoff.timestamp()
+    removed_count = 0
+    
+    for task_dir in TASK_CACHE_DIR.iterdir():
+        if not task_dir.is_dir():
+            continue
+        
+        try:
+            # Check directory modification time
+            if task_dir.stat().st_mtime < cutoff_timestamp:
+                shutil.rmtree(task_dir)
+                removed_count += 1
+                print(f"[Cache Cleanup] Removed old cache for task {task_dir.name}")
+        except Exception as e:
+            print(f"[Cache Cleanup] Error removing {task_dir}: {e}")
+    
+    return removed_count
+
+
+async def cleanup_disk_space(min_free_gb: int = 10) -> dict:
+    """
+    Clean up old files when disk space is low.
+    Deletes oldest task files first until min_free_gb is available.
+    
+    Cleans these directories (in order of collection):
+    - static/tasks/ (task output files)
+    - static/glb_cache/ (cached GLB files)
+    - /var/autorig/uploads/ (user uploads)
+    - /var/autorig/videos/ (generated videos)
+    
+    Returns dict with: deleted_count, freed_bytes, freed_gb
+    """
+    from datetime import timedelta
+    import shutil
+    
+    min_free_bytes = min_free_gb * 1024 * 1024 * 1024
+    min_age_hours = CLEANUP_MIN_AGE_HOURS
+    
+    # Check current free space
+    disk_usage = shutil.disk_usage("/")
+    free_bytes = disk_usage.free
+    
+    result = {
+        "deleted_count": 0,
+        "freed_bytes": 0,
+        "freed_gb": 0.0,
+        "initial_free_gb": free_bytes / (1024**3),
+        "target_free_gb": min_free_gb,
+        "deleted_items": []
+    }
+    
+    # If we have enough space, no cleanup needed
+    if free_bytes >= min_free_bytes:
+        return result
+    
+    print(f"[Disk Cleanup] Free space {free_bytes / (1024**3):.2f} GB < {min_free_gb} GB target. Starting cleanup...")
+    
+    # Collect all cleanable directories with their modification times
+    cleanable_items = []
+    
+    # Age cutoff - never delete files younger than min_age_hours
+    age_cutoff = datetime.utcnow() - timedelta(hours=min_age_hours)
+    age_cutoff_timestamp = age_cutoff.timestamp()
+    
+    # 1. Task cache directories (static/tasks/)
+    if TASK_CACHE_DIR.exists():
+        for item in TASK_CACHE_DIR.iterdir():
+            if item.is_dir():
+                try:
+                    mtime = item.stat().st_mtime
+                    if mtime < age_cutoff_timestamp:
+                        size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
+                        cleanable_items.append({
+                            "path": item,
+                            "mtime": mtime,
+                            "size": size,
+                            "type": "task_cache"
+                        })
+                except Exception as e:
+                    print(f"[Disk Cleanup] Error scanning {item}: {e}")
+    
+    # 2. GLB cache directories (static/glb_cache/)
+    if GLB_CACHE_DIR.exists():
+        for item in GLB_CACHE_DIR.iterdir():
+            if item.is_dir():
+                try:
+                    mtime = item.stat().st_mtime
+                    if mtime < age_cutoff_timestamp:
+                        size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
+                        cleanable_items.append({
+                            "path": item,
+                            "mtime": mtime,
+                            "size": size,
+                            "type": "glb_cache"
+                        })
+                except Exception as e:
+                    print(f"[Disk Cleanup] Error scanning {item}: {e}")
+    
+    # 3. Upload directories (/var/autorig/uploads/)
+    upload_dir = pathlib.Path(UPLOAD_DIR)
+    if upload_dir.exists():
+        for item in upload_dir.iterdir():
+            if item.is_dir():
+                try:
+                    mtime = item.stat().st_mtime
+                    if mtime < age_cutoff_timestamp:
+                        size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
+                        cleanable_items.append({
+                            "path": item,
+                            "mtime": mtime,
+                            "size": size,
+                            "type": "upload"
+                        })
+                except Exception as e:
+                    print(f"[Disk Cleanup] Error scanning {item}: {e}")
+    
+    # 4. Video files (/var/autorig/videos/)
+    videos_dir = pathlib.Path("/var/autorig/videos")
+    if videos_dir.exists():
+        for item in videos_dir.iterdir():
+            if item.is_file():
+                try:
+                    mtime = item.stat().st_mtime
+                    if mtime < age_cutoff_timestamp:
+                        cleanable_items.append({
+                            "path": item,
+                            "mtime": mtime,
+                            "size": item.stat().st_size,
+                            "type": "video"
+                        })
+                except Exception as e:
+                    print(f"[Disk Cleanup] Error scanning {item}: {e}")
+    
+    # Sort by modification time (oldest first)
+    cleanable_items.sort(key=lambda x: x["mtime"])
+    
+    print(f"[Disk Cleanup] Found {len(cleanable_items)} cleanable items")
+    
+    # Delete oldest items until we have enough free space
+    for item in cleanable_items:
+        # Check current free space
+        disk_usage = shutil.disk_usage("/")
+        free_bytes = disk_usage.free
+        
+        if free_bytes >= min_free_bytes:
+            print(f"[Disk Cleanup] Target reached: {free_bytes / (1024**3):.2f} GB free")
+            break
+        
+        try:
+            item_path = item["path"]
+            item_size = item["size"]
+            item_type = item["type"]
+            
+            if item_path.is_dir():
+                shutil.rmtree(item_path)
+            else:
+                item_path.unlink()
+            
+            result["deleted_count"] += 1
+            result["freed_bytes"] += item_size
+            result["deleted_items"].append({
+                "path": str(item_path.name),
+                "type": item_type,
+                "size_mb": item_size / (1024**2)
+            })
+            
+            print(f"[Disk Cleanup] Deleted {item_type}: {item_path.name} ({item_size / (1024**2):.1f} MB)")
+            
+        except Exception as e:
+            print(f"[Disk Cleanup] Error deleting {item['path']}: {e}")
+    
+    result["freed_gb"] = result["freed_bytes"] / (1024**3)
+    
+    # Final free space check
+    disk_usage = shutil.disk_usage("/")
+    result["final_free_gb"] = disk_usage.free / (1024**3)
+    
+    if result["deleted_count"] > 0:
+        print(f"[Disk Cleanup] Complete: deleted {result['deleted_count']} items, freed {result['freed_gb']:.2f} GB")
+        print(f"[Disk Cleanup] Free space now: {result['final_free_gb']:.2f} GB")
+    
+    return result
+
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -2936,15 +3907,199 @@ async def payment_success_page():
     return FileResponse(str(STATIC_DIR / "payment-success.html"))
 
 
-# SEO pages
+# =============================================================================
+# SEO Landing Pages
+# =============================================================================
+
+# Format-specific pages
 @app.get("/glb-auto-rig")
+async def glb_auto_rig_page():
+    """GLB auto-rigging landing page"""
+    return FileResponse(str(STATIC_DIR / "glb-auto-rig.html"))
+
+
 @app.get("/fbx-auto-rig")
+async def fbx_auto_rig_page():
+    """FBX auto-rigging landing page"""
+    return FileResponse(str(STATIC_DIR / "fbx-auto-rig.html"))
+
+
 @app.get("/obj-auto-rig")
+async def obj_auto_rig_page():
+    """OBJ auto-rigging landing page"""
+    return FileResponse(str(STATIC_DIR / "obj-auto-rig.html"))
+
+
+# Info pages
 @app.get("/how-it-works")
+async def how_it_works_page():
+    """How it works page"""
+    return FileResponse(str(STATIC_DIR / "how-it-works.html"))
+
+
 @app.get("/faq")
-async def seo_pages():
-    """Serve SEO landing pages (redirect to main for now)"""
-    return FileResponse(str(STATIC_DIR / "index.html"))
+async def faq_page():
+    """FAQ page"""
+    return FileResponse(str(STATIC_DIR / "faq.html"))
+
+
+@app.get("/guides")
+async def guides_page():
+    """Guides page"""
+    return FileResponse(str(STATIC_DIR / "guides.html"))
+
+
+@app.get("/t-pose-rig")
+async def t_pose_rig_page():
+    """T-pose rig page"""
+    return FileResponse(str(STATIC_DIR / "t-pose-rig.html"))
+
+
+# Mixamo alternative pages (4 languages)
+@app.get("/mixamo-alternative")
+async def mixamo_alternative_page():
+    return FileResponse(str(STATIC_DIR / "mixamo-alternative.html"))
+
+
+@app.get("/mixamo-alternative-ru")
+async def mixamo_alternative_ru_page():
+    return FileResponse(str(STATIC_DIR / "mixamo-alternative-ru.html"))
+
+
+@app.get("/mixamo-alternative-zh")
+async def mixamo_alternative_zh_page():
+    return FileResponse(str(STATIC_DIR / "mixamo-alternative-zh.html"))
+
+
+@app.get("/mixamo-alternative-hi")
+async def mixamo_alternative_hi_page():
+    return FileResponse(str(STATIC_DIR / "mixamo-alternative-hi.html"))
+
+
+# Rig GLB for Unity pages (4 languages)
+@app.get("/rig-glb-unity")
+async def rig_glb_unity_page():
+    return FileResponse(str(STATIC_DIR / "rig-glb-unity.html"))
+
+
+@app.get("/rig-glb-unity-ru")
+async def rig_glb_unity_ru_page():
+    return FileResponse(str(STATIC_DIR / "rig-glb-unity-ru.html"))
+
+
+@app.get("/rig-glb-unity-zh")
+async def rig_glb_unity_zh_page():
+    return FileResponse(str(STATIC_DIR / "rig-glb-unity-zh.html"))
+
+
+@app.get("/rig-glb-unity-hi")
+async def rig_glb_unity_hi_page():
+    return FileResponse(str(STATIC_DIR / "rig-glb-unity-hi.html"))
+
+
+# Rig FBX for Unreal pages (4 languages)
+@app.get("/rig-fbx-unreal")
+async def rig_fbx_unreal_page():
+    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal.html"))
+
+
+@app.get("/rig-fbx-unreal-ru")
+async def rig_fbx_unreal_ru_page():
+    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-ru.html"))
+
+
+@app.get("/rig-fbx-unreal-zh")
+async def rig_fbx_unreal_zh_page():
+    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-zh.html"))
+
+
+@app.get("/rig-fbx-unreal-hi")
+async def rig_fbx_unreal_hi_page():
+    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-hi.html"))
+
+
+# GLB vs FBX comparison pages (4 languages)
+@app.get("/glb-vs-fbx")
+async def glb_vs_fbx_page():
+    return FileResponse(str(STATIC_DIR / "glb-vs-fbx.html"))
+
+
+@app.get("/glb-vs-fbx-ru")
+async def glb_vs_fbx_ru_page():
+    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-ru.html"))
+
+
+@app.get("/glb-vs-fbx-zh")
+async def glb_vs_fbx_zh_page():
+    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-zh.html"))
+
+
+@app.get("/glb-vs-fbx-hi")
+async def glb_vs_fbx_hi_page():
+    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-hi.html"))
+
+
+# T-pose vs A-pose comparison pages (4 languages)
+@app.get("/t-pose-vs-a-pose")
+async def t_pose_vs_a_pose_page():
+    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose.html"))
+
+
+@app.get("/t-pose-vs-a-pose-ru")
+async def t_pose_vs_a_pose_ru_page():
+    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-ru.html"))
+
+
+@app.get("/t-pose-vs-a-pose-zh")
+async def t_pose_vs_a_pose_zh_page():
+    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-zh.html"))
+
+
+@app.get("/t-pose-vs-a-pose-hi")
+async def t_pose_vs_a_pose_hi_page():
+    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-hi.html"))
+
+
+# Animation retargeting pages (4 languages)
+@app.get("/animation-retargeting")
+async def animation_retargeting_page():
+    return FileResponse(str(STATIC_DIR / "animation-retargeting.html"))
+
+
+@app.get("/animation-retargeting-ru")
+async def animation_retargeting_ru_page():
+    return FileResponse(str(STATIC_DIR / "animation-retargeting-ru.html"))
+
+
+@app.get("/animation-retargeting-zh")
+async def animation_retargeting_zh_page():
+    return FileResponse(str(STATIC_DIR / "animation-retargeting-zh.html"))
+
+
+@app.get("/animation-retargeting-hi")
+async def animation_retargeting_hi_page():
+    return FileResponse(str(STATIC_DIR / "animation-retargeting-hi.html"))
+
+
+# Auto-rig OBJ pages (4 languages)
+@app.get("/auto-rig-obj")
+async def auto_rig_obj_page():
+    return FileResponse(str(STATIC_DIR / "auto-rig-obj.html"))
+
+
+@app.get("/auto-rig-obj-ru")
+async def auto_rig_obj_ru_page():
+    return FileResponse(str(STATIC_DIR / "auto-rig-obj-ru.html"))
+
+
+@app.get("/auto-rig-obj-zh")
+async def auto_rig_obj_zh_page():
+    return FileResponse(str(STATIC_DIR / "auto-rig-obj-zh.html"))
+
+
+@app.get("/auto-rig-obj-hi")
+async def auto_rig_obj_hi_page():
+    return FileResponse(str(STATIC_DIR / "auto-rig-obj-hi.html"))
 
 
 # Sitemap and robots.txt
@@ -2964,6 +4119,533 @@ async def robots():
         str(STATIC_DIR / "robots.txt"),
         media_type="text/plain"
     )
+
+
+# Search engine verification files
+@app.get("/yandex_7bb48a0ce446816a.html")
+async def yandex_verification():
+    """Yandex Webmaster verification file"""
+    return FileResponse(str(STATIC_DIR / "yandex_7bb48a0ce446816a.html"))
+
+
+@app.get("/BingSiteAuth.xml")
+async def bing_verification():
+    """Bing Webmaster verification file"""
+    return FileResponse(
+        str(STATIC_DIR / "BingSiteAuth.xml"),
+        media_type="application/xml"
+    )
+
+
+# =============================================================================
+# Scene API (Multi-model 3D scenes)
+# =============================================================================
+
+@app.post("/api/scene", response_model=SceneResponse)
+async def create_scene(
+    request: SceneCreateRequest,
+    req: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new scene from one or two tasks"""
+    # Get user/anon info
+    user = await get_user_by_session(req, db)
+    anon_id = req.cookies.get("anon_id")
+    
+    if user:
+        owner_type = "user"
+        owner_id = user.email
+    elif anon_id:
+        owner_type = "anon"
+        owner_id = anon_id
+    else:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Verify base task exists and get its data
+    from database import Task
+    base_task = await db.execute(select(Task).where(Task.id == request.base_task_id))
+    base_task = base_task.scalar_one_or_none()
+    if not base_task:
+        raise HTTPException(status_code=404, detail="Base task not found")
+    
+    # Build task list
+    task_ids = [request.base_task_id]
+    transforms = {
+        request.base_task_id: {"position": [0, 0, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1]}
+    }
+    
+    # Add second task if provided
+    if request.add_task_id:
+        add_task = await db.execute(select(Task).where(Task.id == request.add_task_id))
+        add_task = add_task.scalar_one_or_none()
+        if not add_task:
+            raise HTTPException(status_code=404, detail="Additional task not found")
+        task_ids.append(request.add_task_id)
+        transforms[request.add_task_id] = {"position": [2, 0, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1]}
+    
+    # Create scene
+    scene_id = str(uuid.uuid4())
+    scene = Scene(
+        id=scene_id,
+        owner_type=owner_type,
+        owner_id=owner_id,
+        name=request.name,
+    )
+    scene.task_ids = task_ids
+    scene.transforms = transforms
+    scene.hierarchy = {}
+    
+    db.add(scene)
+    await db.commit()
+    await db.refresh(scene)
+    
+    # Build response with model info
+    models = []
+    for tid in task_ids:
+        task = await db.execute(select(Task).where(Task.id == tid))
+        task = task.scalar_one_or_none()
+        if task:
+            models.append(SceneModelInfo(
+                task_id=tid,
+                input_url=task.input_url,
+                glb_url=f"/api/task/{tid}/prepared.glb" if task.status == "done" else None,
+                transform=TransformData(**transforms.get(tid, {}))
+            ))
+    
+    return SceneResponse(
+        scene_id=scene.id,
+        name=scene.name,
+        task_ids=scene.task_ids,
+        transforms=scene.transforms,
+        hierarchy=scene.hierarchy,
+        models=models,
+        is_public=scene.is_public,
+        like_count=scene.like_count,
+        liked_by_me=False,
+        owner_type=scene.owner_type,
+        owner_id=scene.owner_id,
+        created_at=scene.created_at,
+        updated_at=scene.updated_at
+    )
+
+
+@app.get("/api/scene/{scene_id}", response_model=SceneResponse)
+async def get_scene(
+    scene_id: str,
+    req: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get scene data"""
+    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = scene.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    
+    # Check ownership for private scenes
+    user = await get_user_by_session(req, db)
+    anon_id = req.cookies.get("anon_id")
+    
+    is_owner = False
+    if scene.owner_type == "user" and user and user.email == scene.owner_id:
+        is_owner = True
+    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
+        is_owner = True
+    
+    if not scene.is_public and not is_owner:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if user liked this scene
+    liked_by_me = False
+    if user:
+        like = await db.execute(
+            select(SceneLike).where(
+                SceneLike.scene_id == scene_id,
+                SceneLike.user_email == user.email
+            )
+        )
+        liked_by_me = like.scalar_one_or_none() is not None
+    
+    # Build model info
+    from database import Task
+    models = []
+    transforms = scene.transforms
+    for tid in scene.task_ids:
+        task = await db.execute(select(Task).where(Task.id == tid))
+        task = task.scalar_one_or_none()
+        if task:
+            models.append(SceneModelInfo(
+                task_id=tid,
+                input_url=task.input_url,
+                glb_url=f"/api/task/{tid}/prepared.glb" if task.status == "done" else None,
+                transform=TransformData(**transforms.get(tid, {}))
+            ))
+    
+    return SceneResponse(
+        scene_id=scene.id,
+        name=scene.name,
+        task_ids=scene.task_ids,
+        transforms=scene.transforms,
+        hierarchy=scene.hierarchy,
+        models=models,
+        is_public=scene.is_public,
+        like_count=scene.like_count,
+        liked_by_me=liked_by_me,
+        owner_type=scene.owner_type,
+        owner_id=scene.owner_id,
+        created_at=scene.created_at,
+        updated_at=scene.updated_at
+    )
+
+
+@app.put("/api/scene/{scene_id}", response_model=SceneResponse)
+async def update_scene(
+    scene_id: str,
+    request: SceneUpdateRequest,
+    req: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update scene transforms, hierarchy, or metadata"""
+    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = scene.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    
+    # Check ownership
+    user = await get_user_by_session(req, db)
+    anon_id = req.cookies.get("anon_id")
+    
+    is_owner = False
+    if scene.owner_type == "user" and user and user.email == scene.owner_id:
+        is_owner = True
+    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
+        is_owner = True
+    
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="Only scene owner can update")
+    
+    # Update fields
+    if request.transforms is not None:
+        scene.transforms = request.transforms
+    if request.hierarchy is not None:
+        scene.hierarchy = request.hierarchy
+    if request.name is not None:
+        scene.name = request.name
+    if request.is_public is not None:
+        scene.is_public = request.is_public
+    
+    scene.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(scene)
+    
+    # Build model info
+    from database import Task
+    models = []
+    transforms = scene.transforms
+    for tid in scene.task_ids:
+        task = await db.execute(select(Task).where(Task.id == tid))
+        task = task.scalar_one_or_none()
+        if task:
+            models.append(SceneModelInfo(
+                task_id=tid,
+                input_url=task.input_url,
+                glb_url=f"/api/task/{tid}/prepared.glb" if task.status == "done" else None,
+                transform=TransformData(**transforms.get(tid, {}))
+            ))
+    
+    return SceneResponse(
+        scene_id=scene.id,
+        name=scene.name,
+        task_ids=scene.task_ids,
+        transforms=scene.transforms,
+        hierarchy=scene.hierarchy,
+        models=models,
+        is_public=scene.is_public,
+        like_count=scene.like_count,
+        liked_by_me=False,
+        owner_type=scene.owner_type,
+        owner_id=scene.owner_id,
+        created_at=scene.created_at,
+        updated_at=scene.updated_at
+    )
+
+
+@app.post("/api/scene/{scene_id}/add", response_model=SceneResponse)
+async def add_model_to_scene(
+    scene_id: str,
+    request: SceneAddModelRequest,
+    req: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Add a model to an existing scene"""
+    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = scene.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    
+    # Check ownership
+    user = await get_user_by_session(req, db)
+    anon_id = req.cookies.get("anon_id")
+    
+    is_owner = False
+    if scene.owner_type == "user" and user and user.email == scene.owner_id:
+        is_owner = True
+    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
+        is_owner = True
+    
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="Only scene owner can add models")
+    
+    # Verify task exists
+    from database import Task
+    task = await db.execute(select(Task).where(Task.id == request.task_id))
+    task = task.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Add to scene
+    task_ids = scene.task_ids
+    if request.task_id in task_ids:
+        raise HTTPException(status_code=400, detail="Task already in scene")
+    
+    task_ids.append(request.task_id)
+    scene.task_ids = task_ids
+    
+    # Add transform
+    transforms = scene.transforms
+    if request.transform:
+        transforms[request.task_id] = {
+            "position": request.transform.position,
+            "rotation": request.transform.rotation,
+            "scale": request.transform.scale
+        }
+    else:
+        # Default position offset based on number of models
+        offset_x = len(task_ids) * 2
+        transforms[request.task_id] = {"position": [offset_x, 0, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1]}
+    scene.transforms = transforms
+    
+    scene.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(scene)
+    
+    # Build model info
+    models = []
+    for tid in scene.task_ids:
+        t = await db.execute(select(Task).where(Task.id == tid))
+        t = t.scalar_one_or_none()
+        if t:
+            models.append(SceneModelInfo(
+                task_id=tid,
+                input_url=t.input_url,
+                glb_url=f"/api/task/{tid}/prepared.glb" if t.status == "done" else None,
+                transform=TransformData(**transforms.get(tid, {}))
+            ))
+    
+    return SceneResponse(
+        scene_id=scene.id,
+        name=scene.name,
+        task_ids=scene.task_ids,
+        transforms=scene.transforms,
+        hierarchy=scene.hierarchy,
+        models=models,
+        is_public=scene.is_public,
+        like_count=scene.like_count,
+        liked_by_me=False,
+        owner_type=scene.owner_type,
+        owner_id=scene.owner_id,
+        created_at=scene.created_at,
+        updated_at=scene.updated_at
+    )
+
+
+@app.delete("/api/scene/{scene_id}/model/{task_id}")
+async def remove_model_from_scene(
+    scene_id: str,
+    task_id: str,
+    req: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove a model from a scene"""
+    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = scene.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    
+    # Check ownership
+    user = await get_user_by_session(req, db)
+    anon_id = req.cookies.get("anon_id")
+    
+    is_owner = False
+    if scene.owner_type == "user" and user and user.email == scene.owner_id:
+        is_owner = True
+    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
+        is_owner = True
+    
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="Only scene owner can remove models")
+    
+    task_ids = scene.task_ids
+    if task_id not in task_ids:
+        raise HTTPException(status_code=404, detail="Task not in scene")
+    
+    if len(task_ids) <= 1:
+        raise HTTPException(status_code=400, detail="Scene must have at least one model")
+    
+    task_ids.remove(task_id)
+    scene.task_ids = task_ids
+    
+    # Remove transform
+    transforms = scene.transforms
+    transforms.pop(task_id, None)
+    scene.transforms = transforms
+    
+    scene.updated_at = datetime.utcnow()
+    await db.commit()
+    
+    return {"status": "ok", "removed_task_id": task_id}
+
+
+@app.post("/api/scene/{scene_id}/like", response_model=SceneLikeResponse)
+async def like_scene(
+    scene_id: str,
+    req: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Like/unlike a scene"""
+    user = await get_user_by_session(req, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required to like scenes")
+    
+    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = scene.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    
+    # Check existing like
+    existing = await db.execute(
+        select(SceneLike).where(
+            SceneLike.scene_id == scene_id,
+            SceneLike.user_email == user.email
+        )
+    )
+    existing = existing.scalar_one_or_none()
+    
+    if existing:
+        # Unlike
+        await db.delete(existing)
+        scene.like_count = max(0, scene.like_count - 1)
+        liked_by_me = False
+    else:
+        # Like
+        like = SceneLike(scene_id=scene_id, user_email=user.email)
+        db.add(like)
+        scene.like_count += 1
+        liked_by_me = True
+    
+    await db.commit()
+    await db.refresh(scene)
+    
+    return SceneLikeResponse(
+        scene_id=scene.id,
+        like_count=scene.like_count,
+        liked_by_me=liked_by_me
+    )
+
+
+@app.get("/api/scenes", response_model=SceneListResponse)
+async def list_scenes(
+    req: Request,
+    page: int = 1,
+    per_page: int = 20,
+    public_only: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
+    """List user's scenes or public scenes"""
+    user = await get_user_by_session(req, db)
+    anon_id = req.cookies.get("anon_id")
+    
+    from sqlalchemy import func, desc
+    
+    query = select(Scene)
+    
+    if public_only:
+        query = query.where(Scene.is_public == True)
+    else:
+        # User's own scenes
+        if user:
+            query = query.where(Scene.owner_type == "user", Scene.owner_id == user.email)
+        elif anon_id:
+            query = query.where(Scene.owner_type == "anon", Scene.owner_id == anon_id)
+        else:
+            return SceneListResponse(scenes=[], total=0, page=page, per_page=per_page)
+    
+    # Count total
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar()
+    
+    # Paginate
+    query = query.order_by(desc(Scene.updated_at)).offset((page - 1) * per_page).limit(per_page)
+    result = await db.execute(query)
+    scenes = result.scalars().all()
+    
+    items = [
+        SceneListItem(
+            scene_id=s.id,
+            name=s.name,
+            task_count=len(s.task_ids),
+            is_public=s.is_public,
+            like_count=s.like_count,
+            created_at=s.created_at
+        )
+        for s in scenes
+    ]
+    
+    return SceneListResponse(
+        scenes=items,
+        total=total,
+        page=page,
+        per_page=per_page
+    )
+
+
+@app.delete("/api/scene/{scene_id}")
+async def delete_scene(
+    scene_id: str,
+    req: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a scene"""
+    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
+    scene = scene.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    
+    # Check ownership
+    user = await get_user_by_session(req, db)
+    anon_id = req.cookies.get("anon_id")
+    
+    is_owner = False
+    if scene.owner_type == "user" and user and user.email == scene.owner_id:
+        is_owner = True
+    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
+        is_owner = True
+    
+    # Admins can delete any scene
+    if user and user.is_admin:
+        is_owner = True
+    
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="Only scene owner can delete")
+    
+    # Delete likes
+    await db.execute(
+        SceneLike.__table__.delete().where(SceneLike.scene_id == scene_id)
+    )
+    
+    await db.delete(scene)
+    await db.commit()
+    
+    return {"status": "ok", "deleted_scene_id": scene_id}
 
 
 # =============================================================================

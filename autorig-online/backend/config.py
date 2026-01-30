@@ -59,7 +59,7 @@ WORKERS = [
 # Limits
 # =============================================================================
 ANON_FREE_LIMIT = 3  # Free conversions for anonymous users
-USER_FREE_LIMIT = 30  # Total free credits after login (30 credits for all registered users)
+USER_FREE_LIMIT = 0  # Total free credits after login (0 credits for all registered users)
 USER_BONUS_AFTER_LOGIN = 27  # Additional credits after login (30 - max anon used)
 
 # =============================================================================
@@ -119,3 +119,9 @@ GUMROAD_PRODUCT_CREDITS = {
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "AutoRigOnlineBot")
 
+# =============================================================================
+# Disk Cleanup Settings
+# =============================================================================
+MIN_FREE_SPACE_GB = int(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain
+CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
+CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
