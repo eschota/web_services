@@ -42,6 +42,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=True)
+    nickname = Column(String(100), nullable=True)  # Public display name (preferred over email)
     picture = Column(String(512), nullable=True)
     gumroad_email = Column(String(255), nullable=True)
     balance_credits = Column(Integer, default=0)
@@ -213,6 +214,69 @@ class TelegramChat(Base):
     last_seen_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Scene(Base):
+    """Scene combining multiple GLB models with transforms"""
+    __tablename__ = "scenes"
+    
+    id = Column(String(36), primary_key=True)  # UUID
+    owner_type = Column(String(10), nullable=False)  # 'anon' or 'user'
+    owner_id = Column(String(255), nullable=False)  # anon_id or user email
+    
+    name = Column(String(255), nullable=True)
+    
+    # JSON array of task_ids that make up this scene
+    _task_ids = Column("task_ids", Text, default="[]")
+    
+    # JSON object with transform data for each task
+    # Format: {"task_id": {"position": [x,y,z], "rotation": [x,y,z], "scale": [x,y,z]}}
+    _transforms = Column("transforms", Text, default="{}")
+    
+    # Hierarchy structure (which objects are grouped)
+    # Format: {"groups": [{"name": "...", "task_ids": [...]}]}
+    _hierarchy = Column("hierarchy", Text, default="{}")
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Gallery integration
+    like_count = Column(Integer, default=0)
+    is_public = Column(Boolean, default=False)
+    
+    @property
+    def task_ids(self) -> list:
+        return json.loads(self._task_ids) if self._task_ids else []
+    
+    @task_ids.setter
+    def task_ids(self, value: list):
+        self._task_ids = json.dumps(value)
+    
+    @property
+    def transforms(self) -> dict:
+        return json.loads(self._transforms) if self._transforms else {}
+    
+    @transforms.setter
+    def transforms(self, value: dict):
+        self._transforms = json.dumps(value)
+    
+    @property
+    def hierarchy(self) -> dict:
+        return json.loads(self._hierarchy) if self._hierarchy else {}
+    
+    @hierarchy.setter
+    def hierarchy(self, value: dict):
+        self._hierarchy = json.dumps(value)
+
+
+class SceneLike(Base):
+    """Like on a scene (by registered user)"""
+    __tablename__ = "scene_likes"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scene_id = Column(String(36), nullable=False, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # =============================================================================
 # Database Initialization
 # =============================================================================
@@ -231,12 +295,16 @@ async def init_db():
                     # Column likely already exists, or DB doesn't support the statement.
                     pass
             await _try_add_column("ALTER TABLE users ADD COLUMN gumroad_email VARCHAR(255)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_settings TEXT")
+            
+            # Scene table migrations
+            await _try_add_column("ALTER TABLE scenes ADD COLUMN is_public BOOLEAN DEFAULT 0")
 
 
 async def get_db():

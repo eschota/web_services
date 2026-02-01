@@ -1,0 +1,25 @@
+{
+  "task_id": "cbeae738",
+  "prompt": "Technical visualization of OpenPose AI body detection on humanoid 3D model. Gray humanoid mesh with 137 bright neon markers: 25 body keypoints (spine, shoulders, hips, knees, ankles) in cyan, 42 hand keypoints on both hands in green, 70 facial landmarks around eyes, nose, mouth in magenta. Connected by thin glowing lines forming skeleton. Dark background with indigo gradient. Scientific/medical scan aesthetic, holographic style",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-openpose.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:12:56.038295",
+  "status": "completed",
+  "started_at": "2026-01-03T18:13:57.382407",
+  "request_payload": {
+    "prompt": "Technical visualization of OpenPose AI body detection on humanoid 3D model. Gray humanoid mesh with 137 bright neon markers: 25 body keypoints (spine, shoulders, hips, knees, ankles) in cyan, 42 hand keypoints on both hands in green, 70 facial landmarks around eyes, nose, mouth in magenta. Connected by thin glowing lines forming skeleton. Dark background with indigo gradient. Scientific/medical scan aesthetic, holographic style",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:13:57.382630",
+  "output_url": "https://renderfin.com/render/default_user/eb78356f-e52a-443a-a7b1-55dff8295c88.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/eb78356f-e52a-443a-a7b1-55dff8295c88.png"
+  },
+  "response_received_at": "2026-01-03T18:13:57.745271",
+  "response_status_code": 200,
+  "download_attempt": 7,
+  "last_download_attempt_at": "2026-01-03T18:14:29.965628",
+  "completed_at": "2026-01-03T18:14:35.754267",
+  "file_size": 617454
+}

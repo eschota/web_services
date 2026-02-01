@@ -36,7 +36,23 @@
     "credits_free": "剩余免费转换",
     "credits_login_hint": "登录获取7次额外免费转换",
 
-    "footer_text": "AutoRig Online © 2025",
+    "footer_text": "AutoRig Online © 2026",
+    "footer_tagline": "AI驱动的自动3D角色绑定。上传您的模型，几分钟内即可获得带动画的绑定模型。",
+    "footer_services": "服务",
+    "footer_glb_rig": "GLB自动绑定",
+    "footer_fbx_rig": "FBX自动绑定",
+    "footer_obj_rig": "OBJ自动绑定",
+    "footer_guides": "指南",
+    "footer_mixamo_alt": "Mixamo替代方案",
+    "footer_glb_unity": "Unity GLB绑定",
+    "footer_fbx_unreal": "Unreal FBX绑定",
+    "footer_glb_vs_fbx": "GLB vs FBX",
+    "footer_tpose": "T-Pose vs A-Pose",
+    "footer_retargeting": "动画重定向",
+    "footer_company": "公司",
+    "footer_how_it_works": "工作原理",
+    "footer_faq": "常见问题",
+    "footer_copyright": "© 2026 AutoRig Online. 保留所有权利。",
 
     "guides_title": "指南和教程",
     "guides_intro": "了解更多关于角色绑定、Unity/Unreal工作流程和最佳实践的信息",
@@ -66,5 +82,9 @@
 
     "nav_home": "首页",
     "nav_guides": "指南",
-    "nav_gallery": "画廊"
+    "nav_gallery": "画廊",
+    "nav_buy": "购买",
+    "nav_api": "API",
+    "buy_subtitle": "需要积分来下载完成的带有绑定和所有动画的3D模型。",
+    "buy_notice": "付款后1-2分钟内自动添加积分。"
 }

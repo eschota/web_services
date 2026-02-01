@@ -50,6 +50,8 @@ class TaskStatusResponse(BaseModel):
     # Whether prepared.glb is ready for early preview
     prepared_glb_ready: Optional[bool] = None
     error_message: Optional[str] = None
+    # GUID for direct file access (e.g., ZIP download)
+    guid: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -62,6 +64,7 @@ class TaskHistoryItem(BaseModel):
     created_at: datetime
     input_url: Optional[str]
     video_ready: bool
+    thumbnail_url: Optional[str] = None
 
 
 class TaskHistoryResponse(BaseModel):
@@ -224,6 +227,10 @@ class GalleryItem(BaseModel):
     time_ago: str
     like_count: int = 0
     liked_by_me: bool = False
+    sales_count: int = 0  # Number of purchases for this task
+    author_email: Optional[str] = None  # Owner email if owner_type == "user"
+    author_nickname: Optional[str] = None  # Preferred display name (fallback to email)
+    version: int = 1  # restart_count + 1
 
 
 class GalleryResponse(BaseModel):
@@ -240,6 +247,18 @@ class LikeResponse(BaseModel):
     task_id: str
     like_count: int
     liked_by_me: bool
+
+
+class TaskCardInfo(BaseModel):
+    """Task card info (likes, sales, author) for display"""
+    task_id: str
+    like_count: int = 0
+    liked_by_me: bool = False
+    sales_count: int = 0
+    author_email: Optional[str] = None
+    author_nickname: Optional[str] = None
+    time_ago: str = ""
+    version: int = 1  # restart_count + 1
 
 
 # =============================================================================
@@ -307,4 +326,85 @@ class QueueStatusResponse(BaseModel):
     total_workers: int
     estimated_wait_seconds: int
     estimated_wait_formatted: str
+
+
+# =============================================================================
+# Scene Schemas (Multi-model 3D scenes)
+# =============================================================================
+class TransformData(BaseModel):
+    """Transform data for a model in a scene"""
+    position: List[float] = Field(default=[0, 0, 0], description="XYZ position")
+    rotation: List[float] = Field(default=[0, 0, 0], description="XYZ rotation in radians")
+    scale: List[float] = Field(default=[1, 1, 1], description="XYZ scale")
+
+
+class SceneCreateRequest(BaseModel):
+    """Request to create a new scene"""
+    base_task_id: str = Field(..., description="Primary task ID for the scene")
+    add_task_id: Optional[str] = Field(None, description="Additional task to add")
+    name: Optional[str] = Field(None, description="Scene name")
+
+
+class SceneAddModelRequest(BaseModel):
+    """Request to add a model to existing scene"""
+    task_id: str = Field(..., description="Task ID to add to scene")
+    transform: Optional[TransformData] = None
+
+
+class SceneUpdateRequest(BaseModel):
+    """Request to update scene transforms/hierarchy"""
+    transforms: Optional[dict] = Field(None, description="Transform data for each task")
+    hierarchy: Optional[dict] = Field(None, description="Hierarchy structure")
+    name: Optional[str] = Field(None, description="Scene name")
+    is_public: Optional[bool] = Field(None, description="Whether scene is public")
+
+
+class SceneModelInfo(BaseModel):
+    """Info about a model in a scene"""
+    task_id: str
+    input_url: Optional[str] = None
+    glb_url: Optional[str] = None
+    transform: TransformData
+
+
+class SceneResponse(BaseModel):
+    """Response with scene data"""
+    scene_id: str
+    name: Optional[str]
+    task_ids: List[str]
+    transforms: dict
+    hierarchy: dict
+    models: List[SceneModelInfo] = []
+    is_public: bool = False
+    like_count: int = 0
+    liked_by_me: bool = False
+    owner_type: str
+    owner_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SceneListItem(BaseModel):
+    """Scene item for list views"""
+    scene_id: str
+    name: Optional[str]
+    task_count: int
+    is_public: bool
+    like_count: int
+    created_at: datetime
+
+
+class SceneListResponse(BaseModel):
+    """Response for scene list"""
+    scenes: List[SceneListItem]
+    total: int
+    page: int
+    per_page: int
+
+
+class SceneLikeResponse(BaseModel):
+    """Response for scene like action"""
+    scene_id: str
+    like_count: int
+    liked_by_me: bool
 

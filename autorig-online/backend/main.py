@@ -620,7 +620,7 @@ async def auth_me(
             free_remaining=remaining
         ),
         credits_remaining=remaining,
-        login_required=remaining <= 0
+        login_required=False
     )
 
 
@@ -2336,6 +2336,7 @@ async def serve_upload(token: str, filename: str):
 # File & Video Proxy (to avoid Mixed Content issues)
 # =============================================================================
 import httpx
+import asyncio
 from fastapi.responses import StreamingResponse
 
 @app.get("/api/video/{task_id}")
@@ -2613,9 +2614,16 @@ async def api_task_cached_files(
             }
     
     # If task is done but not cached yet, trigger caching
-    if task.status == "done" and task.ready_urls:
+    if task.status == "done" and (task.ready_urls or task.output_urls):
+        urls_to_cache = []
+        if task.ready_urls:
+            urls_to_cache.extend(task.ready_urls)
+        if task.output_urls:
+            urls_to_cache.extend(task.output_urls)
+        # Preserve order and remove duplicates
+        urls_to_cache = list(dict.fromkeys(urls_to_cache))
         # Start caching in background
-        result = await cache_task_files(task_id, task.ready_urls, task.guid)
+        result = await cache_task_files(task_id, urls_to_cache, task.guid)
         return {
             "cached": result["cached"],
             "task_id": task_id,
@@ -3873,6 +3881,38 @@ async def task_page(
     )
     
     return HTMLResponse(content=html_content)
+
+
+@app.post("/api/task/{task_id}/purchase-intent")
+async def api_purchase_intent(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Notify when user clicks download-to-purchase."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = await get_anon_session(request, response, db)
+    payload = {}
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    source = payload.get("source") if isinstance(payload, dict) else None
+    from telegram_bot import broadcast_purchase_intent
+    asyncio.create_task(broadcast_purchase_intent(
+        task_id=task_id,
+        user_email=user.email if user else None,
+        anon_id=anon_session.anon_id if not user else None,
+        source=source
+    ))
+
+    return {"ok": True}
 
 
 @app.get("/admin")

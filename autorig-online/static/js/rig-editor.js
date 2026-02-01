@@ -636,6 +636,7 @@ export class ViewerControls {
         this.materialChannel = MaterialChannel.PBR;
         this.rigType = RigType.CHAR;
         this.gizmosVisible = true;
+        this.viewMode = 'tpose'; // 'tpose', 'rig', 'animation'
         
         // Original materials backup for channel switching
         this.originalMaterials = new Map();
@@ -670,6 +671,7 @@ export class ViewerControls {
         this.onCameraModeChange = options.onCameraModeChange || (() => {});
         this.onChannelChange = options.onChannelChange || (() => {});
         this.onRigTypeChange = options.onRigTypeChange || (() => {});
+        this.onViewModeChange = options.onViewModeChange || (() => {});
         this.onSaveDefaultSettings = options.onSaveDefaultSettings || null;
 
         this.currentRotationPreset = 'none';
@@ -857,6 +859,75 @@ export class ViewerControls {
             this.transformControls.enabled = visible;
             this.transformControls.visible = visible;
         }
+    }
+
+    /**
+     * Hide ABCDE rig spheres
+     */
+    hideRigSpheres() {
+        this.controllerSpheres.forEach(sphere => {
+            sphere.visible = false;
+        });
+        this.controllerLabels.forEach(label => {
+            label.visible = false;
+        });
+        console.log('[ViewerControls] Rig spheres hidden');
+    }
+
+    /**
+     * Show ABCDE rig spheres
+     */
+    showRigSpheres() {
+        if (!this.gizmosVisible) return; // Respect global gizmo visibility
+        this.controllerSpheres.forEach(sphere => {
+            sphere.visible = true;
+        });
+        this.controllerLabels.forEach(label => {
+            label.visible = true;
+        });
+        console.log('[ViewerControls] Rig spheres shown');
+    }
+
+    /**
+     * Set view mode: 'tpose', 'rig', 'animation'
+     * Controls which elements are visible and active
+     */
+    setViewMode(mode) {
+        this.viewMode = mode;
+        
+        switch (mode) {
+            case 'tpose':
+                // T-Pose mode: show T-pose reference, hide rig spheres, enable gizmos
+                this.hideRigSpheres();
+                this.setGizmosVisibility(true);
+                break;
+            case 'rig':
+                // RIG mode: show rig spheres, interact with skeleton, enable gizmos
+                this.showRigSpheres();
+                this.setGizmosVisibility(true);
+                break;
+            case 'animation':
+                // Animation mode: hide rig spheres, enable animation playback
+                this.hideRigSpheres();
+                break;
+            default:
+                console.warn('[ViewerControls] Unknown view mode:', mode);
+                return;
+        }
+        
+        console.log('[ViewerControls] View mode set to:', mode);
+        
+        // Trigger callback if defined
+        if (this.onViewModeChange) {
+            this.onViewModeChange(mode);
+        }
+    }
+
+    /**
+     * Get current view mode
+     */
+    getViewMode() {
+        return this.viewMode || 'tpose';
     }
 
     /**
@@ -2454,5 +2525,1524 @@ export class ViewerControls {
     }
 }
 
+// =============================================================================
+// Transform System (QWER modes)
+// =============================================================================
+
+/**
+ * Transform modes enum - keyboard shortcuts QWER
+ */
+export const TransformMode = {
+    SELECT: 'select',    // Q - selection mode (show bounding boxes)
+    MOVE: 'move',        // W - translation
+    ROTATE: 'rotate',    // E - rotation
+    SCALE: 'scale'       // R - scale
+};
+
+/**
+ * Snap settings for transform operations
+ */
+export const SnapSettings = {
+    rotation: 15,        // degrees
+    move: 0.1,           // units
+    scale: 0.1           // multiplier
+};
+
+/**
+ * SelectionSystem class - handles object selection with raycasting and bounding boxes
+ */
+export class SelectionSystem {
+    constructor(scene, camera, renderer) {
+        this.scene = scene;
+        this.camera = camera;
+        this.renderer = renderer;
+        
+        this.selected = [];                // Array of selected objects
+        this.boundingBoxHelpers = [];      // THREE.BoxHelper instances
+        this.highlightMeshes = [];         // Semi-transparent highlight meshes
+        this.raycaster = null;             // Initialized when THREE is available
+        this.selectionEnabled = false;     // Only show highlights in SELECT mode
+        
+        // Callbacks
+        this.onSelectionChange = () => {};
+        
+        console.log('[SelectionSystem] Initialized');
+    }
+    
+    /**
+     * Initialize raycaster (call after THREE is available)
+     */
+    init() {
+        const THREE = window.THREE;
+        if (!THREE) {
+            console.warn('[SelectionSystem] THREE not available');
+            return;
+        }
+        this.raycaster = new THREE.Raycaster();
+        console.log('[SelectionSystem] Raycaster initialized');
+    }
+    
+    /**
+     * Enable selection mode - show bounding boxes on all selectable objects
+     */
+    enableSelectionMode(model) {
+        if (!model) return;
+        
+        const THREE = window.THREE;
+        if (!THREE) return;
+        
+        this.selectionEnabled = true;
+        this.clearHighlights();
+        
+        // Create semi-transparent bounding boxes for all mesh children
+        model.traverse((child) => {
+            if (child.isMesh && child.geometry) {
+                // Create box helper
+                const box = new THREE.BoxHelper(child, 0x4f46e5);
+                box.material.transparent = true;
+                box.material.opacity = 0.3;
+                box.userData.targetObject = child;
+                this.scene.add(box);
+                this.boundingBoxHelpers.push(box);
+            }
+        });
+        
+        console.log('[SelectionSystem] Selection mode enabled,', this.boundingBoxHelpers.length, 'boxes created');
+    }
+    
+    /**
+     * Disable selection mode - remove all bounding box highlights
+     */
+    disableSelectionMode() {
+        this.selectionEnabled = false;
+        this.clearHighlights();
+        console.log('[SelectionSystem] Selection mode disabled');
+    }
+    
+    /**
+     * Clear all highlights
+     */
+    clearHighlights() {
+        this.boundingBoxHelpers.forEach(box => {
+            this.scene.remove(box);
+            box.geometry?.dispose();
+            box.material?.dispose();
+        });
+        this.boundingBoxHelpers = [];
+        
+        this.highlightMeshes.forEach(mesh => {
+            this.scene.remove(mesh);
+            mesh.geometry?.dispose();
+            mesh.material?.dispose();
+        });
+        this.highlightMeshes = [];
+    }
+    
+    /**
+     * Select object at mouse position
+     * @param {Object} mouse - {x, y} normalized device coordinates
+     * @param {THREE.Object3D} model - Root model to search in
+     * @param {boolean} addToSelection - If true, add to existing selection (Shift+click)
+     * @returns {THREE.Object3D|null} - Selected object or null
+     */
+    selectAtPoint(mouse, model, addToSelection = false) {
+        if (!this.raycaster || !model || !this.camera) return null;
+        
+        const THREE = window.THREE;
+        if (!THREE) return null;
+        
+        const mouseVec = new THREE.Vector2(mouse.x, mouse.y);
+        this.raycaster.setFromCamera(mouseVec, this.camera);
+        
+        // Get all meshes from model
+        const meshes = [];
+        model.traverse((child) => {
+            if (child.isMesh) meshes.push(child);
+        });
+        
+        const intersects = this.raycaster.intersectObjects(meshes, false);
+        
+        if (intersects.length === 0) {
+            if (!addToSelection) {
+                this.deselectAll();
+            }
+            return null;
+        }
+        
+        // Get the first hit object
+        let hitObject = intersects[0].object;
+        
+        // Walk up to find a meaningful parent (with name or userData)
+        while (hitObject.parent && hitObject.parent !== model && hitObject.parent.type !== 'Scene') {
+            if (hitObject.parent.name || hitObject.parent.userData?.isSelectable) {
+                hitObject = hitObject.parent;
+            } else {
+                break;
+            }
+        }
+        
+        if (!addToSelection) {
+            this.deselectAll();
+        }
+        
+        this.select(hitObject);
+        return hitObject;
+    }
+    
+    /**
+     * Select an object
+     */
+    select(object) {
+        if (!object || this.selected.includes(object)) return;
+        
+        const THREE = window.THREE;
+        if (!THREE) return;
+        
+        this.selected.push(object);
+        
+        // Create bright bounding box for selected object
+        const box = new THREE.BoxHelper(object, 0x00ff00);
+        box.material.transparent = false;
+        box.userData.isSelectionBox = true;
+        box.userData.targetObject = object;
+        this.scene.add(box);
+        this.boundingBoxHelpers.push(box);
+        
+        console.log('[SelectionSystem] Selected:', object.name || object.type, '| Total selected:', this.selected.length);
+        this.onSelectionChange(this.selected);
+    }
+    
+    /**
+     * Deselect an object
+     */
+    deselect(object) {
+        const idx = this.selected.indexOf(object);
+        if (idx === -1) return;
+        
+        this.selected.splice(idx, 1);
+        
+        // Remove its bounding box
+        const boxIdx = this.boundingBoxHelpers.findIndex(b => b.userData.targetObject === object && b.userData.isSelectionBox);
+        if (boxIdx !== -1) {
+            const box = this.boundingBoxHelpers[boxIdx];
+            this.scene.remove(box);
+            box.geometry?.dispose();
+            box.material?.dispose();
+            this.boundingBoxHelpers.splice(boxIdx, 1);
+        }
+        
+        console.log('[SelectionSystem] Deselected:', object.name || object.type);
+        this.onSelectionChange(this.selected);
+    }
+    
+    /**
+     * Deselect all objects
+     */
+    deselectAll() {
+        // Remove selection boxes only (keep mode boxes if in select mode)
+        const toRemove = this.boundingBoxHelpers.filter(b => b.userData.isSelectionBox);
+        toRemove.forEach(box => {
+            this.scene.remove(box);
+            box.geometry?.dispose();
+            box.material?.dispose();
+        });
+        this.boundingBoxHelpers = this.boundingBoxHelpers.filter(b => !b.userData.isSelectionBox);
+        
+        this.selected = [];
+        console.log('[SelectionSystem] Deselected all');
+        this.onSelectionChange(this.selected);
+    }
+    
+    /**
+     * Get first selected object
+     */
+    getSelected() {
+        return this.selected[0] || null;
+    }
+    
+    /**
+     * Get all selected objects
+     */
+    getAllSelected() {
+        return [...this.selected];
+    }
+    
+    /**
+     * Update bounding boxes (call in animation loop)
+     */
+    update() {
+        this.boundingBoxHelpers.forEach(box => {
+            if (box.userData.targetObject) {
+                box.update();
+            }
+        });
+    }
+    
+    /**
+     * Cleanup
+     */
+    dispose() {
+        this.clearHighlights();
+        this.selected = [];
+        this.raycaster = null;
+    }
+}
+
+/**
+ * GizmoLoader class - loads and manages transform gizmos from GLB files
+ */
+export class GizmoLoader {
+    constructor(scene) {
+        this.scene = scene;
+        this.gizmos = {
+            move: null,
+            rotate: null,
+            scale: null
+        };
+        this.activeGizmo = null;
+        this.gizmoScale = 1.0;
+        
+        // Axis colors
+        this.axisColors = {
+            x: 0xff0000,
+            y: 0x00ff00,
+            z: 0x0000ff
+        };
+        
+        // Currently hovered axis
+        this.hoveredAxis = null;
+        
+        console.log('[GizmoLoader] Initialized');
+    }
+    
+    /**
+     * Load all gizmo models
+     */
+    async loadGizmos() {
+        const THREE = window.THREE;
+        if (!THREE) {
+            console.warn('[GizmoLoader] THREE not available');
+            return;
+        }
+        
+        // Dynamic import of GLTFLoader
+        const { GLTFLoader } = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
+        const loader = new GLTFLoader();
+        
+        const gizmoFiles = {
+            move: '/static/glb/gizmo_move.glb',
+            rotate: '/static/glb/gizmo_rotate.glb',
+            scale: '/static/glb/gizmo_scale.glb'
+        };
+        
+        const loadPromises = Object.entries(gizmoFiles).map(async ([type, path]) => {
+            try {
+                const gltf = await loader.loadAsync(path);
+                this.gizmos[type] = gltf.scene;
+                this.gizmos[type].visible = false;
+                this.gizmos[type].userData.gizmoType = type;
+                
+                // Setup materials for axis highlighting
+                this.setupGizmoMaterials(this.gizmos[type], type);
+                
+                this.scene.add(this.gizmos[type]);
+                console.log(`[GizmoLoader] Loaded ${type} gizmo`);
+            } catch (err) {
+                console.error(`[GizmoLoader] Failed to load ${type} gizmo:`, err);
+            }
+        });
+        
+        await Promise.all(loadPromises);
+        console.log('[GizmoLoader] All gizmos loaded');
+    }
+    
+    /**
+     * Setup materials for gizmo axes
+     */
+    setupGizmoMaterials(gizmo, type) {
+        const THREE = window.THREE;
+        if (!THREE) return;
+        
+        gizmo.traverse((child) => {
+            if (child.isMesh) {
+                const name = child.name.toLowerCase();
+                
+                // Determine axis from name
+                let axis = null;
+                if (name.includes('_x') || name.includes('x_')) axis = 'x';
+                else if (name.includes('_y') || name.includes('y_')) axis = 'y';
+                else if (name.includes('_z') || name.includes('z_')) axis = 'z';
+                
+                if (axis) {
+                    child.userData.axis = axis;
+                    child.userData.gizmoType = type;
+                    
+                    // Create emissive material
+                    const color = this.axisColors[axis];
+                    child.material = new THREE.MeshBasicMaterial({
+                        color: color,
+                        transparent: true,
+                        opacity: 0.8,
+                        depthTest: false,
+                        depthWrite: false
+                    });
+                    child.renderOrder = 999;
+                }
+            }
+        });
+    }
+    
+    /**
+     * Show gizmo of specified type at position
+     */
+    showGizmo(type, position, rotation = null) {
+        // Hide all gizmos first
+        this.hideAllGizmos();
+        
+        const gizmo = this.gizmos[type];
+        if (!gizmo) {
+            console.warn('[GizmoLoader] Gizmo not loaded:', type);
+            return;
+        }
+        
+        gizmo.position.copy(position);
+        if (rotation) {
+            gizmo.rotation.copy(rotation);
+        }
+        gizmo.scale.setScalar(this.gizmoScale);
+        gizmo.visible = true;
+        this.activeGizmo = gizmo;
+        
+        console.log('[GizmoLoader] Showing', type, 'gizmo at', position.toArray());
+    }
+    
+    /**
+     * Hide all gizmos
+     */
+    hideAllGizmos() {
+        Object.values(this.gizmos).forEach(g => {
+            if (g) g.visible = false;
+        });
+        this.activeGizmo = null;
+    }
+    
+    /**
+     * Update gizmo position/rotation to match object
+     */
+    attachToObject(object) {
+        if (!this.activeGizmo || !object) return;
+        
+        const THREE = window.THREE;
+        if (!THREE) return;
+        
+        // Get world position
+        const worldPos = new THREE.Vector3();
+        object.getWorldPosition(worldPos);
+        this.activeGizmo.position.copy(worldPos);
+        
+        // Scale gizmo based on object size
+        const box = new THREE.Box3().setFromObject(object);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        this.gizmoScale = Math.max(0.5, maxDim * 0.3);
+        this.activeGizmo.scale.setScalar(this.gizmoScale);
+    }
+    
+    /**
+     * Check if point intersects gizmo axis
+     * @returns {{ axis: 'x'|'y'|'z', type: string } | null}
+     */
+    checkIntersection(mouse, camera) {
+        if (!this.activeGizmo) return null;
+        
+        const THREE = window.THREE;
+        if (!THREE) return null;
+        
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(mouse.x, mouse.y), camera);
+        
+        // Get all axis meshes
+        const axisMeshes = [];
+        this.activeGizmo.traverse((child) => {
+            if (child.isMesh && child.userData.axis) {
+                axisMeshes.push(child);
+            }
+        });
+        
+        const intersects = raycaster.intersectObjects(axisMeshes, false);
+        if (intersects.length > 0) {
+            const hit = intersects[0].object;
+            return {
+                axis: hit.userData.axis,
+                type: hit.userData.gizmoType
+            };
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Highlight axis on hover
+     */
+    highlightAxis(axis) {
+        if (this.hoveredAxis === axis) return;
+        this.hoveredAxis = axis;
+        
+        if (!this.activeGizmo) return;
+        
+        this.activeGizmo.traverse((child) => {
+            if (child.isMesh && child.userData.axis) {
+                const isHovered = child.userData.axis === axis;
+                child.material.opacity = isHovered ? 1.0 : 0.6;
+                if (isHovered) {
+                    child.scale.setScalar(1.2);
+                } else {
+                    child.scale.setScalar(1.0);
+                }
+            }
+        });
+    }
+    
+    /**
+     * Reset axis highlights
+     */
+    resetHighlights() {
+        this.hoveredAxis = null;
+        if (!this.activeGizmo) return;
+        
+        this.activeGizmo.traverse((child) => {
+            if (child.isMesh && child.userData.axis) {
+                child.material.opacity = 0.8;
+                child.scale.setScalar(1.0);
+            }
+        });
+    }
+    
+    /**
+     * Get active gizmo type
+     */
+    getActiveType() {
+        return this.activeGizmo?.userData?.gizmoType || null;
+    }
+    
+    /**
+     * Cleanup
+     */
+    dispose() {
+        Object.values(this.gizmos).forEach(g => {
+            if (g) {
+                this.scene.remove(g);
+                g.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+        });
+        this.gizmos = { move: null, rotate: null, scale: null };
+        this.activeGizmo = null;
+    }
+}
+
+/**
+ * TransformManager class - manages QWER transform modes
+ */
+export class TransformManager {
+    constructor(options = {}) {
+        this.scene = options.scene;
+        this.camera = options.camera;
+        this.renderer = options.renderer;
+        this.controls = options.controls;      // OrbitControls
+        this.model = options.model;
+        
+        this.mode = TransformMode.SELECT;
+        this.snapEnabled = true;
+        this.snapSettings = { ...SnapSettings };
+        
+        // Sub-systems
+        this.selectionSystem = new SelectionSystem(this.scene, this.camera, this.renderer);
+        this.gizmoLoader = new GizmoLoader(this.scene);
+        
+        // Drag state
+        this.isDragging = false;
+        this.dragAxis = null;
+        this.dragStartPoint = null;
+        this.dragStartValue = null;
+        
+        // Callbacks
+        this.onModeChange = options.onModeChange || (() => {});
+        this.onTransform = options.onTransform || (() => {});
+        
+        // Bind event handlers
+        this._onPointerDown = this._onPointerDown.bind(this);
+        this._onPointerMove = this._onPointerMove.bind(this);
+        this._onPointerUp = this._onPointerUp.bind(this);
+        
+        console.log('[TransformManager] Initialized');
+    }
+    
+    /**
+     * Initialize systems (call after THREE is available)
+     */
+    async init() {
+        this.selectionSystem.init();
+        await this.gizmoLoader.loadGizmos();
+        this._bindEvents();
+        console.log('[TransformManager] Systems initialized');
+    }
+    
+    /**
+     * Bind pointer events
+     */
+    _bindEvents() {
+        if (!this.renderer) return;
+        
+        const canvas = this.renderer.domElement;
+        canvas.addEventListener('pointerdown', this._onPointerDown);
+        canvas.addEventListener('pointermove', this._onPointerMove);
+        canvas.addEventListener('pointerup', this._onPointerUp);
+        canvas.addEventListener('pointerleave', this._onPointerUp);
+    }
+    
+    /**
+     * Unbind pointer events
+     */
+    _unbindEvents() {
+        if (!this.renderer) return;
+        
+        const canvas = this.renderer.domElement;
+        canvas.removeEventListener('pointerdown', this._onPointerDown);
+        canvas.removeEventListener('pointermove', this._onPointerMove);
+        canvas.removeEventListener('pointerup', this._onPointerUp);
+        canvas.removeEventListener('pointerleave', this._onPointerUp);
+    }
+    
+    /**
+     * Get normalized mouse coordinates
+     */
+    _getMouse(event) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        return {
+            x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+            y: -((event.clientY - rect.top) / rect.height) * 2 + 1
+        };
+    }
+    
+    /**
+     * Pointer down handler
+     */
+    _onPointerDown(event) {
+        if (event.button !== 0) return; // Left click only
+
+        const mouse = this._getMouse(event);
+
+        // Check gizmo interaction first
+        if (this.mode !== TransformMode.SELECT) {
+            const hit = this.gizmoLoader.checkIntersection(mouse, this.camera);
+            if (hit) {
+                this.isDragging = true;
+                this.dragAxis = hit.axis;
+                this.dragStartPoint = { ...mouse };
+
+                // Use root model (or selected) for transform
+                const target = this.getTransformTarget();
+                if (target) {
+                    this.dragStartValue = {
+                        position: target.position.clone(),
+                        rotation: target.rotation.clone(),
+                        scale: target.scale.clone()
+                    };
+                }
+
+                // Disable orbit controls during drag
+                if (this.controls) this.controls.enabled = false;
+
+                console.log('[TransformManager] Started drag on axis:', hit.axis, 'target:', target?.name);
+                event.preventDefault();
+                return;
+            }
+        }
+        
+        // Selection
+        if (this.model) {
+            const addToSelection = event.shiftKey;
+            this.selectionSystem.selectAtPoint(mouse, this.model, addToSelection);
+            this._updateGizmoForSelection();
+        }
+    }
+    
+    /**
+     * Pointer move handler
+     */
+    _onPointerMove(event) {
+        const mouse = this._getMouse(event);
+        
+        if (this.isDragging && this.dragAxis) {
+            this._handleDrag(mouse);
+            return;
+        }
+        
+        // Hover highlight for gizmo
+        if (this.mode !== TransformMode.SELECT) {
+            const hit = this.gizmoLoader.checkIntersection(mouse, this.camera);
+            if (hit) {
+                this.gizmoLoader.highlightAxis(hit.axis);
+                this.renderer.domElement.style.cursor = 'pointer';
+            } else {
+                this.gizmoLoader.resetHighlights();
+                this.renderer.domElement.style.cursor = '';
+            }
+        }
+    }
+    
+    /**
+     * Pointer up handler
+     */
+    _onPointerUp(event) {
+        if (this.isDragging) {
+            this.isDragging = false;
+            this.dragAxis = null;
+            this.dragStartPoint = null;
+            this.dragStartValue = null;
+
+            // Re-enable orbit controls
+            if (this.controls) this.controls.enabled = true;
+
+            // Notify transform complete - pass root model (the actual transformed object)
+            const target = this.getTransformTarget();
+            if (target) {
+                this.onTransform(target, this.mode);
+            }
+
+            console.log('[TransformManager] Drag ended, target:', target?.name);
+        }
+    }
+    
+    /**
+     * Set root model - all transforms will apply to this model
+     */
+    setRootModel(model) {
+        this.rootModel = model;
+        console.log('[TransformManager] Root model set:', model?.name || 'none');
+    }
+    
+    /**
+     * Get transform target - root model if set, otherwise selected object
+     */
+    getTransformTarget() {
+        // Always use rootModel if set (for moving entire model)
+        if (this.rootModel) {
+            return this.rootModel;
+        }
+        return this.selectionSystem.getSelected();
+    }
+    
+    /**
+     * Handle drag operation - transforms apply to root model
+     */
+    _handleDrag(mouse) {
+        // Get target: root model if set, otherwise selected
+        const target = this.getTransformTarget();
+        if (!target || !this.dragStartValue) return;
+        
+        const THREE = window.THREE;
+        if (!THREE) return;
+        
+        // Calculate delta in screen space
+        const deltaX = mouse.x - this.dragStartPoint.x;
+        const deltaY = mouse.y - this.dragStartPoint.y;
+        
+        // Map axis to component
+        const axisMap = { x: 'x', y: 'y', z: 'z' };
+        const axis = axisMap[this.dragAxis];
+        
+        // Sensitivity (increased for more responsive feel)
+        const moveSens = 8.0;      // Increased from 5.0
+        const rotateSens = Math.PI * 1.5;  // Increased from PI
+        const scaleSens = 3.0;     // Increased from 2.0
+        
+        // Use deltaX for X/Z axes, deltaY for Y axis
+        // Fix axis inversion to match expected direction
+        let delta;
+        if (this.dragAxis === 'y') {
+            delta = deltaY; // Inverted: down in screen = positive Y
+        } else if (this.dragAxis === 'x') {
+            delta = -deltaX; // Inverted: right in screen = negative X
+        } else {
+            delta = deltaX; // Z axis unchanged
+        }
+        
+        switch (this.mode) {
+            case TransformMode.MOVE: {
+                let moveAmount = delta * moveSens;
+                if (this.snapEnabled) {
+                    moveAmount = Math.round(moveAmount / this.snapSettings.move) * this.snapSettings.move;
+                }
+                target.position[axis] = this.dragStartValue.position[axis] + moveAmount;
+                break;
+            }
+            
+            case TransformMode.ROTATE: {
+                let rotateAmount = delta * rotateSens;
+                if (this.snapEnabled) {
+                    const snapRad = this.snapSettings.rotation * (Math.PI / 180);
+                    rotateAmount = Math.round(rotateAmount / snapRad) * snapRad;
+                }
+                target.rotation[axis] = this.dragStartValue.rotation[axis] + rotateAmount;
+                break;
+            }
+            
+            case TransformMode.SCALE: {
+                let scaleAmount = 1 + delta * scaleSens;
+                if (this.snapEnabled) {
+                    scaleAmount = Math.round(scaleAmount / this.snapSettings.scale) * this.snapSettings.scale;
+                }
+                scaleAmount = Math.max(0.1, scaleAmount); // Minimum scale
+                target.scale[axis] = this.dragStartValue.scale[axis] * scaleAmount;
+                break;
+            }
+        }
+        
+        // Update gizmo position
+        this.gizmoLoader.attachToObject(target);
+    }
+    
+    /**
+     * Update gizmo based on current selection
+     */
+    _updateGizmoForSelection() {
+        const selected = this.selectionSystem.getSelected();
+        
+        if (!selected) {
+            this.gizmoLoader.hideAllGizmos();
+            return;
+        }
+        
+        const THREE = window.THREE;
+        if (!THREE) return;
+        
+        // Show appropriate gizmo based on mode
+        const gizmoType = {
+            [TransformMode.MOVE]: 'move',
+            [TransformMode.ROTATE]: 'rotate',
+            [TransformMode.SCALE]: 'scale'
+        }[this.mode];
+        
+        if (gizmoType) {
+            const worldPos = new THREE.Vector3();
+            selected.getWorldPosition(worldPos);
+            this.gizmoLoader.showGizmo(gizmoType, worldPos);
+            this.gizmoLoader.attachToObject(selected);
+        } else {
+            this.gizmoLoader.hideAllGizmos();
+        }
+    }
+    
+    /**
+     * Set transform mode
+     */
+    setMode(mode) {
+        if (!Object.values(TransformMode).includes(mode)) {
+            console.warn('[TransformManager] Invalid mode:', mode);
+            return;
+        }
+        
+        const prevMode = this.mode;
+        this.mode = mode;
+        
+        // Update selection system
+        if (mode === TransformMode.SELECT) {
+            this.selectionSystem.enableSelectionMode(this.model);
+            this.gizmoLoader.hideAllGizmos();
+        } else {
+            this.selectionSystem.disableSelectionMode();
+            this._updateGizmoForSelection();
+        }
+        
+        console.log('[TransformManager] Mode changed:', prevMode, '->', mode);
+        this.onModeChange(mode, prevMode);
+    }
+    
+    /**
+     * Set model reference
+     */
+    setModel(model) {
+        this.model = model;
+        this.selectionSystem.deselectAll();
+        
+        if (this.mode === TransformMode.SELECT) {
+            this.selectionSystem.enableSelectionMode(model);
+        }
+    }
+    
+    /**
+     * Set snap enabled/disabled
+     */
+    setSnapEnabled(enabled) {
+        this.snapEnabled = enabled;
+        console.log('[TransformManager] Snap:', enabled);
+    }
+    
+    /**
+     * Update snap settings
+     */
+    setSnapSettings(settings) {
+        this.snapSettings = { ...this.snapSettings, ...settings };
+        console.log('[TransformManager] Snap settings updated:', this.snapSettings);
+    }
+    
+    /**
+     * Get current mode
+     */
+    getMode() {
+        return this.mode;
+    }
+    
+    /**
+     * Get mode label
+     */
+    getModeLabel() {
+        const labels = {
+            [TransformMode.SELECT]: 'Select (Q)',
+            [TransformMode.MOVE]: 'Move (W)',
+            [TransformMode.ROTATE]: 'Rotate (E)',
+            [TransformMode.SCALE]: 'Scale (R)'
+        };
+        return labels[this.mode] || this.mode;
+    }
+    
+    /**
+     * Handle keyboard shortcuts
+     */
+    handleKeyDown(key) {
+        const keyLower = key.toLowerCase();
+        
+        switch (keyLower) {
+            case 'q':
+                this.setMode(TransformMode.SELECT);
+                return true;
+            case 'w':
+                this.setMode(TransformMode.MOVE);
+                return true;
+            case 'e':
+                this.setMode(TransformMode.ROTATE);
+                return true;
+            case 'r':
+                this.setMode(TransformMode.SCALE);
+                return true;
+            case 'escape':
+                this.selectionSystem.deselectAll();
+                this.gizmoLoader.hideAllGizmos();
+                return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Update (call in animation loop)
+     */
+    update() {
+        this.selectionSystem.update();
+        
+        // Keep gizmo attached to selected object
+        const selected = this.selectionSystem.getSelected();
+        if (selected && this.gizmoLoader.activeGizmo) {
+            this.gizmoLoader.attachToObject(selected);
+        }
+    }
+    
+    /**
+     * Cleanup
+     */
+    dispose() {
+        this._unbindEvents();
+        this.selectionSystem.dispose();
+        this.gizmoLoader.dispose();
+    }
+}
+
+/**
+ * HierarchyNavigator class - navigate object hierarchy
+ */
+export class HierarchyNavigator {
+    constructor(options = {}) {
+        this.model = options.model;
+        this.selectionSystem = options.selectionSystem;
+        this.currentLevel = null;           // Current hierarchy level object
+        this.navigationStack = [];          // Stack of parent objects for going back
+        
+        // Callbacks
+        this.onNavigate = options.onNavigate || (() => {});
+        
+        console.log('[HierarchyNavigator] Initialized');
+    }
+    
+    /**
+     * Set model reference
+     */
+    setModel(model) {
+        this.model = model;
+        this.currentLevel = model;
+        this.navigationStack = [];
+        console.log('[HierarchyNavigator] Model set, root level');
+    }
+    
+    /**
+     * Enter into selected object's children (Space key)
+     */
+    enterChildren() {
+        if (!this.selectionSystem) return false;
+        
+        const selected = this.selectionSystem.getSelected();
+        if (!selected) {
+            console.log('[HierarchyNavigator] No selection to enter');
+            return false;
+        }
+        
+        if (!selected.children || selected.children.length === 0) {
+            console.log('[HierarchyNavigator] Selected object has no children');
+            return false;
+        }
+        
+        // Push current level to stack
+        this.navigationStack.push(this.currentLevel);
+        this.currentLevel = selected;
+        
+        // Select first child
+        this.selectionSystem.deselectAll();
+        const firstChild = selected.children.find(c => c.isMesh || c.isGroup || c.isObject3D);
+        if (firstChild) {
+            this.selectionSystem.select(firstChild);
+        }
+        
+        console.log('[HierarchyNavigator] Entered:', selected.name || selected.type, '| Children:', selected.children.length);
+        this.onNavigate(this.currentLevel, 'enter');
+        return true;
+    }
+    
+    /**
+     * Go to parent level (↑ button or Backspace)
+     */
+    goToParent() {
+        if (this.navigationStack.length === 0) {
+            console.log('[HierarchyNavigator] Already at root level');
+            return false;
+        }
+        
+        const parent = this.navigationStack.pop();
+        
+        // Select the object we're leaving
+        const leavingObject = this.currentLevel;
+        this.currentLevel = parent;
+        
+        this.selectionSystem.deselectAll();
+        this.selectionSystem.select(leavingObject);
+        
+        console.log('[HierarchyNavigator] Went to parent:', parent.name || parent.type);
+        this.onNavigate(this.currentLevel, 'parent');
+        return true;
+    }
+    
+    /**
+     * Get current level name
+     */
+    getCurrentLevelName() {
+        if (!this.currentLevel) return 'None';
+        return this.currentLevel.name || this.currentLevel.type || 'Object';
+    }
+    
+    /**
+     * Get navigation path (breadcrumb)
+     */
+    getNavigationPath() {
+        const path = this.navigationStack.map(obj => obj.name || obj.type || '?');
+        if (this.currentLevel) {
+            path.push(this.currentLevel.name || this.currentLevel.type || 'Current');
+        }
+        return path;
+    }
+    
+    /**
+     * Reset to root
+     */
+    resetToRoot() {
+        this.currentLevel = this.model;
+        this.navigationStack = [];
+        this.selectionSystem?.deselectAll();
+        console.log('[HierarchyNavigator] Reset to root');
+        this.onNavigate(this.currentLevel, 'reset');
+    }
+    
+    /**
+     * Handle keyboard input
+     */
+    handleKeyDown(key) {
+        switch (key) {
+            case ' ':
+            case 'Space':
+                return this.enterChildren();
+            case 'Backspace':
+                return this.goToParent();
+        }
+        return false;
+    }
+}
+
+/**
+ * TPoseReference class - manages T-pose reference model overlay
+ * Self-illuminating with configurable color and transparency
+ */
+export class TPoseReference {
+    constructor(scene, options = {}) {
+        this.scene = scene;
+        this.model = null;
+        this.visible = false;
+        
+        // Configurable parameters
+        this.color = options.color || 0x00ffff;  // Cyan default (self-illuminating look)
+        this.opacity = options.opacity || 0.4;
+        this.emissiveIntensity = options.emissiveIntensity || 1.0;
+        
+        console.log('[TPoseReference] Initialized with color:', this.color.toString(16), 'opacity:', this.opacity);
+    }
+    
+    /**
+     * Load T-pose reference model
+     */
+    async load() {
+        const THREE = window.THREE;
+        if (!THREE) {
+            console.warn('[TPoseReference] THREE not available');
+            return;
+        }
+        
+        try {
+            const { GLTFLoader } = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
+            const loader = new GLTFLoader();
+            
+            const gltf = await loader.loadAsync('/static/glb/default_t_pose.glb');
+            this.model = gltf.scene;
+            
+            // Fixed position at origin
+            this.model.position.set(0, 0, 0);
+            this.model.rotation.set(0, 0, 0);
+            this.model.scale.set(1, 1, 1);
+            
+            // Apply self-illuminating material (emissive)
+            this._applyMaterial();
+            
+            this.model.visible = this.visible;
+            this.scene.add(this.model);
+            
+            console.log('[TPoseReference] Model loaded with emissive material');
+        } catch (err) {
+            console.error('[TPoseReference] Failed to load:', err);
+        }
+    }
+    
+    /**
+     * Apply falloff shader material to model (Fresnel edge glow effect)
+     */
+    _applyMaterial() {
+        const THREE = window.THREE;
+        if (!this.model || !THREE) return;
+        
+        // Create falloff shader material
+        const falloffMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                color: { value: new THREE.Color(this.color) },
+                opacity: { value: this.opacity },
+                falloffPower: { value: 2.0 }
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vViewDir;
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    vec4 worldPos = modelViewMatrix * vec4(position, 1.0);
+                    vViewDir = normalize(-worldPos.xyz);
+                    gl_Position = projectionMatrix * worldPos;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 color;
+                uniform float opacity;
+                uniform float falloffPower;
+                varying vec3 vNormal;
+                varying vec3 vViewDir;
+                void main() {
+                    // Fresnel falloff - brighter at edges
+                    float fresnel = pow(1.0 - abs(dot(vNormal, vViewDir)), falloffPower);
+                    float intensity = 0.3 + fresnel * 0.7;
+                    gl_FragColor = vec4(color * intensity, opacity * intensity);
+                }
+            `,
+            transparent: true,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            depthTest: true,
+            blending: THREE.AdditiveBlending
+        });
+        
+        this.model.traverse((child) => {
+            if (child.isMesh) {
+                child.material = falloffMaterial.clone();
+                child.renderOrder = 10; // Render on top for visibility
+            }
+        });
+        
+        console.log('[TPoseReference] Applied falloff shader material');
+    }
+    
+    /**
+     * Set color (hex number or string)
+     */
+    setColor(color) {
+        const THREE = window.THREE;
+        if (typeof color === 'string') {
+            this.color = parseInt(color.replace('#', ''), 16);
+        } else {
+            this.color = color;
+        }
+        
+        if (this.model && THREE) {
+            this.model.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    // Support both ShaderMaterial uniforms and regular material.color
+                    if (child.material.uniforms && child.material.uniforms.color) {
+                        child.material.uniforms.color.value.setHex(this.color);
+                    } else if (child.material.color) {
+                        child.material.color.setHex(this.color);
+                    }
+                }
+            });
+        }
+        console.log('[TPoseReference] Color set to:', this.color.toString(16));
+    }
+    
+    /**
+     * Set opacity (0-1)
+     */
+    setOpacity(opacity) {
+        this.opacity = Math.max(0, Math.min(1, opacity));
+        
+        if (this.model) {
+            this.model.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    // Support both ShaderMaterial uniforms and regular material.opacity
+                    if (child.material.uniforms && child.material.uniforms.opacity) {
+                        child.material.uniforms.opacity.value = this.opacity;
+                    } else {
+                        child.material.opacity = this.opacity;
+                    }
+                }
+            });
+        }
+        console.log('[TPoseReference] Opacity set to:', this.opacity);
+    }
+    
+    /**
+     * Toggle visibility (T key)
+     */
+    toggle() {
+        this.visible = !this.visible;
+        if (this.model) {
+            this.model.visible = this.visible;
+        }
+        console.log('[TPoseReference] Visibility:', this.visible);
+        return this.visible;
+    }
+    
+    /**
+     * Set visibility
+     */
+    setVisible(visible) {
+        this.visible = visible;
+        if (this.model) {
+            this.model.visible = visible;
+        }
+        console.log('[TPoseReference] setVisible:', visible);
+    }
+
+    /**
+     * Set wireframe mode
+     */
+    setWireframe(wireframe) {
+        this.wireframe = wireframe;
+        if (this.model) {
+            this.model.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    child.material.wireframe = wireframe;
+                }
+            });
+        }
+    }
+    
+    /**
+     * Check if loaded
+     */
+    isLoaded() {
+        return this.model !== null;
+    }
+    
+    /**
+     * Cleanup
+     */
+    dispose() {
+        if (this.model) {
+            this.scene.remove(this.model);
+            this.model.traverse((child) => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            this.model = null;
+        }
+    }
+}
+
+// =============================================================================
+// Browser Auto-Test System
+// =============================================================================
+
+/**
+ * TransformSystemTests - Auto-tests with console logging
+ */
+export class TransformSystemTests {
+    constructor() {
+        this.testResults = [];
+        this.testCount = 0;
+        this.passCount = 0;
+        this.failCount = 0;
+    }
+    
+    /**
+     * Run all tests
+     */
+    async runAll(transformManager, viewerControls, tPoseRef) {
+        console.log('='.repeat(60));
+        console.log('[TEST] 🧪 Starting Transform System Auto-Tests');
+        console.log('='.repeat(60));
+        
+        this.testResults = [];
+        this.testCount = 0;
+        this.passCount = 0;
+        this.failCount = 0;
+        
+        // Test groups
+        await this.testTransformModes(transformManager);
+        await this.testSelectionSystem(transformManager);
+        await this.testGizmoLoader(transformManager);
+        await this.testTPoseReference(tPoseRef);
+        await this.testSnapSettings(transformManager);
+        await this.testKeyboardShortcuts(transformManager, viewerControls, tPoseRef);
+        
+        // Summary
+        console.log('='.repeat(60));
+        console.log(`[TEST] 📊 Results: ${this.passCount}/${this.testCount} passed, ${this.failCount} failed`);
+        console.log('='.repeat(60));
+        
+        return {
+            total: this.testCount,
+            passed: this.passCount,
+            failed: this.failCount,
+            results: this.testResults
+        };
+    }
+    
+    /**
+     * Assert helper
+     */
+    assert(condition, testName, details = '') {
+        this.testCount++;
+        if (condition) {
+            this.passCount++;
+            console.log(`[TEST] ✅ ${testName}`);
+            this.testResults.push({ name: testName, passed: true, details });
+        } else {
+            this.failCount++;
+            console.error(`[TEST] ❌ ${testName}`, details);
+            this.testResults.push({ name: testName, passed: false, details });
+        }
+    }
+    
+    /**
+     * Test transform modes
+     */
+    async testTransformModes(tm) {
+        console.log('\n[TEST] 📁 Transform Modes');
+        
+        if (!tm) {
+            this.assert(false, 'TransformManager exists', 'TransformManager is null');
+            return;
+        }
+        
+        this.assert(tm.mode === TransformMode.SELECT, 'Initial mode is SELECT');
+        
+        tm.setMode(TransformMode.MOVE);
+        this.assert(tm.mode === TransformMode.MOVE, 'Can set MOVE mode');
+        
+        tm.setMode(TransformMode.ROTATE);
+        this.assert(tm.mode === TransformMode.ROTATE, 'Can set ROTATE mode');
+        
+        tm.setMode(TransformMode.SCALE);
+        this.assert(tm.mode === TransformMode.SCALE, 'Can set SCALE mode');
+        
+        tm.setMode(TransformMode.SELECT);
+        this.assert(tm.mode === TransformMode.SELECT, 'Can return to SELECT mode');
+        
+        this.assert(tm.getModeLabel().includes('Select'), 'getModeLabel() returns correct label');
+    }
+    
+    /**
+     * Test selection system
+     */
+    async testSelectionSystem(tm) {
+        console.log('\n[TEST] 📁 Selection System');
+        
+        if (!tm?.selectionSystem) {
+            this.assert(false, 'SelectionSystem exists', 'SelectionSystem is null');
+            return;
+        }
+        
+        const ss = tm.selectionSystem;
+        
+        this.assert(ss.raycaster !== null, 'Raycaster is initialized');
+        this.assert(Array.isArray(ss.selected), 'Selected array exists');
+        this.assert(ss.selected.length === 0, 'Initial selection is empty');
+        
+        // Test deselect all
+        ss.deselectAll();
+        this.assert(ss.selected.length === 0, 'deselectAll() clears selection');
+        
+        this.assert(typeof ss.onSelectionChange === 'function', 'onSelectionChange callback exists');
+    }
+    
+    /**
+     * Test gizmo loader
+     */
+    async testGizmoLoader(tm) {
+        console.log('\n[TEST] 📁 Gizmo Loader');
+        
+        if (!tm?.gizmoLoader) {
+            this.assert(false, 'GizmoLoader exists', 'GizmoLoader is null');
+            return;
+        }
+        
+        const gl = tm.gizmoLoader;
+        
+        this.assert(gl.gizmos.move !== null, 'Move gizmo loaded');
+        this.assert(gl.gizmos.rotate !== null, 'Rotate gizmo loaded');
+        this.assert(gl.gizmos.scale !== null, 'Scale gizmo loaded');
+        
+        // Test hide all
+        gl.hideAllGizmos();
+        this.assert(gl.activeGizmo === null, 'hideAllGizmos() clears active gizmo');
+        
+        // Test axis colors
+        this.assert(gl.axisColors.x === 0xff0000, 'X axis color is red');
+        this.assert(gl.axisColors.y === 0x00ff00, 'Y axis color is green');
+        this.assert(gl.axisColors.z === 0x0000ff, 'Z axis color is blue');
+    }
+    
+    /**
+     * Test T-pose reference
+     */
+    async testTPoseReference(tPose) {
+        console.log('\n[TEST] 📁 T-Pose Reference');
+        
+        if (!tPose) {
+            this.assert(false, 'TPoseReference exists', 'TPoseReference is null');
+            return;
+        }
+        
+        this.assert(tPose.isLoaded(), 'T-pose model loaded');
+        
+        const initialVisible = tPose.visible;
+        tPose.toggle();
+        this.assert(tPose.visible !== initialVisible, 'toggle() changes visibility');
+        tPose.toggle(); // Restore
+        
+        tPose.setOpacity(0.5);
+        this.assert(tPose.opacity === 0.5, 'setOpacity() updates opacity');
+        tPose.setOpacity(0.3); // Restore
+        
+        tPose.setWireframe(false);
+        this.assert(tPose.wireframe === false, 'setWireframe() updates wireframe');
+        tPose.setWireframe(true); // Restore
+    }
+    
+    /**
+     * Test snap settings
+     */
+    async testSnapSettings(tm) {
+        console.log('\n[TEST] 📁 Snap Settings');
+        
+        if (!tm) return;
+        
+        this.assert(tm.snapEnabled === true, 'Snap is enabled by default');
+        
+        tm.setSnapEnabled(false);
+        this.assert(tm.snapEnabled === false, 'setSnapEnabled(false) works');
+        
+        tm.setSnapEnabled(true);
+        this.assert(tm.snapEnabled === true, 'setSnapEnabled(true) works');
+        
+        const originalRotation = tm.snapSettings.rotation;
+        tm.setSnapSettings({ rotation: 30 });
+        this.assert(tm.snapSettings.rotation === 30, 'setSnapSettings() updates rotation');
+        tm.setSnapSettings({ rotation: originalRotation }); // Restore
+    }
+    
+    /**
+     * Test keyboard shortcuts (simulated)
+     */
+    async testKeyboardShortcuts(tm, vc, tPose) {
+        console.log('\n[TEST] 📁 Keyboard Shortcuts');
+        
+        if (!tm) return;
+        
+        // QWER modes
+        tm.handleKeyDown('q');
+        this.assert(tm.mode === TransformMode.SELECT, 'Q key sets SELECT mode');
+        
+        tm.handleKeyDown('w');
+        this.assert(tm.mode === TransformMode.MOVE, 'W key sets MOVE mode');
+        
+        tm.handleKeyDown('e');
+        this.assert(tm.mode === TransformMode.ROTATE, 'E key sets ROTATE mode');
+        
+        tm.handleKeyDown('r');
+        this.assert(tm.mode === TransformMode.SCALE, 'R key sets SCALE mode');
+        
+        // ESC
+        tm.handleKeyDown('escape');
+        this.assert(tm.selectionSystem.selected.length === 0, 'ESC clears selection');
+        
+        // T for T-pose
+        if (tPose) {
+            const vis = tPose.visible;
+            // T key should be handled by ViewerControls, not TransformManager
+            this.assert(typeof tPose.toggle === 'function', 'T-pose has toggle method');
+        }
+        
+        // Reset to SELECT
+        tm.setMode(TransformMode.SELECT);
+    }
+}
+
 // Export default for convenience
-export default { RigEditor, ViewerControls, RigType, CameraMode, MaterialChannel };
+export default { 
+    RigEditor, 
+    ViewerControls, 
+    RigType, 
+    CameraMode, 
+    MaterialChannel,
+    TransformMode,
+    TransformManager,
+    SelectionSystem,
+    GizmoLoader,
+    HierarchyNavigator,
+    TPoseReference,
+    SnapSettings,
+    TransformSystemTests
+};

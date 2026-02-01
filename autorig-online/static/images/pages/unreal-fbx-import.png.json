@@ -1,0 +1,25 @@
+{
+  "task_id": "af242f16",
+  "prompt": "Abstract visualization of FBX import process in Unreal Engine, dark theme, Unreal orange highlights, technical style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-import.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:27.661158",
+  "status": "completed",
+  "started_at": "2026-01-03T17:53:34.508008",
+  "request_payload": {
+    "prompt": "Abstract visualization of FBX import process in Unreal Engine, dark theme, Unreal orange highlights, technical style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:53:34.508282",
+  "output_url": "https://renderfin.com/render/default_user/9aa61932-58ef-4c1b-ad2c-413579810f4c.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/9aa61932-58ef-4c1b-ad2c-413579810f4c.png"
+  },
+  "response_received_at": "2026-01-03T17:53:34.875603",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:54:01.646140",
+  "completed_at": "2026-01-03T17:54:07.450464",
+  "file_size": 819282
+}

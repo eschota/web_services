@@ -1,0 +1,25 @@
+{
+  "task_id": "4bc33f62",
+  "prompt": "Abstract visualization of 3D character skeleton with mesh overlay, dark theme, indigo blue highlights, technical style, no text, wireframe and solid mesh combination, minimalist design",
+  "output_path": "/root/autorig-online/static/images/pages/mixamo-rigging.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:40:02.046578",
+  "status": "completed",
+  "started_at": "2026-01-03T17:45:46.662322",
+  "request_payload": {
+    "prompt": "Abstract visualization of 3D character skeleton with mesh overlay, dark theme, indigo blue highlights, technical style, no text, wireframe and solid mesh combination, minimalist design",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:45:46.662566",
+  "output_url": "https://renderfin.com/render/default_user/4d693590-37c7-41a2-b21b-3d47b8ca6755.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/4d693590-37c7-41a2-b21b-3d47b8ca6755.png"
+  },
+  "response_received_at": "2026-01-03T17:45:47.048610",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:46:14.020043",
+  "completed_at": "2026-01-03T17:46:19.892180",
+  "file_size": 446043
+}

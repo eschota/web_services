@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "session_id": "52eb8a42-85a9-4de9-92f3-e37de27d9cb6",
+      "chat_id": -349586922,
+      "message_id": 77,
+      "type": "status"
+    },
+    {
+      "session_id": "52eb8a42-85a9-4de9-92f3-e37de27d9cb6",
+      "chat_id": -349586922,
+      "message_id": 78,
+      "type": "results"
+    },
+    {
+      "session_id": "52eb8a42-85a9-4de9-92f3-e37de27d9cb6",
+      "chat_id": 223960353,
+      "message_id": 82,
+      "type": "status"
+    },
+    {
+      "session_id": "52eb8a42-85a9-4de9-92f3-e37de27d9cb6",
+      "chat_id": 223960353,
+      "message_id": 83,
+      "type": "results"
+    }
+  ]
+}

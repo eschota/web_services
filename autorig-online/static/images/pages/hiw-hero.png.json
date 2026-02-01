@@ -1,0 +1,25 @@
+{
+  "task_id": "a316d37d",
+  "prompt": "Dark tech UI visualization of automated 3D character rigging pipeline. Left side shows raw gray humanoid 3D mesh, center shows animated transformation arrows and processing gears, right side shows fully rigged colorful character with visible skeleton overlay in glowing green. Dark purple-black gradient background with indigo accent lights. Futuristic digital aesthetic, neon grid floor, volumetric lighting. Professional 3D software interface style. Text overlay \"3D MODEL → AUTO RIG → ANIMATED CHARACTER\"",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-hero.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:12:50.369064",
+  "status": "completed",
+  "started_at": "2026-01-03T18:12:50.930429",
+  "request_payload": {
+    "prompt": "Dark tech UI visualization of automated 3D character rigging pipeline. Left side shows raw gray humanoid 3D mesh, center shows animated transformation arrows and processing gears, right side shows fully rigged colorful character with visible skeleton overlay in glowing green. Dark purple-black gradient background with indigo accent lights. Futuristic digital aesthetic, neon grid floor, volumetric lighting. Professional 3D software interface style. Text overlay \"3D MODEL → AUTO RIG → ANIMATED CHARACTER\"",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:12:50.930724",
+  "output_url": "https://renderfin.com/render/default_user/578f9e89-9c27-4264-9564-aa6264e47449.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/578f9e89-9c27-4264-9564-aa6264e47449.png"
+  },
+  "response_received_at": "2026-01-03T18:12:51.311667",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:13:18.061792",
+  "completed_at": "2026-01-03T18:13:23.890493",
+  "file_size": 853702
+}

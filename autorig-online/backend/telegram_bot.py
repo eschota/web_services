@@ -210,6 +210,46 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def broadcast_purchase_intent(
+    task_id: str,
+    user_email: str | None = None,
+    anon_id: str | None = None,
+    source: str | None = None
+) -> None:
+    """Notify when user clicks download-to-purchase."""
+    print(f"[Telegram] broadcast_purchase_intent called for task {task_id}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping purchase intent notification")
+        return
+
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    url = _task_url(task_id)
+    actor = user_email or (f"anon:{anon_id}" if anon_id else "anon")
+    source_label = source or "download_all"
+    text = f"💳 Purchase intent\n{url}\nUser: {actor}\nSource: {source_label}"
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                disable_web_page_preview=False
+            ))
+            if result:
+                print(f"[Telegram] Purchase intent sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
 def _format_duration(seconds: int | None) -> str:
     if seconds is None:
         return ""
@@ -258,6 +298,89 @@ async def _download_video_from_worker(task_id: str) -> str | None:
     return None
 
 
+async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_email: str | None = None) -> None:
+    """Notify about task restart."""
+    print(f"[Telegram] broadcast_task_restarted called for task {task_id}, reason={reason}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping restart notification")
+        return
+
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    url = _task_url(task_id)
+    webapp_url = _webapp_url(task_id)
+    
+    # Get task details
+    input_info = ""
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Task).where(Task.id == task_id))
+            task = result.scalar_one_or_none()
+            if task:
+                summary = _task_summary(task.input_url, task.input_type)
+                if summary:
+                    input_info = f"\n{summary}"
+    except Exception as e:
+        print(f"[Telegram] Failed to get task details: {e}")
+    
+    admin_line = f"\n👤 Admin: {admin_email}" if admin_email else ""
+    text = f"🔄 Task restarted ({reason})\n{url}{input_info}{admin_line}"
+
+    chat_ids = await get_active_chat_ids()
+    print(f"[Telegram] Sending restart notification to {len(chat_ids)} chat(s)")
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            keyboard = _make_viewer_keyboard(chat_id, webapp_url)
+            await _send_with_retry(lambda cid=chat_id, kb=keyboard: bot.send_message(
+                chat_id=cid, 
+                text=text, 
+                reply_markup=kb,
+                disable_web_page_preview=False
+            ))
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
+async def broadcast_bulk_restart_summary(total: int, restarted: int, errors: list, admin_email: str) -> None:
+    """Notify about bulk restart completion."""
+    print(f"[Telegram] broadcast_bulk_restart_summary: {restarted}/{total}")
+    token = _get_token()
+    if not token:
+        return
+
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    
+    error_line = ""
+    if errors:
+        error_line = f"\n❌ Errors: {len(errors)}"
+        if len(errors) <= 5:
+            error_line += f"\n{chr(10).join(errors)}"
+    
+    text = (
+        f"🔄 Bulk restart completed\n"
+        f"👤 Admin: {admin_email}\n"
+        f"✅ Restarted: {restarted}/{total}{error_line}"
+    )
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    await asyncio.gather(*[
+        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text, disable_web_page_preview=True))
+        for cid in chat_ids
+    ])
+
+
 async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:
     print(f"[Telegram] broadcast_task_done called for task {task_id}")
     token = _get_token()
@@ -271,24 +394,41 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     url = _task_url(task_id)
     webapp_url = _webapp_url(task_id)
 
-    # If progress_page not passed, try to get from DB
+    # Get task details including owner for author line
+    owner_email = None
     if not progress_page:
         try:
             async with AsyncSessionLocal() as db:
                 from sqlalchemy import select
                 result = await db.execute(select(Task).where(Task.id == task_id))
                 task = result.scalar_one_or_none()
-                if task and task.guid and task.worker_api:
+                if task:
+                    # Get author email if owner is a user
+                    if task.owner_type == "user":
+                        owner_email = task.owner_id
                     # Construct progress_page URL from worker_api and guid
-                    from urllib.parse import urlparse
-                    parsed = urlparse(task.worker_api)
-                    worker_base = f"{parsed.scheme}://{parsed.netloc}"
-                    progress_page = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+                    if task.guid and task.worker_api:
+                        from urllib.parse import urlparse
+                        parsed = urlparse(task.worker_api)
+                        worker_base = f"{parsed.scheme}://{parsed.netloc}"
+                        progress_page = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
         except Exception as e:
-            print(f"[Telegram] Failed to get progress_page: {e}")
+            print(f"[Telegram] Failed to get task details: {e}")
+    else:
+        # Still need to fetch owner_email even if progress_page is passed
+        try:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                result = await db.execute(select(Task).where(Task.id == task_id))
+                task = result.scalar_one_or_none()
+                if task and task.owner_type == "user":
+                    owner_email = task.owner_id
+        except Exception as e:
+            print(f"[Telegram] Failed to get owner_email: {e}")
 
     dur = _format_duration(duration_seconds)
     stats_line = f"\n⏱ {dur}" if dur else ""
+    author_line = f"\n👤 Author: {owner_email}" if owner_email else ""
     worker_line = f"\n🔧 Worker: {progress_page}" if progress_page else ""
 
     # Try to find cached video
@@ -308,7 +448,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     if not video_path:
         # Fallback: at least notify completion
-        text = f"✅ Task completed\n{url}{stats_line}{worker_line}"
+        text = f"✅ Task completed\n{url}{author_line}{stats_line}{worker_line}"
         results = await asyncio.gather(*[
             _send_with_retry(lambda cid=cid: bot.send_message(
                 chat_id=cid, 
@@ -323,7 +463,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
         return
 
     sem = asyncio.Semaphore(2)
-    caption = f"✅ Task completed\n{url}{stats_line}{worker_line}"
+    caption = f"✅ Task completed\n{url}{author_line}{stats_line}{worker_line}"
 
     async def _one(chat_id: int):
         async with sem:

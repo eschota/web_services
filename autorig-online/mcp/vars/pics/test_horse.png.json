@@ -1,0 +1,25 @@
+{
+  "task_id": "b0ab742d",
+  "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+  "output_path": "R:/work/renderfin-mcp/vars/pics/test_horse.png",
+  "aspect_ratio": 1.0,
+  "queued_at": "2026-01-04T00:03:05.892212",
+  "status": "completed",
+  "started_at": "2026-01-04T00:03:05.909722",
+  "request_payload": {
+    "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+    "aspect_ratio": 1.0
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-04T00:03:05.910725",
+  "output_url": "https://renderfin.com/render/default_user/9ccfdc62-94f2-41df-8a04-adae687528c4.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/9ccfdc62-94f2-41df-8a04-adae687528c4.png"
+  },
+  "response_received_at": "2026-01-04T00:03:05.968273",
+  "response_status_code": 200,
+  "download_attempt": 11,
+  "last_download_attempt_at": "2026-01-04T00:03:56.198178",
+  "completed_at": "2026-01-04T00:04:01.231435",
+  "file_size": 2048174
+}

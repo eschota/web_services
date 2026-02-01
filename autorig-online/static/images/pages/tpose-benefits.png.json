@@ -1,0 +1,25 @@
+{
+  "task_id": "77bd183e",
+  "prompt": "Simple diagram showing T-pose benefits for auto rigging, dark background, minimalist style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/tpose-benefits.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:32.983933",
+  "status": "completed",
+  "started_at": "2026-01-03T17:55:51.363551",
+  "request_payload": {
+    "prompt": "Simple diagram showing T-pose benefits for auto rigging, dark background, minimalist style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:55:51.363774",
+  "output_url": "https://renderfin.com/render/default_user/bd432eef-4d99-4507-a130-6bc35b96f4a8.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/bd432eef-4d99-4507-a130-6bc35b96f4a8.png"
+  },
+  "response_received_at": "2026-01-03T17:55:51.766730",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:56:18.616167",
+  "completed_at": "2026-01-03T17:56:24.343444",
+  "file_size": 369749
+}

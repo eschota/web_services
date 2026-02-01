@@ -1,0 +1,25 @@
+{
+  "task_id": "026914fa",
+  "prompt": "Minimalist workflow diagram showing upload arrow rigging arrow export process, dark background, indigo blue accents, no text, simple geometric shapes and arrows, clean design",
+  "output_path": "/root/autorig-online/static/images/pages/mixamo-workflow-diagram.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:40:04.678865",
+  "status": "completed",
+  "started_at": "2026-01-03T17:47:47.479181",
+  "request_payload": {
+    "prompt": "Minimalist workflow diagram showing upload arrow rigging arrow export process, dark background, indigo blue accents, no text, simple geometric shapes and arrows, clean design",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:47:47.479476",
+  "output_url": "https://renderfin.com/render/default_user/76c3fc70-4a82-4285-b3b2-de597a312870.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/76c3fc70-4a82-4285-b3b2-de597a312870.png"
+  },
+  "response_received_at": "2026-01-03T17:47:47.852178",
+  "response_status_code": 200,
+  "download_attempt": 15,
+  "last_download_attempt_at": "2026-01-03T17:49:05.750234",
+  "completed_at": "2026-01-03T17:49:11.450448",
+  "file_size": 174836
+}

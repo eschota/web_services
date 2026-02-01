@@ -1,0 +1,25 @@
+{
+  "task_id": "62a5f125",
+  "prompt": "Product roadmap visualization with 3 milestones floating in dark space. Icons: 1) Quadruped animal silhouette with \"Quadruped Rigging\" label, 2) Hand with finger bones for \"Advanced Hand Control\", 3) Multiple characters grouped for \"Batch Processing\". Connected by glowing dotted timeline. Dark gradient background with indigo and purple accents. Clean modern tech roadmap style, minimalist icons, subtle glow effects",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-roadmap.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:13:22.461929",
+  "status": "completed",
+  "started_at": "2026-01-03T18:18:02.329075",
+  "request_payload": {
+    "prompt": "Product roadmap visualization with 3 milestones floating in dark space. Icons: 1) Quadruped animal silhouette with \"Quadruped Rigging\" label, 2) Hand with finger bones for \"Advanced Hand Control\", 3) Multiple characters grouped for \"Batch Processing\". Connected by glowing dotted timeline. Dark gradient background with indigo and purple accents. Clean modern tech roadmap style, minimalist icons, subtle glow effects",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:18:02.329366",
+  "output_url": "https://renderfin.com/render/default_user/7d981fcf-1b65-423e-aeee-80fef45a5a5c.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/7d981fcf-1b65-423e-aeee-80fef45a5a5c.png"
+  },
+  "response_received_at": "2026-01-03T18:18:02.700029",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:18:29.541007",
+  "completed_at": "2026-01-03T18:18:35.372508",
+  "file_size": 421018
+}

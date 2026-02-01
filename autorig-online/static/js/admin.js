@@ -127,6 +127,46 @@ const Admin = {
             }
         });
 
+        // Restart all incomplete tasks
+        const restartIncompleteBtn = document.getElementById('restart-incomplete-btn');
+        restartIncompleteBtn?.addEventListener('click', async () => {
+            const ok = confirm('🔄 Restart all incomplete tasks?\n\nThis will restart all tasks with status: created, processing, error.\n\nContinue?');
+            if (!ok) return;
+
+            restartIncompleteBtn.disabled = true;
+            restartIncompleteBtn.textContent = '⏳ Restarting...';
+            try {
+                const resp = await fetch('/api/admin/tasks/restart-incomplete', { method: 'POST' });
+                const text = await resp.text();
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch {
+                    alert(`Server error: ${text}`);
+                    return;
+                }
+                
+                if (!resp.ok) {
+                    alert(data.detail || 'Failed to restart tasks');
+                    return;
+                }
+
+                alert(`✅ ${data.message}\n\nRefresh the page in a few seconds to see updated statuses.`);
+                
+                // Refresh stats and tasks
+                await Admin.loadStats();
+                if (Admin.currentTab === 'tasks') {
+                    await Admin.loadAllTasks();
+                }
+            } catch (e) {
+                console.error('Restart incomplete tasks error:', e);
+                alert('Failed to restart tasks: ' + e.message);
+            } finally {
+                restartIncompleteBtn.disabled = false;
+                restartIncompleteBtn.textContent = '🔄 Restart Incomplete';
+            }
+        });
+
         // Tab switching
         document.querySelectorAll('.admin-tab').forEach(tab => {
             tab.addEventListener('click', () => {

@@ -1,0 +1,25 @@
+{
+  "task_id": "ce437d85",
+  "prompt": "Minimalist 3D character silhouette in T-pose, dark background with indigo blue accent lights, modern tech aesthetic, no text, abstract geometric forms, clean composition",
+  "output_path": "/root/autorig-online/static/images/pages/mixamo-hero.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:40:01.007000",
+  "status": "completed",
+  "started_at": "2026-01-03T17:45:13.816707",
+  "request_payload": {
+    "prompt": "Minimalist 3D character silhouette in T-pose, dark background with indigo blue accent lights, modern tech aesthetic, no text, abstract geometric forms, clean composition",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:45:13.816929",
+  "output_url": "https://renderfin.com/render/default_user/5e0e8916-63e6-4a9c-87c6-9b28d43aac3b.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/5e0e8916-63e6-4a9c-87c6-9b28d43aac3b.png"
+  },
+  "response_received_at": "2026-01-03T17:45:14.180930",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:45:41.019933",
+  "completed_at": "2026-01-03T17:45:46.657275",
+  "file_size": 456920
+}

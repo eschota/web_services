@@ -1,0 +1,25 @@
+{
+  "task_id": "38420b26",
+  "prompt": "Video preview rendering of animated 3D character. Film production aesthetic with camera viewfinder overlay, timecode, recording indicator. Character performing walk animation with motion blur. Cinematic lighting with soft rim light and key light. Dark studio background with subtle indigo/purple ambient. Video player controls at bottom. Professional video editing software aesthetic, high-end render quality preview",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-video-preview.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:13:20.169043",
+  "status": "completed",
+  "started_at": "2026-01-03T18:17:28.331782",
+  "request_payload": {
+    "prompt": "Video preview rendering of animated 3D character. Film production aesthetic with camera viewfinder overlay, timecode, recording indicator. Character performing walk animation with motion blur. Cinematic lighting with soft rim light and key light. Dark studio background with subtle indigo/purple ambient. Video player controls at bottom. Professional video editing software aesthetic, high-end render quality preview",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:17:28.332018",
+  "output_url": "https://renderfin.com/render/default_user/8d07fede-3cb8-4177-a522-5740c7832c83.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/8d07fede-3cb8-4177-a522-5740c7832c83.png"
+  },
+  "response_received_at": "2026-01-03T18:17:28.692364",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:17:56.620620",
+  "completed_at": "2026-01-03T18:18:02.324217",
+  "file_size": 461386
+}

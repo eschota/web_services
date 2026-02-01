@@ -1,0 +1,25 @@
+{
+  "task_id": "d2981967",
+  "prompt": "Unity HDRP scene showcasing rigged 3D character. High-quality PBR rendering with dramatic volumetric lighting, global illumination, ray-traced reflections on floor. Character standing in modern studio environment with area lights. Unity Editor interface elements visible in corners. Dark theme with indigo accent lights. Photorealistic game engine quality, cinematic composition, professional lighting setup",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-unity-hdrp.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:13:16.144685",
+  "status": "completed",
+  "started_at": "2026-01-03T18:16:49.947783",
+  "request_payload": {
+    "prompt": "Unity HDRP scene showcasing rigged 3D character. High-quality PBR rendering with dramatic volumetric lighting, global illumination, ray-traced reflections on floor. Character standing in modern studio environment with area lights. Unity Editor interface elements visible in corners. Dark theme with indigo accent lights. Photorealistic game engine quality, cinematic composition, professional lighting setup",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:16:49.948302",
+  "output_url": "https://renderfin.com/render/default_user/5042c4e9-8955-4c66-b4e9-19c90f503635.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/5042c4e9-8955-4c66-b4e9-19c90f503635.png"
+  },
+  "response_received_at": "2026-01-03T18:16:50.345110",
+  "response_status_code": 200,
+  "download_attempt": 7,
+  "last_download_attempt_at": "2026-01-03T18:17:22.517163",
+  "completed_at": "2026-01-03T18:17:28.326350",
+  "file_size": 842772
+}

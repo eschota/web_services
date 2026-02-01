@@ -1,0 +1,25 @@
+{
+  "task_id": "68eb9a32",
+  "prompt": "Minimalist workflow diagram for GLB rigging process, dark theme, indigo blue accents, no text",
+  "output_path": "/root/autorig-online/static/images/pages/glb-workflow.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:46:58.019766",
+  "status": "completed",
+  "started_at": "2026-01-03T17:52:22.885739",
+  "request_payload": {
+    "prompt": "Minimalist workflow diagram for GLB rigging process, dark theme, indigo blue accents, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:52:22.886014",
+  "output_url": "https://renderfin.com/render/default_user/7856d559-16a3-4c9f-939c-ece02c035f94.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/7856d559-16a3-4c9f-939c-ece02c035f94.png"
+  },
+  "response_received_at": "2026-01-03T17:52:23.295923",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:52:50.077295",
+  "completed_at": "2026-01-03T17:52:55.773383",
+  "file_size": 365493
+}

@@ -293,6 +293,15 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         except Exception as e:
             print(f"[Tasks] Failed to send completion email for task {task.id}: {e}")
     
+    # Cache task files to static directory when task completes (replaces ZIP)
+    if was_processing and task.status == "done" and task.ready_urls:
+        try:
+            from main import cache_task_files
+            print(f"[Tasks] Starting file caching for completed task {task.id}")
+            asyncio.create_task(cache_task_files(task.id, task.ready_urls, task.guid))
+        except Exception as e:
+            print(f"[Tasks] Failed to cache files for task {task.id}: {e}")
+    
     # Telegram notification if task just completed
     if was_processing and task.status == "done":
         try:

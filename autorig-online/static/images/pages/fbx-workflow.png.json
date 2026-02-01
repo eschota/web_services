@@ -1,0 +1,25 @@
+{
+  "task_id": "11e17100",
+  "prompt": "Minimalist workflow diagram for FBX rigging process, dark theme, indigo blue accents, no text",
+  "output_path": "/root/autorig-online/static/images/pages/fbx-workflow.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:49.292021",
+  "status": "completed",
+  "started_at": "2026-01-03T17:58:07.211009",
+  "request_payload": {
+    "prompt": "Minimalist workflow diagram for FBX rigging process, dark theme, indigo blue accents, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:58:07.211330",
+  "output_url": "https://renderfin.com/render/default_user/81f0a477-8a77-42dc-9ef6-173d08a94fb1.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/81f0a477-8a77-42dc-9ef6-173d08a94fb1.png"
+  },
+  "response_received_at": "2026-01-03T17:58:07.598195",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:58:34.997138",
+  "completed_at": "2026-01-03T17:58:40.794664",
+  "file_size": 443959
+}

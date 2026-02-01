@@ -1,0 +1,25 @@
+{
+  "task_id": "52637427",
+  "prompt": "Abstract visualization of GLB auto rigging process, dark theme, indigo blue highlights, technical style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/glb-rigging-process.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:46:56.816399",
+  "status": "completed",
+  "started_at": "2026-01-03T17:51:11.472569",
+  "request_payload": {
+    "prompt": "Abstract visualization of GLB auto rigging process, dark theme, indigo blue highlights, technical style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:51:11.472838",
+  "output_url": "https://renderfin.com/render/default_user/342146a4-dc7d-495d-8b97-232c5b307c35.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/342146a4-dc7d-495d-8b97-232c5b307c35.png"
+  },
+  "response_received_at": "2026-01-03T17:51:11.829279",
+  "response_status_code": 200,
+  "download_attempt": 7,
+  "last_download_attempt_at": "2026-01-03T17:51:43.958458",
+  "completed_at": "2026-01-03T17:51:49.694841",
+  "file_size": 530123
+}

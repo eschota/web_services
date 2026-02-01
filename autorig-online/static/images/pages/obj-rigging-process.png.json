@@ -1,0 +1,25 @@
+{
+  "task_id": "7aaff1f4",
+  "prompt": "Abstract visualization of OBJ auto rigging process from sculpture to character, dark theme, indigo blue highlights, technical style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/obj-rigging-process.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:44:40.933798",
+  "status": "completed",
+  "started_at": "2026-01-03T17:49:11.455558",
+  "request_payload": {
+    "prompt": "Abstract visualization of OBJ auto rigging process from sculpture to character, dark theme, indigo blue highlights, technical style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:49:11.455901",
+  "output_url": "https://renderfin.com/render/default_user/10eacbb3-1f04-437b-90e4-b99a83e744c9.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/10eacbb3-1f04-437b-90e4-b99a83e744c9.png"
+  },
+  "response_received_at": "2026-01-03T17:49:11.818327",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:49:38.712981",
+  "completed_at": "2026-01-03T17:49:44.507709",
+  "file_size": 324952
+}

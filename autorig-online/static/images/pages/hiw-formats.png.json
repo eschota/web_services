@@ -1,0 +1,25 @@
+{
+  "task_id": "a78eb5cc",
+  "prompt": "Three 3D file format icons floating in dark space: GLB (blue metallic cube with \"GLB\" text), FBX (orange geometric shape with \"FBX\" text), and OBJ (green wireframe sphere with \"OBJ\" text). Each icon glows with its respective color. Dark gradient background with subtle indigo purple accents. Minimalist tech UI style, soft shadows, volumetric glow effects. Clean modern design for file format selection interface",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-formats.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:12:52.849095",
+  "status": "completed",
+  "started_at": "2026-01-03T18:13:23.895512",
+  "request_payload": {
+    "prompt": "Three 3D file format icons floating in dark space: GLB (blue metallic cube with \"GLB\" text), FBX (orange geometric shape with \"FBX\" text), and OBJ (green wireframe sphere with \"OBJ\" text). Each icon glows with its respective color. Dark gradient background with subtle indigo purple accents. Minimalist tech UI style, soft shadows, volumetric glow effects. Clean modern design for file format selection interface",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:13:23.895728",
+  "output_url": "https://renderfin.com/render/default_user/e832d0e0-8aa7-40f3-b90d-e0db21bbc018.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/e832d0e0-8aa7-40f3-b90d-e0db21bbc018.png"
+  },
+  "response_received_at": "2026-01-03T18:13:24.229859",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:13:51.670307",
+  "completed_at": "2026-01-03T18:13:57.376052",
+  "file_size": 473769
+}

@@ -1,0 +1,25 @@
+{
+  "task_id": "d9dc4dbf",
+  "prompt": "T-Pose preparation process visualization for 3D character. Shows 4 steps: 1) Coordinate axes (RGB X/Y/Z arrows), 2) Scale measurement grid around character, 3) Character alignment with vertical guide lines, 4) Finger spread position with hand detail. All on dark purple-black background with indigo accents. Technical diagram style, blueprint aesthetics, grid overlay, measurement annotations. Professional rigging software interface look",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-tpose-prep.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:12:58.896568",
+  "status": "completed",
+  "started_at": "2026-01-03T18:14:35.760314",
+  "request_payload": {
+    "prompt": "T-Pose preparation process visualization for 3D character. Shows 4 steps: 1) Coordinate axes (RGB X/Y/Z arrows), 2) Scale measurement grid around character, 3) Character alignment with vertical guide lines, 4) Finger spread position with hand detail. All on dark purple-black background with indigo accents. Technical diagram style, blueprint aesthetics, grid overlay, measurement annotations. Professional rigging software interface look",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:14:35.760596",
+  "output_url": "https://renderfin.com/render/default_user/f1c47d8d-3771-4c27-aa96-ac2c63db0546.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/f1c47d8d-3771-4c27-aa96-ac2c63db0546.png"
+  },
+  "response_received_at": "2026-01-03T18:14:36.128818",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:15:03.061485",
+  "completed_at": "2026-01-03T18:15:08.752802",
+  "file_size": 536832
+}

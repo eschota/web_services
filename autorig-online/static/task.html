@@ -2810,10 +2810,10 @@
             },
 
             async downloadAllFiles() {
-                if (this.isDownloadingAll || !this.cachedFilesData?.files?.length) return;
+                const files = this.downloadItems || [];
+                if (this.isDownloadingAll || files.length === 0) return;
                 
                 this.isDownloadingAll = true;
-                const files = this.cachedFilesData.files;
                 const downloadBtn = document.getElementById('download-all-btn');
                 if (downloadBtn) {
                     downloadBtn.disabled = true;
@@ -2825,7 +2825,7 @@
                         const file = files[i];
                         const a = document.createElement('a');
                         a.href = file.url;
-                        a.download = file.name;
+                        a.download = file.downloadName || file.name;
                         a.style.display = 'none';
                         document.body.appendChild(a);
                         a.click();
@@ -2857,6 +2857,57 @@
                 } finally {
                     this.isDownloadingAll = false;
                 }
+            },
+
+            async downloadAllOrPurchase() {
+                if (this.isDownloadingAll) return;
+                if (!this.downloadItems || this.downloadItems.length === 0) {
+                    alert(t('error_generic'));
+                    return;
+                }
+
+                if (!this.purchaseState.purchased_all) {
+                    if (this.purchaseState.login_required) {
+                        window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                        return;
+                    }
+                    if (this.purchaseState.user_credits < 1) {
+                        try {
+                            await fetch(`/api/task/${this.taskId}/purchase-intent`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ source: 'download_all' })
+                            });
+                        } catch (e) {
+                            console.warn('Purchase intent notify failed:', e);
+                        }
+                        window.location.href = '/buy-credits';
+                        return;
+                    }
+                    if (!confirm(`${t('purchase_confirm_all')} 1 credit?`)) return;
+
+                    try {
+                        const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ all: true })
+                        });
+                        const data = await resp.json();
+                        if (resp.ok) {
+                            this.purchaseState.purchased_all = true;
+                            this.purchaseState.user_credits = data.credits_remaining;
+                        } else {
+                            alert(data.detail || t('error_generic'));
+                            return;
+                        }
+                    } catch (e) {
+                        console.error('Purchase error:', e);
+                        alert(t('error_generic'));
+                        return;
+                    }
+                }
+
+                await this.downloadAllFiles();
             },
 
             async loadPurchaseState() {
@@ -3083,89 +3134,23 @@
                     return;
                 }
 
-                // Check if user can download (must be purchased)
-                const canDownloadAll = this.purchaseState.purchased_all;
-                
-                // Add "Unlock Downloads" button at the top if not purchased
-                let buyAllHtml = '';
-                if (!canDownloadAll && items.length > 0) {
-                    const hasCredits = this.purchaseState.user_credits >= 1;
-                    buyAllHtml = `
-                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent);">
-                            <div style="font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);">
-                                Unlock all downloads for this model
-                            </div>
-                            <button onclick="TaskUI.purchaseAll()" class="btn btn-primary" 
-                                    style="width: 100%; justify-content: center; padding: 0.75rem 1rem; font-size: 1rem; gap: 0.5rem;"
-                                    ${(hasCredits || this.purchaseState.login_required) ? '' : 'disabled'}>
-                                <span style="font-size: 1.5rem;">💎</span>
-                                <span style="font-weight: 700; font-size: 1.1rem;">1</span>
-                                <span>${t('btn_download_all')}</span>
-                            </button>
-                            ${this.purchaseState.login_required ? `
-                                <a href="/auth/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}" class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 0.5rem; font-size: 0.85rem;">
-                                    ${t('btn_login_to_purchase')}
-                                </a>
-                            ` : ''}
-                        </li>
-                    `;
-                }
+                const readyItems = items.filter(item => item.isReady);
+                this.downloadItems = readyItems;
 
-                const filesHtml = items.map((item, displayIdx) => {
-                    // Use direct URL from output_urls
-                    const downloadUrl = item.url;
+                const filesHtml = items.map((item) => {
                     const iconHtml = item.icon
                         ? `<img src="${item.icon}" alt="" aria-hidden="true" style="height: 2.5em; width: auto; object-fit: contain; display: block;" onerror="this.style.display='none'">`
                         : '';
-                    
-                    if (canDownloadAll) {
-                        if (item.isReady) {
-                            // Show download button - vertical layout: icon, filename, button
-                            return `
-                                <li class="file-item"
-                                    style="flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; margin-bottom: 0; text-align: center; min-width: 0;">
-                                    ${iconHtml}
-                                    <div style="font-weight: 700; color: var(--accent); font-size: 0.95rem; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3;" title="${item.displayName}">
-                                        ${item.displayName}
-                                    </div>
-                                    <a href="${downloadUrl}" download="${item.downloadName}" class="btn btn-secondary"
-                                       style="padding: 0.4rem 0.6rem; font-size: 0.75rem; margin-top: 0.25rem;">
-                                        <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="14" height="14">
-                                        ${t('btn_download')}
-                                    </a>
-                                </li>
-                            `;
-                        } else {
-                            // File not ready yet - show processing state
-                            return `
-                                <li class="file-item"
-                                    style="flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; margin-bottom: 0; text-align: center; min-width: 0; opacity: 0.7;">
-                                    ${iconHtml}
-                                    <div style="font-weight: 700; color: var(--accent); font-size: 0.95rem; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3;" title="${item.displayName}">
-                                        ${item.displayName}
-                                    </div>
-                                    <span class="btn btn-secondary"
-                                          style="padding: 0.4rem 0.6rem; font-size: 0.75rem; margin-top: 0.25rem; cursor: wait;">
-                                        ⏳ Processing...
-                                    </span>
-                                </li>
-                            `;
-                        }
-                    } else {
-                        // Show locked state - need to purchase first
-                        return `
-                            <li class="file-item"
-                                style="flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; margin-bottom: 0; text-align: center; opacity: 0.6; min-width: 0;">
-                                ${iconHtml}
-                                <div style="font-weight: 700; color: var(--accent); font-size: 0.95rem; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3;" title="${item.displayName}">
-                                    ${item.displayName}
-                                </div>
-                                <span class="btn btn-secondary" style="padding: 0.4rem 0.6rem; font-size: 0.75rem; margin-top: 0.25rem; cursor: not-allowed;">
-                                    🔒 Locked
-                                </span>
-                            </li>
-                        `;
-                    }
+
+                    return `
+                        <li class="file-item"
+                            style="flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem; margin-bottom: 0; text-align: center; min-width: 0;">
+                            ${iconHtml}
+                            <div style="font-weight: 700; color: var(--accent); font-size: 0.95rem; word-break: break-all; overflow-wrap: anywhere; max-width: 100%; line-height: 1.3;" title="${item.displayName}">
+                                ${item.displayName}
+                            </div>
+                        </li>
+                    `;
                 }).join('');
                 
                 // Check cached files availability when task is done
@@ -3180,30 +3165,41 @@
                     });
                 }
                 
-                // Add "Download All Files" button at top if cached and user can download
+                // Single "Download All" button (purchase if needed)
                 let downloadAllHtml = '';
-                if (this.cachedFilesData?.cached && this.cachedFilesData?.files?.length > 0 && canDownloadAll && items.length > 0) {
-                    const fileCount = this.cachedFilesData.files.length;
-                    const totalSize = this.cachedFilesData.total_size;
-                    const sizeStr = totalSize > 1024*1024 
-                        ? `${(totalSize / (1024*1024)).toFixed(1)} MB` 
-                        : `${(totalSize / 1024).toFixed(0)} KB`;
-                    
+                if (items.length > 0) {
+                    const cachedReady = this.cachedFilesData?.cached && this.cachedFilesData?.files?.length > 0;
+                    const fileCount = this.downloadItems.length;
+                    const totalSize = cachedReady ? this.cachedFilesData.total_size : 0;
+                    const sizeStr = cachedReady
+                        ? (totalSize > 1024*1024 
+                            ? `${(totalSize / (1024*1024)).toFixed(1)} MB` 
+                            : `${(totalSize / 1024).toFixed(0)} KB`)
+                        : null;
+                    const buttonLabel = cachedReady
+                        ? `${t('btn_download_all')} (${fileCount} files)`
+                        : t('btn_download_all');
+                    const buttonDisabled = fileCount === 0;
+                    const helperText = cachedReady
+                        ? `📦 ${t('btn_download_all')} ${fileCount} files${sizeStr ? ` (${sizeStr} total)` : ''}`
+                        : 'Preparing downloads...';
+
                     downloadAllHtml = `
-                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.05)); border: 2px solid #10b981; grid-column: 1 / -1;">
+                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
                             <div style="font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);">
-                                📦 Download all ${fileCount} files (${sizeStr} total)
+                                ${helperText}
                             </div>
-                            <button id="download-all-btn" onclick="TaskUI.downloadAllFiles()" class="btn btn-primary" 
-                               style="width: 100%; max-width: 300px; justify-content: center; padding: 0.75rem 1rem; font-size: 1rem; gap: 0.5rem; background: #10b981; border-color: #10b981;">
+                            <button id="download-all-btn" onclick="TaskUI.downloadAllOrPurchase()" class="btn btn-primary" 
+                               style="width: 100%; max-width: 300px; justify-content: center; padding: 0.75rem 1rem; font-size: 1rem; gap: 0.5rem;"
+                               ${buttonDisabled ? 'disabled' : ''}>
                                 <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18" style="filter: brightness(10);">
-                                <span style="font-weight: 700;">Download ALL (${fileCount} files)</span>
+                                <span style="font-weight: 700;">${buttonLabel}</span>
                             </button>
                         </li>
                     `;
                 }
                 
-                list.innerHTML = downloadAllHtml + buyAllHtml + filesHtml;
+                list.innerHTML = downloadAllHtml + filesHtml;
             },
             
             renderTextureGallery(textures) {

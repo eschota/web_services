@@ -1,0 +1,526 @@
+{
+  "tasks": [
+    {
+      "id": "a8ca6ed6",
+      "prompt": "A majestic horse dancing gracefully, dynamic pose with front legs raised, flowing mane and tail in motion, beautiful lighting, photorealistic, high quality",
+      "output_path": "r:\\work\\autorig-blog\\pics\\dancing_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:32:16.041317",
+      "error": "All connection attempts failed"
+    },
+    {
+      "id": "79711c57",
+      "prompt": "A majestic horse dancing gracefully, dynamic pose with front legs raised, flowing mane and tail in motion, beautiful lighting, photorealistic, high quality",
+      "output_path": "r:\\work\\autorig-blog\\pics\\dancing_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:44:49.139511",
+      "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n"
+    },
+    {
+      "id": "af3d86ab",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:54:56.303292",
+      "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n"
+    },
+    {
+      "id": "e7a001e1",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:55:22.526299",
+      "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n"
+    },
+    {
+      "id": "0a2a6cc8",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:56:03.772136",
+      "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n"
+    },
+    {
+      "id": "e1287d84",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:56:41.146064",
+      "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n"
+    },
+    {
+      "id": "0cb45cc0",
+      "prompt": "A simple red circle on white background",
+      "output_path": "R:/work/renderfin-/vars/pics/debug_test.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:57:09.686693",
+      "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n"
+    },
+    {
+      "id": "759abfc9",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:58:34.024125",
+      "error": "Failed to download image after 10 attempts"
+    },
+    {
+      "id": "f68b27a5",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "completed",
+      "created_at": "2026-01-03T23:59:33.620871",
+      "error": null
+    },
+    {
+      "id": "e8a5d207",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "completed",
+      "created_at": "2026-01-04T00:00:29.126305",
+      "error": null
+    },
+    {
+      "id": "c8e2df72",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "completed",
+      "created_at": "2026-01-04T00:01:31.928623",
+      "error": null
+    },
+    {
+      "id": "b0ab742d",
+      "prompt": "A majestic horse dancing gracefully in a golden field at sunset",
+      "output_path": "R:/work/renderfin-/vars/pics/test_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "completed",
+      "created_at": "2026-01-04T00:03:05.892212",
+      "error": null
+    },
+    {
+      "id": "80b30f3b",
+      "prompt": "A majestic horse dancing gracefully, dynamic pose with front legs raised, flowing mane and tail in motion, beautiful lighting, photorealistic, high quality",
+      "output_path": "r:\\work\\autorig-blog\\pics\\dancing_horse.png",
+      "aspect_ratio": 1.0,
+      "status": "completed",
+      "created_at": "2026-01-04T00:03:31.541892",
+      "error": null
+    },
+    {
+      "id": "f9433e79",
+      "prompt": "A beautiful woman in a bikini, elegant and graceful pose, professional photography style, soft natural lighting, tropical beach background with palm trees and crystal clear turquoise water, golden hour sunlight creating warm highlights, shallow depth of field with the subject in sharp focus, vibrant colors, high quality fashion photography aesthetic, relaxed and confident expression, beautiful composition with rule of thirds, cinematic atmosphere, professional camera settings with 85mm portrait lens, bokeh effect in background",
+      "output_path": "r:\\work\\autorig-blog\\generated_image.png",
+      "aspect_ratio": 0.75,
+      "status": "completed",
+      "created_at": "2026-01-04T00:06:38.230026",
+      "error": null
+    },
+    {
+      "id": "3af4e07d",
+      "prompt": "A 3D character model in T-pose, neutral expression, clean mesh topology, wireframe view showing vertices and edges, professional 3D modeling software interface, technical illustration style, blue and gray color scheme, studio lighting",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\01-source-model.png",
+      "aspect_ratio": 1.0,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:51.181585",
+      "error": null
+    },
+    {
+      "id": "b3f6a8d1",
+      "prompt": "3D character mesh analysis, highlighted body parts and joints, anatomical landmarks marked with colored points, technical diagram showing bone structure placement, professional rigging software interface, scientific visualization style, clean white background",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\02-geometry-analysis.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:51.885524",
+      "error": null
+    },
+    {
+      "id": "3114f98d",
+      "prompt": "Automatic joint detection algorithm visualization, skeleton structure overlaid on 3D character, AI-powered bone placement, machine learning process diagram, neural network nodes connected to body parts, futuristic tech aesthetic, gradient background",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\03-joint-detection.png",
+      "aspect_ratio": 0.5625,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:52.613018",
+      "error": null
+    },
+    {
+      "id": "610d3bff",
+      "prompt": "Bone hierarchy tree structure, parent-child relationships visualized, skeletal rig hierarchy diagram, technical rigging interface showing bone connections, clean organizational chart style, professional 3D animation software UI",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\04-bone-hierarchy.png",
+      "aspect_ratio": 1.5,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:53.296444",
+      "error": null
+    },
+    {
+      "id": "8efd87ed",
+      "prompt": "Automatic skinning weights visualization, color-coded vertex weights from red to blue, smooth weight painting on 3D character mesh, professional rigging tools, technical illustration, gradient heat map style",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\05-skinning-weights.png",
+      "aspect_ratio": 0.666,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:54.051998",
+      "error": null
+    },
+    {
+      "id": "b181d99c",
+      "prompt": "Rig controllers and manipulators on 3D character, colorful control curves and handles, professional animation rig interface, intuitive control system design, clean technical visualization, studio lighting",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\06-controllers.png",
+      "aspect_ratio": 1.33,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:54.851628",
+      "error": null
+    },
+    {
+      "id": "b426bf53",
+      "prompt": "3D character in various test poses, autorig validation poses, T-pose, A-pose, and dynamic action poses, professional character rig testing, multiple poses in one view, technical demonstration style",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\07-pose-testing.png",
+      "aspect_ratio": 0.75,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:55.577307",
+      "error": null
+    },
+    {
+      "id": "0344af78",
+      "prompt": "Fully rigged 3D character in dynamic action pose, running or jumping motion, smooth deformation showing quality autorig, professional animation quality, cinematic lighting, detailed character model",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\08-final-rig-action.png",
+      "aspect_ratio": 2.0,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:56.312044",
+      "error": null
+    },
+    {
+      "id": "ef2014cd",
+      "prompt": "Before and after comparison, unrigged static character model on left, fully rigged animated character on right, side by side visualization, professional presentation style, clean white background, technical illustration",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\09-before-after.png",
+      "aspect_ratio": 0.5,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:57.129286",
+      "error": null
+    },
+    {
+      "id": "02959088",
+      "prompt": "Automatic rigging pipeline visualization, workflow diagram showing autorig process steps, automated tools and scripts, AI-powered rigging system, futuristic technology interface, professional software development aesthetic",
+      "output_path": "r:\\work\\autorig-blog\\blog\\01-article-autorig\\images\\10-automation-pipeline.png",
+      "aspect_ratio": 1.25,
+      "status": "completed",
+      "created_at": "2026-01-04T00:12:57.756521",
+      "error": null
+    },
+    {
+      "id": "133a2ed7",
+      "prompt": "Abstract visualization of FBX auto rigging process, dark theme, indigo blue highlights, technical style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/fbx-rigging-process.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:39:55.405622",
+      "error": null
+    },
+    {
+      "id": "f04d6e7a",
+      "prompt": "Simple diagram showing Unity and Unreal Engine compatibility, dark background, minimalist style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/fbx-engine-compat.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:39:56.379337",
+      "error": null
+    },
+    {
+      "id": "5b74dcff",
+      "prompt": "Minimalist workflow diagram for FBX rigging process, dark theme, indigo blue accents, no text",
+      "output_path": "/root/autorig-online/static/images/pages/fbx-workflow.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:39:57.322075",
+      "error": null
+    },
+    {
+      "id": "ce437d85",
+      "prompt": "Minimalist 3D character silhouette in T-pose, dark background with indigo blue accent lights, modern tech aesthetic, no text, abstract geometric forms, clean composition",
+      "output_path": "/root/autorig-online/static/images/pages/mixamo-hero.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:40:01.007000",
+      "error": null
+    },
+    {
+      "id": "4bc33f62",
+      "prompt": "Abstract visualization of 3D character skeleton with mesh overlay, dark theme, indigo blue highlights, technical style, no text, wireframe and solid mesh combination, minimalist design",
+      "output_path": "/root/autorig-online/static/images/pages/mixamo-rigging.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:40:02.046578",
+      "error": null
+    },
+    {
+      "id": "084b986b",
+      "prompt": "Simple 3D character in dynamic pose, dark background, indigo blue glow, minimalist style, no text, motion lines, clean silhouette",
+      "output_path": "/root/autorig-online/static/images/pages/mixamo-animation.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:40:03.248107",
+      "error": null
+    },
+    {
+      "id": "ed0d57a2",
+      "prompt": "Visual comparison of 3D file formats GLB and FBX, dark theme, indigo blue accents, schematic style, no text, side by side layout, minimalist design",
+      "output_path": "/root/autorig-online/static/images/pages/mixamo-format-comparison.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:40:04.641892",
+      "error": null
+    },
+    {
+      "id": "026914fa",
+      "prompt": "Minimalist workflow diagram showing upload arrow rigging arrow export process, dark background, indigo blue accents, no text, simple geometric shapes and arrows, clean design",
+      "output_path": "/root/autorig-online/static/images/pages/mixamo-workflow-diagram.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:40:04.678865",
+      "error": null
+    },
+    {
+      "id": "7aaff1f4",
+      "prompt": "Abstract visualization of OBJ auto rigging process from sculpture to character, dark theme, indigo blue highlights, technical style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/obj-rigging-process.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:44:40.933798",
+      "error": null
+    },
+    {
+      "id": "9f5e58a2",
+      "prompt": "Simple diagram showing geometry preservation, UV mapping, and materials in OBJ format, schematic minimalist style, dark background, no text",
+      "output_path": "/root/autorig-online/static/images/pages/obj-geometry.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:44:41.962672",
+      "error": null
+    },
+    {
+      "id": "0d24e538",
+      "prompt": "Minimalist workflow diagram from sculpture to rigged character for OBJ format, clean lines, dark theme, no text",
+      "output_path": "/root/autorig-online/static/images/pages/obj-workflow.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:44:42.826982",
+      "error": null
+    },
+    {
+      "id": "52637427",
+      "prompt": "Abstract visualization of GLB auto rigging process, dark theme, indigo blue highlights, technical style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/glb-rigging-process.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:46:56.816399",
+      "error": null
+    },
+    {
+      "id": "611d0632",
+      "prompt": "Simple diagram showing GLB format benefits, dark background, minimalist style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/glb-benefits.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:46:56.820542",
+      "error": null
+    },
+    {
+      "id": "68eb9a32",
+      "prompt": "Minimalist workflow diagram for GLB rigging process, dark theme, indigo blue accents, no text",
+      "output_path": "/root/autorig-online/static/images/pages/glb-workflow.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:46:58.019766",
+      "error": null
+    },
+    {
+      "id": "f40ad7a2",
+      "prompt": "Minimalist Unreal Engine with FBX character, dark background with Unreal orange/blue accent, modern tech aesthetic, no text",
+      "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-hero.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:27.620964",
+      "error": null
+    },
+    {
+      "id": "af242f16",
+      "prompt": "Abstract visualization of FBX import process in Unreal Engine, dark theme, Unreal orange highlights, technical style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-import.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:27.661158",
+      "error": null
+    },
+    {
+      "id": "97e5dc97",
+      "prompt": "Simple Unreal Skeletal Mesh setup visualization, dark background, Unreal blue glow, minimalist style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-skeletal.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:28.857674",
+      "error": null
+    },
+    {
+      "id": "9fae6ccd",
+      "prompt": "Minimalist workflow diagram showing FBX to Auto-rig to Unreal FBX to Skeletal Mesh process, dark background, clean arrows and icons, no text",
+      "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-workflow.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:29.657452",
+      "error": null
+    },
+    {
+      "id": "375f84f5",
+      "prompt": "Minimalist comparison of T-pose and A-pose characters side by side, dark background, indigo blue accent, modern tech aesthetic, no text",
+      "output_path": "/root/autorig-online/static/images/pages/tpose-apose-hero.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:32.969844",
+      "error": null
+    },
+    {
+      "id": "77bd183e",
+      "prompt": "Simple diagram showing T-pose benefits for auto rigging, dark background, minimalist style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/tpose-benefits.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:32.983933",
+      "error": null
+    },
+    {
+      "id": "4af55f25",
+      "prompt": "Simple diagram showing A-pose benefits for manual rigging, dark background, minimalist style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/apose-benefits.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:34.147175",
+      "error": null
+    },
+    {
+      "id": "c4d7d0d6",
+      "prompt": "Abstract visualization of FBX auto rigging process, dark theme, indigo blue highlights, technical style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/fbx-rigging-process.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:47.872385",
+      "error": null
+    },
+    {
+      "id": "e87d6a51",
+      "prompt": "Simple diagram showing Unity and Unreal Engine compatibility, dark background, minimalist style, no text",
+      "output_path": "/root/autorig-online/static/images/pages/fbx-engine-compat.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:47.878036",
+      "error": null
+    },
+    {
+      "id": "11e17100",
+      "prompt": "Minimalist workflow diagram for FBX rigging process, dark theme, indigo blue accents, no text",
+      "output_path": "/root/autorig-online/static/images/pages/fbx-workflow.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T17:47:49.292021",
+      "error": null
+    },
+    {
+      "id": "a316d37d",
+      "prompt": "Dark tech UI visualization of automated 3D character rigging pipeline. Left side shows raw gray humanoid 3D mesh, center shows animated transformation arrows and processing gears, right side shows fully rigged colorful character with visible skeleton overlay in glowing green. Dark purple-black gradient background with indigo accent lights. Futuristic digital aesthetic, neon grid floor, volumetric lighting. Professional 3D software interface style. Text overlay \"3D MODEL → AUTO RIG → ANIMATED CHARACTER\"",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-hero.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:12:50.369064",
+      "error": null
+    },
+    {
+      "id": "a78eb5cc",
+      "prompt": "Three 3D file format icons floating in dark space: GLB (blue metallic cube with \"GLB\" text), FBX (orange geometric shape with \"FBX\" text), and OBJ (green wireframe sphere with \"OBJ\" text). Each icon glows with its respective color. Dark gradient background with subtle indigo purple accents. Minimalist tech UI style, soft shadows, volumetric glow effects. Clean modern design for file format selection interface",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-formats.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:12:52.849095",
+      "error": null
+    },
+    {
+      "id": "cbeae738",
+      "prompt": "Technical visualization of OpenPose AI body detection on humanoid 3D model. Gray humanoid mesh with 137 bright neon markers: 25 body keypoints (spine, shoulders, hips, knees, ankles) in cyan, 42 hand keypoints on both hands in green, 70 facial landmarks around eyes, nose, mouth in magenta. Connected by thin glowing lines forming skeleton. Dark background with indigo gradient. Scientific/medical scan aesthetic, holographic style",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-openpose.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:12:56.038295",
+      "error": null
+    },
+    {
+      "id": "d9dc4dbf",
+      "prompt": "T-Pose preparation process visualization for 3D character. Shows 4 steps: 1) Coordinate axes (RGB X/Y/Z arrows), 2) Scale measurement grid around character, 3) Character alignment with vertical guide lines, 4) Finger spread position with hand detail. All on dark purple-black background with indigo accents. Technical diagram style, blueprint aesthetics, grid overlay, measurement annotations. Professional rigging software interface look",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-tpose-prep.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:12:58.896568",
+      "error": null
+    },
+    {
+      "id": "44a16dd6",
+      "prompt": "AI-generated skeleton inside transparent 3D humanoid mesh. Glowing cyan bone hierarchy visible through semi-transparent gray body surface. Neural network visualization patterns emanating from bones showing AI calculation. Joint spheres at shoulders, elbows, hips, knees glowing brighter. Dark space background with deep purple-indigo gradient. Futuristic X-ray hologram aesthetic, digital wireframe overlay, tech scan look",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-skeleton-ai.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:13:03.135229",
+      "error": null
+    },
+    {
+      "id": "7ce47874",
+      "prompt": "Weight painting visualization on 3D humanoid character. Color gradient heat map showing vertex weights: red at joints (shoulders, elbows, knees, hips), transitioning through orange/yellow to blue at extremities. Character in A-pose showing clear deformation zones. Dark purple-black background with indigo accents. Professional 3D software viewport style, Blender weight paint mode aesthetic, clean technical visualization",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-skinning.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:13:10.428132",
+      "error": null
+    },
+    {
+      "id": "805bc713",
+      "prompt": "Split view showing two animation export paths. Left side: \"Baked Animations\" - multiple animation timeline strips with icons for walk/run/idle cycles, looping arrows. Right side: \"Control Rig\" - Blender viewport with character and orange IK controllers, bone handles visible. Both on dark gradient background. Indigo and cyan accent colors. Professional motion graphics style, clean UI cards, tech interface aesthetic",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-animations.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:13:14.406229",
+      "error": null
+    },
+    {
+      "id": "d2981967",
+      "prompt": "Unity HDRP scene showcasing rigged 3D character. High-quality PBR rendering with dramatic volumetric lighting, global illumination, ray-traced reflections on floor. Character standing in modern studio environment with area lights. Unity Editor interface elements visible in corners. Dark theme with indigo accent lights. Photorealistic game engine quality, cinematic composition, professional lighting setup",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-unity-hdrp.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:13:16.144685",
+      "error": null
+    },
+    {
+      "id": "38420b26",
+      "prompt": "Video preview rendering of animated 3D character. Film production aesthetic with camera viewfinder overlay, timecode, recording indicator. Character performing walk animation with motion blur. Cinematic lighting with soft rim light and key light. Dark studio background with subtle indigo/purple ambient. Video player controls at bottom. Professional video editing software aesthetic, high-end render quality preview",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-video-preview.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:13:20.169043",
+      "error": null
+    },
+    {
+      "id": "62a5f125",
+      "prompt": "Product roadmap visualization with 3 milestones floating in dark space. Icons: 1) Quadruped animal silhouette with \"Quadruped Rigging\" label, 2) Hand with finger bones for \"Advanced Hand Control\", 3) Multiple characters grouped for \"Batch Processing\". Connected by glowing dotted timeline. Dark gradient background with indigo and purple accents. Clean modern tech roadmap style, minimalist icons, subtle glow effects",
+      "output_path": "/root/autorig-online/static/images/pages/hiw-roadmap.png",
+      "aspect_ratio": 1.777,
+      "status": "completed",
+      "created_at": "2026-01-03T18:13:22.461929",
+      "error": null
+    }
+  ]
+}

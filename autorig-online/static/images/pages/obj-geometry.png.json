@@ -1,0 +1,25 @@
+{
+  "task_id": "9f5e58a2",
+  "prompt": "Simple diagram showing geometry preservation, UV mapping, and materials in OBJ format, schematic minimalist style, dark background, no text",
+  "output_path": "/root/autorig-online/static/images/pages/obj-geometry.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:44:41.962672",
+  "status": "completed",
+  "started_at": "2026-01-03T17:49:44.512189",
+  "request_payload": {
+    "prompt": "Simple diagram showing geometry preservation, UV mapping, and materials in OBJ format, schematic minimalist style, dark background, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:49:44.512446",
+  "output_url": "https://renderfin.com/render/default_user/65c8fed1-04a9-44dc-a758-6719f40d99c8.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/65c8fed1-04a9-44dc-a758-6719f40d99c8.png"
+  },
+  "response_received_at": "2026-01-03T17:49:44.869783",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:50:11.660708",
+  "completed_at": "2026-01-03T17:50:17.289262",
+  "file_size": 271831
+}

@@ -1,0 +1,30 @@
+[Unit]
+Description=CGTrader Submit Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/CGTrader_SUBMIT_SERVER
+Environment="PATH=/root/CGTrader_SUBMIT_SERVER/venv/bin:/usr/bin:/bin"
+Environment="DISPLAY=:99"
+ExecStart=/root/CGTrader_SUBMIT_SERVER/venv/bin/python app.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cgtrader-submit
+
+# Memory limit (to stay within 2GB total with autorig)
+MemoryMax=800M
+MemoryHigh=600M
+
+# Security (relaxed for browser automation)
+NoNewPrivileges=false
+ProtectSystem=false
+
+[Install]
+WantedBy=multi-user.target

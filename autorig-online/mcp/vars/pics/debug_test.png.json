@@ -1,0 +1,15 @@
+{
+  "task_id": "0cb45cc0",
+  "prompt": "A simple red circle on white background",
+  "output_path": "R:/work/renderfin-mcp/vars/pics/debug_test.png",
+  "aspect_ratio": 1.0,
+  "queued_at": "2026-01-03T23:57:09.686693",
+  "status": "failed",
+  "started_at": "2026-01-03T23:57:09.699694",
+  "output_url": "https://renderfin.com/render/default_user/d806ac47-6a98-4d12-8b98-18d4957d67ab.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/d806ac47-6a98-4d12-8b98-18d4957d67ab.png"
+  },
+  "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n",
+  "failed_at": "2026-01-03T23:57:09.756207"
+}

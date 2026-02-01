@@ -1,0 +1,25 @@
+{
+  "task_id": "4af55f25",
+  "prompt": "Simple diagram showing A-pose benefits for manual rigging, dark background, minimalist style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/apose-benefits.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:34.147175",
+  "status": "completed",
+  "started_at": "2026-01-03T17:56:24.347425",
+  "request_payload": {
+    "prompt": "Simple diagram showing A-pose benefits for manual rigging, dark background, minimalist style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:56:24.347735",
+  "output_url": "https://renderfin.com/render/default_user/8240b433-d2d4-4322-a1f0-b6edffb3c369.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/8240b433-d2d4-4322-a1f0-b6edffb3c369.png"
+  },
+  "response_received_at": "2026-01-03T17:56:25.132768",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:56:52.682061",
+  "completed_at": "2026-01-03T17:56:59.501636",
+  "file_size": 359530
+}

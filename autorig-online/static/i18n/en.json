@@ -49,7 +49,10 @@
 
     "btn_restart_task": "Restart task",
     "btn_restart_task_working": "Restarting...",
-    
+    "btn_edit_scene": "Edit Model/Scene",
+    "btn_save_rig_tpose": "💾 SAVE RIG T-POSE",
+    "btn_save_rig_tpose_saving": "Saving...",
+
     "error_no_file": "Please select a file or enter a URL",
     "error_no_credits": "No credits remaining",
     "error_login_required": "Please sign in to continue",
@@ -81,7 +84,23 @@
     "queue_wait_minutes": "~{minutes} min",
     "queue_wait_hours": "~{hours}h {minutes}m",
     
-    "footer_text": "AutoRig Online © 2025",
+    "footer_text": "AutoRig Online © 2026",
+    "footer_tagline": "AI-powered automatic 3D character rigging. Upload your model and get it rigged with animations in minutes.",
+    "footer_services": "Services",
+    "footer_glb_rig": "GLB Auto Rigging",
+    "footer_fbx_rig": "FBX Auto Rigging",
+    "footer_obj_rig": "OBJ Auto Rigging",
+    "footer_guides": "Guides",
+    "footer_mixamo_alt": "Mixamo Alternative",
+    "footer_glb_unity": "GLB for Unity",
+    "footer_fbx_unreal": "FBX for Unreal",
+    "footer_glb_vs_fbx": "GLB vs FBX",
+    "footer_tpose": "T-Pose vs A-Pose",
+    "footer_retargeting": "Animation Retargeting",
+    "footer_company": "Company",
+    "footer_how_it_works": "How It Works",
+    "footer_faq": "FAQ",
+    "footer_copyright": "© 2026 AutoRig Online. All rights reserved.",
 
     "nav_home": "Home",
     "nav_guides": "Guides",
@@ -89,8 +108,8 @@
     "nav_buy": "Buy",
 
     "buy_title": "Buy Credits",
-    "buy_subtitle": "Credits are used to start rigging tasks. You can buy a bundle below.",
-    "buy_notice": "Credits are added automatically within 1–2 minutes after payment. No files will be downloaded.",
+    "buy_subtitle": "Credits are needed to download finished 3D models with rigging and all animations.",
+    "buy_notice": "Credits are added automatically within 1–2 minutes after payment.",
     "buy_btn": "Buy",
     "buy_login_required": "Please sign in to buy credits.",
 
@@ -148,12 +167,14 @@
     "gallery_sort_label": "Sort:",
     "gallery_sort_likes": "Top liked",
     "gallery_sort_date": "Newest",
+    "gallery_sort_sales": "Top sales",
     "gallery_prev": "Prev",
     "gallery_next": "Next",
     "gallery_page": "Page {page}",
     "gallery_loading": "Loading…",
     "gallery_empty": "No works yet",
     "gallery_open": "Open",
+    "gallery_clear_filter": "Clear filter",
 
     "formats_title": "Supported Export Formats",
     "formats_desc": "We support conversion to all major 3D software and game engines:",
@@ -208,6 +229,71 @@
     "free3d_confirm_create": "Add model \"{title}\" to rigging queue?",
 
     "log_copy": "Copy",
-    "log_copied": "Copied!"
+    "log_copied": "Copied!",
+
+    "hiw_meta_title": "How Auto Rigging Works — Complete Character Rigging Pipeline",
+    "hiw_hero_title": "How Auto Rigging Works",
+    "hiw_hero_lead": "An automated pipeline for preparing 3D models: the user uploads a model and receives a production-ready character. The system performs all technical steps — from initial normalization and body part detection to rigging, skinning, animation preparation, and final export, including Unity HDRP package and realistic video preview.",
+    
+    "hiw_product_title": "What Is This Product",
+    "hiw_product_desc": "The pipeline is designed for batch processing and repeatable results: it removes the need for users to understand the technical details of rigging and engine assembly, turning model upload into a simple \"input → ready output\" service.",
+    "hiw_product_highlight": "Upload your model and get a fully prepared character ready for production use.",
+    
+    "hiw_formats_title": "Supported Formats",
+    "hiw_formats_desc": "The system automatically recognizes the format, correctly imports it, and brings it to a unified working state so that further stages are performed stably and identically.",
+    
+    "hiw_openpose_title": "Automatic Body Marker Detection (OpenPose)",
+    "hiw_openpose_desc": "One of the key elements of quality is automatic detection of character reference points using OpenPose. The system can work with up to 137 markers:",
+    "hiw_markers_body": "Body markers (core kinematics)",
+    "hiw_markers_hands": "Hand markers (21 per hand)",
+    "hiw_markers_face": "Face markers (head/face binding)",
+    "hiw_openpose_humanoid": "Automatic detection works best on humanoid forms (characters with familiar anatomy): in this case, the pipeline most confidently determines limbs, hands, and proportions, which directly improves the quality of subsequent rigging and deformations.",
+    
+    "hiw_tpose_title": "Automatic Model Preparation for Correct T-Pose",
+    "hiw_tpose_intro": "For the automatic rig to be created correctly and produce predictable deformations, the pipeline prepares the model and brings it to a technically correct state:",
+    "hiw_tpose_orientation": "<strong>Model orientation:</strong> normalization of \"forward/up\" direction, bringing to correct position relative to scene axes so that rigging, animations, and engine export work without surprises.",
+    "hiw_tpose_scale": "<strong>Scale and unit auto-check:</strong> the system verifies correct scale and brings the model to expected units so the character has the right size, animations don't look \"sped up/slowed down\" due to scale.",
+    "hiw_tpose_limbs": "<strong>Leg and arm position correction:</strong> adjusting the pose toward cleaner T-pose logic. Important for stable joint detection, correct segment lengths, and quality skinning.",
+    "hiw_tpose_fingers": "<strong>Finger detection and preparation:</strong> separate work with hands to improve finger rig accuracy and reduce deformation artifacts during animation.",
+    "hiw_tpose_result": "Result: the model becomes \"ready for rigging\": correctly oriented, at the right scale, and in a pose suitable for automatic skeleton construction.",
+    
+    "hiw_skeleton_title": "AI-Powered Skeleton Creation & Automatic Skinning",
+    "hiw_skeleton_intro": "After preparation, the pipeline automatically performs the key technical part:",
+    "hiw_skeleton_create": "🦴 Skeleton Creation",
+    "hiw_skeleton_create_desc": "A bone structure is formed for the main body parts (spine, legs, arms, head), with correct connections and hierarchy.",
+    "hiw_skinning_auto": "⚡ Automatic Skinning",
+    "hiw_skinning_auto_desc": "Vertex weights are distributed across bones so that when the skeleton moves, the model deforms naturally without \"breaking\".",
+    "hiw_skeleton_result": "This transforms a static model into a fully animatable character without manual routine work.",
+    
+    "hiw_animations_title": "Animations & Control Rig: Two Directions",
+    "hiw_animations_intro": "The pipeline delivers results in two forms to cover different workflows:",
+    "hiw_baked_title": "🎬 Baked Animations",
+    "hiw_baked_desc": "Ready for import into game engines. Convenient format for game project integration: clips play back stably and predictably.",
+    "hiw_controlrig_title": "🎮 Control Rig (.blend)",
+    "hiw_controlrig_desc": "Fully suitable for manual animation in Blender. Important if you need to manually adjust pose/movement, create unique animation for a task, or quickly make artistic edits without rebuilding the entire pipeline.",
+    "hiw_animations_result": "The system supports both the \"production\" path (engines) and the \"artistic\" path (manual animation).",
+    
+    "hiw_unity_title": "Unity HDRP Export: Turnkey unitypackage",
+    "hiw_unity_intro": "For Unity, the pipeline creates a unitypackage ready for use in Unity HDRP projects:",
+    "hiw_unity_1": "Model and animations prepared for correct import",
+    "hiw_unity_2": "Materials and textures brought to HDRP-render compatible form",
+    "hiw_unity_3": "Result is convenient to connect to projects without manual assembly and lengthy setup",
+    "hiw_unity_result": "This reduces integration time and decreases typical errors when transferring a character to Unity.",
+    
+    "hiw_video_title": "Realistic Result Visualization (Video)",
+    "hiw_video_intro": "After assembly, the system automatically creates a realistic video:",
+    "hiw_video_1": "Shows the final character appearance with correct lighting and materials",
+    "hiw_video_2": "Shows how the rig and deformations work in motion",
+    "hiw_video_3": "Quick quality assessment without manual scene and render setup",
+    "hiw_video_result": "Video serves as quick quality control of the final assembly: it's clear what came out \"at the output\" and where refinement is needed if necessary.",
+    
+    "hiw_roadmap_title": "Roadmap (Coming Soon)",
+    "hiw_roadmap_1": "Automatic retopology to target polygon count",
+    "hiw_roadmap_2": "Selection and application of specific animation to processed model",
+    "hiw_roadmap_3": "Automatic export to Unreal and other game engines",
+    
+    "hiw_cta_title": "Ready to Rig Your Character?",
+    "hiw_cta_subtitle": "Upload GLB/FBX/OBJ and get production-ready results in minutes.",
+    "hiw_cta_button": "Start Auto Rigging Now"
 }
 

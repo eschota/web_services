@@ -1,0 +1,25 @@
+{
+  "task_id": "084b986b",
+  "prompt": "Simple 3D character in dynamic pose, dark background, indigo blue glow, minimalist style, no text, motion lines, clean silhouette",
+  "output_path": "/root/autorig-online/static/images/pages/mixamo-animation.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:40:03.248107",
+  "status": "completed",
+  "started_at": "2026-01-03T17:46:19.895958",
+  "request_payload": {
+    "prompt": "Simple 3D character in dynamic pose, dark background, indigo blue glow, minimalist style, no text, motion lines, clean silhouette",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:46:19.896178",
+  "output_url": "https://renderfin.com/render/default_user/07dfe79d-248a-4501-9d9c-84688b588e06.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/07dfe79d-248a-4501-9d9c-84688b588e06.png"
+  },
+  "response_received_at": "2026-01-03T17:46:20.282778",
+  "response_status_code": 200,
+  "download_attempt": 7,
+  "last_download_attempt_at": "2026-01-03T17:46:52.502053",
+  "completed_at": "2026-01-03T17:46:58.197432",
+  "file_size": 307947
+}

@@ -1,0 +1,25 @@
+{
+  "task_id": "375f84f5",
+  "prompt": "Minimalist comparison of T-pose and A-pose characters side by side, dark background, indigo blue accent, modern tech aesthetic, no text",
+  "output_path": "/root/autorig-online/static/images/pages/tpose-apose-hero.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:32.969844",
+  "status": "completed",
+  "started_at": "2026-01-03T17:55:13.173038",
+  "request_payload": {
+    "prompt": "Minimalist comparison of T-pose and A-pose characters side by side, dark background, indigo blue accent, modern tech aesthetic, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:55:13.173342",
+  "output_url": "https://renderfin.com/render/default_user/d8a5cf97-ebb4-49f2-b700-144e25d6794d.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/d8a5cf97-ebb4-49f2-b700-144e25d6794d.png"
+  },
+  "response_received_at": "2026-01-03T17:55:13.543220",
+  "response_status_code": 200,
+  "download_attempt": 7,
+  "last_download_attempt_at": "2026-01-03T17:55:45.667019",
+  "completed_at": "2026-01-03T17:55:51.357597",
+  "file_size": 464756
+}

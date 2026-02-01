@@ -1,0 +1,25 @@
+{
+  "task_id": "e87d6a51",
+  "prompt": "Simple diagram showing Unity and Unreal Engine compatibility, dark background, minimalist style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/fbx-engine-compat.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:47.878036",
+  "status": "completed",
+  "started_at": "2026-01-03T17:57:32.952697",
+  "request_payload": {
+    "prompt": "Simple diagram showing Unity and Unreal Engine compatibility, dark background, minimalist style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:57:32.953000",
+  "output_url": "https://renderfin.com/render/default_user/29344873-9056-4bda-a4d3-215b7e244050.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/29344873-9056-4bda-a4d3-215b7e244050.png"
+  },
+  "response_received_at": "2026-01-03T17:57:33.290092",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:58:00.386662",
+  "completed_at": "2026-01-03T17:58:07.190747",
+  "file_size": 249460
+}

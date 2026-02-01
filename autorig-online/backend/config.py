@@ -58,7 +58,7 @@ WORKERS = [
 # =============================================================================
 # Limits
 # =============================================================================
-ANON_FREE_LIMIT = 3  # Free conversions for anonymous users
+ANON_FREE_LIMIT = 0  # Free conversions for anonymous users
 USER_FREE_LIMIT = 0  # Total free credits after login (0 credits for all registered users)
 USER_BONUS_AFTER_LOGIN = 27  # Additional credits after login (30 - max anon used)
 

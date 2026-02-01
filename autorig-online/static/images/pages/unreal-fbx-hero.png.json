@@ -1,0 +1,25 @@
+{
+  "task_id": "f40ad7a2",
+  "prompt": "Minimalist Unreal Engine with FBX character, dark background with Unreal orange/blue accent, modern tech aesthetic, no text",
+  "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-hero.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:27.620964",
+  "status": "completed",
+  "started_at": "2026-01-03T17:52:55.778441",
+  "request_payload": {
+    "prompt": "Minimalist Unreal Engine with FBX character, dark background with Unreal orange/blue accent, modern tech aesthetic, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:52:55.778693",
+  "output_url": "https://renderfin.com/render/default_user/b6cdfa32-1ee2-4112-9db1-2ec169c89e02.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/b6cdfa32-1ee2-4112-9db1-2ec169c89e02.png"
+  },
+  "response_received_at": "2026-01-03T17:52:56.197794",
+  "response_status_code": 200,
+  "download_attempt": 7,
+  "last_download_attempt_at": "2026-01-03T17:53:28.286118",
+  "completed_at": "2026-01-03T17:53:34.503329",
+  "file_size": 553810
+}

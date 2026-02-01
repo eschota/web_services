@@ -1,0 +1,25 @@
+{
+  "task_id": "ed0d57a2",
+  "prompt": "Visual comparison of 3D file formats GLB and FBX, dark theme, indigo blue accents, schematic style, no text, side by side layout, minimalist design",
+  "output_path": "/root/autorig-online/static/images/pages/mixamo-format-comparison.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:40:04.641892",
+  "status": "completed",
+  "started_at": "2026-01-03T17:46:58.200204",
+  "request_payload": {
+    "prompt": "Visual comparison of 3D file formats GLB and FBX, dark theme, indigo blue accents, schematic style, no text, side by side layout, minimalist design",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:46:58.200466",
+  "output_url": "https://renderfin.com/render/default_user/64c8aff2-f278-4291-a3fd-27079bd7a776.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/64c8aff2-f278-4291-a3fd-27079bd7a776.png"
+  },
+  "response_received_at": "2026-01-03T17:46:58.573267",
+  "response_status_code": 200,
+  "download_attempt": 9,
+  "last_download_attempt_at": "2026-01-03T17:47:41.737475",
+  "completed_at": "2026-01-03T17:47:47.474274",
+  "file_size": 338416
+}

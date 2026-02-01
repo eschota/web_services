@@ -36,7 +36,23 @@
     "credits_free": "मुफ्त रूपांतरण शेष",
     "credits_login_hint": "7 और मुफ्त रूपांतरण के लिए साइन इन करें",
 
-    "footer_text": "AutoRig Online © 2025",
+    "footer_text": "AutoRig Online © 2026",
+    "footer_tagline": "AI-संचालित स्वचालित 3D कैरेक्टर रिगिंग। अपना मॉडल अपलोड करें और कुछ ही मिनटों में एनिमेशन के साथ रिग्ड मॉडल प्राप्त करें।",
+    "footer_services": "सेवाएं",
+    "footer_glb_rig": "GLB ऑटो रिगिंग",
+    "footer_fbx_rig": "FBX ऑटो रिगिंग",
+    "footer_obj_rig": "OBJ ऑटो रिगिंग",
+    "footer_guides": "गाइड",
+    "footer_mixamo_alt": "Mixamo विकल्प",
+    "footer_glb_unity": "Unity के लिए GLB",
+    "footer_fbx_unreal": "Unreal के लिए FBX",
+    "footer_glb_vs_fbx": "GLB vs FBX",
+    "footer_tpose": "T-Pose vs A-Pose",
+    "footer_retargeting": "एनिमेशन रिटारगेटिंग",
+    "footer_company": "कंपनी",
+    "footer_how_it_works": "यह कैसे काम करता है",
+    "footer_faq": "FAQ",
+    "footer_copyright": "© 2026 AutoRig Online. सर्वाधिकार सुरक्षित।",
 
     "guides_title": "गाइड और ट्यूटोरियल",
     "guides_intro": "कैरेक्टर रिगिंग, Unity/Unreal वर्कफ्लो और बेस्ट प्रैक्टिस के बारे में और जानें",
@@ -66,5 +82,9 @@
 
     "nav_home": "होम",
     "nav_guides": "गाइड",
-    "nav_gallery": "गैलरी"
+    "nav_gallery": "गैलरी",
+    "nav_buy": "खरीदें",
+    "nav_api": "API",
+    "buy_subtitle": "रिगिंग और सभी एनिमेशन के साथ तैयार 3D मॉडल डाउनलोड करने के लिए क्रेडिट की आवश्यकता होती है।",
+    "buy_notice": "भुगतान के बाद 1-2 मिनट के भीतर क्रेडिट स्वचालित रूप से जुड़ जाते हैं।"
 }

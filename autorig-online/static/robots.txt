@@ -1,11 +1,55 @@
 # AutoRig Online robots.txt
 User-agent: *
 Allow: /
+
+# Main pages
+Allow: /gallery
+Allow: /guides
+Allow: /buy-credits
+Allow: /how-it-works
+Allow: /faq
+
+# Format-specific landing pages
 Allow: /glb-auto-rig
 Allow: /fbx-auto-rig
 Allow: /obj-auto-rig
-Allow: /how-it-works
-Allow: /faq
+Allow: /t-pose-rig
+
+# SEO landing pages (multilingual)
+Allow: /mixamo-alternative
+Allow: /mixamo-alternative-ru
+Allow: /mixamo-alternative-zh
+Allow: /mixamo-alternative-hi
+
+Allow: /rig-glb-unity
+Allow: /rig-glb-unity-ru
+Allow: /rig-glb-unity-zh
+Allow: /rig-glb-unity-hi
+
+Allow: /rig-fbx-unreal
+Allow: /rig-fbx-unreal-ru
+Allow: /rig-fbx-unreal-zh
+Allow: /rig-fbx-unreal-hi
+
+Allow: /glb-vs-fbx
+Allow: /glb-vs-fbx-ru
+Allow: /glb-vs-fbx-zh
+Allow: /glb-vs-fbx-hi
+
+Allow: /t-pose-vs-a-pose
+Allow: /t-pose-vs-a-pose-ru
+Allow: /t-pose-vs-a-pose-zh
+Allow: /t-pose-vs-a-pose-hi
+
+Allow: /animation-retargeting
+Allow: /animation-retargeting-ru
+Allow: /animation-retargeting-zh
+Allow: /animation-retargeting-hi
+
+Allow: /auto-rig-obj
+Allow: /auto-rig-obj-ru
+Allow: /auto-rig-obj-zh
+Allow: /auto-rig-obj-hi
 
 # Disallow API and admin
 Disallow: /api/

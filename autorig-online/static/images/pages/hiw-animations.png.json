@@ -1,0 +1,25 @@
+{
+  "task_id": "805bc713",
+  "prompt": "Split view showing two animation export paths. Left side: \"Baked Animations\" - multiple animation timeline strips with icons for walk/run/idle cycles, looping arrows. Right side: \"Control Rig\" - Blender viewport with character and orange IK controllers, bone handles visible. Both on dark gradient background. Indigo and cyan accent colors. Professional motion graphics style, clean UI cards, tech interface aesthetic",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-animations.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:13:14.406229",
+  "status": "completed",
+  "started_at": "2026-01-03T18:16:15.853543",
+  "request_payload": {
+    "prompt": "Split view showing two animation export paths. Left side: \"Baked Animations\" - multiple animation timeline strips with icons for walk/run/idle cycles, looping arrows. Right side: \"Control Rig\" - Blender viewport with character and orange IK controllers, bone handles visible. Both on dark gradient background. Indigo and cyan accent colors. Professional motion graphics style, clean UI cards, tech interface aesthetic",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:16:15.853765",
+  "output_url": "https://renderfin.com/render/default_user/eba5252c-b7af-4571-a435-5c503823d5c4.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/eba5252c-b7af-4571-a435-5c503823d5c4.png"
+  },
+  "response_received_at": "2026-01-03T18:16:16.222974",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:16:43.654501",
+  "completed_at": "2026-01-03T18:16:49.938429",
+  "file_size": 564524
+}

@@ -1,0 +1,25 @@
+{
+  "task_id": "97e5dc97",
+  "prompt": "Simple Unreal Skeletal Mesh setup visualization, dark background, Unreal blue glow, minimalist style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-skeletal.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:28.857674",
+  "status": "completed",
+  "started_at": "2026-01-03T17:54:07.454630",
+  "request_payload": {
+    "prompt": "Simple Unreal Skeletal Mesh setup visualization, dark background, Unreal blue glow, minimalist style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:54:07.459058",
+  "output_url": "https://renderfin.com/render/default_user/a07eda7f-f031-4b14-b93d-4f7ca64d2354.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/a07eda7f-f031-4b14-b93d-4f7ca64d2354.png"
+  },
+  "response_received_at": "2026-01-03T17:54:07.876321",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:54:34.696381",
+  "completed_at": "2026-01-03T17:54:40.336598",
+  "file_size": 233957
+}

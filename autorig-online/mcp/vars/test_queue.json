@@ -1,0 +1,13 @@
+{
+  "tasks": [
+    {
+      "id": "bcf90f79",
+      "prompt": "A simple red circle on white background",
+      "output_path": "R:/work/renderfin-mcp/vars/pics/worker_test.png",
+      "aspect_ratio": 1.0,
+      "status": "failed",
+      "created_at": "2026-01-03T23:57:43.108835",
+      "error": "HTTP error 404: <html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx/1.27.2</center>\r\n</body>\r\n</html>\r\n"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "task_id": "611d0632",
+  "prompt": "Simple diagram showing GLB format benefits, dark background, minimalist style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/glb-benefits.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:46:56.820542",
+  "status": "completed",
+  "started_at": "2026-01-03T17:51:49.700136",
+  "request_payload": {
+    "prompt": "Simple diagram showing GLB format benefits, dark background, minimalist style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:51:49.700432",
+  "output_url": "https://renderfin.com/render/default_user/bf7700ad-e855-4eb3-90cc-b037e0176250.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/bf7700ad-e855-4eb3-90cc-b037e0176250.png"
+  },
+  "response_received_at": "2026-01-03T17:51:50.264060",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:52:17.167254",
+  "completed_at": "2026-01-03T17:52:22.881616",
+  "file_size": 466324
+}

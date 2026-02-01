@@ -1,0 +1,25 @@
+{
+  "task_id": "44a16dd6",
+  "prompt": "AI-generated skeleton inside transparent 3D humanoid mesh. Glowing cyan bone hierarchy visible through semi-transparent gray body surface. Neural network visualization patterns emanating from bones showing AI calculation. Joint spheres at shoulders, elbows, hips, knees glowing brighter. Dark space background with deep purple-indigo gradient. Futuristic X-ray hologram aesthetic, digital wireframe overlay, tech scan look",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-skeleton-ai.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:13:03.135229",
+  "status": "completed",
+  "started_at": "2026-01-03T18:15:08.758901",
+  "request_payload": {
+    "prompt": "AI-generated skeleton inside transparent 3D humanoid mesh. Glowing cyan bone hierarchy visible through semi-transparent gray body surface. Neural network visualization patterns emanating from bones showing AI calculation. Joint spheres at shoulders, elbows, hips, knees glowing brighter. Dark space background with deep purple-indigo gradient. Futuristic X-ray hologram aesthetic, digital wireframe overlay, tech scan look",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:15:08.762604",
+  "output_url": "https://renderfin.com/render/default_user/91e0dced-1c78-4551-87fe-955bd26ece08.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/91e0dced-1c78-4551-87fe-955bd26ece08.png"
+  },
+  "response_received_at": "2026-01-03T18:15:09.177747",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:15:36.398968",
+  "completed_at": "2026-01-03T18:15:42.293377",
+  "file_size": 964175
+}

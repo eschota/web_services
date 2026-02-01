@@ -1,0 +1,25 @@
+{
+  "task_id": "c4d7d0d6",
+  "prompt": "Abstract visualization of FBX auto rigging process, dark theme, indigo blue highlights, technical style, no text",
+  "output_path": "/root/autorig-online/static/images/pages/fbx-rigging-process.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:47.872385",
+  "status": "completed",
+  "started_at": "2026-01-03T17:56:59.505167",
+  "request_payload": {
+    "prompt": "Abstract visualization of FBX auto rigging process, dark theme, indigo blue highlights, technical style, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:56:59.505433",
+  "output_url": "https://renderfin.com/render/default_user/c35ab84d-aa64-429b-bd64-fd7d2dd10fe4.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/c35ab84d-aa64-429b-bd64-fd7d2dd10fe4.png"
+  },
+  "response_received_at": "2026-01-03T17:56:59.890432",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:57:26.755698",
+  "completed_at": "2026-01-03T17:57:32.947968",
+  "file_size": 587460
+}

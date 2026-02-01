@@ -12,10 +12,30 @@ cp /root/autorig-online/static/glb-auto-rig.html /opt/autorig-online/static/
 cp /root/autorig-online/static/fbx-auto-rig.html /opt/autorig-online/static/
 cp /root/autorig-online/static/obj-auto-rig.html /opt/autorig-online/static/
 cp /root/autorig-online/static/t-pose-rig.html /opt/autorig-online/static/
+cp /root/autorig-online/static/t-pose-vs-a-pose.html /opt/autorig-online/static/
+cp /root/autorig-online/static/t-pose-vs-a-pose-ru.html /opt/autorig-online/static/
+cp /root/autorig-online/static/t-pose-vs-a-pose-zh.html /opt/autorig-online/static/
+cp /root/autorig-online/static/t-pose-vs-a-pose-hi.html /opt/autorig-online/static/
 cp /root/autorig-online/static/how-it-works.html /opt/autorig-online/static/
 cp /root/autorig-online/static/faq.html /opt/autorig-online/static/
 cp /root/autorig-online/static/gallery.html /opt/autorig-online/static/
 cp /root/autorig-online/static/g-template.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-glb-unity.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-glb-unity-ru.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-glb-unity-zh.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-glb-unity-hi.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-fbx-unreal.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-fbx-unreal-ru.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-fbx-unreal-zh.html /opt/autorig-online/static/
+cp /root/autorig-online/static/rig-fbx-unreal-hi.html /opt/autorig-online/static/
+cp /root/autorig-online/static/animation-retargeting.html /opt/autorig-online/static/
+cp /root/autorig-online/static/animation-retargeting-ru.html /opt/autorig-online/static/
+cp /root/autorig-online/static/animation-retargeting-zh.html /opt/autorig-online/static/
+cp /root/autorig-online/static/animation-retargeting-hi.html /opt/autorig-online/static/
+cp /root/autorig-online/static/glb-vs-fbx.html /opt/autorig-online/static/
+cp /root/autorig-online/static/glb-vs-fbx-ru.html /opt/autorig-online/static/
+cp /root/autorig-online/static/glb-vs-fbx-zh.html /opt/autorig-online/static/
+cp /root/autorig-online/static/glb-vs-fbx-hi.html /opt/autorig-online/static/
 
 # Update sitemap
 echo "🗺️  Updating sitemap..."

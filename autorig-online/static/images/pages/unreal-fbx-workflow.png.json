@@ -1,0 +1,25 @@
+{
+  "task_id": "9fae6ccd",
+  "prompt": "Minimalist workflow diagram showing FBX to Auto-rig to Unreal FBX to Skeletal Mesh process, dark background, clean arrows and icons, no text",
+  "output_path": "/root/autorig-online/static/images/pages/unreal-fbx-workflow.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:47:29.657452",
+  "status": "completed",
+  "started_at": "2026-01-03T17:54:40.341858",
+  "request_payload": {
+    "prompt": "Minimalist workflow diagram showing FBX to Auto-rig to Unreal FBX to Skeletal Mesh process, dark background, clean arrows and icons, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:54:40.342753",
+  "output_url": "https://renderfin.com/render/default_user/1d916943-0d9b-4e37-92b9-a707cb49c625.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/1d916943-0d9b-4e37-92b9-a707cb49c625.png"
+  },
+  "response_received_at": "2026-01-03T17:54:40.674424",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T17:55:07.522310",
+  "completed_at": "2026-01-03T17:55:13.165724",
+  "file_size": 131805
+}

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b1f2a"/>
+      <stop offset="1" stop-color="#0e1118"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a3142"/>
+      <stop offset="1" stop-color="#1b2231"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="450" rx="28" fill="url(#bg)"/>
+  <rect x="70" y="70" width="660" height="310" rx="22" fill="url(#card)" opacity="0.9"/>
+  <rect x="110" y="120" width="420" height="22" rx="11" fill="#7f8aa3" opacity="0.35"/>
+  <rect x="110" y="160" width="520" height="14" rx="7" fill="#7f8aa3" opacity="0.22"/>
+  <rect x="110" y="190" width="480" height="14" rx="7" fill="#7f8aa3" opacity="0.18"/>
+  <g opacity="0.75">
+    <circle cx="590" cy="230" r="44" fill="#7f8aa3" opacity="0.25"/>
+    <path d="M576 214v32l28-16-28-16z" fill="#d7deee" opacity="0.65"/>
+  </g>
+  <text x="400" y="328" text-anchor="middle" font-family="Outfit, system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="20" fill="#d7deee" opacity="0.85">
+    Preview will appear here
+  </text>
+</svg>
+

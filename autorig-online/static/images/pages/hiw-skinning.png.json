@@ -1,0 +1,25 @@
+{
+  "task_id": "7ce47874",
+  "prompt": "Weight painting visualization on 3D humanoid character. Color gradient heat map showing vertex weights: red at joints (shoulders, elbows, knees, hips), transitioning through orange/yellow to blue at extremities. Character in A-pose showing clear deformation zones. Dark purple-black background with indigo accents. Professional 3D software viewport style, Blender weight paint mode aesthetic, clean technical visualization",
+  "output_path": "/root/autorig-online/static/images/pages/hiw-skinning.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T18:13:10.428132",
+  "status": "completed",
+  "started_at": "2026-01-03T18:15:42.297469",
+  "request_payload": {
+    "prompt": "Weight painting visualization on 3D humanoid character. Color gradient heat map showing vertex weights: red at joints (shoulders, elbows, knees, hips), transitioning through orange/yellow to blue at extremities. Character in A-pose showing clear deformation zones. Dark purple-black background with indigo accents. Professional 3D software viewport style, Blender weight paint mode aesthetic, clean technical visualization",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T18:15:42.297758",
+  "output_url": "https://renderfin.com/render/default_user/4c5c56e4-d31b-41d2-bd0c-c4c4facc7856.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/4c5c56e4-d31b-41d2-bd0c-c4c4facc7856.png"
+  },
+  "response_received_at": "2026-01-03T18:15:43.281438",
+  "response_status_code": 200,
+  "download_attempt": 6,
+  "last_download_attempt_at": "2026-01-03T18:16:10.057053",
+  "completed_at": "2026-01-03T18:16:15.845219",
+  "file_size": 498667
+}

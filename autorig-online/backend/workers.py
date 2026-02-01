@@ -126,9 +126,17 @@ async def select_best_worker() -> Optional[str]:
 async def send_task_to_worker(
     worker_url: str, 
     input_url: str, 
-    task_type: str = "t_pose"
+    task_type: str = "t_pose",
+    transform_params: dict = None
 ) -> WorkerTaskResult:
-    """Send conversion task to worker. Always uses mode: only_rig"""
+    """Send conversion task to worker. Always uses mode: only_rig
+    
+    Args:
+        worker_url: Worker API endpoint
+        input_url: URL to input model file
+        task_type: Type of task (t_pose, etc.)
+        transform_params: Optional dict with local_position, local_rotation, local_scale arrays
+    """
     async with httpx.AsyncClient() as client:
         try:
             # Standard payload for all file types - workers handle GLB/FBX/OBJ
@@ -137,6 +145,15 @@ async def send_task_to_worker(
                 "type": task_type,
                 "mode": "only_rig"
             }
+            
+            # Add transform parameters if provided
+            if transform_params:
+                if transform_params.get("local_position"):
+                    payload["local_position"] = transform_params["local_position"]
+                if transform_params.get("local_rotation"):
+                    payload["local_rotation"] = transform_params["local_rotation"]
+                if transform_params.get("local_scale"):
+                    payload["local_scale"] = transform_params["local_scale"]
             
             response = await client.post(
                 worker_url,

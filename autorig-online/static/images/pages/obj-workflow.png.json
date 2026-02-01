@@ -1,0 +1,25 @@
+{
+  "task_id": "0d24e538",
+  "prompt": "Minimalist workflow diagram from sculpture to rigged character for OBJ format, clean lines, dark theme, no text",
+  "output_path": "/root/autorig-online/static/images/pages/obj-workflow.png",
+  "aspect_ratio": 1.777,
+  "queued_at": "2026-01-03T17:44:42.826982",
+  "status": "completed",
+  "started_at": "2026-01-03T17:50:17.292729",
+  "request_payload": {
+    "prompt": "Minimalist workflow diagram from sculpture to rigged character for OBJ format, clean lines, dark theme, no text",
+    "aspect_ratio": 1.777
+  },
+  "request_url": "https://renderfin.com/api-render",
+  "request_sent_at": "2026-01-03T17:50:17.293030",
+  "output_url": "https://renderfin.com/render/default_user/6dd76145-d3d5-472b-841a-acb4126dbd0d.png",
+  "render_response": {
+    "output_url": "https://renderfin.com/render/default_user/6dd76145-d3d5-472b-841a-acb4126dbd0d.png"
+  },
+  "response_received_at": "2026-01-03T17:50:17.654966",
+  "response_status_code": 200,
+  "download_attempt": 10,
+  "last_download_attempt_at": "2026-01-03T17:51:05.872241",
+  "completed_at": "2026-01-03T17:51:11.468762",
+  "file_size": 195094
+}

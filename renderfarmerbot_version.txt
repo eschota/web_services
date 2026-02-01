@@ -1,0 +1,7 @@
+v2.1.0 - Advanced RenderFarm Monitor
+- CPU monitoring with 10-minute average
+- HTML formatting with inline keyboards
+- API status monitoring
+- Auto-restart watchdogg
+- Real-time server status updates
+- Test links for server management
