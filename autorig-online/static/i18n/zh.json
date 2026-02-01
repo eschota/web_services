@@ -86,5 +86,13 @@
     "nav_buy": "购买",
     "nav_api": "API",
     "buy_subtitle": "需要积分来下载完成的带有绑定和所有动画的3D模型。",
-    "buy_notice": "付款后1-2分钟内自动添加积分。"
+    "buy_notice": "付款后1-2分钟内自动添加积分。",
+    "viewer_instruction": "3D模型已绑定，您可以在下载部分下载绑定和现成的动画。如果模型绑定不正确，请使用3D查看器和 X Y Z 按钮正确放置角色（将您的角色与基本的半透明 T-Pose 模型对齐，然后按保存 T-POSE 按钮并等待重新生成绑定。）",
+    "download_archive_desc": "存档包含您的 3D 模型以及绑定和所有动画，例如行走、跑步、跳跃、跌倒、击打等。您可以在 Unity、Unreal Engine, Blender 或任何其他 3D 建模包中使用它们。",
+    "task_progress_running": "转换进度 — 任务正在运行",
+    "task_progress_queued": "转换进度 — 任务在队列中",
+    "task_progress_completed": "转换进度 — 已完成",
+    "task_progress_error": "转换进度 — 错误",
+    "admin_input_url": "输入 URL (管理员)",
+    "admin_worker_page": "🔧 工作节点进度页面"
 }

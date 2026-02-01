@@ -871,20 +871,20 @@
                  style="margin: -0.25rem 0 0.85rem; padding: 0.65rem 0.85rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14);">
                 <div style="display:flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;">
                     <div style="min-width: 200px; flex: 1;">
-                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">Input URL (admin)</div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;" data-i18n="admin_input_url">Input URL (admin)</div>
                         <a id="admin-input-url-link" href="#" target="_blank"
                            style="color: var(--accent); text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
                             -
                         </a>
                     </div>
                     <button class="btn btn-secondary" id="admin-input-url-copy"
-                            style="padding: 0.35rem 0.6rem; font-size: 0.85rem; white-space: nowrap;">
+                            style="padding: 0.35rem 0.6rem; font-size: 0.85rem; white-space: nowrap;" data-i18n="btn_copy">
                         Copy
                     </button>
                 </div>
                 <!-- Worker Progress Page link -->
                 <div id="admin-worker-progress-row" class="hidden" style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.08);">
-                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">🔧 Worker Progress Page</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;" data-i18n="admin_worker_page">🔧 Worker Progress Page</div>
                     <a id="admin-worker-progress-link" href="#" target="_blank"
                        style="color: #f59e0b; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: 0.9rem;">
                         -
@@ -2047,6 +2047,9 @@
                     
                     this.task = await response.json();
                     this.updateUI();
+                    if (window.I18n) {
+                        I18n.applyTranslations();
+                    }
                     
                     // Stop polling when done or error
                     if (this.task.status === 'done' || this.task.status === 'error') {
@@ -2190,14 +2193,11 @@
                 // Title helper: started vs queued
                 const runStateEl = document.getElementById('task-run-state');
                 if (runStateEl) {
-                    const lang = (localStorage.getItem('autorig_lang') || 'en').toLowerCase();
-                    const isRu = lang.startsWith('ru');
                     let stateText = '';
-                    // We no longer rely on worker_api/guid for non-admin views (workers must be hidden).
-                    if (task.status === 'processing') stateText = isRu ? 'Прогресс конвертации — задача запущена' : 'Conversion Progress — task is running';
-                    else if (task.status === 'created') stateText = isRu ? 'Прогресс конвертации — задача в очереди' : 'Conversion Progress — task is queued';
-                    else if (task.status === 'done') stateText = isRu ? 'Прогресс конвертации — завершено' : 'Conversion Progress — completed';
-                    else if (task.status === 'error') stateText = isRu ? 'Прогресс конвертации — ошибка' : 'Conversion Progress — error';
+                    if (task.status === 'processing') stateText = t('task_progress_running');
+                    else if (task.status === 'created') stateText = t('task_progress_queued');
+                    else if (task.status === 'done') stateText = t('task_progress_completed');
+                    else if (task.status === 'error') stateText = t('task_progress_error');
                     runStateEl.textContent = stateText;
                 }
 
@@ -2612,8 +2612,10 @@
                 }
 
                 // Status derivation from milestones
-                if (logText.includes('DONE')) {
+                if (this.task?.status === 'done' || logText.includes('DONE')) {
                     params.status = 'Done ✓';
+                } else if (this.task?.status === 'error') {
+                    params.status = 'Error ✗';
                 } else if (logText.includes('Exporting')) {
                     params.status = 'Exporting...';
                 } else if (logText.includes('Applying animations')) {
@@ -3184,6 +3186,10 @@
                         ? `📦 ${t('btn_download_all')} ${fileCount} files${sizeStr ? ` (${sizeStr} total)` : ''}`
                         : 'Preparing downloads...';
 
+                    const archiveDesc = `<div style="margin-top: 0.75rem; font-size: 0.95rem; color: #fff; line-height: 1.4; text-align: center; font-weight: 500;" data-i18n="download_archive_desc">
+                        ${t('download_archive_desc')}
+                    </div>`;
+
                     downloadAllHtml = `
                         <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
                             <div style="font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);">
@@ -3195,11 +3201,12 @@
                                 <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18" style="filter: brightness(10);">
                                 <span style="font-weight: 700;">${buttonLabel}</span>
                             </button>
+                            ${archiveDesc}
                         </li>
                     `;
                 }
                 
-                list.innerHTML = downloadAllHtml + filesHtml;
+                list.innerHTML = downloadAllHtml; // Only show "Download All" button, hide individual files
             },
             
             renderTextureGallery(textures) {
@@ -3870,8 +3877,16 @@
                 } catch (e) {
                     console.warn('[Viewer] Failed to load settings:', e);
                 }
-                // Start sync loop after first load (or fail)
-                startPeriodicSync();
+                // Start sync loop after first load (or fail) only for owner/admin
+                const isAdmin = await ensureViewerAdmin();
+                const isOwner = window.TaskUI && window.TaskUI.purchaseState && window.TaskUI.purchaseState.is_owner;
+                
+                if (isAdmin || isOwner) {
+                    console.log('[Viewer] Starting periodic sync (owner/admin)');
+                    startPeriodicSync();
+                } else {
+                    console.log('[Viewer] Periodic sync disabled (not owner/admin)');
+                }
             }
             
             // Periodic sync logic
@@ -7660,6 +7675,13 @@
                     
                     // Initialize header functionality
                     SiteHeader.init();
+                    
+                    if (window.I18n) {
+                        // Setup language selector after injection
+                        I18n.setupSelector();
+                        // Re-apply translations after header is injected and initialized
+                        I18n.applyTranslations();
+                    }
                     
                     // Initialize Free3D search with callback to start task
                     SiteHeader.initSearch((modelUrl, modelName) => {

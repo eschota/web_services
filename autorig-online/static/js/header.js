@@ -164,30 +164,8 @@ async function initSiteHeader() {
     const langOptions = document.querySelectorAll('.lang-option');
     
     if (langBtn && langDropdown) {
-        langBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            langDropdown.classList.toggle('show');
-        });
-        
-        document.addEventListener('click', () => {
-            langDropdown.classList.remove('show');
-        });
-        
-        langOptions.forEach(opt => {
-            opt.addEventListener('click', async () => {
-                const lang = opt.dataset.lang;
-                langBtn.querySelector('span').textContent = lang.toUpperCase();
-                langDropdown.classList.remove('show');
-                // Trigger i18n update
-                if (window.I18n && window.I18n.switchLanguage) {
-                    await window.I18n.switchLanguage(lang);
-                }
-            });
-        });
-        
-        // Set initial language display from I18n or localStorage
-        const savedLang = localStorage.getItem('autorig_lang') || 'en';
-        langBtn.querySelector('span').textContent = savedLang.toUpperCase();
+        // Redundant setup removed - now handled by I18n.setupSelector()
+        // which is called in task.html after injection.
     }
     
     // Update login button to include return URL

@@ -116,3 +116,11 @@ __pycache__/
 
 # Python venv
 autorig-online/venv/
+
+# Large binary files and runtime data
+*.zip
+*.glb
+*.blend
+autorig-online/static/tasks/
+autorig-online/static/glb_cache/
+autorig/uploads/

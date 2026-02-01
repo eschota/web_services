@@ -1067,6 +1067,137 @@ h3 { font-size: 1.25rem; }
 }
 
 /* =============================================================================
+   Task Cards & Gallery Items
+   ============================================================================= */
+.tc-card {
+    display: block;
+    position: relative;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: #000;
+    aspect-ratio: 9 / 16;
+    transition: transform var(--transition), box-shadow var(--transition);
+    border: 1px solid var(--glass-border);
+}
+
+.tc-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--accent);
+}
+
+.tc-media {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.tc-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.3s ease;
+}
+
+.tc-video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.tc-author {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    z-index: 10;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tc-version {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(99, 102, 241, 0.8);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #fff;
+    z-index: 10;
+}
+
+.tc-badges {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 10;
+}
+
+.tc-like {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 6px 12px;
+    border-radius: 20px;
+    color: #fff;
+    cursor: pointer;
+    transition: all var(--transition);
+    font-family: inherit;
+}
+
+.tc-like:hover {
+    background: rgba(0, 0, 0, 0.7);
+    border-color: var(--accent);
+}
+
+.tc-like.liked {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #ef4444;
+}
+
+.tc-like.liked span:first-child {
+    color: #ef4444;
+}
+
+.tc-like-count {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.tc-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 6px 12px;
+    border-radius: 20px;
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* =============================================================================
    Animations
    ============================================================================= */
 @keyframes fadeIn {

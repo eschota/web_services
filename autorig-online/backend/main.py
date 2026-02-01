@@ -1746,6 +1746,50 @@ async def api_get_task_card(
     )
 
 
+@app.get("/api/task/{task_id}/owner_tasks")
+async def api_get_owner_tasks(
+    task_id: str,
+    page: int = 1,
+    per_page: int = 12,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all tasks from the same owner as the specified task"""
+    from tasks import get_user_tasks
+    
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    tasks, total = await get_user_tasks(db, task.owner_type, task.owner_id, page, per_page)
+    
+    # Get author nicknames if needed
+    author_nicknames = {}
+    if task.owner_type == "user":
+        user_result = await db.execute(
+            select(User.email, User.nickname).where(User.email == task.owner_id)
+        )
+        author_nicknames = {r[0]: r[1] for r in user_result.all()}
+
+    return {
+        "tasks": [
+            {
+                "task_id": t.id,
+                "status": t.status,
+                "progress": t.progress,
+                "created_at": t.created_at,
+                "thumbnail_url": f"/api/thumb/{t.id}" if t.status == "done" else None,
+                "owner_type": t.owner_type,
+                "owner_id": t.owner_id if t.owner_type == "user" else "anon"
+            }
+            for t in tasks
+        ],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "owner_type": task.owner_type
+    }
+
+
 @app.post("/api/gallery/{task_id}/like", response_model=LikeResponse)
 async def api_toggle_like(
     task_id: str,
