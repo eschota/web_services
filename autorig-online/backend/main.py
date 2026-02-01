@@ -1566,7 +1566,7 @@ async def api_get_gallery(
 
     # Count total completed tasks with video (with author filter if present)
     count_result = await db.execute(
-        select(func.count(Task.id)).where(*base_conditions)
+        select(func.count(distinct(func.coalesce(Task.input_url, Task.id)))).where(*base_conditions)
     )
     total = count_result.scalar() or 0
 
@@ -1582,7 +1582,7 @@ async def api_get_gallery(
             )
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
             .where(*base_conditions)
-            .group_by(Task.id)
+            .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc('like_count'), desc(Task.created_at))
             .offset(offset)
             .limit(per_page)
@@ -1598,7 +1598,7 @@ async def api_get_gallery(
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
             .outerjoin(TaskFilePurchase, Task.id == TaskFilePurchase.task_id)
             .where(*base_conditions)
-            .group_by(Task.id)
+            .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc('sales_count'), desc(Task.created_at))
             .offset(offset)
             .limit(per_page)
@@ -1612,7 +1612,7 @@ async def api_get_gallery(
             )
             .outerjoin(TaskLike, Task.id == TaskLike.task_id)
             .where(*base_conditions)
-            .group_by(Task.id)
+            .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc(Task.created_at))
             .offset(offset)
             .limit(per_page)
@@ -3160,6 +3160,14 @@ async def api_proxy_thumb(
         # Try alternative pattern
         poster_url = _find_file_in_ready_urls(task.ready_urls or [], "_poster.jpg")
     
+    if not poster_url:
+        # Try icon.png
+        poster_url = _find_file_in_ready_urls(task.ready_urls or [], "icon.png")
+        
+    if not poster_url:
+        # Try Render_1_view.jpg
+        poster_url = _find_file_in_ready_urls(task.ready_urls or [], "Render_1_view.jpg")
+
     if not poster_url:
         raise HTTPException(status_code=404, detail="Thumbnail not available")
     
