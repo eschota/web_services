@@ -293,10 +293,11 @@ async def broadcast_credits_purchased(
     price: str,
     user_email: str,
     product: str,
-    sale_id: str
+    sale_id: str,
+    is_test: bool = False
 ) -> None:
     """Notify when credits are successfully purchased via Gumroad."""
-    print(f"[Telegram] broadcast_credits_purchased: {credits} credits for {user_email}")
+    print(f"[Telegram] broadcast_credits_purchased: {credits} credits for {user_email} (test={is_test})")
     token = _get_token()
     if not token:
         print("[Telegram] No token, skipping credits purchased notification")
@@ -305,8 +306,9 @@ async def broadcast_credits_purchased(
     from telegram import Bot
 
     bot = Bot(token=token)
+    test_label = " [TEST]" if is_test else ""
     text = (
-        f"✅ Credits purchased!\n"
+        f"✅ Credits purchased!{test_label}\n"
         f"💰 Amount: {credits} credits\n"
         f"💵 Price: {price}\n"
         f"👤 User: {user_email}\n"

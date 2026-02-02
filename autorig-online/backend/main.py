@@ -832,6 +832,7 @@ async def api_gumroad_ping(
     gumroad_email = (form.get("email") or "").strip()
     refunded = str(form.get("refunded") or "").lower() == "true"
     test = str(form.get("test") or "").lower() == "true"
+    print(f"[Gumroad] Received webhook: sale_id={sale_id}, test={test}, refunded={refunded}, raw_test={form.get('test')}, raw_refunded={form.get('refunded')}", flush=True)
     # per spec: url_params[userid] binds purchase to the user; you confirmed it is user email
     user_identifier = (form.get("url_params[userid]") or "").strip()
     price = (form.get("price") or "").strip()
@@ -858,47 +859,69 @@ async def api_gumroad_ping(
     db.add(sale)
     try:
         await db.commit()
+        print(f"[Gumroad] New sale recorded: sale_id={sale_id}, product={product_permalink}, userid={user_identifier}, price={price}", flush=True)
     except IntegrityError:
         await db.rollback()
+        print(f"[Gumroad] Duplicate sale_id={sale_id}, skipping", flush=True)
         return {"ok": True, "duplicate": True}
 
     # Validate userid
     if not user_identifier:
-        print(f"[Gumroad] Missing url_params[userid] for sale_id={sale_id}")
+        print(f"[Gumroad] Missing url_params[userid] for sale_id={sale_id}", flush=True)
         return {"ok": False, "error": "missing_userid"}
 
-    # Ignore test/refunded
-    if test or refunded:
+    # Ignore refunded purchases (but allow test purchases - owner buying their own product)
+    if refunded:
+        print(f"[Gumroad] Skipping refunded purchase for sale_id={sale_id}", flush=True)
         return {"ok": True, "credited": False}
+    
+    if test:
+        print(f"[Gumroad] Processing TEST purchase (owner buying own product) for sale_id={sale_id}", flush=True)
 
-    credits = GUMROAD_PRODUCT_CREDITS.get(product_permalink)
-    if not credits:
-        print(f"[Gumroad] Unknown product_permalink={product_permalink} sale_id={sale_id}")
-        return {"ok": False, "error": "unknown_product"}
+    # Extract permalink from full URL if needed (e.g., "https://u3d.gumroad.com/l/autorig-100" -> "autorig-100")
+    try:
+        permalink_key = product_permalink
+        if product_permalink and "/l/" in product_permalink:
+            permalink_key = product_permalink.split("/l/")[-1].split("?")[0]
+        print(f"[Gumroad] Extracted permalink_key={permalink_key} from {product_permalink}", flush=True)
+        
+        credits = GUMROAD_PRODUCT_CREDITS.get(permalink_key)
+        print(f"[Gumroad] Credits lookup: {permalink_key} -> {credits}", flush=True)
+        if not credits:
+            print(f"[Gumroad] Unknown product_permalink={product_permalink} (key={permalink_key}) sale_id={sale_id}", flush=True)
+            return {"ok": False, "error": "unknown_product"}
 
-    # userid = user email
-    urs = await db.execute(select(User).where(User.email == user_identifier))
-    user = urs.scalar_one_or_none()
-    if not user:
-        print(f"[Gumroad] User not found for userid(email)={user_identifier} sale_id={sale_id}")
-        return {"ok": False, "error": "user_not_found"}
+        # userid = user email
+        urs = await db.execute(select(User).where(User.email == user_identifier))
+        user = urs.scalar_one_or_none()
+        if not user:
+            print(f"[Gumroad] User not found for userid(email)={user_identifier} sale_id={sale_id}", flush=True)
+            return {"ok": False, "error": "user_not_found"}
 
-    user.balance_credits += credits
-    if gumroad_email:
-        user.gumroad_email = gumroad_email
-    await db.commit()
+        print(f"[Gumroad] Found user {user.email} with balance={user.balance_credits}, adding {credits}", flush=True)
+        user.balance_credits += credits
+        if gumroad_email:
+            user.gumroad_email = gumroad_email
+        await db.commit()
+        print(f"[Gumroad] SUCCESS! Credited {credits} to {user.email}, new balance={user.balance_credits}", flush=True)
 
-    # Send Telegram notification for successful purchase
-    from telegram_bot import broadcast_credits_purchased
-    asyncio.create_task(broadcast_credits_purchased(
-        credits=credits,
-        price=price or "unknown",
-        user_email=user.email,
-        product=product_permalink,
-        sale_id=sale_id
-    ))
+        # Send Telegram notification for successful purchase
+        from telegram_bot import broadcast_credits_purchased
+        asyncio.create_task(broadcast_credits_purchased(
+            credits=credits,
+            price=price or "unknown",
+            user_email=user.email,
+            product=product_permalink,
+            sale_id=sale_id,
+            is_test=test
+        ))
 
-    return {"ok": True, "credited": True, "credits_added": credits, "user_email": user.email}
+        return {"ok": True, "credited": True, "credits_added": credits, "user_email": user.email}
+    except Exception as e:
+        print(f"[Gumroad] ERROR processing sale {sale_id}: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/task/{task_id}", response_model=TaskStatusResponse)
