@@ -60,16 +60,23 @@
             </div>
 
             <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem;">
-                <div class="card" style="padding: 1.5rem;">
+                <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">100 credits</h3>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$1.99</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.02 per credit</div>
                     <button class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
-                <div class="card" style="padding: 1.5rem;">
+                <div class="card" style="padding: 1.5rem; text-align: center; border: 2px solid var(--accent); position: relative;">
+                    <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;">POPULAR</span>
                     <h3 style="margin-top: 0;">500 credits</h3>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$9.99</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.02 per credit</div>
                     <button class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
-                <div class="card" style="padding: 1.5rem;">
+                <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">1000 credits</h3>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$49.99</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.05 per credit</div>
                     <button class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
             </div>
@@ -226,6 +233,13 @@
 
         function setupBuyButtons() {
             const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
+            
+            const packageInfo = {
+                'autorig-100': { credits: '100', price: '$1.99' },
+                'autorig-500': { credits: '500', price: '$9.99' },
+                'autorig-1000': { credits: '1000', price: '$49.99' }
+            };
+            
             const go = (p) => {
                 const uid = getUserid();
                 if (!uid) {
@@ -233,6 +247,15 @@
                     window.location.href = '/auth/login';
                     return;
                 }
+                
+                // Send Telegram notification (fire-and-forget)
+                const info = packageInfo[p] || { credits: p, price: 'unknown' };
+                fetch('/api/notify/credits-click', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ package: `${info.credits} credits`, price: info.price })
+                }).catch(() => {}); // ignore errors
+                
                 window.location.href = gumroadUrl(p, uid);
             };
             document.getElementById('buy-100')?.addEventListener('click', () => go('autorig-100'));

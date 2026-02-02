@@ -807,7 +807,17 @@ async def api_create_task(
 # =============================================================================
 # Gumroad (Payments)
 # =============================================================================
+@app.api_route("/api-gumroad", methods=["GET", "HEAD", "OPTIONS"])
+@app.api_route("/webhook/gumroad", methods=["GET", "HEAD", "OPTIONS"])
+@app.api_route("/gumroad", methods=["GET", "HEAD", "OPTIONS"])
+async def api_gumroad_ping_check():
+    """Gumroad URL validation check (responds to GET/HEAD/OPTIONS for URL verification)"""
+    return {"ok": True, "message": "Gumroad webhook endpoint ready"}
+
+
 @app.post("/api-gumroad")
+@app.post("/webhook/gumroad")
+@app.post("/gumroad")
 async def api_gumroad_ping(
     request: Request,
     db: AsyncSession = Depends(get_db)
@@ -877,6 +887,16 @@ async def api_gumroad_ping(
     if gumroad_email:
         user.gumroad_email = gumroad_email
     await db.commit()
+
+    # Send Telegram notification for successful purchase
+    from telegram_bot import broadcast_credits_purchased
+    asyncio.create_task(broadcast_credits_purchased(
+        credits=credits,
+        price=price or "unknown",
+        user_email=user.email,
+        product=product_permalink,
+        sale_id=sale_id
+    ))
 
     return {"ok": True, "credited": True, "credits_added": credits, "user_email": user.email}
 
@@ -3370,6 +3390,53 @@ def validate_telegram_init_data(init_data: str) -> Optional[dict]:
     except Exception as e:
         print(f"[Telegram] Validation error: {e}")
         return None
+
+
+@app.post("/api/notify/credits-click")
+async def notify_credits_click(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Notify Telegram about credits purchase click"""
+    try:
+        body = await request.json()
+        package = body.get('package', 'unknown')
+        price = body.get('price', 'unknown')
+        
+        # Get user info from session
+        user_email = None
+        anon_id = None
+        
+        session_id = request.cookies.get("session_id")
+        if session_id:
+            result = await db.execute(
+                select(UserSession).where(UserSession.session_id == session_id)
+            )
+            sess = result.scalar_one_or_none()
+            if sess:
+                user_result = await db.execute(
+                    select(User).where(User.id == sess.user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                if user:
+                    user_email = user.email
+        
+        if not user_email:
+            anon_id = request.cookies.get("anon_id")
+        
+        # Fire-and-forget notification
+        from telegram_bot import broadcast_credits_purchase_click
+        asyncio.create_task(broadcast_credits_purchase_click(
+            package=package,
+            price=price,
+            user_email=user_email,
+            anon_id=anon_id
+        ))
+        
+        return {"ok": True}
+    except Exception as e:
+        print(f"[Notify] Credits click error: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/api/telegram/auth")

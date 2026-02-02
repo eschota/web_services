@@ -250,6 +250,89 @@ async def broadcast_purchase_intent(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def broadcast_credits_purchase_click(
+    package: str,
+    price: str,
+    user_email: str | None = None,
+    anon_id: str | None = None
+) -> None:
+    """Notify when user clicks buy credits button."""
+    print(f"[Telegram] broadcast_credits_purchase_click: package={package}, price={price}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping credits purchase notification")
+        return
+
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    actor = user_email or (f"anon:{anon_id}" if anon_id else "anonymous")
+    text = f"💰 Credits purchase click\nPackage: {package}\nPrice: {price}\nUser: {actor}"
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                disable_web_page_preview=True
+            ))
+            if result:
+                print(f"[Telegram] Credits purchase click sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
+async def broadcast_credits_purchased(
+    credits: int,
+    price: str,
+    user_email: str,
+    product: str,
+    sale_id: str
+) -> None:
+    """Notify when credits are successfully purchased via Gumroad."""
+    print(f"[Telegram] broadcast_credits_purchased: {credits} credits for {user_email}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping credits purchased notification")
+        return
+
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    text = (
+        f"✅ Credits purchased!\n"
+        f"💰 Amount: {credits} credits\n"
+        f"💵 Price: {price}\n"
+        f"👤 User: {user_email}\n"
+        f"📦 Product: {product}\n"
+        f"🆔 Sale: {sale_id}"
+    )
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                disable_web_page_preview=True
+            ))
+            if result:
+                print(f"[Telegram] Credits purchased sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
 def _format_duration(seconds: int | None) -> str:
     if seconds is None:
         return ""
@@ -575,7 +658,11 @@ async def _start_cmd(update, context):
     if not chat:
         return
     title = getattr(chat, "title", None) or getattr(chat, "username", None) or getattr(chat, "full_name", None)
+    print(f"[Telegram] /start command from chat_id={chat.id}, type={getattr(chat, 'type', None)}, title={title}")
     await upsert_chat(chat.id, getattr(chat, "type", None), title)
+    # Get current subscriber count
+    active_chats = await get_active_chat_ids()
+    print(f"[Telegram] New subscriber added. Total active chats: {len(active_chats)}")
     await update.message.reply_text("✅ Subscribed. You will receive task notifications here.")
 
 
@@ -592,6 +679,12 @@ async def run_polling() -> None:
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
+    
+    # Log startup info
+    active_chats = await get_active_chat_ids()
+    print(f"[Telegram] Bot started. Active subscribers: {len(active_chats)}")
+    if len(active_chats) == 0:
+        print("[Telegram] WARNING: No subscribers! Send /start to @autorigbot to subscribe.")
 
     # Keep alive
     try:
