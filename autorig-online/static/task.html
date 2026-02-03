@@ -1950,6 +1950,27 @@
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/footer.js"></script>
     <script>
+        // Allowed emails for admin links (Input URL, Worker Progress Page)
+        const ALLOWED_ADMIN_EMAILS = ['eschota@gmail.com', 'vladkcg@gmail.com'];
+        let _allowedAdminPromise = null;
+        async function isAllowedAdmin() {
+            if (_allowedAdminPromise) return _allowedAdminPromise;
+            _allowedAdminPromise = (async () => {
+                try {
+                    const authResp = await fetch('/auth/me');
+                    if (authResp.ok) {
+                        const authData = await authResp.json();
+                        const email = authData?.user?.email;
+                        return email && ALLOWED_ADMIN_EMAILS.includes(email);
+                    }
+                } catch (e) {
+                    // ignore
+                }
+                return false;
+            })();
+            return _allowedAdminPromise;
+        }
+
         const TaskPage = {
             taskId: null,
             pollInterval: null,
@@ -2046,7 +2067,7 @@
                     }
                     
                     this.task = await response.json();
-                    this.updateUI();
+                    await this.updateUI();
                     if (window.I18n) {
                         I18n.applyTranslations();
                     }
@@ -2156,7 +2177,7 @@
                 });
             },
             
-            updateUI() {
+            async updateUI() {
                 const task = this.task;
                 
                 // Status
@@ -2201,7 +2222,7 @@
                     runStateEl.textContent = stateText;
                 }
 
-                // Admin-only: Input URL block (visible only when API returns input_url)
+                // Admin-only: Input URL block (visible only for allowed emails)
                 const adminRow = document.getElementById('admin-input-url-row');
                 const adminLink = document.getElementById('admin-input-url-link');
                 const adminCopy = document.getElementById('admin-input-url-copy');
@@ -2209,7 +2230,8 @@
                 const adminWorkerLink = document.getElementById('admin-worker-progress-link');
                 if (adminRow && adminLink && adminCopy) {
                     const inputUrl = task && task.input_url ? String(task.input_url) : '';
-                    if (inputUrl) {
+                    const canSeeAdminLinks = await isAllowedAdmin();
+                    if (inputUrl && canSeeAdminLinks) {
                         adminRow.classList.remove('hidden');
                         adminLink.href = inputUrl;
                         adminLink.textContent = inputUrl;
