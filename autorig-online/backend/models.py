@@ -86,6 +86,7 @@ class UserInfo(BaseModel):
     picture: Optional[str]
     balance_credits: int
     total_tasks: int
+    youtube_bonus_received: bool
     is_admin: bool
 
 
@@ -407,4 +408,26 @@ class SceneLikeResponse(BaseModel):
     scene_id: str
     like_count: int
     liked_by_me: bool
+
+
+# =============================================================================
+# Feedback Schemas
+# =============================================================================
+class FeedbackCreateRequest(BaseModel):
+    """Request to submit feedback"""
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+class FeedbackItem(BaseModel):
+    """Feedback item for display"""
+    id: int
+    user_email: str
+    user_name: Optional[str]
+    text: str
+    created_at: datetime
+
+
+class FeedbackListResponse(BaseModel):
+    """Response for feedback list"""
+    items: List[FeedbackItem]
 

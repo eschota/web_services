@@ -47,6 +47,7 @@ class User(Base):
     gumroad_email = Column(String(255), nullable=True)
     balance_credits = Column(Integer, default=0)
     total_tasks = Column(Integer, default=0)
+    youtube_bonus_received = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, default=datetime.utcnow)
     
@@ -214,6 +215,17 @@ class TelegramChat(Base):
     last_seen_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Feedback(Base):
+    """User feedback/comments"""
+    __tablename__ = "feedback"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    user_name = Column(String(255), nullable=True)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Scene(Base):
     """Scene combining multiple GLB models with transforms"""
     __tablename__ = "scenes"
@@ -296,6 +308,7 @@ async def init_db():
                     pass
             await _try_add_column("ALTER TABLE users ADD COLUMN gumroad_email VARCHAR(255)")
             await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")

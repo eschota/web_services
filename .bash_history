@@ -19,3 +19,6 @@ echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKDFDCv307odpveI77EXbIDXQh4r6CUpOVWA8c
 chmod 700 ~/.ssh
 chmod 600 ~/.ssh/authorized_keys
 exit
+root@6268041-hp847164:~# git add . && git commit -m "Ваше сообщение" && git push
+[main 84a5490]
+git add . && git commit -m "Ваше сообщение" && git push

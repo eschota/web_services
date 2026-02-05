@@ -38,7 +38,7 @@ from config import (
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS
 )
-from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase, Scene, SceneLike
+from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase, Scene, SceneLike, Feedback
 from models import (
     TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
@@ -54,6 +54,9 @@ from models import (
     # Scene models
     SceneCreateRequest, SceneAddModelRequest, SceneUpdateRequest,
     SceneResponse, SceneModelInfo, TransformData,
+    # Feedback models
+    FeedbackCreateRequest, FeedbackItem, FeedbackListResponse,
+    # Scene list models
     SceneListItem, SceneListResponse, SceneLikeResponse
 )
 from workers import get_global_queue_status
@@ -602,6 +605,7 @@ async def auth_me(
                 picture=user.picture,
                 balance_credits=user.balance_credits,
                 total_tasks=user.total_tasks,
+                youtube_bonus_received=user.youtube_bonus_received,
                 is_admin=user.is_admin
             ),
             credits_remaining=user.balance_credits,
@@ -713,6 +717,89 @@ async def api_revoke_api_key(
         rec.revoked_at = datetime.utcnow()
         await db.commit()
     return {"ok": True, "key_id": key_id}
+
+
+# =============================================================================
+# YouTube Bonus & Feedback
+# =============================================================================
+@app.post("/api/user/grant-youtube-bonus")
+async def grant_youtube_bonus(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Grant 10 credits for YouTube link click (once per user)"""
+    if user.youtube_bonus_received:
+        return {"ok": False, "already_received": True}
+    
+    user.balance_credits += 10
+    user.youtube_bonus_received = True
+    await db.commit()
+    
+    from telegram_bot import broadcast_youtube_bonus_click
+    asyncio.create_task(broadcast_youtube_bonus_click(user.email))
+    
+    return {"ok": True, "new_balance": user.balance_credits}
+
+
+@app.post("/api/user/feedback")
+async def submit_feedback(
+    req: FeedbackCreateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Submit user feedback"""
+    fb = Feedback(
+        user_email=user.email,
+        user_name=user.name or user.email,
+        text=req.text
+    )
+    db.add(fb)
+    await db.commit()
+    
+    from telegram_bot import broadcast_feedback_submitted
+    asyncio.create_task(broadcast_feedback_submitted(user.email, req.text))
+    
+    return {"ok": True}
+
+
+@app.get("/api/feedback", response_model=FeedbackListResponse)
+async def get_feedback_list(
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all feedback items"""
+    from sqlalchemy import select
+    result = await db.execute(select(Feedback).order_by(Feedback.created_at.desc()))
+    items = result.scalars().all()
+    return FeedbackListResponse(items=[
+        FeedbackItem(
+            id=i.id,
+            user_email=i.user_email,
+            user_name=i.user_name,
+            text=i.text,
+            created_at=i.created_at
+        ) for i in items
+    ])
+
+
+@app.delete("/api/feedback/{feedback_id}")
+async def delete_feedback(
+    feedback_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete feedback (admin only)"""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    from sqlalchemy import select
+    result = await db.execute(select(Feedback).where(Feedback.id == feedback_id))
+    fb = result.scalar_one_or_none()
+    if not fb:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    
+    await db.delete(fb)
+    await db.commit()
+    return {"ok": True}
 
 
 # =============================================================================

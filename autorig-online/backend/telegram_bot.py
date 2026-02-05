@@ -288,6 +288,53 @@ async def broadcast_credits_purchase_click(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def broadcast_youtube_bonus_click(
+    user_email: str
+) -> None:
+    """Notify when user clicks YouTube bonus link."""
+    print(f"[Telegram] broadcast_youtube_bonus_click: user={user_email}")
+    token = _get_token()
+    if not token:
+        return
+
+    from telegram import Bot
+    bot = Bot(token=token)
+    text = f"🎁 YouTube Bonus Clicked!\n👤 User: {user_email}\n💰 +10 credits granted"
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    await asyncio.gather(*[
+        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text))
+        for cid in chat_ids
+    ])
+
+
+async def broadcast_feedback_submitted(
+    user_email: str,
+    text_content: str
+) -> None:
+    """Notify when user submits feedback."""
+    print(f"[Telegram] broadcast_feedback_submitted: user={user_email}")
+    token = _get_token()
+    if not token:
+        return
+
+    from telegram import Bot
+    bot = Bot(token=token)
+    text = f"📝 New Feedback Submitted!\n👤 User: {user_email}\n💬 Text: {text_content[:500]}"
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    await asyncio.gather(*[
+        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text))
+        for cid in chat_ids
+    ])
+
+
 async def broadcast_credits_purchased(
     credits: int,
     price: str,

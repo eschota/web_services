@@ -3697,6 +3697,7 @@
             // Rig Editor and Viewer Controls instances
             let rigEditor = null;
             let viewerControls = null;
+            let setActiveMode = null; // Defined in setupViewModeSelector but exposed here
             
             // Transform System instances
             let transformManager = null;
@@ -5663,7 +5664,7 @@
                     const animBtn = document.getElementById('view-mode-anim');
                     const allBtns = [tposeBtn, rigBtn, animBtn];
                     
-                    const setActiveMode = async (mode) => {
+                    setActiveMode = async (mode) => {
                         console.log('[Viewer] setActiveMode:', mode, 
                             'currentType:', currentModelType, 
                             'cacheHasPrepared:', !!modelCache.prepared,
@@ -7495,6 +7496,12 @@
                     // Show notification that animations are ready
                     showAnimationsReadyNotification();
                     
+                    // Auto-switch to animation mode if we are in prepared mode
+                    if (typeof setActiveMode === 'function') {
+                        console.log('[Viewer] Auto-switching to animation mode');
+                        setActiveMode('animation');
+                    }
+                    
                 } catch (err) {
                     console.warn('[Viewer] Background animations load failed, will try FBX later:', err.message);
                 } finally {
@@ -7523,7 +7530,13 @@
                     console.log('[Viewer] Polling task status...');
                     const r = await fetch(`/api/task/${taskId}`);
                     const t = await r.json();
-                    console.log('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready);
+                    
+                    // Check if animations are ready in ready_urls
+                    const animationsReady = t && t.ready_urls && t.ready_urls.some(url => 
+                        url.toLowerCase().includes('_all_animations') && url.toLowerCase().endsWith('.glb')
+                    );
+                    
+                    console.log('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
 
                     const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
                     window.currentTaskIsFree3D = isFree3DTask; // Global flag for loadModel to use
@@ -7577,7 +7590,7 @@
                                 console.log('[Viewer] ✓ Prepared model loaded and cached');
                                 
                                 // Start loading animations in BACKGROUND (non-blocking)
-                                if (t.status === 'done' && !modelCache.animations) {
+                                if ((t.status === 'done' || animationsReady) && !modelCache.animations) {
                                     loadAnimationsInBackground();
                                 }
                             }
@@ -7586,19 +7599,24 @@
                         }
                     }
                     
-                    // 3. If task is done and we haven't started background load yet, start it
-                    if (t && t.status === 'done' && preparedLoaded && !modelCache.animations && !animationsLoadingInBackground) {
+                    // 3. If task is done or animations ready and we haven't started background load yet, start it
+                    if (t && (t.status === 'done' || animationsReady) && preparedLoaded && !modelCache.animations && !animationsLoadingInBackground) {
                         loadAnimationsInBackground();
                     }
                     
-                    // 4. If task is done and animations are cached but not shown, we can auto-switch
-                    if (t && t.status === 'done' && modelCache.animations && !finalLoaded) {
+                    // 4. If task is done or animations ready and animations are cached but not shown, we can auto-switch
+                    if (t && (t.status === 'done' || animationsReady) && modelCache.animations && !finalLoaded) {
                         finalLoaded = true;
-                        console.log('[Viewer] ✓ Task complete, animations ready in cache');
+                        console.log('[Viewer] ✓ Task complete or animations ready, animations ready in cache');
                         
-                        // Don't auto-switch - let user click the Anim button
-                        // Just mark it as ready
+                        // Mark it as ready
                         showAnimationsReadyNotification();
+
+                        // Auto-switch to animation mode
+                        if (typeof setActiveMode === 'function') {
+                            console.log('[Viewer] Auto-switching to animation mode (ready)');
+                            setActiveMode('animation');
+                        }
                     }
 
                     // Update RigEditor status

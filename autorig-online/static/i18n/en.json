@@ -140,6 +140,21 @@
     "api_access_copied": "Copied",
     "btn_copy": "Copy",
 
+    "free_title": "FREE",
+    "free_greeting": "Hi 3D ARTIST! I've been doing this project with a friend on enthusiasm for over a year and everything is free here!",
+    "free_message": "I would like to make the RIG even cooler and I know how, but for this I need MONEY :) for beer and cookies! So if you have a couple of extra bucks, please buy credits!",
+    "free_youtube_intro": "And if not, then just follow the link to my youtube channel and click like!",
+    "free_credits_offer": "Get 10 credits for downloading for free!!!",
+    "free_feedback_hint": "And please leave feedback about the RIG and what you would like to improve in the form below",
+    "youtube_bonus_success": "Yay! +10 credits are yours. Use them wisely! ;)",
+    "youtube_bonus_already": "Hey, greedy! You already got your bonus. Once is enough, or there won't be anything left for cookies! :D",
+    "feedback_title": "Leave Feedback",
+    "feedback_submit": "Submit Feedback",
+    "feedback_list_title": "User Feedback",
+    "feedback_loading": "Loading feedback...",
+    "feedback_empty": "No feedback yet. Be the first!",
+    "feedback_success": "Thanks for the feedback! We'll read everything (honestly).",
+
     "guides_title": "Guides & Tutorials",
     "guides_intro": "Learn more about character rigging, Unity/Unreal workflows, and best practices",
 

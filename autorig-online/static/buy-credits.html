@@ -49,7 +49,23 @@
 
     <main style="padding: 3rem 0;">
         <div class="container" style="max-width: 980px;">
-            <div class="card" style="padding: 2rem;">
+            <!-- FREE Credits Section -->
+            <div class="card" style="padding: 2rem; border: 2px dashed var(--accent); background: rgba(var(--accent-rgb), 0.05);">
+                <h2 style="margin-top: 0; color: var(--accent);" data-i18n="free_title">FREE</h2>
+                <div style="line-height: 1.6;">
+                    <p style="font-weight: 600; font-size: 1.1rem; margin-bottom: 1rem;" data-i18n="free_greeting">Hi 3D ARTIST! I've been doing this project with a friend on enthusiasm for over a year and everything is free here!</p>
+                    <p data-i18n="free_message">I would like to make the RIG even cooler and I know how, but for this I need MONEY :) for beer and cookies! So if you have a couple of extra bucks, please buy credits!</p>
+                    <p style="margin-top: 1rem;" data-i18n="free_youtube_intro">And if not, then just follow the link to my youtube channel and click like!</p>
+                    <p style="font-weight: 700; color: var(--accent); font-size: 1.2rem; margin: 1rem 0;" data-i18n="free_credits_offer">Get 10 credits for downloading for free!!!</p>
+                    <a href="https://youtube.com/shorts/z68FA_hQZgc?feature=share" target="_blank" class="btn btn-primary" id="youtube-bonus-link" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.377.505 9.377.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                        YouTube
+                    </a>
+                    <p style="margin-top: 1rem; font-style: italic; font-size: 0.9rem; color: var(--text-muted);" data-i18n="free_feedback_hint">And please leave feedback about the RIG and what you would like to improve in the form below</p>
+                </div>
+            </div>
+
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
                 <h1 style="margin-top: 0;" data-i18n="buy_title">Buy Credits</h1>
                 <p style="color: var(--text-secondary);" data-i18n="buy_subtitle">
                     Credits are needed to download finished 3D models with rigging and all animations.
@@ -62,22 +78,39 @@
             <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem;">
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">100 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$1.99</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.02 per credit</div>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$1</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.01 per credit</div>
                     <button class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center; border: 2px solid var(--accent); position: relative;">
                     <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;">POPULAR</span>
                     <h3 style="margin-top: 0;">500 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$9.99</div>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$10</div>
                     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.02 per credit</div>
                     <button class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">1000 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$49.99</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.05 per credit</div>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$100</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.1 per credit</div>
                     <button class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                </div>
+            </div>
+
+            <!-- Feedback Form Section -->
+            <div id="feedback-section" class="card hidden" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="feedback_title">Leave Feedback</h2>
+                <div style="margin-top: 1rem;">
+                    <textarea id="feedback-text" style="width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="What do you think about the RIG? What should we improve?"></textarea>
+                    <button class="btn btn-primary" id="btn-submit-feedback" style="margin-top: 1rem;" data-i18n="feedback_submit">Submit Feedback</button>
+                </div>
+            </div>
+
+            <!-- Feedback List Section -->
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="feedback_list_title">User Feedback</h2>
+                <div id="feedback-list" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+                    <div style="color: var(--text-muted);" data-i18n="feedback_loading">Loading feedback...</div>
                 </div>
             </div>
 
@@ -219,9 +252,109 @@
                 if (labelEl) labelEl.textContent = t('credits_remaining');
                 if (creditsEl) creditsEl.textContent = data.credits_remaining ?? '-';
                 window.__authedUser = data.user || null;
+                
+                // Show feedback section if logged in
+                if (window.__authedUser) {
+                    document.getElementById('feedback-section')?.classList.remove('hidden');
+                }
             } catch (e) {
                 console.error('Auth load failed:', e);
             }
+        }
+
+        async function setupYouTubeBonus() {
+            const link = document.getElementById('youtube-bonus-link');
+            link?.addEventListener('click', async (e) => {
+                if (!window.__authedUser) {
+                    alert(t('buy_login_required'));
+                    e.preventDefault();
+                    return;
+                }
+                
+                // Call API to grant bonus
+                try {
+                    const resp = await fetch('/api/user/grant-youtube-bonus', { method: 'POST' });
+                    const data = await resp.json();
+                    if (data.ok) {
+                        alert(t('youtube_bonus_success'));
+                        await updateCreditsUI();
+                    } else if (data.already_received) {
+                        alert(t('youtube_bonus_already'));
+                    }
+                } catch (e) {
+                    console.error('YouTube bonus failed:', e);
+                }
+            });
+        }
+
+        async function loadFeedback() {
+            const listEl = document.getElementById('feedback-list');
+            try {
+                const resp = await fetch('/api/feedback');
+                const data = await resp.json();
+                if (!data.items || data.items.length === 0) {
+                    listEl.innerHTML = `<div style="color: var(--text-muted);">${t('feedback_empty')}</div>`;
+                    return;
+                }
+                
+                const isAdmin = window.__authedUser?.is_admin;
+                
+                listEl.innerHTML = data.items.map(item => `
+                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
+                        <div style="display:flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; font-size: 0.9rem; color: var(--accent);">${item.user_name}</div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">${new Date(item.created_at).toLocaleString()}</div>
+                                <div style="white-space: pre-wrap; line-height: 1.5;">${item.text}</div>
+                            </div>
+                            ${isAdmin ? `<button class="btn btn-ghost" style="color: #ef4444; padding: 0.25rem 0.5rem;" onclick="deleteFeedback(${item.id})">Delete</button>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Load feedback failed:', e);
+                listEl.innerHTML = `<div style="color: #ef4444;">Failed to load feedback</div>`;
+            }
+        }
+
+        async function deleteFeedback(id) {
+            if (!confirm('Delete this feedback?')) return;
+            try {
+                const resp = await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
+                if (resp.ok) {
+                    await loadFeedback();
+                }
+            } catch (e) {
+                console.error('Delete feedback failed:', e);
+            }
+        }
+        window.deleteFeedback = deleteFeedback;
+
+        function setupFeedbackForm() {
+            const btn = document.getElementById('btn-submit-feedback');
+            const textarea = document.getElementById('feedback-text');
+            btn?.addEventListener('click', async () => {
+                const text = textarea.value.trim();
+                if (!text) return;
+                
+                btn.disabled = true;
+                try {
+                    const resp = await fetch('/api/user/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text })
+                    });
+                    if (resp.ok) {
+                        textarea.value = '';
+                        alert(t('feedback_success'));
+                        await loadFeedback();
+                    }
+                } catch (e) {
+                    console.error('Feedback submit failed:', e);
+                } finally {
+                    btn.disabled = false;
+                }
+            });
         }
 
         function gumroadUrl(permalink, useridEmail) {
@@ -235,9 +368,9 @@
             const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
             
             const packageInfo = {
-                'autorig-100': { credits: '100', price: '$1.99' },
-                'autorig-500': { credits: '500', price: '$9.99' },
-                'autorig-1000': { credits: '1000', price: '$49.99' }
+                'autorig-100': { credits: '100', price: '$1' },
+                'autorig-500': { credits: '500', price: '$10' },
+                'autorig-1000': { credits: '1000', price: '$100' }
             };
             
             const go = (p) => {
@@ -319,6 +452,9 @@
             setupLangSelector();
             await updateCreditsUI();
             setupBuyButtons();
+            setupYouTubeBonus();
+            setupFeedbackForm();
+            await loadFeedback();
 
             document.getElementById('btn-refresh-keys')?.addEventListener('click', loadApiKeys);
             document.getElementById('btn-generate-key')?.addEventListener('click', generateApiKey);
