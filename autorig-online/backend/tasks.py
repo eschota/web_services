@@ -316,6 +316,15 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
                 progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
             print(f"[Tasks] Scheduling Telegram done notification for task {task.id}")
             asyncio.create_task(broadcast_task_done(task.id, duration_seconds=duration, progress_page=progress_url))
+            
+            # GA4 rig_completed event
+            if task.ga_client_id:
+                from main import send_ga4_event
+                asyncio.create_task(send_ga4_event(
+                    task.ga_client_id, 
+                    "rig_completed", 
+                    {"duration": duration, "task_id": task.id}
+                ))
         except Exception as e:
             print(f"[Telegram] Failed to notify done: {e}")
             import traceback
@@ -369,41 +378,51 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
 
 async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
     """
-    Find all stale processing tasks and reset them.
-    Returns number of tasks reset.
+    Find all stale processing tasks and reset them or mark as error.
+    Returns number of tasks reset/marked as error.
     """
-    from config import STALE_TASK_TIMEOUT_MINUTES
+    from config import STALE_TASK_TIMEOUT_MINUTES, GLOBAL_TASK_TIMEOUT_MINUTES
     from datetime import timedelta
     
-    cutoff_time = datetime.utcnow() - timedelta(minutes=STALE_TASK_TIMEOUT_MINUTES)
+    now = datetime.utcnow()
+    stale_cutoff = now - timedelta(minutes=STALE_TASK_TIMEOUT_MINUTES)
+    global_cutoff = now - timedelta(minutes=GLOBAL_TASK_TIMEOUT_MINUTES)
     
-    # Find processing tasks that haven't made progress
+    # Find all non-terminal tasks
     result = await db.execute(
         select(Task).where(
-            Task.status == "processing",
+            Task.status.notin_(["done", "error"]),
         )
     )
-    processing_tasks = result.scalars().all()
+    active_tasks = result.scalars().all()
     
-    reset_count = 0
-    for task in processing_tasks:
-        # Determine the reference time for staleness
-        # Use last_progress_at if available, otherwise use updated_at or created_at
-        reference_time = task.last_progress_at or task.updated_at or task.created_at
+    action_count = 0
+    for task in active_tasks:
+        # 1. Check for global hard timeout (3 hours)
+        if task.created_at and task.created_at < global_cutoff:
+            task.status = "error"
+            task.error_message = f"Task timed out after {GLOBAL_TASK_TIMEOUT_MINUTES} minutes."
+            task.updated_at = now
+            print(f"[Timeout] Task {task.id} marked as error (global timeout)")
+            action_count += 1
+            continue
+
+        # 2. Check for staleness (no progress for 10 minutes)
+        # Only for tasks that are actually in 'processing'
+        if task.status == "processing":
+            reference_time = task.last_progress_at or task.updated_at or task.created_at
+            
+            if reference_time and reference_time < stale_cutoff:
+                # Additional check: if it has URLs but no progress, or just no progress at all
+                if task.ready_count == 0:
+                    print(f"[Stale Task] Detected stale task {task.id}: no progress since {reference_time}")
+                    if await reset_stale_task(db, task):
+                        action_count += 1
+    
+    if action_count > 0:
+        await db.commit()
         
-        # Check if task is stale
-        if reference_time and reference_time < cutoff_time:
-            # Additional check: verify worker files are actually not accessible
-            if task.output_urls and task.ready_count == 0:
-                # Task has URLs but none are ready - likely worker lost the task
-                print(f"[Stale Task] Detected stale task {task.id}: "
-                      f"no progress since {reference_time}, "
-                      f"ready_count={task.ready_count}/{task.total_count}")
-                
-                if await reset_stale_task(db, task):
-                    reset_count += 1
-    
-    return reset_count
+    return action_count
 
 
 # =============================================================================

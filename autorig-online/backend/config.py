@@ -89,6 +89,7 @@ PROGRESS_CHECK_TIMEOUT = 5  # Timeout for HEAD requests in seconds
 # Stale Task Detection & Auto-Restart
 # =============================================================================
 STALE_TASK_TIMEOUT_MINUTES = 10  # Task is "stale" if no progress for this long
+GLOBAL_TASK_TIMEOUT_MINUTES = 180  # Hard timeout for any non-terminal task (3 hours)
 MAX_TASK_RESTARTS = 3  # Maximum number of auto-restarts before marking as error
 STALE_CHECK_INTERVAL_CYCLES = 2  # Check for stale tasks every N background worker cycles
 
@@ -125,3 +126,9 @@ TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "AutoRigOnlineBot")
 MIN_FREE_SPACE_GB = int(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
+
+# =============================================================================
+# Google Analytics 4 (Measurement Protocol)
+# =============================================================================
+GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "G-T4E781EHE4")
+GA_API_SECRET = os.getenv("GA_API_SECRET", "")

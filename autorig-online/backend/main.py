@@ -36,7 +36,8 @@ from config import (
     GUMROAD_PRODUCT_CREDITS,
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
-    MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS
+    MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
+    GA_MEASUREMENT_ID, GA_API_SECRET
 )
 from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase, Scene, SceneLike, Feedback
 from models import (
@@ -75,6 +76,39 @@ from tasks import (
     find_and_reset_stale_tasks,
     find_file_by_pattern
 )
+
+
+import re
+import httpx
+
+# =============================================================================
+# Google Analytics 4 Helper
+# =============================================================================
+async def send_ga4_event(client_id: str, event_name: str, params: dict = None):
+    """
+    Send event to GA4 via Measurement Protocol.
+    """
+    if not GA_MEASUREMENT_ID or not GA_API_SECRET or not client_id:
+        if DEBUG:
+            print(f"[GA4] Skipping event '{event_name}' (missing config or client_id)")
+        return
+    
+    url = f"https://www.google-analytics.com/mp/collect?measurement_id={GA_MEASUREMENT_ID}&api_secret={GA_API_SECRET}"
+    payload = {
+        "client_id": client_id,
+        "events": [{
+            "name": event_name,
+            "params": params or {}
+        }]
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            if DEBUG:
+                print(f"[GA4] Event '{event_name}' sent. Status: {resp.status_code}")
+    except Exception as e:
+        print(f"[GA4] Failed to send event '{event_name}': {e}")
 
 
 # =============================================================================
@@ -813,6 +847,7 @@ async def api_create_task(
     source: str = Form(...),
     input_url: Optional[str] = Form(None),
     type: str = Form("t_pose"),
+    ga_client_id: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -865,6 +900,18 @@ async def api_create_task(
     
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
+    
+    # Store GA client ID if provided
+    if ga_client_id:
+        task.ga_client_id = ga_client_id
+        await db.commit()
+        
+        # Send GA4 event
+        asyncio.create_task(send_ga4_event(
+            ga_client_id, 
+            "task_created", 
+            {"source": source, "type": type}
+        ))
     
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
     try:
@@ -2718,6 +2765,14 @@ async def proxy_file_by_name(
         has_access = await _has_paid_access(db, user, task_id, file_index)
         if not has_access:
             raise HTTPException(status_code=402, detail="Payment required to download files")
+        
+        # Track download event for paid files
+        if task.ga_client_id:
+            asyncio.create_task(send_ga4_event(
+                task.ga_client_id, 
+                "rig_downloaded", 
+                {"filename": clean_filename, "task_id": task_id}
+            ))
     
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename

@@ -18,6 +18,15 @@ from config import DATABASE_URL
 # =============================================================================
 # Engine and Session Setup
 # =============================================================================
+# For SQLite, we want to enable WAL mode for better concurrency
+@event.listens_for(create_engine(DATABASE_URL.replace("sqlite+aiosqlite", "sqlite")), "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    if "sqlite" in DATABASE_URL:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
@@ -138,6 +147,7 @@ class Task(Base):
 
     # Viewer settings (JSON string). Used by task.html to persist viewer state per-task.
     viewer_settings = Column(Text, nullable=True)
+    ga_client_id = Column(String(100), nullable=True)
     
     @property
     def output_urls(self) -> list:
@@ -315,6 +325,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_settings TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN ga_client_id VARCHAR(100)")
             
             # Scene table migrations
             await _try_add_column("ALTER TABLE scenes ADD COLUMN is_public BOOLEAN DEFAULT 0")

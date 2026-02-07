@@ -116,6 +116,13 @@ const App = {
         
         // Update start button
         if (startBtn) {
+            // Only show if activeTab is 'link'
+            if (this.state.activeTab === 'link') {
+                startBtn.classList.remove('hidden');
+            } else {
+                startBtn.classList.add('hidden');
+            }
+
             if (this.state.loginRequired) {
                 startBtn.textContent = t('btn_login_continue');
                 startBtn.onclick = () => window.location.href = '/auth/login';
@@ -182,9 +189,11 @@ const App = {
                 if (target === 'upload') {
                     uploadPanel?.classList.remove('hidden');
                     linkPanel?.classList.add('hidden');
+                    document.getElementById('start-btn')?.classList.add('hidden');
                 } else {
                     uploadPanel?.classList.add('hidden');
                     linkPanel?.classList.remove('hidden');
+                    document.getElementById('start-btn')?.classList.remove('hidden');
                 }
             });
         });
@@ -304,6 +313,22 @@ const App = {
         
         formData.append('type', 't_pose');
         
+        // Add GA client ID if available
+        try {
+            if (typeof gtag === 'function') {
+                // Try to get client_id from gtag
+                const gaMeasurementId = 'G-T4E781EHE4';
+                // Since gtag('get', ...) is async, we might want to use a more reliable way or just the cookie
+                const gaCookie = document.cookie.split('; ').find(row => row.startsWith('_ga='));
+                if (gaCookie) {
+                    const clientId = gaCookie.split('=')[1].split('.').slice(-2).join('.');
+                    formData.append('ga_client_id', clientId);
+                }
+            }
+        } catch (e) {
+            console.warn('[GA4] Failed to get client_id:', e);
+        }
+        
         // Disable button
         if (startBtn) {
             startBtn.disabled = true;
@@ -354,11 +379,15 @@ const App = {
         const grid = document.getElementById('gallery-preview-grid');
         if (!grid) return;
 
+        console.log('[Gallery] Loading preview...');
+
         try {
             // Homepage preview should show top liked by default
-            const resp = await fetch('/api/gallery?per_page=10&sort=likes');
+            const resp = await fetch('/api/gallery?per_page=12&sort=likes&t=' + Date.now());
             const data = await resp.json();
             const items = (data && data.items) ? data.items : [];
+            
+            console.log('[Gallery] Received items:', items.length);
             const total = (data && typeof data.total === 'number') ? data.total : null;
 
             const viewAllLink = document.getElementById('gallery-view-all-link');

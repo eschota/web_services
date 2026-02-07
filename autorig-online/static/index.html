@@ -146,7 +146,7 @@
     </header>
     
     <!-- Free3D Model Search -->
-    <section class="free3d-search">
+    <section class="free3d-search hidden">
         <div class="container">
             <div class="free3d-search-row">
                 <label for="free3d-search-input" class="free3d-search-label" data-i18n="free3d_search_label">Search Free 3D Models</label>
@@ -230,39 +230,13 @@
                         <span data-i18n="tpose_notice">Models must be in T-Pose for best results</span>
                     </div>
                     
-                    <!-- Queue Status -->
-                    <div class="queue-status mt-3" id="queue-status">
-                        <div class="queue-status-header">
-                            <img src="/static/images/icons/queue.svg" alt="Queue" class="queue-status-icon" width="20" height="20">
-                            <span data-i18n="queue_status">Server Queue</span>
-                        </div>
-                        <div class="queue-status-body">
-                            <div class="queue-stat">
-                                <span class="queue-stat-value" id="queue-active">-</span>
-                                <span class="queue-stat-label" data-i18n="queue_active">Active</span>
-                            </div>
-                            <div class="queue-stat">
-                                <span class="queue-stat-value" id="queue-pending">-</span>
-                                <span class="queue-stat-label" data-i18n="queue_pending">In Queue</span>
-                            </div>
-                            <div class="queue-stat">
-                                <span class="queue-stat-value" id="queue-wait">-</span>
-                                <span class="queue-stat-label" data-i18n="queue_wait">Est. Wait</span>
-                            </div>
-                            <div class="queue-stat">
-                                <span class="queue-stat-value" id="queue-servers">-</span>
-                                <span class="queue-stat-label" data-i18n="queue_servers">Servers</span>
-                            </div>
-                        </div>
-                    </div>
-                    
                     <!-- Login Hint -->
                     <div class="alert alert-warning mt-2 hidden" id="login-hint">
                         <span data-i18n="credits_login_hint">Sign in for 7 more free conversions</span>
                     </div>
                     
                     <!-- Submit Button -->
-                    <button type="submit" class="btn btn-primary mt-3" id="start-btn" style="width:100%">
+                    <button type="submit" class="btn btn-primary mt-3 hidden" id="start-btn" style="width:100%">
                         <span data-i18n="btn_start">Start Rigging</span>
                     </button>
                 </form>
@@ -284,49 +258,6 @@
                 </div>
             </div>
         </section>
-        
-        <!-- Features -->
-        <section class="container">
-            <div class="features">
-                <div class="feature card">
-                    <img src="/static/images/icons/fast.svg" alt="Fast" class="feature-icon" width="96" height="96">
-                    <h3 data-i18n="feature_fast_title">Fast Processing</h3>
-                    <p data-i18n="feature_fast_desc">Get your rigged model in just a few minutes</p>
-                </div>
-                <div class="feature card">
-                    <img src="/static/images/icons/animations.svg" alt="Animations" class="feature-icon" width="96" height="96">
-                    <h3 data-i18n="feature_animations_title">50+ Animations</h3>
-                    <p data-i18n="feature_animations_desc">Pre-configured animations for your character</p>
-                </div>
-                <div class="feature card">
-                    <img src="/static/images/icons/formats.svg" alt="Formats" class="feature-icon" width="96" height="96">
-                    <h3 data-i18n="feature_formats_title">Multiple Formats</h3>
-                    <p data-i18n="feature_formats_desc">Support for GLB, FBX, and OBJ models</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Formats -->
-        <section class="container mt-4">
-            <div class="card" style="padding: 2rem;">
-                <h3 class="card-title" style="margin-top: 0;" data-i18n="formats_title">Supported Export Formats</h3>
-                <p style="color: var(--text-secondary);" data-i18n="formats_desc">We support conversion to all major 3D software and game engines:</p>
-                <div class="features" style="margin: 1rem 0 0 0;">
-                    <div class="card" style="padding: 1.25rem;">
-                        <div style="font-weight: 600;">DCC</div>
-                        <div style="color: var(--text-secondary); margin-top: 0.5rem;">3ds Max • Maya • Cinema 4D</div>
-                    </div>
-                    <div class="card" style="padding: 1.25rem;">
-                        <div style="font-weight: 600;">Game Engines</div>
-                        <div style="color: var(--text-secondary); margin-top: 0.5rem;">Unity HDRP • Unity • Unreal (FBX)</div>
-                    </div>
-                    <div class="card" style="padding: 1.25rem;">
-                        <div style="font-weight: 600;">Web / Exchange</div>
-                        <div style="color: var(--text-secondary); margin-top: 0.5rem;">GLB • FBX • OBJ</div>
-                    </div>
-                </div>
-            </div>
-        </section>
 
         <!-- History -->
         <section class="container-sm mt-4">
@@ -341,9 +272,35 @@
                 </div>
             </div>
         </section>
+
+        <!-- Queue Status -->
+        <section class="container-sm mt-4">
+            <div class="queue-status" id="queue-status">
+                <div class="queue-status-header">
+                    <img src="/static/images/icons/queue.svg" alt="Queue" class="queue-status-icon" width="20" height="20">
+                    <span data-i18n="queue_status">Server Queue</span>
+                </div>
+                <div class="queue-status-body">
+                    <div class="queue-stat">
+                        <span class="queue-stat-value" id="queue-active">-</span>
+                        <span class="queue-stat-label" data-i18n="queue_active">Active</span>
+                    </div>
+                    <div class="queue-stat">
+                        <span class="queue-stat-value" id="queue-pending">-</span>
+                        <span class="queue-stat-label" data-i18n="queue_pending">In Queue</span>
+                    </div>
+                    <div class="queue-stat">
+                        <span class="queue-stat-value" id="queue-wait">-</span>
+                        <span class="queue-stat-label" data-i18n="queue_wait">Est. Wait</span>
+                    </div>
+                    <div class="queue-stat">
+                        <span class="queue-stat-value" id="queue-servers">-</span>
+                        <span class="queue-stat-label" data-i18n="queue_servers">Servers</span>
+                    </div>
+                </div>
+            </div>
+        </section>
     </main>
-    
-    <!-- SEO Footer -->
     <footer class="site-footer">
         <div class="container">
             <div class="footer-grid">

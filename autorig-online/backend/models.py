@@ -14,6 +14,7 @@ class TaskCreateRequest(BaseModel):
     source: str = Field(..., description="Source type: 'link' or 'upload'")
     input_url: Optional[str] = Field(None, description="URL of the model (for link source)")
     type: str = Field(default="t_pose", description="Conversion type")
+    ga_client_id: Optional[str] = Field(None, description="Google Analytics client ID")
 
 
 class TaskCreateResponse(BaseModel):
