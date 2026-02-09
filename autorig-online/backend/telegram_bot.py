@@ -69,21 +69,21 @@ def _format_input_url(input_url: str | None) -> str:
     if not input_url:
         return ""
     
-    # For Free3D URLs, show the full URL
+    # For Free3D URLs, show a compact markdown link
     if "free3d.online" in input_url:
-        return f"📦 Source: {input_url}"
+        return f"📦 [Free3D Model]({input_url})"
     
-    # For other URLs, show domain + path
+    # For other URLs, show domain + path as a markdown link
     try:
         parsed = urlparse(input_url)
         domain = parsed.netloc or ""
         path = parsed.path or ""
         # Truncate very long paths
-        if len(path) > 50:
-            path = path[:25] + "..." + path[-22:]
-        return f"📦 Source: {domain}{path}"
+        if len(path) > 40:
+            path = path[:20] + "..." + path[-15:]
+        return f"📦 [{domain}{path}]({input_url})"
     except Exception:
-        return f"📦 Source: {input_url[:80]}..." if len(input_url) > 80 else f"📦 Source: {input_url}"
+        return f"📦 [Source]({input_url})"
 
 
 async def upsert_chat(chat_id: int, chat_type: str | None, title: str | None) -> None:
@@ -172,6 +172,7 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
 
     bot = Bot(token=token)
     url = _task_url(task_id)
@@ -179,13 +180,13 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
     summary = _task_summary(input_url, input_type)
     source_line = _format_input_url(input_url)
     
-    text = f"🟢 New task started\n{url}"
+    text = f"🟢 New task started\n🔗 [View Task]({url})"
     if summary:
-        text += f"\n{summary}"
+        text += f"\n📄 {summary}"
     if source_line:
         text += f"\n{source_line}"
     if progress_page:
-        text += f"\n🔧 Worker: {progress_page}"
+        text += f"\n🔧 [Worker Page]({progress_page})"
 
     chat_ids = await get_active_chat_ids()
     print(f"[Telegram] Sending new task notification to {len(chat_ids)} chat(s)")
@@ -202,6 +203,7 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
                 chat_id=cid, 
                 text=text, 
                 reply_markup=kb,
+                parse_mode=ParseMode.MARKDOWN,
                 disable_web_page_preview=False
             ))
             if result:
@@ -224,12 +226,13 @@ async def broadcast_purchase_intent(
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
 
     bot = Bot(token=token)
     url = _task_url(task_id)
     actor = user_email or (f"anon:{anon_id}" if anon_id else "anon")
     source_label = source or "download_all"
-    text = f"💳 Purchase intent\n{url}\nUser: {actor}\nSource: {source_label}"
+    text = f"💳 Purchase intent\n🔗 [Task]({url})\n👤 {actor} | 📍 {source_label}"
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
@@ -242,6 +245,7 @@ async def broadcast_purchase_intent(
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid,
                 text=text,
+                parse_mode=ParseMode.MARKDOWN,
                 disable_web_page_preview=False
             ))
             if result:
@@ -521,6 +525,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
 
     bot = Bot(token=token)
     url = _task_url(task_id)
@@ -561,7 +566,10 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     dur = _format_duration(duration_seconds)
     stats_line = f"\n⏱ {dur}" if dur else ""
     author_line = f"\n👤 Author: {owner_email}" if owner_email else ""
-    worker_line = f"\n🔧 Worker: {progress_page}" if progress_page else ""
+    
+    text = f"✅ Task completed\n🔗 [View Result]({url}){author_line}{stats_line}"
+    if progress_page:
+        text += f"\n🔧 [Worker Logs]({progress_page})"
 
     # Try to find cached video
     mp4_path = f"/var/autorig/videos/{task_id}.mp4"
@@ -580,12 +588,12 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     if not video_path:
         # Fallback: at least notify completion
-        text = f"✅ Task completed\n{url}{author_line}{stats_line}{worker_line}"
         results = await asyncio.gather(*[
             _send_with_retry(lambda cid=cid: bot.send_message(
                 chat_id=cid, 
                 text=text, 
                 reply_markup=_make_viewer_keyboard(cid, webapp_url),
+                parse_mode=ParseMode.MARKDOWN,
                 disable_web_page_preview=False
             ))
             for cid in chat_ids
@@ -595,7 +603,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
         return
 
     sem = asyncio.Semaphore(2)
-    caption = f"✅ Task completed\n{url}{author_line}{stats_line}{worker_line}"
+    caption = text
 
     async def _one(chat_id: int):
         async with sem:
@@ -613,6 +621,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
                             video=f,
                             caption=caption,
                             reply_markup=keyboard,
+                            parse_mode=ParseMode.MARKDOWN,
                             supports_streaming=True,
                         )
                     finally:
