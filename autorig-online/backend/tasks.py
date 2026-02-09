@@ -215,11 +215,28 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     # Telegram notification (fire-and-forget) - now we have progress_page
     try:
         from telegram_bot import broadcast_new_task
-        # Construct progress_page URL from worker_api and guid
-        worker_base = get_worker_base_url(worker_url)
-        progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
-        print(f"[Tasks] Scheduling Telegram notification for new task {task.id}")
-        asyncio.create_task(broadcast_new_task(task.id, task.input_url, task.input_type, progress_url))
+        from sqlalchemy import update
+        
+        # Atomic check-and-set to prevent duplicate notifications
+        now = datetime.utcnow()
+        stmt = (
+            update(Task)
+            .where(Task.id == task.id)
+            .where(Task.telegram_new_notified_at.is_(None))
+            .values(telegram_new_notified_at=now)
+        )
+        res = await db.execute(stmt)
+        await db.commit()
+        
+        if res.rowcount == 1:
+            # Construct progress_page URL from worker_api and guid
+            worker_base = get_worker_base_url(worker_url)
+            progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+            print(f"[Tasks] Scheduling Telegram notification for new task {task.id}")
+            asyncio.create_task(broadcast_new_task(task.id, task.input_url, task.input_type, progress_url))
+        else:
+            print(f"[Tasks] New task notification already sent for {task.id}, skipping")
+            
     except Exception as e:
         print(f"[Telegram] Failed to notify new task: {e}")
         import traceback
@@ -306,25 +323,42 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     if was_processing and task.status == "done":
         try:
             from telegram_bot import broadcast_task_done
-            duration = None
-            if task.created_at:
-                duration = int((datetime.utcnow() - task.created_at).total_seconds())
-            # Construct progress_page URL
-            progress_url = None
-            if task.guid and task.worker_api:
-                worker_base = get_worker_base_url(task.worker_api)
-                progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
-            print(f"[Tasks] Scheduling Telegram done notification for task {task.id}")
-            asyncio.create_task(broadcast_task_done(task.id, duration_seconds=duration, progress_page=progress_url))
+            from sqlalchemy import update
             
-            # GA4 rig_completed event
-            if task.ga_client_id:
-                from main import send_ga4_event
-                asyncio.create_task(send_ga4_event(
-                    task.ga_client_id, 
-                    "rig_completed", 
-                    {"duration": duration, "task_id": task.id}
-                ))
+            # Atomic check-and-set to prevent duplicate notifications
+            now = datetime.utcnow()
+            stmt = (
+                update(Task)
+                .where(Task.id == task.id)
+                .where(Task.telegram_done_notified_at.is_(None))
+                .values(telegram_done_notified_at=now)
+            )
+            res = await db.execute(stmt)
+            await db.commit()
+            
+            if res.rowcount == 1:
+                duration = None
+                if task.created_at:
+                    duration = int((datetime.utcnow() - task.created_at).total_seconds())
+                # Construct progress_page URL
+                progress_url = None
+                if task.guid and task.worker_api:
+                    worker_base = get_worker_base_url(task.worker_api)
+                    progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+                print(f"[Tasks] Scheduling Telegram done notification for task {task.id}")
+                asyncio.create_task(broadcast_task_done(task.id, duration_seconds=duration, progress_page=progress_url))
+                
+                # GA4 rig_completed event
+                if task.ga_client_id:
+                    from main import send_ga4_event
+                    asyncio.create_task(send_ga4_event(
+                        task.ga_client_id, 
+                        "rig_completed", 
+                        {"duration": duration, "task_id": task.id}
+                    ))
+            else:
+                print(f"[Tasks] Done notification already sent for {task.id}, skipping")
+                
         except Exception as e:
             print(f"[Telegram] Failed to notify done: {e}")
             import traceback

@@ -145,6 +145,10 @@ class Task(Base):
     fbx_glb_ready = Column(Boolean, default=False)
     fbx_glb_error = Column(Text, nullable=True)
 
+    # Telegram notification tracking
+    telegram_new_notified_at = Column(DateTime, nullable=True)
+    telegram_done_notified_at = Column(DateTime, nullable=True)
+
     # Viewer settings (JSON string). Used by task.html to persist viewer state per-task.
     viewer_settings = Column(Text, nullable=True)
     ga_client_id = Column(String(100), nullable=True)
@@ -326,6 +330,8 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_settings TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN ga_client_id VARCHAR(100)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_new_notified_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_done_notified_at DATETIME")
             
             # Scene table migrations
             await _try_add_column("ALTER TABLE scenes ADD COLUMN is_public BOOLEAN DEFAULT 0")

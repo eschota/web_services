@@ -29,10 +29,10 @@ async def tcp_check(host: str, port: int, timeout: float = 5.0) -> bool:
 
 
 async def http_proxy_check(
-    host: str, port: int, username: str, password: str, timeout: float = 10.0
+    host: str, port: int, timeout: float = 10.0
 ) -> bool:
     """Check if HTTP proxy works by making a request through it."""
-    proxy_url = f"http://{username}:{password}@{host}:{port}"
+    proxy_url = f"http://{host}:{port}"
     try:
         async with httpx.AsyncClient(
             proxy=proxy_url, timeout=timeout, verify=False
@@ -77,9 +77,7 @@ async def check_all_nodes_http():
         nodes = result.scalars().all()
 
         for node in nodes:
-            works = await http_proxy_check(
-                node.ip, node.proxy_port, node.proxy_username, node.proxy_password
-            )
+            works = await http_proxy_check(node.ip, node.proxy_port)
 
             if not works and node.status == VPSStatus.online:
                 node.status = VPSStatus.degraded
