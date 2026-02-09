@@ -34,20 +34,11 @@ def _task_url(task_id: str) -> str:
     return f"{base}/task?id={task_id}&t={ts}"
 
 
-def _webapp_url(task_id: str) -> str:
-    """URL for Telegram WebApp mode (minimal UI) with cache-busting."""
-    import time
-    base = (APP_URL or "").rstrip("/")
-    # Add timestamp to bypass Telegram's link preview cache
-    ts = int(time.time())
-    return f"{base}/task?id={task_id}&mode=webapp&t={ts}"
-
-
 def _task_summary(input_url: str | None, input_type: str | None) -> str:
     parts: list[str] = []
 
     if input_type:
-        parts.append(f"type={input_type}")
+        parts.append(input_type)
 
     ext = None
     if input_url:
@@ -59,9 +50,11 @@ def _task_summary(input_url: str | None, input_type: str | None) -> str:
             ext = None
 
     if ext:
-        parts.append(f"format=.{ext}")
+        # Avoid duplicate if input_type is same as ext
+        if not input_type or input_type.lower() != ext:
+            parts.append(f".{ext}")
 
-    return ", ".join(parts) if parts else ""
+    return " | ".join(parts) if parts else ""
 
 
 def _format_input_url(input_url: str | None) -> str:
@@ -157,17 +150,16 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
 
     bot = Bot(token=token)
     url = _task_url(task_id)
-    webapp_url = _webapp_url(task_id)
     summary = _task_summary(input_url, input_type)
     source_line = _format_input_url(input_url)
     
-    text = f"🟢 New task started\n🔗 [View Task]({url})"
-    if summary:
-        text += f"\n📄 {summary}"
+    # Compact 2-line format
+    text = f"🟢 *New task started*\n"
+    text += f"🔗 [View Result]({url}) | 📄 {summary}"
+    if progress_page:
+        text += f" | 🔧 [Worker]({progress_page})"
     if source_line:
         text += f"\n{source_line}"
-    if progress_page:
-        text += f"\n🔧 [Worker Page]({progress_page})"
 
     chat_ids = await get_active_chat_ids()
     print(f"[Telegram] Sending new task notification to {len(chat_ids)} chat(s)")
@@ -178,7 +170,6 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
 
     async def _one(chat_id: int):
         async with sem:
-            # Use appropriate button type for chat
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid, 
                 text=text, 
@@ -211,7 +202,7 @@ async def broadcast_purchase_intent(
     url = _task_url(task_id)
     actor = user_email or (f"anon:{anon_id}" if anon_id else "anon")
     source_label = source or "download_all"
-    text = f"💳 Purchase intent\n🔗 [Task]({url})\n👤 {actor} | 📍 {source_label}"
+    text = f"💳 *Purchase intent*\n🔗 [Task]({url}) | 👤 {actor} | 📍 {source_label}"
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
@@ -422,10 +413,10 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
 
     bot = Bot(token=token)
     url = _task_url(task_id)
-    webapp_url = _webapp_url(task_id)
     
     # Get task details
     input_info = ""
@@ -436,12 +427,12 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
             if task:
                 summary = _task_summary(task.input_url, task.input_type)
                 if summary:
-                    input_info = f"\n{summary}"
+                    input_info = f" | 📄 {summary}"
     except Exception as e:
         print(f"[Telegram] Failed to get task details: {e}")
     
-    admin_line = f"\n👤 Admin: {admin_email}" if admin_email else ""
-    text = f"🔄 Task restarted ({reason})\n{url}{input_info}{admin_line}"
+    admin_line = f" | 👤 Admin: {admin_email}" if admin_email else ""
+    text = f"🔄 *Task restarted* ({reason})\n🔗 [Task]({url}){input_info}{admin_line}"
 
     chat_ids = await get_active_chat_ids()
     print(f"[Telegram] Sending restart notification to {len(chat_ids)} chat(s)")
@@ -455,6 +446,7 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
             await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid, 
                 text=text, 
+                parse_mode=ParseMode.MARKDOWN,
                 disable_web_page_preview=False
             ))
 
@@ -506,7 +498,6 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     bot = Bot(token=token)
     url = _task_url(task_id)
-    webapp_url = _webapp_url(task_id)
 
     # Get task details including owner for author line
     owner_email = None
@@ -541,10 +532,12 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
             print(f"[Telegram] Failed to get owner_email: {e}")
 
     dur = _format_duration(duration_seconds)
-    stats_line = f"\n⏱ {dur}" if dur else ""
-    author_line = f"\n👤 Author: {owner_email}" if owner_email else ""
+    author_line = f"👤 {owner_email}" if owner_email else ""
+    dur_line = f"⏱ {dur}" if dur else ""
     
-    text = f"✅ Task completed\n🔗 [View Result]({url}){author_line}{stats_line}"
+    # Table-like formatting in 2 lines
+    text = f"✅ *Task completed*\n"
+    text += f"🔗 [View Result]({url}) | {author_line} | {dur_line}"
     if progress_page:
         text += f"\n🔧 [Worker Logs]({progress_page})"
 
@@ -583,8 +576,6 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     async def _one(chat_id: int):
         async with sem:
-            # Use appropriate button type for chat
-            
             # Telegram expects a file-like object
             def _send():
                 f = open(video_path, "rb")
