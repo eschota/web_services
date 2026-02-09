@@ -145,25 +145,6 @@ async def _send_with_retry(coro_factory, *, max_retries: int = 2):
             return None
 
 
-def _make_viewer_keyboard(chat_id: int, webapp_url: str):
-    """Create keyboard with appropriate button type for chat.
-    
-    - Private chats (positive ID): web_app button (opens in Telegram WebApp)
-    - Groups/channels (negative ID): url button (opens in browser)
-    """
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from telegram._webappinfo import WebAppInfo
-    
-    if chat_id > 0:
-        # Private chat - web_app button works here
-        button = InlineKeyboardButton("🎮 Open Viewer", web_app=WebAppInfo(url=webapp_url))
-    else:
-        # Group/channel - use regular URL button
-        button = InlineKeyboardButton("🎮 Open Viewer", url=webapp_url)
-    
-    return InlineKeyboardMarkup([[button]])
-
-
 async def broadcast_new_task(task_id: str, input_url: str | None, input_type: str | None, progress_page: str | None = None) -> None:
     print(f"[Telegram] broadcast_new_task called for task {task_id}")
     token = _get_token()
@@ -198,11 +179,9 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
     async def _one(chat_id: int):
         async with sem:
             # Use appropriate button type for chat
-            keyboard = _make_viewer_keyboard(chat_id, webapp_url)
-            result = await _send_with_retry(lambda cid=chat_id, kb=keyboard: bot.send_message(
+            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid, 
                 text=text, 
-                reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN,
                 disable_web_page_preview=False
             ))
@@ -473,11 +452,9 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
 
     async def _one(chat_id: int):
         async with sem:
-            keyboard = _make_viewer_keyboard(chat_id, webapp_url)
-            await _send_with_retry(lambda cid=chat_id, kb=keyboard: bot.send_message(
+            await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid, 
                 text=text, 
-                reply_markup=kb,
                 disable_web_page_preview=False
             ))
 
@@ -592,7 +569,6 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
             _send_with_retry(lambda cid=cid: bot.send_message(
                 chat_id=cid, 
                 text=text, 
-                reply_markup=_make_viewer_keyboard(cid, webapp_url),
                 parse_mode=ParseMode.MARKDOWN,
                 disable_web_page_preview=False
             ))
@@ -608,7 +584,6 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     async def _one(chat_id: int):
         async with sem:
             # Use appropriate button type for chat
-            keyboard = _make_viewer_keyboard(chat_id, webapp_url)
             
             # Telegram expects a file-like object
             def _send():
@@ -620,7 +595,6 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
                             chat_id=chat_id,
                             video=f,
                             caption=caption,
-                            reply_markup=keyboard,
                             parse_mode=ParseMode.MARKDOWN,
                             supports_streaming=True,
                         )
