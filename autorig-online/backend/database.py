@@ -6,8 +6,8 @@ from typing import Optional
 import json
 
 from sqlalchemy import (
-    Column, String, Integer, BigInteger, Boolean, DateTime, Text, 
-    create_engine, event
+    Column, String, Integer, BigInteger, Boolean, DateTime, Text,
+    UniqueConstraint, create_engine, event
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -229,6 +229,20 @@ class TelegramChat(Base):
     last_seen_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TelegramNotification(Base):
+    """Idempotency guard for Telegram sends per chat/event."""
+    __tablename__ = "telegram_notifications"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "event_type", "event_key", name="uq_tg_chat_event_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    event_key = Column(String(128), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Feedback(Base):
     """User feedback/comments"""
     __tablename__ = "feedback"
@@ -335,6 +349,28 @@ async def init_db():
             
             # Scene table migrations
             await _try_add_column("ALTER TABLE scenes ADD COLUMN is_public BOOLEAN DEFAULT 0")
+
+            # Telegram idempotency table/index (safe to run repeatedly)
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS telegram_notifications (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        chat_id BIGINT NOT NULL,
+                        event_type VARCHAR(64) NOT NULL,
+                        event_key VARCHAR(128) NOT NULL,
+                        created_at DATETIME
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_tg_chat_event_key
+                    ON telegram_notifications (chat_id, event_type, event_key)
+                    """
+                )
+            except Exception:
+                pass
 
 
 async def get_db():

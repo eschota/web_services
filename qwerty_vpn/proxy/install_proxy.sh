@@ -76,7 +76,27 @@ nserver 1.1.1.1
 auth none
 
 proxy -p49152 -n
+proxy -p49154 -n
+proxy -p49155 -n
+proxy -p49156 -n
+proxy -p49157 -n
+proxy -p49158 -n
+proxy -p49159 -n
+proxy -p49160 -n
+proxy -p49161 -n
+proxy -p49162 -n
+proxy -p49163 -n
 socks -p49153 -n
+socks -p49200 -n
+socks -p49201 -n
+socks -p49202 -n
+socks -p49203 -n
+socks -p49204 -n
+socks -p49205 -n
+socks -p49206 -n
+socks -p49207 -n
+socks -p49208 -n
+socks -p49209 -n
 EOF
 echo "    Done: /etc/3proxy/3proxy.cfg"
 

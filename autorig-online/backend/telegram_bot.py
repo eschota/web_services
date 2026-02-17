@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import os
 import asyncio
+import html
 from datetime import datetime
 from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 
-from database import AsyncSessionLocal, TelegramChat, Task
+from database import AsyncSessionLocal, TelegramChat, TelegramNotification, Task
 from config import APP_URL
 
 
@@ -38,7 +40,7 @@ def _task_summary(input_url: str | None, input_type: str | None) -> str:
     parts: list[str] = []
 
     if input_type:
-        parts.append(input_type)
+        parts.append(input_type.lower())
 
     ext = None
     if input_url:
@@ -52,7 +54,7 @@ def _task_summary(input_url: str | None, input_type: str | None) -> str:
     if ext:
         # Avoid duplicate if input_type is same as ext
         if not input_type or input_type.lower() != ext:
-            parts.append(f".{ext}")
+            parts.append(ext)
 
     return " | ".join(parts) if parts else ""
 
@@ -62,11 +64,11 @@ def _format_input_url(input_url: str | None) -> str:
     if not input_url:
         return ""
     
-    # For Free3D URLs, show a compact markdown link
+    # For Free3D URLs, show a compact link
     if "free3d.online" in input_url:
-        return f"📦 [Free3D Model]({input_url})"
+        return f'📦 <a href="{html.escape(input_url)}">Free3D Model</a>'
     
-    # For other URLs, show domain + path as a markdown link
+    # For other URLs, show domain + path as a link
     try:
         parsed = urlparse(input_url)
         domain = parsed.netloc or ""
@@ -74,9 +76,9 @@ def _format_input_url(input_url: str | None) -> str:
         # Truncate very long paths
         if len(path) > 40:
             path = path[:20] + "..." + path[-15:]
-        return f"📦 [{domain}{path}]({input_url})"
+        return f'📦 <a href="{html.escape(input_url)}">{html.escape(domain + path)}</a>'
     except Exception:
-        return f"📦 [Source]({input_url})"
+        return f'📦 <a href="{html.escape(input_url)}">Source</a>'
 
 
 async def upsert_chat(chat_id: int, chat_type: str | None, title: str | None) -> None:
@@ -108,7 +110,31 @@ async def get_active_chat_ids() -> list[int]:
         return [row[0] for row in rs.all()]
 
 
-async def _send_with_retry(coro_factory, *, max_retries: int = 2):
+async def reserve_notification(chat_id: int, event_type: str, event_key: str) -> bool:
+    """
+    Reserve a per-chat notification key atomically.
+    Returns True if reserved now, False if it was already reserved/sent earlier.
+    """
+    async with AsyncSessionLocal() as db:
+        rec = TelegramNotification(
+            chat_id=chat_id,
+            event_type=event_type,
+            event_key=event_key,
+            created_at=datetime.utcnow(),
+        )
+        db.add(rec)
+        try:
+            await db.commit()
+            return True
+        except IntegrityError:
+            await db.rollback()
+            return False
+        except Exception:
+            await db.rollback()
+            raise
+
+
+async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network: bool = True):
     """Best-effort retry for Telegram rate limits/transient errors."""
     from telegram.error import RetryAfter, TimedOut, NetworkError
 
@@ -124,6 +150,9 @@ async def _send_with_retry(coro_factory, *, max_retries: int = 2):
                 return None
             await asyncio.sleep(float(getattr(e, "retry_after", 1.0)) + 0.5)
         except (TimedOut, NetworkError) as e:
+            if not retry_network:
+                print(f"[Telegram] Network error (no retry mode): {e}")
+                return None
             attempt += 1
             print(f"[Telegram] Network error: {e}, retry {attempt}/{max_retries}")
             if attempt > max_retries:
@@ -153,11 +182,11 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
     summary = _task_summary(input_url, input_type)
     source_line = _format_input_url(input_url)
     
-    # Compact 2-line format
-    text = f"🟢 *New task started*\n"
-    text += f"🔗 [View Result]({url}) | 📄 {summary}"
+    # Compact 2-line format using HTML
+    text = f"🟢 <b>New task started</b>\n"
+    text += f'🔗 <a href="{html.escape(url)}">View Result</a> | 📄 {html.escape(summary)}'
     if progress_page:
-        text += f" | 🔧 [Worker]({progress_page})"
+        text += f' | 🔧 <a href="{html.escape(progress_page)}">Worker</a>'
     if source_line:
         text += f"\n{source_line}"
 
@@ -170,12 +199,16 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
 
     async def _one(chat_id: int):
         async with sem:
+            reserved = await reserve_notification(chat_id, "task_new", task_id)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate new-task notification for chat={chat_id}, task={task_id}")
+                return
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid, 
                 text=text, 
-                parse_mode=ParseMode.MARKDOWN,
+                parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False
-            ))
+            ), retry_network=False)
             if result:
                 print(f"[Telegram] New task notification sent to chat {chat_id}")
 
@@ -202,7 +235,7 @@ async def broadcast_purchase_intent(
     url = _task_url(task_id)
     actor = user_email or (f"anon:{anon_id}" if anon_id else "anon")
     source_label = source or "download_all"
-    text = f"💳 *Purchase intent*\n🔗 [Task]({url}) | 👤 {actor} | 📍 {source_label}"
+    text = f'💳 <b>Purchase intent</b>\n🔗 <a href="{html.escape(url)}">Task</a> | 👤 {html.escape(actor)} | 📍 {html.escape(source_label)}'
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
@@ -215,7 +248,7 @@ async def broadcast_purchase_intent(
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid,
                 text=text,
-                parse_mode=ParseMode.MARKDOWN,
+                parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False
             ))
             if result:
@@ -238,10 +271,11 @@ async def broadcast_credits_purchase_click(
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
 
     bot = Bot(token=token)
     actor = user_email or (f"anon:{anon_id}" if anon_id else "anonymous")
-    text = f"💰 Credits purchase click\nPackage: {package}\nPrice: {price}\nUser: {actor}"
+    text = f"💰 <b>Credits purchase click</b>\nPackage: {html.escape(package)} | Price: {html.escape(price)} | User: {html.escape(actor)}"
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
@@ -254,6 +288,7 @@ async def broadcast_credits_purchase_click(
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid,
                 text=text,
+                parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True
             ))
             if result:
@@ -272,15 +307,17 @@ async def broadcast_youtube_bonus_click(
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
+
     bot = Bot(token=token)
-    text = f"🎁 YouTube Bonus Clicked!\n👤 User: {user_email}\n💰 +10 credits granted"
+    text = f"🎁 <b>YouTube Bonus Clicked!</b>\n👤 User: {html.escape(user_email)} | 💰 +10 credits granted"
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
         return
 
     await asyncio.gather(*[
-        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text))
+        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML))
         for cid in chat_ids
     ])
 
@@ -296,15 +333,17 @@ async def broadcast_feedback_submitted(
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
+
     bot = Bot(token=token)
-    text = f"📝 New Feedback Submitted!\n👤 User: {user_email}\n💬 Text: {text_content[:500]}"
+    text = f"📝 <b>New Feedback Submitted!</b>\n👤 User: {html.escape(user_email)}\n💬 Text: {html.escape(text_content[:500])}"
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
         return
 
     await asyncio.gather(*[
-        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text))
+        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML))
         for cid in chat_ids
     ])
 
@@ -325,16 +364,15 @@ async def broadcast_credits_purchased(
         return
 
     from telegram import Bot
+    from telegram.constants import ParseMode
 
     bot = Bot(token=token)
     test_label = " [TEST]" if is_test else ""
     text = (
-        f"✅ Credits purchased!{test_label}\n"
-        f"💰 Amount: {credits} credits\n"
-        f"💵 Price: {price}\n"
-        f"👤 User: {user_email}\n"
-        f"📦 Product: {product}\n"
-        f"🆔 Sale: {sale_id}"
+        f"✅ <b>Credits purchased!</b>{test_label}\n"
+        f"💰 Amount: {credits} credits | 💵 Price: {html.escape(price)}\n"
+        f"👤 User: {html.escape(user_email)} | 📦 Product: {html.escape(product)}\n"
+        f"🆔 Sale: {html.escape(sale_id)}"
     )
 
     chat_ids = await get_active_chat_ids()
@@ -348,6 +386,7 @@ async def broadcast_credits_purchased(
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid,
                 text=text,
+                parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True
             ))
             if result:
@@ -427,12 +466,12 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
             if task:
                 summary = _task_summary(task.input_url, task.input_type)
                 if summary:
-                    input_info = f" | 📄 {summary}"
+                    input_info = f" | 📄 {html.escape(summary)}"
     except Exception as e:
         print(f"[Telegram] Failed to get task details: {e}")
     
-    admin_line = f" | 👤 Admin: {admin_email}" if admin_email else ""
-    text = f"🔄 *Task restarted* ({reason})\n🔗 [Task]({url}){input_info}{admin_line}"
+    admin_line = f" | 👤 Admin: {html.escape(admin_email)}" if admin_email else ""
+    text = f'🔄 <b>Task restarted</b> ({html.escape(reason)})\n🔗 <a href="{html.escape(url)}">Task</a>{input_info}{admin_line}'
 
     chat_ids = await get_active_chat_ids()
     print(f"[Telegram] Sending restart notification to {len(chat_ids)} chat(s)")
@@ -446,7 +485,7 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
             await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid, 
                 text=text, 
-                parse_mode=ParseMode.MARKDOWN,
+                parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False
             ))
 
@@ -532,14 +571,14 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
             print(f"[Telegram] Failed to get owner_email: {e}")
 
     dur = _format_duration(duration_seconds)
-    author_line = f"👤 {owner_email}" if owner_email else ""
-    dur_line = f"⏱ {dur}" if dur else ""
+    author_line = f"👤 {html.escape(owner_email)}" if owner_email else ""
+    dur_line = f"⏱ {html.escape(dur)}" if dur else ""
     
-    # Table-like formatting in 2 lines
-    text = f"✅ *Task completed*\n"
-    text += f"🔗 [View Result]({url}) | {author_line} | {dur_line}"
+    # Table-like formatting in 2 lines using HTML
+    text = f"✅ <b>Task completed</b>\n"
+    text += f'🔗 <a href="{html.escape(url)}">View Result</a> | {author_line} | {dur_line}'
     if progress_page:
-        text += f"\n🔧 [Worker Logs]({progress_page})"
+        text += f'\n🔧 <a href="{html.escape(progress_page)}">Worker Logs</a>'
 
     # Try to find cached video
     mp4_path = f"/var/autorig/videos/{task_id}.mp4"
@@ -558,15 +597,19 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     if not video_path:
         # Fallback: at least notify completion
-        results = await asyncio.gather(*[
-            _send_with_retry(lambda cid=cid: bot.send_message(
-                chat_id=cid, 
-                text=text, 
-                parse_mode=ParseMode.MARKDOWN,
+        async def _one_text(chat_id: int):
+            reserved = await reserve_notification(chat_id, "task_done", task_id)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate done notification for chat={chat_id}, task={task_id}")
+                return None
+            return await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False
-            ))
-            for cid in chat_ids
-        ])
+            ), retry_network=False)
+
+        results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
         sent_count = sum(1 for r in results if r is not None)
         print(f"[Telegram] Done notification sent to {sent_count}/{len(chat_ids)} chat(s)")
         return
@@ -576,6 +619,10 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     async def _one(chat_id: int):
         async with sem:
+            reserved = await reserve_notification(chat_id, "task_done", task_id)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate done notification for chat={chat_id}, task={task_id}")
+                return
             # Telegram expects a file-like object
             def _send():
                 f = open(video_path, "rb")
@@ -586,7 +633,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
                             chat_id=chat_id,
                             video=f,
                             caption=caption,
-                            parse_mode=ParseMode.MARKDOWN,
+                            parse_mode=ParseMode.HTML,
                             supports_streaming=True,
                         )
                     finally:
@@ -596,7 +643,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
                             pass
                 return _inner()
 
-            await _send_with_retry(_send)
+            await _send_with_retry(_send, retry_network=False)
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 

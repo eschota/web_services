@@ -22,3 +22,4 @@ exit
 root@6268041-hp847164:~# git add . && git commit -m "Ваше сообщение" && git push
 [main 84a5490]
 git add . && git commit -m "Ваше сообщение" && git push
+cat /root/.ssh/id_rsa_qwerty_vpn
