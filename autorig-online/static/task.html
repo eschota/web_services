@@ -947,6 +947,42 @@
             margin-top: 0 !important;
         }
 
+        #video-player-wrap {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .task-card-author-overlay {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 11;
+            display: inline-flex;
+            align-items: center;
+            max-width: calc(100% - 148px);
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #fff;
+            text-decoration: none;
+            font-size: 0.75rem;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .task-card-author-overlay:hover {
+            color: #fff;
+            border-color: rgba(99, 102, 241, 0.6);
+            background: rgba(0, 0, 0, 0.72);
+        }
+
         @media (max-width: 1200px) {
             .viewer-custom-layout {
                 grid-template-columns: 1fr;
@@ -975,12 +1011,13 @@
             #video-player-wrap {
                 flex: 1 1 auto;
                 display: flex;
-                min-height: 420px;
+                min-height: 294px;
+                max-height: 49vh;
             }
 
             #video-player {
                 height: 100% !important;
-                max-height: none !important;
+                max-height: 49vh !important;
             }
         }
         
@@ -1145,7 +1182,7 @@
                 <!-- Video Player with overlay badges -->
                 <div id="video-player-wrap" style="position: relative; width: 100%;">
                     <video id="video-player" controls autoplay muted loop playsinline 
-                           style="width: 100%; height: auto; max-height: 70vh; object-fit: contain; border-radius: 12px; background: #000; display: block;"></video>
+                           style="width: 100%; height: auto; max-height: 49vh; object-fit: contain; border-radius: 12px; background: #000; display: block;"></video>
                     
                     <!-- Author overlay - top left -->
                     <a href="#" id="task-author-link" class="task-card-author-overlay hidden"></a>
@@ -2034,13 +2071,16 @@
                     <div style="grid-column:1/-1; color:var(--text-muted);">Loading custom animations...</div>
                 </div>
 
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:0.55rem; flex-wrap:wrap; margin-top:0.6rem;">
+                <div style="display:flex; flex-direction:column; align-items:stretch; gap:0.45rem; margin-top:0.6rem;">
                     <div id="custom-anim-selected-label" style="font-size:0.78rem; color:var(--text-muted);">
                         Select an animation
                     </div>
-                    <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
-                        <button id="custom-anim-download-btn" class="btn btn-primary" style="padding:0.4rem 0.58rem; font-size:0.74rem;" disabled>
-                            Download Selected Animation
+                    <div style="display:flex; width:100%;">
+                        <button id="custom-anim-download-btn" class="btn btn-primary"
+                                style="width:100%; display:inline-flex; align-items:center; justify-content:center; gap:0.45rem; padding:0.56rem 0.8rem; font-size:0.78rem;"
+                                disabled>
+                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16" style="filter: brightness(10);">
+                            <span class="custom-anim-download-btn-text">Download Selected Animation</span>
                         </button>
                     </div>
                 </div>
@@ -3754,7 +3794,14 @@
                 if (!labelEl || !downloadBtn) return;
 
                 const actionText = this.tSafe('custom_anim_download_selected_action', 'Download Selected Animation');
-                downloadBtn.textContent = actionText;
+                let btnTextEl = downloadBtn.querySelector('.custom-anim-download-btn-text');
+                if (!btnTextEl) {
+                    downloadBtn.innerHTML = '<img src="/static/images/icons/download.svg" alt="" width="16" height="16" style="filter: brightness(10);"><span class="custom-anim-download-btn-text"></span>';
+                    btnTextEl = downloadBtn.querySelector('.custom-anim-download-btn-text');
+                }
+                if (btnTextEl) {
+                    btnTextEl.textContent = actionText;
+                }
 
                 if (!selected || !selected.available || !selected.ready) {
                     labelEl.textContent = this.tSafe('custom_anim_no_selection', 'Select an animation');
@@ -3766,12 +3813,15 @@
                 downloadBtn.disabled = false;
             },
 
-            async notifyCustomAnimationIntent(source = 'custom_animation_download', animationId = null) {
+            async notifyCustomAnimationIntent(source = 'custom_animation_download', animationId = null, animationName = null) {
                 if (!this.taskId) return;
                 try {
                     const payload = { source };
                     if (animationId) {
                         payload.animation_id = animationId;
+                    }
+                    if (animationName) {
+                        payload.animation_name = animationName;
                     }
                     await fetch(`/api/task/${this.taskId}/purchase-intent`, {
                         method: 'POST',
@@ -3788,7 +3838,7 @@
                 if (!selected || !selected.available || !selected.ready) return;
 
                 const selectedId = this.normalizeAnimationKey(selected.id);
-                await this.notifyCustomAnimationIntent('custom_animation_download', selectedId);
+                await this.notifyCustomAnimationIntent('custom_animation_download', selectedId, selected.name);
 
                 if (this.animationCatalog?.login_required) {
                     window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);

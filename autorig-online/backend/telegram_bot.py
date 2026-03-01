@@ -219,7 +219,9 @@ async def broadcast_purchase_intent(
     task_id: str,
     user_email: str | None = None,
     anon_id: str | None = None,
-    source: str | None = None
+    source: str | None = None,
+    animation_id: str | None = None,
+    animation_name: str | None = None
 ) -> None:
     """Notify when user clicks download-to-purchase."""
     print(f"[Telegram] broadcast_purchase_intent called for task {task_id}")
@@ -236,6 +238,14 @@ async def broadcast_purchase_intent(
     actor = user_email or (f"anon:{anon_id}" if anon_id else "anon")
     source_label = source or "download_all"
     text = f'💳 <b>Purchase intent</b>\n🔗 <a href="{html.escape(url)}">Task</a> | 👤 {html.escape(actor)} | 📍 {html.escape(source_label)}'
+
+    anim_name = (animation_name or "").strip()
+    anim_id = (animation_id or "").strip()
+    if anim_name or anim_id:
+        if anim_name and anim_id and anim_name.lower() != anim_id.lower():
+            text += f"\n🎬 <b>Animation:</b> {html.escape(anim_name)} ({html.escape(anim_id)})"
+        else:
+            text += f"\n🎬 <b>Animation:</b> {html.escape(anim_name or anim_id)}"
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:

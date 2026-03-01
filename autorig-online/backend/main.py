@@ -3513,6 +3513,7 @@ from fastapi.responses import StreamingResponse
 @app.get("/api/video/{task_id}")
 async def proxy_video(
     task_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy video from worker to serve over HTTPS"""
@@ -3522,20 +3523,67 @@ async def proxy_video(
     
     if not task.video_url:
         raise HTTPException(status_code=404, detail="Video not available")
-    
-    async def stream_video():
-        async with httpx.AsyncClient() as client:
-            async with client.stream("GET", task.video_url, timeout=60.0) as response:
-                async for chunk in response.aiter_bytes(chunk_size=65536):
-                    yield chunk
-    
+
+    # Forward range headers so browser can seek to arbitrary frames.
+    # Without 206 + Content-Range, timeline scrubbing in <video> is broken.
+    upstream_headers: Dict[str, str] = {}
+    range_header = request.headers.get("range")
+    if range_header:
+        upstream_headers["Range"] = range_header
+    if_range = request.headers.get("if-range")
+    if if_range:
+        upstream_headers["If-Range"] = if_range
+
+    client = httpx.AsyncClient(timeout=120.0)
+    try:
+        req = client.build_request("GET", task.video_url, headers=upstream_headers)
+        worker_resp = await client.send(req, stream=True)
+    except Exception:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail="Video source unavailable")
+
+    if worker_resp.status_code not in (200, 206):
+        code = worker_resp.status_code if worker_resp.status_code in (401, 403, 404) else 502
+        try:
+            await worker_resp.aclose()
+        finally:
+            await client.aclose()
+        raise HTTPException(status_code=code, detail="Video is unavailable")
+
+    async def _close_stream_resources():
+        try:
+            await worker_resp.aclose()
+        finally:
+            await client.aclose()
+
+    response_headers: Dict[str, str] = {
+        "Content-Disposition": f"inline; filename={task_id}_video.mp4",
+        "Cache-Control": "public, max-age=86400",
+        # Prevent GZip middleware from wrapping video stream and breaking ranges.
+        "Content-Encoding": "identity",
+        "Accept-Ranges": "bytes",
+    }
+
+    content_length = worker_resp.headers.get("content-length")
+    content_range = worker_resp.headers.get("content-range")
+    etag = worker_resp.headers.get("etag")
+    last_modified = worker_resp.headers.get("last-modified")
+    if content_length:
+        response_headers["Content-Length"] = content_length
+    if content_range:
+        response_headers["Content-Range"] = content_range
+    if etag:
+        response_headers["ETag"] = etag
+    if last_modified:
+        response_headers["Last-Modified"] = last_modified
+
+    media_type = worker_resp.headers.get("content-type") or "video/mp4"
     return StreamingResponse(
-        stream_video(),
-        media_type="video/mp4",
-        headers={
-            "Content-Disposition": f"inline; filename={task_id}_video.mp4",
-            "Cache-Control": "public, max-age=86400"
-        }
+        worker_resp.aiter_bytes(chunk_size=65536),
+        status_code=worker_resp.status_code,
+        media_type=media_type,
+        headers=response_headers,
+        background=BackgroundTask(_close_stream_resources),
     )
 
 
@@ -5137,13 +5185,51 @@ async def api_purchase_intent(
     except Exception:
         payload = {}
 
-    source = payload.get("source") if isinstance(payload, dict) else None
+    source = None
+    animation_id = None
+    animation_name = None
+    if isinstance(payload, dict):
+        source_raw = payload.get("source")
+        source = str(source_raw).strip() if source_raw is not None else None
+
+        anim_id_raw = payload.get("animation_id")
+        anim_id_normalized = _normalize_animation_key(str(anim_id_raw or ""))
+        animation_id = anim_id_normalized or None
+
+        anim_name_raw = payload.get("animation_name")
+        if anim_name_raw is not None:
+            anim_name_clean = str(anim_name_raw).strip()
+            if anim_name_clean:
+                animation_name = anim_name_clean
+
+    # Prefer canonical animation name from manifest for stable Telegram logs.
+    if animation_id:
+        try:
+            manifest = _load_animation_manifest()
+            raw_items = manifest.get("animations") or []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("enabled", True) is False:
+                    continue
+                key = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
+                if key == animation_id:
+                    resolved_name = str(item.get("name") or "").strip()
+                    if resolved_name:
+                        animation_name = resolved_name
+                    break
+        except Exception:
+            # Best-effort enrichment only.
+            pass
+
     from telegram_bot import broadcast_purchase_intent
     asyncio.create_task(broadcast_purchase_intent(
         task_id=task_id,
         user_email=user.email if user else None,
         anon_id=anon_session.anon_id if not user else None,
-        source=source
+        source=source,
+        animation_id=animation_id,
+        animation_name=animation_name
     ))
 
     return {"ok": True}
