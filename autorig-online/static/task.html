@@ -3385,15 +3385,6 @@
                 const token = applyToken ?? ++this.animationApplyToken;
                 const selected = this.getSelectedAnimationItem();
                 if (!selected) return;
-
-                try {
-                    if (typeof window.setViewMode === 'function') {
-                        // Move viewer to animation mode before applying selected clip.
-                        await window.setViewMode('animation');
-                    }
-                } catch (e) {
-                    console.warn('Failed to switch viewer mode:', e);
-                }
                 if (token !== this.animationApplyToken) return;
 
                 const bridge = window.CustomAnimationViewerBridge;
@@ -4261,7 +4252,9 @@
             }
 
             function applyAnimationClipsToCurrentModel(clips, hints = []) {
-                if (!currentModel || !Array.isArray(clips) || !clips.length) return false;
+                if (currentModelType !== 'animations' || !currentModel || !Array.isArray(clips) || !clips.length) {
+                    return false;
+                }
                 if (mixer) {
                     try {
                         mixer.stopAllAction();
@@ -4280,6 +4273,69 @@
             }
 
             const customAnimationClipCache = new Map();
+            const FBX_CLIP_POSITION_SCALE_FACTOR = 0.01;
+            const FBX_CLIP_SCALE_TRIGGER_ABS = 20;
+
+            function normalizeFbxClipUnits(clips) {
+                if (!Array.isArray(clips) || !clips.length) return [];
+
+                let maxAbsPosition = 0;
+                for (const clip of clips) {
+                    if (!clip || !Array.isArray(clip.tracks)) continue;
+                    for (const track of clip.tracks) {
+                        const trackName = String(track?.name || '');
+                        if (!trackName.endsWith('.position') || !track?.values) continue;
+                        for (let i = 0; i < track.values.length; i++) {
+                            const v = Math.abs(Number(track.values[i]) || 0);
+                            if (v > maxAbsPosition) maxAbsPosition = v;
+                        }
+                    }
+                }
+
+                // FBX often stores in centimeters while GLB scene is in meters.
+                if (maxAbsPosition < FBX_CLIP_SCALE_TRIGGER_ABS) {
+                    return clips;
+                }
+
+                const scaled = clips.map((clip) => {
+                    if (!clip || !Array.isArray(clip.tracks)) return clip;
+                    const scaledTracks = clip.tracks.map((track) => {
+                        const trackName = String(track?.name || '');
+                        if (!trackName.endsWith('.position') || !track?.values || !track?.times) {
+                            return track;
+                        }
+                        const ValuesCtor = track.values.constructor || Float32Array;
+                        const TimesCtor = track.times.constructor || Float32Array;
+                        const scaledValues = new ValuesCtor(track.values.length);
+                        const clonedTimes = new TimesCtor(track.times.length);
+                        for (let i = 0; i < track.values.length; i++) {
+                            scaledValues[i] = Number(track.values[i]) * FBX_CLIP_POSITION_SCALE_FACTOR;
+                        }
+                        for (let i = 0; i < track.times.length; i++) {
+                            clonedTimes[i] = Number(track.times[i]);
+                        }
+                        const TrackCtor = track.constructor;
+                        try {
+                            if (typeof track.getInterpolation === 'function') {
+                                return new TrackCtor(track.name, clonedTimes, scaledValues, track.getInterpolation());
+                            }
+                            return new TrackCtor(track.name, clonedTimes, scaledValues);
+                        } catch (_) {
+                            return track;
+                        }
+                    });
+                    try {
+                        return new THREE.AnimationClip(clip.name, clip.duration, scaledTracks, clip.blendMode);
+                    } catch (_) {
+                        return clip;
+                    }
+                });
+
+                console.log(
+                    `[Viewer] Normalized FBX clip units by ${FBX_CLIP_POSITION_SCALE_FACTOR} (max position ${maxAbsPosition.toFixed(2)})`
+                );
+                return scaled;
+            }
 
             async function loadAnimationClipsFromFbxUrl(fbxUrl, label = 'Custom Animation FBX', retryCount = 0) {
                 const normalizedUrl = String(fbxUrl || '').trim();
@@ -4319,7 +4375,8 @@
                     return [];
                 }
 
-                const clips = Array.isArray(fbxModel?.animations) ? fbxModel.animations : [];
+                const rawClips = Array.isArray(fbxModel?.animations) ? fbxModel.animations : [];
+                const clips = normalizeFbxClipUnits(rawClips);
                 if (clips.length) {
                     customAnimationClipCache.set(normalizedUrl, clips);
                 }
@@ -4339,7 +4396,7 @@
             window.CustomAnimationViewerBridge = {
                 async playByName(name) {
                     try {
-                        if (typeof setActiveMode === 'function') {
+                        if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
                             await setActiveMode('animation');
                         }
                     } catch (_) {
@@ -4349,14 +4406,17 @@
                 },
                 async playByFbxUrl(url, hints = []) {
                     try {
-                        if (typeof setActiveMode === 'function') {
+                        if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
                             await setActiveMode('animation');
                         }
                     } catch (_) {
                         // ignore mode switch errors
                     }
 
-                    if (!currentModel) return false;
+                    if (currentModelType !== 'animations' || !currentModel) {
+                        setStatus('Animations GLB is not ready yet');
+                        return false;
+                    }
                     const clips = await loadAnimationClipsFromFbxUrl(url, 'Custom Animation FBX');
                     if (!clips.length) return false;
 
@@ -6493,19 +6553,22 @@
                                         setLoadingUIState(true);
                                         loadingManager.show('Loading Animations');
                                         loadingManager.setQueue([
-                                            { name: 'Animations GLB', status: 'pending' },
-                                            { name: 'Animations FBX', status: 'pending' }
+                                            { name: 'Animations GLB', status: 'pending' }
                                         ]);
-                                        let ok = await loadModel(`/api/task/${taskId}/animations.glb`, 'Animations GLB');
-                                        if (!ok) {
-                                            ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
-                                        }
+                                        const ok = await loadModel(
+                                            `/api/task/${taskId}/animations.glb`,
+                                            'Animations GLB',
+                                            0,
+                                            120000
+                                        );
                                         if (ok) {
                                             currentModelType = 'animations';
                                             // Cache for future use
                                             modelCache.animations = currentModel;
                                             modelCache.animationsData = [...animations];
                                             console.log('[Viewer] ✓ Cached animations model');
+                                        } else {
+                                            console.warn('[Viewer] Animations GLB failed; keep current GLB model without FBX model fallback');
                                         }
                                         setLoadingUIState(false);
                                     }
@@ -7650,7 +7713,7 @@
                 console.log('[Materials] Applied improved materials to model');
             }
 
-            async function loadModel(glbUrl, label = 'GLB', retryCount = 0) {
+            async function loadModel(glbUrl, label = 'GLB', retryCount = 0, timeoutMs = 30000) {
                 if (!sceneInited) await initScene();
 
                 setStatus(`Loading ${label}...`);
@@ -7666,7 +7729,7 @@
                 const loader = new GLTFLoader();
                 let gltf;
                 let lastProgress = Date.now();
-                const TIMEOUT_MS = 30000; // 30 second timeout
+                const TIMEOUT_MS = Math.max(10000, Number(timeoutMs || 30000));
                 
                 try {
                     gltf = await new Promise((resolve, reject) => {
@@ -7712,7 +7775,7 @@
                         console.log(`[Viewer] Retrying ${label} in 1s...`);
                         // Wait a bit before retry
                         await new Promise(r => setTimeout(r, 1000));
-                        return await loadModel(glbUrl, label, retryCount + 1);
+                        return await loadModel(glbUrl, label, retryCount + 1, TIMEOUT_MS);
                     }
                 } catch (e) {
                     setStatus(`${label} failed`);

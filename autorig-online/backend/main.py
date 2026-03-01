@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, quote, unquote
+from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -827,7 +828,9 @@ async def _build_task_animation_file_map(
     # Synthesize URLs by convention: /{guid}/{guid}_{animation_name}.fbx
     # Only enabled when task likely contains generated animation set.
     has_animation_bundle = any("_all_animations_unity.fbx" in (u or "").lower() for u in combined_urls)
-    can_synthesize = bool(worker_root and guid and manifest_items and (worker_file_urls or has_animation_bundle))
+    # Important: if worker model-files API returns concrete list, trust it and avoid
+    # marking missing animations as available via synthetic guesses.
+    can_synthesize = bool(worker_root and guid and manifest_items and has_animation_bundle and not worker_file_urls)
     if can_synthesize:
         for item in (manifest_items or []):
             if not isinstance(item, dict):
@@ -2355,19 +2358,30 @@ async def api_preview_animation(
         raise HTTPException(status_code=404, detail="Animation file not ready")
 
     file_url = resolved["url"]
+    client = httpx.AsyncClient(timeout=120.0)
+    try:
+        req = client.build_request("GET", file_url)
+        worker_resp = await client.send(req, stream=True)
+    except Exception:
+        await client.aclose()
+        raise HTTPException(status_code=404, detail="Animation file is unavailable")
 
-    async def stream_file():
-        async with httpx.AsyncClient() as client:
-            async with client.stream("GET", file_url, timeout=120.0) as worker_resp:
-                if worker_resp.status_code != 200:
-                    raise HTTPException(status_code=404, detail="Animation file is unavailable")
-                async for chunk in worker_resp.aiter_bytes(chunk_size=65536):
-                    yield chunk
+    if worker_resp.status_code != 200:
+        await worker_resp.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=404, detail="Animation file is unavailable")
+
+    async def _close_stream_resources():
+        try:
+            await worker_resp.aclose()
+        finally:
+            await client.aclose()
 
     return StreamingResponse(
-        stream_file(),
+        worker_resp.aiter_bytes(chunk_size=65536),
         media_type="application/octet-stream",
-        headers={"Cache-Control": "no-store, max-age=0"}
+        headers={"Cache-Control": "no-store, max-age=0"},
+        background=BackgroundTask(_close_stream_resources)
     )
 
 
