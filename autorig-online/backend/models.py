@@ -333,6 +333,7 @@ class AnimationCatalogItem(BaseModel):
     ready: bool = False
     purchased: bool = False
     file_name: Optional[str] = None
+    preview_url: Optional[str] = None
 
 
 class AnimationCatalogResponse(BaseModel):

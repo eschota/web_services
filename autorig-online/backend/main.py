@@ -16,7 +16,7 @@ import json
 import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote, unquote
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -557,6 +557,10 @@ GUID_PREFIX_RE = re.compile(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_',
     re.IGNORECASE
 )
+GUID_ANY_RE = re.compile(
+    r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+    re.IGNORECASE
+)
 
 _ANIM_CATALOG_CACHE: Dict[str, Any] = {
     "mtime_ns": None,
@@ -573,6 +577,155 @@ def _normalize_animation_key(value: str) -> str:
 
 def _strip_guid_prefix(filename: str) -> str:
     return GUID_PREFIX_RE.sub('', filename or '')
+
+
+def _extract_guid_from_text(text: str) -> Optional[str]:
+    if not text:
+        return None
+    m = GUID_ANY_RE.search(text)
+    return m.group(0) if m else None
+
+
+def _infer_worker_root_and_guid(task) -> tuple[Optional[str], Optional[str]]:
+    """
+    Infer worker root (http://host:port/converter/glb) and GUID for a task.
+    Uses task.worker_api/task.guid first, then falls back to progress_page and URLs.
+    """
+    worker_root: Optional[str] = None
+    guid: Optional[str] = (task.guid or "").strip() or None
+
+    worker_api = (task.worker_api or "").strip()
+    if worker_api:
+        if "/api-converter-glb" in worker_api:
+            worker_root = worker_api.split("/api-converter-glb", 1)[0].rstrip("/") + "/converter/glb"
+        elif "/converter/glb" in worker_api:
+            worker_root = worker_api.split("/converter/glb", 1)[0].rstrip("/") + "/converter/glb"
+        else:
+            parsed = urlparse(worker_api)
+            if parsed.scheme and parsed.netloc:
+                worker_root = f"{parsed.scheme}://{parsed.netloc}/converter/glb"
+        if not guid:
+            guid = _extract_guid_from_text(worker_api)
+
+    progress_page = (task.progress_page or "").strip()
+    if progress_page:
+        m = re.search(r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})/', progress_page)
+        if m:
+            if not worker_root:
+                worker_root = f"{m.group(1)}/converter/glb"
+            if not guid:
+                guid = m.group(2)
+        if not guid:
+            guid = _extract_guid_from_text(progress_page)
+
+    if not worker_root or not guid:
+        for u in list(task.output_urls or []) + list(task.ready_urls or []):
+            if not isinstance(u, str):
+                continue
+            url = u.strip()
+            if not url:
+                continue
+            m = re.search(r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})/', url)
+            if m:
+                if not worker_root:
+                    worker_root = f"{m.group(1)}/converter/glb"
+                if not guid:
+                    guid = m.group(2)
+                if worker_root and guid:
+                    break
+            if not guid:
+                guid = _extract_guid_from_text(url)
+
+    return worker_root, guid
+
+
+def _upsert_animation_file_map(result: Dict[str, dict], key: str, rec: dict) -> None:
+    """
+    Merge records with priority:
+    1) ready real files
+    2) non-ready real files
+    3) synthetic files
+    """
+    existing = result.get(key)
+    if not existing:
+        result[key] = rec
+        return
+
+    existing_score = (2 if not existing.get("synthetic") else 0) + (1 if existing.get("ready") else 0)
+    rec_score = (2 if not rec.get("synthetic") else 0) + (1 if rec.get("ready") else 0)
+    if rec_score > existing_score:
+        result[key] = rec
+
+
+def _add_animation_file_url_to_map(
+    *,
+    result: Dict[str, dict],
+    file_url: str,
+    ready: bool,
+    index: Optional[int] = None,
+    synthetic: bool = False
+) -> None:
+    raw_name = unquote((file_url or "").split("/")[-1])
+    if not raw_name.lower().endswith(".fbx"):
+        return
+
+    clean_name = _strip_guid_prefix(raw_name)
+    stem = clean_name[:-4] if clean_name.lower().endswith(".fbx") else clean_name
+    stem_l = stem.lower()
+    # Exclude package-level animation files; keep only single animation files.
+    if "_all_animations" in stem_l:
+        return
+
+    key = _normalize_animation_key(stem)
+    if not key:
+        return
+
+    rec = {
+        "url": file_url,
+        "raw_filename": raw_name,
+        "clean_filename": clean_name,
+        "index": index,
+        "ready": bool(ready),
+        "synthetic": bool(synthetic),
+    }
+    _upsert_animation_file_map(result, key, rec)
+
+
+async def _fetch_worker_animation_file_urls(worker_root: str, guid: str) -> List[str]:
+    """
+    Fetch worker file listing via /api-converter-glb/model-files/{guid}
+    and return URLs for all .fbx files discovered.
+    """
+    if not worker_root or not guid:
+        return []
+    api_base = worker_root.replace("/converter/glb", "")
+    files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
+    out: List[str] = []
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(files_url, timeout=5.0)
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        folders = data.get("folders", {})
+        if not isinstance(folders, dict):
+            return []
+        for folder_data in folders.values():
+            if not isinstance(folder_data, dict):
+                continue
+            for f in (folder_data.get("files") or []):
+                if not isinstance(f, dict):
+                    continue
+                rel_path = str(f.get("rel_path") or "").strip()
+                if not rel_path:
+                    continue
+                if not rel_path.lower().endswith(".fbx"):
+                    continue
+                # Keep slashes in rel_path (e.g. nested folders), encode only unsafe chars.
+                out.append(f"{worker_root}/{guid}/{quote(rel_path, safe='/')}")
+    except Exception:
+        return []
+    return out
 
 
 def _load_animation_manifest() -> dict:
@@ -624,45 +777,85 @@ def _load_animation_manifest() -> dict:
         }
 
 
-def _build_task_animation_file_map(task) -> Dict[str, dict]:
+async def _build_task_animation_file_map(
+    task,
+    manifest_items: Optional[List[dict]] = None
+) -> Dict[str, dict]:
     """
     Build map of normalized animation key -> worker file metadata for individual FBX animations.
-    Excludes package files like *_all_animations*.fbx.
+    Sources:
+    1) task.output_urls/task.ready_urls
+    2) worker model-files API
+    3) synthesized GUID-based URLs from manifest (fallback)
     """
-    download_urls = (task.output_urls or []) if (task.output_urls and len(task.output_urls) > 0) else (task.ready_urls or [])
+    result: Dict[str, dict] = {}
+
+    output_urls = [u.strip() for u in (task.output_urls or []) if isinstance(u, str)]
     ready_urls = [u.strip() for u in (task.ready_urls or []) if isinstance(u, str)]
     ready_url_set = set(ready_urls)
-    ready_name_set = {u.split('/')[-1] for u in ready_urls}
 
-    result: Dict[str, dict] = {}
-    for idx, url in enumerate(download_urls):
-        if not isinstance(url, str):
-            continue
-        file_url = url.strip()
-        raw_name = file_url.split('/')[-1]
-        if not raw_name.lower().endswith('.fbx'):
-            continue
+    # Use both output and ready URLs, preserving order and uniqueness.
+    combined_urls: List[str] = []
+    seen = set()
+    for u in output_urls + ready_urls:
+        if u and u not in seen:
+            seen.add(u)
+            combined_urls.append(u)
 
-        clean_name = _strip_guid_prefix(raw_name)
-        stem = clean_name[:-4] if clean_name.lower().endswith('.fbx') else clean_name
-        stem_l = stem.lower()
-        if "_all_animations" in stem_l:
-            continue
+    for idx, file_url in enumerate(combined_urls):
+        _add_animation_file_url_to_map(
+            result=result,
+            file_url=file_url,
+            ready=(file_url in ready_url_set),
+            index=idx,
+            synthetic=False
+        )
 
-        key = _normalize_animation_key(stem)
-        if not key:
-            continue
+    worker_root, guid = _infer_worker_root_and_guid(task)
+    worker_file_urls: List[str] = []
+    if worker_root and guid:
+        worker_file_urls = await _fetch_worker_animation_file_urls(worker_root, guid)
+        for idx, file_url in enumerate(worker_file_urls):
+            _add_animation_file_url_to_map(
+                result=result,
+                file_url=file_url,
+                ready=True,
+                index=None,
+                synthetic=False
+            )
 
-        rec = {
-            "url": file_url,
-            "raw_filename": raw_name,
-            "clean_filename": clean_name,
-            "index": idx,
-            "ready": (file_url in ready_url_set) or (raw_name in ready_name_set),
-        }
-        # Prefer a ready file if duplicates appear.
-        if key not in result or (not result[key]["ready"] and rec["ready"]):
-            result[key] = rec
+    # Synthesize URLs by convention: /{guid}/{guid}_{animation_name}.fbx
+    # Only enabled when task likely contains generated animation set.
+    has_animation_bundle = any("_all_animations_unity.fbx" in (u or "").lower() for u in combined_urls)
+    can_synthesize = bool(worker_root and guid and manifest_items and (worker_file_urls or has_animation_bundle))
+    if can_synthesize:
+        for item in (manifest_items or []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("enabled", True) is False:
+                continue
+            anim_name = None
+            src = item.get("source_file")
+            if isinstance(src, str) and src.strip():
+                anim_name = Path(src).stem
+            if not anim_name:
+                raw_name = str(item.get("name") or "").strip()
+                anim_name = raw_name
+            if not anim_name:
+                continue
+
+            key = _normalize_animation_key(str(item.get("id") or anim_name))
+            if not key:
+                continue
+            file_name = f"{guid}_{anim_name}.fbx"
+            file_url = f"{worker_root}/{guid}/{quote(file_name)}"
+            _add_animation_file_url_to_map(
+                result=result,
+                file_url=file_url,
+                ready=(task.status == "done"),
+                index=None,
+                synthetic=True
+            )
 
     return result
 
@@ -703,6 +896,18 @@ def _resolve_animation_file(item: dict, file_map: Dict[str, dict]) -> Optional[d
                 return v
 
     return None
+
+
+def _resolve_worker_files_api_context(task) -> tuple[Optional[str], Optional[str]]:
+    """
+    Resolve context for worker files API:
+    returns (api_base, guid), where api_base is like http://host:port
+    """
+    worker_root, guid = _infer_worker_root_and_guid(task)
+    if not worker_root or not guid:
+        return None, None
+    api_base = worker_root.replace("/converter/glb", "")
+    return api_base, guid
 
 
 async def _get_animation_purchase_state(db: AsyncSession, user: Optional[User], task_id: str) -> tuple[set, bool]:
@@ -1456,15 +1661,12 @@ async def api_task_worker_files(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.guid or not task.worker_api:
+    api_base, guid = _resolve_worker_files_api_context(task)
+    if not api_base or not guid:
         return {"available": False, "files": []}
-    
-    # Fetch from worker's model-files API
-    from workers import get_worker_base_url
-    worker_base = get_worker_base_url(task.worker_api)
-    # worker_base is like http://x.x.x.x:port/converter/glb, API is at /api-converter-glb
-    api_base = worker_base.replace('/converter/glb', '')
-    files_url = f"{api_base}/api-converter-glb/model-files/{task.guid}"
+
+    worker_root = f"{api_base}/converter/glb"
+    files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
     
     try:
         import httpx
@@ -1486,7 +1688,7 @@ async def api_task_worker_files(
                         "folder": folder_name,
                         "type": f.get('type'),
                         "size": f.get('size'),
-                        "url": f"{worker_base}/converter/glb/{task.guid}/{rel_path}"
+                        "url": f"{worker_root}/{guid}/{rel_path}"
                     })
             
             return {
@@ -1929,7 +2131,7 @@ async def api_get_animation_catalog(
     if not isinstance(raw_items, list):
         raw_items = []
 
-    file_map = _build_task_animation_file_map(task)
+    file_map = await _build_task_animation_file_map(task, raw_items)
     purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
 
     items: List[AnimationCatalogItem] = []
@@ -1947,6 +2149,7 @@ async def api_get_animation_catalog(
         available = matched is not None
         ready = bool(matched and matched.get("ready"))
         file_name = matched.get("clean_filename") if matched else None
+        preview_url = f"/api/task/{task_id}/animations/preview/{quote(anim_id)}" if available else None
 
         tags = item.get("tags") if isinstance(item.get("tags"), list) else []
         items.append(AnimationCatalogItem(
@@ -1962,6 +2165,7 @@ async def api_get_animation_catalog(
             ready=ready,
             purchased=(purchased_all or (anim_id in purchased_ids)),
             file_name=file_name,
+            preview_url=preview_url,
         ))
 
     items.sort(key=lambda x: (x.type, x.name.lower()))
@@ -2069,7 +2273,7 @@ async def api_purchase_animation(
         )
 
     # Guard: animation should exist in this task outputs before purchase.
-    file_map = _build_task_animation_file_map(task)
+    file_map = await _build_task_animation_file_map(task, raw_items)
     resolved = _resolve_animation_file(catalog_by_id[animation_id], file_map)
     if not resolved:
         raise HTTPException(status_code=409, detail="Animation is not available for this task yet")
@@ -2098,6 +2302,72 @@ async def api_purchase_animation(
         purchased_animation_ids=sorted(purchased_ids),
         purchased_all=purchased_all,
         credits_remaining=user.balance_credits
+    )
+
+
+@app.get("/api/task/{task_id}/animations/preview/{animation_id}")
+async def api_preview_animation(
+    task_id: str,
+    animation_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stream selected custom animation FBX for in-viewer preview.
+
+    Unlike download endpoint, preview does not require purchase,
+    but is limited to task owner/admin to avoid exposing worker files publicly.
+    """
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to preview this animation")
+
+    anim_id = _normalize_animation_key(animation_id)
+    manifest = _load_animation_manifest()
+    raw_items = manifest.get("animations") or []
+    catalog_by_id: Dict[str, dict] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("enabled", True) is False:
+            continue
+        key = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
+        if key:
+            catalog_by_id[key] = item
+
+    if anim_id not in catalog_by_id:
+        raise HTTPException(status_code=404, detail="Animation not found")
+
+    file_map = await _build_task_animation_file_map(task, raw_items)
+    resolved = _resolve_animation_file(catalog_by_id[anim_id], file_map)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Animation file not ready")
+
+    file_url = resolved["url"]
+
+    async def stream_file():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", file_url, timeout=120.0) as worker_resp:
+                if worker_resp.status_code != 200:
+                    raise HTTPException(status_code=404, detail="Animation file is unavailable")
+                async for chunk in worker_resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
+
+    return StreamingResponse(
+        stream_file(),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store, max-age=0"}
     )
 
 
@@ -2132,7 +2402,7 @@ async def api_download_animation(
     if anim_id not in catalog_by_id:
         raise HTTPException(status_code=404, detail="Animation not found")
 
-    file_map = _build_task_animation_file_map(task)
+    file_map = await _build_task_animation_file_map(task, raw_items)
     resolved = _resolve_animation_file(catalog_by_id[anim_id], file_map)
     if not resolved:
         raise HTTPException(status_code=404, detail="Animation file not ready")
