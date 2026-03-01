@@ -830,29 +830,35 @@
 
         /* Custom animation picker */
         .custom-anim-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 0.5rem;
-            margin-top: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            margin-top: 0.45rem;
+            max-height: none;
+            overflow: visible;
+            padding-right: 0;
         }
 
         .custom-anim-card {
             border: 1px solid var(--border);
             border-radius: 8px;
             background: rgba(255,255,255,0.02);
-            padding: 0.45rem;
+            padding: 0.5rem 0.6rem;
             cursor: pointer;
-            transition: all 0.15s ease;
-            min-height: 66px;
+            transition: border-color 0.15s ease, background 0.15s ease;
+            min-height: auto;
             display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            gap: 0.28rem;
+            align-items: center;
+            width: 100%;
+            text-align: left;
+            color: var(--text-primary, #f3f4f6);
+            font: inherit;
+            appearance: none;
+            -webkit-appearance: none;
         }
 
         .custom-anim-card:hover {
             border-color: var(--accent);
-            transform: translateY(-1px);
         }
 
         .custom-anim-card.active {
@@ -867,15 +873,18 @@
 
         .custom-anim-name {
             font-weight: 600;
-            font-size: 0.82rem;
-            line-height: 1.25;
+            font-size: 0.9rem;
+            line-height: 1.2;
+            color: var(--text-primary, #f3f4f6);
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
             word-break: break-word;
+            width: 100%;
         }
 
         .custom-anim-meta {
-            display: flex;
-            gap: 0.35rem;
-            flex-wrap: wrap;
+            display: none;
         }
 
         .custom-anim-chip {
@@ -905,10 +914,37 @@
         }
 
         .viewer-side-panel {
-            position: sticky;
-            top: 1rem;
-            max-height: 72vh;
-            overflow: auto;
+            position: static;
+            top: auto;
+            max-height: none;
+            overflow: visible;
+        }
+
+        .task-columns-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        main.task-page-main.container-sm {
+            max-width: 1680px;
+        }
+
+        .task-columns-primary,
+        .task-columns-secondary {
+            min-width: 0;
+            min-height: 100%;
+        }
+
+        .task-columns-secondary {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .task-columns-secondary > * {
+            margin-top: 0 !important;
         }
 
         @media (max-width: 1200px) {
@@ -919,6 +955,32 @@
                 position: static;
                 max-height: none;
                 overflow: visible;
+            }
+        }
+
+        @media (max-width: 1360px) {
+            .task-columns-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (min-width: 1361px) {
+            #video-container {
+                flex: 1 1 auto;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+            }
+
+            #video-player-wrap {
+                flex: 1 1 auto;
+                display: flex;
+                min-height: 420px;
+            }
+
+            #video-player {
+                height: 100% !important;
+                max-height: none !important;
             }
         }
         
@@ -951,9 +1013,9 @@
     <!-- Site Header (injected by header.js) -->
     <div id="site-header"></div>
     
-    <main class="container-sm" style="padding-top: 2rem;">
+    <main class="container-sm task-page-main" style="padding-top: 2rem;">
         <!-- Task Card -->
-        <div class="card">
+        <div class="card" id="task-main-card">
             <!-- Task header title (always fully visible) -->
             <h2 data-i18n="task_title" style="margin: 0 0 0.75rem 0;">
                 Conversion Progress
@@ -1956,7 +2018,7 @@
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
                     <h3 class="card-title" style="margin:0; font-size:1rem;">Custom Animations</h3>
                     <div style="font-size:0.72rem; color:var(--text-muted);">
-                        1 animation = 1 credit, unlock all = 10 credits
+                        1 animation = 1 credit
                     </div>
                 </div>
 
@@ -1974,17 +2036,11 @@
 
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:0.55rem; flex-wrap:wrap; margin-top:0.6rem;">
                     <div id="custom-anim-selected-label" style="font-size:0.78rem; color:var(--text-muted);">
-                        No animation selected
+                        Select an animation
                     </div>
                     <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
-                        <button id="custom-anim-buy-all-btn" class="btn btn-secondary" style="padding:0.4rem 0.58rem; font-size:0.74rem;">
-                            Unlock all (10 credits)
-                        </button>
-                        <button id="custom-anim-buy-btn" class="btn btn-secondary" style="padding:0.4rem 0.58rem; font-size:0.74rem;" disabled>
-                            Buy selected (1 credit)
-                        </button>
                         <button id="custom-anim-download-btn" class="btn btn-primary" style="padding:0.4rem 0.58rem; font-size:0.74rem;" disabled>
-                            Download selected FBX
+                            Download Selected Animation
                         </button>
                     </div>
                 </div>
@@ -2107,6 +2163,207 @@
             return _allowedAdminPromise;
         }
 
+        const CUSTOM_ANIMATION_NAME_I18N = {
+            ru: {
+                "breakdance_uprock_var_1": "Брейкданс ап-рок (вариант 1)",
+                "chicken_dance": "Танец цыпленка",
+                "hip_hop_dancing": "Хип-хоп танец",
+                "northern_soul_spin": "Вращение Northern Soul",
+                "twist_dance": "Танец твист",
+                "defeat2": "Поражение 2",
+                "dying": "Умирание",
+                "getting_up": "Подъем с земли",
+                "agreeing": "Согласие",
+                "cheering": "Ликование",
+                "crazy_gesture": "Безумный жест",
+                "hand_raising": "Поднятие руки",
+                "look_around": "Осмотреться",
+                "look_over_shoulder": "Взгляд через плечо",
+                "pointing_gesture": "Указывающий жест",
+                "shake_fist": "Потрясание кулаком",
+                "thoughtful_head_shake": "Задумчивое покачивание головой",
+                "yelling": "Крик",
+                "fist_fight_a": "Кулачный бой A",
+                "head_hit": "Удар по голове",
+                "idle_bouncing_fight": "Стойка в бою (пружинящая)",
+                "idle_combat_stance": "Боевая стойка (покой)",
+                "idle_fighting": "Боевая стойка",
+                "illegal_elbow_punch": "Запрещенный удар локтем",
+                "kick_to_the_groin": "Удар в пах",
+                "kicking": "Удар ногой",
+                "punching": "Удар кулаком",
+                "side_kick": "Боковой удар ногой",
+                "standing_2h_magic_attack_02": "Стоя: магическая атака 2H 02",
+                "standing_2h_magic_attack_04": "Стоя: магическая атака 2H 04",
+                "idle": "Покой",
+                "idle2": "Покой 2",
+                "idle_dwarf": "Покой (дварф)",
+                "idle_glance_around": "Покой: оглядывается",
+                "idle_happy": "Покой: радостный",
+                "idle_sad": "Покой: грустный",
+                "joyful_jump": "Радостный прыжок",
+                "jump": "Прыжок",
+                "jump_forward": "Прыжок вперед",
+                "jump_hunched": "Сутулый прыжок",
+                "silly_dancing": "Глупый танец",
+                "victory": "Победа",
+                "waving1": "Махание рукой 1",
+                "waving2": "Махание рукой 2",
+                "drunk_run_forward": "Пьяный бег вперед",
+                "injured_run": "Бег с травмой",
+                "jogging_stumble": "Бег трусцой со спотыканием",
+                "jump_forward_run": "Бег с прыжком вперед",
+                "running": "Бег",
+                "running2": "Бег 2",
+                "running3": "Бег 3",
+                "running_scared": "Испуганный бег",
+                "happy_walk": "Радостная походка",
+                "strut_walking": "Важная походка",
+                "walking": "Ходьба",
+                "walking2": "Ходьба 2",
+                "walking_backwards": "Ходьба назад",
+                "walking_backwards_happy": "Радостная ходьба назад",
+                "walking_crouched": "Ходьба пригнувшись",
+                "walking_drunk": "Пьяная походка",
+                "walking_limp": "Ходьба хромая",
+                "walking_lumber": "Тяжелая походка",
+                "walking_tiptoe": "Ходьба на цыпочках",
+                "walking_zombie": "Походка зомби"
+            },
+            zh: {
+                "breakdance_uprock_var_1": "霹雳舞 Uprock 变体 1",
+                "chicken_dance": "小鸡舞",
+                "hip_hop_dancing": "嘻哈舞",
+                "northern_soul_spin": "Northern Soul 旋转",
+                "twist_dance": "扭扭舞",
+                "defeat2": "失败 2",
+                "dying": "死亡",
+                "getting_up": "起身",
+                "agreeing": "点头同意",
+                "cheering": "欢呼",
+                "crazy_gesture": "疯狂手势",
+                "hand_raising": "举手",
+                "look_around": "环顾四周",
+                "look_over_shoulder": "回头看肩后",
+                "pointing_gesture": "指向手势",
+                "shake_fist": "挥拳示威",
+                "thoughtful_head_shake": "若有所思地摇头",
+                "yelling": "大喊",
+                "fist_fight_a": "拳击动作 A",
+                "head_hit": "头部受击",
+                "idle_bouncing_fight": "战斗待机（弹跳）",
+                "idle_combat_stance": "战斗待机姿态",
+                "idle_fighting": "战斗待机",
+                "illegal_elbow_punch": "违规肘击",
+                "kick_to_the_groin": "踢裆",
+                "kicking": "踢击",
+                "punching": "出拳",
+                "side_kick": "侧踢",
+                "standing_2h_magic_attack_02": "站立双手武器魔法攻击 02",
+                "standing_2h_magic_attack_04": "站立双手武器魔法攻击 04",
+                "idle": "待机",
+                "idle2": "待机 2",
+                "idle_dwarf": "矮人待机",
+                "idle_glance_around": "待机环视",
+                "idle_happy": "开心待机",
+                "idle_sad": "悲伤待机",
+                "joyful_jump": "欢乐跳跃",
+                "jump": "跳跃",
+                "jump_forward": "向前跳",
+                "jump_hunched": "弓身跳跃",
+                "silly_dancing": "搞怪舞蹈",
+                "victory": "胜利",
+                "waving1": "挥手 1",
+                "waving2": "挥手 2",
+                "drunk_run_forward": "醉酒向前跑",
+                "injured_run": "受伤奔跑",
+                "jogging_stumble": "慢跑踉跄",
+                "jump_forward_run": "前跳奔跑",
+                "running": "奔跑",
+                "running2": "奔跑 2",
+                "running3": "奔跑 3",
+                "running_scared": "惊恐奔跑",
+                "happy_walk": "开心步行",
+                "strut_walking": "昂首阔步",
+                "walking": "步行",
+                "walking2": "步行 2",
+                "walking_backwards": "后退行走",
+                "walking_backwards_happy": "开心后退行走",
+                "walking_crouched": "蹲伏行走",
+                "walking_drunk": "醉酒步态",
+                "walking_limp": "跛行",
+                "walking_lumber": "沉重步伐",
+                "walking_tiptoe": "踮脚行走",
+                "walking_zombie": "僵尸步态"
+            },
+            hi: {
+                "breakdance_uprock_var_1": "ब्रेकडांस अपरॉक (वैरिएंट 1)",
+                "chicken_dance": "चिकन डांस",
+                "hip_hop_dancing": "हिप-हॉप डांस",
+                "northern_soul_spin": "नॉर्दर्न सोल स्पिन",
+                "twist_dance": "ट्विस्ट डांस",
+                "defeat2": "हार 2",
+                "dying": "मरना",
+                "getting_up": "उठना",
+                "agreeing": "सहमति",
+                "cheering": "जयकार",
+                "crazy_gesture": "पागल इशारा",
+                "hand_raising": "हाथ उठाना",
+                "look_around": "चारों ओर देखना",
+                "look_over_shoulder": "कंधे के ऊपर से देखना",
+                "pointing_gesture": "इशारा करना",
+                "shake_fist": "मुट्ठी लहराना",
+                "thoughtful_head_shake": "सोचते हुए सिर हिलाना",
+                "yelling": "चिल्लाना",
+                "fist_fight_a": "मुक्का-लड़ाई A",
+                "head_hit": "सिर पर प्रहार",
+                "idle_bouncing_fight": "फाइटिंग आइडल (बाउंस)",
+                "idle_combat_stance": "कॉम्बैट स्टांस आइडल",
+                "idle_fighting": "फाइटिंग आइडल",
+                "illegal_elbow_punch": "गैरकानूनी कोहनी वार",
+                "kick_to_the_groin": "ग्रोइन पर किक",
+                "kicking": "किक मारना",
+                "punching": "घूंसा मारना",
+                "side_kick": "साइड किक",
+                "standing_2h_magic_attack_02": "खड़े होकर 2H मैजिक अटैक 02",
+                "standing_2h_magic_attack_04": "खड़े होकर 2H मैजिक अटैक 04",
+                "idle": "आइडल",
+                "idle2": "आइडल 2",
+                "idle_dwarf": "ड्वार्फ आइडल",
+                "idle_glance_around": "आइडल - इधर-उधर देखना",
+                "idle_happy": "खुश आइडल",
+                "idle_sad": "उदास आइडल",
+                "joyful_jump": "खुशहाल छलांग",
+                "jump": "छलांग",
+                "jump_forward": "आगे छलांग",
+                "jump_hunched": "झुकी हुई छलांग",
+                "silly_dancing": "मज़ाकिया नृत्य",
+                "victory": "विजय",
+                "waving1": "हाथ हिलाना 1",
+                "waving2": "हाथ हिलाना 2",
+                "drunk_run_forward": "नशे में आगे दौड़ना",
+                "injured_run": "घायल दौड़",
+                "jogging_stumble": "जॉगिंग में लड़खड़ाना",
+                "jump_forward_run": "आगे छलांग के साथ दौड़",
+                "running": "दौड़ना",
+                "running2": "दौड़ना 2",
+                "running3": "दौड़ना 3",
+                "running_scared": "डरे हुए दौड़ना",
+                "happy_walk": "खुश चाल",
+                "strut_walking": "इतराती चाल",
+                "walking": "चलना",
+                "walking2": "चलना 2",
+                "walking_backwards": "पीछे चलना",
+                "walking_backwards_happy": "खुश होकर पीछे चलना",
+                "walking_crouched": "झुककर चलना",
+                "walking_drunk": "नशे में चलना",
+                "walking_limp": "लंगड़ाकर चलना",
+                "walking_lumber": "भारी चाल",
+                "walking_tiptoe": "पंजों के बल चलना",
+                "walking_zombie": "ज़ॉम्बी चाल"
+            }
+        };
+
         const TaskPage = {
             taskId: null,
             pollInterval: null,
@@ -2157,6 +2414,7 @@
                 
                 // Expose for onclick handlers
                 window.TaskUI = this;
+                this.ensureDesktopViewerLayout();
                 
                 // Load purchase state
                 await this.loadPurchaseState();
@@ -2178,6 +2436,14 @@
                 // Setup buttons
                 this.setupButtons();
                 this.setupCustomAnimationPicker();
+
+                if (!this.__languageChangeBound) {
+                    this.__languageChangeBound = true;
+                    window.addEventListener('languageChanged', () => {
+                        this.renderAnimationCatalog();
+                        this.updateCustomAnimationActions();
+                    });
+                }
 
                 // Progress log polling (every 10s while page is open)
                 this.startProgressLogPolling();
@@ -2324,6 +2590,7 @@
             
             async updateUI() {
                 const task = this.task;
+                this.ensureDesktopViewerLayout();
                 
                 // Status
                 const statusBadge = document.getElementById('status-badge');
@@ -2887,20 +3154,13 @@
                     </div>
                 `;
                 
-                // Move model-params to bottom when task is done
-                if (this.task?.status === 'done') {
-                    const card = container.closest('.card');
-                    const modelViewer = document.getElementById('model-viewer-wrap');
-                    const videoContainer = document.getElementById('video-container');
-                    
-                    // Insert after model-viewer if visible, otherwise after video-container
-                    const insertAfter = modelViewer && !modelViewer.classList.contains('hidden') 
-                        ? modelViewer 
-                        : videoContainer;
-                    
-                    if (insertAfter && card && container.parentElement === card) {
-                        insertAfter.after(container);
-                    }
+                // Keep Model Parameters strictly below video preview
+                const videoContainer = document.getElementById('video-container');
+                const viewerLayout = document.getElementById('viewer-custom-layout');
+                if (videoContainer && videoContainer.parentElement) {
+                    videoContainer.insertAdjacentElement('afterend', container);
+                } else if (viewerLayout && viewerLayout.parentElement) {
+                    viewerLayout.insertAdjacentElement('afterend', container);
                 }
             },
             
@@ -3167,8 +3427,6 @@
 
             setupCustomAnimationPicker() {
                 const typeSelect = document.getElementById('custom-anim-type');
-                const buyBtn = document.getElementById('custom-anim-buy-btn');
-                const buyAllBtn = document.getElementById('custom-anim-buy-all-btn');
                 const downloadBtn = document.getElementById('custom-anim-download-btn');
 
                 if (typeSelect && !typeSelect.__wired) {
@@ -3178,18 +3436,79 @@
                         this.renderAnimationCatalog();
                     });
                 }
-                if (buyBtn && !buyBtn.__wired) {
-                    buyBtn.__wired = true;
-                    buyBtn.addEventListener('click', () => this.purchaseSelectedAnimation());
-                }
-                if (buyAllBtn && !buyAllBtn.__wired) {
-                    buyAllBtn.__wired = true;
-                    buyAllBtn.addEventListener('click', () => this.purchaseAllAnimations());
-                }
                 if (downloadBtn && !downloadBtn.__wired) {
                     downloadBtn.__wired = true;
-                    downloadBtn.addEventListener('click', () => this.downloadSelectedAnimation());
+                    downloadBtn.addEventListener('click', () => this.downloadSelectedAnimationAction());
                 }
+            },
+
+            ensureTaskDesktopColumns() {
+                const main = document.querySelector('main.container-sm');
+                const taskCard = document.getElementById('task-main-card');
+                const videoContainer = document.getElementById('video-container');
+                const videoPending = document.getElementById('video-pending');
+                const modelParams = document.getElementById('model-params');
+                const downloadsCard = document.getElementById('downloads-card');
+                const additionalSection = document.getElementById('additional-content-section');
+                if (!main || !taskCard) return;
+
+                let shell = document.getElementById('task-columns-layout');
+                let primary = document.getElementById('task-columns-primary');
+                let secondary = document.getElementById('task-columns-secondary');
+
+                if (!shell || !primary || !secondary) {
+                    shell = document.createElement('div');
+                    shell.id = 'task-columns-layout';
+                    shell.className = 'task-columns-layout';
+
+                    primary = document.createElement('div');
+                    primary.id = 'task-columns-primary';
+                    primary.className = 'task-columns-primary';
+
+                    secondary = document.createElement('div');
+                    secondary.id = 'task-columns-secondary';
+                    secondary.className = 'task-columns-secondary';
+
+                    shell.appendChild(primary);
+                    shell.appendChild(secondary);
+                    main.insertBefore(shell, taskCard);
+                }
+
+                if (taskCard.parentElement !== primary) {
+                    primary.appendChild(taskCard);
+                }
+
+                const moveToSecondary = (el) => {
+                    if (!el) return;
+                    if (el.parentElement !== secondary) {
+                        secondary.appendChild(el);
+                    }
+                };
+
+                if (videoContainer) {
+                    videoContainer.classList.add('card');
+                    videoContainer.classList.remove('mt-3');
+                }
+                moveToSecondary(videoContainer);
+                moveToSecondary(videoPending);
+                moveToSecondary(modelParams);
+                moveToSecondary(downloadsCard);
+                moveToSecondary(additionalSection);
+            },
+
+            ensureDesktopViewerLayout() {
+                const layout = document.getElementById('viewer-custom-layout');
+                const modelViewerWrap = document.getElementById('model-viewer-wrap');
+                const customWrap = document.getElementById('custom-animations-wrap');
+                if (!layout || !modelViewerWrap || !customWrap) return;
+
+                if (modelViewerWrap.parentElement !== layout) {
+                    layout.insertBefore(modelViewerWrap, layout.firstChild);
+                }
+                if (customWrap.parentElement !== layout) {
+                    layout.appendChild(customWrap);
+                }
+                this.ensureTaskDesktopColumns();
             },
 
             normalizeAnimationKey(value) {
@@ -3198,6 +3517,23 @@
                     .replace(/[^a-z0-9]+/g, '_')
                     .replace(/_+/g, '_')
                     .replace(/^_+|_+$/g, '');
+            },
+
+            tSafe(key, fallback) {
+                const value = t(key);
+                if (!value || value === key) return fallback;
+                return value;
+            },
+
+            getLocalizedAnimationName(anim) {
+                const animId = this.normalizeAnimationKey(String(anim?.id || anim?.name || ''));
+                const fallbackName = String(anim?.name || animId || '');
+                const lang = String(window.I18n?.currentLang || 'en').toLowerCase();
+                const byLang = CUSTOM_ANIMATION_NAME_I18N[lang];
+                if (byLang && byLang[animId]) {
+                    return byLang[animId];
+                }
+                return fallbackName;
             },
 
             getSelectedAnimationItem() {
@@ -3234,13 +3570,16 @@
                     this.animationCatalogLoaded = true;
                     this.animationCatalogHash = stateHash;
 
-                    const all = Array.isArray(data.animations) ? data.animations : [];
+                    const allRaw = Array.isArray(data.animations) ? data.animations : [];
+                    const all = allRaw.filter(a => Boolean(a?.available) && Boolean(a?.ready));
                     if (!all.length) {
                         wrap.classList.remove('hidden');
                         const grid = document.getElementById('custom-anim-grid');
                         if (grid) {
-                            grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">Animation catalog is empty.</div>`;
+                            grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No ready custom animations yet.')}</div>`;
                         }
+                        this.selectedAnimationId = null;
+                        this.updateCustomAnimationActions();
                         return;
                     }
 
@@ -3249,8 +3588,8 @@
                     const stillExists = all.some(a => this.normalizeAnimationKey(a?.id) === selectedId);
                     if (!stillExists) {
                         const walkItems = all.filter(a => String(a.type || '').toLowerCase() === 'walk');
-                        const preferredWalk = walkItems.find(a => a.available) || walkItems[0];
-                        const preferredAny = all.find(a => a.available) || all[0];
+                        const preferredWalk = walkItems[0];
+                        const preferredAny = all[0];
                         const preferred = preferredWalk || preferredAny;
                         this.selectedAnimationId = this.normalizeAnimationKey(preferred?.id) || null;
                     }
@@ -3268,6 +3607,7 @@
             },
 
             renderAnimationCatalog() {
+                this.ensureDesktopViewerLayout();
                 const wrap = document.getElementById('custom-animations-wrap');
                 const typeSelect = document.getElementById('custom-anim-type');
                 const grid = document.getElementById('custom-anim-grid');
@@ -3282,20 +3622,32 @@
                     .replaceAll("'", '&#039;');
 
                 const all = Array.isArray(this.animationCatalog.animations) ? this.animationCatalog.animations : [];
-                if (!all.length) {
-                    wrap.classList.add('hidden');
+                const readyAll = all.filter(a => Boolean(a?.available) && Boolean(a?.ready));
+                if (!readyAll.length) {
+                    wrap.classList.remove('hidden');
+                    typeSelect.innerHTML = '';
+                    stats.textContent = '';
+                    this.selectedAnimationId = null;
+                    grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No ready custom animations yet.')}</div>`;
+                    this.updateCustomAnimationActions();
                     return;
                 }
                 wrap.classList.remove('hidden');
 
-                const types = Array.isArray(this.animationCatalog.types) ? this.animationCatalog.types : [];
-                const normalizedTypes = types
-                    .map(t => ({
-                        id: String(t?.id || '').toLowerCase(),
-                        label: String(t?.label || t?.id || ''),
-                        count: Number(t?.count || 0),
-                    }))
-                    .filter(t => t.id);
+                const typeMap = new Map();
+                for (const anim of readyAll) {
+                    const typeId = String(anim?.type || 'other').toLowerCase();
+                    if (!typeMap.has(typeId)) {
+                        typeMap.set(typeId, {
+                            id: typeId,
+                            label: String(anim?.type_label || anim?.type || typeId),
+                            count: 0,
+                        });
+                    }
+                    typeMap.get(typeId).count += 1;
+                }
+                const normalizedTypes = Array.from(typeMap.values())
+                    .sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
                 let selectedType = String(this.animationTypeFilter || 'walk').toLowerCase();
                 if (!normalizedTypes.some(t => t.id === selectedType)) {
@@ -3312,11 +3664,11 @@
                     .join('');
                 typeSelect.value = selectedType;
 
-                const filtered = all.filter(a => String(a.type || '').toLowerCase() === selectedType);
-                stats.textContent = `${filtered.length} / ${all.length} animations`;
+                const filtered = readyAll.filter(a => String(a.type || '').toLowerCase() === selectedType);
+                stats.textContent = `${filtered.length} / ${readyAll.length}`;
 
                 if (!filtered.length) {
-                    grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">No animations in this type.</div>`;
+                    grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_type', 'No ready animations in this type.')}</div>`;
                     this.updateCustomAnimationActions();
                     return;
                 }
@@ -3328,35 +3680,11 @@
 
                 grid.innerHTML = filtered.map((anim) => {
                     const isActive = this.normalizeAnimationKey(anim?.id) === this.normalizeAnimationKey(this.selectedAnimationId);
-                    const availableChip = anim.available
-                        ? `<span class="custom-anim-chip ok">ready</span>`
-                        : `<span class="custom-anim-chip warn">not ready</span>`;
-                    const paid = this.animationCatalog.purchased_all || anim.purchased;
-                    const paidChip = paid
-                        ? `<span class="custom-anim-chip ok">purchased</span>`
-                        : `<span class="custom-anim-chip">1 credit</span>`;
-                    const hasGifPreview = Boolean(anim.preview_gif) && anim.preview_ready === true;
-                    const previewBlock = hasGifPreview
-                        ? `<img src="${esc(anim.preview_gif)}" alt="${esc(anim.name)} preview"
-                                loading="lazy"
-                                style="width:100%; height:44px; object-fit:cover; border-radius:6px; border:1px solid rgba(255,255,255,0.08); margin-bottom:0.3rem;"
-                                onerror="this.style.display='none'">`
-                        : `<div style="height:44px; border-radius:6px; border:1px dashed rgba(255,255,255,0.15); margin-bottom:0.3rem; display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:0.66rem;">
-                                Live preview in viewer
-                           </div>`;
+                    const localizedName = this.getLocalizedAnimationName(anim);
                     return `
-                        <div class="custom-anim-card ${isActive ? 'active' : ''} ${anim.available ? '' : 'unavailable'}"
-                             data-anim-id="${esc(anim.id)}">
-                            <div>
-                                ${previewBlock}
-                                <div class="custom-anim-name">${esc(anim.name)}</div>
-                            </div>
-                            <div class="custom-anim-meta">
-                                <span class="custom-anim-chip">${esc(anim.type_label || anim.type)}</span>
-                                ${availableChip}
-                                ${paidChip}
-                            </div>
-                        </div>
+                        <button type="button" class="custom-anim-card ${isActive ? 'active' : ''}" data-anim-id="${esc(anim.id)}" title="${esc(localizedName)}">
+                            <div class="custom-anim-name">${esc(localizedName)}</div>
+                        </button>
                     `;
                 }).join('');
 
@@ -3422,44 +3750,83 @@
             updateCustomAnimationActions() {
                 const selected = this.getSelectedAnimationItem();
                 const labelEl = document.getElementById('custom-anim-selected-label');
-                const buyBtn = document.getElementById('custom-anim-buy-btn');
-                const buyAllBtn = document.getElementById('custom-anim-buy-all-btn');
                 const downloadBtn = document.getElementById('custom-anim-download-btn');
-                if (!labelEl || !buyBtn || !buyAllBtn || !downloadBtn) return;
+                if (!labelEl || !downloadBtn) return;
 
-                const pricing = this.animationCatalog?.pricing || {};
-                const singleCost = Number(pricing.single_animation_credits || 1);
-                const allCost = Number(pricing.all_animations_credits || 10);
-                const purchasedAll = Boolean(this.animationCatalog?.purchased_all);
+                const actionText = this.tSafe('custom_anim_download_selected_action', 'Download Selected Animation');
+                downloadBtn.textContent = actionText;
 
-                buyAllBtn.disabled = purchasedAll;
-                buyAllBtn.textContent = purchasedAll ? 'All animations unlocked' : `Unlock all (${allCost} credits)`;
-
-                if (!selected) {
-                    labelEl.textContent = 'No animation selected';
-                    buyBtn.disabled = true;
+                if (!selected || !selected.available || !selected.ready) {
+                    labelEl.textContent = this.tSafe('custom_anim_no_selection', 'Select an animation');
                     downloadBtn.disabled = true;
-                    buyBtn.textContent = `Buy selected (${singleCost} credit)`;
-                    downloadBtn.textContent = 'Download selected FBX';
                     return;
                 }
 
-                const hasAccess = purchasedAll || Boolean(selected.purchased);
-                const canDownload = hasAccess && Boolean(selected.available);
-                const canBuy = !hasAccess && Boolean(selected.available);
+                labelEl.textContent = this.getLocalizedAnimationName(selected);
+                downloadBtn.disabled = false;
+            },
 
-                labelEl.textContent = `${selected.name} • ${selected.available ? 'ready' : 'not ready yet'} • FBX`;
-                buyBtn.disabled = !canBuy;
-                downloadBtn.disabled = !canDownload;
-
-                if (!selected.available) {
-                    buyBtn.textContent = 'Not ready yet';
-                } else if (hasAccess) {
-                    buyBtn.textContent = 'Purchased';
-                } else {
-                    buyBtn.textContent = `Buy selected (${singleCost} credit)`;
+            async notifyCustomAnimationIntent(source = 'custom_animation_download', animationId = null) {
+                if (!this.taskId) return;
+                try {
+                    const payload = { source };
+                    if (animationId) {
+                        payload.animation_id = animationId;
+                    }
+                    await fetch(`/api/task/${this.taskId}/purchase-intent`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } catch (e) {
+                    console.warn('Custom animation intent notify failed:', e);
                 }
-                downloadBtn.textContent = 'Download selected FBX';
+            },
+
+            async downloadSelectedAnimationAction() {
+                const selected = this.getSelectedAnimationItem();
+                if (!selected || !selected.available || !selected.ready) return;
+
+                const selectedId = this.normalizeAnimationKey(selected.id);
+                await this.notifyCustomAnimationIntent('custom_animation_download', selectedId);
+
+                if (this.animationCatalog?.login_required) {
+                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    return;
+                }
+
+                const purchasedAll = Boolean(this.animationCatalog?.purchased_all);
+                const hasAccess = purchasedAll || Boolean(selected.purchased);
+                const singleCost = Number(this.animationCatalog?.pricing?.single_animation_credits || 1);
+                const credits = Number(this.animationCatalog?.user_credits || 0);
+
+                if (!hasAccess) {
+                    if (credits < singleCost) {
+                        window.location.href = '/buy-credits';
+                        return;
+                    }
+
+                    try {
+                        const resp = await fetch(`/api/task/${this.taskId}/animations/purchase`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ animation_id: selectedId })
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) {
+                            alert(data.detail || this.tSafe('custom_anim_purchase_failed', this.tSafe('error_generic', 'Unable to process download.')));
+                            return;
+                        }
+                        this.purchaseState.user_credits = data.credits_remaining;
+                        await this.loadAnimationCatalog(true);
+                    } catch (e) {
+                        console.error('Animation purchase failed:', e);
+                        alert(this.tSafe('custom_anim_purchase_failed', this.tSafe('error_generic', 'Unable to process download.')));
+                        return;
+                    }
+                }
+
+                this.downloadSelectedAnimation(selectedId);
             },
 
             async purchaseSelectedAnimation() {
@@ -3545,10 +3912,10 @@
                 }
             },
 
-            downloadSelectedAnimation() {
-                const selected = this.getSelectedAnimationItem();
-                if (!selected || !selected.available) return;
-                const url = `/api/task/${this.taskId}/animations/download/${encodeURIComponent(selected.id)}`;
+            downloadSelectedAnimation(animationId = null) {
+                const targetId = this.normalizeAnimationKey(animationId || this.selectedAnimationId);
+                if (!targetId) return;
+                const url = `/api/task/${this.taskId}/animations/download/${encodeURIComponent(targetId)}`;
                 window.location.href = url;
             },
 
@@ -4081,7 +4448,7 @@
             RigEditor, ViewerControls, RigType, CameraMode, MaterialChannel,
             TransformMode, TransformManager, SelectionSystem, GizmoLoader,
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
-        } from '/static/js/rig-editor.js?v=62';
+        } from '/static/js/rig-editor.js?v=63';
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -5718,9 +6085,6 @@
             async function initScene() {
                 if (sceneInited) return;
                 sceneInited = true;
-
-                const videoContainer = document.getElementById('video-container');
-                if (videoContainer) videoContainer.classList.remove('hidden');
                 
                 wrap.classList.remove('hidden');
                 setStatus('Initializing...');
@@ -6444,7 +6808,18 @@
                     const tposeBtn = document.getElementById('view-mode-tpose');
                     const rigBtn = document.getElementById('view-mode-rig');
                     const animBtn = document.getElementById('view-mode-anim');
+                    const rotationButtonsWrap = document.getElementById('rotation-buttons');
+                    const saveRigWrap = document.getElementById('save-rig-wrap');
                     const allBtns = [tposeBtn, rigBtn, animBtn];
+
+                    const setEditControlsVisible = (visible) => {
+                        if (rotationButtonsWrap) {
+                            rotationButtonsWrap.classList.toggle('hidden', !visible);
+                        }
+                        if (saveRigWrap) {
+                            saveRigWrap.classList.toggle('hidden', !visible);
+                        }
+                    };
                     
                     setActiveMode = async (mode) => {
                         console.log('[Viewer] setActiveMode:', mode, 
@@ -6456,6 +6831,7 @@
                         switch (mode) {
                             case 'tpose':
                             case 'rig':
+                                setEditControlsVisible(true);
                                 // For T-Pose and RIG modes, load prepared.glb (static model for editing)
                                 if (mode === 'tpose') {
                                     tposeBtn?.classList.add('active');
@@ -6518,6 +6894,7 @@
                                 
                             case 'animation':
                                 animBtn?.classList.add('active');
+                                setEditControlsVisible(false);
                                 // Hide T-Pose reference
                                 if (tPoseReference) {
                                     tPoseReference.setVisible(false);
@@ -6590,6 +6967,7 @@
                     
                     // Initialize to T-Pose mode by default (don't load model yet, will be loaded by waitAndInitViewer)
                     tposeBtn?.classList.add('active');
+                    setEditControlsVisible(true);
                     if (viewerControls) viewerControls.setViewMode('tpose');
                     
                     // Enable T-Pose reference by default in T-Pose mode
@@ -8495,8 +8873,8 @@
             if (!isWebAppMode) {
                 const headerContainer = document.getElementById('site-header');
                 if (headerContainer && window.SiteHeader) {
-                    // Render header with search enabled
-                    headerContainer.innerHTML = SiteHeader.render({ showSearch: true });
+                    // Render header without Free3D search block on task page
+                    headerContainer.innerHTML = SiteHeader.render({ showSearch: false });
                     
                     // Initialize header functionality
                     SiteHeader.init();
@@ -8508,11 +8886,6 @@
                         I18n.applyTranslations();
                     }
                     
-                    // Initialize Free3D search with callback to start task
-                    SiteHeader.initSearch((modelUrl, modelName) => {
-                        // Navigate to home page with URL to start conversion
-                        window.location.href = `/?url=${encodeURIComponent(modelUrl)}`;
-                    });
                 }
             }
         })();

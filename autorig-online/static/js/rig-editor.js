@@ -436,8 +436,6 @@ export class AOBaker {
                 }
             `,
             fragmentShader: `
-                #extension GL_OES_standard_derivatives : enable
-                
                 uniform float aoRadius;
                 uniform float aoIntensity;
                 uniform int numSamples;

@@ -2320,8 +2320,9 @@ async def api_preview_animation(
     """
     Stream selected custom animation FBX for in-viewer preview.
 
-    Unlike download endpoint, preview does not require purchase,
-    but is limited to task owner/admin to avoid exposing worker files publicly.
+    Unlike download endpoint, preview does not require purchase.
+    For completed tasks we allow public preview access so animation playback works
+    across browsers/sessions (e.g. when owner cookies are missing in another browser).
     """
     task = await get_task_by_id(db, task_id)
     if not task:
@@ -2333,7 +2334,9 @@ async def api_preview_animation(
     except Exception:
         anon_session = None
 
-    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+    is_owner_or_admin = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
+    # Keep strict access for in-progress tasks, but allow preview on completed tasks.
+    if not is_owner_or_admin and task.status != "done":
         raise HTTPException(status_code=403, detail="Not authorized to preview this animation")
 
     anim_id = _normalize_animation_key(animation_id)
