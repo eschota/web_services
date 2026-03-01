@@ -1,0 +1,21 @@
+{
+  "id": "walking_limp",
+  "name": "Walking_limp",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "injured"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_limp.glb",
+  "output_file_hint": "{guid}_Walking_limp.fbx",
+  "aliases": [
+    "Walking_limp",
+    "Walking limp"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_limp.gif",
+  "enabled": true,
+  "order": 58
+}

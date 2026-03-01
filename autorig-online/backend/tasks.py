@@ -11,14 +11,14 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession, AsyncSessionLocal
-from config import WORKERS
 from workers import (
     select_best_worker,
     send_task_to_worker,
     send_fbx_to_glb,
     check_urls_batch,
     check_video_availability,
-    get_worker_base_url
+    get_worker_base_url,
+    get_configured_workers
 )
 
 
@@ -81,9 +81,14 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
     Writes fbx_glb_* fields into the task once the worker responds.
     """
     last_error = None
-    candidate_workers = [first_worker_url] + [w for w in WORKERS if w != first_worker_url]
 
     async with AsyncSessionLocal() as db:
+        configured_workers = await get_configured_workers(db)
+        candidate_workers = []
+        if first_worker_url:
+            candidate_workers.append(first_worker_url)
+        candidate_workers += [w for w in configured_workers if w and w != first_worker_url]
+
         task = await get_task_by_id(db, task_id)
         if not task:
             return

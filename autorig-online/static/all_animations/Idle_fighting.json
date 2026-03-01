@@ -1,0 +1,20 @@
+{
+  "id": "idle_fighting",
+  "name": "Idle_fighting",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle_fighting.glb",
+  "output_file_hint": "{guid}_Idle_fighting.fbx",
+  "aliases": [
+    "Idle_fighting",
+    "Idle fighting"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle_fighting.gif",
+  "enabled": true,
+  "order": 20
+}

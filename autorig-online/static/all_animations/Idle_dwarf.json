@@ -1,0 +1,20 @@
+{
+  "id": "idle_dwarf",
+  "name": "Idle_dwarf",
+  "type": "idle",
+  "type_label": "Idle",
+  "tags": [
+    "idle"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle_dwarf.glb",
+  "output_file_hint": "{guid}_Idle_dwarf.fbx",
+  "aliases": [
+    "Idle_dwarf",
+    "Idle dwarf"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle_dwarf.gif",
+  "enabled": true,
+  "order": 19
+}

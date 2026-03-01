@@ -1,0 +1,20 @@
+{
+  "id": "waving2",
+  "name": "Waving2",
+  "type": "other",
+  "type_label": "Other",
+  "tags": [
+    "other"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Waving2.glb",
+  "output_file_hint": "{guid}_Waving2.fbx",
+  "aliases": [
+    "Waving2",
+    "Waving2"
+  ],
+  "preview_gif": "/static/all_animations/previews/waving2.gif",
+  "enabled": true,
+  "order": 63
+}

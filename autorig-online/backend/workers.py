@@ -4,12 +4,16 @@ Handles communication with conversion workers
 """
 import re
 import asyncio
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 from dataclasses import dataclass
 import random
 
 import httpx
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+
+from database import WorkerEndpoint
 from config import (
     WORKERS, 
     PROGRESS_BATCH_SIZE, 
@@ -74,6 +78,33 @@ def extract_guid(text: str) -> Optional[str]:
 # =============================================================================
 # Worker Communication
 # =============================================================================
+async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) -> List[Tuple[str, int]]:
+    """
+    Return enabled worker URLs ordered by weight desc (priority), id asc.
+    Fallback to config.WORKERS (weight=0) when DB has no rows or db is not provided.
+    """
+    if not db:
+        return [(u, 0) for u in WORKERS]
+
+    try:
+        res = await db.execute(
+            select(WorkerEndpoint.url, WorkerEndpoint.weight)
+            .where(WorkerEndpoint.enabled.is_(True))
+            .order_by(desc(WorkerEndpoint.weight), WorkerEndpoint.id)
+        )
+        rows = res.all()
+        workers = [(url, int(weight or 0)) for (url, weight) in rows if url]
+    except Exception:
+        workers = []
+
+    return workers or [(u, 0) for u in WORKERS]
+
+
+async def get_configured_workers(db: Optional[AsyncSession] = None) -> List[str]:
+    """Convenience wrapper returning only URLs."""
+    return [url for (url, _w) in await get_configured_workers_with_weight(db)]
+
+
 async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerInfo:
     """Get load/status from a single worker"""
     try:
@@ -90,17 +121,17 @@ async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerI
         return WorkerInfo(url=worker_url, available=False, error=str(e))
 
 
-async def get_all_workers_status() -> List[WorkerInfo]:
-    """Get status of all workers"""
+async def get_all_workers_status(worker_urls: List[str]) -> List[WorkerInfo]:
+    """Get status of provided workers"""
     async with httpx.AsyncClient() as client:
-        tasks = [get_worker_load(url, client) for url in WORKERS]
+        tasks = [get_worker_load(url, client) for url in worker_urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         workers = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 workers.append(WorkerInfo(
-                    url=WORKERS[i], 
+                    url=worker_urls[i], 
                     available=False, 
                     error=str(result)
                 ))
@@ -109,18 +140,29 @@ async def get_all_workers_status() -> List[WorkerInfo]:
         return workers
 
 
-async def select_best_worker() -> Optional[str]:
-    """Select the least busy available worker"""
-    workers = await get_all_workers_status()
-    available = [w for w in workers if w.available]
-    
+async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]:
+    """
+    Select best worker for a new task.
+    Strategy:
+    - Prefer higher weight (priority).
+    - Within the highest-weight available group, pick least busy (min load).
+    - If none respond, fallback to first configured URL (still weight-ordered).
+    """
+    workers_with_weight = await get_configured_workers_with_weight(db)
+    worker_urls = [u for (u, _w) in workers_with_weight]
+    if not worker_urls:
+        return None
+
+    statuses = await get_all_workers_status(worker_urls)
+    available = [w for w in statuses if w.available]
     if not available:
-        # If no workers respond to GET, try them anyway
-        return WORKERS[0] if WORKERS else None
-    
-    # Sort by load, return least busy
-    available.sort(key=lambda w: w.load)
-    return available[0].url
+        return worker_urls[0]
+
+    weight_by_url: Dict[str, int] = {u: w for (u, w) in workers_with_weight}
+    max_weight = max(weight_by_url.get(w.url, 0) for w in available)
+    candidates = [w for w in available if weight_by_url.get(w.url, 0) == max_weight]
+    candidates.sort(key=lambda w: w.load)
+    return candidates[0].url
 
 
 async def send_task_to_worker(
@@ -388,17 +430,18 @@ async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) ->
         )
 
 
-async def get_global_queue_status() -> GlobalQueueStatus:
+async def get_global_queue_status(db: Optional[AsyncSession] = None) -> GlobalQueueStatus:
     """Get queue status from all workers and calculate wait time"""
+    worker_urls = await get_configured_workers(db)
     async with httpx.AsyncClient() as client:
-        tasks = [get_worker_queue_status(url, client) for url in WORKERS]
+        tasks = [get_worker_queue_status(url, client) for url in worker_urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         workers = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 workers.append(WorkerQueueStatus(
-                    url=WORKERS[i],
+                    url=worker_urls[i],
                     available=False,
                     error=str(result)
                 ))

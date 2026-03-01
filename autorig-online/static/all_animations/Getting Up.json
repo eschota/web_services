@@ -1,0 +1,20 @@
+{
+  "id": "getting_up",
+  "name": "Getting Up",
+  "type": "die",
+  "type_label": "Die/Recovery",
+  "tags": [
+    "die"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Getting Up.glb",
+  "output_file_hint": "{guid}_Getting Up.fbx",
+  "aliases": [
+    "Getting Up",
+    "Getting Up"
+  ],
+  "preview_gif": "/static/all_animations/previews/getting_up.gif",
+  "enabled": true,
+  "order": 10
+}

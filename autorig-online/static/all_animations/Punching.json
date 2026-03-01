@@ -1,0 +1,21 @@
+{
+  "id": "punching",
+  "name": "Punching",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight",
+    "punch"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Punching.glb",
+  "output_file_hint": "{guid}_Punching.fbx",
+  "aliases": [
+    "Punching",
+    "Punching"
+  ],
+  "preview_gif": "/static/all_animations/previews/punching.gif",
+  "enabled": true,
+  "order": 38
+}

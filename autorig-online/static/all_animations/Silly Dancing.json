@@ -1,0 +1,20 @@
+{
+  "id": "silly_dancing",
+  "name": "Silly Dancing",
+  "type": "other",
+  "type_label": "Other",
+  "tags": [
+    "other"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Silly Dancing.glb",
+  "output_file_hint": "{guid}_Silly Dancing.fbx",
+  "aliases": [
+    "Silly Dancing",
+    "Silly Dancing"
+  ],
+  "preview_gif": "/static/all_animations/previews/silly_dancing.gif",
+  "enabled": true,
+  "order": 45
+}

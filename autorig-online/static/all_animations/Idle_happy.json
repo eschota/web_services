@@ -1,0 +1,21 @@
+{
+  "id": "idle_happy",
+  "name": "Idle_happy",
+  "type": "idle",
+  "type_label": "Idle",
+  "tags": [
+    "idle",
+    "mood_positive"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle_happy.glb",
+  "output_file_hint": "{guid}_Idle_happy.fbx",
+  "aliases": [
+    "Idle_happy",
+    "Idle happy"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle_happy.gif",
+  "enabled": true,
+  "order": 22
+}

@@ -1,0 +1,21 @@
+{
+  "id": "kick_to_the_groin",
+  "name": "Kick To The Groin",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight",
+    "kick"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Kick To The Groin.glb",
+  "output_file_hint": "{guid}_Kick To The Groin.fbx",
+  "aliases": [
+    "Kick To The Groin",
+    "Kick To The Groin"
+  ],
+  "preview_gif": "/static/all_animations/previews/kick_to_the_groin.gif",
+  "enabled": true,
+  "order": 32
+}

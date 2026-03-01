@@ -1,0 +1,22 @@
+{
+  "id": "walking_backwards_happy",
+  "name": "Walking_backwards_happy",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "directional",
+    "mood_positive"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_backwards_happy.glb",
+  "output_file_hint": "{guid}_Walking_backwards_happy.fbx",
+  "aliases": [
+    "Walking_backwards_happy",
+    "Walking backwards happy"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_backwards_happy.gif",
+  "enabled": true,
+  "order": 55
+}

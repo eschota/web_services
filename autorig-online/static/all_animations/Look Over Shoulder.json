@@ -1,0 +1,20 @@
+{
+  "id": "look_over_shoulder",
+  "name": "Look Over Shoulder",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Look Over Shoulder.glb",
+  "output_file_hint": "{guid}_Look Over Shoulder.fbx",
+  "aliases": [
+    "Look Over Shoulder",
+    "Look Over Shoulder"
+  ],
+  "preview_gif": "/static/all_animations/previews/look_over_shoulder.gif",
+  "enabled": true,
+  "order": 35
+}

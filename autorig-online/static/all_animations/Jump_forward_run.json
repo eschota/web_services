@@ -1,0 +1,21 @@
+{
+  "id": "jump_forward_run",
+  "name": "Jump_forward_run",
+  "type": "run",
+  "type_label": "Run",
+  "tags": [
+    "run",
+    "directional"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Jump_forward_run.glb",
+  "output_file_hint": "{guid}_Jump_forward_run.fbx",
+  "aliases": [
+    "Jump_forward_run",
+    "Jump forward run"
+  ],
+  "preview_gif": "/static/all_animations/previews/jump_forward_run.gif",
+  "enabled": true,
+  "order": 30
+}

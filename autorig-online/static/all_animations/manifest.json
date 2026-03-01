@@ -1,0 +1,1364 @@
+{
+  "version": 1,
+  "updated_at": "2026-03-01",
+  "types": [
+    {
+      "id": "walk",
+      "label": "Walk",
+      "count": 12
+    },
+    {
+      "id": "run",
+      "label": "Run",
+      "count": 8
+    },
+    {
+      "id": "jump",
+      "label": "Jump",
+      "count": 4
+    },
+    {
+      "id": "fight",
+      "label": "Fight",
+      "count": 12
+    },
+    {
+      "id": "die",
+      "label": "Die/Recovery",
+      "count": 3
+    },
+    {
+      "id": "idle",
+      "label": "Idle",
+      "count": 6
+    },
+    {
+      "id": "dance",
+      "label": "Dance",
+      "count": 5
+    },
+    {
+      "id": "emote",
+      "label": "Emote/Gesture",
+      "count": 10
+    },
+    {
+      "id": "other",
+      "label": "Other",
+      "count": 4
+    }
+  ],
+  "pricing": {
+    "single_animation_credits": 1,
+    "all_animations_credits": 10,
+    "download_format": "fbx"
+  },
+  "animations": [
+    {
+      "id": "breakdance_uprock_var_1",
+      "name": "Breakdance Uprock Var 1",
+      "type": "dance",
+      "type_label": "Dance",
+      "tags": [
+        "dance"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Breakdance Uprock Var 1.glb",
+      "output_file_hint": "{guid}_Breakdance Uprock Var 1.fbx",
+      "aliases": [
+        "Breakdance Uprock Var 1",
+        "Breakdance Uprock Var 1"
+      ],
+      "preview_gif": "/static/all_animations/previews/breakdance_uprock_var_1.gif",
+      "enabled": true,
+      "order": 2
+    },
+    {
+      "id": "chicken_dance",
+      "name": "Chicken_Dance",
+      "type": "dance",
+      "type_label": "Dance",
+      "tags": [
+        "dance"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Chicken_Dance.glb",
+      "output_file_hint": "{guid}_Chicken_Dance.fbx",
+      "aliases": [
+        "Chicken_Dance",
+        "Chicken Dance"
+      ],
+      "preview_gif": "/static/all_animations/previews/chicken_dance.gif",
+      "enabled": true,
+      "order": 4
+    },
+    {
+      "id": "hip_hop_dancing",
+      "name": "Hip Hop Dancing",
+      "type": "dance",
+      "type_label": "Dance",
+      "tags": [
+        "dance"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Hip Hop Dancing.glb",
+      "output_file_hint": "{guid}_Hip Hop Dancing.fbx",
+      "aliases": [
+        "Hip Hop Dancing",
+        "Hip Hop Dancing"
+      ],
+      "preview_gif": "/static/all_animations/previews/hip_hop_dancing.gif",
+      "enabled": true,
+      "order": 14
+    },
+    {
+      "id": "northern_soul_spin",
+      "name": "Northern Soul Spin",
+      "type": "dance",
+      "type_label": "Dance",
+      "tags": [
+        "dance"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Northern Soul Spin.glb",
+      "output_file_hint": "{guid}_Northern Soul Spin.fbx",
+      "aliases": [
+        "Northern Soul Spin",
+        "Northern Soul Spin"
+      ],
+      "preview_gif": "/static/all_animations/previews/northern_soul_spin.gif",
+      "enabled": true,
+      "order": 36
+    },
+    {
+      "id": "twist_dance",
+      "name": "Twist Dance",
+      "type": "dance",
+      "type_label": "Dance",
+      "tags": [
+        "dance"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Twist Dance.glb",
+      "output_file_hint": "{guid}_Twist Dance.fbx",
+      "aliases": [
+        "Twist Dance",
+        "Twist Dance"
+      ],
+      "preview_gif": "/static/all_animations/previews/twist_dance.gif",
+      "enabled": true,
+      "order": 50
+    },
+    {
+      "id": "defeat2",
+      "name": "Defeat2",
+      "type": "die",
+      "type_label": "Die/Recovery",
+      "tags": [
+        "die"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Defeat2.glb",
+      "output_file_hint": "{guid}_Defeat2.fbx",
+      "aliases": [
+        "Defeat2",
+        "Defeat2"
+      ],
+      "preview_gif": "/static/all_animations/previews/defeat2.gif",
+      "enabled": true,
+      "order": 6
+    },
+    {
+      "id": "dying",
+      "name": "Dying",
+      "type": "die",
+      "type_label": "Die/Recovery",
+      "tags": [
+        "die"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Dying.glb",
+      "output_file_hint": "{guid}_Dying.fbx",
+      "aliases": [
+        "Dying",
+        "Dying"
+      ],
+      "preview_gif": "/static/all_animations/previews/dying.gif",
+      "enabled": true,
+      "order": 8
+    },
+    {
+      "id": "getting_up",
+      "name": "Getting Up",
+      "type": "die",
+      "type_label": "Die/Recovery",
+      "tags": [
+        "die"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Getting Up.glb",
+      "output_file_hint": "{guid}_Getting Up.fbx",
+      "aliases": [
+        "Getting Up",
+        "Getting Up"
+      ],
+      "preview_gif": "/static/all_animations/previews/getting_up.gif",
+      "enabled": true,
+      "order": 10
+    },
+    {
+      "id": "agreeing",
+      "name": "Agreeing",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Agreeing.glb",
+      "output_file_hint": "{guid}_Agreeing.fbx",
+      "aliases": [
+        "Agreeing",
+        "Agreeing"
+      ],
+      "preview_gif": "/static/all_animations/previews/agreeing.gif",
+      "enabled": true,
+      "order": 1
+    },
+    {
+      "id": "cheering",
+      "name": "Cheering",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Cheering.glb",
+      "output_file_hint": "{guid}_Cheering.fbx",
+      "aliases": [
+        "Cheering",
+        "Cheering"
+      ],
+      "preview_gif": "/static/all_animations/previews/cheering.gif",
+      "enabled": true,
+      "order": 3
+    },
+    {
+      "id": "crazy_gesture",
+      "name": "Crazy Gesture",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Crazy Gesture.glb",
+      "output_file_hint": "{guid}_Crazy Gesture.fbx",
+      "aliases": [
+        "Crazy Gesture",
+        "Crazy Gesture"
+      ],
+      "preview_gif": "/static/all_animations/previews/crazy_gesture.gif",
+      "enabled": true,
+      "order": 5
+    },
+    {
+      "id": "hand_raising",
+      "name": "Hand Raising",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Hand Raising.glb",
+      "output_file_hint": "{guid}_Hand Raising.fbx",
+      "aliases": [
+        "Hand Raising",
+        "Hand Raising"
+      ],
+      "preview_gif": "/static/all_animations/previews/hand_raising.gif",
+      "enabled": true,
+      "order": 11
+    },
+    {
+      "id": "look_around",
+      "name": "Look Around",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Look Around.glb",
+      "output_file_hint": "{guid}_Look Around.fbx",
+      "aliases": [
+        "Look Around",
+        "Look Around"
+      ],
+      "preview_gif": "/static/all_animations/previews/look_around.gif",
+      "enabled": true,
+      "order": 34
+    },
+    {
+      "id": "look_over_shoulder",
+      "name": "Look Over Shoulder",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Look Over Shoulder.glb",
+      "output_file_hint": "{guid}_Look Over Shoulder.fbx",
+      "aliases": [
+        "Look Over Shoulder",
+        "Look Over Shoulder"
+      ],
+      "preview_gif": "/static/all_animations/previews/look_over_shoulder.gif",
+      "enabled": true,
+      "order": 35
+    },
+    {
+      "id": "pointing_gesture",
+      "name": "Pointing Gesture",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Pointing Gesture.glb",
+      "output_file_hint": "{guid}_Pointing Gesture.fbx",
+      "aliases": [
+        "Pointing Gesture",
+        "Pointing Gesture"
+      ],
+      "preview_gif": "/static/all_animations/previews/pointing_gesture.gif",
+      "enabled": true,
+      "order": 37
+    },
+    {
+      "id": "shake_fist",
+      "name": "Shake Fist",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Shake Fist.glb",
+      "output_file_hint": "{guid}_Shake Fist.fbx",
+      "aliases": [
+        "Shake Fist",
+        "Shake Fist"
+      ],
+      "preview_gif": "/static/all_animations/previews/shake_fist.gif",
+      "enabled": true,
+      "order": 43
+    },
+    {
+      "id": "thoughtful_head_shake",
+      "name": "Thoughtful Head Shake",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Thoughtful Head Shake.glb",
+      "output_file_hint": "{guid}_Thoughtful Head Shake.fbx",
+      "aliases": [
+        "Thoughtful Head Shake",
+        "Thoughtful Head Shake"
+      ],
+      "preview_gif": "/static/all_animations/previews/thoughtful_head_shake.gif",
+      "enabled": true,
+      "order": 49
+    },
+    {
+      "id": "yelling",
+      "name": "Yelling",
+      "type": "emote",
+      "type_label": "Emote/Gesture",
+      "tags": [
+        "emote"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Yelling.glb",
+      "output_file_hint": "{guid}_Yelling.fbx",
+      "aliases": [
+        "Yelling",
+        "Yelling"
+      ],
+      "preview_gif": "/static/all_animations/previews/yelling.gif",
+      "enabled": true,
+      "order": 64
+    },
+    {
+      "id": "fist_fight_a",
+      "name": "Fist Fight A",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Fist Fight A.glb",
+      "output_file_hint": "{guid}_Fist Fight A.fbx",
+      "aliases": [
+        "Fist Fight A",
+        "Fist Fight A"
+      ],
+      "preview_gif": "/static/all_animations/previews/fist_fight_a.gif",
+      "enabled": true,
+      "order": 9
+    },
+    {
+      "id": "head_hit",
+      "name": "Head Hit",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Head Hit.glb",
+      "output_file_hint": "{guid}_Head Hit.fbx",
+      "aliases": [
+        "Head Hit",
+        "Head Hit"
+      ],
+      "preview_gif": "/static/all_animations/previews/head_hit.gif",
+      "enabled": true,
+      "order": 13
+    },
+    {
+      "id": "idle_bouncing_fight",
+      "name": "Idle_bouncing_fight",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle_bouncing_fight.glb",
+      "output_file_hint": "{guid}_Idle_bouncing_fight.fbx",
+      "aliases": [
+        "Idle_bouncing_fight",
+        "Idle bouncing fight"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle_bouncing_fight.gif",
+      "enabled": true,
+      "order": 17
+    },
+    {
+      "id": "idle_combat_stance",
+      "name": "Idle_combat_stance",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle_combat_stance.glb",
+      "output_file_hint": "{guid}_Idle_combat_stance.fbx",
+      "aliases": [
+        "Idle_combat_stance",
+        "Idle combat stance"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle_combat_stance.gif",
+      "enabled": true,
+      "order": 18
+    },
+    {
+      "id": "idle_fighting",
+      "name": "Idle_fighting",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle_fighting.glb",
+      "output_file_hint": "{guid}_Idle_fighting.fbx",
+      "aliases": [
+        "Idle_fighting",
+        "Idle fighting"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle_fighting.gif",
+      "enabled": true,
+      "order": 20
+    },
+    {
+      "id": "illegal_elbow_punch",
+      "name": "Illegal Elbow Punch",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight",
+        "punch"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Illegal Elbow Punch.glb",
+      "output_file_hint": "{guid}_Illegal Elbow Punch.fbx",
+      "aliases": [
+        "Illegal Elbow Punch",
+        "Illegal Elbow Punch"
+      ],
+      "preview_gif": "/static/all_animations/previews/illegal_elbow_punch.gif",
+      "enabled": true,
+      "order": 24
+    },
+    {
+      "id": "kick_to_the_groin",
+      "name": "Kick To The Groin",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight",
+        "kick"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Kick To The Groin.glb",
+      "output_file_hint": "{guid}_Kick To The Groin.fbx",
+      "aliases": [
+        "Kick To The Groin",
+        "Kick To The Groin"
+      ],
+      "preview_gif": "/static/all_animations/previews/kick_to_the_groin.gif",
+      "enabled": true,
+      "order": 32
+    },
+    {
+      "id": "kicking",
+      "name": "Kicking",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight",
+        "kick"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Kicking.glb",
+      "output_file_hint": "{guid}_Kicking.fbx",
+      "aliases": [
+        "Kicking",
+        "Kicking"
+      ],
+      "preview_gif": "/static/all_animations/previews/kicking.gif",
+      "enabled": true,
+      "order": 33
+    },
+    {
+      "id": "punching",
+      "name": "Punching",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight",
+        "punch"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Punching.glb",
+      "output_file_hint": "{guid}_Punching.fbx",
+      "aliases": [
+        "Punching",
+        "Punching"
+      ],
+      "preview_gif": "/static/all_animations/previews/punching.gif",
+      "enabled": true,
+      "order": 38
+    },
+    {
+      "id": "side_kick",
+      "name": "Side Kick",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight",
+        "kick"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Side Kick.glb",
+      "output_file_hint": "{guid}_Side Kick.fbx",
+      "aliases": [
+        "Side Kick",
+        "Side Kick"
+      ],
+      "preview_gif": "/static/all_animations/previews/side_kick.gif",
+      "enabled": true,
+      "order": 44
+    },
+    {
+      "id": "standing_2h_magic_attack_02",
+      "name": "Standing 2H Magic Attack 02",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight",
+        "magic"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Standing 2H Magic Attack 02.glb",
+      "output_file_hint": "{guid}_Standing 2H Magic Attack 02.fbx",
+      "aliases": [
+        "Standing 2H Magic Attack 02",
+        "Standing 2H Magic Attack 02"
+      ],
+      "preview_gif": "/static/all_animations/previews/standing_2h_magic_attack_02.gif",
+      "enabled": true,
+      "order": 46
+    },
+    {
+      "id": "standing_2h_magic_attack_04",
+      "name": "Standing 2H Magic Attack 04",
+      "type": "fight",
+      "type_label": "Fight",
+      "tags": [
+        "fight",
+        "magic"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Standing 2H Magic Attack 04.glb",
+      "output_file_hint": "{guid}_Standing 2H Magic Attack 04.fbx",
+      "aliases": [
+        "Standing 2H Magic Attack 04",
+        "Standing 2H Magic Attack 04"
+      ],
+      "preview_gif": "/static/all_animations/previews/standing_2h_magic_attack_04.gif",
+      "enabled": true,
+      "order": 47
+    },
+    {
+      "id": "idle",
+      "name": "Idle",
+      "type": "idle",
+      "type_label": "Idle",
+      "tags": [
+        "idle"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle.glb",
+      "output_file_hint": "{guid}_Idle.fbx",
+      "aliases": [
+        "Idle",
+        "Idle"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle.gif",
+      "enabled": true,
+      "order": 15
+    },
+    {
+      "id": "idle2",
+      "name": "Idle2",
+      "type": "idle",
+      "type_label": "Idle",
+      "tags": [
+        "idle"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle2.glb",
+      "output_file_hint": "{guid}_Idle2.fbx",
+      "aliases": [
+        "Idle2",
+        "Idle2"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle2.gif",
+      "enabled": true,
+      "order": 16
+    },
+    {
+      "id": "idle_dwarf",
+      "name": "Idle_dwarf",
+      "type": "idle",
+      "type_label": "Idle",
+      "tags": [
+        "idle"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle_dwarf.glb",
+      "output_file_hint": "{guid}_Idle_dwarf.fbx",
+      "aliases": [
+        "Idle_dwarf",
+        "Idle dwarf"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle_dwarf.gif",
+      "enabled": true,
+      "order": 19
+    },
+    {
+      "id": "idle_glance_around",
+      "name": "Idle_glance_around",
+      "type": "idle",
+      "type_label": "Idle",
+      "tags": [
+        "idle"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle_glance_around.glb",
+      "output_file_hint": "{guid}_Idle_glance_around.fbx",
+      "aliases": [
+        "Idle_glance_around",
+        "Idle glance around"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle_glance_around.gif",
+      "enabled": true,
+      "order": 21
+    },
+    {
+      "id": "idle_happy",
+      "name": "Idle_happy",
+      "type": "idle",
+      "type_label": "Idle",
+      "tags": [
+        "idle",
+        "mood_positive"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle_happy.glb",
+      "output_file_hint": "{guid}_Idle_happy.fbx",
+      "aliases": [
+        "Idle_happy",
+        "Idle happy"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle_happy.gif",
+      "enabled": true,
+      "order": 22
+    },
+    {
+      "id": "idle_sad",
+      "name": "Idle_sad",
+      "type": "idle",
+      "type_label": "Idle",
+      "tags": [
+        "idle"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Idle_sad.glb",
+      "output_file_hint": "{guid}_Idle_sad.fbx",
+      "aliases": [
+        "Idle_sad",
+        "Idle sad"
+      ],
+      "preview_gif": "/static/all_animations/previews/idle_sad.gif",
+      "enabled": true,
+      "order": 23
+    },
+    {
+      "id": "joyful_jump",
+      "name": "Joyful Jump",
+      "type": "jump",
+      "type_label": "Jump",
+      "tags": [
+        "jump",
+        "mood_positive"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Joyful Jump.glb",
+      "output_file_hint": "{guid}_Joyful Jump.fbx",
+      "aliases": [
+        "Joyful Jump",
+        "Joyful Jump"
+      ],
+      "preview_gif": "/static/all_animations/previews/joyful_jump.gif",
+      "enabled": true,
+      "order": 27
+    },
+    {
+      "id": "jump",
+      "name": "Jump",
+      "type": "jump",
+      "type_label": "Jump",
+      "tags": [
+        "jump"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Jump.glb",
+      "output_file_hint": "{guid}_Jump.fbx",
+      "aliases": [
+        "Jump",
+        "Jump"
+      ],
+      "preview_gif": "/static/all_animations/previews/jump.gif",
+      "enabled": true,
+      "order": 28
+    },
+    {
+      "id": "jump_forward",
+      "name": "Jump_forward",
+      "type": "jump",
+      "type_label": "Jump",
+      "tags": [
+        "jump",
+        "directional"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Jump_forward.glb",
+      "output_file_hint": "{guid}_Jump_forward.fbx",
+      "aliases": [
+        "Jump_forward",
+        "Jump forward"
+      ],
+      "preview_gif": "/static/all_animations/previews/jump_forward.gif",
+      "enabled": true,
+      "order": 29
+    },
+    {
+      "id": "jump_hunched",
+      "name": "Jump_hunched",
+      "type": "jump",
+      "type_label": "Jump",
+      "tags": [
+        "jump",
+        "mood_scared"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Jump_hunched.glb",
+      "output_file_hint": "{guid}_Jump_hunched.fbx",
+      "aliases": [
+        "Jump_hunched",
+        "Jump hunched"
+      ],
+      "preview_gif": "/static/all_animations/previews/jump_hunched.gif",
+      "enabled": true,
+      "order": 31
+    },
+    {
+      "id": "silly_dancing",
+      "name": "Silly Dancing",
+      "type": "other",
+      "type_label": "Other",
+      "tags": [
+        "other"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Silly Dancing.glb",
+      "output_file_hint": "{guid}_Silly Dancing.fbx",
+      "aliases": [
+        "Silly Dancing",
+        "Silly Dancing"
+      ],
+      "preview_gif": "/static/all_animations/previews/silly_dancing.gif",
+      "enabled": true,
+      "order": 45
+    },
+    {
+      "id": "victory",
+      "name": "Victory",
+      "type": "other",
+      "type_label": "Other",
+      "tags": [
+        "other",
+        "mood_positive"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Victory.glb",
+      "output_file_hint": "{guid}_Victory.fbx",
+      "aliases": [
+        "Victory",
+        "Victory"
+      ],
+      "preview_gif": "/static/all_animations/previews/victory.gif",
+      "enabled": true,
+      "order": 51
+    },
+    {
+      "id": "waving1",
+      "name": "Waving1",
+      "type": "other",
+      "type_label": "Other",
+      "tags": [
+        "other"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Waving1.glb",
+      "output_file_hint": "{guid}_Waving1.fbx",
+      "aliases": [
+        "Waving1",
+        "Waving1"
+      ],
+      "preview_gif": "/static/all_animations/previews/waving1.gif",
+      "enabled": true,
+      "order": 62
+    },
+    {
+      "id": "waving2",
+      "name": "Waving2",
+      "type": "other",
+      "type_label": "Other",
+      "tags": [
+        "other"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Waving2.glb",
+      "output_file_hint": "{guid}_Waving2.fbx",
+      "aliases": [
+        "Waving2",
+        "Waving2"
+      ],
+      "preview_gif": "/static/all_animations/previews/waving2.gif",
+      "enabled": true,
+      "order": 63
+    },
+    {
+      "id": "drunk_run_forward",
+      "name": "Drunk Run Forward",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run",
+        "directional",
+        "style_drunk"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Drunk Run Forward.glb",
+      "output_file_hint": "{guid}_Drunk Run Forward.fbx",
+      "aliases": [
+        "Drunk Run Forward",
+        "Drunk Run Forward"
+      ],
+      "preview_gif": "/static/all_animations/previews/drunk_run_forward.gif",
+      "enabled": true,
+      "order": 7
+    },
+    {
+      "id": "injured_run",
+      "name": "Injured Run",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run",
+        "injured"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Injured Run.glb",
+      "output_file_hint": "{guid}_Injured Run.fbx",
+      "aliases": [
+        "Injured Run",
+        "Injured Run"
+      ],
+      "preview_gif": "/static/all_animations/previews/injured_run.gif",
+      "enabled": true,
+      "order": 25
+    },
+    {
+      "id": "jogging_stumble",
+      "name": "Jogging Stumble",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Jogging Stumble.glb",
+      "output_file_hint": "{guid}_Jogging Stumble.fbx",
+      "aliases": [
+        "Jogging Stumble",
+        "Jogging Stumble"
+      ],
+      "preview_gif": "/static/all_animations/previews/jogging_stumble.gif",
+      "enabled": true,
+      "order": 26
+    },
+    {
+      "id": "jump_forward_run",
+      "name": "Jump_forward_run",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run",
+        "directional"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Jump_forward_run.glb",
+      "output_file_hint": "{guid}_Jump_forward_run.fbx",
+      "aliases": [
+        "Jump_forward_run",
+        "Jump forward run"
+      ],
+      "preview_gif": "/static/all_animations/previews/jump_forward_run.gif",
+      "enabled": true,
+      "order": 30
+    },
+    {
+      "id": "running",
+      "name": "Running",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Running.glb",
+      "output_file_hint": "{guid}_Running.fbx",
+      "aliases": [
+        "Running",
+        "Running"
+      ],
+      "preview_gif": "/static/all_animations/previews/running.gif",
+      "enabled": true,
+      "order": 39
+    },
+    {
+      "id": "running2",
+      "name": "Running2",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Running2.glb",
+      "output_file_hint": "{guid}_Running2.fbx",
+      "aliases": [
+        "Running2",
+        "Running2"
+      ],
+      "preview_gif": "/static/all_animations/previews/running2.gif",
+      "enabled": true,
+      "order": 40
+    },
+    {
+      "id": "running3",
+      "name": "Running3",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Running3.glb",
+      "output_file_hint": "{guid}_Running3.fbx",
+      "aliases": [
+        "Running3",
+        "Running3"
+      ],
+      "preview_gif": "/static/all_animations/previews/running3.gif",
+      "enabled": true,
+      "order": 41
+    },
+    {
+      "id": "running_scared",
+      "name": "Running_scared",
+      "type": "run",
+      "type_label": "Run",
+      "tags": [
+        "run",
+        "mood_scared"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Running_scared.glb",
+      "output_file_hint": "{guid}_Running_scared.fbx",
+      "aliases": [
+        "Running_scared",
+        "Running scared"
+      ],
+      "preview_gif": "/static/all_animations/previews/running_scared.gif",
+      "enabled": true,
+      "order": 42
+    },
+    {
+      "id": "happy_walk",
+      "name": "Happy Walk",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "mood_positive"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Happy Walk.glb",
+      "output_file_hint": "{guid}_Happy Walk.fbx",
+      "aliases": [
+        "Happy Walk",
+        "Happy Walk"
+      ],
+      "preview_gif": "/static/all_animations/previews/happy_walk.gif",
+      "enabled": true,
+      "order": 12
+    },
+    {
+      "id": "strut_walking",
+      "name": "Strut Walking",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Strut Walking.glb",
+      "output_file_hint": "{guid}_Strut Walking.fbx",
+      "aliases": [
+        "Strut Walking",
+        "Strut Walking"
+      ],
+      "preview_gif": "/static/all_animations/previews/strut_walking.gif",
+      "enabled": true,
+      "order": 48
+    },
+    {
+      "id": "walking",
+      "name": "Walking",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking.glb",
+      "output_file_hint": "{guid}_Walking.fbx",
+      "aliases": [
+        "Walking",
+        "Walking"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking.gif",
+      "enabled": true,
+      "order": 52
+    },
+    {
+      "id": "walking2",
+      "name": "Walking2",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking2.glb",
+      "output_file_hint": "{guid}_Walking2.fbx",
+      "aliases": [
+        "Walking2",
+        "Walking2"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking2.gif",
+      "enabled": true,
+      "order": 53
+    },
+    {
+      "id": "walking_backwards",
+      "name": "Walking_backwards",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "directional"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_backwards.glb",
+      "output_file_hint": "{guid}_Walking_backwards.fbx",
+      "aliases": [
+        "Walking_backwards",
+        "Walking backwards"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_backwards.gif",
+      "enabled": true,
+      "order": 54
+    },
+    {
+      "id": "walking_backwards_happy",
+      "name": "Walking_backwards_happy",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "directional",
+        "mood_positive"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_backwards_happy.glb",
+      "output_file_hint": "{guid}_Walking_backwards_happy.fbx",
+      "aliases": [
+        "Walking_backwards_happy",
+        "Walking backwards happy"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_backwards_happy.gif",
+      "enabled": true,
+      "order": 55
+    },
+    {
+      "id": "walking_crouched",
+      "name": "Walking_crouched",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "stance_crouched"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_crouched.glb",
+      "output_file_hint": "{guid}_Walking_crouched.fbx",
+      "aliases": [
+        "Walking_crouched",
+        "Walking crouched"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_crouched.gif",
+      "enabled": true,
+      "order": 56
+    },
+    {
+      "id": "walking_drunk",
+      "name": "Walking_drunk",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "style_drunk"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_drunk.glb",
+      "output_file_hint": "{guid}_Walking_drunk.fbx",
+      "aliases": [
+        "Walking_drunk",
+        "Walking drunk"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_drunk.gif",
+      "enabled": true,
+      "order": 57
+    },
+    {
+      "id": "walking_limp",
+      "name": "Walking_limp",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "injured"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_limp.glb",
+      "output_file_hint": "{guid}_Walking_limp.fbx",
+      "aliases": [
+        "Walking_limp",
+        "Walking limp"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_limp.gif",
+      "enabled": true,
+      "order": 58
+    },
+    {
+      "id": "walking_lumber",
+      "name": "Walking_lumber",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_lumber.glb",
+      "output_file_hint": "{guid}_Walking_lumber.fbx",
+      "aliases": [
+        "Walking_lumber",
+        "Walking lumber"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_lumber.gif",
+      "enabled": true,
+      "order": 59
+    },
+    {
+      "id": "walking_tiptoe",
+      "name": "Walking_tiptoe",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "style_tiptoe"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_tiptoe.glb",
+      "output_file_hint": "{guid}_Walking_tiptoe.fbx",
+      "aliases": [
+        "Walking_tiptoe",
+        "Walking tiptoe"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_tiptoe.gif",
+      "enabled": true,
+      "order": 60
+    },
+    {
+      "id": "walking_zombie",
+      "name": "Walking_zombie",
+      "type": "walk",
+      "type_label": "Walk",
+      "tags": [
+        "walk",
+        "style_zombie"
+      ],
+      "credits": 1,
+      "format": "fbx",
+      "source_file": "Walking_zombie.glb",
+      "output_file_hint": "{guid}_Walking_zombie.fbx",
+      "aliases": [
+        "Walking_zombie",
+        "Walking zombie"
+      ],
+      "preview_gif": "/static/all_animations/previews/walking_zombie.gif",
+      "enabled": true,
+      "order": 61
+    }
+  ]
+}

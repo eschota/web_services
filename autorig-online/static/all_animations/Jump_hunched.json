@@ -1,0 +1,21 @@
+{
+  "id": "jump_hunched",
+  "name": "Jump_hunched",
+  "type": "jump",
+  "type_label": "Jump",
+  "tags": [
+    "jump",
+    "mood_scared"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Jump_hunched.glb",
+  "output_file_hint": "{guid}_Jump_hunched.fbx",
+  "aliases": [
+    "Jump_hunched",
+    "Jump hunched"
+  ],
+  "preview_gif": "/static/all_animations/previews/jump_hunched.gif",
+  "enabled": true,
+  "order": 31
+}

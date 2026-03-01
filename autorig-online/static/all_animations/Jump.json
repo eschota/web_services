@@ -1,0 +1,20 @@
+{
+  "id": "jump",
+  "name": "Jump",
+  "type": "jump",
+  "type_label": "Jump",
+  "tags": [
+    "jump"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Jump.glb",
+  "output_file_hint": "{guid}_Jump.fbx",
+  "aliases": [
+    "Jump",
+    "Jump"
+  ],
+  "preview_gif": "/static/all_animations/previews/jump.gif",
+  "enabled": true,
+  "order": 28
+}

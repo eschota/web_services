@@ -1,0 +1,21 @@
+{
+  "id": "walking_tiptoe",
+  "name": "Walking_tiptoe",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "style_tiptoe"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_tiptoe.glb",
+  "output_file_hint": "{guid}_Walking_tiptoe.fbx",
+  "aliases": [
+    "Walking_tiptoe",
+    "Walking tiptoe"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_tiptoe.gif",
+  "enabled": true,
+  "order": 60
+}

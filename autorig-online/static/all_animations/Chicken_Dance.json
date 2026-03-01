@@ -1,0 +1,20 @@
+{
+  "id": "chicken_dance",
+  "name": "Chicken_Dance",
+  "type": "dance",
+  "type_label": "Dance",
+  "tags": [
+    "dance"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Chicken_Dance.glb",
+  "output_file_hint": "{guid}_Chicken_Dance.fbx",
+  "aliases": [
+    "Chicken_Dance",
+    "Chicken Dance"
+  ],
+  "preview_gif": "/static/all_animations/previews/chicken_dance.gif",
+  "enabled": true,
+  "order": 4
+}

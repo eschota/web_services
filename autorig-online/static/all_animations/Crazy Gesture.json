@@ -1,0 +1,20 @@
+{
+  "id": "crazy_gesture",
+  "name": "Crazy Gesture",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Crazy Gesture.glb",
+  "output_file_hint": "{guid}_Crazy Gesture.fbx",
+  "aliases": [
+    "Crazy Gesture",
+    "Crazy Gesture"
+  ],
+  "preview_gif": "/static/all_animations/previews/crazy_gesture.gif",
+  "enabled": true,
+  "order": 5
+}

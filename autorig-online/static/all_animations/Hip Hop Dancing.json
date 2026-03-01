@@ -1,0 +1,20 @@
+{
+  "id": "hip_hop_dancing",
+  "name": "Hip Hop Dancing",
+  "type": "dance",
+  "type_label": "Dance",
+  "tags": [
+    "dance"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Hip Hop Dancing.glb",
+  "output_file_hint": "{guid}_Hip Hop Dancing.fbx",
+  "aliases": [
+    "Hip Hop Dancing",
+    "Hip Hop Dancing"
+  ],
+  "preview_gif": "/static/all_animations/previews/hip_hop_dancing.gif",
+  "enabled": true,
+  "order": 14
+}

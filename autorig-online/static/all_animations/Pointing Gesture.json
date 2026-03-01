@@ -1,0 +1,20 @@
+{
+  "id": "pointing_gesture",
+  "name": "Pointing Gesture",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Pointing Gesture.glb",
+  "output_file_hint": "{guid}_Pointing Gesture.fbx",
+  "aliases": [
+    "Pointing Gesture",
+    "Pointing Gesture"
+  ],
+  "preview_gif": "/static/all_animations/previews/pointing_gesture.gif",
+  "enabled": true,
+  "order": 37
+}

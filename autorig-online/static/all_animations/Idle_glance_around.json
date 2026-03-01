@@ -1,0 +1,20 @@
+{
+  "id": "idle_glance_around",
+  "name": "Idle_glance_around",
+  "type": "idle",
+  "type_label": "Idle",
+  "tags": [
+    "idle"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle_glance_around.glb",
+  "output_file_hint": "{guid}_Idle_glance_around.fbx",
+  "aliases": [
+    "Idle_glance_around",
+    "Idle glance around"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle_glance_around.gif",
+  "enabled": true,
+  "order": 21
+}

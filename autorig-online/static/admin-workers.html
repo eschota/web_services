@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Workers | Admin Panel | AutoRig.online</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/autorig-logo.png"
+                         srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x"
+                         alt="Autorig.Online"
+                         class="logo-img"
+                         height="120">
+                </a>
+
+                <nav class="nav">
+                    <a href="/guides" class="nav-link" data-i18n="nav_guides">Guides</a>
+                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                    <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
+                    <a href="/developers" class="nav-link" data-i18n="nav_api">API</a>
+                </nav>
+
+                <div class="header-actions">
+                    <!-- Credits Badge -->
+                    <div class="credits-badge">
+                        <span id="credits-label" data-i18n="credits_free">Free conversions left</span>
+                        <span class="count" id="credits-count">-</span>
+                    </div>
+
+                    <!-- Language Selector -->
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                                <path d="M3 4.5L6 7.5L9 4.5"/>
+                            </svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+
+                    <!-- Theme Toggle -->
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+
+                    <!-- Login Button -->
+                    <a href="/auth/login" class="btn btn-google" id="login-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        <span data-i18n="btn_login">Sign in with Google</span>
+                    </a>
+
+                    <!-- User Info -->
+                    <div id="user-info" class="hidden flex items-center gap-2">
+                        <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
+                        <span class="user-name"></span>
+                        <a href="/auth/logout" class="btn btn-ghost" data-i18n="btn_logout">Sign out</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container" style="padding-top: 2rem;">
+        <div class="flex justify-between items-center" style="gap: 1rem; flex-wrap: wrap;">
+            <div>
+                <h1>Workers</h1>
+                <div style="color: var(--text-muted); font-size: 0.9rem;">
+                    <a href="/admin" class="nav-link" style="padding: 0;">Back to Admin</a>
+                </div>
+            </div>
+            <div style="color: var(--text-muted);">
+                Total: <span id="workers-total">-</span>,
+                Enabled: <span id="workers-enabled">-</span>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header" style="flex-wrap: wrap; gap: 1rem;">
+                <h3 class="card-title">Add worker</h3>
+                <form id="add-worker-form" style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end;">
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">URL</label>
+                        <input type="text" class="form-input" id="new-worker-url" placeholder="http://host:port/api-converter-glb" style="width: 520px;">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Weight</label>
+                        <input type="number" class="form-input" id="new-worker-weight" value="0" style="width: 120px;">
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Enabled</label>
+                        <input type="checkbox" id="new-worker-enabled" checked style="width: 18px; height: 18px;">
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="add-worker-btn">Add</button>
+                </form>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table class="admin-table" style="min-width: 900px;">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">ID</th>
+                            <th>URL</th>
+                            <th style="width: 120px;">Weight</th>
+                            <th style="width: 110px;">Enabled</th>
+                            <th style="width: 110px;">Done</th>
+                            <th style="width: 110px;">Total</th>
+                            <th style="width: 120px;">Done share</th>
+                            <th style="width: 160px;">Updated</th>
+                            <th style="width: 170px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="workers-table">
+                        <tr>
+                            <td colspan="9" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/js/i18n.js?v=workers-3"></script>
+    <script src="/static/js/admin-workers.js?v=workers-3"></script>
+    <script src="/static/js/app.js?v=workers-3"></script>
+</body>
+</html>
+

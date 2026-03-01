@@ -1,0 +1,21 @@
+{
+  "id": "joyful_jump",
+  "name": "Joyful Jump",
+  "type": "jump",
+  "type_label": "Jump",
+  "tags": [
+    "jump",
+    "mood_positive"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Joyful Jump.glb",
+  "output_file_hint": "{guid}_Joyful Jump.fbx",
+  "aliases": [
+    "Joyful Jump",
+    "Joyful Jump"
+  ],
+  "preview_gif": "/static/all_animations/previews/joyful_jump.gif",
+  "enabled": true,
+  "order": 27
+}

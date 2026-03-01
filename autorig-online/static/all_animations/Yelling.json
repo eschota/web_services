@@ -1,0 +1,20 @@
+{
+  "id": "yelling",
+  "name": "Yelling",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Yelling.glb",
+  "output_file_hint": "{guid}_Yelling.fbx",
+  "aliases": [
+    "Yelling",
+    "Yelling"
+  ],
+  "preview_gif": "/static/all_animations/previews/yelling.gif",
+  "enabled": true,
+  "order": 64
+}

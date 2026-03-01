@@ -1,0 +1,20 @@
+{
+  "id": "defeat2",
+  "name": "Defeat2",
+  "type": "die",
+  "type_label": "Die/Recovery",
+  "tags": [
+    "die"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Defeat2.glb",
+  "output_file_hint": "{guid}_Defeat2.fbx",
+  "aliases": [
+    "Defeat2",
+    "Defeat2"
+  ],
+  "preview_gif": "/static/all_animations/previews/defeat2.gif",
+  "enabled": true,
+  "order": 6
+}

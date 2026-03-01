@@ -1,0 +1,20 @@
+{
+  "id": "shake_fist",
+  "name": "Shake Fist",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Shake Fist.glb",
+  "output_file_hint": "{guid}_Shake Fist.fbx",
+  "aliases": [
+    "Shake Fist",
+    "Shake Fist"
+  ],
+  "preview_gif": "/static/all_animations/previews/shake_fist.gif",
+  "enabled": true,
+  "order": 43
+}

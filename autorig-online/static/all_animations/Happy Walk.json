@@ -1,0 +1,21 @@
+{
+  "id": "happy_walk",
+  "name": "Happy Walk",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "mood_positive"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Happy Walk.glb",
+  "output_file_hint": "{guid}_Happy Walk.fbx",
+  "aliases": [
+    "Happy Walk",
+    "Happy Walk"
+  ],
+  "preview_gif": "/static/all_animations/previews/happy_walk.gif",
+  "enabled": true,
+  "order": 12
+}

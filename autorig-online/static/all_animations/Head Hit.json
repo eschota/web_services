@@ -1,0 +1,20 @@
+{
+  "id": "head_hit",
+  "name": "Head Hit",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Head Hit.glb",
+  "output_file_hint": "{guid}_Head Hit.fbx",
+  "aliases": [
+    "Head Hit",
+    "Head Hit"
+  ],
+  "preview_gif": "/static/all_animations/previews/head_hit.gif",
+  "enabled": true,
+  "order": 13
+}

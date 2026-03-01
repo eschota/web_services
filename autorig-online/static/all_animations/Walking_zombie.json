@@ -1,0 +1,21 @@
+{
+  "id": "walking_zombie",
+  "name": "Walking_zombie",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "style_zombie"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_zombie.glb",
+  "output_file_hint": "{guid}_Walking_zombie.fbx",
+  "aliases": [
+    "Walking_zombie",
+    "Walking zombie"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_zombie.gif",
+  "enabled": true,
+  "order": 61
+}

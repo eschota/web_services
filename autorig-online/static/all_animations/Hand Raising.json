@@ -1,0 +1,20 @@
+{
+  "id": "hand_raising",
+  "name": "Hand Raising",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Hand Raising.glb",
+  "output_file_hint": "{guid}_Hand Raising.fbx",
+  "aliases": [
+    "Hand Raising",
+    "Hand Raising"
+  ],
+  "preview_gif": "/static/all_animations/previews/hand_raising.gif",
+  "enabled": true,
+  "order": 11
+}

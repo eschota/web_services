@@ -217,6 +217,34 @@ class AdminTaskListResponse(BaseModel):
     per_page: int
 
 
+class AdminWorkerItem(BaseModel):
+    id: int
+    url: str
+    enabled: bool
+    weight: int
+    created_at: datetime
+    updated_at: datetime
+    done_tasks: int = 0
+    total_tasks: int = 0
+    done_share_pct: float = 0.0
+
+
+class AdminWorkerListResponse(BaseModel):
+    workers: List[AdminWorkerItem]
+
+
+class AdminWorkerCreate(BaseModel):
+    url: str
+    enabled: bool = True
+    weight: int = 0
+
+
+class AdminWorkerUpdate(BaseModel):
+    url: Optional[str] = None
+    enabled: Optional[bool] = None
+    weight: Optional[int] = None
+
+
 # =============================================================================
 # Gallery Schemas
 # =============================================================================
@@ -285,6 +313,46 @@ class PurchaseResponse(BaseModel):
     """Response after purchase"""
     success: bool
     purchased_files: List[int]
+    purchased_all: bool
+    credits_remaining: int
+
+
+# =============================================================================
+# Custom Animation Schemas
+# =============================================================================
+class AnimationCatalogItem(BaseModel):
+    id: str
+    name: str
+    type: str
+    type_label: str
+    tags: List[str] = []
+    credits: int = 1
+    format: str = "fbx"
+    preview_gif: Optional[str] = None
+    available: bool = False
+    ready: bool = False
+    purchased: bool = False
+    file_name: Optional[str] = None
+
+
+class AnimationCatalogResponse(BaseModel):
+    types: List[dict]
+    animations: List[AnimationCatalogItem]
+    purchased_all: bool = False
+    purchased_ids: List[str] = []
+    login_required: bool = False
+    user_credits: int = 0
+    pricing: dict
+
+
+class AnimationPurchaseRequest(BaseModel):
+    animation_id: Optional[str] = None
+    all: Optional[bool] = None
+
+
+class AnimationPurchaseResponse(BaseModel):
+    success: bool
+    purchased_animation_ids: List[str]
     purchased_all: bool
     credits_remaining: int
 

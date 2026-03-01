@@ -1,0 +1,21 @@
+{
+  "id": "jump_forward",
+  "name": "Jump_forward",
+  "type": "jump",
+  "type_label": "Jump",
+  "tags": [
+    "jump",
+    "directional"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Jump_forward.glb",
+  "output_file_hint": "{guid}_Jump_forward.fbx",
+  "aliases": [
+    "Jump_forward",
+    "Jump forward"
+  ],
+  "preview_gif": "/static/all_animations/previews/jump_forward.gif",
+  "enabled": true,
+  "order": 29
+}

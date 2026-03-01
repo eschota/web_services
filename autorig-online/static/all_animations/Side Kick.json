@@ -1,0 +1,21 @@
+{
+  "id": "side_kick",
+  "name": "Side Kick",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight",
+    "kick"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Side Kick.glb",
+  "output_file_hint": "{guid}_Side Kick.fbx",
+  "aliases": [
+    "Side Kick",
+    "Side Kick"
+  ],
+  "preview_gif": "/static/all_animations/previews/side_kick.gif",
+  "enabled": true,
+  "order": 44
+}

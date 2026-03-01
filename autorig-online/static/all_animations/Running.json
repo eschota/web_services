@@ -1,0 +1,20 @@
+{
+  "id": "running",
+  "name": "Running",
+  "type": "run",
+  "type_label": "Run",
+  "tags": [
+    "run"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Running.glb",
+  "output_file_hint": "{guid}_Running.fbx",
+  "aliases": [
+    "Running",
+    "Running"
+  ],
+  "preview_gif": "/static/all_animations/previews/running.gif",
+  "enabled": true,
+  "order": 39
+}

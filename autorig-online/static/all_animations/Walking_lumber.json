@@ -1,0 +1,20 @@
+{
+  "id": "walking_lumber",
+  "name": "Walking_lumber",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_lumber.glb",
+  "output_file_hint": "{guid}_Walking_lumber.fbx",
+  "aliases": [
+    "Walking_lumber",
+    "Walking lumber"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_lumber.gif",
+  "enabled": true,
+  "order": 59
+}

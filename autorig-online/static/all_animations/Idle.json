@@ -1,0 +1,20 @@
+{
+  "id": "idle",
+  "name": "Idle",
+  "type": "idle",
+  "type_label": "Idle",
+  "tags": [
+    "idle"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle.glb",
+  "output_file_hint": "{guid}_Idle.fbx",
+  "aliases": [
+    "Idle",
+    "Idle"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle.gif",
+  "enabled": true,
+  "order": 15
+}

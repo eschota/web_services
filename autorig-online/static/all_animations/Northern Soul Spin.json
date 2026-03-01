@@ -1,0 +1,20 @@
+{
+  "id": "northern_soul_spin",
+  "name": "Northern Soul Spin",
+  "type": "dance",
+  "type_label": "Dance",
+  "tags": [
+    "dance"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Northern Soul Spin.glb",
+  "output_file_hint": "{guid}_Northern Soul Spin.fbx",
+  "aliases": [
+    "Northern Soul Spin",
+    "Northern Soul Spin"
+  ],
+  "preview_gif": "/static/all_animations/previews/northern_soul_spin.gif",
+  "enabled": true,
+  "order": 36
+}

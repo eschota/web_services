@@ -1,0 +1,20 @@
+{
+  "id": "breakdance_uprock_var_1",
+  "name": "Breakdance Uprock Var 1",
+  "type": "dance",
+  "type_label": "Dance",
+  "tags": [
+    "dance"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Breakdance Uprock Var 1.glb",
+  "output_file_hint": "{guid}_Breakdance Uprock Var 1.fbx",
+  "aliases": [
+    "Breakdance Uprock Var 1",
+    "Breakdance Uprock Var 1"
+  ],
+  "preview_gif": "/static/all_animations/previews/breakdance_uprock_var_1.gif",
+  "enabled": true,
+  "order": 2
+}

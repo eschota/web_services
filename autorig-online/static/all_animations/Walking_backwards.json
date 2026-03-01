@@ -1,0 +1,21 @@
+{
+  "id": "walking_backwards",
+  "name": "Walking_backwards",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "directional"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_backwards.glb",
+  "output_file_hint": "{guid}_Walking_backwards.fbx",
+  "aliases": [
+    "Walking_backwards",
+    "Walking backwards"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_backwards.gif",
+  "enabled": true,
+  "order": 54
+}

@@ -1,0 +1,20 @@
+{
+  "id": "strut_walking",
+  "name": "Strut Walking",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Strut Walking.glb",
+  "output_file_hint": "{guid}_Strut Walking.fbx",
+  "aliases": [
+    "Strut Walking",
+    "Strut Walking"
+  ],
+  "preview_gif": "/static/all_animations/previews/strut_walking.gif",
+  "enabled": true,
+  "order": 48
+}

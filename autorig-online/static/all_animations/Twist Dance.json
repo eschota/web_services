@@ -1,0 +1,20 @@
+{
+  "id": "twist_dance",
+  "name": "Twist Dance",
+  "type": "dance",
+  "type_label": "Dance",
+  "tags": [
+    "dance"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Twist Dance.glb",
+  "output_file_hint": "{guid}_Twist Dance.fbx",
+  "aliases": [
+    "Twist Dance",
+    "Twist Dance"
+  ],
+  "preview_gif": "/static/all_animations/previews/twist_dance.gif",
+  "enabled": true,
+  "order": 50
+}

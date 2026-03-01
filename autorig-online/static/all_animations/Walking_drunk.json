@@ -1,0 +1,21 @@
+{
+  "id": "walking_drunk",
+  "name": "Walking_drunk",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "style_drunk"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_drunk.glb",
+  "output_file_hint": "{guid}_Walking_drunk.fbx",
+  "aliases": [
+    "Walking_drunk",
+    "Walking drunk"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_drunk.gif",
+  "enabled": true,
+  "order": 57
+}

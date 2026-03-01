@@ -1,0 +1,20 @@
+{
+  "id": "idle_bouncing_fight",
+  "name": "Idle_bouncing_fight",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle_bouncing_fight.glb",
+  "output_file_hint": "{guid}_Idle_bouncing_fight.fbx",
+  "aliases": [
+    "Idle_bouncing_fight",
+    "Idle bouncing fight"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle_bouncing_fight.gif",
+  "enabled": true,
+  "order": 17
+}

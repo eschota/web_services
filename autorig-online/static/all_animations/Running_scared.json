@@ -1,0 +1,21 @@
+{
+  "id": "running_scared",
+  "name": "Running_scared",
+  "type": "run",
+  "type_label": "Run",
+  "tags": [
+    "run",
+    "mood_scared"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Running_scared.glb",
+  "output_file_hint": "{guid}_Running_scared.fbx",
+  "aliases": [
+    "Running_scared",
+    "Running scared"
+  ],
+  "preview_gif": "/static/all_animations/previews/running_scared.gif",
+  "enabled": true,
+  "order": 42
+}

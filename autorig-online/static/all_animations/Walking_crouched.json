@@ -1,0 +1,21 @@
+{
+  "id": "walking_crouched",
+  "name": "Walking_crouched",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk",
+    "stance_crouched"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking_crouched.glb",
+  "output_file_hint": "{guid}_Walking_crouched.fbx",
+  "aliases": [
+    "Walking_crouched",
+    "Walking crouched"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking_crouched.gif",
+  "enabled": true,
+  "order": 56
+}

@@ -1,0 +1,20 @@
+{
+  "id": "idle_sad",
+  "name": "Idle_sad",
+  "type": "idle",
+  "type_label": "Idle",
+  "tags": [
+    "idle"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle_sad.glb",
+  "output_file_hint": "{guid}_Idle_sad.fbx",
+  "aliases": [
+    "Idle_sad",
+    "Idle sad"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle_sad.gif",
+  "enabled": true,
+  "order": 23
+}

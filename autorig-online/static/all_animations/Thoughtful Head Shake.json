@@ -1,0 +1,20 @@
+{
+  "id": "thoughtful_head_shake",
+  "name": "Thoughtful Head Shake",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Thoughtful Head Shake.glb",
+  "output_file_hint": "{guid}_Thoughtful Head Shake.fbx",
+  "aliases": [
+    "Thoughtful Head Shake",
+    "Thoughtful Head Shake"
+  ],
+  "preview_gif": "/static/all_animations/previews/thoughtful_head_shake.gif",
+  "enabled": true,
+  "order": 49
+}

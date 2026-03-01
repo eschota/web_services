@@ -1,0 +1,21 @@
+{
+  "id": "standing_2h_magic_attack_04",
+  "name": "Standing 2H Magic Attack 04",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight",
+    "magic"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Standing 2H Magic Attack 04.glb",
+  "output_file_hint": "{guid}_Standing 2H Magic Attack 04.fbx",
+  "aliases": [
+    "Standing 2H Magic Attack 04",
+    "Standing 2H Magic Attack 04"
+  ],
+  "preview_gif": "/static/all_animations/previews/standing_2h_magic_attack_04.gif",
+  "enabled": true,
+  "order": 47
+}

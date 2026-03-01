@@ -1,0 +1,20 @@
+{
+  "id": "cheering",
+  "name": "Cheering",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Cheering.glb",
+  "output_file_hint": "{guid}_Cheering.fbx",
+  "aliases": [
+    "Cheering",
+    "Cheering"
+  ],
+  "preview_gif": "/static/all_animations/previews/cheering.gif",
+  "enabled": true,
+  "order": 3
+}

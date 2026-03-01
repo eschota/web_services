@@ -1,0 +1,20 @@
+{
+  "id": "look_around",
+  "name": "Look Around",
+  "type": "emote",
+  "type_label": "Emote/Gesture",
+  "tags": [
+    "emote"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Look Around.glb",
+  "output_file_hint": "{guid}_Look Around.fbx",
+  "aliases": [
+    "Look Around",
+    "Look Around"
+  ],
+  "preview_gif": "/static/all_animations/previews/look_around.gif",
+  "enabled": true,
+  "order": 34
+}

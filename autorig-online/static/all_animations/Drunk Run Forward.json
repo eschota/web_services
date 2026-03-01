@@ -1,0 +1,22 @@
+{
+  "id": "drunk_run_forward",
+  "name": "Drunk Run Forward",
+  "type": "run",
+  "type_label": "Run",
+  "tags": [
+    "run",
+    "directional",
+    "style_drunk"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Drunk Run Forward.glb",
+  "output_file_hint": "{guid}_Drunk Run Forward.fbx",
+  "aliases": [
+    "Drunk Run Forward",
+    "Drunk Run Forward"
+  ],
+  "preview_gif": "/static/all_animations/previews/drunk_run_forward.gif",
+  "enabled": true,
+  "order": 7
+}

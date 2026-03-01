@@ -110,13 +110,22 @@
         </div>
         
         <!-- Tabs -->
-        <div class="admin-tabs mt-4" style="display: flex; gap: 0; border-bottom: 2px solid var(--border-color);">
-            <button class="admin-tab active" data-tab="users" style="padding: 0.75rem 1.5rem; background: transparent; border: none; border-bottom: 2px solid var(--accent); margin-bottom: -2px; color: var(--accent); font-weight: 600; cursor: pointer;">
-                👥 Users
-            </button>
-            <button class="admin-tab" data-tab="tasks" style="padding: 0.75rem 1.5rem; background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--text-muted); font-weight: 500; cursor: pointer;">
-                📋 All Tasks
-            </button>
+        <div class="admin-tabs mt-4" style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 2px solid var(--border-color);">
+            <div style="display: flex; gap: 0;">
+                <button class="admin-tab active" data-tab="users" style="padding: 0.75rem 1.5rem; background: transparent; border: none; border-bottom: 2px solid var(--accent); margin-bottom: -2px; color: var(--accent); font-weight: 600; cursor: pointer;">
+                    👥 Users
+                </button>
+                <button class="admin-tab" data-tab="tasks" style="padding: 0.75rem 1.5rem; background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                    📋 All Tasks
+                </button>
+                <button class="admin-tab" data-tab="workers" style="padding: 0.75rem 1.5rem; background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                    ⚙️ Workers
+                </button>
+            </div>
+
+            <a href="/admin/workers" class="btn btn-secondary" style="margin-bottom: 0.5rem;">
+                Open Workers Page
+            </a>
         </div>
         
         <!-- Users Tab Content -->
@@ -206,6 +215,59 @@
                         <button class="btn btn-secondary" id="all-tasks-prev-page" disabled>← Prev</button>
                         <button class="btn btn-secondary" id="all-tasks-next-page" disabled>Next →</button>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Workers Tab Content -->
+        <div id="tab-workers" class="tab-content" style="display: none;">
+            <div class="card mt-4">
+                <div class="card-header" style="flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h3 class="card-title">Workers</h3>
+                        <div style="color: var(--text-muted); font-size: 0.875rem;">
+                            Total: <span id="workers-total">-</span>,
+                            Enabled: <span id="workers-enabled">-</span>
+                        </div>
+                    </div>
+                    <form id="add-worker-form" style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end;">
+                        <div class="form-group" style="margin: 0;">
+                            <label class="form-label">URL</label>
+                            <input type="text" class="form-input" id="new-worker-url" placeholder="http://host:port/api-converter-glb" style="width: 420px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label class="form-label">Weight</label>
+                            <input type="number" class="form-input" id="new-worker-weight" value="0" style="width: 120px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label class="form-label">Enabled</label>
+                            <input type="checkbox" id="new-worker-enabled" checked style="width: 18px; height: 18px;">
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="add-worker-btn">Add</button>
+                    </form>
+                </div>
+
+                <div style="overflow-x: auto;">
+                    <table class="admin-table" style="min-width: 900px;">
+                        <thead>
+                            <tr>
+                                <th style="width: 80px;">ID</th>
+                                <th>URL</th>
+                                <th style="width: 120px;">Weight</th>
+                                <th style="width: 110px;">Enabled</th>
+                                <th style="width: 110px;">Done</th>
+                                <th style="width: 110px;">Total</th>
+                                <th style="width: 120px;">Done share</th>
+                                <th style="width: 160px;">Updated</th>
+                                <th style="width: 170px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="workers-table">
+                            <tr>
+                                <td colspan="9" style="text-align: center; color: var(--text-muted);">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -347,9 +409,9 @@
         </div>
     </footer>
     
-    <script src="/static/js/i18n.js"></script>
-    <script src="/static/js/admin.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/i18n.js?v=workers-3"></script>
+    <script src="/static/js/admin.js?v=workers-3"></script>
+    <script src="/static/js/app.js?v=workers-3"></script>
 </body>
 </html>
 

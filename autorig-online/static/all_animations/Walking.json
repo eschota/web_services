@@ -1,0 +1,20 @@
+{
+  "id": "walking",
+  "name": "Walking",
+  "type": "walk",
+  "type_label": "Walk",
+  "tags": [
+    "walk"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Walking.glb",
+  "output_file_hint": "{guid}_Walking.fbx",
+  "aliases": [
+    "Walking",
+    "Walking"
+  ],
+  "preview_gif": "/static/all_animations/previews/walking.gif",
+  "enabled": true,
+  "order": 52
+}

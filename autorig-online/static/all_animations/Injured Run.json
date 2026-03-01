@@ -1,0 +1,21 @@
+{
+  "id": "injured_run",
+  "name": "Injured Run",
+  "type": "run",
+  "type_label": "Run",
+  "tags": [
+    "run",
+    "injured"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Injured Run.glb",
+  "output_file_hint": "{guid}_Injured Run.fbx",
+  "aliases": [
+    "Injured Run",
+    "Injured Run"
+  ],
+  "preview_gif": "/static/all_animations/previews/injured_run.gif",
+  "enabled": true,
+  "order": 25
+}

@@ -8,7 +8,7 @@ import uuid
 import shutil
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import hashlib
 import hmac
 import secrets
@@ -16,6 +16,7 @@ import json
 import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -39,7 +40,11 @@ from config import (
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
     GA_MEASUREMENT_ID, GA_API_SECRET
 )
-from database import init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase, Scene, SceneLike, Feedback
+from database import (
+    init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase,
+    Scene, SceneLike, Feedback, WorkerEndpoint,
+    TaskAnimationPurchase, TaskAnimationBundlePurchase
+)
 from models import (
     TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
@@ -49,9 +54,12 @@ from models import (
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
     AdminStatsResponse, AdminTaskListItem, AdminTaskListResponse,
+    AdminWorkerItem, AdminWorkerListResponse, AdminWorkerCreate, AdminWorkerUpdate,
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse, LikeResponse, TaskCardInfo,
     PurchaseStateResponse, PurchaseRequest, PurchaseResponse,
+    AnimationCatalogItem, AnimationCatalogResponse,
+    AnimationPurchaseRequest, AnimationPurchaseResponse,
     # Scene models
     SceneCreateRequest, SceneAddModelRequest, SceneUpdateRequest,
     SceneResponse, SceneModelInfo, TransformData,
@@ -243,7 +251,7 @@ async def background_task_updater():
                 # 1. Dispatch queued tasks (status=created) to free workers
                 # =============================================================
                 try:
-                    queue_status = await get_global_queue_status()
+                    queue_status = await get_global_queue_status(db=db)
                     free_workers = [
                         w for w in queue_status.workers
                         if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)
@@ -518,6 +526,238 @@ def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optiona
     if anon_session and task.owner_type == "anon" and task.owner_id == anon_session.anon_id:
         return True
     return False
+
+
+def _normalize_worker_url(url: str) -> str:
+    url = (url or "").strip()
+    # Avoid duplicate records due to trailing slash differences.
+    while url.endswith("/"):
+        url = url[:-1]
+    return url
+
+
+def _validate_worker_url(url: str) -> str:
+    url = _normalize_worker_url(url)
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid worker url")
+    return url
+
+
+# =============================================================================
+# Custom Animations Catalog / Pricing
+# =============================================================================
+ANIMATION_SINGLE_CREDITS = 1
+ANIMATION_BUNDLE_CREDITS = 10
+DOWNLOAD_ALL_FILES_CREDITS = 10
+
+ANIMATIONS_DIR = Path(__file__).resolve().parent.parent / "static" / "all_animations"
+ANIMATIONS_MANIFEST_PATH = ANIMATIONS_DIR / "manifest.json"
+GUID_PREFIX_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_',
+    re.IGNORECASE
+)
+
+_ANIM_CATALOG_CACHE: Dict[str, Any] = {
+    "mtime_ns": None,
+    "data": None,
+}
+
+
+def _normalize_animation_key(value: str) -> str:
+    value = (value or "").strip().lower()
+    value = re.sub(r'[^a-z0-9]+', '_', value)
+    value = re.sub(r'_+', '_', value).strip('_')
+    return value
+
+
+def _strip_guid_prefix(filename: str) -> str:
+    return GUID_PREFIX_RE.sub('', filename or '')
+
+
+def _load_animation_manifest() -> dict:
+    """Load custom animation manifest from static/all_animations with lightweight cache."""
+    try:
+        if not ANIMATIONS_MANIFEST_PATH.exists():
+            return {
+                "version": 1,
+                "types": [],
+                "pricing": {
+                    "single_animation_credits": ANIMATION_SINGLE_CREDITS,
+                    "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+                    "download_format": "fbx",
+                },
+                "animations": [],
+            }
+
+        mtime_ns = ANIMATIONS_MANIFEST_PATH.stat().st_mtime_ns
+        if _ANIM_CATALOG_CACHE["data"] is not None and _ANIM_CATALOG_CACHE["mtime_ns"] == mtime_ns:
+            return _ANIM_CATALOG_CACHE["data"]
+
+        raw = ANIMATIONS_MANIFEST_PATH.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("Manifest must be an object")
+
+        data.setdefault("types", [])
+        data.setdefault("animations", [])
+        data.setdefault("pricing", {
+            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
+            "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+            "download_format": "fbx",
+        })
+
+        _ANIM_CATALOG_CACHE["mtime_ns"] = mtime_ns
+        _ANIM_CATALOG_CACHE["data"] = data
+        return data
+    except Exception as e:
+        print(f"[Animations] Failed to load manifest: {e}")
+        return {
+            "version": 1,
+            "types": [],
+            "pricing": {
+                "single_animation_credits": ANIMATION_SINGLE_CREDITS,
+                "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+                "download_format": "fbx",
+            },
+            "animations": [],
+        }
+
+
+def _build_task_animation_file_map(task) -> Dict[str, dict]:
+    """
+    Build map of normalized animation key -> worker file metadata for individual FBX animations.
+    Excludes package files like *_all_animations*.fbx.
+    """
+    download_urls = (task.output_urls or []) if (task.output_urls and len(task.output_urls) > 0) else (task.ready_urls or [])
+    ready_urls = [u.strip() for u in (task.ready_urls or []) if isinstance(u, str)]
+    ready_url_set = set(ready_urls)
+    ready_name_set = {u.split('/')[-1] for u in ready_urls}
+
+    result: Dict[str, dict] = {}
+    for idx, url in enumerate(download_urls):
+        if not isinstance(url, str):
+            continue
+        file_url = url.strip()
+        raw_name = file_url.split('/')[-1]
+        if not raw_name.lower().endswith('.fbx'):
+            continue
+
+        clean_name = _strip_guid_prefix(raw_name)
+        stem = clean_name[:-4] if clean_name.lower().endswith('.fbx') else clean_name
+        stem_l = stem.lower()
+        if "_all_animations" in stem_l:
+            continue
+
+        key = _normalize_animation_key(stem)
+        if not key:
+            continue
+
+        rec = {
+            "url": file_url,
+            "raw_filename": raw_name,
+            "clean_filename": clean_name,
+            "index": idx,
+            "ready": (file_url in ready_url_set) or (raw_name in ready_name_set),
+        }
+        # Prefer a ready file if duplicates appear.
+        if key not in result or (not result[key]["ready"] and rec["ready"]):
+            result[key] = rec
+
+    return result
+
+
+def _resolve_animation_file(item: dict, file_map: Dict[str, dict]) -> Optional[dict]:
+    """Resolve animation metadata item to the best matching task file."""
+    candidates: List[str] = []
+
+    for field in ("id", "name"):
+        if isinstance(item.get(field), str):
+            candidates.append(_normalize_animation_key(item[field]))
+
+    aliases = item.get("aliases") or []
+    if isinstance(aliases, list):
+        for alias in aliases:
+            if isinstance(alias, str):
+                candidates.append(_normalize_animation_key(alias))
+
+    src = item.get("source_file")
+    if isinstance(src, str):
+        src_stem = Path(src).stem
+        candidates.append(_normalize_animation_key(src_stem))
+
+    # Unique, keep order
+    uniq = []
+    for c in candidates:
+        if c and c not in uniq:
+            uniq.append(c)
+
+    for c in uniq:
+        if c in file_map:
+            return file_map[c]
+
+    # Fuzzy fallback (useful if worker adds prefixes/suffixes)
+    for c in uniq:
+        for k, v in file_map.items():
+            if k == c or k.endswith(f"_{c}") or c.endswith(f"_{k}") or c in k:
+                return v
+
+    return None
+
+
+async def _get_animation_purchase_state(db: AsyncSession, user: Optional[User], task_id: str) -> tuple[set, bool]:
+    """Return (purchased_ids, purchased_all) for custom animations."""
+    if not user:
+        return set(), False
+
+    purchased_ids = set()
+    try:
+        rows = await db.execute(
+            select(TaskAnimationPurchase.animation_id).where(
+                TaskAnimationPurchase.task_id == task_id,
+                TaskAnimationPurchase.user_email == user.email
+            )
+        )
+        purchased_ids = {r[0] for r in rows.all() if r and r[0]}
+    except Exception:
+        purchased_ids = set()
+
+    purchased_all = False
+    try:
+        bundle = await db.execute(
+            select(TaskAnimationBundlePurchase.id).where(
+                TaskAnimationBundlePurchase.task_id == task_id,
+                TaskAnimationBundlePurchase.user_email == user.email
+            )
+        )
+        purchased_all = bundle.scalar_one_or_none() is not None
+    except Exception:
+        purchased_all = False
+
+    # Backward compatibility: old "buy all files" purchase unlocks animation downloads too.
+    if not purchased_all:
+        legacy = await db.execute(
+            select(TaskFilePurchase.id).where(
+                TaskFilePurchase.task_id == task_id,
+                TaskFilePurchase.user_email == user.email,
+                TaskFilePurchase.file_index.is_(None)
+            )
+        )
+        purchased_all = legacy.scalar_one_or_none() is not None
+
+    return purchased_ids, purchased_all
+
+
+async def _credit_task_owner_for_sale(db: AsyncSession, task, buyer_user: User, amount: int) -> None:
+    """Credit task owner when a paid download/purchase happens."""
+    if amount <= 0:
+        return
+    if task.owner_type != "user" or not task.owner_id:
+        return
+    owner_result = await db.execute(select(User).where(User.email == task.owner_id))
+    task_owner = owner_result.scalar_one_or_none()
+    if task_owner and task_owner.id != buyer_user.id:
+        task_owner.balance_credits += amount
 
 
 # =============================================================================
@@ -915,7 +1155,7 @@ async def api_create_task(
     
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
     try:
-        queue_status = await get_global_queue_status()
+        queue_status = await get_global_queue_status(db=db)
         free_worker = next(
             (w for w in queue_status.workers 
              if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)),
@@ -1411,7 +1651,7 @@ async def api_restart_task(
     await db.refresh(task)
 
     # Start pipeline for the same task_id without blocking on FBX pre-conversion.
-    worker_url = await select_best_worker()
+    worker_url = await select_best_worker(db=db)
     if not worker_url:
         raise HTTPException(status_code=500, detail="No workers available")
 
@@ -1594,9 +1834,9 @@ async def api_purchase_files(
             credits_remaining=user.balance_credits
         )
     
-    # Handle "buy all" request (1 credit for full task access)
+    # Handle "buy all" request (full-task access)
     if purchase_req.all:
-        cost = 1
+        cost = DOWNLOAD_ALL_FILES_CREDITS
         if user.balance_credits < cost:
             raise HTTPException(status_code=402, detail="Insufficient credits")
         
@@ -1604,13 +1844,7 @@ async def api_purchase_files(
         user.balance_credits -= cost
         
         # Credit task owner (if they have a user account)
-        if task.owner_type == "user" and task.owner_id:
-            owner_result = await db.execute(
-                select(User).where(User.email == task.owner_id)
-            )
-            task_owner = owner_result.scalar_one_or_none()
-            if task_owner and task_owner.id != user.id:  # Don't credit yourself
-                task_owner.balance_credits += 1
+        await _credit_task_owner_for_sale(db, task, user, cost)
         
         # Create purchase record for "all files"
         purchase = TaskFilePurchase(
@@ -1677,6 +1911,273 @@ async def api_purchase_files(
         )
     
     raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
+
+
+@app.get("/api/task/{task_id}/animations/catalog", response_model=AnimationCatalogResponse)
+async def api_get_animation_catalog(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Return custom animation catalog + availability + purchase state for a task."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    manifest = _load_animation_manifest()
+    raw_items = manifest.get("animations") or []
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    file_map = _build_task_animation_file_map(task)
+    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+
+    items: List[AnimationCatalogItem] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("enabled", True) is False:
+            continue
+
+        anim_id = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
+        if not anim_id:
+            continue
+
+        matched = _resolve_animation_file(item, file_map)
+        available = matched is not None
+        ready = bool(matched and matched.get("ready"))
+        file_name = matched.get("clean_filename") if matched else None
+
+        tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+        items.append(AnimationCatalogItem(
+            id=anim_id,
+            name=str(item.get("name") or anim_id),
+            type=str(item.get("type") or "other"),
+            type_label=str(item.get("type_label") or str(item.get("type") or "other").title()),
+            tags=[str(t) for t in tags if isinstance(t, str)],
+            credits=int(item.get("credits", ANIMATION_SINGLE_CREDITS) or ANIMATION_SINGLE_CREDITS),
+            format=str(item.get("format") or "fbx"),
+            preview_gif=item.get("preview_gif"),
+            available=available,
+            ready=ready,
+            purchased=(purchased_all or (anim_id in purchased_ids)),
+            file_name=file_name,
+        ))
+
+    items.sort(key=lambda x: (x.type, x.name.lower()))
+
+    types = manifest.get("types")
+    if not isinstance(types, list):
+        type_counts: Dict[str, int] = {}
+        for it in items:
+            type_counts[it.type] = type_counts.get(it.type, 0) + 1
+        types = [
+            {"id": k, "label": k.title(), "count": v}
+            for k, v in sorted(type_counts.items(), key=lambda x: x[0])
+        ]
+
+    return AnimationCatalogResponse(
+        types=types,
+        animations=items,
+        purchased_all=purchased_all,
+        purchased_ids=sorted(purchased_ids),
+        login_required=(user is None),
+        user_credits=(user.balance_credits if user else 0),
+        pricing={
+            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
+            "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+            "download_format": "fbx"
+        }
+    )
+
+
+@app.post("/api/task/{task_id}/animations/purchase", response_model=AnimationPurchaseResponse)
+async def api_purchase_animation(
+    task_id: str,
+    purchase_req: AnimationPurchaseRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Purchase one custom animation (1 credit) or unlock all custom animations (10 credits)."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    manifest = _load_animation_manifest()
+    raw_items = manifest.get("animations") or []
+    catalog_by_id: Dict[str, dict] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("enabled", True) is False:
+            continue
+        anim_id = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
+        if anim_id:
+            catalog_by_id[anim_id] = item
+
+    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+
+    if purchase_req.all:
+        if purchased_all:
+            return AnimationPurchaseResponse(
+                success=True,
+                purchased_animation_ids=sorted(purchased_ids),
+                purchased_all=True,
+                credits_remaining=user.balance_credits
+            )
+
+        cost = ANIMATION_BUNDLE_CREDITS
+        if user.balance_credits < cost:
+            raise HTTPException(status_code=402, detail="Insufficient credits")
+
+        user.balance_credits -= cost
+        await _credit_task_owner_for_sale(db, task, user, cost)
+        db.add(TaskAnimationBundlePurchase(
+            task_id=task_id,
+            user_email=user.email,
+            credits_spent=cost,
+        ))
+
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+
+        purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+        return AnimationPurchaseResponse(
+            success=True,
+            purchased_animation_ids=sorted(purchased_ids),
+            purchased_all=purchased_all,
+            credits_remaining=user.balance_credits
+        )
+
+    animation_id = _normalize_animation_key(str(purchase_req.animation_id or ""))
+    if not animation_id:
+        raise HTTPException(status_code=400, detail="animation_id is required")
+    if animation_id not in catalog_by_id:
+        raise HTTPException(status_code=404, detail="Animation not found")
+
+    if purchased_all or animation_id in purchased_ids:
+        return AnimationPurchaseResponse(
+            success=True,
+            purchased_animation_ids=sorted(purchased_ids),
+            purchased_all=purchased_all,
+            credits_remaining=user.balance_credits
+        )
+
+    # Guard: animation should exist in this task outputs before purchase.
+    file_map = _build_task_animation_file_map(task)
+    resolved = _resolve_animation_file(catalog_by_id[animation_id], file_map)
+    if not resolved:
+        raise HTTPException(status_code=409, detail="Animation is not available for this task yet")
+
+    cost = ANIMATION_SINGLE_CREDITS
+    if user.balance_credits < cost:
+        raise HTTPException(status_code=402, detail="Insufficient credits")
+
+    user.balance_credits -= cost
+    await _credit_task_owner_for_sale(db, task, user, cost)
+    db.add(TaskAnimationPurchase(
+        task_id=task_id,
+        user_email=user.email,
+        animation_id=animation_id,
+        credits_spent=cost
+    ))
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+
+    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+    return AnimationPurchaseResponse(
+        success=True,
+        purchased_animation_ids=sorted(purchased_ids),
+        purchased_all=purchased_all,
+        credits_remaining=user.balance_credits
+    )
+
+
+@app.get("/api/task/{task_id}/animations/download/{animation_id}")
+async def api_download_animation(
+    task_id: str,
+    animation_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Download selected custom animation FBX if purchased."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anim_id = _normalize_animation_key(animation_id)
+    manifest = _load_animation_manifest()
+    raw_items = manifest.get("animations") or []
+    catalog_by_id: Dict[str, dict] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("enabled", True) is False:
+            continue
+        key = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
+        if key:
+            catalog_by_id[key] = item
+
+    if anim_id not in catalog_by_id:
+        raise HTTPException(status_code=404, detail="Animation not found")
+
+    file_map = _build_task_animation_file_map(task)
+    resolved = _resolve_animation_file(catalog_by_id[anim_id], file_map)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Animation file not ready")
+
+    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+    if not (purchased_all or anim_id in purchased_ids):
+        raise HTTPException(status_code=402, detail="Payment required to download this animation")
+
+    file_url = resolved["url"]
+    clean_filename = resolved["clean_filename"]
+
+    # Track download event for paid custom animation
+    if task.ga_client_id:
+        asyncio.create_task(send_ga4_event(
+            task.ga_client_id,
+            "custom_animation_downloaded",
+            {"animation_id": anim_id, "task_id": task_id, "filename": clean_filename}
+        ))
+
+    # Serve from local cache if present
+    cached_path = TASK_CACHE_DIR / task_id / clean_filename
+    if cached_path.exists():
+        return FileResponse(
+            cached_path,
+            media_type="application/octet-stream",
+            filename=clean_filename,
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
+
+    async def stream_file():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", file_url, timeout=120.0) as response:
+                if response.status_code != 200:
+                    raise HTTPException(status_code=404, detail="Animation file is unavailable")
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    yield chunk
+
+    return StreamingResponse(
+        stream_file(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename={clean_filename}",
+            "Cache-Control": "public, max-age=86400"
+        }
+    )
 
 
 @app.get("/api/history", response_model=TaskHistoryResponse)
@@ -2021,9 +2522,9 @@ async def api_toggle_like(
 # Queue Status Endpoint
 # =============================================================================
 @app.get("/api/queue/status", response_model=QueueStatusResponse)
-async def api_queue_status():
+async def api_queue_status(db: AsyncSession = Depends(get_db)):
     """Get global queue status across all workers"""
-    status = await get_global_queue_status()
+    status = await get_global_queue_status(db=db)
     
     return QueueStatusResponse(
         workers=[
@@ -2050,6 +2551,168 @@ async def api_queue_status():
 # =============================================================================
 # Admin Endpoints
 # =============================================================================
+@app.get("/api/admin/workers", response_model=AdminWorkerListResponse)
+async def api_admin_workers(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """List configured conversion workers (admin only)."""
+    from sqlalchemy import desc, func, case
+    from database import Task
+
+    res = await db.execute(
+        select(WorkerEndpoint).order_by(
+            desc(WorkerEndpoint.enabled),
+            desc(WorkerEndpoint.weight),
+            WorkerEndpoint.id
+        )
+    )
+    workers = res.scalars().all()
+
+    # Stats: count how many tasks each worker actually processed.
+    # We focus on done_tasks for "who does most of the work".
+    stats_res = await db.execute(
+        select(
+            Task.worker_api.label("worker_api"),
+            func.count(Task.id).label("total_tasks"),
+            func.sum(case((Task.status == "done", 1), else_=0)).label("done_tasks"),
+        )
+        .where(Task.worker_api.is_not(None))
+        .group_by(Task.worker_api)
+    )
+    stats_rows = stats_res.all()
+
+    def _norm(url: str) -> str:
+        url = (url or "").strip()
+        while url.endswith("/"):
+            url = url[:-1]
+        return url
+
+    stats_by_url = {}
+    for row in stats_rows:
+        url = _norm(row.worker_api)
+        stats_by_url[url] = {
+            "total_tasks": int(row.total_tasks or 0),
+            "done_tasks": int(row.done_tasks or 0),
+        }
+
+    total_done_all = 0
+    for w in workers:
+        s = stats_by_url.get(_norm(w.url))
+        if s:
+            total_done_all += int(s.get("done_tasks", 0))
+
+    return AdminWorkerListResponse(
+        workers=[
+            AdminWorkerItem(
+                id=w.id,
+                url=w.url,
+                enabled=bool(w.enabled),
+                weight=int(w.weight or 0),
+                created_at=w.created_at,
+                updated_at=w.updated_at,
+                done_tasks=int(stats_by_url.get(_norm(w.url), {}).get("done_tasks", 0)),
+                total_tasks=int(stats_by_url.get(_norm(w.url), {}).get("total_tasks", 0)),
+                done_share_pct=(
+                    (float(stats_by_url.get(_norm(w.url), {}).get("done_tasks", 0)) / float(total_done_all)) * 100.0
+                    if total_done_all > 0 else 0.0
+                )
+            )
+            for w in workers
+        ]
+    )
+
+
+@app.post("/api/admin/workers", response_model=AdminWorkerItem)
+async def api_admin_create_worker(
+    data: AdminWorkerCreate,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new worker endpoint (admin only)."""
+    url = _validate_worker_url(data.url)
+    worker = WorkerEndpoint(
+        url=url,
+        enabled=bool(data.enabled),
+        weight=int(data.weight or 0)
+    )
+    db.add(worker)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Worker url already exists")
+
+    await db.refresh(worker)
+    return AdminWorkerItem(
+        id=worker.id,
+        url=worker.url,
+        enabled=bool(worker.enabled),
+        weight=int(worker.weight or 0),
+        created_at=worker.created_at,
+        updated_at=worker.updated_at,
+        done_tasks=0,
+        total_tasks=0,
+        done_share_pct=0.0
+    )
+
+
+@app.put("/api/admin/workers/{worker_id}", response_model=AdminWorkerItem)
+async def api_admin_update_worker(
+    worker_id: int,
+    data: AdminWorkerUpdate,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update worker endpoint (admin only)."""
+    res = await db.execute(select(WorkerEndpoint).where(WorkerEndpoint.id == worker_id))
+    worker = res.scalar_one_or_none()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    if data.url is not None:
+        worker.url = _validate_worker_url(data.url)
+    if data.enabled is not None:
+        worker.enabled = bool(data.enabled)
+    if data.weight is not None:
+        worker.weight = int(data.weight)
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Worker url already exists")
+
+    await db.refresh(worker)
+    return AdminWorkerItem(
+        id=worker.id,
+        url=worker.url,
+        enabled=bool(worker.enabled),
+        weight=int(worker.weight or 0),
+        created_at=worker.created_at,
+        updated_at=worker.updated_at,
+        done_tasks=0,
+        total_tasks=0,
+        done_share_pct=0.0
+    )
+
+
+@app.delete("/api/admin/workers/{worker_id}")
+async def api_admin_delete_worker(
+    worker_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete worker endpoint (admin only)."""
+    res = await db.execute(select(WorkerEndpoint).where(WorkerEndpoint.id == worker_id))
+    worker = res.scalar_one_or_none()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    await db.delete(worker)
+    await db.commit()
+    return {"ok": True, "id": worker_id}
+
+
 @app.get("/api/admin/stats", response_model=AdminStatsResponse)
 async def api_admin_stats(
     admin: User = Depends(require_admin),
@@ -2485,7 +3148,7 @@ async def api_admin_restart_incomplete_tasks(
                     task.fbx_glb_error = None
                     
                     # Select worker and send task
-                    worker_url = await select_best_worker()
+                    worker_url = await select_best_worker(db=bg_db)
                     if not worker_url:
                         task.status = "error"
                         task.error_message = "No workers available"
@@ -4205,6 +4868,14 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
     if not user or user.email not in ADMIN_EMAILS:
         return RedirectResponse(url="/auth/login")
     return FileResponse(str(STATIC_DIR / "admin.html"))
+
+
+@app.get("/admin/workers")
+async def admin_workers_page(user: Optional[User] = Depends(get_current_user)):
+    """Serve admin workers page (dedicated)."""
+    if not user or user.email not in ADMIN_EMAILS:
+        return RedirectResponse(url="/auth/login")
+    return FileResponse(str(STATIC_DIR / "admin-workers.html"))
 
 
 @app.get("/gallery")

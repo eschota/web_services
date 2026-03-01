@@ -1,0 +1,21 @@
+{
+  "id": "illegal_elbow_punch",
+  "name": "Illegal Elbow Punch",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight",
+    "punch"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Illegal Elbow Punch.glb",
+  "output_file_hint": "{guid}_Illegal Elbow Punch.fbx",
+  "aliases": [
+    "Illegal Elbow Punch",
+    "Illegal Elbow Punch"
+  ],
+  "preview_gif": "/static/all_animations/previews/illegal_elbow_punch.gif",
+  "enabled": true,
+  "order": 24
+}

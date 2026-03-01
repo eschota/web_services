@@ -1,0 +1,20 @@
+{
+  "id": "dying",
+  "name": "Dying",
+  "type": "die",
+  "type_label": "Die/Recovery",
+  "tags": [
+    "die"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Dying.glb",
+  "output_file_hint": "{guid}_Dying.fbx",
+  "aliases": [
+    "Dying",
+    "Dying"
+  ],
+  "preview_gif": "/static/all_animations/previews/dying.gif",
+  "enabled": true,
+  "order": 8
+}

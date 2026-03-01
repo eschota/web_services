@@ -98,6 +98,35 @@ class TaskFilePurchase(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TaskAnimationPurchase(Base):
+    """Purchase of a single custom animation for a task."""
+    __tablename__ = "task_animation_purchases"
+    __table_args__ = (
+        UniqueConstraint("task_id", "user_email", "animation_id", name="uq_task_animation_purchase"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    animation_id = Column(String(128), nullable=False, index=True)
+    credits_spent = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TaskAnimationBundlePurchase(Base):
+    """Unlock-all custom animations purchase for a task."""
+    __tablename__ = "task_animation_bundle_purchases"
+    __table_args__ = (
+        UniqueConstraint("task_id", "user_email", name="uq_task_animation_bundle_purchase"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    credits_spent = Column(Integer, nullable=False, default=10)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Task(Base):
     """Conversion task"""
     __tablename__ = "tasks"
@@ -174,6 +203,18 @@ class Task(Base):
         if self.total_count == 0:
             return 0
         return int((self.ready_count / self.total_count) * 100)
+
+
+class WorkerEndpoint(Base):
+    """Conversion worker endpoint (admin-managed)."""
+    __tablename__ = "worker_endpoints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    url = Column(String(255), unique=True, nullable=False, index=True)
+    enabled = Column(Boolean, default=True)
+    weight = Column(Integer, default=0)  # Higher means higher priority
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Session(Base):
@@ -367,6 +408,90 @@ async def init_db():
                     """
                     CREATE UNIQUE INDEX IF NOT EXISTS uq_tg_chat_event_key
                     ON telegram_notifications (chat_id, event_type, event_key)
+                    """
+                )
+            except Exception:
+                pass
+
+            # Worker endpoints table/index (safe to run repeatedly)
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS worker_endpoints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        url VARCHAR(255) NOT NULL,
+                        enabled BOOLEAN DEFAULT 1,
+                        weight INTEGER DEFAULT 0,
+                        created_at DATETIME,
+                        updated_at DATETIME
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_worker_endpoints_url
+                    ON worker_endpoints (url)
+                    """
+                )
+
+                # Seed defaults from config.WORKERS (safe + idempotent).
+                # This makes the DB the source of truth without manual setup.
+                try:
+                    from config import WORKERS as DEFAULT_WORKERS
+                except Exception:
+                    DEFAULT_WORKERS = []
+
+                for raw_url in (DEFAULT_WORKERS or []):
+                    url = (raw_url or "").strip()
+                    while url.endswith("/"):
+                        url = url[:-1]
+                    if not url:
+                        continue
+                    try:
+                        await conn.exec_driver_sql(
+                            "INSERT OR IGNORE INTO worker_endpoints (url, enabled, weight, created_at, updated_at) VALUES (?, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                            (url,)
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Custom animation purchase tables/indexes (safe to run repeatedly)
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS task_animation_purchases (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id VARCHAR(36) NOT NULL,
+                        user_email VARCHAR(255) NOT NULL,
+                        animation_id VARCHAR(128) NOT NULL,
+                        credits_spent INTEGER NOT NULL DEFAULT 1,
+                        created_at DATETIME
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_task_animation_purchase
+                    ON task_animation_purchases (task_id, user_email, animation_id)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS task_animation_bundle_purchases (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id VARCHAR(36) NOT NULL,
+                        user_email VARCHAR(255) NOT NULL,
+                        credits_spent INTEGER NOT NULL DEFAULT 10,
+                        created_at DATETIME
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_task_animation_bundle_purchase
+                    ON task_animation_bundle_purchases (task_id, user_email)
                     """
                 )
             except Exception:

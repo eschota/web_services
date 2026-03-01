@@ -1,0 +1,20 @@
+{
+  "id": "idle_combat_stance",
+  "name": "Idle_combat_stance",
+  "type": "fight",
+  "type_label": "Fight",
+  "tags": [
+    "fight"
+  ],
+  "credits": 1,
+  "format": "fbx",
+  "source_file": "Idle_combat_stance.glb",
+  "output_file_hint": "{guid}_Idle_combat_stance.fbx",
+  "aliases": [
+    "Idle_combat_stance",
+    "Idle combat stance"
+  ],
+  "preview_gif": "/static/all_animations/previews/idle_combat_stance.gif",
+  "enabled": true,
+  "order": 18
+}
