@@ -4669,7 +4669,7 @@
             }
 
             function applyAnimationClipsToCurrentModel(clips, hints = []) {
-                if (currentModelType !== 'animations' || !currentModel || !Array.isArray(clips) || !clips.length) {
+                if (!currentModel || !Array.isArray(clips) || !clips.length) {
                     return false;
                 }
                 if (mixer) {
@@ -4831,7 +4831,7 @@
                     }
 
                     if (currentModelType !== 'animations' || !currentModel) {
-                        setStatus('Animations GLB is not ready yet');
+                        setStatus('Animations not ready yet');
                         return false;
                     }
                     const clips = await loadAnimationClipsFromFbxUrl(url, 'Custom Animation FBX');
@@ -5198,7 +5198,7 @@
                 },
                 
                 setQueue(items) {
-                    // items = [{name: 'animations.glb', status: 'pending'}, ...]
+                    // items = [{name: 'Animations FBX', status: 'pending'}, ...]
                     this.queue = items.map(item => ({
                         name: item.name || item,
                         status: item.status || 'pending'
@@ -6787,16 +6787,42 @@
                 // Note: currentModelType is defined at outer scope for access by waitAndInitViewer
                 
                 // Model cache to avoid reloading large files
+                // animationClips: clips from _all_animations_unity.fbx (applied to prepared model)
                 const modelCache = {
-                    animations: null,  // Cached animations model (100MB+)
-                    prepared: null,    // Cached prepared model
-                    animationsData: null, // Cached animations array
-                    preparedData: null
+                    prepared: null,       // Cached prepared model (with textures)
+                    preparedData: null,
+                    animationClips: null, // AnimationClip[] from FBX (no model swap)
+                    animationsData: null // Alias for animationClips
                 };
                 window.modelCache = modelCache; // Debug access
                 
-                // Swap cached model into scene (fast, no network)
+                // Swap cached model into scene, or apply cached animation clips to prepared model
                 function swapToCache(cacheKey) {
+                    if (cacheKey === 'animations') {
+                        // Animations: apply clips to prepared model (no model swap)
+                        const clips = modelCache.animationClips || modelCache.animationsData;
+                        if (!clips || !clips.length) return false;
+                        
+                        // Ensure we're on prepared model
+                        const preparedModel = modelCache.prepared;
+                        if (!preparedModel) return false;
+                        if (currentModel !== preparedModel) {
+                            if (currentModel) scene.remove(currentModel);
+                            currentModel = preparedModel;
+                            scene.add(currentModel);
+                            if (transformManager) transformManager.setRootModel(currentModel);
+                            if (transformManager) transformManager.setModel(currentModel);
+                            if (hierarchyNavigator) {
+                                hierarchyNavigator.setModel(currentModel);
+                                window.updateHierarchyUI?.();
+                            }
+                            if (window.recreateWireframe) window.recreateWireframe();
+                        }
+                        
+                        currentModelType = 'animations';
+                        return applyAnimationClipsToCurrentModel(clips);
+                    }
+                    
                     if (!modelCache[cacheKey]) return false;
                     
                     console.log(`[Viewer] Swapping to cached ${cacheKey} model`);
@@ -6813,15 +6839,14 @@
                     // Set root model for transforms
                     if (transformManager) transformManager.setRootModel(currentModel);
                     
-                    // Restore animations if any
-                    if (modelCache[cacheKey + 'Data']) {
+                    // Restore animations if any (prepared has none)
+                    if (modelCache[cacheKey + 'Data'] && modelCache[cacheKey + 'Data'].length) {
                         animations = modelCache[cacheKey + 'Data'];
-                        if (mixer) {
-                            mixer.stopAllAction();
-                        }
-                        if (animations.length > 0) {
-                            mixer = new THREE.AnimationMixer(currentModel);
-                        }
+                        if (mixer) mixer.stopAllAction();
+                        mixer = new THREE.AnimationMixer(currentModel);
+                    } else {
+                        animations = [];
+                        if (mixer) mixer.stopAllAction();
                     }
                     
                     // Update references
@@ -6875,7 +6900,7 @@
                         console.log('[Viewer] setActiveMode:', mode, 
                             'currentType:', currentModelType, 
                             'cacheHasPrepared:', !!modelCache.prepared,
-                            'cacheHasAnimations:', !!modelCache.animations);
+                            'cacheHasAnimations:', !!(modelCache.animationClips && modelCache.animationClips.length));
                         allBtns.forEach(b => b?.classList.remove('active'));
                         
                         switch (mode) {
@@ -6952,52 +6977,48 @@
                                     if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
                                 }
                                 
-                                // Load animations.glb if not already loaded
+                                // Load animation clips from FBX if not already cached
                                 if (currentModelType !== 'animations') {
-                                    // Try cache first (instant swap)
-                                    if (modelCache.animations && swapToCache('animations')) {
-                                        currentModelType = 'animations';
-                                        console.log('[Viewer] ✓ Swapped to cached animations model');
-                                        
-                                        // Setup animation UI after cache swap
-                                        if (animations.length && sel && playBtn && pauseBtn) {
-                                            sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
-                                            sel.classList.remove('hidden');
-                                            playBtn.classList.remove('hidden');
-                                            pauseBtn.classList.remove('hidden');
-                                            
-                                            // Auto-play first animation
-                                            try {
-                                                play(sel.value);
-                                                console.log('[Viewer] ✓ Auto-playing animation after cache swap:', sel.value);
-                                            } catch (e) {
-                                                console.warn('[Viewer] Auto-play after cache swap failed:', e);
-                                            }
-                                        }
+                                    if (modelCache.animationClips?.length && swapToCache('animations')) {
+                                        console.log('[Viewer] ✓ Applied cached animation clips');
                                     } else {
-                                        // Need to load from server
-                                        console.log('[Viewer] Loading animations.glb from server...');
+                                        // Ensure we're on prepared model (has textures)
+                                        if (currentModel !== modelCache.prepared && modelCache.prepared) {
+                                            if (currentModel) scene.remove(currentModel);
+                                            currentModel = modelCache.prepared;
+                                            scene.add(currentModel);
+                                            if (transformManager) {
+                                                transformManager.setRootModel(currentModel);
+                                                transformManager.setModel(currentModel);
+                                            }
+                                            if (hierarchyNavigator) {
+                                                hierarchyNavigator.setModel(currentModel);
+                                                window.updateHierarchyUI?.();
+                                            }
+                                            if (window.recreateWireframe) window.recreateWireframe();
+                                        }
+                                        // Load _all_animations_unity.fbx, extract clips, apply to prepared model
+                                        console.log('[Viewer] Loading animations.fbx from server...');
                                         setLoadingUIState(true);
                                         loadingManager.show('Loading Animations');
-                                        loadingManager.setQueue([
-                                            { name: 'Animations GLB', status: 'pending' }
-                                        ]);
-                                        const ok = await loadModel(
-                                            `/api/task/${taskId}/animations.glb`,
-                                            'Animations GLB',
-                                            0,
-                                            120000
-                                        );
-                                        if (ok) {
-                                            currentModelType = 'animations';
-                                            // Cache for future use
-                                            modelCache.animations = currentModel;
-                                            modelCache.animationsData = [...animations];
-                                            console.log('[Viewer] ✓ Cached animations model');
-                                        } else {
-                                            console.warn('[Viewer] Animations GLB failed; keep current GLB model without FBX model fallback');
+                                        loadingManager.setQueue([{ name: 'Animations FBX', status: 'pending' }]);
+                                        try {
+                                            const fbxUrl = `/api/task/${taskId}/animations.fbx`;
+                                            const clips = await loadAnimationClipsFromFbxUrl(fbxUrl, 'Animations FBX');
+                                            if (clips && clips.length && currentModel) {
+                                                modelCache.animationClips = clips;
+                                                modelCache.animationsData = clips;
+                                                currentModelType = 'animations';
+                                                applyAnimationClipsToCurrentModel(clips);
+                                                console.log('[Viewer] ✓ Loaded and applied', clips.length, 'animation clips from FBX');
+                                            } else {
+                                                console.warn('[Viewer] Animations FBX: no clips extracted or no model');
+                                            }
+                                        } catch (err) {
+                                            console.warn('[Viewer] Animations FBX load failed:', err.message);
+                                        } finally {
+                                            setLoadingUIState(false);
                                         }
-                                        setLoadingUIState(false);
                                     }
                                 }
                                 break;
@@ -8670,53 +8691,38 @@
             let animationsLoadingInBackground = false;
             
             async function loadAnimationsInBackground() {
-                if (animationsLoadingInBackground || modelCache.animations) {
+                if (animationsLoadingInBackground || (modelCache.animationClips && modelCache.animationClips.length)) {
                     return; // Already loading or cached
                 }
                 
                 animationsLoadingInBackground = true;
-                console.log('[Viewer] 🔄 Starting background load of animations...');
+                console.log('[Viewer] 🔄 Starting background load of animations (FBX)...');
                 
                 try {
-                    // Load animations GLB silently (no loading overlay)
-                    const { GLTFLoader } = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
-                    const loader = new GLTFLoader();
+                    // Load _all_animations_unity.fbx, extract clips only (keep prepared model for textures)
+                    const fbxUrl = `/api/task/${taskId}/animations.fbx`;
+                    const clips = await loadAnimationClipsFromFbxUrl(fbxUrl, 'Animations FBX');
                     
-                    const gltf = await new Promise((resolve, reject) => {
-                        loader.load(
-                            `/api/task/${taskId}/animations.glb`,
-                            resolve,
-                            (xhr) => {
-                                if (xhr.total > 0) {
-                                    const pct = Math.round((xhr.loaded / xhr.total) * 100);
-                                    console.log(`[Viewer] Background animations: ${pct}%`);
-                                }
-                            },
-                            reject
-                        );
-                    });
+                    if (!clips || !clips.length) {
+                        console.warn('[Viewer] Background animations FBX: no clips extracted');
+                        return;
+                    }
                     
-                    // Cache the loaded model (don't add to scene yet)
-                    const model = gltf.scene;
-                    const loadedAnimations = gltf.animations || [];
-                    
-                    modelCache.animations = model;
-                    modelCache.animationsData = loadedAnimations;
+                    modelCache.animationClips = clips;
+                    modelCache.animationsData = clips;
                     animationsLoaded = true;
                     
-                    console.log('[Viewer] ✓ Background animations loaded and cached!', loadedAnimations.length, 'animations');
+                    console.log('[Viewer] ✓ Background animations loaded and cached!', clips.length, 'clips from FBX');
                     
-                    // Show notification that animations are ready
                     showAnimationsReadyNotification();
                     
-                    // Auto-switch to animation mode if we are in prepared mode
                     if (typeof setActiveMode === 'function') {
                         console.log('[Viewer] Auto-switching to animation mode');
                         setActiveMode('animation');
                     }
                     
                 } catch (err) {
-                    console.warn('[Viewer] Background animations load failed, will try FBX later:', err.message);
+                    console.warn('[Viewer] Background animations FBX load failed:', err.message);
                 } finally {
                     animationsLoadingInBackground = false;
                 }
@@ -8744,10 +8750,11 @@
                     const r = await fetch(`/api/task/${taskId}`);
                     const t = await r.json();
                     
-                    // Check if animations are ready in ready_urls
-                    const animationsReady = t && t.ready_urls && t.ready_urls.some(url => 
-                        url.toLowerCase().includes('_all_animations') && url.toLowerCase().endsWith('.glb')
-                    );
+                    // Check if animations are ready in ready_urls (_all_animations_unity.fbx)
+                    const animationsReady = t && t.ready_urls && t.ready_urls.some(url => {
+                        const u = (url || '').toLowerCase();
+                        return u.includes('_all_animations') && (u.endsWith('.fbx') || u.includes('unity'));
+                    });
                     
                     console.log('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
 
@@ -8803,7 +8810,7 @@
                                 console.log('[Viewer] ✓ Prepared model loaded and cached');
                                 
                                 // Start loading animations in BACKGROUND (non-blocking)
-                                if ((t.status === 'done' || animationsReady) && !modelCache.animations) {
+                                if ((t.status === 'done' || animationsReady) && !(modelCache.animationClips && modelCache.animationClips.length)) {
                                     loadAnimationsInBackground();
                                 }
                             }
@@ -8813,12 +8820,12 @@
                     }
                     
                     // 3. If task is done or animations ready and we haven't started background load yet, start it
-                    if (t && (t.status === 'done' || animationsReady) && preparedLoaded && !modelCache.animations && !animationsLoadingInBackground) {
+                    if (t && (t.status === 'done' || animationsReady) && preparedLoaded && !(modelCache.animationClips && modelCache.animationClips.length) && !animationsLoadingInBackground) {
                         loadAnimationsInBackground();
                     }
                     
                     // 4. If task is done or animations ready and animations are cached but not shown, we can auto-switch
-                    if (t && (t.status === 'done' || animationsReady) && modelCache.animations && !finalLoaded) {
+                    if (t && (t.status === 'done' || animationsReady) && (modelCache.animationClips && modelCache.animationClips.length) && !finalLoaded) {
                         finalLoaded = true;
                         console.log('[Viewer] ✓ Task complete or animations ready, animations ready in cache');
                         
@@ -8836,7 +8843,7 @@
                     if (rigEditor && t) rigEditor.setTaskStatus(t.status);
                     
                     // Stop polling if task is done and everything is loaded
-                    if (t && t.status === 'done' && preparedLoaded && (modelCache.animations || animationsLoadingInBackground)) {
+                    if (t && t.status === 'done' && preparedLoaded && ((modelCache.animationClips && modelCache.animationClips.length) || animationsLoadingInBackground)) {
                         console.log('[Viewer] Task done, models loaded/loading. Stopping poll.');
                         return;
                     }

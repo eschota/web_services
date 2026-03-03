@@ -24,3 +24,4 @@ root@6268041-hp847164:~# git add . && git commit -m "Ваше сообщение
 git add . && git commit -m "Ваше сообщение" && git push
 cat /root/.ssh/id_rsa_qwerty_vpn
 git add . && git commit -m "авторебут" && git push
+git add . && git commit -m "Ваше сообщение" && git push
