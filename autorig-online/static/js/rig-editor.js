@@ -402,11 +402,11 @@ export class AOBaker {
     
     /**
      * Bake Cavity AO into UV space texture
-     * Uses dFdx/dFdy derivatives to detect surface curvature
+     * Uses fallback shader only (no dFdx/dFdy) - avoids WebGL errors in Telegram WebView
      */
     bakeToUV(model) {
         const resolution = this.resolution;
-        
+
         // Create UV bake render target
         const aoTarget = new THREE.WebGLRenderTarget(resolution, resolution, {
             minFilter: THREE.LinearFilter,
@@ -414,82 +414,43 @@ export class AOBaker {
             format: THREE.RGBAFormat,
             type: THREE.UnsignedByteType
         });
-        
-        // Create Cavity AO material
-        // Uses screen-space derivatives to detect curvature
+
+        const vertexShader = `
+            varying vec3 vWorldPos;
+            varying vec3 vWorldNormal;
+            varying vec2 vUv;
+            void main() {
+                vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                vWorldPos = worldPos.xyz;
+                vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+                vUv = uv;
+                vec2 uvPos = uv * 2.0 - 1.0;
+                gl_Position = vec4(uvPos.x, uvPos.y, 0.0, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            uniform float aoRadius;
+            uniform float aoIntensity;
+            varying vec3 vWorldNormal;
+            void main() {
+                vec3 normal = normalize(vWorldNormal);
+                float edgeFactor = 1.0 - abs(dot(normal, vec3(0.0, 1.0, 0.0)));
+                float cavity = edgeFactor * aoRadius * 5.0;
+                float ao = 1.0 - clamp(cavity * aoIntensity, 0.0, 0.95);
+                ao = pow(ao, 1.2);
+                gl_FragColor = vec4(vec3(ao), 1.0);
+            }
+        `;
+
         const cavityMaterial = new THREE.ShaderMaterial({
-            vertexShader: `
-                varying vec3 vWorldPos;
-                varying vec3 vWorldNormal;
-                varying vec2 vUv;
-                
-                void main() {
-                    // Transform to world space
-                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
-                    vWorldPos = worldPos.xyz;
-                    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-                    vUv = uv;
-                    
-                    // Use UV as screen position (bake to UV space)
-                    vec2 uvPos = uv * 2.0 - 1.0;
-                    gl_Position = vec4(uvPos.x, uvPos.y, 0.0, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform float aoRadius;
-                uniform float aoIntensity;
-                uniform int numSamples;
-                
-                varying vec3 vWorldPos;
-                varying vec3 vWorldNormal;
-                varying vec2 vUv;
-                
-                void main() {
-                    vec3 normal = normalize(vWorldNormal);
-                    
-                    // Method 1: Derivative-based curvature detection
-                    // How fast does the normal change across the surface?
-                    vec3 ddxNormal = dFdx(vWorldNormal);
-                    vec3 ddyNormal = dFdy(vWorldNormal);
-                    
-                    // Normal variation = curvature indicator
-                    // Higher values = more curved surface = more concave areas
-                    float normalVariation = length(ddxNormal) + length(ddyNormal);
-                    
-                    // Position derivatives for edge detection
-                    vec3 ddxPos = dFdx(vWorldPos);
-                    vec3 ddyPos = dFdy(vWorldPos);
-                    
-                    // Cross product magnitude indicates surface detail
-                    float surfaceDetail = length(cross(ddxPos, ddyPos));
-                    
-                    // Combine curvature metrics
-                    // aoRadius controls sensitivity to different detail sizes
-                    float cavity = normalVariation * aoRadius * 50.0;
-                    
-                    // Add edge darkening based on normal facing
-                    // Surfaces facing away from "up" get slightly darker
-                    float edgeFactor = 1.0 - abs(dot(normal, vec3(0.0, 1.0, 0.0)));
-                    cavity += edgeFactor * aoRadius * 5.0;
-                    
-                    // Apply intensity and clamp
-                    float ao = 1.0 - clamp(cavity * aoIntensity, 0.0, 0.95);
-                    
-                    // Gamma correction for better visual distribution
-                    ao = pow(ao, 1.2);
-                    
-                    gl_FragColor = vec4(vec3(ao), 1.0);
-                }
-            `,
+            vertexShader,
+            fragmentShader,
             uniforms: {
                 aoRadius: { value: this.aoRadius },
-                aoIntensity: { value: this.aoIntensity },
-                numSamples: { value: this.numSamples }
+                aoIntensity: { value: this.aoIntensity }
             },
-            side: THREE.DoubleSide,
-            extensions: {
-                derivatives: true
-            }
+            side: THREE.DoubleSide
         });
         
         // Create scene for UV baking
@@ -2218,7 +2179,6 @@ export class ViewerControls {
             console.warn('[ViewerControls] Cannot bake AO - no renderer');
             return;
         }
-        
         try {
             // Create AOBaker if not exists
             if (!this.aoBaker) {

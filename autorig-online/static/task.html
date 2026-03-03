@@ -1270,7 +1270,7 @@
             
                             <!-- Top-center: Version/FPS + Fullscreen only (camera/gizmos/wireframe/default hidden) -->
                             <div id="viewer-camera-wrap" style="position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%); pointer-events: auto; display: flex; gap: 0.5rem; align-items: center;">
-                                <div id="viewer-version" style="font-size: 0.6rem; color: rgba(79,70,229,0.8); font-family: monospace; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(79,70,229,0.3); white-space: nowrap;">v63</div>
+                                <div id="viewer-version" style="font-size: 0.6rem; color: rgba(79,70,229,0.8); font-family: monospace; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(79,70,229,0.3); white-space: nowrap;">v68</div>
                                 <div id="viewer-fps" style="font-size: 0.65rem; color: rgba(255,255,255,0.4); font-family: monospace; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); white-space: nowrap;">-- FPS</div>
                                 <!-- HIDDEN: Camera mode button -->
                                 <button id="viewer-camera-btn" class="btn btn-secondary" style="
@@ -4498,7 +4498,7 @@
             RigEditor, ViewerControls, RigType, CameraMode, MaterialChannel,
             TransformMode, TransformManager, SelectionSystem, GizmoLoader,
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
-        } from '/static/js/rig-editor.js?v=63';
+        } from '/static/js/rig-editor.js?v=68';
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -4668,6 +4668,55 @@
                 }
             }
 
+            function remapClipTrackNamesForModel(clips, model) {
+                if (!model || !Array.isArray(clips) || !clips.length) return clips;
+                const nodeNames = new Set();
+                model.traverse((obj) => { if (obj.name) nodeNames.add(obj.name); });
+                const has = (n) => nodeNames.has(n) || [...nodeNames].some((x) => x.toLowerCase() === (n || '').toLowerCase());
+
+                function remapPath(path) {
+                    if (!path || has(path)) return path;
+                    if (/l$/i.test(path) && !path.endsWith('.l')) {
+                        const withDot = path.slice(0, -1) + '.l';
+                        if (has(withDot)) return withDot;
+                    }
+                    if (/r$/i.test(path) && !path.endsWith('.r')) {
+                        const withDot = path.slice(0, -1) + '.r';
+                        if (has(withDot)) return withDot;
+                    }
+                    return path;
+                }
+
+                return clips.map((clip) => {
+                    if (!clip?.tracks?.length) return clip;
+                    let changed = false;
+                    const newTracks = clip.tracks.map((track) => {
+                        const name = String(track?.name || '');
+                        const dot = name.lastIndexOf('.');
+                        if (dot === -1) return track;
+                        const path = name.slice(0, dot);
+                        const prop = name.slice(dot);
+                        const newPath = remapPath(path);
+                        if (newPath === path) return track;
+                        changed = true;
+                        const TrackCtor = track.constructor;
+                        try {
+                            const args = [newPath + prop, track.times, track.values];
+                            if (typeof track.getInterpolation === 'function') args.push(track.getInterpolation());
+                            return new TrackCtor(...args);
+                        } catch (_) {
+                            return track;
+                        }
+                    });
+                    if (!changed) return clip;
+                    try {
+                        return new THREE.AnimationClip(clip.name, clip.duration, newTracks, clip.blendMode);
+                    } catch (_) {
+                        return clip;
+                    }
+                });
+            }
+
             function applyAnimationClipsToCurrentModel(clips, hints = []) {
                 if (!currentModel || !Array.isArray(clips) || !clips.length) {
                     return false;
@@ -4679,6 +4728,7 @@
                         // ignore stop errors
                     }
                 }
+                clips = remapClipTrackNamesForModel(clips, currentModel);
                 animations = [...clips];
                 mixer = new THREE.AnimationMixer(currentModel);
 
@@ -4686,6 +4736,10 @@
                 const preferredClipName = picked ? picked.name : (animations[0]?.name || null);
                 rebuildAnimationControls(preferredClipName);
                 setStatus(`Ready (${animations.length} animations)`);
+                // Auto-play first animation when applying clips
+                if (animations.length && typeof play === 'function') {
+                    play(preferredClipName || animations[0].name);
+                }
                 return true;
             }
 
@@ -6398,7 +6452,9 @@
                     }
                 });
                 window.viewerControls = viewerControls; // Make global for debugging
-                
+                if (window.Telegram?.WebApp) {
+                    viewerControls.bakeAOForModel = () => { viewerControls.bakedAOTexture = null; };
+                }
                 // Initialize TransformManager (QWER modes)
                 transformManager = new TransformManager({
                     scene,
@@ -8692,11 +8748,10 @@
             
             async function loadAnimationsInBackground() {
                 if (animationsLoadingInBackground || (modelCache.animationClips && modelCache.animationClips.length)) {
-                    return; // Already loading or cached
+                    return;
                 }
-                
                 animationsLoadingInBackground = true;
-                console.log('[Viewer] 🔄 Starting background load of animations (FBX)...');
+                console.log('[Viewer] 🔄 Loading animations FBX...');
                 
                 try {
                     // Load _all_animations_unity.fbx, extract clips only (keep prepared model for textures)
@@ -8704,7 +8759,7 @@
                     const clips = await loadAnimationClipsFromFbxUrl(fbxUrl, 'Animations FBX');
                     
                     if (!clips || !clips.length) {
-                        console.warn('[Viewer] Background animations FBX: no clips extracted');
+                        console.warn('[Viewer] Animations FBX: no clips extracted');
                         return;
                     }
                     
@@ -8715,14 +8770,17 @@
                     console.log('[Viewer] ✓ Background animations loaded and cached!', clips.length, 'clips from FBX');
                     
                     showAnimationsReadyNotification();
-                    
-                    if (typeof setActiveMode === 'function') {
-                        console.log('[Viewer] Auto-switching to animation mode');
-                        setActiveMode('animation');
-                    }
-                    
+                    const tryAnimSwitch = (attempt = 0) => {
+                        if (typeof setActiveMode === 'function') {
+                            console.log('[Viewer] Auto-switching to animation mode');
+                            setActiveMode('animation');
+                            return;
+                        }
+                        if (attempt < 10) setTimeout(() => tryAnimSwitch(attempt + 1), 300);
+                    };
+                    setTimeout(() => tryAnimSwitch(), 100);
                 } catch (err) {
-                    console.warn('[Viewer] Background animations FBX load failed:', err.message);
+                    console.warn('[Viewer] Animations FBX load failed:', err.message, err);
                 } finally {
                     animationsLoadingInBackground = false;
                 }
@@ -8790,12 +8848,16 @@
                         }
                     }
 
-                    // 2. Load PREPARED model first for instant preview (non-blocking)
+                    // 2. Start loading animations ASAP when ready (parallel with model)
+                    if (!isFree3DTask && t && (t.status === 'done' || animationsReady) && !(modelCache.animationClips && modelCache.animationClips.length) && !animationsLoadingInBackground) {
+                        loadAnimationsInBackground();
+                    }
+
+                    // 3. Load PREPARED model for instant preview
                     if (!isFree3DTask && t && t.prepared_glb_ready && !preparedLoaded && !preparedLoadingInProgress) {
                         preparedLoadingInProgress = true;
                         console.log('[Viewer] Loading prepared model for instant preview...');
                         
-                        // Setup loading queue for preview
                         loadingManager.show('Loading Model');
                         loadingManager.setQueue([{ name: 'Prepared Model', status: 'pending' }]);
                         
@@ -8804,28 +8866,17 @@
                             if (ok) {
                                 preparedLoaded = true;
                                 currentModelType = 'prepared';
-                                // Cache prepared model
                                 modelCache.prepared = currentModel;
                                 modelCache.preparedData = [];
                                 console.log('[Viewer] ✓ Prepared model loaded and cached');
-                                
-                                // Start loading animations in BACKGROUND (non-blocking)
-                                if ((t.status === 'done' || animationsReady) && !(modelCache.animationClips && modelCache.animationClips.length)) {
-                                    loadAnimationsInBackground();
-                                }
                             }
                         } finally {
                             preparedLoadingInProgress = false;
                         }
                     }
                     
-                    // 3. If task is done or animations ready and we haven't started background load yet, start it
-                    if (t && (t.status === 'done' || animationsReady) && preparedLoaded && !(modelCache.animationClips && modelCache.animationClips.length) && !animationsLoadingInBackground) {
-                        loadAnimationsInBackground();
-                    }
-                    
-                    // 4. If task is done or animations ready and animations are cached but not shown, we can auto-switch
-                    if (t && (t.status === 'done' || animationsReady) && (modelCache.animationClips && modelCache.animationClips.length) && !finalLoaded) {
+                    // 5. If animations cached and model loaded, auto-switch to animation mode
+                    if (t && (t.status === 'done' || animationsReady) && preparedLoaded && (modelCache.animationClips && modelCache.animationClips.length) && !finalLoaded) {
                         finalLoaded = true;
                         console.log('[Viewer] ✓ Task complete or animations ready, animations ready in cache');
                         
@@ -8839,10 +8890,8 @@
                         }
                     }
 
-                    // Update RigEditor status
                     if (rigEditor && t) rigEditor.setTaskStatus(t.status);
                     
-                    // Stop polling if task is done and everything is loaded
                     if (t && t.status === 'done' && preparedLoaded && ((modelCache.animationClips && modelCache.animationClips.length) || animationsLoadingInBackground)) {
                         console.log('[Viewer] Task done, models loaded/loading. Stopping poll.');
                         return;
