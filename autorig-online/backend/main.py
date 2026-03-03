@@ -4744,50 +4744,6 @@ async def api_set_task_viewer_settings(
     return {"ok": True}
 
 
-@app.get("/api/task/{task_id}/{resource_path:path}")
-async def api_proxy_task_resource(
-    task_id: str,
-    resource_path: str,
-    db: AsyncSession = Depends(get_db)
-):
-    """Proxy task resources (textures, .fbm, etc.) referenced by GLB/FBX models."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if not task.guid or not task.worker_api:
-        raise HTTPException(status_code=404, detail="Task resources not available")
-    from workers import get_worker_base_url
-    worker_base = get_worker_base_url(task.worker_api)
-    filename = resource_path.split("/")[-1] if "/" in resource_path else resource_path
-    candidates = []
-    for url in (task.ready_urls or []) + (task.output_urls or []):
-        url_clean = (url or "").strip()
-        if filename in url_clean or url_clean.endswith(filename):
-            candidates.append(url_clean)
-    if not candidates:
-        base = f"{worker_base}/converter/glb/{task.guid}"
-        candidates = [
-            f"{base}/{resource_path}",
-            f"{base}/{task.guid}_100k/{resource_path}",
-        ]
-    for file_url in candidates:
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(file_url, timeout=30.0, follow_redirects=True)
-                if response.status_code != 200:
-                    continue
-                ext = filename.split(".")[-1].lower()
-                ct = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp", "fbm": "application/octet-stream"}.get(ext, "application/octet-stream")
-                return Response(
-                    content=response.content,
-                    media_type=ct,
-                    headers={"Cache-Control": "public, max-age=86400", "Access-Control-Allow-Origin": "*"},
-                )
-            except (httpx.RequestError, httpx.HTTPStatusError):
-                continue
-    raise HTTPException(status_code=404, detail="Resource not found")
-
-
 # =============================================================================
 # Static Files & Pages
 # =============================================================================
@@ -5108,12 +5064,13 @@ async def task_page(
 ):
     """Serve task page with dynamic OG meta tags for Telegram/social sharing"""
     
+    # Read base template
     task_html_path = STATIC_DIR / "task.html"
     html_content = task_html_path.read_text(encoding="utf-8")
-    _no_cache = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
-
+    
+    # If no task_id, return default page
     if not id:
-        return HTMLResponse(content=html_content, headers=_no_cache)
+        return HTMLResponse(content=html_content)
     
     task_id = id
     base_url = APP_URL or "https://autorig.online"
@@ -5205,7 +5162,7 @@ async def task_page(
         f'<title>{task_title} | AutoRig.online</title>'
     )
     
-    return HTMLResponse(content=html_content, headers=_no_cache)
+    return HTMLResponse(content=html_content)
 
 
 @app.post("/api/task/{task_id}/purchase-intent")
