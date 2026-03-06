@@ -25,6 +25,23 @@ from workers import (
 # =============================================================================
 # Helper Functions
 # =============================================================================
+def get_task_progress_reference_time(task: Task) -> Optional[datetime]:
+    """
+    Return last *real* progress timestamp for stale detection.
+    Do not use updated_at, because it is bumped by periodic polling.
+    """
+    return task.last_progress_at or task.created_at
+
+
+def get_task_no_progress_minutes(task: Task, now: Optional[datetime] = None) -> float:
+    """Minutes since real progress start/reference."""
+    ref = get_task_progress_reference_time(task)
+    if not ref:
+        return 0.0
+    now_ts = now or datetime.utcnow()
+    return max(0.0, (now_ts - ref).total_seconds() / 60.0)
+
+
 def find_file_by_pattern(ready_urls: List[str], pattern: str, quality: str = "100k") -> Optional[str]:
     """
     Find a file in ready_urls matching the pattern in the specified quality folder.
@@ -130,6 +147,7 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
                     task.output_urls = result.output_urls
                     task.total_count = len(result.output_urls)
                     task.status = "processing"
+                    task.last_progress_at = datetime.utcnow()
                     task.updated_at = datetime.utcnow()
                     await db.commit()
                 return
@@ -213,6 +231,8 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     task.output_urls = result.output_urls
     task.total_count = len(result.output_urls)
     task.status = "processing"
+    # Start stale timer from (re)dispatch moment, not from original task creation time.
+    task.last_progress_at = datetime.utcnow()
     task.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(task)
@@ -449,12 +469,17 @@ async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
         # 2. Check for staleness (no progress for 10 minutes)
         # Only for tasks that are actually in 'processing'
         if task.status == "processing":
-            reference_time = task.last_progress_at or task.updated_at or task.created_at
-            
+            reference_time = get_task_progress_reference_time(task)
+
             if reference_time and reference_time < stale_cutoff:
                 # Additional check: if it has URLs but no progress, or just no progress at all
                 if task.ready_count == 0:
-                    print(f"[Stale Task] Detected stale task {task.id}: no progress since {reference_time}")
+                    no_progress_min = get_task_no_progress_minutes(task, now=now)
+                    print(
+                        f"[Stale Task] Detected stale task {task.id}: "
+                        f"worker={task.worker_api}, no_progress={no_progress_min:.1f}m, "
+                        f"since={reference_time}"
+                    )
                     if await reset_stale_task(db, task):
                         action_count += 1
     
@@ -462,6 +487,38 @@ async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
         await db.commit()
         
     return action_count
+
+
+async def get_stalled_processing_tasks_by_worker(
+    db: AsyncSession,
+    *,
+    min_stalled_minutes: int
+) -> dict[str, list[Task]]:
+    """
+    Return processing tasks that have no real progress for at least N minutes,
+    grouped by worker_api.
+    """
+    from datetime import timedelta
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=min_stalled_minutes)
+    result = await db.execute(
+        select(Task).where(Task.status == "processing")
+    )
+    processing_tasks = result.scalars().all()
+
+    grouped: dict[str, list[Task]] = {}
+    for task in processing_tasks:
+        if task.ready_count != 0:
+            continue
+        ref = get_task_progress_reference_time(task)
+        if not ref or ref >= cutoff:
+            continue
+        worker = (task.worker_api or "").strip()
+        if not worker:
+            continue
+        grouped.setdefault(worker, []).append(task)
+    return grouped
 
 
 # =============================================================================

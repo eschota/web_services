@@ -7,6 +7,8 @@ import asyncio
 from typing import Optional, List, Tuple, Dict
 from dataclasses import dataclass
 import random
+import os
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -105,6 +107,66 @@ async def get_configured_workers(db: Optional[AsyncSession] = None) -> List[str]
     return [url for (url, _w) in await get_configured_workers_with_weight(db)]
 
 
+WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
+_worker_quarantine_until: Dict[str, datetime] = {}
+_worker_quarantine_reason: Dict[str, str] = {}
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+def _purge_expired_quarantine(now: Optional[datetime] = None) -> None:
+    ts = now or _utcnow()
+    expired = [url for (url, until) in _worker_quarantine_until.items() if until <= ts]
+    for url in expired:
+        _worker_quarantine_until.pop(url, None)
+        _worker_quarantine_reason.pop(url, None)
+
+
+def quarantine_worker(worker_url: str, reason: Optional[str] = None, ttl_seconds: Optional[int] = None) -> None:
+    """Temporarily exclude worker from selection."""
+    if not worker_url:
+        return
+    ttl = int(ttl_seconds or WORKER_QUARANTINE_SECONDS)
+    now = _utcnow()
+    until = now + timedelta(seconds=max(60, ttl))
+    prev_until = _worker_quarantine_until.get(worker_url)
+    if not prev_until or prev_until < until:
+        _worker_quarantine_until[worker_url] = until
+    if reason:
+        _worker_quarantine_reason[worker_url] = reason
+    print(
+        f"[Workers] Quarantine enabled for {worker_url} "
+        f"until {until.isoformat()} reason={reason or '-'}"
+    )
+
+
+def clear_worker_quarantine(worker_url: str) -> None:
+    """Clear worker quarantine manually or on recovery."""
+    removed = _worker_quarantine_until.pop(worker_url, None)
+    _worker_quarantine_reason.pop(worker_url, None)
+    if removed:
+        print(f"[Workers] Quarantine cleared for {worker_url}")
+
+
+def is_worker_quarantined(worker_url: str) -> bool:
+    _purge_expired_quarantine()
+    return worker_url in _worker_quarantine_until
+
+
+def get_quarantined_workers() -> Dict[str, dict]:
+    """Snapshot of currently quarantined workers."""
+    _purge_expired_quarantine()
+    snapshot: Dict[str, dict] = {}
+    for url, until in _worker_quarantine_until.items():
+        snapshot[url] = {
+            "until": until.isoformat(),
+            "reason": _worker_quarantine_reason.get(url)
+        }
+    return snapshot
+
+
 async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerInfo:
     """Get load/status from a single worker"""
     try:
@@ -155,12 +217,23 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
 
     statuses = await get_all_workers_status(worker_urls)
     available = [w for w in statuses if w.available]
-    if not available:
-        return worker_urls[0]
+    quarantine_safe_available = [w for w in available if not is_worker_quarantined(w.url)]
+
+    if quarantine_safe_available:
+        candidates_pool = quarantine_safe_available
+    elif available:
+        # Degraded mode: all available workers are quarantined.
+        # Keep service alive by falling back to available workers anyway.
+        candidates_pool = available
+        print("[Workers] All available workers are quarantined, using degraded fallback")
+    else:
+        # No worker responded as available. Prefer non-quarantined URL for optimistic dispatch.
+        non_quarantined_urls = [u for u in worker_urls if not is_worker_quarantined(u)]
+        return (non_quarantined_urls or worker_urls)[0]
 
     weight_by_url: Dict[str, int] = {u: w for (u, w) in workers_with_weight}
-    max_weight = max(weight_by_url.get(w.url, 0) for w in available)
-    candidates = [w for w in available if weight_by_url.get(w.url, 0) == max_weight]
+    max_weight = max(weight_by_url.get(w.url, 0) for w in candidates_pool)
+    candidates = [w for w in candidates_pool if weight_by_url.get(w.url, 0) == max_weight]
     candidates.sort(key=lambda w: w.load)
     return candidates[0].url
 

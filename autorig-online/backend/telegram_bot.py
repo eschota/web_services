@@ -502,6 +502,49 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def broadcast_worker_stalled(
+    worker_url: str,
+    stalled_tasks: int,
+    oldest_stalled_minutes: int,
+    sample_task_ids: list[str] | None = None,
+) -> None:
+    """Notify about stalled worker state (throttled by caller)."""
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping worker stalled notification")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    safe_url = html.escape(worker_url or "unknown")
+    sample = ", ".join((sample_task_ids or [])[:3])
+    sample_line = f"\n🧩 Tasks: <code>{html.escape(sample)}</code>" if sample else ""
+    text = (
+        f"🚨 <b>Worker stalled</b>\n"
+        f"🔧 {safe_url} | 📌 stalled: {int(stalled_tasks)} | ⏱ oldest: {int(oldest_stalled_minutes)}m"
+        f"{sample_line}"
+    )
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            ), retry_network=False)
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
 async def broadcast_bulk_restart_summary(total: int, restarted: int, errors: list, admin_email: str) -> None:
     """Notify about bulk restart completion."""
     print(f"[Telegram] broadcast_bulk_restart_summary: {restarted}/{total}")

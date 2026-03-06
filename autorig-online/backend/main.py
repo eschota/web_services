@@ -7,7 +7,7 @@ import os
 import uuid
 import shutil
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import hashlib
 import hmac
@@ -69,7 +69,12 @@ from models import (
     # Scene list models
     SceneListItem, SceneListResponse, SceneLikeResponse
 )
-from workers import get_global_queue_status
+from workers import (
+    get_global_queue_status,
+    quarantine_worker,
+    clear_worker_quarantine,
+    is_worker_quarantined,
+)
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -83,7 +88,9 @@ from tasks import (
     get_all_users, update_user_balance,
     get_gallery_items, format_time_ago,
     find_and_reset_stale_tasks,
-    find_file_by_pattern
+    find_file_by_pattern,
+    get_stalled_processing_tasks_by_worker,
+    get_task_no_progress_minutes,
 )
 
 
@@ -231,6 +238,86 @@ def _atomic_write_json_file(path: str, data: dict) -> None:
 # =============================================================================
 background_task_running = False
 background_worker_cycle_count = 0  # Track cycles for periodic stale task checks
+STALLED_ALERT_REPEAT_SECONDS = int(os.getenv("STALLED_ALERT_REPEAT_SECONDS", "3600"))
+STALLED_TASK_THRESHOLD = int(os.getenv("STALLED_TASK_THRESHOLD", "2"))
+STALLED_RECOVERY_HEALTHY_CYCLES = int(os.getenv("STALLED_RECOVERY_HEALTHY_CYCLES", "3"))
+_stalled_worker_state: dict[str, dict] = {}
+
+
+async def _monitor_stalled_workers(db: AsyncSession, queue_status=None) -> bool:
+    """
+    Detect workers with stale processing tasks, quarantine them and send periodic alerts.
+    Returns True when at least one worker is currently stalled.
+    """
+    from config import STALE_TASK_TIMEOUT_MINUTES
+    from telegram_bot import broadcast_worker_stalled
+
+    now = datetime.utcnow()
+    stalled_grouped = await get_stalled_processing_tasks_by_worker(
+        db,
+        min_stalled_minutes=STALE_TASK_TIMEOUT_MINUTES
+    )
+    active_stalled_workers: set[str] = set()
+    queue_by_url = {w.url: w for w in (queue_status.workers if queue_status else [])}
+
+    for worker_url, tasks in stalled_grouped.items():
+        if len(tasks) < STALLED_TASK_THRESHOLD:
+            continue
+        active_stalled_workers.add(worker_url)
+        oldest_minutes = int(max(get_task_no_progress_minutes(t, now=now) for t in tasks) or 0)
+        reason = f"stalled_tasks={len(tasks)}, oldest={oldest_minutes}m"
+        quarantine_worker(worker_url, reason=reason)
+
+        state = _stalled_worker_state.get(worker_url) or {}
+        first_seen = state.get("first_seen_at") or now
+        last_alert_at = state.get("last_alert_at")
+        should_alert = (
+            last_alert_at is None
+            or (now - last_alert_at).total_seconds() >= STALLED_ALERT_REPEAT_SECONDS
+        )
+        if should_alert:
+            sample_ids = [t.id for t in tasks[:3]]
+            asyncio.create_task(
+                broadcast_worker_stalled(
+                    worker_url=worker_url,
+                    stalled_tasks=len(tasks),
+                    oldest_stalled_minutes=oldest_minutes,
+                    sample_task_ids=sample_ids,
+                )
+            )
+            last_alert_at = now
+
+        _stalled_worker_state[worker_url] = {
+            "first_seen_at": first_seen,
+            "last_alert_at": last_alert_at,
+            "healthy_cycles": 0,
+        }
+
+    # Recovery tracking for previously stalled workers.
+    for worker_url in list(_stalled_worker_state.keys()):
+        if worker_url in active_stalled_workers:
+            continue
+        state = _stalled_worker_state.get(worker_url) or {}
+        healthy_cycles = int(state.get("healthy_cycles") or 0)
+        worker_q = queue_by_url.get(worker_url)
+        # Consider worker healthy when it responds and has no queue pressure.
+        is_healthy_now = bool(
+            worker_q
+            and worker_q.available
+            and worker_q.total_active == 0
+            and worker_q.total_pending == 0
+            and worker_q.queue_size == 0
+        )
+        healthy_cycles = healthy_cycles + 1 if is_healthy_now else 0
+        if healthy_cycles >= STALLED_RECOVERY_HEALTHY_CYCLES:
+            clear_worker_quarantine(worker_url)
+            _stalled_worker_state.pop(worker_url, None)
+            print(f"[Stalled Monitor] Worker recovered: {worker_url}")
+        else:
+            state["healthy_cycles"] = healthy_cycles
+            _stalled_worker_state[worker_url] = state
+
+    return len(active_stalled_workers) > 0
 
 async def background_task_updater():
     """Background worker that updates all processing tasks periodically"""
@@ -248,15 +335,37 @@ async def background_task_updater():
             background_worker_cycle_count += 1
             
             async with AsyncSessionLocal() as db:
+                queue_status = None
+                force_stale_reset = False
                 # =============================================================
                 # 1. Dispatch queued tasks (status=created) to free workers
                 # =============================================================
                 try:
                     queue_status = await get_global_queue_status(db=db)
+                    try:
+                        stalled_detected = await _monitor_stalled_workers(db, queue_status=queue_status)
+                        if stalled_detected:
+                            force_stale_reset = True
+                    except Exception as e:
+                        print(f"[Background Worker] Stalled monitor error: {e}")
+
                     free_workers = [
                         w for w in queue_status.workers
-                        if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)
+                        if (
+                            w.available
+                            and (w.total_active < w.max_concurrent)
+                            and (w.queue_size <= 0)
+                            and not is_worker_quarantined(w.url)
+                        )
                     ]
+                    if not free_workers:
+                        fallback_workers = [
+                            w for w in queue_status.workers
+                            if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)
+                        ]
+                        if fallback_workers:
+                            free_workers = fallback_workers
+                            print("[Background Worker] All free workers are quarantined, using degraded dispatch fallback")
 
                     if free_workers:
                         # Pull up to N queued tasks
@@ -277,13 +386,14 @@ async def background_task_updater():
                     print(f"[Background Worker] Queue dispatch error: {e}")
 
                 # =============================================================
-                # 2. Check for stale tasks periodically
+                # 2. Check for stale tasks periodically (or immediately on stall)
                 # =============================================================
-                if background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0:
+                if force_stale_reset or (background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0):
                     try:
                         reset_count = await find_and_reset_stale_tasks(db)
                         if reset_count > 0:
-                            print(f"[Background Worker] Auto-reset {reset_count} stale task(s)")
+                            reason = "forced" if force_stale_reset else "periodic"
+                            print(f"[Background Worker] Auto-reset {reset_count} stale task(s) [{reason}]")
                     except Exception as e:
                         print(f"[Background Worker] Stale task check error: {e}")
 
@@ -4090,6 +4200,39 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
     return None
 
 
+def _resolve_worker_base_from_task(task) -> Optional[str]:
+    """Resolve worker base URL from task metadata without requiring worker_api."""
+    from workers import get_worker_base_url
+
+    # 1) Best source: normalized worker_api.
+    if getattr(task, "worker_api", None):
+        try:
+            return get_worker_base_url(task.worker_api)
+        except Exception:
+            pass
+
+    # 2) Progress page can contain the worker host.
+    progress_page = str(getattr(task, "progress_page", "") or "").strip()
+    if progress_page:
+        try:
+            parsed = urlparse(progress_page)
+            if parsed.scheme and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+        except Exception:
+            pass
+
+    # 3) Fallback to any known ready/output URL host.
+    for url in (list(getattr(task, "ready_urls", []) or []) + list(getattr(task, "output_urls", []) or [])):
+        try:
+            parsed = urlparse(str(url).strip())
+            if parsed.scheme and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+        except Exception:
+            continue
+
+    return None
+
+
 async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
     """Proxy a model file from worker with streaming.
     
@@ -4105,31 +4248,50 @@ async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
     content_type = content_types.get(ext, "application/octet-stream")
     
     # Create client that lives through the response
-    client = httpx.AsyncClient()
-    
-    async def stream_file():
+    client = httpx.AsyncClient(timeout=300.0, follow_redirects=True)
+    try:
+        req = client.build_request("GET", url)
+        upstream = await client.send(req, stream=True)
+    except Exception as e:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"Model source unavailable: {e}")
+
+    if upstream.status_code != 200:
+        status = 404 if upstream.status_code == 404 else 502
         try:
-            async with client.stream("GET", url, timeout=300.0, follow_redirects=True) as response:
-                if response.status_code != 200:
-                    return
-                # Use larger chunks for better throughput
-                async for chunk in response.aiter_bytes(chunk_size=131072):  # 128KB chunks
-                    yield chunk
+            await upstream.aclose()
         finally:
             await client.aclose()
-    
+        raise HTTPException(status_code=status, detail=f"Model source returned HTTP {upstream.status_code}")
+
+    async def _close_stream_resources():
+        try:
+            await upstream.aclose()
+        finally:
+            await client.aclose()
+
     headers = {
         "Content-Disposition": f"inline; filename={filename}",
         "Cache-Control": "public, max-age=86400",  # 24 hours cache
         "Access-Control-Allow-Origin": "*",
         "X-Content-Type-Options": "nosniff"
     }
-    # Note: Don't set Content-Length as GZip middleware will change the size
+    content_length = upstream.headers.get("content-length")
+    last_modified = upstream.headers.get("last-modified")
+    etag = upstream.headers.get("etag")
+    if content_length:
+        headers["Content-Length"] = content_length
+    if last_modified:
+        headers["Last-Modified"] = last_modified
+    if etag:
+        headers["ETag"] = etag
 
+    media_type = upstream.headers.get("content-type") or content_type
     return StreamingResponse(
-        stream_file(),
-        media_type=content_type,
-        headers=headers
+        upstream.aiter_bytes(chunk_size=131072),  # 128KB chunks
+        media_type=media_type,
+        headers=headers,
+        background=BackgroundTask(_close_stream_resources),
     )
 
 
@@ -4252,7 +4414,7 @@ async def api_proxy_animations_glb(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.guid or not task.worker_api:
+    if not task.guid:
         raise HTTPException(status_code=404, detail="Model not available yet")
     
     # Check cache first (fastest path)
@@ -4268,24 +4430,22 @@ async def api_proxy_animations_glb(
             }
         )
     
-    from workers import get_worker_base_url
-    worker_base = get_worker_base_url(task.worker_api)
-    
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
-    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations", ".glb")
+    animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
     if animations_url:
         result = await _get_cached_glb(task_id, animations_url, "animations")
         if result:
             return result
-    
-    # Fallback: try main model GLB
-    model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
-    result = await _get_cached_glb(task_id, model_url, "animations")
-    if result:
-        return result
-    
-    # Last resort: stream without caching
-    return await _proxy_model_file(model_url, f"{task_id}_animations.glb")
+
+    # Fallback: synthesize canonical all_animations path from worker root.
+    worker_base = _resolve_worker_base_from_task(task)
+    if worker_base:
+        synthesized_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations.glb"
+        result = await _get_cached_glb(task_id, synthesized_url, "animations")
+        if result:
+            return result
+
+    raise HTTPException(status_code=404, detail="Animations GLB not available yet")
 
 
 @app.get("/api/task/{task_id}/animations.fbx")

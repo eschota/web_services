@@ -6995,7 +6995,20 @@
                                             modelCache.animationsData = [...animations];
                                             console.log('[Viewer] ✓ Cached animations model');
                                         } else {
-                                            console.warn('[Viewer] Animations GLB failed; keep current GLB model without FBX model fallback');
+                                            console.error('[Viewer] Animations GLB failed; file is unavailable or corrupted');
+                                            setStatus('Animations GLB unavailable/corrupted');
+                                            mode = 'tpose';
+                                            animBtn?.classList.remove('active');
+                                            tposeBtn?.classList.add('active');
+                                            setEditControlsVisible(true);
+                                            if (tPoseReference) {
+                                                tPoseReference.setVisible(true);
+                                                const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
+                                                if (tposeToggleBtn) tposeToggleBtn.classList.add('active');
+                                            }
+                                            if (sel) sel.classList.add('hidden');
+                                            if (playBtn) playBtn.classList.add('hidden');
+                                            if (pauseBtn) pauseBtn.classList.add('hidden');
                                         }
                                         setLoadingUIState(false);
                                     }
