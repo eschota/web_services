@@ -256,6 +256,8 @@
     "free3d_searching": "Поиск...",
     "free3d_no_results": "Модели не найдены. Попробуй другой запрос.",
     "free3d_confirm_create": "Добавить модель \"{title}\" в очередь риггинга?",
+    "free3d_creating_task_title": "Создаём задачу для \"{title}\"",
+    "free3d_creating_task_subtitle": "Пожалуйста, подождите. Перенаправление выполнится автоматически.",
 
     "log_copy": "Копировать",
     "log_copied": "Скопировано!",

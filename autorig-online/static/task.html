@@ -8926,7 +8926,7 @@
     </script>
 
     <!-- Site Header Component -->
-    <script src="/static/js/header.js"></script>
+    <script src="/static/js/header.js?v=20260306-searchfix2"></script>
     <script>
         // Inject site header (skip in webapp mode)
         (function() {
@@ -8936,11 +8936,48 @@
             if (!isWebAppMode) {
                 const headerContainer = document.getElementById('site-header');
                 if (headerContainer && window.SiteHeader) {
-                    // Render header without Free3D search block on task page
-                    headerContainer.innerHTML = SiteHeader.render({ showSearch: false });
+                    // Render header with Free3D search ribbon on task page
+                    headerContainer.innerHTML = SiteHeader.render({ showSearch: true });
                     
                     // Initialize header functionality
                     SiteHeader.init();
+                    SiteHeader.initSearch(async (modelUrl, modelName) => {
+                        if (!modelUrl) return;
+
+                        const confirmTemplate = (window.t ? t('free3d_confirm_create') : 'Add model "{title}" to rigging queue?');
+                        const confirmText = confirmTemplate.replace('{title}', modelName || 'Untitled');
+                        const confirmed = confirm(confirmText);
+                        if (!confirmed) return;
+
+                        const formData = new FormData();
+                        formData.append('source', 'link');
+                        formData.append('input_url', modelUrl);
+                        formData.append('type', 't_pose');
+
+                        try {
+                            const resp = await fetch('/api/task/create', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await resp.json();
+                            if (resp.ok && data.task_id) {
+                                window.location.href = `/task?id=${data.task_id}`;
+                                return;
+                            }
+                            if (resp.status === 401) {
+                                window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                                return;
+                            }
+                            if (resp.status === 402) {
+                                window.location.href = '/buy-credits';
+                                return;
+                            }
+                            alert((data && (data.detail || data.message)) || (window.t ? t('error_generic') : 'Failed to create task'));
+                        } catch (e) {
+                            console.error('[Free3D] Failed to create task from task page:', e);
+                            alert(window.t ? t('error_generic') : 'Failed to create task');
+                        }
+                    });
                     
                     if (window.I18n) {
                         // Setup language selector after injection

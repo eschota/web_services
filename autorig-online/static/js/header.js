@@ -105,7 +105,7 @@ function renderSiteHeader(options = {}) {
  */
 function renderFree3DSearch() {
     return `
-    <section class="free3d-search">
+    <section class="free3d-search hidden">
         <div class="container">
             <div class="free3d-search-row">
                 <label for="free3d-search-input" class="free3d-search-label" data-i18n="free3d_search_label">Search Free 3D Models</label>
@@ -227,12 +227,47 @@ function initFree3DSearch(onModelSelect) {
     const resultsContainer = document.getElementById('free3d-results');
     const statusSpan = document.getElementById('free3d-search-status');
     const randomizeBtn = document.getElementById('free3d-randomize-btn');
+    const searchSection = document.querySelector('.free3d-search');
     
-    if (!searchInput || !resultsContainer) return;
+    if (!searchInput || !resultsContainer || !searchSection) return;
     
     let searchTimeout = null;
+    let searchEnabled = false;
+
+    function hideSearchSection(reason = 'unknown') {
+        searchSection.classList.add('hidden');
+        resultsContainer.classList.add('hidden');
+        statusSpan?.classList.add('hidden');
+        searchEnabled = false;
+        console.warn(`[Free3D][Header] Search ribbon hidden: ${reason}`);
+    }
+
+    function showSearchSection() {
+        searchSection.classList.remove('hidden');
+        searchEnabled = true;
+    }
+
+    async function probeSearchHealth() {
+        try {
+            const resp = await fetch('/api/free3d/search?mode=browse&topK=1&type=1');
+            if (!resp.ok) {
+                hideSearchSection(`http_${resp.status}`);
+                return;
+            }
+            const data = await resp.json();
+            if (!data || data.ok !== true || data.degraded) {
+                hideSearchSection('degraded_upstream');
+                return;
+            }
+            showSearchSection();
+        } catch (e) {
+            hideSearchSection(`probe_failed_${e?.message || 'unknown'}`);
+        }
+    }
     
     async function performSearch(query, category = 'characters') {
+        if (!searchEnabled) return;
+
         if (!query || query.length < 2) {
             resultsContainer.classList.add('hidden');
             return;
@@ -243,31 +278,67 @@ function initFree3DSearch(onModelSelect) {
         }
         
         try {
-            const resp = await fetch(`/api/free3d/search?q=${encodeURIComponent(query)}&category=${category}`);
+            const cacheBust = Date.now();
+            const resp = await fetch(`/api/free3d/search?q=${encodeURIComponent(query)}&mode=semantic&topK=20&_=${cacheBust}`);
             if (!resp.ok) throw new Error('Search failed');
             
             const data = await resp.json();
+            if (!data || data.ok !== true || data.degraded) {
+                hideSearchSection('search_degraded');
+                return;
+            }
+
             renderSearchResults(data.results || []);
         } catch (e) {
             console.error('[Free3D] Search error:', e);
-            resultsContainer.innerHTML = '<div style="padding: 1rem; color: var(--text-muted);">Search failed</div>';
-            resultsContainer.classList.remove('hidden');
+            hideSearchSection('search_failed');
         } finally {
             if (statusSpan) statusSpan.classList.add('hidden');
         }
     }
+
+    function normalizeResultItem(model) {
+        if (!model || typeof model !== 'object') return null;
+        const title = model.title || model.name || model.model_name || model.display_name || '';
+        const preview =
+            model.previewSmallAbsUrl ||
+            model.previewMediumAbsUrl ||
+            model.preview_small_abs_url ||
+            model.preview_medium_abs_url ||
+            model.previewSmallUrl ||
+            model.previewMediumUrl ||
+            model.preview_url ||
+            model.thumbnail_url ||
+            '';
+        const glbUrl =
+            model.glb_url ||
+            model.glb100k_url ||
+            model.glb_base_url ||
+            model.model_url ||
+            model.url ||
+            '';
+
+        return {
+            title: (title && String(title).trim()) || 'Untitled',
+            preview: preview || '/static/images/placeholder-thumb.svg',
+            glbUrl: (glbUrl && String(glbUrl).trim()) || '',
+        };
+    }
     
     function renderSearchResults(results) {
-        if (!results.length) {
+        const normalized = (results || []).map(normalizeResultItem).filter(Boolean);
+        if (!normalized.length) {
             resultsContainer.innerHTML = '<div style="padding: 1rem; color: var(--text-muted);">No models found</div>';
             resultsContainer.classList.remove('hidden');
             return;
         }
         
-        resultsContainer.innerHTML = results.map(model => `
-            <div class="free3d-result-item" data-url="${model.glb_url || model.url}" data-name="${model.name || ''}">
-                <img src="${model.thumb || '/static/images/placeholder-thumb.svg'}" alt="${model.name || 'Model'}" loading="lazy">
-                <div class="free3d-result-name">${model.name || 'Untitled'}</div>
+        resultsContainer.innerHTML = normalized.map(model => `
+            <div class="free3d-item free3d-result-item" data-url="${model.glbUrl}" data-name="${model.title}" title="${model.title}">
+                <div class="free3d-item-inner">
+                    <img src="${model.preview}" alt="${model.title}" loading="lazy" onerror="this.src='/static/images/placeholder-thumb.svg'">
+                </div>
+                <div class="free3d-item-title free3d-result-name">${model.title}</div>
             </div>
         `).join('');
         
@@ -281,7 +352,7 @@ function initFree3DSearch(onModelSelect) {
                 if (onModelSelect && url) {
                     onModelSelect(url, name);
                 } else if (url) {
-                    // Default: navigate to task page with URL
+                    // Default fallback: open homepage with model URL param
                     window.location.href = `/?url=${encodeURIComponent(url)}`;
                 }
             });
@@ -310,6 +381,7 @@ function initFree3DSearch(onModelSelect) {
     if (randomizeBtn) {
         const randomQueries = ['robot', 'warrior', 'girl', 'zombie', 'soldier', 'knight', 'ninja', 'monster', 'alien', 'dragon'];
         randomizeBtn.addEventListener('click', () => {
+            if (!searchEnabled) return;
             const randomQuery = randomQueries[Math.floor(Math.random() * randomQueries.length)];
             searchInput.value = randomQuery;
             const category = categorySelect ? categorySelect.value : 'characters';
@@ -321,11 +393,14 @@ function initFree3DSearch(onModelSelect) {
     searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             clearTimeout(searchTimeout);
+            if (!searchEnabled) return;
             const query = searchInput.value.trim();
             const category = categorySelect ? categorySelect.value : 'characters';
             performSearch(query, category);
         }
     });
+
+    probeSearchHealth();
 }
 
 // Export for global use

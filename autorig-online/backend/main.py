@@ -16,7 +16,7 @@ import json
 import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse, quote, unquote
+from urllib.parse import urlparse, quote, unquote, parse_qsl
 from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form
@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -35,16 +35,16 @@ from config import (
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
     RATE_LIMIT_TASKS_PER_MINUTE, ADMIN_EMAILS,
     ANON_FREE_LIMIT,
-    GUMROAD_PRODUCT_CREDITS,
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
-    GA_MEASUREMENT_ID, GA_API_SECRET
+    GA_MEASUREMENT_ID, GA_API_SECRET,
+    GUMROAD_PRODUCT_CREDITS,
 )
 from database import (
-    init_db, get_db, User, AnonSession, GumroadSale, ApiKey, TaskLike, TaskFilePurchase,
+    init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint,
-    TaskAnimationPurchase, TaskAnimationBundlePurchase
+    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase
 )
 from models import (
     TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
@@ -1502,118 +1502,138 @@ async def api_create_task(
 @app.api_route("/api-gumroad", methods=["GET", "HEAD", "OPTIONS"])
 @app.api_route("/webhook/gumroad", methods=["GET", "HEAD", "OPTIONS"])
 @app.api_route("/gumroad", methods=["GET", "HEAD", "OPTIONS"])
+@app.api_route("/gumroad/ping", methods=["GET", "HEAD", "OPTIONS"])
 async def api_gumroad_ping_check():
     """Gumroad URL validation check (responds to GET/HEAD/OPTIONS for URL verification)"""
     return {"ok": True, "message": "Gumroad webhook endpoint ready"}
 
 
+GUMROAD_PROXY_TARGET = "https://free3d.online/gumroad/ping"
+
+
+def _normalize_gumroad_product_key(raw_value: str | None) -> str:
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme or parsed.netloc:
+            path = (parsed.path or "").rstrip("/")
+            if path:
+                value = path.rsplit("/", 1)[-1]
+    except Exception:
+        pass
+    return value.strip().lower()
+
+
 @app.post("/api-gumroad")
 @app.post("/webhook/gumroad")
 @app.post("/gumroad")
+@app.post("/gumroad/ping")
 async def api_gumroad_ping(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
+    request: Request
 ):
     """
-    Gumroad Ping webhook (application/x-www-form-urlencoded).
-    Credits are granted ONLY from this endpoint (idempotent via sale_id).
+    Proxy-tunnel for Gumroad webhook.
+    Accepts payload from Gumroad and forwards it AS-IS to free3d.online.
+    Always returns 200 "ok" (fallback mode) to avoid Gumroad retries.
     """
-    form = await request.form()
-    sale_id = (form.get("sale_id") or "").strip()
-    product_permalink = (form.get("product_permalink") or "").strip()
-    gumroad_email = (form.get("email") or "").strip()
-    refunded = str(form.get("refunded") or "").lower() == "true"
-    test = str(form.get("test") or "").lower() == "true"
-    print(f"[Gumroad] Received webhook: sale_id={sale_id}, test={test}, refunded={refunded}, raw_test={form.get('test')}, raw_refunded={form.get('refunded')}", flush=True)
-    # per spec: url_params[userid] binds purchase to the user; you confirmed it is user email
-    user_identifier = (form.get("url_params[userid]") or "").strip()
-    price = (form.get("price") or "").strip()
-    quantity_raw = (form.get("quantity") or "").strip()
-    try:
-        quantity = int(quantity_raw) if quantity_raw else None
-    except Exception:
-        quantity = None
+    raw_body = await request.body()
+    content_type = request.headers.get("content-type", "application/x-www-form-urlencoded")
+    parsed_form = dict(parse_qsl(raw_body.decode("utf-8", errors="ignore"), keep_blank_values=True))
 
+    sale_id = (parsed_form.get("sale_id") or "").strip()
+    email = (parsed_form.get("email") or "").strip() or "unknown"
+    product = (parsed_form.get("product_permalink") or "").strip() or "unknown"
+    product_name = (parsed_form.get("product_name") or "").strip() or None
+    price_raw = (parsed_form.get("price") or "").strip() or "0"
+    is_test = str(parsed_form.get("test") or "").strip().lower() in {"1", "true", "yes", "on"}
+    is_recurring_charge = str(parsed_form.get("is_recurring_charge") or "").strip().lower() in {"1", "true", "yes", "on"}
+    refunded = str(parsed_form.get("refunded") or "").strip().lower() in {"1", "true", "yes", "on"}
+    subscription_id = (parsed_form.get("subscription_id") or "").strip() or None
+    license_key = (parsed_form.get("license_key") or "").strip() or None
     if not sale_id:
-        raise HTTPException(status_code=400, detail="Missing sale_id")
+        sale_id = f"proxy-{hashlib.sha256(raw_body).hexdigest()[:16]}"
 
-    # Idempotency: save the ping; duplicates must not re-credit
-    sale = GumroadSale(
-        sale_id=sale_id,
-        user_email=user_identifier or None,
-        product_permalink=product_permalink or None,
-        gumroad_email=gumroad_email or None,
-        price=price or None,
-        quantity=quantity,
-        refunded=refunded,
-        test=test
-    )
-    db.add(sale)
     try:
-        await db.commit()
-        print(f"[Gumroad] New sale recorded: sale_id={sale_id}, product={product_permalink}, userid={user_identifier}, price={price}", flush=True)
-    except IntegrityError:
-        await db.rollback()
-        print(f"[Gumroad] Duplicate sale_id={sale_id}, skipping", flush=True)
-        return {"ok": True, "duplicate": True}
+        price_cents = int(price_raw)
+    except Exception:
+        price_cents = 0
 
-    # Validate userid
-    if not user_identifier:
-        print(f"[Gumroad] Missing url_params[userid] for sale_id={sale_id}", flush=True)
-        return {"ok": False, "error": "missing_userid"}
+    product_key = _normalize_gumroad_product_key(product)
+    local_credits_added = 0
+    should_notify_purchase = True
 
-    # Ignore refunded purchases (but allow test purchases - owner buying their own product)
-    if refunded:
-        print(f"[Gumroad] Skipping refunded purchase for sale_id={sale_id}", flush=True)
-        return {"ok": True, "credited": False}
-    
-    if test:
-        print(f"[Gumroad] Processing TEST purchase (owner buying own product) for sale_id={sale_id}", flush=True)
+    if product_key.startswith("autorig-") and email and email != "unknown":
+        try:
+            async with AsyncSessionLocal() as db:
+                purchase = GumroadPurchase(
+                    sale_id=sale_id,
+                    email=email,
+                    product_permalink=product_key,
+                    product_name=product_name,
+                    price=price_cents,
+                    refunded=refunded,
+                    is_recurring_charge=is_recurring_charge,
+                    subscription_id=subscription_id,
+                    license_key=license_key,
+                    test=is_test,
+                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                    credited=False,
+                    credits_added=0,
+                )
+                db.add(purchase)
+                try:
+                    await db.flush()
+                except IntegrityError:
+                    await db.rollback()
+                    purchase = None
 
-    # Extract permalink from full URL if needed (e.g., "https://u3d.gumroad.com/l/autorig-100" -> "autorig-100")
+                if purchase is not None:
+                    credits_to_add = 0 if refunded else int(GUMROAD_PRODUCT_CREDITS.get(product_key, max(price_cents, 0)))
+                    user_result = await db.execute(
+                        select(User).where(func.lower(User.email) == email.lower())
+                    )
+                    user = user_result.scalar_one_or_none()
+                    if user and credits_to_add > 0:
+                        user.balance_credits = max(0, int(user.balance_credits or 0) + credits_to_add)
+                        user.gumroad_email = email
+                        purchase.credited = True
+                        purchase.credits_added = credits_to_add
+                        local_credits_added = credits_to_add
+                    await db.commit()
+                    should_notify_purchase = True
+        except Exception as e:
+            print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
+
+    from telegram_bot import broadcast_credits_purchased
+    if should_notify_purchase:
+        asyncio.create_task(
+            broadcast_credits_purchased(
+                credits=local_credits_added if local_credits_added > 0 else max(price_cents, 0),
+                price=str(price_raw),
+                user_email=email,
+                product=product,
+                sale_id=sale_id,
+                is_test=is_test,
+                is_recurring_charge=is_recurring_charge,
+                refunded=refunded,
+            )
+        )
+
     try:
-        permalink_key = product_permalink
-        if product_permalink and "/l/" in product_permalink:
-            permalink_key = product_permalink.split("/l/")[-1].split("?")[0]
-        print(f"[Gumroad] Extracted permalink_key={permalink_key} from {product_permalink}", flush=True)
-        
-        credits = GUMROAD_PRODUCT_CREDITS.get(permalink_key)
-        print(f"[Gumroad] Credits lookup: {permalink_key} -> {credits}", flush=True)
-        if not credits:
-            print(f"[Gumroad] Unknown product_permalink={product_permalink} (key={permalink_key}) sale_id={sale_id}", flush=True)
-            return {"ok": False, "error": "unknown_product"}
-
-        # userid = user email
-        urs = await db.execute(select(User).where(User.email == user_identifier))
-        user = urs.scalar_one_or_none()
-        if not user:
-            print(f"[Gumroad] User not found for userid(email)={user_identifier} sale_id={sale_id}", flush=True)
-            return {"ok": False, "error": "user_not_found"}
-
-        print(f"[Gumroad] Found user {user.email} with balance={user.balance_credits}, adding {credits}", flush=True)
-        user.balance_credits += credits
-        if gumroad_email:
-            user.gumroad_email = gumroad_email
-        await db.commit()
-        print(f"[Gumroad] SUCCESS! Credited {credits} to {user.email}, new balance={user.balance_credits}", flush=True)
-
-        # Send Telegram notification for successful purchase
-        from telegram_bot import broadcast_credits_purchased
-        asyncio.create_task(broadcast_credits_purchased(
-            credits=credits,
-            price=price or "unknown",
-            user_email=user.email,
-            product=product_permalink,
-            sale_id=sale_id,
-            is_test=test
-        ))
-
-        return {"ok": True, "credited": True, "credits_added": credits, "user_email": user.email}
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            upstream = await client.post(
+                GUMROAD_PROXY_TARGET,
+                content=raw_body,
+                headers={"Content-Type": content_type},
+            )
+        if upstream.status_code != 200:
+            print(f"[GumroadProxy] Upstream non-200: {upstream.status_code}", flush=True)
     except Exception as e:
-        print(f"[Gumroad] ERROR processing sale {sale_id}: {type(e).__name__}: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        return {"ok": False, "error": str(e)}
+        print(f"[GumroadProxy] Upstream request failed: {e}", flush=True)
+
+    return Response(content="ok", media_type="text/plain")
 
 
 @app.get("/api/task/{task_id}", response_model=TaskStatusResponse)
@@ -4580,36 +4600,151 @@ async def api_proxy_thumb(
 
 FREE3D_BASE_URL = "https://free3d.online"
 
+
+def _normalize_free3d_item(item: dict) -> Optional[dict]:
+    """Normalize Free3D API item into stable frontend shape."""
+    if not isinstance(item, dict):
+        return None
+
+    guid = (item.get("guid") or "").strip()
+    if not guid:
+        return None
+
+    title = (item.get("title") or "Untitled").strip() or "Untitled"
+    model_page_url = item.get("modelPageUrl") or f"/models/{guid}"
+
+    preview_small = item.get("previewSmallUrl")
+    preview_medium = item.get("previewMediumUrl")
+    if not preview_small and preview_medium:
+        preview_small = preview_medium
+    if not preview_medium and preview_small:
+        preview_medium = preview_small
+
+    def _to_abs(url: Optional[str]) -> Optional[str]:
+        if not url:
+            return None
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        return f"{FREE3D_BASE_URL}{url}"
+
+    viewer_asset_base = f"{FREE3D_BASE_URL}/viewer-asset/{guid}"
+    return {
+        "guid": guid,
+        "title": title,
+        "type": item.get("type"),
+        "typeLabel": item.get("typeLabel"),
+        "category": item.get("category"),
+        "modelPageUrl": model_page_url,
+        "previewSmallUrl": preview_small,
+        "previewMediumUrl": preview_medium,
+        "previewSmallAbsUrl": _to_abs(preview_small),
+        "previewMediumAbsUrl": _to_abs(preview_medium),
+        # Stable public asset URLs (no auth required)
+        "glb_url": f"{viewer_asset_base}/glb100k",
+        "glb1k_url": f"{viewer_asset_base}/glb1k",
+        "glb10k_url": f"{viewer_asset_base}/glb10k",
+        "glb100k_url": f"{viewer_asset_base}/glb100k",
+        "glb_base_url": f"{viewer_asset_base}/glb",
+        "animations_url": f"{viewer_asset_base}/animations100k",
+    }
+
 @app.get("/api/free3d/search")
 async def api_free3d_search(
     q: str = "",
     query: str = "",
     topK: int = 20,
+    offset: int = 0,
+    sort: str = "relevance",
     type: Optional[int] = None,
-    mode: str = "clip"
+    category: Optional[str] = None,
+    categories: Optional[str] = None,
+    mode: str = "semantic",
 ):
-    """Proxy search requests to free3d.online API"""
+    """Proxy search requests to Free3D API with normalized fail-safe response."""
     search_query = q or query
-    if not search_query:
-        return {"results": []}
-    
-    params = {
-        "q": search_query,
-        "topK": min(topK, 100)
+    safe_topk = max(1, min(topK, 100))
+    safe_offset = max(0, offset)
+    normalized_mode = (mode or "semantic").strip().lower()
+    use_browse = normalized_mode == "browse" or not search_query
+
+    params: Dict[str, Any] = {
+        "topK": safe_topk,
+        "offset": safe_offset,
+        "sort": sort or ("popular" if use_browse else "relevance"),
     }
+    if not use_browse and search_query:
+        params["q"] = search_query
     if type is not None:
         params["type"] = type
-    if mode:
-        params["mode"] = mode
-    
+    # Free3D semantic endpoint can return empty results when legacy clients
+    # pass category filters (e.g. category=characters). Keep category filters
+    # only for browse mode and ignore them for semantic search.
+    if use_browse and category:
+        params["category"] = category
+    if use_browse and categories:
+        params["categories"] = categories
+
+    endpoint = "/api-embeddings/browse" if use_browse else "/api-embeddings/"
+
+    last_error: Optional[str] = None
+    for attempt in range(2):
+        timeout = 8.0 if attempt == 0 else 12.0
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{FREE3D_BASE_URL}{endpoint}", params=params)
+                resp.raise_for_status()
+                payload = resp.json()
+
+            raw_results = payload.get("results", []) if isinstance(payload, dict) else []
+            normalized_results = []
+            for item in raw_results:
+                normalized = _normalize_free3d_item(item)
+                if normalized:
+                    normalized_results.append(normalized)
+
+            return {
+                "ok": True,
+                "degraded": False,
+                "source": "browse" if use_browse else "semantic",
+                "query": search_query,
+                "total": payload.get("total", len(normalized_results)) if isinstance(payload, dict) else len(normalized_results),
+                "hasMore": bool(payload.get("hasMore")) if isinstance(payload, dict) else False,
+                "offset": safe_offset,
+                "results": normalized_results,
+            }
+        except Exception as e:
+            last_error = str(e)
+            if attempt == 0:
+                continue
+
+            print(f"[Free3D] Search error ({endpoint}): {e}")
+            return {
+                "ok": False,
+                "degraded": True,
+                "source": "browse" if use_browse else "semantic",
+                "query": search_query,
+                "total": 0,
+                "hasMore": False,
+                "offset": safe_offset,
+                "results": [],
+                "error": last_error or "free3d_upstream_unavailable",
+            }
+
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(f"{FREE3D_BASE_URL}/api-embeddings/", params=params)
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as e:
-        print(f"[Free3D] Search error: {e}")
-        return {"results": [], "error": str(e)}
+        # Defensive fallback; loop above should always return.
+        return {
+            "ok": False,
+            "degraded": True,
+            "source": "browse" if use_browse else "semantic",
+            "query": search_query,
+            "total": 0,
+            "hasMore": False,
+            "offset": safe_offset,
+            "results": [],
+            "error": last_error or "free3d_unknown_error",
+        }
+    except Exception:
+        return {"ok": False, "degraded": True, "results": []}
 
 
 @app.get("/api/free3d/image/{guid}/{filename}")

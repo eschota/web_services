@@ -4972,7 +4972,7 @@
     </script>
 
     <!-- Site Header Component -->
-    <script src="/static/js/header.js"></script>
+    <script src="/static/js/header.js?v=20260306-searchfix2"></script>
     <script>
         // Inject site header (skip in webapp mode)
         (function() {

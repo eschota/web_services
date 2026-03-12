@@ -12,11 +12,11 @@ from __future__ import annotations
 import os
 import asyncio
 import html
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.exc import IntegrityError
 
 from database import AsyncSessionLocal, TelegramChat, TelegramNotification, Task
@@ -134,6 +134,92 @@ async def reserve_notification(chat_id: int, event_type: str, event_key: str) ->
             raise
 
 
+async def attach_notification_message_id(chat_id: int, event_type: str, event_key: str, message_id: int | None) -> None:
+    if not message_id:
+        return
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(TelegramNotification)
+            .where(TelegramNotification.chat_id == chat_id)
+            .where(TelegramNotification.event_type == event_type)
+            .where(TelegramNotification.event_key == event_key)
+            .values(message_id=int(message_id))
+        )
+        await db.commit()
+
+
+async def pop_notification_message_id(chat_id: int, event_type: str, event_key: str) -> int | None:
+    async with AsyncSessionLocal() as db:
+        rs = await db.execute(
+            select(TelegramNotification)
+            .where(TelegramNotification.chat_id == chat_id)
+            .where(TelegramNotification.event_type == event_type)
+            .where(TelegramNotification.event_key == event_key)
+        )
+        rec = rs.scalar_one_or_none()
+        if not rec or not rec.message_id:
+            return None
+        message_id = int(rec.message_id)
+        rec.deleted_at = datetime.utcnow()
+        await db.commit()
+        return message_id
+
+
+async def _task_telegram_metrics(task_id: str) -> dict[str, int]:
+    now = datetime.utcnow()
+    current_from = now - timedelta(hours=24)
+    previous_from = now - timedelta(hours=48)
+    async with AsyncSessionLocal() as db:
+        task_rs = await db.execute(select(Task).where(Task.id == task_id))
+        task = task_rs.scalar_one_or_none()
+        if not task:
+            return {"ordinal": 0, "current_24h": 0, "delta_24h": 0}
+
+        ordinal_rs = await db.execute(
+            select(func.count(Task.id))
+            .where(Task.created_at <= task.created_at)
+        )
+        ordinal = int(ordinal_rs.scalar() or 0)
+
+        current_rs = await db.execute(
+            select(func.count(Task.id))
+            .where(Task.created_at >= current_from)
+            .where(Task.created_at <= now)
+        )
+        current_24h = int(current_rs.scalar() or 0)
+
+        previous_rs = await db.execute(
+            select(func.count(Task.id))
+            .where(Task.created_at >= previous_from)
+            .where(Task.created_at < current_from)
+        )
+        previous_24h = int(previous_rs.scalar() or 0)
+
+    return {
+        "ordinal": ordinal,
+        "current_24h": current_24h,
+        "delta_24h": current_24h - previous_24h,
+    }
+
+
+def _format_task_metrics(metrics: dict[str, int]) -> str:
+    ordinal = int(metrics.get("ordinal") or 0)
+    current_24h = int(metrics.get("current_24h") or 0)
+    delta = int(metrics.get("delta_24h") or 0)
+    delta_str = f"+{delta}" if delta > 0 else str(delta)
+    if delta >= 10:
+        trend = "🟢⇈"
+    elif delta > 0:
+        trend = "🟢↗"
+    elif delta <= -10:
+        trend = "🔴⇊"
+    elif delta < 0:
+        trend = "🔴↘"
+    else:
+        trend = "⚪→"
+    return f"#{ordinal} | 24h {current_24h} | {trend} {delta_str}"
+
+
 async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network: bool = True):
     """Best-effort retry for Telegram rate limits/transient errors."""
     from telegram.error import RetryAfter, TimedOut, NetworkError
@@ -181,10 +267,14 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
     url = _task_url(task_id)
     summary = _task_summary(input_url, input_type)
     source_line = _format_input_url(input_url)
+    metrics_line = _format_task_metrics(await _task_telegram_metrics(task_id))
     
     # Compact 2-line format using HTML
-    text = f"🟢 <b>New task started</b>\n"
-    text += f'🔗 <a href="{html.escape(url)}">View Result</a> | 📄 {html.escape(summary)}'
+    new_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
+    if summary:
+        new_parts.append(f"📄 {html.escape(summary)}")
+    new_parts.append(html.escape(metrics_line))
+    text = f"🟢 <b>New task started</b>\n" + " | ".join(new_parts)
     if progress_page:
         text += f' | 🔧 <a href="{html.escape(progress_page)}">Worker</a>'
     if source_line:
@@ -210,6 +300,7 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
                 disable_web_page_preview=False
             ), retry_network=False)
             if result:
+                await attach_notification_message_id(chat_id, "task_new", task_id, getattr(result, "message_id", None))
                 print(f"[Telegram] New task notification sent to chat {chat_id}")
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
@@ -364,7 +455,9 @@ async def broadcast_credits_purchased(
     user_email: str,
     product: str,
     sale_id: str,
-    is_test: bool = False
+    is_test: bool = False,
+    is_recurring_charge: bool = False,
+    refunded: bool = False,
 ) -> None:
     """Notify when credits are successfully purchased via Gumroad."""
     print(f"[Telegram] broadcast_credits_purchased: {credits} credits for {user_email} (test={is_test})")
@@ -393,9 +486,19 @@ async def broadcast_credits_purchased(
 
     async def _one(chat_id: int):
         async with sem:
+            reserved = await reserve_notification(chat_id, "gumroad_sale", sale_id)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate gumroad-sale notification for chat={chat_id}, sale={sale_id}")
+                return
+            flags = []
+            if is_recurring_charge:
+                flags.append("recurring")
+            if refunded:
+                flags.append("refunded")
+            extra = f" ({', '.join(flags)})" if flags else ""
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid,
-                text=text,
+                text=text + extra,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True
             ))
@@ -590,6 +693,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     bot = Bot(token=token)
     url = _task_url(task_id)
+    metrics_line = _format_task_metrics(await _task_telegram_metrics(task_id))
 
     # Get task details including owner for author line
     owner_email = None
@@ -624,12 +728,15 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
             print(f"[Telegram] Failed to get owner_email: {e}")
 
     dur = _format_duration(duration_seconds)
-    author_line = f"👤 {html.escape(owner_email)}" if owner_email else ""
-    dur_line = f"⏱ {html.escape(dur)}" if dur else ""
-    
+    done_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
+    if owner_email:
+        done_parts.append(f"👤 {html.escape(owner_email)}")
+    if dur:
+        done_parts.append(f"⏱ {html.escape(dur)}")
+    done_parts.append(html.escape(metrics_line))
+
     # Table-like formatting in 2 lines using HTML
-    text = f"✅ <b>Task completed</b>\n"
-    text += f'🔗 <a href="{html.escape(url)}">View Result</a> | {author_line} | {dur_line}'
+    text = f"✅ <b>Task completed</b>\n" + " | ".join(done_parts)
     if progress_page:
         text += f'\n🔧 <a href="{html.escape(progress_page)}">Worker Logs</a>'
 
@@ -651,6 +758,12 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     if not video_path:
         # Fallback: at least notify completion
         async def _one_text(chat_id: int):
+            old_message_id = await pop_notification_message_id(chat_id, "task_new", task_id)
+            if old_message_id:
+                await _send_with_retry(
+                    lambda cid=chat_id, mid=old_message_id: bot.delete_message(chat_id=cid, message_id=mid),
+                    retry_network=False,
+                )
             reserved = await reserve_notification(chat_id, "task_done", task_id)
             if not reserved:
                 print(f"[Telegram] Skip duplicate done notification for chat={chat_id}, task={task_id}")
@@ -672,6 +785,12 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
 
     async def _one(chat_id: int):
         async with sem:
+            old_message_id = await pop_notification_message_id(chat_id, "task_new", task_id)
+            if old_message_id:
+                await _send_with_retry(
+                    lambda cid=chat_id, mid=old_message_id: bot.delete_message(chat_id=cid, message_id=mid),
+                    retry_network=False,
+                )
             reserved = await reserve_notification(chat_id, "task_done", task_id)
             if not reserved:
                 print(f"[Telegram] Skip duplicate done notification for chat={chat_id}, task={task_id}")

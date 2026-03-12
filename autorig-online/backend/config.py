@@ -109,6 +109,11 @@ EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@autorig.online")
 # =============================================================================
 # Gumroad product_permalink -> credits mapping
 GUMROAD_PRODUCT_CREDITS = {
+    # Free3D products
+    "free3d-10credits": 1000,
+    "free3d-unlimitedsubscription": 999999,
+    "free3d-unlimited": 999999,
+    # Legacy AutoRig products (kept for backward compatibility)
     "autorig-100": 100,
     "autorig-500": 500,
     "autorig-1000": 1000,

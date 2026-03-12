@@ -245,6 +245,28 @@ class GumroadSale(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class GumroadPurchase(Base):
+    """
+    Full Gumroad webhook audit log + idempotency by sale_id.
+    """
+    __tablename__ = "gumroad_purchases"
+
+    sale_id = Column(String(255), primary_key=True)
+    email = Column(String(255), nullable=False, index=True)
+    product_permalink = Column(String(255), nullable=False, index=True)
+    product_name = Column(String(255), nullable=True)
+    price = Column(Integer, nullable=True)
+    refunded = Column(Boolean, default=False)
+    is_recurring_charge = Column(Boolean, default=False)
+    subscription_id = Column(String(255), nullable=True)
+    license_key = Column(String(255), nullable=True)
+    test = Column(Boolean, default=False)
+    raw_payload = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    credited = Column(Boolean, default=False)
+    credits_added = Column(Integer, default=0)
+
+
 class ApiKey(Base):
     """User API keys (stored hashed)."""
     __tablename__ = "api_keys"
@@ -281,6 +303,8 @@ class TelegramNotification(Base):
     chat_id = Column(BigInteger, nullable=False, index=True)
     event_type = Column(String(64), nullable=False, index=True)
     event_key = Column(String(128), nullable=False, index=True)
+    message_id = Column(BigInteger, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -400,6 +424,8 @@ async def init_db():
                         chat_id BIGINT NOT NULL,
                         event_type VARCHAR(64) NOT NULL,
                         event_key VARCHAR(128) NOT NULL,
+                        message_id BIGINT,
+                        deleted_at DATETIME,
                         created_at DATETIME
                     )
                     """
@@ -412,6 +438,8 @@ async def init_db():
                 )
             except Exception:
                 pass
+            await _try_add_column("ALTER TABLE telegram_notifications ADD COLUMN message_id BIGINT")
+            await _try_add_column("ALTER TABLE telegram_notifications ADD COLUMN deleted_at DATETIME")
 
             # Worker endpoints table/index (safe to run repeatedly)
             try:
@@ -454,6 +482,43 @@ async def init_db():
                         )
                     except Exception:
                         pass
+            except Exception:
+                pass
+
+            # Gumroad purchases audit table/index (safe to run repeatedly)
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS gumroad_purchases (
+                        sale_id VARCHAR(255) PRIMARY KEY,
+                        email VARCHAR(255) NOT NULL,
+                        product_permalink VARCHAR(255) NOT NULL,
+                        product_name VARCHAR(255),
+                        price INTEGER,
+                        refunded BOOLEAN DEFAULT 0,
+                        is_recurring_charge BOOLEAN DEFAULT 0,
+                        subscription_id VARCHAR(255),
+                        license_key VARCHAR(255),
+                        test BOOLEAN DEFAULT 0,
+                        raw_payload TEXT,
+                        created_at DATETIME,
+                        credited BOOLEAN DEFAULT 0,
+                        credits_added INTEGER DEFAULT 0
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_gumroad_purchases_email
+                    ON gumroad_purchases (email)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_gumroad_purchases_product
+                    ON gumroad_purchases (product_permalink)
+                    """
+                )
             except Exception:
                 pass
 

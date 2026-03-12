@@ -9,7 +9,8 @@ const App = {
         creditsRemaining: 0,
         loginRequired: false,
         selectedFile: null,
-        activeTab: 'upload'
+        activeTab: 'upload',
+        free3dCreateInFlight: false
     },
     
     /**
@@ -140,6 +141,43 @@ const App = {
     updateUI() {
         this.updateAuthUI();
         I18n.applyTranslations();
+    },
+
+    showFree3DCreateOverlay(title) {
+        let overlay = document.getElementById('free3d-create-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'free3d-create-overlay';
+            overlay.className = 'free3d-create-overlay hidden';
+            overlay.innerHTML = `
+                <div class="free3d-create-overlay-card">
+                    <div class="free3d-create-spinner" aria-hidden="true"></div>
+                    <div class="free3d-create-title" id="free3d-create-title"></div>
+                    <div class="free3d-create-subtitle" id="free3d-create-subtitle"></div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+
+        const safeTitle = (title || '3D model').trim();
+        const titleEl = overlay.querySelector('#free3d-create-title');
+        const subtitleEl = overlay.querySelector('#free3d-create-subtitle');
+        if (titleEl) {
+            titleEl.textContent = t('free3d_creating_task_title').replace('{title}', safeTitle);
+        }
+        if (subtitleEl) {
+            subtitleEl.textContent = t('free3d_creating_task_subtitle');
+        }
+        overlay.classList.remove('hidden');
+        document.body.classList.add('free3d-create-busy');
+    },
+
+    hideFree3DCreateOverlay() {
+        const overlay = document.getElementById('free3d-create-overlay');
+        if (overlay) {
+            overlay.classList.add('hidden');
+        }
+        document.body.classList.remove('free3d-create-busy');
     },
     
     /**
@@ -544,7 +582,48 @@ const App = {
         isSearching: false,
         hasFocusedOnce: false,
         keywords: [], // Loaded from external file
-        keywordsLoaded: false
+        keywordsLoaded: false,
+        ribbonEnabled: false,
+        sectionHiddenByHealth: false,
+    },
+
+    hideFree3DRibbon(reason = 'unknown') {
+        const section = document.querySelector('.free3d-search');
+        if (section) {
+            section.classList.add('hidden');
+        }
+        this.free3dState.ribbonEnabled = false;
+        this.free3dState.sectionHiddenByHealth = true;
+        console.warn(`[Free3D] Ribbon hidden: ${reason}`);
+    },
+
+    showFree3DRibbon() {
+        const section = document.querySelector('.free3d-search');
+        if (section) {
+            section.classList.remove('hidden');
+        }
+        this.free3dState.ribbonEnabled = true;
+        this.free3dState.sectionHiddenByHealth = false;
+    },
+
+    async checkFree3DRibbonHealth() {
+        try {
+            const resp = await fetch('/api/free3d/search?mode=browse&topK=1&type=1');
+            if (!resp.ok) {
+                this.hideFree3DRibbon(`http_${resp.status}`);
+                return false;
+            }
+            const data = await resp.json();
+            if (!data || data.ok !== true || data.degraded) {
+                this.hideFree3DRibbon('degraded_upstream');
+                return false;
+            }
+            this.showFree3DRibbon();
+            return true;
+        } catch (error) {
+            this.hideFree3DRibbon(`probe_failed_${error?.message || 'unknown'}`);
+            return false;
+        }
     },
 
     /**
@@ -600,6 +679,9 @@ const App = {
         const randomizeBtn = document.getElementById('free3d-randomize-btn');
         
         if (!input || !results) return;
+
+        const isHealthy = await this.checkFree3DRibbonHealth();
+        if (!isHealthy) return;
 
         // Load keywords from file
         await this.loadFree3DKeywords();
@@ -664,7 +746,7 @@ const App = {
         const status = document.getElementById('free3d-search-status');
         const categorySelect = document.getElementById('free3d-category-select');
         
-        if (!results) return;
+        if (!results || !this.free3dState.ribbonEnabled) return;
 
         // Show searching status
         status?.classList.remove('hidden');
@@ -690,12 +772,20 @@ const App = {
 
         try {
             // Use our backend proxy to avoid CORS issues
-            const url = `/api/free3d/search?q=${encodeURIComponent(searchQuery)}&topK=50`;
+            const url = `/api/free3d/search?q=${encodeURIComponent(searchQuery)}&topK=20&mode=semantic&_=${Date.now()}`;
             const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`search_http_${response.status}`);
+            }
             const data = await response.json();
 
             status?.classList.add('hidden');
             this.free3dState.isSearching = false;
+
+            if (!data || data.ok !== true || data.degraded) {
+                this.hideFree3DRibbon('search_degraded');
+                return;
+            }
 
             if (data.results && data.results.length > 0) {
                 this.renderFree3DResults(data.results);
@@ -708,8 +798,7 @@ const App = {
             console.error('Free3D search failed:', error);
             status?.classList.add('hidden');
             this.free3dState.isSearching = false;
-            results.innerHTML = `<div class="free3d-no-results">Search error. Please try again.</div>`;
-            results.classList.remove('hidden');
+            this.hideFree3DRibbon('search_failed');
         }
     },
 
@@ -720,14 +809,42 @@ const App = {
         const results = document.getElementById('free3d-results');
         if (!results) return;
 
-        const baseUrl = 'https://free3d.online';
+        const normalized = (models || []).map((model) => {
+            if (!model || typeof model !== 'object') return null;
+            const title = model.title || model.name || model.model_name || model.display_name || '';
+            const preview =
+                model.previewSmallAbsUrl ||
+                model.previewMediumAbsUrl ||
+                model.preview_small_abs_url ||
+                model.preview_medium_abs_url ||
+                model.previewSmallUrl ||
+                model.previewMediumUrl ||
+                model.preview_url ||
+                model.thumbnail_url ||
+                '';
+            const glbUrl =
+                model.glb_url ||
+                model.glb100k_url ||
+                model.glb_base_url ||
+                model.model_url ||
+                model.url ||
+                '';
+            return {
+                title: (title && String(title).trim()) || 'Untitled',
+                preview: preview || '/static/images/placeholder-thumb.svg',
+                glbUrl: (glbUrl && String(glbUrl).trim()) || '',
+            };
+        }).filter(Boolean);
 
-        results.innerHTML = models.map(model => {
-            // Use our proxy for images to bypass referrer restrictions
-            const previewPath = model.previewSmallUrl; // e.g. /data/{guid}/{guid}_preview.jpg
-            const previewUrl = `/api/free3d/image/${model.guid}/${model.guid}_preview.jpg`;
-            const glbUrl = baseUrl + model.glbUrl;
-            const title = model.title || 'Untitled';
+        if (!normalized.length) {
+            results.innerHTML = `<div class="free3d-no-results" data-i18n="free3d_no_results">${t('free3d_no_results')}</div>`;
+            return;
+        }
+
+        results.innerHTML = normalized.map(model => {
+            const previewUrl = model.preview;
+            const glbUrl = model.glbUrl;
+            const title = model.title;
 
             return `
                 <div class="free3d-item" 
@@ -759,6 +876,15 @@ const App = {
      * Create a new AutoRig task from a Free3D model
      */
     async createTaskFromFree3D(glbUrl, title) {
+        if (!glbUrl) {
+            alert(t('error_generic'));
+            return;
+        }
+
+        if (this.state.free3dCreateInFlight) {
+            return;
+        }
+
         if (this.state.loginRequired) {
             window.location.href = '/auth/login';
             return;
@@ -773,6 +899,10 @@ const App = {
         formData.append('input_url', glbUrl);
         formData.append('type', 't_pose');
 
+        this.state.free3dCreateInFlight = true;
+        this.showFree3DCreateOverlay(title);
+        let navigatingAway = false;
+
         try {
             const response = await fetch('/api/task/create', {
                 method: 'POST',
@@ -782,12 +912,15 @@ const App = {
             const data = await response.json();
 
             if (response.ok) {
+                navigatingAway = true;
                 window.location.href = `/task?id=${data.task_id}`;
             } else {
                 if (response.status === 401) {
+                    navigatingAway = true;
                     alert(t('error_login_required'));
                     window.location.href = '/auth/login';
                 } else if (response.status === 402) {
+                    navigatingAway = true;
                     window.location.href = '/buy-credits';
                 } else {
                     alert(data.detail || t('error_generic'));
@@ -796,6 +929,11 @@ const App = {
         } catch (error) {
             console.error('Failed to create task:', error);
             alert(t('error_generic'));
+        } finally {
+            if (!navigatingAway) {
+                this.hideFree3DCreateOverlay();
+            }
+            this.state.free3dCreateInFlight = false;
         }
     }
 };

@@ -255,6 +255,8 @@
     "free3d_searching": "Searching...",
     "free3d_no_results": "No models found. Try a different search.",
     "free3d_confirm_create": "Add model \"{title}\" to rigging queue?",
+    "free3d_creating_task_title": "Creating task for \"{title}\"",
+    "free3d_creating_task_subtitle": "Please wait. You will be redirected automatically.",
 
     "log_copy": "Copy",
     "log_copied": "Copied!",

@@ -1856,16 +1856,15 @@ img[loading="lazy"] {
     50% { opacity: 1; transform: scale(1); }
 }
 
-/* Results horizontal strip - Glass style */
+/* Results responsive tile grid - Glass style */
 .free3d-results {
     margin-top: 1rem;
-    padding: 1.25rem 1rem;
-    overflow-x: auto;
-    overflow-y: visible;
-    display: flex;
-    gap: 1rem;
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
+    padding: 0.75rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.6rem;
     scrollbar-width: thin;
     scrollbar-color: rgba(99, 102, 241, 0.4) transparent;
     background: rgba(0, 0, 0, 0.2);
@@ -1897,8 +1896,8 @@ img[loading="lazy"] {
 
 /* Individual model item - Glass card */
 .free3d-item {
-    flex-shrink: 0;
-    width: 180px;
+    width: 100%;
+    min-width: 0;
     cursor: pointer;
     position: relative;
     border-radius: var(--radius-md);
@@ -1908,7 +1907,7 @@ img[loading="lazy"] {
 }
 
 .free3d-item:hover {
-    transform: translateY(-4px);
+    transform: translateY(-2px);
     z-index: 10;
 }
 
@@ -1953,9 +1952,9 @@ img[loading="lazy"] {
 }
 
 .free3d-item-title {
-    margin-top: 0.5rem;
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
+    margin-top: 0.35rem;
+    padding: 0 0.2rem;
+    font-size: 0.64rem;
     font-weight: 500;
     color: var(--text-secondary);
     white-space: nowrap;
@@ -2025,16 +2024,79 @@ img[loading="lazy"] {
     }
 
     .free3d-results {
-        padding: 1rem 0.75rem;
-    }
-
-    .free3d-item {
-        width: 140px;
+        padding: 0.6rem;
+        grid-template-columns: repeat(auto-fill, minmax(144px, 1fr));
+        gap: 0.45rem;
     }
 
     .free3d-item:hover {
         transform: translateY(-2px);
     }
+}
+
+.free3d-create-busy {
+    cursor: progress;
+}
+
+.free3d-create-busy * {
+    cursor: progress !important;
+}
+
+.free3d-create-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(6, 10, 28, 0.62);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.free3d-create-overlay.hidden {
+    display: none;
+}
+
+.free3d-create-overlay-card {
+    width: min(440px, 100%);
+    padding: 1.4rem 1.2rem;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background:
+        radial-gradient(circle at top, rgba(99, 102, 241, 0.22), transparent 58%),
+        rgba(15, 23, 42, 0.94);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    text-align: center;
+}
+
+.free3d-create-spinner {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 0.9rem;
+    border-radius: 50%;
+    border: 4px solid rgba(255, 255, 255, 0.14);
+    border-top-color: var(--accent);
+    animation: free3d-create-spin 0.85s linear infinite;
+}
+
+@keyframes free3d-create-spin {
+    to { transform: rotate(360deg); }
+}
+
+.free3d-create-title {
+    color: #f8fafc;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.free3d-create-subtitle {
+    margin-top: 0.4rem;
+    color: rgba(226, 232, 240, 0.82);
+    font-size: 0.9rem;
+    line-height: 1.5;
 }
 
 /* ====================================

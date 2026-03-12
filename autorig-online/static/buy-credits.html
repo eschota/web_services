@@ -78,7 +78,7 @@
             <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem;">
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">100 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$1</div>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$3</div>
                     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.01 per credit</div>
                     <button class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
@@ -368,7 +368,7 @@
             const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
             
             const packageInfo = {
-                'autorig-100': { credits: '100', price: '$1' },
+                'autorig-100': { credits: '100', price: '$3' },
                 'autorig-500': { credits: '500', price: '$10' },
                 'autorig-1000': { credits: '1000', price: '$100' }
             };
