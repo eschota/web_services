@@ -55,11 +55,11 @@
                 <div style="line-height: 1.6;">
                     <p style="font-weight: 600; font-size: 1.1rem; margin-bottom: 1rem;" data-i18n="free_greeting">Hi 3D ARTIST! I've been doing this project with a friend on enthusiasm for over a year and everything is free here!</p>
                     <p data-i18n="free_message">I would like to make the RIG even cooler and I know how, but for this I need MONEY :) for beer and cookies! So if you have a couple of extra bucks, please buy credits!</p>
-                    <p style="margin-top: 1rem;" data-i18n="free_youtube_intro">And if not, then just follow the link to my youtube channel and click like!</p>
+                    <p style="margin-top: 1rem;" data-i18n="free_youtube_intro">And if not, then just open Free3D Online and support the project there!</p>
                     <p style="font-weight: 700; color: var(--accent); font-size: 1.2rem; margin: 1rem 0;" data-i18n="free_credits_offer">Get 10 credits for downloading for free!!!</p>
-                    <a href="https://youtu.be/wz8cR6VitF8?si=9l9HO-ssJoRPhbKu" target="_blank" class="btn btn-primary" id="youtube-bonus-link" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
+                    <a href="https://free3d.online/" target="_blank" class="btn btn-primary" id="youtube-bonus-link" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
                         <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.377.505 9.377.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                        YouTube
+                        Free3D.online
                     </a>
                     <p style="margin-top: 1rem; font-style: italic; font-size: 0.9rem; color: var(--text-muted);" data-i18n="free_feedback_hint">And please leave feedback about the RIG and what you would like to improve in the form below</p>
                 </div>
@@ -264,22 +264,19 @@
 
         async function setupYouTubeBonus() {
             const link = document.getElementById('youtube-bonus-link');
-            link?.addEventListener('click', async (e) => {
+            link?.addEventListener('click', (e) => {
                 if (!window.__authedUser) {
                     alert(t('buy_login_required'));
                     e.preventDefault();
                     return;
                 }
-                
+
                 // Call API to grant bonus
                 try {
-                    const resp = await fetch('/api/user/grant-youtube-bonus', { method: 'POST' });
-                    const data = await resp.json();
-                    if (data.ok) {
-                        alert(t('youtube_bonus_success'));
-                        await updateCreditsUI();
-                    } else if (data.already_received) {
-                        alert(t('youtube_bonus_already'));
+                    if (navigator.sendBeacon) {
+                        navigator.sendBeacon('/api/user/grant-youtube-bonus', new Blob(['1'], { type: 'text/plain;charset=UTF-8' }));
+                    } else {
+                        fetch('/api/user/grant-youtube-bonus', { method: 'POST', keepalive: true }).catch(() => {});
                     }
                 } catch (e) {
                     console.error('YouTube bonus failed:', e);

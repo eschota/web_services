@@ -2087,6 +2087,14 @@
             </div>
             </div>
             
+            <div class="card mt-3 hidden" id="task-free3d-popular-section">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                    <h3 class="card-title" style="margin:0;">🔥 Popular Free3D Characters - Download for free!</h3>
+                    <div style="font-size:0.78rem; color:var(--text-muted);">6 random picks from top popular characters</div>
+                </div>
+                <div id="task-free3d-popular-results" class="free3d-results" style="padding-top:0;"></div>
+            </div>
+
             <div class="alert alert-info hidden mt-3" id="video-pending">
                 <span data-i18n="task_video_pending">Video is being generated...</span>
             </div>
@@ -2407,7 +2415,10 @@
         const TaskPage = {
             taskId: null,
             pollInterval: null,
+            queueStatusInterval: null,
             task: null,
+            taskFetchedAt: 0,
+            fetchInFlight: false,
             ownerTasksPage: 1,
             ownerTasksPerPage: 12,
             ownerTasksTotal: 0,
@@ -2423,6 +2434,8 @@
             selectedAnimationId: null,
             animationApplyToken: 0,
             animationTypeFilter: 'walk',
+            free3dPopularPool: [],
+            free3dPopularLoaded: false,
             
             async init() {
                 // Init i18n
@@ -2461,7 +2474,7 @@
                 
                 // Start polling
                 await this.fetchTask();
-                this.pollInterval = setInterval(() => this.fetchTask(), 2000);
+                this.startTaskPolling();
                 
                 // Load task card info (likes, sales, author)
                 await this.loadCardInfo();
@@ -2470,12 +2483,15 @@
                 // Load queue status (skip in webapp mode)
                 if (!this.isWebAppMode) {
                     this.loadQueueStatus();
-                    setInterval(() => this.loadQueueStatus(), 10000);
+                    this.queueStatusInterval = setInterval(() => {
+                        if (!document.hidden) this.loadQueueStatus();
+                    }, 10000);
                 }
                 
                 // Setup buttons
                 this.setupButtons();
                 this.setupCustomAnimationPicker();
+                this.loadPopularFree3DCharacters();
 
                 if (!this.__languageChangeBound) {
                     this.__languageChangeBound = true;
@@ -2487,6 +2503,17 @@
 
                 // Progress log polling (every 10s while page is open)
                 this.startProgressLogPolling();
+
+                if (!this.__visibilityBound) {
+                    this.__visibilityBound = true;
+                    document.addEventListener('visibilitychange', () => {
+                        if (!document.hidden) {
+                            this.fetchTask();
+                            this.refreshProgressLog();
+                            if (!this.isWebAppMode) this.loadQueueStatus();
+                        }
+                    });
+                }
             },
             
             setupTheme() {
@@ -2503,10 +2530,134 @@
                     toggle.textContent = newTheme === 'dark' ? '☀️' : '🌙';
                 });
             },
-            
-            async fetchTask() {
+
+            ensurePopularFree3DSection() {
+                return document.getElementById('task-free3d-popular-section');
+            },
+
+            normalizeFree3DItem(model) {
+                if (!model || typeof model !== 'object') return null;
+                const title = model.title || model.name || model.model_name || model.display_name || '';
+                const preview =
+                    model.previewSmallAbsUrl ||
+                    model.previewMediumAbsUrl ||
+                    model.preview_small_abs_url ||
+                    model.preview_medium_abs_url ||
+                    model.previewSmallUrl ||
+                    model.previewMediumUrl ||
+                    model.preview_url ||
+                    model.thumbnail_url ||
+                    model.thumb ||
+                    '';
+                const pageUrl =
+                    model.modelPageUrl ||
+                    model.model_page_url ||
+                    model.product_url ||
+                    '';
+
+                if (!pageUrl) return null;
+
+                return {
+                    title: (title && String(title).trim()) || 'Untitled',
+                    preview: preview || '/static/images/placeholder-thumb.svg',
+                    pageUrl: String(pageUrl).trim(),
+                };
+            },
+
+            pickRandomFree3DItems(count = 5) {
+                const pool = Array.isArray(this.free3dPopularPool) ? [...this.free3dPopularPool] : [];
+                for (let i = pool.length - 1; i > 0; i -= 1) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [pool[i], pool[j]] = [pool[j], pool[i]];
+                }
+                return pool.slice(0, Math.min(count, pool.length));
+            },
+
+            renderPopularFree3DCharacters() {
+                const section = this.ensurePopularFree3DSection();
+                const container = document.getElementById('task-free3d-popular-results');
+                if (!section || !container) return;
+
+                const picks = this.pickRandomFree3DItems(6);
+                if (!picks.length) {
+                    section.classList.add('hidden');
+                    return;
+                }
+
+                container.innerHTML = picks.map((model) => `
+                    <div class="free3d-item free3d-result-item" data-page-url="${model.pageUrl}" title="${model.title}">
+                        <div class="free3d-item-inner">
+                            <img src="${model.preview}" alt="${model.title}" loading="lazy" onerror="this.src='/static/images/placeholder-thumb.svg'">
+                        </div>
+                        <div class="free3d-item-title free3d-result-name">${model.title}</div>
+                    </div>
+                `).join('');
+
+                container.querySelectorAll('.free3d-result-item').forEach((item) => {
+                    item.addEventListener('click', () => {
+                        const destination = item.dataset.pageUrl || 'https://free3d.online/';
+                        window.location.href = destination;
+                    });
+                });
+
+                section.classList.remove('hidden');
+            },
+
+            async loadPopularFree3DCharacters(force = false) {
+                const section = this.ensurePopularFree3DSection();
+                const container = document.getElementById('task-free3d-popular-results');
+                if (!section || !container) return;
+
+                if (this.free3dPopularLoaded && !force) {
+                    this.renderPopularFree3DCharacters();
+                    return;
+                }
+
+                container.innerHTML = '<div style="padding: 1rem; color: var(--text-muted);">Loading popular characters...</div>';
+
                 try {
-                    const response = await fetch(`/api/task/${this.taskId}`);
+                    const params = new URLSearchParams({
+                        mode: 'browse',
+                        sort: 'popular',
+                        category: 'characters',
+                        topK: '24',
+                        type: '1',
+                        _: String(Date.now()),
+                    });
+                    const response = await fetch(`/api/free3d/search?${params.toString()}`, { cache: 'no-store' });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                    const data = await response.json();
+                    const normalized = (Array.isArray(data?.results) ? data.results : [])
+                        .map((item) => this.normalizeFree3DItem(item))
+                        .filter(Boolean);
+
+                    if (!normalized.length) {
+                        section.classList.add('hidden');
+                        return;
+                    }
+
+                    this.free3dPopularPool = normalized;
+                    this.free3dPopularLoaded = true;
+                    this.renderPopularFree3DCharacters();
+                } catch (error) {
+                    console.warn('[TaskPage] Failed to load popular Free3D characters:', error);
+                    section.classList.add('hidden');
+                }
+            },
+            
+            startTaskPolling() {
+                if (this.pollInterval) return;
+                this.pollInterval = setInterval(() => {
+                    if (!document.hidden) this.fetchTask();
+                }, 4000);
+            },
+
+            async fetchTask() {
+                if (!this.taskId || this.fetchInFlight || document.hidden) return;
+                try {
+                    this.fetchInFlight = true;
+                    const response = await fetch(`/api/task/${this.taskId}`, { cache: 'no-store' });
                     
                     if (!response.ok) {
                         if (response.status === 404) {
@@ -2517,6 +2668,8 @@
                     }
                     
                     this.task = await response.json();
+                    this.taskFetchedAt = Date.now();
+                    window.dispatchEvent(new CustomEvent('taskDataUpdated', { detail: this.task }));
                     await this.updateUI();
                     await this.loadAnimationCatalog();
                     if (window.I18n) {
@@ -2529,6 +2682,8 @@
                     }
                 } catch (error) {
                     console.error('Fetch error:', error);
+                } finally {
+                    this.fetchInFlight = false;
                 }
             },
             
@@ -2908,6 +3063,7 @@
                 const hint = document.getElementById('progress-log-hint');
                 if (!box || !pre || !hint) return;
                 if (!this.taskId) return;
+                if (document.hidden) return;
 
                 // Only poll while page has a task and it's not error
                 if (!this.task || this.task.status === 'error') {
@@ -4392,6 +4548,10 @@
                 if (this.pollInterval) {
                     clearInterval(this.pollInterval);
                     this.pollInterval = null;
+                }
+                if (this.queueStatusInterval) {
+                    clearInterval(this.queueStatusInterval);
+                    this.queueStatusInterval = null;
                 }
             },
 
@@ -8749,13 +8909,33 @@
                     }, 3000);
                 }
             }
+
+            async function getLatestTaskState() {
+                const cachedTask = window.TaskUI?.task;
+                const cachedAt = Number(window.TaskUI?.taskFetchedAt || 0);
+                const taskAgeMs = Date.now() - cachedAt;
+                if (cachedTask && taskAgeMs >= 0 && taskAgeMs < 4500) {
+                    return cachedTask;
+                }
+
+                const r = await fetch(`/api/task/${taskId}`, { cache: 'no-store' });
+                const t = await r.json();
+                if (window.TaskUI) {
+                    window.TaskUI.task = t;
+                    window.TaskUI.taskFetchedAt = Date.now();
+                }
+                return t;
+            }
             
             // Init viewer: Free3D loads immediately, others wait for prepared/done
             async function waitAndInitViewer() {
                 try {
+                    if (document.hidden) {
+                        setTimeout(waitAndInitViewer, 5000);
+                        return;
+                    }
                     console.log('[Viewer] Polling task status...');
-                    const r = await fetch(`/api/task/${taskId}`);
-                    const t = await r.json();
+                    const t = await getLatestTaskState();
                     
                     // Check if animations are ready in ready_urls
                     const animationsReady = t && t.ready_urls && t.ready_urls.some(url => 
@@ -8858,7 +9038,7 @@
                     console.warn('[Viewer] Poll error:', e);
                 }
                 // Keep polling until task is done
-                setTimeout(waitAndInitViewer, 3000);
+                setTimeout(waitAndInitViewer, 5000);
             }
 
             console.log('[Viewer] Starting viewer initialization...');
@@ -8941,41 +9121,13 @@
                     
                     // Initialize header functionality
                     SiteHeader.init();
-                    SiteHeader.initSearch(async (modelUrl, modelName) => {
-                        if (!modelUrl) return;
-
-                        const confirmTemplate = (window.t ? t('free3d_confirm_create') : 'Add model "{title}" to rigging queue?');
-                        const confirmText = confirmTemplate.replace('{title}', modelName || 'Untitled');
-                        const confirmed = confirm(confirmText);
-                        if (!confirmed) return;
-
-                        const formData = new FormData();
-                        formData.append('source', 'link');
-                        formData.append('input_url', modelUrl);
-                        formData.append('type', 't_pose');
-
-                        try {
-                            const resp = await fetch('/api/task/create', {
-                                method: 'POST',
-                                body: formData
-                            });
-                            const data = await resp.json();
-                            if (resp.ok && data.task_id) {
-                                window.location.href = `/task?id=${data.task_id}`;
-                                return;
-                            }
-                            if (resp.status === 401) {
-                                window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
-                                return;
-                            }
-                            if (resp.status === 402) {
-                                window.location.href = '/buy-credits';
-                                return;
-                            }
-                            alert((data && (data.detail || data.message)) || (window.t ? t('error_generic') : 'Failed to create task'));
-                        } catch (e) {
-                            console.error('[Free3D] Failed to create task from task page:', e);
-                            alert(window.t ? t('error_generic') : 'Failed to create task');
+                    SiteHeader.initSearch({
+                        defaultCategory: 'characters',
+                        autoRandomOnInit: false,
+                        type: 1,
+                        onModelSelect: (modelUrl, modelName, modelPageUrl) => {
+                            const destination = modelPageUrl || 'https://free3d.online/';
+                            window.location.href = destination;
                         }
                     });
                     

@@ -1963,30 +1963,6 @@ img[loading="lazy"] {
     text-align: center;
 }
 
-/* Click hint on hover */
-.free3d-item::after {
-    content: '+ Add';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) scale(0.9);
-    background: var(--accent);
-    color: white;
-    padding: 0.4rem 0.75rem;
-    border-radius: var(--radius-sm);
-    font-size: 0.8rem;
-    font-weight: 600;
-    opacity: 0;
-    transition: all 0.2s ease;
-    pointer-events: none;
-    z-index: 10;
-}
-
-.free3d-item:hover::after {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-}
-
 /* No results message */
 .free3d-no-results {
     padding: 2rem;

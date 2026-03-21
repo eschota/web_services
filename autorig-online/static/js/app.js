@@ -12,6 +12,14 @@ const App = {
         activeTab: 'upload',
         free3dCreateInFlight: false
     },
+
+    scheduleNonCriticalWork(callback, timeout = 1200) {
+        if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(() => callback(), { timeout });
+            return;
+        }
+        window.setTimeout(callback, 0);
+    },
     
     /**
      * Initialize application
@@ -19,34 +27,42 @@ const App = {
     async init() {
         // Initialize i18n (global)
         await I18n.init();
-        
-        // Check auth status (global header)
-        await this.checkAuth();
-        
-        // Setup UI (safe on pages that don't have the conversion form)
+
+        // Setup critical UI first so first paint is not blocked by network.
         this.setupThemeToggle();
 
         // Conversion form (home page only)
         const hasConvertForm = !!document.getElementById('convert-form');
         if (hasConvertForm) {
-        this.setupTabs();
-        this.setupUploadZone();
-        this.setupForm();
+            this.setupTabs();
+            this.setupUploadZone();
+            this.setupForm();
         }
-        
-        // Optional widgets (only when the container exists)
-        this.loadHistory();
-        this.loadGalleryPreview();
-        
-        // Free3D model search (home page)
-        this.initFree3DSearch();
 
-        // Queue status (only if present)
+        // Defer non-critical network work until after the page is interactive.
+        this.scheduleNonCriticalWork(() => {
+            this.checkAuth();
+        });
+
+        this.scheduleNonCriticalWork(() => {
+            this.loadHistory();
+            this.loadGalleryPreview();
+        });
+
+        this.scheduleNonCriticalWork(() => {
+            this.initFree3DSearch();
+        }, 2000);
+
         const hasQueue = !!document.getElementById('queue-active');
         if (hasQueue) {
-        this.loadQueueStatus();
-        // Refresh queue status every 10 seconds
-        setInterval(() => this.loadQueueStatus(), 10000);
+            this.scheduleNonCriticalWork(() => {
+                this.loadQueueStatus();
+                setInterval(() => {
+                    if (!document.hidden) {
+                        this.loadQueueStatus();
+                    }
+                }, 10000);
+            });
         }
         
         // Listen for language changes (re-apply translations + refresh auth-derived labels)

@@ -221,7 +221,7 @@ async function initSiteHeader() {
  * Initialize Free3D search functionality (call after rendering)
  * @param {Function} onModelSelect - Callback when a model is selected
  */
-function initFree3DSearch(onModelSelect) {
+function initFree3DSearch(onModelSelectOrOptions, maybeOptions = {}) {
     const searchInput = document.getElementById('free3d-search-input');
     const categorySelect = document.getElementById('free3d-category-select');
     const resultsContainer = document.getElementById('free3d-results');
@@ -230,9 +230,25 @@ function initFree3DSearch(onModelSelect) {
     const searchSection = document.querySelector('.free3d-search');
     
     if (!searchInput || !resultsContainer || !searchSection) return;
+
+    const resolvedOptions = typeof onModelSelectOrOptions === 'function'
+        ? { ...maybeOptions, onModelSelect: onModelSelectOrOptions }
+        : { ...(onModelSelectOrOptions || {}) };
+    const onModelSelect = resolvedOptions.onModelSelect;
+    const defaultCategory = resolvedOptions.defaultCategory || 'characters';
+    const autoRandomOnInit = !!resolvedOptions.autoRandomOnInit;
+    const semanticType = Number.isFinite(Number(resolvedOptions.type)) ? Number(resolvedOptions.type) : 1;
+    const randomQueries = Array.isArray(resolvedOptions.randomQueries) && resolvedOptions.randomQueries.length
+        ? resolvedOptions.randomQueries
+        : ['girl', 'robot', 'warrior', 'soldier', 'knight', 'ninja', 'monster', 'alien', 'dragon', 'cyborg'];
     
     let searchTimeout = null;
     let searchEnabled = false;
+    let initialRandomTriggered = false;
+
+    if (categorySelect && defaultCategory) {
+        categorySelect.value = defaultCategory;
+    }
 
     function hideSearchSection(reason = 'unknown') {
         searchSection.classList.add('hidden');
@@ -249,7 +265,15 @@ function initFree3DSearch(onModelSelect) {
 
     async function probeSearchHealth() {
         try {
-            const resp = await fetch('/api/free3d/search?mode=browse&topK=1&type=1');
+            const params = new URLSearchParams({
+                mode: 'browse',
+                topK: '1',
+                type: String(semanticType),
+            });
+            if (categorySelect?.value && categorySelect.value !== 'all') {
+                params.set('category', categorySelect.value);
+            }
+            const resp = await fetch(`/api/free3d/search?${params.toString()}`);
             if (!resp.ok) {
                 hideSearchSection(`http_${resp.status}`);
                 return;
@@ -263,6 +287,36 @@ function initFree3DSearch(onModelSelect) {
         } catch (e) {
             hideSearchSection(`probe_failed_${e?.message || 'unknown'}`);
         }
+    }
+
+    function buildSemanticQuery(query, category = 'characters') {
+        const trimmed = String(query || '').trim();
+        if (!trimmed) return '';
+        const categoryHints = {
+            characters: 'character',
+            animals: 'animal creature',
+            vehicles: 'vehicle',
+            weapons: 'weapon',
+            props: 'prop object',
+        };
+        const hint = categoryHints[String(category || '').toLowerCase()];
+        if (!hint || String(category).toLowerCase() === 'all') {
+            return trimmed;
+        }
+        const lowered = trimmed.toLowerCase();
+        const hintWords = hint.split(/\s+/).filter(Boolean);
+        if (hintWords.some(word => lowered.includes(word))) {
+            return trimmed;
+        }
+        return `${hint} ${trimmed}`;
+    }
+
+    function triggerRandomSearch() {
+        if (!searchEnabled) return;
+        const randomQuery = randomQueries[Math.floor(Math.random() * randomQueries.length)];
+        searchInput.value = randomQuery;
+        const category = categorySelect ? categorySelect.value : defaultCategory;
+        performSearch(randomQuery, category);
     }
     
     async function performSearch(query, category = 'characters') {
@@ -279,7 +333,18 @@ function initFree3DSearch(onModelSelect) {
         
         try {
             const cacheBust = Date.now();
-            const resp = await fetch(`/api/free3d/search?q=${encodeURIComponent(query)}&mode=semantic&topK=20&_=${cacheBust}`);
+            const semanticQuery = buildSemanticQuery(query, category);
+            const params = new URLSearchParams({
+                q: semanticQuery,
+                mode: 'semantic',
+                topK: '20',
+                type: String(semanticType),
+                _: String(cacheBust),
+            });
+            if (category && category !== 'all') {
+                params.set('category', category);
+            }
+            const resp = await fetch(`/api/free3d/search?${params.toString()}`);
             if (!resp.ok) throw new Error('Search failed');
             
             const data = await resp.json();
@@ -317,11 +382,17 @@ function initFree3DSearch(onModelSelect) {
             model.model_url ||
             model.url ||
             '';
+        const modelPageUrl =
+            model.modelPageUrl ||
+            model.model_page_url ||
+            model.product_url ||
+            '';
 
         return {
             title: (title && String(title).trim()) || 'Untitled',
             preview: preview || '/static/images/placeholder-thumb.svg',
             glbUrl: (glbUrl && String(glbUrl).trim()) || '',
+            modelPageUrl: (modelPageUrl && String(modelPageUrl).trim()) || '',
         };
     }
     
@@ -334,7 +405,7 @@ function initFree3DSearch(onModelSelect) {
         }
         
         resultsContainer.innerHTML = normalized.map(model => `
-            <div class="free3d-item free3d-result-item" data-url="${model.glbUrl}" data-name="${model.title}" title="${model.title}">
+            <div class="free3d-item free3d-result-item" data-url="${model.glbUrl}" data-page-url="${model.modelPageUrl}" data-name="${model.title}" title="${model.title}">
                 <div class="free3d-item-inner">
                     <img src="${model.preview}" alt="${model.title}" loading="lazy" onerror="this.src='/static/images/placeholder-thumb.svg'">
                 </div>
@@ -348,9 +419,12 @@ function initFree3DSearch(onModelSelect) {
         resultsContainer.querySelectorAll('.free3d-result-item').forEach(item => {
             item.addEventListener('click', () => {
                 const url = item.dataset.url;
+                const pageUrl = item.dataset.pageUrl;
                 const name = item.dataset.name;
-                if (onModelSelect && url) {
-                    onModelSelect(url, name);
+                if (onModelSelect && (url || pageUrl)) {
+                    onModelSelect(url, name, pageUrl);
+                } else if (pageUrl) {
+                    window.location.href = pageUrl;
                 } else if (url) {
                     // Default fallback: open homepage with model URL param
                     window.location.href = `/?url=${encodeURIComponent(url)}`;
@@ -379,13 +453,8 @@ function initFree3DSearch(onModelSelect) {
     
     // Randomize button
     if (randomizeBtn) {
-        const randomQueries = ['robot', 'warrior', 'girl', 'zombie', 'soldier', 'knight', 'ninja', 'monster', 'alien', 'dragon'];
         randomizeBtn.addEventListener('click', () => {
-            if (!searchEnabled) return;
-            const randomQuery = randomQueries[Math.floor(Math.random() * randomQueries.length)];
-            searchInput.value = randomQuery;
-            const category = categorySelect ? categorySelect.value : 'characters';
-            performSearch(randomQuery, category);
+            triggerRandomSearch();
         });
     }
     
@@ -400,7 +469,12 @@ function initFree3DSearch(onModelSelect) {
         }
     });
 
-    probeSearchHealth();
+    probeSearchHealth().then(() => {
+        if (searchEnabled && autoRandomOnInit && !initialRandomTriggered) {
+            initialRandomTriggered = true;
+            triggerRandomSearch();
+        }
+    });
 }
 
 // Export for global use

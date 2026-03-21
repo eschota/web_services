@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -42,7 +42,7 @@ from config import (
     GUMROAD_PRODUCT_CREDITS,
 )
 from database import (
-    init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, TaskLike, TaskFilePurchase,
+    init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint,
     TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase
 )
@@ -403,7 +403,7 @@ async def background_task_updater():
                 if background_worker_cycle_count % CLEANUP_CHECK_INTERVAL_CYCLES == 0:
                     try:
                         from main import cleanup_disk_space
-                        result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB)
+                        result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB, db=db)
                         if result["deleted_count"] > 0:
                             print(f"[Background Worker] Disk cleanup: freed {result['freed_gb']:.2f} GB, deleted {result['deleted_count']} items")
                     except Exception as e:
@@ -1433,16 +1433,28 @@ async def api_create_task(
         filename = file.filename or "model.glb"
         filepath = os.path.join(upload_dir, filename)
         
-        # Check file size
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE_MB}MB."
-            )
-        
-        with open(filepath, "wb") as f:
-            f.write(content)
+        # Stream upload to disk so large files do not spike RAM.
+        max_upload_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+        uploaded_bytes = 0
+        try:
+            with open(filepath, "wb") as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    uploaded_bytes += len(chunk)
+                    if uploaded_bytes > max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE_MB}MB."
+                        )
+                    f.write(chunk)
+        except Exception:
+            try:
+                os.unlink(filepath)
+            except OSError:
+                pass
+            raise
         
         # Generate public URL (URL-encode filename for special chars, spaces, cyrillic)
         from urllib.parse import quote
@@ -1562,7 +1574,8 @@ async def api_gumroad_ping(
 
     product_key = _normalize_gumroad_product_key(product)
     local_credits_added = 0
-    should_notify_purchase = True
+    known_product = product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
+    should_notify_purchase = False
 
     if product_key.startswith("autorig-") and email and email != "unknown":
         try:
@@ -1605,6 +1618,15 @@ async def api_gumroad_ping(
                     should_notify_purchase = True
         except Exception as e:
             print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
+
+    if not should_notify_purchase:
+        if known_product or price_cents > 0 or refunded or is_test:
+            should_notify_purchase = True
+        else:
+            print(
+                f"[GumroadProxy] Ignoring unknown zero-price webhook sale={sale_id} product={product!r}",
+                flush=True,
+            )
 
     from telegram_bot import broadcast_credits_purchased
     if should_notify_purchase:
@@ -3422,6 +3444,7 @@ async def api_admin_delete_all_tasks(
 async def api_admin_cleanup(
     request: Request,
     admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Manually trigger disk cleanup (admin only).
@@ -3435,7 +3458,7 @@ async def api_admin_cleanup(
     
     # Run cleanup
     from main import cleanup_disk_space
-    result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB)
+    result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB, db=db)
     
     # Get final disk stats
     disk_usage = shutil.disk_usage("/")
@@ -4340,6 +4363,133 @@ def _validate_glb(data: bytes) -> bool:
     return True
 
 
+def _validate_glb_file(path: Path) -> bool:
+    """Validate GLB header and declared length without loading the whole file into RAM."""
+    try:
+        actual_size = path.stat().st_size
+        if actual_size < 12:
+            return False
+        with path.open("rb") as f:
+            header = f.read(12)
+    except Exception as e:
+        print(f"[GLB Validate] Failed to read {path.name}: {e}")
+        return False
+
+    if header[:4] != b"glTF":
+        return False
+    version = int.from_bytes(header[4:8], "little")
+    if version not in (1, 2):
+        return False
+    expected_length = int.from_bytes(header[8:12], "little")
+    if actual_size != expected_length:
+        print(f"[GLB Validate] Length mismatch for {path.name}: header says {expected_length}, actual {actual_size}")
+        return False
+    return True
+
+
+async def _stream_httpx_response_to_file(response: httpx.Response, destination: Path) -> int:
+    """Stream an upstream response to disk to avoid buffering large files in memory."""
+    bytes_written = 0
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with destination.open("wb") as f:
+            async for chunk in response.aiter_bytes(1024 * 1024):
+                if not chunk:
+                    continue
+                f.write(chunk)
+                bytes_written += len(chunk)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+            try:
+                if hasattr(os, "posix_fadvise") and hasattr(os, "POSIX_FADV_DONTNEED"):
+                    os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+            except OSError:
+                pass
+        return bytes_written
+    except Exception:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _extract_upload_token_from_input_url(input_url: Optional[str]) -> Optional[str]:
+    if not input_url:
+        return None
+    try:
+        parsed = urlparse(input_url)
+        path_parts = [part for part in (parsed.path or "").split("/") if part]
+    except Exception:
+        return None
+    if len(path_parts) >= 2 and path_parts[0] == "u":
+        return path_parts[1]
+    return None
+
+
+def _estimate_path_size(path: Path) -> int:
+    try:
+        if not path.exists():
+            return 0
+        if path.is_file():
+            return path.stat().st_size
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    except Exception:
+        return 0
+
+
+def _iter_task_artifact_paths(task: Task) -> List[Path]:
+    paths: List[Path] = [
+        TASK_CACHE_DIR / task.id,
+        Path("/var/autorig/videos") / f"{task.id}.mp4",
+    ]
+    paths.extend(GLB_CACHE_DIR.glob(f"{task.id}_*.glb"))
+    upload_token = _extract_upload_token_from_input_url(getattr(task, "input_url", None))
+    if upload_token:
+        paths.append(Path(UPLOAD_DIR) / upload_token)
+
+    unique_paths: List[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_paths.append(path)
+    return unique_paths
+
+
+def _delete_task_artifacts(task: Task) -> tuple[int, int]:
+    deleted_items = 0
+    freed_bytes = 0
+    for path in _iter_task_artifact_paths(task):
+        if not path.exists():
+            continue
+        item_size = _estimate_path_size(path)
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            deleted_items += 1
+            freed_bytes += item_size
+        except Exception as e:
+            print(f"[Disk Cleanup] Failed to delete task artifact {path}: {e}")
+    return deleted_items, freed_bytes
+
+
+async def _delete_task_record_and_related(db: AsyncSession, task_id: str) -> None:
+    await db.execute(delete(TaskLike).where(TaskLike.task_id == task_id))
+    await db.execute(delete(TaskFilePurchase).where(TaskFilePurchase.task_id == task_id))
+    await db.execute(delete(TaskAnimationPurchase).where(TaskAnimationPurchase.task_id == task_id))
+    await db.execute(delete(TaskAnimationBundlePurchase).where(TaskAnimationBundlePurchase.task_id == task_id))
+    await db.execute(delete(Task).where(Task.id == task_id))
+    await db.commit()
+
+
 async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:
     """
     Get GLB file from local cache, or download and cache it.
@@ -4352,8 +4502,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
     if cache_path.exists():
         # Validate cached file is not corrupted
         try:
-            cached_data = cache_path.read_bytes()
-            if not _validate_glb(cached_data):
+            if not _validate_glb_file(cache_path):
                 print(f"[GLB Cache] Cached file corrupted, deleting: {cache_path.name}")
                 cache_path.unlink()
             else:
@@ -4375,21 +4524,24 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
     
     # Download and cache
     try:
-        import httpx
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=120.0, follow_redirects=True)
-            if response.status_code != 200:
-                return None
-            
-            # Validate before caching
-            if not _validate_glb(response.content):
+            temp_path = cache_path.with_suffix(".tmp")
+            async with client.stream("GET", url, timeout=120.0, follow_redirects=True) as response:
+                if response.status_code != 200:
+                    return None
+                size_bytes = await _stream_httpx_response_to_file(response, temp_path)
+
+            if not _validate_glb_file(temp_path):
                 print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
                 return None
-            
-            # Write to cache file
-            cache_path.write_bytes(response.content)
-            print(f"[GLB Cache] Cached valid GLB: {cache_path.name} ({len(response.content)} bytes)")
-            
+
+            temp_path.replace(cache_path)
+            print(f"[GLB Cache] Cached valid GLB: {cache_path.name} ({size_bytes} bytes)")
+
             return FileResponse(
                 path=str(cache_path),
                 media_type="model/gltf-binary",
@@ -4610,7 +4762,7 @@ def _normalize_free3d_item(item: dict) -> Optional[dict]:
     if not guid:
         return None
 
-    title = (item.get("title") or "Untitled").strip() or "Untitled"
+    title = (item.get("title") or item.get("name") or "Untitled").strip() or "Untitled"
     model_page_url = item.get("modelPageUrl") or f"/models/{guid}"
 
     preview_small = item.get("previewSmallUrl")
@@ -4634,7 +4786,7 @@ def _normalize_free3d_item(item: dict) -> Optional[dict]:
         "type": item.get("type"),
         "typeLabel": item.get("typeLabel"),
         "category": item.get("category"),
-        "modelPageUrl": model_page_url,
+        "modelPageUrl": _to_abs(model_page_url),
         "previewSmallUrl": preview_small,
         "previewMediumUrl": preview_medium,
         "previewSmallAbsUrl": _to_abs(preview_small),
@@ -4695,7 +4847,9 @@ async def api_free3d_search(
                 resp.raise_for_status()
                 payload = resp.json()
 
-            raw_results = payload.get("results", []) if isinstance(payload, dict) else []
+            raw_results = []
+            if isinstance(payload, dict):
+                raw_results = payload.get("results") or payload.get("items") or []
             normalized_results = []
             for item in raw_results:
                 normalized = _normalize_free3d_item(item)
@@ -5095,8 +5249,6 @@ async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> 
     Returns:
         {"cached": True/False, "files": [...], "errors": [...]}
     """
-    import httpx
-    
     cache_dir = TASK_CACHE_DIR / task_id
     cache_dir.mkdir(parents=True, exist_ok=True)
     
@@ -5120,21 +5272,21 @@ async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> 
                     continue
                 
                 # Download file
-                response = await client.get(url, follow_redirects=True)
-                if response.status_code == 200:
-                    # Write to temp file first, then rename (atomic)
-                    temp_path = filepath.with_suffix('.tmp')
-                    temp_path.write_bytes(response.content)
-                    temp_path.rename(filepath)
-                    
-                    cached_files.append({
-                        "name": filename,
-                        "size": len(response.content),
-                        "url": f"/api/file/{task_id}/download/{quote(filename)}"
-                    })
-                    print(f"[Cache] Cached {filename} for task {task_id} ({len(response.content)} bytes)")
-                else:
-                    errors.append(f"HTTP {response.status_code} for {filename}")
+                async with client.stream("GET", url, follow_redirects=True) as response:
+                    if response.status_code == 200:
+                        # Write to temp file first, then rename (atomic)
+                        temp_path = filepath.with_suffix('.tmp')
+                        size_bytes = await _stream_httpx_response_to_file(response, temp_path)
+                        temp_path.rename(filepath)
+                        
+                        cached_files.append({
+                            "name": filename,
+                            "size": size_bytes,
+                            "url": f"/api/file/{task_id}/download/{quote(filename)}"
+                        })
+                        print(f"[Cache] Cached {filename} for task {task_id} ({size_bytes} bytes)")
+                    else:
+                        errors.append(f"HTTP {response.status_code} for {filename}")
                     
             except Exception as e:
                 errors.append(f"Error caching {url}: {str(e)}")
@@ -5177,108 +5329,159 @@ async def cleanup_old_cached_files(max_age_days: int = 30):
     return removed_count
 
 
-async def cleanup_disk_space(min_free_gb: int = 10) -> dict:
+async def cleanup_disk_space(min_free_gb: int = 10, db: Optional[AsyncSession] = None) -> dict:
     """
     Clean up old files when disk space is low.
-    Deletes oldest task files first until min_free_gb is available.
-    
-    Cleans these directories (in order of collection):
-    - static/tasks/ (task output files)
-    - static/glb_cache/ (cached GLB files)
-    - /var/autorig/uploads/ (user uploads)
-    - /var/autorig/videos/ (generated videos)
-    
-    Returns dict with: deleted_count, freed_bytes, freed_gb
+
+    Priority:
+    1. Remove the oldest completed/error tasks physically and delete their DB rows.
+    2. Remove orphaned cache/upload/video files not referenced by any remaining task.
     """
     from datetime import timedelta
     import shutil
-    
+
     min_free_bytes = min_free_gb * 1024 * 1024 * 1024
     min_age_hours = CLEANUP_MIN_AGE_HOURS
-    
-    # Check current free space
+
     disk_usage = shutil.disk_usage("/")
     free_bytes = disk_usage.free
-    
+
     result = {
         "deleted_count": 0,
+        "deleted_task_rows": 0,
         "freed_bytes": 0,
         "freed_gb": 0.0,
         "initial_free_gb": free_bytes / (1024**3),
         "target_free_gb": min_free_gb,
         "deleted_items": []
     }
-    
-    # If we have enough space, no cleanup needed
+
     if free_bytes >= min_free_bytes:
         return result
-    
+
     print(f"[Disk Cleanup] Free space {free_bytes / (1024**3):.2f} GB < {min_free_gb} GB target. Starting cleanup...")
-    
-    # Collect all cleanable directories with their modification times
-    cleanable_items = []
-    
-    # Age cutoff - never delete files younger than min_age_hours
+
     age_cutoff = datetime.utcnow() - timedelta(hours=min_age_hours)
     age_cutoff_timestamp = age_cutoff.timestamp()
-    
-    # 1. Task cache directories (static/tasks/)
-    if TASK_CACHE_DIR.exists():
-        for item in TASK_CACHE_DIR.iterdir():
-            if item.is_dir():
+    cleanable_items = []
+
+    cleanup_db: Optional[AsyncSession] = db
+    owns_db_session = cleanup_db is None
+    if owns_db_session:
+        cleanup_db = AsyncSessionLocal()
+
+    existing_task_ids: set[str] = set()
+    upload_tokens_in_use: set[str] = set()
+
+    try:
+        if cleanup_db is not None:
+            task_rows = (
+                await cleanup_db.execute(
+                    select(Task).order_by(Task.created_at)
+                )
+            ).scalars().all()
+
+            task_cleanup_candidates: List[Task] = []
+            for task in task_rows:
+                existing_task_ids.add(task.id)
+                upload_token = _extract_upload_token_from_input_url(task.input_url)
+                if upload_token:
+                    upload_tokens_in_use.add(upload_token)
+                if (
+                    task.status in ("done", "error")
+                    and task.created_at
+                    and task.created_at < age_cutoff
+                ):
+                    task_cleanup_candidates.append(task)
+
+            for task in task_cleanup_candidates:
+                disk_usage = shutil.disk_usage("/")
+                free_bytes = disk_usage.free
+                if free_bytes >= min_free_bytes:
+                    break
+
+                deleted_items, freed_bytes = _delete_task_artifacts(task)
+                if deleted_items <= 0 and freed_bytes <= 0:
+                    continue
+
+                try:
+                    await _delete_task_record_and_related(cleanup_db, task.id)
+                except Exception as e:
+                    await cleanup_db.rollback()
+                    print(f"[Disk Cleanup] Failed to delete task {task.id} from DB: {e}")
+                    continue
+
+                result["deleted_count"] += deleted_items
+                result["deleted_task_rows"] += 1
+                result["freed_bytes"] += freed_bytes
+                result["deleted_items"].append({
+                    "path": task.id,
+                    "type": "task",
+                    "size_mb": freed_bytes / (1024**2)
+                })
+                existing_task_ids.discard(task.id)
+
+                upload_token = _extract_upload_token_from_input_url(task.input_url)
+                if upload_token:
+                    upload_tokens_in_use.discard(upload_token)
+
+                print(f"[Disk Cleanup] Deleted task {task.id} with {deleted_items} local item(s), freed {freed_bytes / (1024**2):.1f} MB")
+
+        if TASK_CACHE_DIR.exists():
+            for item in TASK_CACHE_DIR.iterdir():
+                if not item.is_dir() or item.name in existing_task_ids:
+                    continue
                 try:
                     mtime = item.stat().st_mtime
                     if mtime < age_cutoff_timestamp:
-                        size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
                         cleanable_items.append({
                             "path": item,
                             "mtime": mtime,
-                            "size": size,
+                            "size": _estimate_path_size(item),
                             "type": "task_cache"
                         })
                 except Exception as e:
                     print(f"[Disk Cleanup] Error scanning {item}: {e}")
-    
-    # 2. GLB cache directories (static/glb_cache/)
-    if GLB_CACHE_DIR.exists():
-        for item in GLB_CACHE_DIR.iterdir():
-            if item.is_dir():
+
+        if GLB_CACHE_DIR.exists():
+            for item in GLB_CACHE_DIR.iterdir():
+                task_prefix = item.name[:36]
+                if task_prefix in existing_task_ids:
+                    continue
                 try:
                     mtime = item.stat().st_mtime
                     if mtime < age_cutoff_timestamp:
-                        size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
                         cleanable_items.append({
                             "path": item,
                             "mtime": mtime,
-                            "size": size,
+                            "size": _estimate_path_size(item),
                             "type": "glb_cache"
                         })
                 except Exception as e:
                     print(f"[Disk Cleanup] Error scanning {item}: {e}")
-    
-    # 3. Upload directories (/var/autorig/uploads/)
-    upload_dir = pathlib.Path(UPLOAD_DIR)
-    if upload_dir.exists():
-        for item in upload_dir.iterdir():
-            if item.is_dir():
+
+        upload_dir = pathlib.Path(UPLOAD_DIR)
+        if upload_dir.exists():
+            for item in upload_dir.iterdir():
+                if not item.is_dir() or item.name in upload_tokens_in_use:
+                    continue
                 try:
                     mtime = item.stat().st_mtime
                     if mtime < age_cutoff_timestamp:
-                        size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
                         cleanable_items.append({
                             "path": item,
                             "mtime": mtime,
-                            "size": size,
+                            "size": _estimate_path_size(item),
                             "type": "upload"
                         })
                 except Exception as e:
                     print(f"[Disk Cleanup] Error scanning {item}: {e}")
-    
-    # 4. Video files (/var/autorig/videos/)
-    videos_dir = pathlib.Path("/var/autorig/videos")
-    if videos_dir.exists():
-        for item in videos_dir.iterdir():
-            if item.is_file():
+
+        videos_dir = pathlib.Path("/var/autorig/videos")
+        if videos_dir.exists():
+            for item in videos_dir.iterdir():
+                if not item.is_file() or item.stem in existing_task_ids:
+                    continue
                 try:
                     mtime = item.stat().st_mtime
                     if mtime < age_cutoff_timestamp:
@@ -5290,55 +5493,56 @@ async def cleanup_disk_space(min_free_gb: int = 10) -> dict:
                         })
                 except Exception as e:
                     print(f"[Disk Cleanup] Error scanning {item}: {e}")
-    
-    # Sort by modification time (oldest first)
-    cleanable_items.sort(key=lambda x: x["mtime"])
-    
-    print(f"[Disk Cleanup] Found {len(cleanable_items)} cleanable items")
-    
-    # Delete oldest items until we have enough free space
-    for item in cleanable_items:
-        # Check current free space
-        disk_usage = shutil.disk_usage("/")
-        free_bytes = disk_usage.free
-        
-        if free_bytes >= min_free_bytes:
-            print(f"[Disk Cleanup] Target reached: {free_bytes / (1024**3):.2f} GB free")
-            break
-        
-        try:
-            item_path = item["path"]
-            item_size = item["size"]
-            item_type = item["type"]
-            
-            if item_path.is_dir():
-                shutil.rmtree(item_path)
-            else:
-                item_path.unlink()
-            
-            result["deleted_count"] += 1
-            result["freed_bytes"] += item_size
-            result["deleted_items"].append({
-                "path": str(item_path.name),
-                "type": item_type,
-                "size_mb": item_size / (1024**2)
-            })
-            
-            print(f"[Disk Cleanup] Deleted {item_type}: {item_path.name} ({item_size / (1024**2):.1f} MB)")
-            
-        except Exception as e:
-            print(f"[Disk Cleanup] Error deleting {item['path']}: {e}")
-    
+
+        cleanable_items.sort(key=lambda x: x["mtime"])
+        print(f"[Disk Cleanup] Found {len(cleanable_items)} orphan cleanable items")
+
+        for item in cleanable_items:
+            disk_usage = shutil.disk_usage("/")
+            free_bytes = disk_usage.free
+
+            if free_bytes >= min_free_bytes:
+                print(f"[Disk Cleanup] Target reached: {free_bytes / (1024**3):.2f} GB free")
+                break
+
+            try:
+                item_path = item["path"]
+                item_size = item["size"]
+                item_type = item["type"]
+
+                if item_path.is_dir():
+                    shutil.rmtree(item_path)
+                else:
+                    item_path.unlink()
+
+                result["deleted_count"] += 1
+                result["freed_bytes"] += item_size
+                result["deleted_items"].append({
+                    "path": str(item_path.name),
+                    "type": item_type,
+                    "size_mb": item_size / (1024**2)
+                })
+
+                print(f"[Disk Cleanup] Deleted {item_type}: {item_path.name} ({item_size / (1024**2):.1f} MB)")
+
+            except Exception as e:
+                print(f"[Disk Cleanup] Error deleting {item['path']}: {e}")
+    finally:
+        if owns_db_session and cleanup_db is not None:
+            await cleanup_db.close()
+
     result["freed_gb"] = result["freed_bytes"] / (1024**3)
-    
-    # Final free space check
+
     disk_usage = shutil.disk_usage("/")
     result["final_free_gb"] = disk_usage.free / (1024**3)
-    
-    if result["deleted_count"] > 0:
-        print(f"[Disk Cleanup] Complete: deleted {result['deleted_count']} items, freed {result['freed_gb']:.2f} GB")
+
+    if result["deleted_count"] > 0 or result["deleted_task_rows"] > 0:
+        print(
+            f"[Disk Cleanup] Complete: deleted {result['deleted_count']} item(s), "
+            f"deleted {result['deleted_task_rows']} task row(s), freed {result['freed_gb']:.2f} GB"
+        )
         print(f"[Disk Cleanup] Free space now: {result['final_free_gb']:.2f} GB")
-    
+
     return result
 
 
