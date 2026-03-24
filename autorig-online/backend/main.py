@@ -38,7 +38,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
-    NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES,
+    GALLERY_DB_PURGE_INTERVAL_CYCLES,
     GALLERY_UPSTREAM_PURGE_BATCH,
     GALLERY_UPSTREAM_PURGE_ROUNDS,
     GA_MEASUREMENT_ID, GA_API_SECRET,
@@ -480,36 +480,37 @@ async def background_task_updater():
 
                 # =============================================================
                 # 2.6–2.7 Gallery DB cleanup (single-worker lock; multi-round upstream)
+                # Default: once per week (GALLERY_DB_PURGE_INTERVAL_CYCLES) — not every worker tick.
                 # =============================================================
-                lock_f = _try_acquire_gallery_purge_lock()
-                if lock_f is not None:
-                    try:
-                        upstream_deleted = 0
-                        upstream_off = 0
-                        for _round in range(GALLERY_UPSTREAM_PURGE_ROUNDS):
-                            try:
-                                ur = await purge_gallery_upstream_dead_tasks(
-                                    db,
-                                    batch=GALLERY_UPSTREAM_PURGE_BATCH,
-                                    offset=upstream_off,
+                if background_worker_cycle_count % GALLERY_DB_PURGE_INTERVAL_CYCLES == 0:
+                    lock_f = _try_acquire_gallery_purge_lock()
+                    if lock_f is not None:
+                        try:
+                            upstream_deleted = 0
+                            upstream_off = 0
+                            for _round in range(GALLERY_UPSTREAM_PURGE_ROUNDS):
+                                try:
+                                    ur = await purge_gallery_upstream_dead_tasks(
+                                        db,
+                                        batch=GALLERY_UPSTREAM_PURGE_BATCH,
+                                        offset=upstream_off,
+                                    )
+                                except Exception as e:
+                                    print(f"[Background Worker] Gallery upstream purge error: {e}")
+                                    break
+                                upstream_deleted += ur["deleted"]
+                                if ur["scanned"] == 0:
+                                    break
+                                if ur["deleted"] > 0:
+                                    upstream_off = 0
+                                else:
+                                    upstream_off += ur["scanned"]
+                            if upstream_deleted > 0:
+                                print(
+                                    f"[Background Worker] Gallery upstream purge: deleted {upstream_deleted} "
+                                    f"task(s) in up to {GALLERY_UPSTREAM_PURGE_ROUNDS} round(s)"
                                 )
-                            except Exception as e:
-                                print(f"[Background Worker] Gallery upstream purge error: {e}")
-                                break
-                            upstream_deleted += ur["deleted"]
-                            if ur["scanned"] == 0:
-                                break
-                            if ur["deleted"] > 0:
-                                upstream_off = 0
-                            else:
-                                upstream_off += ur["scanned"]
-                        if upstream_deleted > 0:
-                            print(
-                                f"[Background Worker] Gallery upstream purge: deleted {upstream_deleted} "
-                                f"task(s) in up to {GALLERY_UPSTREAM_PURGE_ROUNDS} round(s)"
-                            )
 
-                        if background_worker_cycle_count % NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES == 0:
                             try:
                                 pr = await purge_tasks_without_poster_and_video(db)
                                 if pr["deleted"] > 0:
@@ -519,8 +520,8 @@ async def background_task_updater():
                                     )
                             except Exception as e:
                                 print(f"[Background Worker] No-assets purge error: {e}")
-                    finally:
-                        _release_gallery_purge_lock(lock_f)
+                        finally:
+                            _release_gallery_purge_lock(lock_f)
 
                 # =============================================================
                 # 3. Update progress for all processing tasks
@@ -3764,7 +3765,8 @@ async def api_admin_disk_stats(
         "settings": {
             "min_free_space_gb": MIN_FREE_SPACE_GB,
             "cleanup_interval_cycles": CLEANUP_CHECK_INTERVAL_CYCLES,
-            "min_age_hours": CLEANUP_MIN_AGE_HOURS
+            "min_age_hours": CLEANUP_MIN_AGE_HOURS,
+            "gallery_db_purge_interval_cycles": GALLERY_DB_PURGE_INTERVAL_CYCLES,
         }
     }
 

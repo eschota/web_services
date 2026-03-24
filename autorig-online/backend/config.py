@@ -133,8 +133,23 @@ CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
 
 # Purge DB rows for terminal tasks that have neither video nor any thumbnail URL in ready/output lists
+# (Used only as legacy env name; gallery purges are gated by GALLERY_DB_PURGE_INTERVAL_CYCLES below.)
 NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES = int(
     os.getenv("NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES", "10")
+)
+
+# Gallery / task DB purge (upstream HTTP probe + no-poster purge): default once per week.
+# Background worker sleeps BACKGROUND_WORKER_SLEEP_SEC between cycles (see main.py).
+_BACKGROUND_WORKER_SLEEP_SEC = 30
+_GALLERY_PURGE_DEFAULT_WEEK_SEC = 7 * 24 * 3600
+GALLERY_DB_PURGE_INTERVAL_CYCLES = max(
+    1,
+    int(
+        os.getenv(
+            "GALLERY_DB_PURGE_INTERVAL_CYCLES",
+            str(_GALLERY_PURGE_DEFAULT_WEEK_SEC // _BACKGROUND_WORKER_SLEEP_SEC),
+        )
+    ),
 )
 
 # HEAD/GET probe of worker URLs: gallery rows with deleted worker files still have JSON paths — purge in batches

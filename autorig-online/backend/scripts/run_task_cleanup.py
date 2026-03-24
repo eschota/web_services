@@ -2,7 +2,8 @@
 """
 Gallery/task DB cleanup: JSON poster paths + upstream HTTP probe (same logic as the app background worker).
 
-Run on a schedule via systemd timer or cron so cleanup happens even if uvicorn workers are busy.
+Run on a schedule via systemd timer (default: weekly, see deploy/autorig-gallery-purge.timer)
+so cleanup happens even if uvicorn workers are busy.
 Uses the same file lock as main.py so it does not run concurrently with the in-app purge.
 """
 from __future__ import annotations
