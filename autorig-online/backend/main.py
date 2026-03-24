@@ -39,6 +39,7 @@ from config import (
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
     NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES,
+    GALLERY_UPSTREAM_PURGE_BATCH,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
 )
@@ -436,7 +437,20 @@ async def background_task_updater():
                         print(f"[Background Worker] Disk cleanup error: {e}")
 
                 # =============================================================
-                # 2.6. Purge terminal tasks with no video_ready and no poster in URLs
+                # 2.6. Gallery: purge rows whose poster/video 404 on worker (JSON paths still present)
+                # =============================================================
+                try:
+                    ur = await purge_gallery_upstream_dead_tasks(db, batch=GALLERY_UPSTREAM_PURGE_BATCH)
+                    if ur["deleted"] > 0:
+                        print(
+                            f"[Background Worker] Gallery upstream purge: deleted {ur['deleted']} "
+                            f"(scanned {ur['scanned']})"
+                        )
+                except Exception as e:
+                    print(f"[Background Worker] Gallery upstream purge error: {e}")
+
+                # =============================================================
+                # 2.7. Purge terminal tasks with no poster filename in JSON (no HTTP)
                 # =============================================================
                 if background_worker_cycle_count % NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES == 0:
                     try:
@@ -444,7 +458,7 @@ async def background_task_updater():
                         if pr["deleted"] > 0:
                             print(
                                 f"[Background Worker] Purged {pr['deleted']} stale task(s) "
-                                f"(no poster, no video); scanned {pr['scanned']}"
+                                f"(no poster paths in JSON); scanned {pr['scanned']}"
                             )
                     except Exception as e:
                         print(f"[Background Worker] No-assets purge error: {e}")
@@ -3572,12 +3586,14 @@ async def api_admin_purge_no_poster_video(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Delete terminal tasks (done/error) that have no video_ready and no poster/thumb URL in lists.
-    Admin only. Same logic as the background purge.
+    1) Purge terminal rows with no poster filename in JSON.
+    2) Purge gallery-eligible rows whose poster/video URLs 404 on workers (files TTL-expired).
+    Admin only — same as background jobs.
     """
-    result = await purge_tasks_without_poster_and_video(db)
-    print(f"[Admin] purge-no-poster-video by {admin.email}: {result}")
-    return {"ok": True, **result}
+    a = await purge_tasks_without_poster_and_video(db)
+    b = await purge_gallery_upstream_dead_tasks(db, batch=max(GALLERY_UPSTREAM_PURGE_BATCH, 200))
+    print(f"[Admin] purge-no-poster-video by {admin.email}: string={a} upstream={b}")
+    return {"ok": True, "string_purge": a, "upstream_purge": b}
 
 
 @app.post("/api/admin/cleanup")
@@ -4399,6 +4415,18 @@ def _task_has_poster(task: Task) -> bool:
     return False
 
 
+def resolve_poster_url_for_task(task: Task) -> Optional[str]:
+    """First poster/thumb URL for /api/thumb — searches ready_urls and output_urls (same order as thumb proxy)."""
+    urls = list(task.ready_urls or []) + list(task.output_urls or [])
+    if not urls:
+        return None
+    for pattern in ("_video_poster.jpg", "_poster.jpg", "icon.png", "Render_1_view.jpg"):
+        u = _find_file_in_ready_urls(urls, pattern)
+        if u:
+            return u.strip()
+    return None
+
+
 def _gallery_task_has_poster_sql():
     """
     SQL condition aligned with _task_has_poster(): JSON URL text must contain a thumb filename.
@@ -4679,6 +4707,88 @@ async def purge_tasks_without_poster_and_video(db: AsyncSession) -> dict:
     return {"deleted": deleted, "scanned": len(rows)}
 
 
+async def _probe_http_asset_reachable(client, url: str) -> bool:
+    """True if worker still serves this URL (HEAD or tiny ranged GET)."""
+    if not url or not str(url).strip():
+        return False
+    url = str(url).strip()
+    try:
+        r = await client.head(url, timeout=15.0, follow_redirects=True)
+        if r.status_code == 200:
+            return True
+        if r.status_code in (404, 410):
+            return False
+    except Exception:
+        pass
+    try:
+        r = await client.get(
+            url,
+            timeout=15.0,
+            follow_redirects=True,
+            headers={"Range": "bytes=0-0"},
+        )
+        return r.status_code in (200, 206)
+    except Exception:
+        return False
+
+
+async def purge_gallery_upstream_dead_tasks(
+    db: AsyncSession, batch: Optional[int] = None
+) -> dict:
+    """
+    Remove done+video_ready tasks that still match gallery SQL but poster or video 404 on worker.
+    Workers delete files over time; DB strings become stale — this aligns DB with reality.
+    """
+    import httpx
+
+    limit = batch if batch is not None else GALLERY_UPSTREAM_PURGE_BATCH
+    result = await db.execute(
+        select(Task)
+        .where(
+            Task.status == "done",
+            Task.video_ready.is_(True),
+            _gallery_task_has_poster_sql(),
+        )
+        .order_by(Task.created_at.asc())
+        .limit(limit)
+    )
+    rows = list(result.scalars().all())
+    if not rows:
+        return {"deleted": 0, "scanned": 0, "upstream": True}
+
+    deleted = 0
+    async with httpx.AsyncClient() as client:
+        for task in rows:
+            poster_url = resolve_poster_url_for_task(task)
+            if not poster_url:
+                _delete_task_artifacts(task)
+                try:
+                    await _delete_task_record_and_related(db, task.id)
+                    deleted += 1
+                except Exception as e:
+                    await db.rollback()
+                    print(f"[Gallery upstream purge] Failed {task.id} (no poster url): {e}")
+                continue
+            if not await _probe_http_asset_reachable(client, poster_url):
+                _delete_task_artifacts(task)
+                try:
+                    await _delete_task_record_and_related(db, task.id)
+                    deleted += 1
+                except Exception as e:
+                    await db.rollback()
+                    print(f"[Gallery upstream purge] Failed {task.id} (dead poster): {e}")
+                continue
+            if task.video_url and not await _probe_http_asset_reachable(client, task.video_url):
+                _delete_task_artifacts(task)
+                try:
+                    await _delete_task_record_and_related(db, task.id)
+                    deleted += 1
+                except Exception as e:
+                    await db.rollback()
+                    print(f"[Gallery upstream purge] Failed {task.id} (dead video): {e}")
+    return {"deleted": deleted, "scanned": len(rows), "upstream": True}
+
+
 async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:
     """
     Get GLB file from local cache, or download and cache it.
@@ -4901,21 +5011,8 @@ async def api_proxy_thumb(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
-    # Try to find _video_poster.jpg in ready_urls
-    poster_url = _find_file_in_ready_urls(task.ready_urls or [], "_video_poster.jpg")
-    if not poster_url:
-        # Try alternative pattern
-        poster_url = _find_file_in_ready_urls(task.ready_urls or [], "_poster.jpg")
-    
-    if not poster_url:
-        # Try icon.png
-        poster_url = _find_file_in_ready_urls(task.ready_urls or [], "icon.png")
-        
-    if not poster_url:
-        # Try Render_1_view.jpg
-        poster_url = _find_file_in_ready_urls(task.ready_urls or [], "Render_1_view.jpg")
 
+    poster_url = resolve_poster_url_for_task(task)
     if not poster_url:
         raise HTTPException(status_code=404, detail="Thumbnail not available")
     
