@@ -20,7 +20,21 @@
     └── ...
 ```
 
-## Deploy после `git pull` на сервере
+## Одна команда: push в GitHub + деплой в `/opt` + nginx + restart
+
+Из корня репозитория (например `/root`), где есть `autorig-online/`:
+
+```bash
+/root/autorig-online/deploy/push-and-deploy.sh
+# или с сообщением коммита:
+/root/autorig-online/deploy/push-and-deploy.sh "fix: описание"
+```
+
+Скрипт делает: `git add -A` → commit (если есть изменения) → `git push` → `rsync` `backend/` (без `db/`) и `static/` (без `tasks/`, `glb_cache/`) в `PROD_ROOT` → копирует `deploy/nginx.conf` → `nginx -t` + reload → `systemctl restart autorig`.
+
+Без обновления nginx: `SKIP_NGINX=1 /root/autorig-online/deploy/push-and-deploy.sh`
+
+## Deploy только на сервере (без push)
 
 ```bash
 sudo /root/autorig-online/deploy/sync-prod-from-repo.sh
