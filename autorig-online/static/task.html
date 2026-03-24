@@ -2782,6 +2782,42 @@
                         </button>
                     </div>
                 </div>
+
+                <div id="sprite-sheet-mvp-wrap" style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
+                    <div style="font-size:0.82rem; font-weight:600; margin-bottom:0.45rem;">Sprite sheet (MVP)</div>
+                    <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                        Renders the selected custom animation to a PNG atlas in the browser (Three.js).
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:0.45rem; align-items:center; margin-bottom:0.45rem;">
+                        <label for="sprite-sheet-view" style="font-size:0.72rem; color:var(--text-muted);">View</label>
+                        <select id="sprite-sheet-view" class="form-input" style="max-width:160px; padding:0.35rem 0.45rem; font-size:0.75rem;">
+                            <option value="front" selected>Front</option>
+                            <option value="back">Back</option>
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                            <option value="front_right">Front-right (45°)</option>
+                        </select>
+                        <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
+                        <input id="sprite-sheet-frames" type="number" min="1" max="64" value="16" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
+                        <label for="sprite-sheet-fw" style="font-size:0.72rem; color:var(--text-muted);">W</label>
+                        <input id="sprite-sheet-fw" type="number" min="64" max="512" value="256" class="form-input" style="width:68px; padding:0.35rem 0.4rem; font-size:0.75rem;">
+                        <label for="sprite-sheet-fh" style="font-size:0.72rem; color:var(--text-muted);">H</label>
+                        <input id="sprite-sheet-fh" type="number" min="64" max="512" value="256" class="form-input" style="width:68px; padding:0.35rem 0.4rem; font-size:0.75rem;">
+                    </div>
+                    <button type="button" id="sprite-sheet-generate-btn" class="btn btn-secondary" style="width:100%; padding:0.5rem 0.65rem; font-size:0.78rem;" disabled>
+                        Generate sprite sheet
+                    </button>
+                    <div id="sprite-sheet-progress" style="font-size:0.7rem; color:var(--text-muted); margin-top:0.35rem; min-height:1em;"></div>
+                    <div id="sprite-sheet-preview-wrap" style="margin-top:0.5rem; display:none;">
+                        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.35rem;">Preview</div>
+                        <img id="sprite-sheet-preview-img" alt="Sprite sheet preview" style="max-width:100%; height:auto; image-rendering:pixelated; border:1px solid var(--border-subtle, rgba(255,255,255,0.12)); border-radius:6px; background:repeating-conic-gradient(#80808020 0% 25%, #fff0 0% 50%) 50% / 16px 16px;">
+                    </div>
+                    <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.65rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:120px;"></pre>
+                    <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
+                        <button type="button" id="sprite-sheet-download-png-btn" class="btn btn-primary" style="flex:1; min-width:120px; padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download PNG</button>
+                        <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="flex:1; min-width:120px; padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download JSON</button>
+                    </div>
+                </div>
             </div>
             </div>
             
@@ -4827,6 +4863,192 @@
                     downloadBtn.__wired = true;
                     downloadBtn.addEventListener('click', () => this.downloadSelectedAnimationAction());
                 }
+
+                const genBtn = document.getElementById('sprite-sheet-generate-btn');
+                if (genBtn && !genBtn.__wired) {
+                    genBtn.__wired = true;
+                    genBtn.addEventListener('click', () => this.generateSpriteSheetAction());
+                }
+            },
+
+            updateSpriteSheetControlsState() {
+                const btn = document.getElementById('sprite-sheet-generate-btn');
+                if (!btn) return;
+                const getCtx = window.__getViewerSpriteSheetContext;
+                const selected = this.getSelectedAnimationItem();
+                let ok = false;
+                if (getCtx && selected?.ready && selected?.preview_url) {
+                    try {
+                        const ctx = getCtx();
+                        ok = Boolean(
+                            ctx?.currentModelType === 'animations' &&
+                            ctx?.currentModel &&
+                            ctx?.mixer &&
+                            ctx?.scene &&
+                            ctx?.renderer
+                        );
+                    } catch (_) {
+                        ok = false;
+                    }
+                }
+                btn.disabled = !ok;
+            },
+
+            async generateSpriteSheetAction() {
+                const cap = window.captureSpriteSheetAtlas;
+                const getCtx = window.__getViewerSpriteSheetContext;
+                const lim = window.SPRITE_SHEET_LIMITS || { minFrames: 1, maxFrames: 64, minFrameSize: 64, maxFrameSize: 512 };
+                const progressEl = document.getElementById('sprite-sheet-progress');
+                const previewWrap = document.getElementById('sprite-sheet-preview-wrap');
+                const previewImg = document.getElementById('sprite-sheet-preview-img');
+                const metaEl = document.getElementById('sprite-sheet-meta');
+                const dlPng = document.getElementById('sprite-sheet-download-png-btn');
+                const dlJson = document.getElementById('sprite-sheet-download-json-btn');
+
+                if (!cap || !getCtx) {
+                    alert('Viewer is not ready yet.');
+                    return;
+                }
+
+                const selected = this.getSelectedAnimationItem();
+                if (!selected?.preview_url || !selected.ready) {
+                    alert('Select a ready custom animation first.');
+                    return;
+                }
+
+                const ctx = getCtx();
+                if (ctx.currentModelType !== 'animations' || !ctx.currentModel || !ctx.mixer) {
+                    alert('Animations model must be loaded. Wait for the viewer to finish loading or switch to Animation mode.');
+                    return;
+                }
+
+                const viewSel = document.getElementById('sprite-sheet-view');
+                const framesIn = document.getElementById('sprite-sheet-frames');
+                const fwIn = document.getElementById('sprite-sheet-fw');
+                const fhIn = document.getElementById('sprite-sheet-fh');
+                const viewPreset = (viewSel?.value || 'front').trim();
+                let frameCount = parseInt(String(framesIn?.value || '16'), 10);
+                let fw = parseInt(String(fwIn?.value || '256'), 10);
+                let fh = parseInt(String(fhIn?.value || '256'), 10);
+                frameCount = Math.min(lim.maxFrames, Math.max(lim.minFrames, frameCount));
+                fw = Math.min(lim.maxFrameSize, Math.max(lim.minFrameSize, fw));
+                fh = Math.min(lim.maxFrameSize, Math.max(lim.minFrameSize, fh));
+                if (framesIn) framesIn.value = String(frameCount);
+                if (fwIn) fwIn.value = String(fw);
+                if (fhIn) fhIn.value = String(fh);
+
+                const bridge = window.CustomAnimationViewerBridge;
+                if (bridge?.playByFbxUrl) {
+                    const okLoad = await bridge.playByFbxUrl(selected.preview_url, [
+                        selected.name,
+                        selected.id,
+                        selected.file_name,
+                    ]);
+                    if (!okLoad) {
+                        alert('Could not load animation FBX for this selection.');
+                        return;
+                    }
+                }
+
+                const clips = ctx.animations || [];
+                if (!clips.length) {
+                    alert('No animation clips on the model.');
+                    return;
+                }
+                const clip = clips[0];
+
+                let lastBlobUrl = null;
+                const revokeOld = () => {
+                    if (lastBlobUrl) {
+                        try {
+                            URL.revokeObjectURL(lastBlobUrl);
+                        } catch (_) {}
+                        lastBlobUrl = null;
+                    }
+                };
+
+                const genBtn = document.getElementById('sprite-sheet-generate-btn');
+                if (genBtn) genBtn.disabled = true;
+                if (progressEl) progressEl.textContent = 'Rendering…';
+                revokeOld();
+                if (previewWrap) previewWrap.style.display = 'none';
+                if (metaEl) {
+                    metaEl.style.display = 'none';
+                    metaEl.textContent = '';
+                }
+                if (dlPng) dlPng.style.display = 'none';
+                if (dlJson) dlJson.style.display = 'none';
+
+                ctx.stopMainViewerLoop();
+                try {
+                    const { pngBlob, meta } = await cap({
+                        THREE: ctx.THREE,
+                        renderer: ctx.renderer,
+                        scene: ctx.scene,
+                        rootObject: ctx.currentModel,
+                        mixer: ctx.mixer,
+                        clip,
+                        frameCount,
+                        frameWidth: fw,
+                        frameHeight: fh,
+                        viewPreset,
+                        transparentBackground: true,
+                        groundObject: ctx.groundPlaneMesh,
+                        onProgress: (p) => {
+                            if (progressEl) progressEl.textContent = `Rendering… ${Math.round(p * 100)}%`;
+                        },
+                    });
+
+                    meta.animationId = this.normalizeAnimationKey(selected.id);
+                    meta.animationName = selected.name;
+
+                    lastBlobUrl = URL.createObjectURL(pngBlob);
+                    if (previewImg) {
+                        previewImg.src = lastBlobUrl;
+                    }
+                    if (previewWrap) previewWrap.style.display = 'block';
+                    if (metaEl) {
+                        metaEl.textContent = JSON.stringify(meta, null, 2);
+                        metaEl.style.display = 'block';
+                    }
+                    if (progressEl) progressEl.textContent = 'Done.';
+
+                    const base = `spritesheet_${this.taskId}_${meta.animationId}_${viewPreset}`;
+
+                    if (dlPng) {
+                        dlPng.style.display = 'inline-flex';
+                        dlPng.onclick = () => {
+                            const a = document.createElement('a');
+                            a.href = lastBlobUrl;
+                            a.download = `${base}.png`;
+                            a.click();
+                        };
+                    }
+                    if (dlJson) {
+                        dlJson.style.display = 'inline-flex';
+                        dlJson.onclick = () => {
+                            const jb = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
+                            const u = URL.createObjectURL(jb);
+                            const a = document.createElement('a');
+                            a.href = u;
+                            a.download = `${base}.json`;
+                            a.click();
+                            setTimeout(() => URL.revokeObjectURL(u), 2000);
+                        };
+                    }
+                } catch (e) {
+                    console.error('[SpriteSheet]', e);
+                    alert(e?.message || 'Sprite sheet generation failed.');
+                    if (progressEl) progressEl.textContent = '';
+                } finally {
+                    ctx.startMainViewerLoop();
+                    try {
+                        await this.applySelectedAnimationToViewer();
+                    } catch (e) {
+                        console.warn('[SpriteSheet] restore animation failed:', e);
+                    }
+                    this.updateSpriteSheetControlsState();
+                }
             },
 
             ensureTaskDesktopColumns() {
@@ -5158,11 +5380,13 @@
                 if (!selected || !selected.available || !selected.ready) {
                     labelEl.textContent = this.tSafe('custom_anim_no_selection', 'Select an animation');
                     downloadBtn.disabled = true;
+                    this.updateSpriteSheetControlsState();
                     return;
                 }
 
                 labelEl.textContent = this.getLocalizedAnimationName(selected);
                 downloadBtn.disabled = false;
+                this.updateSpriteSheetControlsState();
             },
 
             async notifyCustomAnimationIntent(source = 'custom_animation_download', animationId = null, animationName = null) {
@@ -5857,6 +6081,15 @@
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
         } from '/static/js/rig-editor.js?v=64';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
+        import {
+            captureSpriteSheetAtlas,
+            VIEW_PRESETS as SPRITE_VIEW_PRESETS,
+            SPRITE_SHEET_LIMITS,
+        } from '/static/js/sprite-sheet-mvp.js?v=1';
+
+        window.captureSpriteSheetAtlas = captureSpriteSheetAtlas;
+        window.SPRITE_VIEW_PRESETS = SPRITE_VIEW_PRESETS;
+        window.SPRITE_SHEET_LIMITS = SPRITE_SHEET_LIMITS;
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -9066,6 +9299,21 @@
                 if (transformPanelInit) transformPanelInit.style.display = 'none';
 
                 startMainViewerLoop();
+
+                window.__getViewerSpriteSheetContext = function () {
+                    return {
+                        THREE,
+                        scene,
+                        renderer,
+                        mixer,
+                        animations,
+                        currentModel,
+                        currentModelType,
+                        groundPlaneMesh,
+                        stopMainViewerLoop,
+                        startMainViewerLoop,
+                    };
+                };
             }
 
             // Get model transform parameters for sending to worker
