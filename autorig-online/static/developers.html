@@ -15,47 +15,8 @@
     <meta name="twitter:description" content="REST API for automatic 3D rigging.">
     <link rel="stylesheet" href="/static/css/styles.css">
 </head>
-<body>
-    <header class="header">
-        <div class="container">
-            <div class="header-inner">
-                <a href="/" class="logo">
-                    <img src="/static/images/logo/autorig-logo.png" alt="AutoRig" class="logo-icon" width="80" height="80">
-                    <span>AutoRig</span>
-                </a>
-
-                <nav class="nav">
-                    <a href="/" class="nav-link" data-i18n="nav_home">Home</a>
-                    <a href="/guides" class="nav-link" data-i18n="nav_guides">Guides</a>
-                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
-                    <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
-                    <a href="/developers" class="nav-link active" data-i18n="nav_api">API</a>
-                </nav>
-
-                <div class="header-actions">
-                    <div class="credits-badge">
-                        <span id="credits-label" data-i18n="credits_remaining">Credits remaining</span>
-                        <span class="count" id="credits-count">-</span>
-                    </div>
-                    <div class="lang-selector">
-                        <button class="lang-btn">
-                            <span>EN</span>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-                                <path d="M3 4.5L6 7.5L9 4.5"/>
-                            </svg>
-                        </button>
-                        <div class="lang-dropdown">
-                            <button class="lang-option" data-lang="en">English</button>
-                            <button class="lang-option" data-lang="ru">Русский</button>
-                            <button class="lang-option" data-lang="zh">中文</button>
-                            <button class="lang-option" data-lang="hi">हिंदी</button>
-                        </div>
-                    </div>
-                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
-                </div>
-            </div>
-        </div>
-    </header>
+<body data-layout-free3d-init="none">
+    <div id="site-header"></div>
 
     <main style="padding: 3rem 0;">
         <div class="container" style="max-width: 980px;">
@@ -151,34 +112,14 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
         </div>
     </main>
 
-    <footer class="site-footer">
-        <div class="container">
-            <div class="footer-grid">
-                <div class="footer-brand">
-                    <a href="/" class="footer-logo">
-                    <img src="/static/images/logo/autorig-logo.png" alt="AutoRig Online" height="120">
-                    </a>
-                    <p class="footer-tagline" data-i18n="footer_tagline">AI-powered automatic 3D character rigging.</p>
-                </div>
-                <div class="footer-links">
-                    <h4 class="footer-heading" data-i18n="footer_company">Company</h4>
-                    <ul>
-                        <li><a href="/guides" data-i18n="nav_guides">All Guides</a></li>
-                        <li><a href="/faq" data-i18n="footer_faq">FAQ</a></li>
-                        <li><a href="/buy-credits" data-i18n="nav_buy">Buy Credits</a></li>
-                        <li><a href="/developers" data-i18n="nav_api">API</a></li>
-                    </ul>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <p class="footer-copyright" data-i18n="footer_copyright">© 2025 AutoRig Online. All rights reserved.</p>
-            </div>
-        </div>
-    </footer>
-
     <script type="application/json" id="autorig-api-agent-brief">{}</script>
 
-    <script src="/static/js/i18n.js"></script>
+    <div id="site-footer"></div>
+
+        <script src="/static/js/header.js?v=20260324-sitelayout"></script>
+    <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
+    <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
+<script src="/static/js/i18n.js"></script>
     <script>
         async function loadAuth() {
             const resp = await fetch('/auth/me');

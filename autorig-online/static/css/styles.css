@@ -246,6 +246,7 @@ h3 { font-size: 1.25rem; }
     font-size: 1.5rem;
     font-weight: 700;
     color: var(--text-primary);
+    flex-shrink: 0;
 }
 
 .logo-icon {
@@ -260,10 +261,15 @@ h3 { font-size: 1.25rem; }
 }
 
 .logo-img {
+    /* Asset 360×240; keep box identical on static pages and on /task (#site-header injection) */
     height: 80px;
     width: auto;
+    max-height: 80px;
+    aspect-ratio: 360 / 240;
     object-fit: contain;
+    object-position: left center;
     flex-shrink: 0;
+    display: block;
 }
 
 .header-actions {

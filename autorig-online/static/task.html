@@ -12,7 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=tc-4">
+    <link rel="stylesheet" href="/static/css/styles.css?v=tc-5">
     
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -1727,7 +1727,7 @@
         }
     </style>
 </head>
-<body>
+<body data-layout-free3d-ribbon="1" data-layout-free3d-init="task">
     <!-- Site Header (injected by header.js) -->
     <div id="site-header"></div>
     
@@ -3046,12 +3046,14 @@
         </div>
     </div>
     
-    <!-- Site Footer (injected by footer.js) -->
+    <!-- Site Footer (injected by site-layout.js) -->
     <div id="site-footer"></div>
 
-    <!-- Scripts -->
+    <!-- Scripts: layout before i18n so header/footer exist when I18n.init runs -->
+    <script src="/static/js/header.js?v=20260324-sitelayout"></script>
+    <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
+    <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
     <script src="/static/js/i18n.js"></script>
-    <script src="/static/js/footer.js"></script>
     <script>
         window.__taskPerf = window.__taskPerf || {
             mainViewerFps: 0,
@@ -5821,11 +5823,6 @@
         
         document.addEventListener('DOMContentLoaded', () => {
             TaskPage.init();
-            // Initialize site footer
-            const footerContainer = document.getElementById('site-footer');
-            if (footerContainer && window.SiteFooter) {
-                footerContainer.innerHTML = SiteFooter.render();
-            }
         });
     </script>
 
@@ -12751,43 +12748,6 @@
         }
     </script>
 
-    <!-- Site Header Component -->
-    <script src="/static/js/header.js?v=20260306-searchfix2"></script>
-    <script>
-        // Inject site header (skip in webapp mode)
-        (function() {
-            const params = new URLSearchParams(window.location.search);
-            const isWebAppMode = params.get('mode') === 'webapp';
-            
-            if (!isWebAppMode) {
-                const headerContainer = document.getElementById('site-header');
-                if (headerContainer && window.SiteHeader) {
-                    // Render header with Free3D search ribbon on task page
-                    headerContainer.innerHTML = SiteHeader.render({ showSearch: true });
-                    
-                    // Initialize header functionality
-                    SiteHeader.init();
-                    SiteHeader.initSearch({
-                        defaultCategory: 'characters',
-                        autoRandomOnInit: false,
-                        type: 1,
-                        onModelSelect: (modelUrl, modelName, modelPageUrl) => {
-                            const destination = modelPageUrl || 'https://free3d.online/';
-                            window.location.href = destination;
-                        }
-                    });
-                    
-                    if (window.I18n) {
-                        // Setup language selector after injection
-                        I18n.setupSelector();
-                        // Re-apply translations after header is injected and initialized
-                        I18n.applyTranslations();
-                    }
-                    
-                }
-            }
-        })();
-    </script>
 </body>
 </html>
 

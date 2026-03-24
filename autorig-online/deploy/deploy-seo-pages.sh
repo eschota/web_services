@@ -41,6 +41,11 @@ cp /root/autorig-online/static/glb-vs-fbx-ru.html /root/autorig-online/static/
 cp /root/autorig-online/static/glb-vs-fbx-zh.html /root/autorig-online/static/
 cp /root/autorig-online/static/glb-vs-fbx-hi.html /root/autorig-online/static/
 
+# Shared layout JS (header/footer injection)
+cp /root/autorig-online/static/js/site-layout.js /root/autorig-online/static/js/
+cp /root/autorig-online/static/js/header.js /root/autorig-online/static/js/
+cp /root/autorig-online/static/js/footer.js /root/autorig-online/static/js/
+
 # Update sitemap
 echo "🗺️  Updating sitemap..."
 cp /root/autorig-online/static/sitemap.xml /root/autorig-online/static/

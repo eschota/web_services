@@ -15,26 +15,48 @@ const DROPDOWN_ARROW_SVG = `<svg width="12" height="12" viewBox="0 0 12 12" fill
 </svg>`;
 
 /**
+ * Normalize path for nav active comparison (trailing slash, empty → /)
+ */
+function normalizeNavPath(p) {
+    if (p == null || p === '') return '/';
+    const s = String(p).replace(/\/$/, '') || '/';
+    return s;
+}
+
+/**
+ * @param {string} href - nav link href e.g. /guides
+ * @param {string} [activePath] - current path; omit or 'none' for no active state
+ */
+function navLinkClass(href, activePath) {
+    if (activePath == null || activePath === '' || activePath === 'none') return 'nav-link';
+    const h = normalizeNavPath(href);
+    const a = normalizeNavPath(activePath);
+    return h === a ? 'nav-link active' : 'nav-link';
+}
+
+/**
  * Render the site header
  * @param {Object} options - Configuration options
  * @param {boolean} options.showSearch - Whether to show Free3D search (default: true)
  * @param {boolean} options.showNav - Whether to show navigation links (default: true)
  * @param {boolean} options.showCredits - Whether to show credits badge (default: true)
+ * @param {string} [options.activePath] - pathname for highlighting active nav link (e.g. location.pathname)
  * @returns {string} HTML string
  */
 function renderSiteHeader(options = {}) {
     const { 
         showSearch = true, 
         showNav = true, 
-        showCredits = true 
+        showCredits = true,
+        activePath = undefined
     } = options;
     
     const navHtml = showNav ? `
         <nav class="nav">
-            <a href="/guides" class="nav-link" data-i18n="nav_guides">Guides</a>
-            <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
-            <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
-            <a href="/developers" class="nav-link" data-i18n="nav_api">API</a>
+            <a href="/guides" class="${navLinkClass('/guides', activePath)}" data-i18n="nav_guides">Guides</a>
+            <a href="/gallery" class="${navLinkClass('/gallery', activePath)}" data-i18n="nav_gallery">Gallery</a>
+            <a href="/buy-credits" class="${navLinkClass('/buy-credits', activePath)}" data-i18n="nav_buy">Buy</a>
+            <a href="/developers" class="${navLinkClass('/developers', activePath)}" data-i18n="nav_api">API</a>
         </nav>
     ` : '';
     
@@ -54,7 +76,8 @@ function renderSiteHeader(options = {}) {
                          srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x"
                          alt="Autorig.Online" 
                          class="logo-img" 
-                         height="240">
+                         width="120"
+                         height="80">
                 </a>
 
                 ${navHtml}
