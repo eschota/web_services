@@ -906,6 +906,40 @@
             color: #f59e0b;
         }
 
+        .sprite-sheet-views-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+            gap: 0.65rem;
+            margin-top: 0.55rem;
+        }
+        .sprite-sheet-view-cell {
+            border: 1px solid var(--border, rgba(255,255,255,0.12));
+            border-radius: 8px;
+            padding: 0.45rem;
+            background: rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .sprite-sheet-view-cell canvas {
+            image-rendering: pixelated;
+            border-radius: 4px;
+            background: repeating-conic-gradient(#80808020 0% 25%, #fff0 0% 50%) 50% / 12px 12px;
+        }
+        .sprite-sheet-view-label {
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-align: center;
+        }
+        .sprite-sheet-view-dl {
+            font-size: 0.65rem;
+            color: var(--accent);
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
         .viewer-custom-layout {
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
@@ -2782,42 +2816,6 @@
                         </button>
                     </div>
                 </div>
-
-                <div id="sprite-sheet-mvp-wrap" style="margin-top:0.85rem; padding-top:0.75rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
-                    <div style="font-size:0.82rem; font-weight:600; margin-bottom:0.45rem;">Sprite sheet (MVP)</div>
-                    <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.5rem;">
-                        Renders the selected custom animation to a PNG atlas in the browser (Three.js).
-                    </div>
-                    <div style="display:flex; flex-wrap:wrap; gap:0.45rem; align-items:center; margin-bottom:0.45rem;">
-                        <label for="sprite-sheet-view" style="font-size:0.72rem; color:var(--text-muted);">View</label>
-                        <select id="sprite-sheet-view" class="form-input" style="max-width:160px; padding:0.35rem 0.45rem; font-size:0.75rem;">
-                            <option value="front" selected>Front</option>
-                            <option value="back">Back</option>
-                            <option value="left">Left</option>
-                            <option value="right">Right</option>
-                            <option value="front_right">Front-right (45°)</option>
-                        </select>
-                        <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
-                        <input id="sprite-sheet-frames" type="number" min="1" max="64" value="16" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
-                        <label for="sprite-sheet-fw" style="font-size:0.72rem; color:var(--text-muted);">W</label>
-                        <input id="sprite-sheet-fw" type="number" min="64" max="512" value="256" class="form-input" style="width:68px; padding:0.35rem 0.4rem; font-size:0.75rem;">
-                        <label for="sprite-sheet-fh" style="font-size:0.72rem; color:var(--text-muted);">H</label>
-                        <input id="sprite-sheet-fh" type="number" min="64" max="512" value="256" class="form-input" style="width:68px; padding:0.35rem 0.4rem; font-size:0.75rem;">
-                    </div>
-                    <button type="button" id="sprite-sheet-generate-btn" class="btn btn-secondary" style="width:100%; padding:0.5rem 0.65rem; font-size:0.78rem;" disabled>
-                        Generate sprite sheet
-                    </button>
-                    <div id="sprite-sheet-progress" style="font-size:0.7rem; color:var(--text-muted); margin-top:0.35rem; min-height:1em;"></div>
-                    <div id="sprite-sheet-preview-wrap" style="margin-top:0.5rem; display:none;">
-                        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.35rem;">Preview</div>
-                        <img id="sprite-sheet-preview-img" alt="Sprite sheet preview" style="max-width:100%; height:auto; image-rendering:pixelated; border:1px solid var(--border-subtle, rgba(255,255,255,0.12)); border-radius:6px; background:repeating-conic-gradient(#80808020 0% 25%, #fff0 0% 50%) 50% / 16px 16px;">
-                    </div>
-                    <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.65rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:120px;"></pre>
-                    <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
-                        <button type="button" id="sprite-sheet-download-png-btn" class="btn btn-primary" style="flex:1; min-width:120px; padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download PNG</button>
-                        <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="flex:1; min-width:120px; padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download JSON</button>
-                    </div>
-                </div>
             </div>
             </div>
             
@@ -2983,6 +2981,47 @@
                             <div id="face-rig-status" class="face-rig-status">The viewer will load the task model, keep auto talk running by default, and can use your microphone locally for lip sync.</div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Sprite sheet MVP: below Face RIG; auto-renders 5 standard views -->
+            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="sprite-sheet-card">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                    <h3 class="card-title" style="margin:0; font-size:1rem;">2D Sprite sheet</h3>
+                    <div style="font-size:0.72rem; color:var(--text-muted);">Five views · PNG atlas · Three.js</div>
+                </div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.55rem;">
+                    Same custom animations as in 3D preview. Renders automatically when you pick an animation (or change options).
+                </div>
+                <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap; margin-bottom:0.45rem;">
+                    <label for="sprite-sheet-anim-type" style="font-size:0.72rem; color:var(--text-muted);">Type:</label>
+                    <select id="sprite-sheet-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
+                        <option value="walk" selected>Walk</option>
+                    </select>
+                    <div id="sprite-sheet-anim-stats" style="font-size:0.72rem; color:var(--text-muted);"></div>
+                </div>
+                <div id="sprite-sheet-anim-grid" class="custom-anim-grid">
+                    <div style="grid-column:1/-1; color:var(--text-muted);">Loading…</div>
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.65rem; padding-top:0.55rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
+                    <label for="sprite-sheet-resolution" style="font-size:0.72rem; color:var(--text-muted);">Cell size</label>
+                    <select id="sprite-sheet-resolution" class="form-input" style="max-width:120px; padding:0.35rem 0.45rem; font-size:0.75rem;">
+                        <option value="64">64 px</option>
+                        <option value="128">128 px</option>
+                        <option value="256" selected>256 px</option>
+                        <option value="512">512 px</option>
+                        <option value="1024">1024 px</option>
+                    </select>
+                    <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
+                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="16" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
+                    <span style="font-size:0.68rem; color:var(--text-muted);">Views: front, back, left, top, top-right 45°</span>
+                </div>
+                <div id="sprite-sheet-progress" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem; min-height:1.2em;"></div>
+                <div id="sprite-sheet-views-grid" class="sprite-sheet-views-grid"></div>
+                <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.62rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:160px;"></pre>
+                <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
+                    <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download pack JSON</button>
+                    <button type="button" id="sprite-sheet-download-all-png-btn" class="btn btn-primary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download all PNGs</button>
                 </div>
             </div>
 
@@ -3486,6 +3525,9 @@
             animationCatalogHash: null,
             selectedAnimationId: null,
             animationApplyToken: 0,
+            spriteSheetGenId: 0,
+            spriteSheetDebounceTimer: null,
+            spriteSheetLastPack: null,
             animationTypeFilter: 'walk',
             free3dPopularPool: [],
             free3dPopularLoaded: false,
@@ -4856,6 +4898,8 @@
                     typeSelect.__wired = true;
                     typeSelect.addEventListener('change', () => {
                         this.animationTypeFilter = String(typeSelect.value || 'walk').toLowerCase();
+                        const st = document.getElementById('sprite-sheet-anim-type');
+                        if (st) st.value = this.animationTypeFilter;
                         this.renderAnimationCatalog();
                     });
                 }
@@ -4864,16 +4908,30 @@
                     downloadBtn.addEventListener('click', () => this.downloadSelectedAnimationAction());
                 }
 
-                const genBtn = document.getElementById('sprite-sheet-generate-btn');
-                if (genBtn && !genBtn.__wired) {
-                    genBtn.__wired = true;
-                    genBtn.addEventListener('click', () => this.generateSpriteSheetAction());
+                const spriteType = document.getElementById('sprite-sheet-anim-type');
+                if (spriteType && !spriteType.__wired) {
+                    spriteType.__wired = true;
+                    spriteType.addEventListener('change', () => {
+                        this.animationTypeFilter = String(spriteType.value || 'walk').toLowerCase();
+                        const main = document.getElementById('custom-anim-type');
+                        if (main) main.value = this.animationTypeFilter;
+                        this.renderAnimationCatalog();
+                    });
+                }
+                const resSel = document.getElementById('sprite-sheet-resolution');
+                if (resSel && !resSel.__wired) {
+                    resSel.__wired = true;
+                    resSel.addEventListener('change', () => this.scheduleSpriteSheetAutoRender());
+                }
+                const framesIn = document.getElementById('sprite-sheet-frames');
+                if (framesIn && !framesIn.__wired) {
+                    framesIn.__wired = true;
+                    framesIn.addEventListener('change', () => this.scheduleSpriteSheetAutoRender());
                 }
             },
 
             updateSpriteSheetControlsState() {
-                const btn = document.getElementById('sprite-sheet-generate-btn');
-                if (!btn) return;
+                const card = document.getElementById('sprite-sheet-card');
                 const getCtx = window.__getViewerSpriteSheetContext;
                 const selected = this.getSelectedAnimationItem();
                 let ok = false;
@@ -4891,51 +4949,92 @@
                         ok = false;
                     }
                 }
-                btn.disabled = !ok;
+                if (card) {
+                    if (ok) {
+                        card.classList.remove('hidden');
+                        window.__taskPageBoot?.revealElement('sprite-sheet-card', 0);
+                    } else {
+                        card.classList.add('hidden');
+                        this._stopSpriteSheetPreviews();
+                        const pr = document.getElementById('sprite-sheet-progress');
+                        if (pr) pr.textContent = '';
+                    }
+                }
+                if (ok) {
+                    this.scheduleSpriteSheetAutoRender();
+                }
             },
 
-            async generateSpriteSheetAction() {
-                const cap = window.captureSpriteSheetAtlas;
-                const getCtx = window.__getViewerSpriteSheetContext;
-                const lim = window.SPRITE_SHEET_LIMITS || { minFrames: 1, maxFrames: 64, minFrameSize: 64, maxFrameSize: 512 };
-                const progressEl = document.getElementById('sprite-sheet-progress');
-                const previewWrap = document.getElementById('sprite-sheet-preview-wrap');
-                const previewImg = document.getElementById('sprite-sheet-preview-img');
-                const metaEl = document.getElementById('sprite-sheet-meta');
-                const dlPng = document.getElementById('sprite-sheet-download-png-btn');
-                const dlJson = document.getElementById('sprite-sheet-download-json-btn');
+            scheduleSpriteSheetAutoRender() {
+                if (this.spriteSheetDebounceTimer) {
+                    clearTimeout(this.spriteSheetDebounceTimer);
+                }
+                this.spriteSheetDebounceTimer = setTimeout(() => {
+                    this.spriteSheetDebounceTimer = null;
+                    this.generateSpriteSheetAction({ auto: true });
+                }, 420);
+            },
 
-                if (!cap || !getCtx) {
-                    alert('Viewer is not ready yet.');
+            _stopSpriteSheetPreviews() {
+                const stoppers = this._spritePreviewStoppers;
+                if (Array.isArray(stoppers) && stoppers.length) {
+                    stoppers.forEach((fn) => {
+                        try {
+                            if (typeof fn === 'function') fn();
+                        } catch (_) {}
+                    });
+                }
+                this._spritePreviewStoppers = [];
+                const pack = this.spriteSheetLastPack;
+                if (pack?.urls) {
+                    pack.urls.forEach((u) => {
+                        try {
+                            URL.revokeObjectURL(u);
+                        } catch (_) {}
+                    });
+                }
+                this.spriteSheetLastPack = null;
+            },
+
+            async generateSpriteSheetAction(opts = {}) {
+                const auto = Boolean(opts.auto);
+                const capPack = window.captureStandardSpriteSheetPack;
+                const getCtx = window.__getViewerSpriteSheetContext;
+                const lim = window.SPRITE_SHEET_LIMITS || { minFrames: 1, maxFrames: 64, minFrameSize: 64, maxFrameSize: 1024 };
+                const progressEl = document.getElementById('sprite-sheet-progress');
+                const viewsGrid = document.getElementById('sprite-sheet-views-grid');
+                const metaEl = document.getElementById('sprite-sheet-meta');
+                const dlJson = document.getElementById('sprite-sheet-download-json-btn');
+                const dlAll = document.getElementById('sprite-sheet-download-all-png-btn');
+                const views = window.SPRITE_STANDARD_VIEW_IDS || ['front', 'back', 'left', 'top', 'top_right'];
+
+                if (!capPack || !getCtx) {
+                    if (!auto) alert('Viewer is not ready yet.');
                     return;
                 }
 
                 const selected = this.getSelectedAnimationItem();
                 if (!selected?.preview_url || !selected.ready) {
-                    alert('Select a ready custom animation first.');
+                    if (viewsGrid) viewsGrid.innerHTML = '';
+                    if (progressEl) progressEl.textContent = '';
                     return;
                 }
 
                 const ctx = getCtx();
                 if (ctx.currentModelType !== 'animations' || !ctx.currentModel || !ctx.mixer) {
-                    alert('Animations model must be loaded. Wait for the viewer to finish loading or switch to Animation mode.');
+                    if (!auto) {
+                        alert('Animations model must be loaded. Wait for the viewer to finish loading.');
+                    }
                     return;
                 }
 
-                const viewSel = document.getElementById('sprite-sheet-view');
                 const framesIn = document.getElementById('sprite-sheet-frames');
-                const fwIn = document.getElementById('sprite-sheet-fw');
-                const fhIn = document.getElementById('sprite-sheet-fh');
-                const viewPreset = (viewSel?.value || 'front').trim();
+                const resSel = document.getElementById('sprite-sheet-resolution');
                 let frameCount = parseInt(String(framesIn?.value || '16'), 10);
-                let fw = parseInt(String(fwIn?.value || '256'), 10);
-                let fh = parseInt(String(fhIn?.value || '256'), 10);
+                let cell = parseInt(String(resSel?.value || '256'), 10);
                 frameCount = Math.min(lim.maxFrames, Math.max(lim.minFrames, frameCount));
-                fw = Math.min(lim.maxFrameSize, Math.max(lim.minFrameSize, fw));
-                fh = Math.min(lim.maxFrameSize, Math.max(lim.minFrameSize, fh));
+                cell = Math.min(lim.maxFrameSize, Math.max(lim.minFrameSize, cell));
                 if (framesIn) framesIn.value = String(frameCount);
-                if (fwIn) fwIn.value = String(fw);
-                if (fhIn) fhIn.value = String(fh);
 
                 const bridge = window.CustomAnimationViewerBridge;
                 if (bridge?.playByFbxUrl) {
@@ -4945,43 +5044,32 @@
                         selected.file_name,
                     ]);
                     if (!okLoad) {
-                        alert('Could not load animation FBX for this selection.');
+                        if (!auto) alert('Could not load animation FBX for this selection.');
                         return;
                     }
                 }
 
                 const clips = ctx.animations || [];
                 if (!clips.length) {
-                    alert('No animation clips on the model.');
+                    if (!auto) alert('No animation clips on the model.');
                     return;
                 }
                 const clip = clips[0];
 
-                let lastBlobUrl = null;
-                const revokeOld = () => {
-                    if (lastBlobUrl) {
-                        try {
-                            URL.revokeObjectURL(lastBlobUrl);
-                        } catch (_) {}
-                        lastBlobUrl = null;
-                    }
-                };
-
-                const genBtn = document.getElementById('sprite-sheet-generate-btn');
-                if (genBtn) genBtn.disabled = true;
-                if (progressEl) progressEl.textContent = 'Rendering…';
-                revokeOld();
-                if (previewWrap) previewWrap.style.display = 'none';
+                const genId = ++this.spriteSheetGenId;
+                this._stopSpriteSheetPreviews();
+                if (progressEl) progressEl.textContent = 'Rendering sprite sheets…';
+                if (viewsGrid) viewsGrid.innerHTML = '';
                 if (metaEl) {
                     metaEl.style.display = 'none';
                     metaEl.textContent = '';
                 }
-                if (dlPng) dlPng.style.display = 'none';
                 if (dlJson) dlJson.style.display = 'none';
+                if (dlAll) dlAll.style.display = 'none';
 
                 ctx.stopMainViewerLoop();
                 try {
-                    const { pngBlob, meta } = await cap({
+                    const { results, packMeta } = await capPack({
                         THREE: ctx.THREE,
                         renderer: ctx.renderer,
                         scene: ctx.scene,
@@ -4989,65 +5077,107 @@
                         mixer: ctx.mixer,
                         clip,
                         frameCount,
-                        frameWidth: fw,
-                        frameHeight: fh,
-                        viewPreset,
+                        frameWidth: cell,
+                        frameHeight: cell,
+                        views,
                         transparentBackground: true,
                         groundObject: ctx.groundPlaneMesh,
                         onProgress: (p) => {
+                            if (this.spriteSheetGenId !== genId) return;
                             if (progressEl) progressEl.textContent = `Rendering… ${Math.round(p * 100)}%`;
                         },
                     });
 
-                    meta.animationId = this.normalizeAnimationKey(selected.id);
-                    meta.animationName = selected.name;
+                    if (this.spriteSheetGenId !== genId) return;
 
-                    lastBlobUrl = URL.createObjectURL(pngBlob);
-                    if (previewImg) {
-                        previewImg.src = lastBlobUrl;
+                    packMeta.animationId = this.normalizeAnimationKey(selected.id);
+                    packMeta.animationName = selected.name;
+                    packMeta.taskId = this.taskId;
+
+                    const urlList = [];
+                    const stoppers = [];
+                    const labels = {};
+                    (window.STANDARD_SPRITE_VIEWS || []).forEach((v) => {
+                        labels[v.id] = v.label;
+                    });
+
+                    if (viewsGrid) {
+                        viewsGrid.innerHTML = '';
+                        results.forEach((r, idx) => {
+                            const url = URL.createObjectURL(r.pngBlob);
+                            urlList.push(url);
+                            const cellEl = document.createElement('div');
+                            cellEl.className = 'sprite-sheet-view-cell';
+                            const lab = document.createElement('div');
+                            lab.className = 'sprite-sheet-view-label';
+                            lab.textContent = labels[r.view] || r.view;
+                            const canvas = document.createElement('canvas');
+                            canvas.width = 120;
+                            canvas.height = 120;
+                            const dl = document.createElement('span');
+                            dl.className = 'sprite-sheet-view-dl';
+                            dl.textContent = 'PNG';
+                            dl.addEventListener('click', () => {
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `spritesheet_${this.taskId}_${packMeta.animationId}_${r.view}.png`;
+                                a.click();
+                            });
+                            cellEl.appendChild(lab);
+                            cellEl.appendChild(canvas);
+                            cellEl.appendChild(dl);
+                            viewsGrid.appendChild(cellEl);
+
+                            const stop = window.startAtlasPreviewAnimation(canvas, url, r.meta, Math.max(8, Math.min(24, r.meta.fps || 12)));
+                            stoppers.push(stop);
+                        });
+                        this._spritePreviewStoppers = stoppers;
                     }
-                    if (previewWrap) previewWrap.style.display = 'block';
+
+                    this.spriteSheetLastPack = { urls: urlList, packMeta, results };
+
                     if (metaEl) {
-                        metaEl.textContent = JSON.stringify(meta, null, 2);
+                        metaEl.textContent = JSON.stringify(packMeta, null, 2);
                         metaEl.style.display = 'block';
                     }
-                    if (progressEl) progressEl.textContent = 'Done.';
+                    if (progressEl) progressEl.textContent = 'Done — all views.';
 
-                    const base = `spritesheet_${this.taskId}_${meta.animationId}_${viewPreset}`;
-
-                    if (dlPng) {
-                        dlPng.style.display = 'inline-flex';
-                        dlPng.onclick = () => {
-                            const a = document.createElement('a');
-                            a.href = lastBlobUrl;
-                            a.download = `${base}.png`;
-                            a.click();
-                        };
-                    }
                     if (dlJson) {
                         dlJson.style.display = 'inline-flex';
                         dlJson.onclick = () => {
-                            const jb = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
+                            const jb = new Blob([JSON.stringify(packMeta, null, 2)], { type: 'application/json' });
                             const u = URL.createObjectURL(jb);
                             const a = document.createElement('a');
                             a.href = u;
-                            a.download = `${base}.json`;
+                            a.download = `spritesheet_pack_${this.taskId}_${packMeta.animationId}.json`;
                             a.click();
                             setTimeout(() => URL.revokeObjectURL(u), 2000);
                         };
                     }
+                    if (dlAll) {
+                        dlAll.style.display = 'inline-flex';
+                        dlAll.onclick = () => {
+                            results.forEach((r) => {
+                                const u = URL.createObjectURL(r.pngBlob);
+                                const a = document.createElement('a');
+                                a.href = u;
+                                a.download = `spritesheet_${this.taskId}_${packMeta.animationId}_${r.view}.png`;
+                                a.click();
+                                setTimeout(() => URL.revokeObjectURL(u), 200);
+                            });
+                        };
+                    }
                 } catch (e) {
                     console.error('[SpriteSheet]', e);
-                    alert(e?.message || 'Sprite sheet generation failed.');
+                    if (!auto) alert(e?.message || 'Sprite sheet generation failed.');
                     if (progressEl) progressEl.textContent = '';
                 } finally {
                     ctx.startMainViewerLoop();
                     try {
                         await this.applySelectedAnimationToViewer();
-                    } catch (e) {
-                        console.warn('[SpriteSheet] restore animation failed:', e);
+                    } catch (err) {
+                        console.warn('[SpriteSheet] restore animation failed:', err);
                     }
-                    this.updateSpriteSheetControlsState();
                 }
             },
 
@@ -5241,7 +5371,14 @@
                     typeSelect.innerHTML = '';
                     stats.textContent = '';
                     this.selectedAnimationId = null;
-                    grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No ready custom animations yet.')}</div>`;
+                    const emptyMsg = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No ready custom animations yet.')}</div>`;
+                    grid.innerHTML = emptyMsg;
+                    const sg = document.getElementById('sprite-sheet-anim-grid');
+                    const st = document.getElementById('sprite-sheet-anim-type');
+                    const ss = document.getElementById('sprite-sheet-anim-stats');
+                    if (sg) sg.innerHTML = emptyMsg;
+                    if (st) st.innerHTML = '';
+                    if (ss) ss.textContent = '';
                     this.updateCustomAnimationActions();
                     return;
                 }
@@ -5282,7 +5419,15 @@
                 stats.textContent = `${filtered.length} / ${readyAll.length}`;
 
                 if (!filtered.length) {
-                    grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_type', 'No ready animations in this type.')}</div>`;
+                    const emptyType = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_type', 'No ready animations in this type.')}</div>`;
+                    grid.innerHTML = emptyType;
+                    const sg = document.getElementById('sprite-sheet-anim-grid');
+                    const st = document.getElementById('sprite-sheet-anim-type');
+                    const ss = document.getElementById('sprite-sheet-anim-stats');
+                    if (sg) sg.innerHTML = emptyType;
+                    if (st) st.innerHTML = typeSelect.innerHTML;
+                    if (st) st.value = selectedType;
+                    if (ss) ss.textContent = stats.textContent;
                     this.updateCustomAnimationActions();
                     return;
                 }
@@ -5302,12 +5447,26 @@
                     `;
                 }).join('');
 
-                grid.querySelectorAll('.custom-anim-card').forEach((el) => {
-                    el.addEventListener('click', async () => {
-                        const id = el.getAttribute('data-anim-id');
-                        await this.selectAnimation(id);
+                const wireGrid = (rootEl) => {
+                    rootEl.querySelectorAll('.custom-anim-card').forEach((el) => {
+                        el.addEventListener('click', async () => {
+                            const id = el.getAttribute('data-anim-id');
+                            await this.selectAnimation(id);
+                        });
                     });
-                });
+                };
+                wireGrid(grid);
+
+                const spriteType = document.getElementById('sprite-sheet-anim-type');
+                const spriteGrid = document.getElementById('sprite-sheet-anim-grid');
+                const spriteStats = document.getElementById('sprite-sheet-anim-stats');
+                if (spriteType && spriteGrid && spriteStats) {
+                    spriteType.innerHTML = typeSelect.innerHTML;
+                    spriteType.value = selectedType;
+                    spriteStats.textContent = stats.textContent;
+                    spriteGrid.innerHTML = grid.innerHTML;
+                    wireGrid(spriteGrid);
+                }
 
                 this.updateCustomAnimationActions();
             },
@@ -6083,12 +6242,17 @@
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
         import {
             captureSpriteSheetAtlas,
-            VIEW_PRESETS as SPRITE_VIEW_PRESETS,
+            captureStandardSpriteSheetPack,
+            startAtlasPreviewAnimation,
+            STANDARD_SPRITE_VIEWS,
             SPRITE_SHEET_LIMITS,
-        } from '/static/js/sprite-sheet-mvp.js?v=1';
+        } from '/static/js/sprite-sheet-mvp.js?v=2';
 
         window.captureSpriteSheetAtlas = captureSpriteSheetAtlas;
-        window.SPRITE_VIEW_PRESETS = SPRITE_VIEW_PRESETS;
+        window.captureStandardSpriteSheetPack = captureStandardSpriteSheetPack;
+        window.startAtlasPreviewAnimation = startAtlasPreviewAnimation;
+        window.STANDARD_SPRITE_VIEWS = STANDARD_SPRITE_VIEWS;
+        window.SPRITE_STANDARD_VIEW_IDS = STANDARD_SPRITE_VIEWS.map((v) => v.id);
         window.SPRITE_SHEET_LIMITS = SPRITE_SHEET_LIMITS;
 
         // Make THREE available globally for rig-editor module
@@ -12679,6 +12843,10 @@
                         onEnable() {
                             faceRigViewer?.setBlockEnabled(true);
                         }
+                    },
+                    spriteSheet: {
+                        label: '2D Sprite sheet',
+                        element: document.getElementById('sprite-sheet-card'),
                     },
                     popularFree3d: {
                         label: 'Popular Free3D Characters',
