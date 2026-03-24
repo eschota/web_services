@@ -36,16 +36,14 @@
         body.webapp-mode #owner-tasks-btn { display: none !important; }
         body.webapp-mode #restart-task-btn { display: none !important; }
         body.webapp-mode #change-rig-btn { display: none !important; }
-        body.webapp-mode #task-run-state { display: none !important; }
         body.webapp-mode footer { display: none !important; }
         body.webapp-mode main { padding-top: 0.5rem !important; }
         body.webapp-mode .card:first-child h2 { display: none !important; }
         body.webapp-mode #progress-container { margin-bottom: 0.5rem; }
-        body.webapp-mode #telegram-share-btn { display: inline-flex !important; }
+        body.webapp-mode #task-share-btn { display: inline-flex !important; }
         /* Hide downloads and video player in webapp mode - only 3D viewer */
         body.webapp-mode #downloads-card { display: none !important; }
         body.webapp-mode #video-player { display: none !important; }
-        body.webapp-mode #video-preview-title { display: none !important; }
         body.webapp-mode #hdrp-renders { display: none !important; }
         body.webapp-mode #video-pending { display: none !important; }
         
@@ -145,46 +143,272 @@
         .texture-tile .download-btn:hover {
             background: var(--accent-hover);
         }
-        /* Model Parameters Block */
+        /* Model Parameters Block (inside #task-sidebar-bundle: section style, no second card) */
         #model-params {
-            background: rgba(0,0,0,0.18);
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 12px;
-            padding: 1rem;
-            margin-top: 0.75rem;
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            padding: 0;
+            margin-top: 0;
         }
         #model-params .section-title {
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             color: var(--text-secondary);
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.4rem;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            justify-content: center;
+            gap: 0.35rem;
+            width: 100%;
+            text-align: center;
         }
+        #model-params-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.28rem 0.32rem;
+        }
+        /* Center title; Share stays in right column for balance when visible */
+        #downloads-card .task-downloads-card-header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 0.5rem;
+            width: 100%;
+        }
+        #downloads-card .task-downloads-card-header .card-title {
+            margin: 0;
+            grid-column: 2;
+            justify-self: center;
+            text-align: center;
+        }
+        #downloads-card .task-downloads-card-header .task-share-open-btn {
+            grid-column: 3;
+            justify-self: end;
+        }
+
+        .task-share-open-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.95rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: inherit;
+            color: var(--text-primary);
+            background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 6%, transparent));
+            border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+            border-radius: 999px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, transform 0.15s, box-shadow 0.2s;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+        }
+        .task-share-open-btn:hover {
+            border-color: var(--accent);
+            background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent) 10%, transparent));
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 22%, transparent);
+        }
+        .task-share-open-btn svg {
+            width: 17px;
+            height: 17px;
+            flex-shrink: 0;
+            opacity: 0.95;
+        }
+
+        /* Modal: centered in viewport (top layer), no nested scroll strip */
+        .task-share-dialog {
+            position: fixed;
+            inset: 0;
+            width: min(420px, calc(100vw - 1.5rem));
+            max-width: min(420px, calc(100vw - 1.5rem));
+            height: fit-content;
+            max-height: 90vh;
+            margin: auto;
+            border: none;
+            border-radius: var(--radius-lg, 16px);
+            padding: 0;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            box-shadow: var(--shadow-lg);
+            font-family: inherit;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+        .task-share-dialog::backdrop {
+            background: rgba(6, 8, 18, 0.62);
+            backdrop-filter: blur(6px);
+        }
+        [data-theme="light"] .task-share-dialog::backdrop {
+            background: rgba(20, 24, 40, 0.45);
+        }
+        .task-share-dialog__inner {
+            padding: 1rem 1.1rem 1.05rem;
+            overflow: visible;
+        }
+        .task-share-dialog__head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .task-share-dialog__head h2 {
+            margin: 0;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        .task-share-dialog__close {
+            flex-shrink: 0;
+            width: 34px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1.15rem;
+            line-height: 1;
+            transition: background 0.15s, color 0.15s;
+        }
+        .task-share-dialog__close:hover {
+            background: color-mix(in srgb, var(--text-muted) 24%, transparent);
+            color: var(--text-primary);
+        }
+        .task-share-dialog__lede {
+            margin: 0 0 0.65rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+        .task-share-dialog__row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            margin-bottom: 0.65rem;
+        }
+        .task-share-dialog__url {
+            width: 100%;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            word-break: break-all;
+            padding: 0.45rem 0.55rem;
+            border-radius: var(--radius-sm);
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            margin-bottom: 0.75rem;
+            font-family: ui-monospace, monospace;
+        }
+        .task-share-dialog__label {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin-bottom: 0.35rem;
+        }
+        .task-share-dialog__embed {
+            width: 100%;
+            min-height: 3.25rem;
+            font-size: 0.7rem;
+            line-height: 1.35;
+            font-family: ui-monospace, monospace;
+            padding: 0.45rem 0.5rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--bg-input);
+            color: var(--text-secondary);
+            resize: none;
+            overflow: hidden;
+            margin-bottom: 0.35rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .task-share-dialog__hint {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin: 0 0 0.55rem;
+            line-height: 1.3;
+        }
+        .task-share-dialog__grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.35rem;
+        }
+        @media (max-width: 360px) {
+            .task-share-dialog__grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+        .task-share-platform-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.2rem;
+            padding: 0.4rem 0.28rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 0.64rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s, transform 0.12s;
+            text-align: center;
+            line-height: 1.15;
+            min-height: 2.75rem;
+        }
+        .task-share-platform-btn:hover {
+            border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+            background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+            transform: translateY(-1px);
+        }
+        .task-share-platform-btn .task-share-platform-ico {
+            font-size: 1.15rem;
+            line-height: 1;
+        }
+        .task-share-platform-btn[data-tone="yt"] { border-color: rgba(255, 0, 0, 0.28); }
+        .task-share-platform-btn[data-tone="tw"] { border-color: rgba(29, 155, 240, 0.35); }
+        .task-share-platform-btn[data-tone="fb"] { border-color: rgba(24, 119, 242, 0.35); }
+        .task-share-dialog .btn.btn-sm {
+            padding: 0.35rem 0.65rem;
+            font-size: 0.78rem;
+        }
+
         .param-tile {
             background: rgba(255,255,255,0.04);
             border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 8px;
-            padding: 0.6rem 0.5rem;
+            border-radius: 6px;
+            padding: 0.32rem 0.28rem;
             text-align: center;
             transition: background 0.2s, border-color 0.2s;
+            line-height: 1.15;
         }
         .param-tile:hover {
             background: rgba(255,255,255,0.07);
             border-color: rgba(255,255,255,0.12);
         }
         .param-tile-label {
-            font-size: 0.75rem;
+            font-size: 0.62rem;
             font-weight: 500;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.02em;
             color: var(--text-secondary);
-            margin-bottom: 0.35rem;
+            margin-bottom: 0.12rem;
+            line-height: 1.1;
         }
         .param-tile-value {
-            font-size: 1rem;
+            font-size: 0.78rem;
             font-weight: 600;
             color: var(--text-primary);
+            line-height: 1.2;
         }
         .param-tile-value.status-processing {
             color: var(--accent);
@@ -956,9 +1180,24 @@
 
         .task-columns-layout {
             display: grid;
-            grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
+            grid-template-columns: minmax(0, 1.25fr) minmax(0, 540px);
             gap: 1rem;
-            align-items: stretch;
+            align-items: start;
+        }
+
+        #task-sidebar-bundle {
+            width: 540px;
+            max-width: 100%;
+            box-sizing: border-box;
+            align-self: flex-start;
+            padding: 1rem 1.25rem 1.25rem;
+        }
+
+        #task-sidebar-bundle #model-params,
+        #task-sidebar-bundle #downloads-card {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 1rem;
+            margin-top: 1rem;
         }
 
         main.task-page-main.container-sm {
@@ -968,12 +1207,12 @@
         .task-columns-primary,
         .task-columns-secondary {
             min-width: 0;
-            min-height: 100%;
         }
 
         .task-columns-secondary {
             display: flex;
             flex-direction: column;
+            align-items: stretch;
             gap: 1rem;
         }
 
@@ -981,11 +1220,69 @@
             margin-top: 0 !important;
         }
 
+        /*
+         * Video box: must NOT use width: 100% with max-height + portrait aspect — the box stays full
+         * column width and object-fit:contain pillarboxes. Use intrinsic pixel ratio via --vp-w/--vp-h
+         * and width: min(100%, calc(49vh * w/h)) so when height is capped, width shrinks to match the file.
+         */
         #video-player-wrap {
+            --vp-w: 16;
+            --vp-h: 9;
             position: relative;
+            width: min(100%, calc(49vh * var(--vp-w) / var(--vp-h)));
+            max-width: 100%;
+            max-height: 49vh;
+            margin-inline: auto;
             border-radius: 12px;
             overflow: hidden;
             background: #000;
+            min-width: 0;
+            min-height: 0;
+            box-sizing: border-box;
+            aspect-ratio: var(--vp-w) / var(--vp-h);
+        }
+
+        #video-player {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            border-radius: 12px;
+            background: #000;
+        }
+
+        /* Overlay must not participate in intrinsic min-width (flex/grid) or widen narrow aspect-ratio box */
+        #video-container {
+            min-width: 0;
+        }
+
+        #video-player-wrap #task-card-badges {
+            position: absolute;
+            inset: 0 0 auto 0;
+            display: flex;
+            justify-content: flex-end;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 12px;
+            z-index: 10;
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            margin: 0;
+            pointer-events: none;
+        }
+
+        #video-player-wrap #task-card-badges .tc-badge {
+            pointer-events: auto;
+            flex: 0 1 auto;
+            min-width: 0;
+            max-width: 100%;
+            box-sizing: border-box;
         }
 
         .task-card-author-overlay {
@@ -1034,24 +1331,11 @@
             }
         }
 
+        /* Video column: height from #video-player-wrap aspect-ratio — no stretch to match 3D column */
         @media (min-width: 1361px) {
             #video-container {
-                flex: 1 1 auto;
-                display: flex;
-                flex-direction: column;
-                min-height: 0;
-            }
-
-            #video-player-wrap {
-                flex: 1 1 auto;
-                display: flex;
-                min-height: 294px;
-                max-height: 49vh;
-            }
-
-            #video-player {
-                height: 100% !important;
-                max-height: 49vh !important;
+                width: 100%;
+                align-self: flex-start;
             }
         }
         
@@ -1094,6 +1378,11 @@
             opacity: 0;
             pointer-events: none;
             z-index: -1;
+        }
+
+        /* Face RIG block disabled — re-enable by clearing FACE_RIG_UI_DISABLED in script and removing this rule */
+        #face-rig-viewer-card.face-rig-ui-disabled {
+            display: none !important;
         }
 
         .face-rig-viewer-stage {
@@ -1518,65 +1807,6 @@
             text-shadow: 0 1px 2px rgba(0,0,0,0.35);
         }
 
-        .perf-toggle-btn {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            width: 30px;
-            height: 30px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.12);
-            background: rgba(10, 12, 22, 0.82);
-            color: rgba(255,255,255,0.9);
-            cursor: pointer;
-            z-index: 45;
-            backdrop-filter: blur(8px);
-            transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-        }
-
-        .perf-toggle-btn:hover {
-            transform: translateY(-1px);
-            background: rgba(33, 37, 58, 0.92);
-            border-color: rgba(255,255,255,0.22);
-        }
-
-        .perf-toggle-btn svg {
-            width: 15px;
-            height: 15px;
-            pointer-events: none;
-        }
-
-        .perf-toggle-placeholder {
-            display: none;
-            margin-top: 0.75rem;
-            padding: 0.7rem 0.9rem;
-            border-radius: 12px;
-            border: 1px dashed rgba(255,255,255,0.15);
-            background: rgba(255,255,255,0.02);
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.75rem;
-        }
-
-        .perf-toggle-placeholder.is-visible {
-            display: flex;
-        }
-
-        .perf-toggle-placeholder-label {
-            font-size: 0.82rem;
-            color: var(--text-muted);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .perf-block-disabled {
-            display: none !important;
-        }
-
         .page-boot-status {
             margin: 0 0 1rem 0;
             padding: 0.9rem 1rem;
@@ -1759,6 +1989,130 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Task card: one-line title + All tasks + status */
+        .task-status-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.65rem 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.75rem;
+        }
+        .task-status-header-title {
+            margin: 0;
+            font-size: clamp(1.05rem, 2.5vw, 1.35rem);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+            flex: 1 1 12rem;
+            min-width: 0;
+            line-height: 1.25;
+        }
+        .task-status-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        /* Unified header controls: same radius, border, scale as the rest of the UI */
+        .task-header-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.42rem 0.88rem;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            font-family: inherit;
+            line-height: 1.2;
+            color: var(--text-primary);
+            background: color-mix(in srgb, var(--bg-input) 92%, transparent);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            cursor: pointer;
+            transition: border-color 0.18s, background 0.18s, box-shadow 0.18s, color 0.18s;
+            white-space: nowrap;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+        .task-header-btn svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            opacity: 0.88;
+        }
+        .task-header-btn:hover {
+            border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+            background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+            color: var(--text-primary);
+        }
+        .task-header-btn:active {
+            transform: translateY(1px);
+        }
+        #status-container {
+            display: inline-flex;
+            align-items: center;
+        }
+        .task-status-pill {
+            display: inline-flex;
+            align-items: center;
+            margin: 0;
+            padding: 0.42rem 0.88rem;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            font-family: inherit;
+            line-height: 1.2;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: color-mix(in srgb, var(--bg-input) 92%, transparent);
+            color: var(--text-secondary);
+            white-space: nowrap;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+        .task-status-pill--processing {
+            border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+            background: color-mix(in srgb, var(--accent) 11%, var(--bg-input));
+            color: var(--accent);
+        }
+        .task-status-pill--queued {
+            border-color: color-mix(in srgb, var(--text-muted) 28%, var(--border));
+            color: var(--text-secondary);
+        }
+        .task-status-pill--done {
+            border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+            background: color-mix(in srgb, var(--success) 12%, var(--bg-input));
+            color: var(--success);
+        }
+        .task-status-pill--error {
+            border-color: color-mix(in srgb, var(--error) 42%, var(--border));
+            background: color-mix(in srgb, var(--error) 10%, var(--bg-input));
+            color: var(--error);
+        }
+
+        /* Download-all row: full grid width, label on one line */
+        #file-list > .file-item:has(#download-all-btn) {
+            align-items: stretch;
+        }
+        #download-all-btn {
+            width: 100%;
+            max-width: none;
+            box-sizing: border-box;
+            justify-content: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+            flex-wrap: nowrap;
+            padding: 0.75rem 1rem;
+            font-size: clamp(0.75rem, 2.2vw, 1rem);
+            line-height: 1.25;
+        }
+        #download-all-btn img {
+            flex-shrink: 0;
+        }
+        #download-all-btn > span {
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body data-layout-free3d-ribbon="1" data-layout-free3d-init="task">
@@ -1769,10 +2123,23 @@
         <!-- Task Card -->
         <div class="card" id="task-main-card">
             <!-- Task header title (always fully visible) -->
-            <h2 data-i18n="task_title" style="margin: 0 0 0.75rem 0;">
-                Conversion Progress
-            </h2>
-            <div id="task-run-state" style="margin: -0.25rem 0 0.75rem; font-size: 0.9rem; color: var(--text-muted);"></div>
+            <div class="task-status-header-row">
+                <h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>
+                <div class="task-status-header-actions">
+                    <button type="button" class="task-header-btn" id="owner-tasks-btn"
+                            title="All tasks">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+                        </svg>
+                        <span data-i18n="btn_owner_tasks">All tasks</span>
+                    </button>
+                    <div id="status-container">
+                        <span class="task-status-pill task-status-pill--processing" id="status-badge">
+                            <span id="status-text">Processing...</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
             <div id="page-boot-status" class="page-boot-status">
                 <div class="page-boot-status-head">
                     <div class="page-boot-status-title">Loading task page</div>
@@ -1815,25 +2182,6 @@
                 </div>
             </div>
 
-            <!-- Header actions row (one line): buttons + status -->
-            <div style="display: flex; justify-content: flex-start; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
-                <div class="flex gap-2" style="align-items: center; flex-wrap: wrap;">
-                    <button class="btn btn-secondary" id="owner-tasks-btn"
-                            style="padding: 0.55rem 0.9rem; border-color: var(--warning); color: var(--warning); background: rgba(245, 158, 11, 0.08); white-space: nowrap;">
-                        <span aria-hidden="true" style="font-size: 1.8rem; line-height: 1; display: inline-block;">📋</span>
-                        <span data-i18n="btn_owner_tasks" style="display: inline-block;">All tasks</span>
-                    </button>
-                    <!-- Restart button removed - using SAVE RIG T-POSE button in viewer -->
-
-                    <!-- Status Badge (in header row) -->
-                    <div id="status-container" style="white-space: nowrap; display: inline-flex; align-items: center;">
-                        <span class="alert alert-info" id="status-badge" style="display: inline-block; margin: 0;">
-                    <span id="status-text">Processing...</span>
-                </span>
-                    </div>
-                </div>
-            </div>
-            
             <!-- Queue Status (compact) -->
             <div class="queue-status-compact mt-3" id="queue-status-compact">
                 <img src="/static/images/icons/queue.svg" alt="Queue" class="queue-status-icon" width="20" height="20" style="display: none;">
@@ -1890,14 +2238,6 @@
                 </div>
             </div>
 
-            <!-- Model Parameters -->
-            <div id="model-params" class="hidden">
-                <div class="section-title">📊 Model Parameters</div>
-                <div id="model-params-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
-                    <!-- 9 tiles will be injected by JS -->
-                </div>
-            </div>
-            
             <!-- Error Message -->
             <div class="alert alert-error hidden mt-3" id="error-container">
                 <span id="error-message"></span>
@@ -1905,36 +2245,6 @@
 
             <!-- Viewer + Custom Animations side-by-side -->
             <div id="viewer-custom-layout" class="viewer-custom-layout">
-            <!-- Video Preview with Task Card Info -->
-            <div class="video-preview hidden boot-reveal-surface" id="video-container">
-                <div id="video-preview-title" style="font-weight: 600; font-size: 1.1rem; margin-bottom: 0.5rem;">🎬 Video Preview</div>
-                
-                <!-- Video Player with overlay badges -->
-                <div id="video-player-wrap" style="position: relative; width: 100%;">
-                    <div class="boot-skeleton-overlay" data-label="Preparing video preview..."></div>
-                    <video id="video-player" controls muted playsinline preload="metadata"
-                           style="width: 100%; height: auto; max-height: 49vh; object-fit: contain; border-radius: 12px; background: #000; display: block;"></video>
-                    
-                    <!-- Author overlay - top left -->
-                    <a href="#" id="task-author-link" class="task-card-author-overlay hidden"></a>
-                    
-                    <!-- Badges - top right -->
-                    <div id="task-card-badges" style="position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; z-index: 10;">
-                        <button class="tc-like" type="button" id="task-like-btn" title="Like">
-                            <span>♥</span>
-                            <span class="tc-like-count" id="task-like-count">0</span>
-                        </button>
-                        <span class="tc-badge hidden" id="task-sales-badge" title="Sales">
-                            <span>💰</span>
-                            <span id="task-sales-count">0</span>
-                        </span>
-                    </div>
-                </div>
-                <div id="hdrp-renders" class="hidden"
-                     style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 1rem;">
-                    <!-- HDRP renders injected by JS -->
-                </div>
-
                 <!-- Model Viewer (GLB) -->
                 <div id="model-viewer-wrap" class="hidden boot-reveal-surface" style="margin-bottom: 1rem;">
                     <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem;">
@@ -2819,7 +3129,7 @@
             </div>
             </div>
             
-            <div class="card mt-3 boot-deferred-section boot-reveal-surface face-rig-card-pending" id="face-rig-viewer-card">
+            <div class="card mt-3 boot-deferred-section boot-reveal-surface face-rig-card-pending face-rig-ui-disabled hidden" id="face-rig-viewer-card" aria-hidden="true">
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <h3 class="card-title" style="margin:0;">Face RIG Animation</h3>
                     <div style="font-size:0.78rem; color:var(--text-muted);">Simple realtime face animation for the current model</div>
@@ -2984,7 +3294,7 @@
                 </div>
             </div>
 
-            <!-- Sprite sheet MVP: below Face RIG; auto-renders 5 standard views -->
+            <!-- Sprite sheet MVP: auto-renders 5 standard views -->
             <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="sprite-sheet-card">
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
                     <h3 class="card-title" style="margin:0; font-size:1rem;">2D Sprite sheet</h3>
@@ -3013,7 +3323,7 @@
                         <option value="1024">1024 px</option>
                     </select>
                     <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
-                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="16" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
+                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="30" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
                     <span style="font-size:0.68rem; color:var(--text-muted);">Views: front, back, left, top, top-right 45°</span>
                 </div>
                 <div id="sprite-sheet-progress" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem; min-height:1.2em;"></div>
@@ -3033,19 +3343,47 @@
                 <div id="task-free3d-popular-results" class="free3d-results" style="padding-top:0;"></div>
             </div>
 
-            <div class="alert alert-info hidden mt-3" id="video-pending">
-                <span data-i18n="task_video_pending">Video is being generated...</span>
-            </div>
-            
             <!-- Actions removed (buttons moved into header) -->
         </div>
-        
-        <!-- Files List -->
-        <div class="card mt-3 boot-deferred-section boot-reveal-surface" id="downloads-card">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+
+        <!-- Video + model params + downloads: single 540px sidebar card (column via ensureTaskDesktopColumns) -->
+        <div id="task-sidebar-bundle" class="card mt-3 boot-deferred-section">
+            <div class="alert alert-info hidden" id="video-pending">
+                <span data-i18n="task_video_pending">Video is being generated...</span>
+            </div>
+            <div class="video-preview hidden boot-reveal-surface" id="video-container">
+                <!-- Video Player with overlay badges -->
+                <div id="video-player-wrap">
+                    <div class="boot-skeleton-overlay" data-label="Preparing video preview..."></div>
+                    <video id="video-player" controls muted playsinline preload="metadata"></video>
+                    
+                    <!-- Author overlay - top left -->
+                    <a href="#" id="task-author-link" class="task-card-author-overlay hidden"></a>
+                    
+                    <!-- Sales badge (top right) -->
+                    <div id="task-card-badges">
+                        <span class="tc-badge hidden" id="task-sales-badge" title="Sales">
+                            <span>💰</span>
+                            <span id="task-sales-count">0</span>
+                        </span>
+                    </div>
+                </div>
+                <div id="hdrp-renders" class="hidden"
+                     style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 1rem;">
+                    <!-- HDRP renders injected by JS -->
+                </div>
+            </div>
+            <div id="model-params" class="hidden">
+                <div class="section-title">📊 Model Parameters</div>
+                <div id="model-params-grid">
+                    <!-- 9 tiles will be injected by JS -->
+                </div>
+            </div>
+            <div id="downloads-card" class="boot-deferred-section boot-reveal-surface">
+            <div class="card-header task-downloads-card-header">
                 <h3 class="card-title">Downloads (<span id="files-count">0</span>)</h3>
-                <button id="telegram-share-btn" class="telegram-share-btn" onclick="TelegramApp.shareTask(TaskUI.taskId)" style="display: none;">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.2-.08-.06-.19-.04-.27-.02-.12.03-1.99 1.27-5.62 3.72-.53.36-1.01.54-1.44.53-.47-.01-1.38-.27-2.06-.49-.83-.27-1.49-.42-1.43-.88.03-.24.37-.49 1.02-.75 4-1.74 6.67-2.89 8.02-3.44 3.82-1.58 4.62-1.86 5.14-1.86.11 0 .37.03.53.17.14.12.18.28.2.45-.01.07.01.23-.01.35z"/></svg>
+                <button type="button" id="task-share-btn" class="task-share-open-btn" style="display: none;" aria-haspopup="dialog" aria-controls="task-share-dialog">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                     Share
                 </button>
             </div>
@@ -3059,6 +3397,7 @@
                     <div class="skeleton skeleton-text" style="width: 180px;"></div>
                 </li>
             </ul>
+            </div>
         </div>
         
         <!-- Additional Content (Textures) -->
@@ -3069,6 +3408,28 @@
             <div id="texture-gallery" class="texture-gallery"></div>
         </div>
     </main>
+
+    <dialog id="task-share-dialog" class="task-share-dialog" aria-labelledby="task-share-dialog-title">
+        <div class="task-share-dialog__inner">
+            <div class="task-share-dialog__head">
+                <h2 id="task-share-dialog-title">Share &amp; embed</h2>
+                <button type="button" class="task-share-dialog__close" id="task-share-dialog-close" aria-label="Close">&times;</button>
+            </div>
+            <p class="task-share-dialog__lede">Copy the task link, embed the viewer on your site, or open a share dialog on social networks.</p>
+            <div class="task-share-dialog__label">Page URL</div>
+            <div class="task-share-dialog__url" id="task-share-page-url" tabindex="0"></div>
+            <div class="task-share-dialog__row">
+                <button type="button" class="btn btn-primary btn-sm" id="task-share-copy-link">Copy link</button>
+                <button type="button" class="btn btn-secondary btn-sm hidden" id="task-share-native">Share…</button>
+            </div>
+            <div class="task-share-dialog__label">Embed</div>
+            <textarea id="task-share-embed-code" class="task-share-dialog__embed" readonly rows="4" spellcheck="false"></textarea>
+            <p class="task-share-dialog__hint" id="task-share-embed-note">Some sites block iframes; use the link if the embed does not load.</p>
+            <button type="button" class="btn btn-secondary btn-sm" id="task-share-copy-embed" style="margin-bottom:0.85rem;">Copy embed code</button>
+            <div class="task-share-dialog__label">Social &amp; apps</div>
+            <div class="task-share-dialog__grid" id="task-share-platform-grid"></div>
+        </div>
+    </dialog>
 
     <!-- Owner Tasks Modal -->
     <div id="owner-tasks-modal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 2rem;">
@@ -3578,7 +3939,6 @@
                 
                 // Load task card info (likes, sales, author)
                 await this.loadCardInfo();
-                this.setupLikeButton();
                 
                 // Load queue status (skip in webapp mode)
                 if (!this.isWebAppMode) {
@@ -3645,6 +4005,18 @@
                 });
             },
 
+            syncVideoPlayerWrapAspect() {
+                const wrap = document.getElementById('video-player-wrap');
+                const video = document.getElementById('video-player');
+                if (!wrap || !video) return;
+                const w = Number(video.videoWidth || 0);
+                const h = Number(video.videoHeight || 0);
+                if (w > 0 && h > 0) {
+                    wrap.style.setProperty('--vp-w', String(w));
+                    wrap.style.setProperty('--vp-h', String(h));
+                }
+            },
+
             ensureVideoPreviewController() {
                 if (this.videoPreviewBound) return;
                 const container = document.getElementById('video-container');
@@ -3681,6 +4053,7 @@
                             extra.width = Number(video.videoWidth || 0);
                             extra.height = Number(video.videoHeight || 0);
                             extra.duration = Math.round((Number(video.duration || 0)) * 100) / 100;
+                            this.syncVideoPlayerWrapAspect();
                         }
                         if (eventName === 'playing') {
                             video.dataset.wasPlaying = '1';
@@ -3734,6 +4107,11 @@
                         if (typeof this.pauseVideoPreview === 'function') {
                             this.pauseVideoPreview('source-update');
                         }
+                        const videoWrap = document.getElementById('video-player-wrap');
+                        if (videoWrap) {
+                            videoWrap.style.removeProperty('--vp-w');
+                            videoWrap.style.removeProperty('--vp-h');
+                        }
                         video.removeAttribute('src');
                         video.load();
                         video.src = proxyUrl;
@@ -3772,6 +4150,7 @@
                     } else if (!document.hidden && this.videoPreviewVisible && video.paused) {
                         window.__taskPageBoot?.revealElement(container, 1);
                         window.__taskPageBoot?.markVideoReady('Video preview ready');
+                        this.syncVideoPlayerWrapAspect();
                         video.play().catch(() => {});
                     }
                 } else if (task.status === 'processing' || task.status === 'done') {
@@ -3981,18 +4360,6 @@
                 const info = this.cardInfo;
                 if (!info) return;
                 
-                // Update like count and state
-                const likeBtn = document.getElementById('task-like-btn');
-                const likeCount = document.getElementById('task-like-count');
-                if (likeBtn && likeCount) {
-                    likeCount.textContent = String(info.like_count || 0);
-                    if (info.liked_by_me) {
-                        likeBtn.classList.add('liked');
-                    } else {
-                        likeBtn.classList.remove('liked');
-                    }
-                }
-                
                 // Update sales count (hide if 0)
                 const salesBadge = document.getElementById('task-sales-badge');
                 const salesCount = document.getElementById('task-sales-count');
@@ -4021,44 +4388,6 @@
                 }
             },
             
-            setupLikeButton() {
-                const likeBtn = document.getElementById('task-like-btn');
-                if (!likeBtn) return;
-                
-                likeBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    
-                    // Check auth
-                    const userInfo = document.getElementById('user-info');
-                    const isAuthed = userInfo && !userInfo.classList.contains('hidden');
-                    if (!isAuthed) {
-                        window.location.href = '/auth/login';
-                        return;
-                    }
-                    
-                    try {
-                        const r = await fetch(`/api/gallery/${this.taskId}/like`, { method: 'POST' });
-                        if (r.status === 401) {
-                            window.location.href = '/auth/login';
-                            return;
-                        }
-                        const d = await r.json();
-                        likeBtn.classList.toggle('liked', !!d.liked_by_me);
-                        const cnt = document.getElementById('task-like-count');
-                        if (cnt) cnt.textContent = String(d.like_count ?? 0);
-                        
-                        // Update local cardInfo
-                        if (this.cardInfo) {
-                            this.cardInfo.like_count = d.like_count;
-                            this.cardInfo.liked_by_me = d.liked_by_me;
-                        }
-                    } catch (err) {
-                        console.error('Like failed:', err);
-                    }
-                });
-            },
-            
             async updateUI() {
                 const task = this.task;
                 this.ensureDesktopViewerLayout();
@@ -4067,24 +4396,24 @@
                 const statusBadge = document.getElementById('status-badge');
                 const statusText = document.getElementById('status-text');
                 
-                statusBadge.className = 'alert';
+                statusBadge.className = 'task-status-pill';
                 if (task.status === 'done') {
-                    statusBadge.classList.add('alert-success');
+                    statusBadge.classList.add('task-status-pill--done');
                     statusText.textContent = t('task_status_done');
                     // Show Telegram share button when task is done
-                    const shareBtn = document.getElementById('telegram-share-btn');
+                    const shareBtn = document.getElementById('task-share-btn');
                     if (shareBtn) shareBtn.style.display = 'flex';
                     // Haptic feedback for Telegram Web App
                     if (window.TelegramApp) TelegramApp.hapticFeedback('success');
                 } else if (task.status === 'error') {
-                    statusBadge.classList.add('alert-error');
+                    statusBadge.classList.add('task-status-pill--error');
                     statusText.textContent = t('task_status_error');
                     if (window.TelegramApp) TelegramApp.hapticFeedback('error');
                 } else if (task.status === 'processing') {
-                    statusBadge.classList.add('alert-info');
+                    statusBadge.classList.add('task-status-pill--processing');
                     statusText.textContent = t('task_status_processing');
                 } else {
-                    statusBadge.classList.add('alert-info');
+                    statusBadge.classList.add('task-status-pill--queued');
                     statusText.textContent = t('task_status_created');
                 }
                 
@@ -4094,17 +4423,6 @@
                     document.getElementById('progress-container')?.classList.add('hidden');
                 }
                 
-                // Title helper: started vs queued
-                const runStateEl = document.getElementById('task-run-state');
-                if (runStateEl) {
-                    let stateText = '';
-                    if (task.status === 'processing') stateText = t('task_progress_running');
-                    else if (task.status === 'created') stateText = t('task_progress_queued');
-                    else if (task.status === 'done') stateText = t('task_progress_completed');
-                    else if (task.status === 'error') stateText = t('task_progress_error');
-                    runStateEl.textContent = stateText;
-                }
-
                 // Admin-only: Input URL block (visible only for allowed emails)
                 const adminRow = document.getElementById('admin-input-url-row');
                 const adminLink = document.getElementById('admin-input-url-link');
@@ -4706,6 +5024,10 @@
             async downloadAllFiles() {
                 const files = this.downloadItems || [];
                 if (this.isDownloadingAll || files.length === 0) return;
+                const dlAllLabel = (n) => {
+                    const base = window.t ? window.t('btn_download_all') : 'Download All';
+                    return `📦 ${base} ${n} files`;
+                };
                 
                 this.isDownloadingAll = true;
                 const downloadBtn = document.getElementById('download-all-btn');
@@ -4739,14 +5061,14 @@
                         downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">Download Complete!</span>`;
                         setTimeout(() => {
                             downloadBtn.disabled = false;
-                            downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">Download ALL (${files.length} files)</span>`;
+                            downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">${dlAllLabel(files.length)}</span>`;
                         }, 2000);
                     }
                 } catch (e) {
                     console.error('Download error:', e);
                     if (downloadBtn) {
                         downloadBtn.disabled = false;
-                        downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">Download ALL (${files.length} files)</span>`;
+                        downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">${dlAllLabel(files.length)}</span>`;
                     }
                 } finally {
                     this.isDownloadingAll = false;
@@ -5030,7 +5352,7 @@
 
                 const framesIn = document.getElementById('sprite-sheet-frames');
                 const resSel = document.getElementById('sprite-sheet-resolution');
-                let frameCount = parseInt(String(framesIn?.value || '16'), 10);
+                let frameCount = parseInt(String(framesIn?.value || '30'), 10);
                 let cell = parseInt(String(resSel?.value || '256'), 10);
                 frameCount = Math.min(lim.maxFrames, Math.max(lim.minFrames, frameCount));
                 cell = Math.min(lim.maxFrameSize, Math.max(lim.minFrameSize, cell));
@@ -5184,10 +5506,7 @@
             ensureTaskDesktopColumns() {
                 const main = document.querySelector('main.container-sm');
                 const taskCard = document.getElementById('task-main-card');
-                const videoContainer = document.getElementById('video-container');
-                const videoPending = document.getElementById('video-pending');
-                const modelParams = document.getElementById('model-params');
-                const downloadsCard = document.getElementById('downloads-card');
+                const taskSidebarBundle = document.getElementById('task-sidebar-bundle');
                 const additionalSection = document.getElementById('additional-content-section');
                 if (!main || !taskCard) return;
 
@@ -5224,14 +5543,7 @@
                     }
                 };
 
-                if (videoContainer) {
-                    videoContainer.classList.add('card');
-                    videoContainer.classList.remove('mt-3');
-                }
-                moveToSecondary(videoContainer);
-                moveToSecondary(videoPending);
-                moveToSecondary(modelParams);
-                moveToSecondary(downloadsCard);
+                moveToSecondary(taskSidebarBundle);
                 moveToSecondary(additionalSection);
             },
 
@@ -5888,24 +6200,17 @@
                             : `${(totalSize / 1024).toFixed(0)} KB`)
                         : null;
                     const buttonLabel = cachedReady
-                        ? `${t('btn_download_all')} (${fileCount} files)`
-                        : t('btn_download_all');
-                    const buttonDisabled = fileCount === 0;
-                    const helperText = cachedReady
                         ? `📦 ${t('btn_download_all')} ${fileCount} files${sizeStr ? ` (${sizeStr} total)` : ''}`
                         : 'Preparing downloads...';
+                    const buttonDisabled = fileCount === 0;
 
-                    const archiveDesc = `<div style="margin-top: 0.75rem; font-size: 0.95rem; color: #fff; line-height: 1.4; text-align: center; font-weight: 500;" data-i18n="download_archive_desc">
+                    const archiveDesc = `<div style="margin-top: 0.75rem; font-size: 0.95rem; color: var(--text-primary); line-height: 1.4; text-align: center; font-weight: 500;" data-i18n="download_archive_desc">
                         ${t('download_archive_desc')}
                     </div>`;
 
                     downloadAllHtml = `
-                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
-                            <div style="font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);">
-                                ${helperText}
-                            </div>
-                            <button id="download-all-btn" onclick="TaskUI.downloadAllOrPurchase()" class="btn btn-primary" 
-                               style="width: 100%; max-width: 300px; justify-content: center; padding: 0.75rem 1rem; font-size: 1rem; gap: 0.5rem;"
+                        <li class="file-item" style="flex-direction: column; align-items: stretch; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
+                            <button id="download-all-btn" onclick="TaskUI.downloadAllOrPurchase()" class="btn btn-primary"
                                ${buttonDisabled ? 'disabled' : ''}>
                                 <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18" style="filter: brightness(10);">
                                 <span style="font-weight: 700;">${buttonLabel}</span>
@@ -6226,9 +6531,8 @@
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
         import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
         import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
-        import { RGBELoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/RGBELoader.js';
-        import { EXRLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/EXRLoader.js';
-        
+        import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
+
         import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
         import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -6246,7 +6550,7 @@
             startAtlasPreviewAnimation,
             STANDARD_SPRITE_VIEWS,
             SPRITE_SHEET_LIMITS,
-        } from '/static/js/sprite-sheet-mvp.js?v=2';
+        } from '/static/js/sprite-sheet-mvp.js?v=6';
 
         window.captureSpriteSheetAtlas = captureSpriteSheetAtlas;
         window.captureStandardSpriteSheetPack = captureStandardSpriteSheetPack;
@@ -6258,8 +6562,6 @@
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
         const perfLogger = window.__taskPerf;
-        const TOGGLE_ON_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="3"/></svg>';
-        const TOGGLE_OFF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l18 18"/><path d="M10.6 10.7A3 3 0 0 0 13.4 13.5"/><path d="M9.9 5.2A12.8 12.8 0 0 1 12 5c6.5 0 10 7 10 7a18.7 18.7 0 0 1-4.1 4.8"/><path d="M6.6 6.7C3.7 8.6 2 12 2 12a18.4 18.4 0 0 0 6.3 5.8A11.5 11.5 0 0 0 12 19c1 0 2-.1 2.9-.4"/></svg>';
 
         const params = new URLSearchParams(window.location.search);
         const rawTaskId = params.get('id') || '';
@@ -6279,8 +6581,7 @@
             // LIGHTING & RENDERER CONFIG (edit values here)
             // ============================================================
             const LIGHTING_CONFIG = {
-                // HDR Environment (IBL reflections)
-                hdrPath: '/static/ibl/DefaultHDRISky.exr',
+                // IBL: PMREM from RoomEnvironment (no external .hdr/.exr — avoids 404s and large assets)
                 envIntensity: 1.0,          // scene.environmentIntensity (Three.js r152+)
 
                 // Tone mapping
@@ -6603,44 +6904,22 @@
             };
 
             async function loadEnvironment(scene) {
-                const url = LIGHTING_CONFIG.hdrPath;
+                if (!renderer) return false;
                 setStatus('Loading IBL...');
-
-                // Use EXRLoader for .exr (RGBELoader is still imported/available as required stack).
-                const tryEXR = () => new Promise((resolve) => {
-                    const exr = new EXRLoader();
-                    exr.load(url, (t) => {
-                        t.mapping = THREE.EquirectangularReflectionMapping;
-                        scene.environment = t;
-                        // Set envIntensity if supported (Three.js r152+)
-                        if ('environmentIntensity' in scene) {
-                            scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
-                        }
-                        console.log('[Viewer] EXR environment loaded');
-                        resolve(true);
-                    }, undefined, (err) => {
-                        console.warn('[Viewer] EXR load failed:', err);
-                        resolve(false);
-                    });
-                });
-
-                const tryRGBE = () => new Promise((resolve) => {
-                    const rgbe = new RGBELoader();
-                    rgbe.load(url.replace('.exr', '.hdr'), (t) => {
-                        t.mapping = THREE.EquirectangularReflectionMapping;
-                        scene.environment = t;
-                        if ('environmentIntensity' in scene) {
-                            scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
-                        }
-                        console.log('[Viewer] HDR environment loaded');
-                        resolve(true);
-                    }, undefined, () => resolve(false));
-                });
-
-                const okExr = await tryEXR();
-                if (okExr) return true;
-                const okHdr = await tryRGBE();
-                return okHdr;
+                try {
+                    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+                    const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+                    scene.environment = envTexture;
+                    pmremGenerator.dispose();
+                    if ('environmentIntensity' in scene) {
+                        scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
+                    }
+                    console.log('[Viewer] IBL ready (RoomEnvironment PMREM)');
+                    return true;
+                } catch (e) {
+                    console.error('[Viewer] IBL setup failed:', e);
+                    return false;
+                }
             }
 
             // Scene state (persistent across model loads)
@@ -8274,7 +8553,9 @@
                     camera.aspect = w / h;
                     camera.updateProjectionMatrix();
                     renderer.setPixelRatio(getMainViewerTargetPixelRatio());
-                    renderer.setSize(w, h, false);
+                    // Must update canvas CSS (third arg true): with false, layout size follows
+                    // buffer pixels and the canvas no longer fills #model-viewer after DPR/quality changes.
+                    renderer.setSize(w, h, true);
                     if (composer) composer.setSize(w, h);
                     if (bloomPass) bloomPass.resolution.set(w, h);
                 };
@@ -10766,7 +11047,10 @@
                 return t;
             }
 
-            const faceRigViewer = (() => {
+            const FACE_RIG_UI_DISABLED = true;
+            const faceRigViewer = FACE_RIG_UI_DISABLED
+                ? null
+                : (() => {
                 const card = document.getElementById('face-rig-viewer-card');
                 const host = document.getElementById('face-rig-viewer-host');
                 const stage = card?.querySelector?.('.face-rig-viewer-stage') || null;
@@ -12798,142 +13082,19 @@
                 }
             };
 
-            const taskPerfManager = (() => {
-                const videoElement = document.getElementById('video-player');
-                const registry = {
-                    videoPreview: {
-                        label: 'Video Preview',
-                        element: document.getElementById('video-container'),
-                        extraElements: [document.getElementById('video-pending')],
-                        onDisable() {
-                            if (videoElement && !videoElement.paused) {
-                                videoElement.dataset.wasPlaying = '1';
-                            }
-                            videoElement?.pause();
-                            perfLogger?.log('TaskPage', 'video preview paused');
-                        },
-                        onEnable() {
-                            if (videoElement?.src && videoElement?.dataset?.wasPlaying === '1' && !document.hidden) {
-                                videoElement.play?.().catch(() => {});
-                            } else {
-                                perfLogger?.log('TaskPage', 'video preview enabled without autoplay');
-                            }
-                        }
-                    },
-                    mainViewer: {
-                        label: '3D Preview',
-                        element: document.getElementById('model-viewer-wrap'),
-                        onDisable() {
-                            mainViewerControl.setEnabled(false);
-                        },
-                        onEnable() {
-                            mainViewerControl.setEnabled(true);
-                        }
-                    },
-                    customAnimations: {
-                        label: 'Custom Animations',
-                        element: document.getElementById('custom-animations-wrap')
-                    },
-                    faceViewer: {
-                        label: 'Face RIG Animation',
-                        element: document.getElementById('face-rig-viewer-card'),
-                        onDisable() {
-                            faceRigViewer?.setBlockEnabled(false);
-                        },
-                        onEnable() {
-                            faceRigViewer?.setBlockEnabled(true);
-                        }
-                    },
-                    spriteSheet: {
-                        label: '2D Sprite sheet',
-                        element: document.getElementById('sprite-sheet-card'),
-                    },
-                    popularFree3d: {
-                        label: 'Popular Free3D Characters',
-                        element: document.getElementById('task-free3d-popular-section')
-                    },
-                    downloads: {
-                        label: 'Downloads',
-                        element: document.getElementById('downloads-card')
-                    },
-                    additionalContent: {
-                        label: 'Additional Content',
-                        element: document.getElementById('additional-content-section')
-                    }
-                };
-
-                function createToggleButton(id, enabled, onToggle) {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'perf-toggle-btn';
-                    btn.innerHTML = enabled ? TOGGLE_ON_ICON : TOGGLE_OFF_ICON;
-                    btn.title = enabled ? 'Disable block' : 'Enable block';
-                    btn.addEventListener('click', (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onToggle();
-                    });
-                    return btn;
+            const taskPerfManager = {
+                getStates() {
+                    return {
+                        videoPreview: true,
+                        mainViewer: true,
+                        customAnimations: true,
+                        spriteSheet: true,
+                        popularFree3d: true,
+                        downloads: true,
+                        additionalContent: true
+                    };
                 }
-
-                function ensurePlaceholder(id, entry) {
-                    if (entry.placeholder) return entry.placeholder;
-                    const placeholder = document.createElement('div');
-                    placeholder.className = 'perf-toggle-placeholder';
-                    placeholder.innerHTML = `<div class="perf-toggle-placeholder-label">${entry.label} disabled</div>`;
-                    const btn = createToggleButton(id, false, () => setEnabled(id, true));
-                    placeholder.appendChild(btn);
-                    entry.element.insertAdjacentElement('afterend', placeholder);
-                    entry.placeholder = placeholder;
-                    entry.placeholderButton = btn;
-                    return placeholder;
-                }
-
-                function updateButtonState(button, enabled) {
-                    if (!button) return;
-                    button.innerHTML = enabled ? TOGGLE_ON_ICON : TOGGLE_OFF_ICON;
-                    button.title = enabled ? 'Disable block' : 'Enable block';
-                }
-
-                function setEnabled(id, enabled) {
-                    const entry = registry[id];
-                    if (!entry?.element) return;
-                    entry.enabled = !!enabled;
-                    perfLogger.blockStates[id] = entry.enabled;
-                    perfLogger?.log('TaskPage', entry.enabled ? 'block enabled' : 'block disabled', { block: entry.label });
-                    entry.element.classList.toggle('perf-block-disabled', !entry.enabled);
-                    (entry.extraElements || []).forEach((extra) => extra?.classList.toggle('perf-block-disabled', !entry.enabled));
-                    const placeholder = ensurePlaceholder(id, entry);
-                    placeholder.classList.toggle('is-visible', !entry.enabled);
-                    updateButtonState(entry.button, entry.enabled);
-                    updateButtonState(entry.placeholderButton, entry.enabled);
-                    if (entry.enabled) {
-                        entry.onEnable?.();
-                    } else {
-                        entry.onDisable?.();
-                    }
-                }
-
-                function init() {
-                    Object.entries(registry).forEach(([id, entry]) => {
-                        if (!entry.element) return;
-                        entry.enabled = true;
-                        perfLogger.blockStates[id] = true;
-                        entry.element.style.position = entry.element.style.position || 'relative';
-                        const button = createToggleButton(id, true, () => setEnabled(id, !entry.enabled));
-                        entry.element.appendChild(button);
-                        entry.button = button;
-                        ensurePlaceholder(id, entry);
-                    });
-                }
-
-                return {
-                    init,
-                    getStates() {
-                        return Object.fromEntries(Object.entries(registry).map(([id, entry]) => [id, !!entry.enabled]));
-                    }
-                };
-            })();
+            };
 
             function startPerfSummaryLogger() {
                 setInterval(() => {
@@ -13092,7 +13253,6 @@
             }
 
             console.log('[Viewer] Starting viewer initialization...');
-            taskPerfManager.init();
             startPerfSummaryLogger();
             window.addEventListener('taskPageDeferredReady', () => {
                 faceRigViewer?.init();
@@ -13133,6 +13293,174 @@
                 }
             });
         }
+    </script>
+
+    <!-- Share modal (link, embed, social) -->
+    <script>
+        (function () {
+            const SHARE_TEXT = 'Check out this rigged 3D model on AutoRig.online';
+
+            const PLATFORM_LINKS = [
+                { key: 'twitter', label: 'X / Twitter', tone: 'tw', icon: '𝕏', url: (u, t) => `https://twitter.com/intent/tweet?url=${encodeURIComponent(u)}&text=${encodeURIComponent(t)}` },
+                { key: 'facebook', label: 'Facebook', tone: 'fb', icon: 'f', url: (u) => `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(u)}` },
+                { key: 'reddit', label: 'Reddit', icon: '◉', url: (u, t) => `https://www.reddit.com/submit?url=${encodeURIComponent(u)}&title=${encodeURIComponent(t)}` },
+                { key: 'linkedin', label: 'LinkedIn', icon: 'in', url: (u) => `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(u)}` },
+                { key: 'whatsapp', label: 'WhatsApp', icon: '⌁', url: (u, t) => `https://api.whatsapp.com/send?text=${encodeURIComponent(`${t} ${u}`)}` },
+                { key: 'vk', label: 'VK', icon: 'VK', url: (u, t) => `https://vk.com/share.php?url=${encodeURIComponent(u)}&title=${encodeURIComponent(t)}` },
+                { key: 'tumblr', label: 'Tumblr', icon: 't', url: (u, t) => `https://www.tumblr.com/widgets/share/tool?canonicalUrl=${encodeURIComponent(u)}&title=${encodeURIComponent(t)}` },
+                { key: 'pinterest', label: 'Pinterest', icon: 'P', url: (u, t) => `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(u)}&description=${encodeURIComponent(t)}` },
+                { key: 'line', label: 'Line', icon: 'L', url: (u) => `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(u)}` },
+                { key: 'email', label: 'Email', icon: '✉', url: (u, t) => `mailto:?subject=${encodeURIComponent(t)}&body=${encodeURIComponent(`${t}\n\n${u}`)}` },
+                { key: 'gmail', label: 'Gmail', icon: 'G', url: (u, t) => `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(t)}&body=${encodeURIComponent(`${t}\n\n${u}`)}` }
+            ];
+
+            const PLATFORM_COPY = [
+                { key: 'youtube', label: 'YouTube', tone: 'yt', icon: '▶', sub: 'Description', text: (u, t) => `${t}\n\n${u}\n\n#3D #rigging #AutoRig #glb #animation` },
+                { key: 'instagram', label: 'Instagram', icon: '📷', sub: 'Copy link', text: (u) => u }
+            ];
+
+            function getDialog() {
+                return document.getElementById('task-share-dialog');
+            }
+
+            async function copyStr(s) {
+                try {
+                    await navigator.clipboard.writeText(s);
+                } catch (e) {
+                    const ta = document.createElement('textarea');
+                    ta.value = s;
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        document.execCommand('copy');
+                    } finally {
+                        document.body.removeChild(ta);
+                    }
+                }
+            }
+
+            function buildGrid(pageUrl, text) {
+                const grid = document.getElementById('task-share-platform-grid');
+                if (!grid) return;
+                grid.textContent = '';
+                const mkBtn = (label, icon, sub, tone, onClick) => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'task-share-platform-btn';
+                    if (tone) b.dataset.tone = tone;
+                    const ico = document.createElement('span');
+                    ico.className = 'task-share-platform-ico';
+                    ico.textContent = icon;
+                    const lab = document.createElement('span');
+                    lab.textContent = label;
+                    b.appendChild(ico);
+                    b.appendChild(lab);
+                    if (sub) {
+                        const s = document.createElement('span');
+                        s.style.fontSize = '0.6rem';
+                        s.style.fontWeight = '500';
+                        s.style.opacity = '0.88';
+                        s.textContent = sub;
+                        b.appendChild(s);
+                    }
+                    b.addEventListener('click', onClick);
+                    return b;
+                };
+
+                const tg = mkBtn('Telegram', '✈', 'App / web', null, () => {
+                    const tid = window.TaskUI?.taskId;
+                    if (tid && window.TelegramApp) {
+                        window.TelegramApp.shareTask(tid);
+                    } else {
+                        window.open(`https://t.me/share/url?url=${encodeURIComponent(pageUrl)}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+                    }
+                });
+                grid.appendChild(tg);
+
+                PLATFORM_LINKS.forEach((p) => {
+                    const href = p.url(pageUrl, text);
+                    grid.appendChild(
+                        mkBtn(p.label, p.icon, '', p.tone, () => {
+                            window.open(href, '_blank', 'noopener,noreferrer');
+                        })
+                    );
+                });
+
+                PLATFORM_COPY.forEach((p) => {
+                    const payload = p.text(pageUrl, text);
+                    grid.appendChild(
+                        mkBtn(p.label, p.icon, p.sub, p.tone, async () => {
+                            await copyStr(payload);
+                        })
+                    );
+                });
+            }
+
+            window.TaskShare = {
+                open() {
+                    const tid = window.TaskUI?.taskId;
+                    if (!tid) return;
+                    const pageUrl = `${window.location.origin}/task?id=${encodeURIComponent(tid)}`;
+                    const text = SHARE_TEXT;
+                    const title = document.title || 'AutoRig.online';
+
+                    const urlEl = document.getElementById('task-share-page-url');
+                    if (urlEl) urlEl.textContent = pageUrl;
+
+                    const embed = document.getElementById('task-share-embed-code');
+                    if (embed) {
+                        embed.value = `<iframe src="${pageUrl}" width="560" height="420" style="border:0;border-radius:12px;max-width:100%;min-height:280px;" title="${title.replace(/"/g, '&quot;')}" loading="lazy" allowfullscreen></iframe>`;
+                    }
+
+                    const nativeBtn = document.getElementById('task-share-native');
+                    if (nativeBtn) {
+                        if (navigator.share) {
+                            nativeBtn.classList.remove('hidden');
+                            nativeBtn.onclick = () => {
+                                navigator.share({ title, text, url: pageUrl }).catch(() => {});
+                            };
+                        } else {
+                            nativeBtn.classList.add('hidden');
+                            nativeBtn.onclick = null;
+                        }
+                    }
+
+                    buildGrid(pageUrl, text);
+                    const d = getDialog();
+                    if (d && typeof d.showModal === 'function') {
+                        d.showModal();
+                    }
+                },
+                close() {
+                    const d = getDialog();
+                    if (d && typeof d.close === 'function') d.close();
+                },
+                async copyLink() {
+                    const tid = window.TaskUI?.taskId;
+                    if (!tid) return;
+                    const pageUrl = `${window.location.origin}/task?id=${encodeURIComponent(tid)}`;
+                    await copyStr(pageUrl);
+                },
+                async copyEmbed() {
+                    const ta = document.getElementById('task-share-embed-code');
+                    if (!ta?.value) return;
+                    await copyStr(ta.value);
+                }
+            };
+
+            document.getElementById('task-share-btn')?.addEventListener('click', () => window.TaskShare.open());
+            document.getElementById('task-share-dialog-close')?.addEventListener('click', () => window.TaskShare.close());
+            document.getElementById('task-share-copy-link')?.addEventListener('click', () => window.TaskShare.copyLink());
+            document.getElementById('task-share-copy-embed')?.addEventListener('click', () => window.TaskShare.copyEmbed());
+            const dlg = getDialog();
+            if (dlg) {
+                dlg.addEventListener('click', (e) => {
+                    if (e.target === dlg) dlg.close();
+                });
+            }
+        })();
     </script>
 
     <!-- Telegram WebApp Integration -->

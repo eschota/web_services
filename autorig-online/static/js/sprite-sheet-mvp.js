@@ -68,6 +68,105 @@ export function viewDirection(preset, out) {
 }
 
 /**
+ * World-space bounds that include animated skinned meshes (bone hull + static fallback).
+ * `Box3.setFromObject` alone uses rest-pose geometry bounds and misses deformed vertices.
+ *
+ * @param {typeof import('three')} THREE
+ * @param {import('three').Object3D} rootObject
+ * @returns {import('three').Box3}
+ */
+export function computeCaptureBoundingBox(THREE, rootObject) {
+  const box = new THREE.Box3();
+  const tmp = new THREE.Vector3();
+  const cubeSize = new THREE.Vector3();
+
+  rootObject.updateMatrixWorld(true);
+
+  const fallback = new THREE.Box3().setFromObject(rootObject);
+  if (!fallback.isEmpty()) {
+    box.copy(fallback);
+  }
+
+  rootObject.traverse((obj) => {
+    if (!obj.visible) return;
+
+    if (obj.isSkinnedMesh && obj.skeleton && obj.geometry) {
+      obj.skeleton.update();
+      const geom = obj.geometry;
+      if (!geom.boundingSphere) geom.computeBoundingSphere();
+      const bs = geom.boundingSphere;
+      const r = bs.radius > 0 ? bs.radius : 0.1;
+      const sx = Math.abs(obj.scale.x);
+      const sy = Math.abs(obj.scale.y);
+      const sz = Math.abs(obj.scale.z);
+      const scaleMax = Math.max(sx, sy, sz, 1e-6);
+      const bonePad = Math.max(r * scaleMax * 0.4, 0.15);
+
+      const bones = obj.skeleton.bones;
+      for (let i = 0; i < bones.length; i++) {
+        bones[i].getWorldPosition(tmp);
+        cubeSize.set(bonePad * 2, bonePad * 2, bonePad * 2);
+        const boneBox = new THREE.Box3().setFromCenterAndSize(tmp, cubeSize);
+        box.union(boneBox);
+      }
+    } else if (obj.isMesh && obj.geometry && !obj.isSkinnedMesh) {
+      const ob = new THREE.Box3().setFromObject(obj);
+      if (!ob.isEmpty()) {
+        box.union(ob);
+      }
+    }
+  });
+
+  if (box.isEmpty() && !fallback.isEmpty()) {
+    return fallback;
+  }
+  return box;
+}
+
+/**
+ * One stable zoom-extents box for the whole clip: union of skin-aware bounds at each
+ * render time sample (same times as atlas frames). Camera stays fixed while frames play.
+ *
+ * @param {typeof import('three')} THREE
+ * @param {import('three').Object3D} rootObject
+ * @param {import('three').AnimationMixer} mixer
+ * @param {import('three').AnimationAction} action
+ * @param {import('three').AnimationClip} clip
+ * @param {number} frameCount
+ * @returns {{ box: import('three').Box3, center: import('three').Vector3 }}
+ */
+export function computeStableCaptureBoundsForClip(
+  THREE,
+  rootObject,
+  mixer,
+  action,
+  clip,
+  frameCount
+) {
+  const duration = Math.max(clip.duration || 0, 1e-6);
+  const unionBox = new THREE.Box3();
+
+  for (let i = 0; i < frameCount; i++) {
+    const t = frameCount <= 1 ? 0 : (i / (frameCount - 1)) * duration;
+    action.time = t;
+    mixer.update(0);
+    rootObject.updateMatrixWorld(true);
+
+    const b = computeCaptureBoundingBox(THREE, rootObject);
+    if (!b.isEmpty()) {
+      unionBox.union(b);
+    }
+  }
+
+  if (unionBox.isEmpty()) {
+    throw new Error('Sprite sheet: empty bounding box');
+  }
+
+  const center = unionBox.getCenter(new THREE.Vector3());
+  return { box: unionBox, center };
+}
+
+/**
  * Position orthographic camera and set left/right/top/bottom so the full AABB fits
  * for the current frame aspect ratio (fixes wrong crop when using max(x,y,z) only).
  * @param {typeof import('three')} THREE
@@ -94,7 +193,6 @@ export function fitOrthoCameraToBox(THREE, orthoCam, box, center, viewPreset, fr
   orthoCam.lookAt(center);
   orthoCam.updateMatrixWorld(true);
 
-  const inv = new THREE.Matrix4().copy(orthoCam.matrixWorld).invert();
   const corners = [
     new THREE.Vector3(box.min.x, box.min.y, box.min.z),
     new THREE.Vector3(box.max.x, box.min.y, box.min.z),
@@ -110,7 +208,7 @@ export function fitOrthoCameraToBox(THREE, orthoCam, box, center, viewPreset, fr
   let maxAbsY = 0;
   const tmp = new THREE.Vector3();
   for (const c of corners) {
-    tmp.copy(c).applyMatrix4(inv);
+    tmp.copy(c).applyMatrix4(orthoCam.matrixWorldInverse);
     maxAbsX = Math.max(maxAbsX, Math.abs(tmp.x));
     maxAbsY = Math.max(maxAbsY, Math.abs(tmp.y));
   }
@@ -183,7 +281,7 @@ export async function captureSpriteSheetAtlas(opts) {
 
   const frameCount = Math.min(
     SPRITE_SHEET_LIMITS.maxFrames,
-    Math.max(SPRITE_SHEET_LIMITS.minFrames, Math.floor(Number(rawFrameCount) || 8))
+    Math.max(SPRITE_SHEET_LIMITS.minFrames, Math.floor(Number(rawFrameCount) || 30))
   );
   const frameWidth = Math.min(
     SPRITE_SHEET_LIMITS.maxFrameSize,
@@ -202,15 +300,9 @@ export async function captureSpriteSheetAtlas(opts) {
   const atlasW = cols * frameWidth;
   const atlasH = rows * frameHeight;
 
-  const box = new THREE.Box3().setFromObject(rootObject);
-  if (box.isEmpty()) {
-    throw new Error('Sprite sheet: empty bounding box');
-  }
-  const center = box.getCenter(new THREE.Vector3());
   const frameAspect = frameWidth / frameHeight;
 
   const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
-  fitOrthoCameraToBox(THREE, orthoCam, box, center, viewPreset, frameAspect);
 
   const prevGroundVis = groundObject ? groundObject.visible : null;
   if (groundObject) groundObject.visible = false;
@@ -263,6 +355,16 @@ export async function captureSpriteSheetAtlas(opts) {
 
   const duration = Math.max(clip.duration || 0, 1e-6);
   const totalSteps = frameCount;
+
+  const { box: stableBox, center: stableCenter } = computeStableCaptureBoundsForClip(
+    THREE,
+    rootObject,
+    mixer,
+    action,
+    clip,
+    frameCount
+  );
+  fitOrthoCameraToBox(THREE, orthoCam, stableBox, stableCenter, viewPreset, frameAspect);
 
   try {
     for (let i = 0; i < frameCount; i++) {

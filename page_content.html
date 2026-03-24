@@ -67,6 +67,75 @@
         body.webapp-mode #video-preview-title { display: none !important; }
         body.webapp-mode #hdrp-renders { display: none !important; }
         body.webapp-mode #video-pending { display: none !important; }
+
+        .task-header-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.42rem 0.88rem;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            font-family: inherit;
+            line-height: 1.2;
+            color: var(--text-primary);
+            background: color-mix(in srgb, var(--bg-input) 92%, transparent);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            cursor: pointer;
+            transition: border-color 0.18s, background 0.18s, box-shadow 0.18s, color 0.18s;
+            white-space: nowrap;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+        .task-header-btn svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            opacity: 0.88;
+        }
+        .task-header-btn:hover {
+            border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+            background: color-mix(in srgb, var(--accent) 9%, var(--bg-card));
+        }
+        #status-container {
+            display: inline-flex;
+            align-items: center;
+        }
+        .task-status-pill {
+            display: inline-flex;
+            align-items: center;
+            margin: 0;
+            padding: 0.42rem 0.88rem;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            font-family: inherit;
+            line-height: 1.2;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: color-mix(in srgb, var(--bg-input) 92%, transparent);
+            color: var(--text-secondary);
+            white-space: nowrap;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+        .task-status-pill--processing {
+            border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+            background: color-mix(in srgb, var(--accent) 11%, var(--bg-input));
+            color: var(--accent);
+        }
+        .task-status-pill--queued {
+            border-color: color-mix(in srgb, var(--text-muted) 28%, var(--border));
+            color: var(--text-secondary);
+        }
+        .task-status-pill--done {
+            border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+            background: color-mix(in srgb, var(--success) 12%, var(--bg-input));
+            color: var(--success);
+        }
+        .task-status-pill--error {
+            border-color: color-mix(in srgb, var(--error) 42%, var(--border));
+            background: color-mix(in srgb, var(--error) 10%, var(--bg-input));
+            color: var(--error);
+        }
         
         .viewer-loading-overlay {
             position: absolute;
@@ -1063,6 +1132,28 @@
         #model-viewer-wrap:hover:not(.viewer-focused)::after {
             opacity: 1;
         }
+
+        #file-list > .file-item:has(#download-all-btn) {
+            align-items: stretch;
+        }
+        #download-all-btn {
+            width: 100%;
+            max-width: none;
+            box-sizing: border-box;
+            justify-content: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+            flex-wrap: nowrap;
+            padding: 0.75rem 1rem;
+            font-size: clamp(0.75rem, 2.2vw, 1rem);
+            line-height: 1.25;
+        }
+        #download-all-btn img {
+            flex-shrink: 0;
+        }
+        #download-all-btn > span {
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -1163,17 +1254,19 @@
             <!-- Header actions row (one line): buttons + status -->
             <div style="display: flex; justify-content: flex-start; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
                 <div class="flex gap-2" style="align-items: center; flex-wrap: wrap;">
-                    <button class="btn btn-secondary" id="owner-tasks-btn" style="padding: 0.55rem 0.9rem; border-color: var(--warning); color: var(--warning); background: rgba(245, 158, 11, 0.08); white-space: nowrap;">
-                        <span aria-hidden="true" style="font-size: 1.8rem; line-height: 1; display: inline-block;">📋</span>
-                        <span data-i18n="btn_owner_tasks" style="display: inline-block;">All tasks</span>
+                    <button type="button" class="task-header-btn" id="owner-tasks-btn" title="All tasks">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+                        </svg>
+                        <span data-i18n="btn_owner_tasks">All tasks</span>
                     </button>
                     <!-- Restart button removed - using SAVE RIG T-POSE button in viewer -->
 
                     <!-- Status Badge (in header row) -->
-                    <div id="status-container" style="white-space: nowrap; display: inline-flex; align-items: center;">
-                        <span class="alert alert-success" id="status-badge" style="display: inline-block; margin: 0;">
-                    <span id="status-text">Completed</span>
-                </span>
+                    <div id="status-container">
+                        <span class="task-status-pill task-status-pill--done" id="status-badge">
+                            <span id="status-text">Completed</span>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -2146,13 +2239,10 @@
                 </button>
             </div>
             <ul class="file-list" id="file-list" style="max-height: none; overflow: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem;">
-                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
-                            <div style="font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);">
-                                📦 Download All 5 files (202.6 MB total)
-                            </div>
-                            <button id="download-all-btn" onclick="TaskUI.downloadAllOrPurchase()" class="btn btn-primary" style="width: 100%; max-width: 300px; justify-content: center; padding: 0.75rem 1rem; font-size: 1rem; gap: 0.5rem;">
+                        <li class="file-item" style="flex-direction: column; align-items: stretch; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
+                            <button id="download-all-btn" onclick="TaskUI.downloadAllOrPurchase()" class="btn btn-primary">
                                 <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18" style="filter: brightness(10);">
-                                <span style="font-weight: 700;">Download All (5 files)</span>
+                                <span style="font-weight: 700;">📦 Download All 5 files (202.6 MB total)</span>
                             </button>
                             <div style="margin-top: 0.75rem; font-size: 0.95rem; color: #fff; line-height: 1.4; text-align: center; font-weight: 500;" data-i18n="download_archive_desc">The archive contains your 3D model with rigging and all animations, such as walking, running, jumping, falling, hitting, etc. You can use them in Unity, Unreal Engine, Blender or any other 3D modeling package.</div>
                         </li>
@@ -2744,9 +2834,9 @@
                 const statusBadge = document.getElementById('status-badge');
                 const statusText = document.getElementById('status-text');
                 
-                statusBadge.className = 'alert';
+                statusBadge.className = 'task-status-pill';
                 if (task.status === 'done') {
-                    statusBadge.classList.add('alert-success');
+                    statusBadge.classList.add('task-status-pill--done');
                     statusText.textContent = t('task_status_done');
                     // Show Telegram share button when task is done
                     const shareBtn = document.getElementById('telegram-share-btn');
@@ -2754,14 +2844,14 @@
                     // Haptic feedback for Telegram Web App
                     if (window.TelegramApp) TelegramApp.hapticFeedback('success');
                 } else if (task.status === 'error') {
-                    statusBadge.classList.add('alert-error');
+                    statusBadge.classList.add('task-status-pill--error');
                     statusText.textContent = t('task_status_error');
                     if (window.TelegramApp) TelegramApp.hapticFeedback('error');
                 } else if (task.status === 'processing') {
-                    statusBadge.classList.add('alert-info');
+                    statusBadge.classList.add('task-status-pill--processing');
                     statusText.textContent = t('task_status_processing');
                 } else {
-                    statusBadge.classList.add('alert-info');
+                    statusBadge.classList.add('task-status-pill--queued');
                     statusText.textContent = t('task_status_created');
                 }
                 
@@ -3389,6 +3479,10 @@
             async downloadAllFiles() {
                 const files = this.downloadItems || [];
                 if (this.isDownloadingAll || files.length === 0) return;
+                const dlAllLabel = (n) => {
+                    const base = window.t ? window.t('btn_download_all') : 'Download All';
+                    return `📦 ${base} ${n} files`;
+                };
                 
                 this.isDownloadingAll = true;
                 const downloadBtn = document.getElementById('download-all-btn');
@@ -3422,14 +3516,14 @@
                         downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">Download Complete!</span>`;
                         setTimeout(() => {
                             downloadBtn.disabled = false;
-                            downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">Download ALL (${files.length} files)</span>`;
+                            downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">${dlAllLabel(files.length)}</span>`;
                         }, 2000);
                     }
                 } catch (e) {
                     console.error('Download error:', e);
                     if (downloadBtn) {
                         downloadBtn.disabled = false;
-                        downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">Download ALL (${files.length} files)</span>`;
+                        downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">${dlAllLabel(files.length)}</span>`;
                     }
                 } finally {
                     this.isDownloadingAll = false;
@@ -4261,24 +4355,17 @@
                             : `${(totalSize / 1024).toFixed(0)} KB`)
                         : null;
                     const buttonLabel = cachedReady
-                        ? `${t('btn_download_all')} (${fileCount} files)`
-                        : t('btn_download_all');
-                    const buttonDisabled = fileCount === 0;
-                    const helperText = cachedReady
                         ? `📦 ${t('btn_download_all')} ${fileCount} files${sizeStr ? ` (${sizeStr} total)` : ''}`
                         : 'Preparing downloads...';
+                    const buttonDisabled = fileCount === 0;
 
                     const archiveDesc = `<div style="margin-top: 0.75rem; font-size: 0.95rem; color: #fff; line-height: 1.4; text-align: center; font-weight: 500;" data-i18n="download_archive_desc">
                         ${t('download_archive_desc')}
                     </div>`;
 
                     downloadAllHtml = `
-                        <li class="file-item" style="flex-direction: column; align-items: center; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
-                            <div style="font-size: 0.95rem; font-weight: 500; color: var(--text-secondary);">
-                                ${helperText}
-                            </div>
-                            <button id="download-all-btn" onclick="TaskUI.downloadAllOrPurchase()" class="btn btn-primary" 
-                               style="width: 100%; max-width: 300px; justify-content: center; padding: 0.75rem 1rem; font-size: 1rem; gap: 0.5rem;"
+                        <li class="file-item" style="flex-direction: column; align-items: stretch; gap: 0.5rem; padding: 1rem; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-rgb), 0.05)); border: 2px solid var(--accent); grid-column: 1 / -1;">
+                            <button id="download-all-btn" onclick="TaskUI.downloadAllOrPurchase()" class="btn btn-primary"
                                ${buttonDisabled ? 'disabled' : ''}>
                                 <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18" style="filter: brightness(10);">
                                 <span style="font-weight: 700;">${buttonLabel}</span>

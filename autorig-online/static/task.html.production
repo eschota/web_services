@@ -2644,9 +2644,8 @@
         import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
         import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
         import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
-        import { RGBELoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/RGBELoader.js';
-        import { EXRLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/EXRLoader.js';
-        
+        import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
+
         import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
         import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2675,8 +2674,7 @@
             // LIGHTING & RENDERER CONFIG (edit values here)
             // ============================================================
             const LIGHTING_CONFIG = {
-                // HDR Environment (IBL reflections)
-                hdrPath: '/static/ibl/DefaultHDRISky.exr',
+                // IBL: PMREM from RoomEnvironment (no external .hdr/.exr)
                 envIntensity: 1.0,          // scene.environmentIntensity (Three.js r152+)
 
                 // Tone mapping
@@ -2721,44 +2719,22 @@
             }
 
             async function loadEnvironment(scene) {
-                const url = LIGHTING_CONFIG.hdrPath;
+                if (!renderer) return false;
                 setStatus('Loading IBL...');
-
-                // Use EXRLoader for .exr (RGBELoader is still imported/available as required stack).
-                const tryEXR = () => new Promise((resolve) => {
-                    const exr = new EXRLoader();
-                    exr.load(url, (t) => {
-                        t.mapping = THREE.EquirectangularReflectionMapping;
-                        scene.environment = t;
-                        // Set envIntensity if supported (Three.js r152+)
-                        if ('environmentIntensity' in scene) {
-                            scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
-                        }
-                        console.log('[Viewer] EXR environment loaded');
-                        resolve(true);
-                    }, undefined, (err) => {
-                        console.warn('[Viewer] EXR load failed:', err);
-                        resolve(false);
-                    });
-                });
-
-                const tryRGBE = () => new Promise((resolve) => {
-                    const rgbe = new RGBELoader();
-                    rgbe.load(url.replace('.exr', '.hdr'), (t) => {
-                        t.mapping = THREE.EquirectangularReflectionMapping;
-                        scene.environment = t;
-                        if ('environmentIntensity' in scene) {
-                            scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
-                        }
-                        console.log('[Viewer] HDR environment loaded');
-                        resolve(true);
-                    }, undefined, () => resolve(false));
-                });
-
-                const okExr = await tryEXR();
-                if (okExr) return true;
-                const okHdr = await tryRGBE();
-                return okHdr;
+                try {
+                    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+                    const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+                    scene.environment = envTexture;
+                    pmremGenerator.dispose();
+                    if ('environmentIntensity' in scene) {
+                        scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
+                    }
+                    console.log('[Viewer] IBL ready (RoomEnvironment PMREM)');
+                    return true;
+                } catch (e) {
+                    console.error('[Viewer] IBL setup failed:', e);
+                    return false;
+                }
             }
 
             // Scene state (persistent across model loads)
