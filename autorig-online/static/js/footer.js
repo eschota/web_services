@@ -19,7 +19,7 @@ function renderSiteFooter() {
                 <!-- Brand Column -->
                 <div class="footer-brand">
                     <a href="/" class="footer-logo">
-                        <img src="/static/images/logo/autorig-logo.png" alt="AutoRig Online" height="60">
+                    <img src="/static/images/logo/autorig-logo.png" alt="AutoRig Online" height="60">
                     </a>
                     <p class="footer-tagline" data-i18n="footer_tagline">AI-powered automatic 3D character rigging. Upload your model and get it rigged with animations in minutes.</p>
                 </div>

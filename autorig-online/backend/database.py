@@ -183,7 +183,8 @@ class Task(Base):
     face_rig_analysis = Column(Text, nullable=True)
     face_rig_analysis_updated_at = Column(DateTime, nullable=True)
     ga_client_id = Column(String(100), nullable=True)
-    
+    created_via_api = Column(Boolean, default=False)  # True if POST /api/task/create used API key auth
+
     @property
     def output_urls(self) -> list:
         return json.loads(self._output_urls) if self._output_urls else []
@@ -466,6 +467,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN face_rig_analysis TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN face_rig_analysis_updated_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN ga_client_id VARCHAR(100)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN created_via_api BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_new_notified_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_done_notified_at DATETIME")
             

@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, or_
 from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -38,6 +38,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
+    NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
 )
@@ -47,7 +48,7 @@ from database import (
     TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase
 )
 from models import (
-    TaskCreateRequest, TaskCreateResponse, TaskStatusResponse,
+    TaskCreateResponse, TaskStatusResponse,
     TaskHistoryItem, TaskHistoryResponse,
     UserInfo, AnonInfo, AuthStatusResponse,
     ApiKeyItem, ApiKeyListResponse, ApiKeyCreateResponse,
@@ -435,6 +436,20 @@ async def background_task_updater():
                         print(f"[Background Worker] Disk cleanup error: {e}")
 
                 # =============================================================
+                # 2.6. Purge terminal tasks with no video_ready and no poster in URLs
+                # =============================================================
+                if background_worker_cycle_count % NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES == 0:
+                    try:
+                        pr = await purge_tasks_without_poster_and_video(db)
+                        if pr["deleted"] > 0:
+                            print(
+                                f"[Background Worker] Purged {pr['deleted']} stale task(s) "
+                                f"(no poster, no video); scanned {pr['scanned']}"
+                            )
+                    except Exception as e:
+                        print(f"[Background Worker] No-assets purge error: {e}")
+
+                # =============================================================
                 # 3. Update progress for all processing tasks
                 # =============================================================
                 result = await db.execute(
@@ -570,6 +585,7 @@ async def get_current_user(
 ) -> Optional[User]:
     """Session cookie user, or user resolved from API key; anon API keys set request.state.api_key_anon_id."""
     request.state.api_key_anon_id = None
+    request.state.auth_via_api_key = False
     session_token = request.cookies.get(SESSION_COOKIE)
     if session_token:
         return await get_user_by_session(db, session_token)
@@ -609,11 +625,13 @@ async def get_current_user(
         urs = await db.execute(select(User).where(User.id == key_rec.user_id))
         user = urs.scalar_one_or_none()
         if user:
+            request.state.auth_via_api_key = True
             await db.commit()
         return user
 
     if key_rec.anon_id:
         request.state.api_key_anon_id = key_rec.anon_id
+        request.state.auth_via_api_key = True
         await db.commit()
         return None
 
@@ -1469,6 +1487,7 @@ async def api_create_task(
     - ``multipart/form-data`` / ``application/x-www-form-urlencoded``: same fields as before;
       ``source`` defaults to ``link`` if omitted. Use ``source=upload`` + ``file`` for uploads.
     """
+    via_api = bool(getattr(request.state, "auth_via_api_key", False))
     api_key_anon = getattr(request.state, "api_key_anon_id", None)
     if user:
         owner_type = "user"
@@ -1566,7 +1585,7 @@ async def api_create_task(
     
     # Create task
     task, error = await create_conversion_task(
-        db, final_url, input_type, owner_type, owner_id
+        db, final_url, input_type, owner_type, owner_id, created_via_api=via_api
     )
     
     if error and not task:
@@ -1601,11 +1620,13 @@ async def api_create_task(
     except Exception as e:
         # Don't fail task creation if immediate dispatch fails - background worker will pick it up
         print(f"[Immediate Dispatch] Failed for task {task.id}: {e}")
-    
+
+    await db.refresh(task)
+
     return TaskCreateResponse(
         task_id=task.id,
         status=task.status,
-        message=error
+        message=error,
     )
 
 
@@ -2776,8 +2797,12 @@ async def api_get_gallery(
     # Get current user email for liked_by_me check
     user_email = user.email if user else None
 
-    # Build base conditions
-    base_conditions = [Task.status == "done", Task.video_ready == True]
+    # Build base conditions (must have poster URLs in DB or /api/thumb 404s in the grid)
+    base_conditions = [
+        Task.status == "done",
+        Task.video_ready == True,
+        _gallery_task_has_poster_sql(),
+    ]
     if author:
         base_conditions.append(Task.owner_type == "user")
         base_conditions.append(Task.owner_id == author)
@@ -3539,6 +3564,20 @@ async def api_admin_delete_all_tasks(
     asyncio.create_task(_terminate_soon())
     
     return {"ok": True, "deleted_count": total_deleted, "message": "All tasks deleted. Service restarting..."}
+
+
+@app.post("/api/admin/tasks/purge-no-poster-video")
+async def api_admin_purge_no_poster_video(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete terminal tasks (done/error) that have no video_ready and no poster/thumb URL in lists.
+    Admin only. Same logic as the background purge.
+    """
+    result = await purge_tasks_without_poster_and_video(db)
+    print(f"[Admin] purge-no-poster-video by {admin.email}: {result}")
+    return {"ok": True, **result}
 
 
 @app.post("/api/admin/cleanup")
@@ -4344,6 +4383,32 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
     return None
 
 
+def _task_has_poster(task: Task) -> bool:
+    """True if ready_urls/output_urls contain a file usable as /api/thumb source (same rules as api_proxy_thumb)."""
+    urls = list(task.ready_urls or []) + list(task.output_urls or [])
+    if not urls:
+        return False
+    if _find_file_in_ready_urls(urls, "_video_poster.jpg"):
+        return True
+    if _find_file_in_ready_urls(urls, "_poster.jpg"):
+        return True
+    if _find_file_in_ready_urls(urls, "icon.png"):
+        return True
+    if _find_file_in_ready_urls(urls, "Render_1_view.jpg"):
+        return True
+    return False
+
+
+def _gallery_task_has_poster_sql():
+    """
+    SQL condition aligned with _task_has_poster(): JSON URL text must contain a thumb filename.
+    Used so /api/gallery does not list tasks whose /api/thumb would 404.
+    """
+    pats = ("_video_poster.jpg", "_poster.jpg", "icon.png", "Render_1_view.jpg")
+    cols = (Task._ready_urls, Task._output_urls)
+    return or_(*[func.instr(col, p) > 0 for col in cols for p in pats])
+
+
 def _resolve_worker_base_from_task(task) -> Optional[str]:
     """Resolve worker base URL from task metadata without requiring worker_api."""
     from workers import get_worker_base_url
@@ -4589,6 +4654,29 @@ async def _delete_task_record_and_related(db: AsyncSession, task_id: str) -> Non
     await db.execute(delete(TaskAnimationBundlePurchase).where(TaskAnimationBundlePurchase.task_id == task_id))
     await db.execute(delete(Task).where(Task.id == task_id))
     await db.commit()
+
+
+async def purge_tasks_without_poster_and_video(db: AsyncSession) -> dict:
+    """
+    Delete terminal tasks (done/error) with no poster-like URL in ready_urls/output_urls.
+    Covers: no video + no poster; and video_ready=true in DB but thumb paths missing (broken gallery).
+
+    Keeps task when a poster path exists but video_ready is false (may still have file downloads).
+    """
+    result = await db.execute(select(Task).where(Task.status.in_(["done", "error"])))
+    rows = list(result.scalars().all())
+    deleted = 0
+    for task in rows:
+        if _task_has_poster(task):
+            continue
+        _delete_task_artifacts(task)
+        try:
+            await _delete_task_record_and_related(db, task.id)
+            deleted += 1
+        except Exception as e:
+            await db.rollback()
+            print(f"[Purge no-assets tasks] Failed {task.id}: {e}")
+    return {"deleted": deleted, "scanned": len(rows)}
 
 
 async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:

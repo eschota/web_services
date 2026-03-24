@@ -177,7 +177,9 @@ async def create_conversion_task(
     input_url: str,
     task_type: str,
     owner_type: str,
-    owner_id: str
+    owner_id: str,
+    *,
+    created_via_api: bool = False,
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
@@ -191,7 +193,8 @@ async def create_conversion_task(
         owner_id=owner_id,
         input_url=input_url,
         input_type=task_type,
-        status="created"
+        status="created",
+        created_via_api=created_via_api,
     )
 
     db.add(task)
@@ -258,7 +261,15 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             worker_base = get_worker_base_url(worker_url)
             progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
             print(f"[Tasks] Scheduling Telegram notification for new task {task.id}")
-            asyncio.create_task(broadcast_new_task(task.id, task.input_url, task.input_type, progress_url))
+            asyncio.create_task(
+                broadcast_new_task(
+                    task.id,
+                    task.input_url,
+                    task.input_type,
+                    progress_url,
+                    via_api=bool(getattr(task, "created_via_api", False)),
+                )
+            )
         else:
             print(f"[Tasks] New task notification already sent for {task.id}, skipping")
             
@@ -644,6 +655,14 @@ async def update_user_balance(
 # =============================================================================
 # Gallery Functions
 # =============================================================================
+def _gallery_task_has_poster_sql():
+    """Same thumb-path rule as main._gallery_task_has_poster_sql (avoid importing main)."""
+    from sqlalchemy import or_, func
+
+    pats = ("_video_poster.jpg", "_poster.jpg", "icon.png", "Render_1_view.jpg")
+    return or_(*[func.instr(c, p) > 0 for c in (Task._ready_urls, Task._output_urls) for p in pats])
+
+
 async def get_gallery_items(
     db: AsyncSession,
     page: int = 1,
@@ -654,30 +673,26 @@ async def get_gallery_items(
     Returns: (tasks, total_count)
     """
     from sqlalchemy import func
-    
-    # Count total completed tasks with video
-    count_result = await db.execute(
-        select(func.count(Task.id)).where(
-            Task.status == "done",
-            Task.video_ready == True
-        )
+
+    base = (
+        Task.status == "done",
+        Task.video_ready == True,
+        _gallery_task_has_poster_sql(),
     )
+
+    count_result = await db.execute(select(func.count(Task.id)).where(*base))
     total = count_result.scalar() or 0
-    
-    # Get paginated results, newest first
+
     offset = (page - 1) * per_page
     result = await db.execute(
         select(Task)
-        .where(
-            Task.status == "done",
-            Task.video_ready == True
-        )
+        .where(*base)
         .order_by(desc(Task.created_at))
         .offset(offset)
         .limit(per_page)
     )
     tasks = result.scalars().all()
-    
+
     return list(tasks), total
 
 

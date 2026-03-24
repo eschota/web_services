@@ -6,6 +6,7 @@
 #   ./push-and-deploy.sh
 #   ./push-and-deploy.sh "fix: API docs"
 #   SKIP_NGINX=1 ./push-and-deploy.sh   # only rsync + restart autorig (no nginx reload)
+#   RSYNC_STATIC_DELETE=1 ./push-and-deploy.sh   # mirror static/ exactly (deletes prod-only files under static/)
 #
 set -euo pipefail
 
@@ -41,8 +42,13 @@ sudo rsync -a \
   --exclude 'db/' \
   "${AUTORIG_ROOT}/backend/" "${PROD_ROOT}/backend/"
 
-# Static: mirror repo; drop files removed in git; skip heavy runtime caches on disk
-sudo rsync -a --delete \
+# Static: add/update from repo; skip heavy runtime caches. Default: no --delete (avoids wiping
+# prod-only assets that were never committed). Set RSYNC_STATIC_DELETE=1 to mirror repo exactly.
+STATIC_RSYNC=(sudo rsync -a)
+if [[ "${RSYNC_STATIC_DELETE:-0}" == "1" ]]; then
+  STATIC_RSYNC+=(--delete)
+fi
+"${STATIC_RSYNC[@]}" \
   --exclude 'tasks/' \
   --exclude 'glb_cache/' \
   "${AUTORIG_ROOT}/static/" "${PROD_ROOT}/static/"

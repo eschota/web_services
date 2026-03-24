@@ -132,6 +132,11 @@ MIN_FREE_SPACE_GB = int(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free sp
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
 
+# Purge DB rows for terminal tasks that have neither video nor any thumbnail URL in ready/output lists
+NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES = int(
+    os.getenv("NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES", "10")
+)
+
 # =============================================================================
 # Google Analytics 4 (Measurement Protocol)
 # =============================================================================

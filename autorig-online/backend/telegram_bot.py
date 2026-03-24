@@ -253,7 +253,13 @@ async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network:
             return None
 
 
-async def broadcast_new_task(task_id: str, input_url: str | None, input_type: str | None, progress_page: str | None = None) -> None:
+async def broadcast_new_task(
+    task_id: str,
+    input_url: str | None,
+    input_type: str | None,
+    progress_page: str | None = None,
+    via_api: bool = False,
+) -> None:
     print(f"[Telegram] broadcast_new_task called for task {task_id}")
     token = _get_token()
     if not token:
@@ -270,11 +276,14 @@ async def broadcast_new_task(task_id: str, input_url: str | None, input_type: st
     metrics_line = _format_task_metrics(await _task_telegram_metrics(task_id))
     
     # Compact 2-line format using HTML
+    header = "🟢 <b>New task started</b>"
+    if via_api:
+        header += " · 🔌 <b>API</b>"
     new_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
     if summary:
         new_parts.append(f"📄 {html.escape(summary)}")
     new_parts.append(html.escape(metrics_line))
-    text = f"🟢 <b>New task started</b>\n" + " | ".join(new_parts)
+    text = header + "\n" + " | ".join(new_parts)
     if progress_page:
         text += f' | 🔧 <a href="{html.escape(progress_page)}">Worker</a>'
     if source_line:

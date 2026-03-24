@@ -10,18 +10,21 @@ from pydantic import BaseModel, Field
 # Task Schemas
 # =============================================================================
 class TaskCreateRequest(BaseModel):
-    """Request to create a new conversion task"""
-    source: str = Field(..., description="Source type: 'link' or 'upload'")
-    input_url: Optional[str] = Field(None, description="URL of the model (for link source)")
-    type: str = Field(default="t_pose", description="Conversion type")
+    """JSON body for ``POST /api/task/create`` (``Content-Type: application/json``). Omitted fields use defaults."""
+    source: str = Field(default="link", description="``link`` (URL) or ``upload`` (multipart file)")
+    input_url: Optional[str] = Field(None, description="Public URL of the model (required for ``source=link``)")
+    type: str = Field(default="t_pose", description="Conversion type, e.g. ``t_pose``")
     ga_client_id: Optional[str] = Field(None, description="Google Analytics client ID")
 
 
 class TaskCreateResponse(BaseModel):
-    """Response after creating a task"""
+    """Response after creating a task."""
     task_id: str
     status: str
-    message: Optional[str] = None
+    message: Optional[str] = Field(
+        None,
+        description="Error detail from the creation step if any; omitted or null when creation succeeded.",
+    )
 
 
 class TaskStatusResponse(BaseModel):
