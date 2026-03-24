@@ -32,6 +32,10 @@ cp /root/autorig-online/static/animation-retargeting.html /root/autorig-online/s
 cp /root/autorig-online/static/animation-retargeting-ru.html /root/autorig-online/static/
 cp /root/autorig-online/static/animation-retargeting-zh.html /root/autorig-online/static/
 cp /root/autorig-online/static/animation-retargeting-hi.html /root/autorig-online/static/
+cp /root/autorig-online/static/face-rig-animation.html /root/autorig-online/static/
+cp /root/autorig-online/static/face-rig-animation-ru.html /root/autorig-online/static/
+cp /root/autorig-online/static/face-rig-animation-zh.html /root/autorig-online/static/
+cp /root/autorig-online/static/face-rig-animation-hi.html /root/autorig-online/static/
 cp /root/autorig-online/static/glb-vs-fbx.html /root/autorig-online/static/
 cp /root/autorig-online/static/glb-vs-fbx-ru.html /root/autorig-online/static/
 cp /root/autorig-online/static/glb-vs-fbx-zh.html /root/autorig-online/static/

@@ -106,7 +106,8 @@ const I18n = {
             't-pose-vs-a-pose',
             'glb-vs-fbx',
             'auto-rig-obj',
-            'animation-retargeting'
+            'animation-retargeting',
+            'face-rig-animation'
         ];
 
         guides.forEach(guide => {

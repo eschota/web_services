@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face Rig &amp; Facial Animation Guide — Soft Masks, Landmarks &amp; Lip Sync | AutoRig Online</title>
-    <meta name="description" content="How AutoRig turns a frontal head image into soft facial masks, 2D landmarks, and per-region confidence for game-ready facial animation. Step-by-step pipeline overview and live analyze-head demo (same API as production).">
-    <meta name="keywords" content="face rig, facial animation, face masks, facial landmarks, lip sync, blendshapes, morph targets, 3D character rigging, head analysis, Unity facial animation, Unreal facial animation, AutoRig">
+    <title>Face rig и анимация лица — мягкие маски, лендмарки и липсинк | AutoRig Online</title>
+    <meta name="description" content="Как AutoRig по фронтальному изображению головы строит мягкие маски лица, 2D-лендмарки и оценку зон для игровой мимики и липсинка. Обзор пайплайна и живое демо analyze-head (тот же API, что в продакшене).">
+    <meta name="keywords" content="face rig, риг лица, мимика, лендмарки лица, липсинк, блендшейпы, морфы, риг персонажа, анализ головы, Unity мимика, Unreal мимика, AutoRig">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="AutoRig Online">
-    <link rel="canonical" href="https://autorig.online/face-rig-animation">
+    <link rel="canonical" href="https://autorig.online/face-rig-animation-ru">
     <link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation">
     <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
     <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
@@ -17,20 +17,20 @@
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="AutoRig Online">
-    <meta property="og:locale" content="en_US">
-    <meta property="og:title" content="Face Rig &amp; Facial Animation Guide — Soft Masks &amp; Landmarks | AutoRig Online">
-    <meta property="og:description" content="Interactive guide: frontal head analysis, soft masks, landmarks, and region scores for facial animation. Live demo calls the production face-rig worker API.">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:title" content="Face rig и анимация лица — маски и лендмарки | AutoRig Online">
+    <meta property="og:description" content="Интерактивное руководство: анализ головы, мягкие маски, лендмарки и оценка зон. Живое демо вызывает API face-rig воркера.">
     <meta property="og:type" content="article">
-    <meta property="og:url" content="https://autorig.online/face-rig-animation">
+    <meta property="og:url" content="https://autorig.online/face-rig-animation-ru">
     <meta property="og:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
     <meta property="og:image:width" content="259">
     <meta property="og:image:height" content="194">
-    <meta property="og:image:alt" content="Frontal 3D head render sample for face rig mask analysis">
+    <meta property="og:image:alt" content="Пример фронтального рендера головы для анализа масок">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Face Rig &amp; Facial Animation Guide | AutoRig Online">
-    <meta name="twitter:description" content="Soft facial masks, landmarks, and live analyze-head demo — same pipeline as AutoRig production.">
+    <meta name="twitter:title" content="Face rig и анимация лица | AutoRig Online">
+    <meta name="twitter:description" content="Мягкие маски, лендмарки и демо analyze-head — тот же пайплайн, что в AutoRig.">
     <meta name="twitter:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
 
     <script type="application/ld+json">
@@ -56,54 +56,54 @@
             },
             {
                 "@type": "WebPage",
-                "@id": "https://autorig.online/face-rig-animation#webpage",
-                "url": "https://autorig.online/face-rig-animation",
-                "name": "Face Rig & Facial Animation Guide — Soft Masks, Landmarks & Lip Sync",
-                "description": "How AutoRig analyzes a frontal head render into soft facial masks and landmarks for animation and lip sync, with a live API demo.",
-                "inLanguage": "en-US",
+                "@id": "https://autorig.online/face-rig-animation-ru#webpage",
+                "url": "https://autorig.online/face-rig-animation-ru",
+                "name": "Face rig и анимация — мягкие маски, лендмарки и липсинк",
+                "description": "Как AutoRig по фронтальному рендеру головы строит мягкие маски и лендмарки для мимики и липсинка, с живым демо API.",
+                "inLanguage": "ru-RU",
                 "isPartOf": { "@id": "https://autorig.online/#website" },
                 "primaryImageOfPage": {
                     "@type": "ImageObject",
                     "url": "https://autorig.online/static/images/guides/face-rig-demo-head.png"
                 },
-                "breadcrumb": { "@id": "https://autorig.online/face-rig-animation#breadcrumb" }
+                "breadcrumb": { "@id": "https://autorig.online/face-rig-animation-ru#breadcrumb" }
             },
             {
                 "@type": "BreadcrumbList",
-                "@id": "https://autorig.online/face-rig-animation#breadcrumb",
+                "@id": "https://autorig.online/face-rig-animation-ru#breadcrumb",
                 "itemListElement": [
                     {
                         "@type": "ListItem",
                         "position": 1,
-                        "name": "Home",
+                        "name": "Главная",
                         "item": "https://autorig.online/"
                     },
                     {
                         "@type": "ListItem",
                         "position": 2,
-                        "name": "Guides",
+                        "name": "Руководства",
                         "item": "https://autorig.online/guides"
                     },
                     {
                         "@type": "ListItem",
                         "position": 3,
-                        "name": "Face Rig & Animation",
-                        "item": "https://autorig.online/face-rig-animation"
+                        "name": "Face rig и анимация",
+                        "item": "https://autorig.online/face-rig-animation-ru"
                     }
                 ]
             },
             {
                 "@type": "Article",
-                "headline": "Face Rig & Facial Animation — Soft Masks, Landmarks & Lip Sync",
-                "description": "Guide to AutoRig face analysis: RGB + synthetic depth/alpha, region confidence, 2D landmarks, and soft masks for facial animation.",
+                "headline": "Face rig и анимация лица — мягкие маски, лендмарки и липсинк",
+                "description": "Руководство по анализу лица в AutoRig: RGB, синтетическая глубина/альфа, уверенность по зонам, 2D-лендмарки и мягкие маски для мимики.",
                 "author": { "@type": "Organization", "name": "AutoRig Online" },
                 "publisher": { "@id": "https://autorig.online/#organization" },
                 "image": ["https://autorig.online/static/images/guides/face-rig-demo-head.png"],
                 "datePublished": "2026-03-24",
                 "dateModified": "2026-03-24",
-                "mainEntityOfPage": { "@id": "https://autorig.online/face-rig-animation#webpage" },
+                "mainEntityOfPage": { "@id": "https://autorig.online/face-rig-animation-ru#webpage" },
                 "articleSection": "Guides",
-                "keywords": ["face rig", "facial animation", "face masks", "landmarks", "lip sync", "character rigging", "3D head analysis"]
+                "keywords": ["face rig", "мимика", "маски лица", "лендмарки", "липсинк", "риг персонажа", "анализ головы"]
             }
         ]
     }
@@ -633,22 +633,22 @@
                 <div>
                     <nav class="fr-breadcrumb" aria-label="Breadcrumb">
                         <ol>
-                            <li><a href="/">Home</a></li>
-                            <li><a href="/guides">Guides</a></li>
-                            <li aria-current="page">Face Rig &amp; Animation</li>
+                            <li><a href="/">Главная</a></li>
+                            <li><a href="/guides">Руководства</a></li>
+                            <li aria-current="page">Face rig и анимация</li>
                         </ol>
                     </nav>
-                    <h1>Face Rig &amp; Animation</h1>
-                    <p class="hero-subtitle">Frontal head render → soft facial masks, 2D landmarks, and region scores for lip sync and expression in the AutoRig pipeline.</p>
+                    <h1>Face rig и анимация</h1>
+                    <p class="hero-subtitle">Фронтальный рендер головы → мягкие маски лица, 2D-лендмарки и оценка зон для липсинка и выражений в пайплайне AutoRig.</p>
                     <div class="fr-chips" aria-hidden="true">
-                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt=""> Head analysis</span>
-                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt=""> Soft masks</span>
-                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt=""> Landmarks</span>
+                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt=""> Анализ головы</span>
+                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt=""> Мягкие маски</span>
+                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt=""> Лендмарки</span>
                     </div>
                 </div>
                 <div class="fr-hero-aside">
-                    <a href="#live-demo" class="fr-cta">Open interactive demo</a>
-                    <p class="fr-mini">Runs the same <code>analyze-head</code> call as the worker tester.</p>
+                    <a href="#live-demo" class="fr-cta">Открыть интерактивное демо</a>
+                    <p class="fr-mini">Тот же вызов <code>analyze-head</code>, что и в тестере воркера.</p>
                 </div>
             </div>
         </div>
@@ -658,25 +658,21 @@
         <div class="container">
             <div class="fr-insight-grid">
                 <div class="fr-insight">
-                    <h2>Pipeline</h2>
+                    <h2>Пайплайн</h2>
                     <p>
-                        Service ingests RGB plus synthetic depth (luminance) and alpha, like the
-                        <a href="https://worker-0001.free3d.online/test/test.html" rel="noopener noreferrer">pipeline tester</a>.
-                        Output: region confidence, landmarks, contours, and <strong>soft masks</strong> for eyes, mouth, brows, etc.
+                        Сервис принимает RGB и синтетическую глубину (по яркости) и альфу, как в <a href="https://worker-0001.free3d.online/test/test.html" rel="noopener noreferrer">pipeline tester</a>. На выходе: уверенность по зонам, лендмарки, контуры и <strong>мягкие маски</strong> для глаз, рта, бровей и т.д.
                     </p>
                 </div>
                 <div class="fr-insight">
-                    <h2>Why masks</h2>
+                    <h2>Зачем маски</h2>
                     <p>
-                        Masks delimit where mesh deformation and speech motion apply. Clean separation keeps
-                        talking, blinking, and emotion layers from fighting each other at runtime.
+                        Маски задают, где на меше допустимы деформация и речевые движения. Чистое разделение зон помогает не смешивать речь, моргание и эмоции.
                     </p>
                 </div>
                 <div class="fr-insight">
-                    <h2>In AutoRig</h2>
+                    <h2>В AutoRig</h2>
                     <p>
-                        After body rigging, the worker can analyze the head so you skip hand-painted weights per zone.
-                        Demo uses <code>POST …/api/face-rig/analyze-head</code> on the live worker.
+                        После рига тела воркер может проанализировать голову — без ручной раскраски весов по зонам. Демо вызывает <code>POST …/api/face-rig/analyze-head</code> на боевом воркере.
                     </p>
                 </div>
             </div>
@@ -684,19 +680,19 @@
             <div id="live-demo" class="fr-section">
                 <div class="fr-studio">
                     <div class="fr-studio-head">
-                        <h2>Interactive demo</h2>
-                        <p>Sample image runs on load. Replace the image, then <strong>Run analysis</strong> to refresh masks.</p>
+                        <h2>Интерактивное демо</h2>
+                        <p>Пример запускается при загрузке. Замените изображение и нажмите <strong>Запустить анализ</strong>, чтобы обновить маски.</p>
                     </div>
                     <div class="fr-studio-body">
                         <div class="fr-input-col">
                             <div class="fr-drop" id="fr-drop" role="button" tabindex="0">
                                 <span style="font-size: 1.25rem; opacity: 0.85;">🖼</span>
-                                <p class="fr-drop-hint">Drop or click to choose image</p>
+                                <p class="fr-drop-hint">Перетащите или нажмите, чтобы выбрать изображение</p>
                                 <input type="file" id="fr-file" accept="image/*" style="display:none" aria-hidden="true">
                                 <img id="fr-preview" class="fr-preview" alt="Preview" src="/static/images/guides/face-rig-demo-head.png">
                             </div>
                             <p class="fr-meta" id="fr-file-label"></p>
-                            <button type="button" class="btn btn-primary fr-run" id="fr-run">Run analysis</button>
+                            <button type="button" class="btn btn-primary fr-run" id="fr-run">Запустить анализ</button>
                             <p class="fr-api-note">
                                 <code>POST https://worker-0001.free3d.online/api/face-rig/analyze-head</code>
                             </p>
@@ -711,12 +707,11 @@
             </div>
 
             <div class="fr-next">
-                <h2>Next steps</h2>
+                <h2>Дальше</h2>
                 <p>
-                    Add engine-specific notes (Unity blendshapes, Unreal poses), capture tips for stable front lighting,
-                    or troubleshooting when confidence is low. Well-lit, centered faces work best.
+                    Сюда можно добавить заметки под движок (Unity blendshapes, Unreal), советы по съёмке фронтала и разбор низкой уверенности. Лучше всего ровный свет и центрированное лицо.
                 </p>
-                <p style="margin-bottom: 0;"><a href="/"><strong>Run the full auto-rig pipeline on a character →</strong></a></p>
+                <p style="margin-bottom: 0;"><a href="/"><strong>Полный пайплайн auto-rig для персонажа →</strong></a></p>
             </div>
         </div>
     </section>
@@ -724,11 +719,11 @@
 
     <section class="related-section">
         <div class="container">
-            <h2>Related guides</h2>
+            <h2>Связанные гайды</h2>
             <div class="related-links">
-                <a href="/animation-retargeting" class="related-link">Animation Retargeting</a>
-                <a href="/how-it-works" class="related-link">How It Works</a>
-                <a href="/guides" class="related-link">All guides</a>
+                <a href="/animation-retargeting-ru" class="related-link">Ретаргетинг анимаций</a>
+                <a href="/how-it-works" class="related-link">Как это работает</a>
+                <a href="/guides" class="related-link">Все руководства</a>
             </div>
         </div>
     </section>
@@ -788,6 +783,17 @@
         </div>
     </footer>
 
+<script>
+window.__FR_I18N = {
+  running: 'Выполняется анализ…',
+  softMasks: 'Мягкие маски',
+  regionConfidence: 'Уверенность по зонам',
+  landmarks: 'Лендмарки',
+  analysis: 'Анализ',
+  sampleLabel: 'Пример: фронтальный рендер головы',
+  resultsIdle: 'Результаты появятся после первого запуска.'
+};
+</script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <script>

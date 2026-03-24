@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face Rig &amp; Facial Animation Guide — Soft Masks, Landmarks &amp; Lip Sync | AutoRig Online</title>
-    <meta name="description" content="How AutoRig turns a frontal head image into soft facial masks, 2D landmarks, and per-region confidence for game-ready facial animation. Step-by-step pipeline overview and live analyze-head demo (same API as production).">
-    <meta name="keywords" content="face rig, facial animation, face masks, facial landmarks, lip sync, blendshapes, morph targets, 3D character rigging, head analysis, Unity facial animation, Unreal facial animation, AutoRig">
+    <title>面部绑定与动画指南 — 软蒙版、关键点与口型同步 | AutoRig Online</title>
+    <meta name="description" content="AutoRig 如何将正面头部图像转为面部软蒙版、2D 关键点与分区置信度，用于游戏面部动画。流程说明与线上 analyze-head 演示（与生产环境相同 API）。">
+    <meta name="keywords" content="面部绑定, 面部动画, 面部蒙版, 面部关键点, 口型同步, 混合形状, 角色绑定, 头部分析, Unity 面部, Unreal 面部, AutoRig">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="AutoRig Online">
-    <link rel="canonical" href="https://autorig.online/face-rig-animation">
+    <link rel="canonical" href="https://autorig.online/face-rig-animation-zh">
     <link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation">
     <link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
     <link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
@@ -17,20 +17,20 @@
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="AutoRig Online">
-    <meta property="og:locale" content="en_US">
-    <meta property="og:title" content="Face Rig &amp; Facial Animation Guide — Soft Masks &amp; Landmarks | AutoRig Online">
-    <meta property="og:description" content="Interactive guide: frontal head analysis, soft masks, landmarks, and region scores for facial animation. Live demo calls the production face-rig worker API.">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:title" content="面部绑定与动画 — 软蒙版与关键点 | AutoRig Online">
+    <meta property="og:description" content="交互式指南：正面头部分析、软蒙版、关键点与分区评分。在线演示调用生产环境 face-rig API。">
     <meta property="og:type" content="article">
-    <meta property="og:url" content="https://autorig.online/face-rig-animation">
+    <meta property="og:url" content="https://autorig.online/face-rig-animation-zh">
     <meta property="og:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
     <meta property="og:image:width" content="259">
     <meta property="og:image:height" content="194">
-    <meta property="og:image:alt" content="Frontal 3D head render sample for face rig mask analysis">
+    <meta property="og:image:alt" content="用于面部分析蒙版演示的正面头部渲染示例">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Face Rig &amp; Facial Animation Guide | AutoRig Online">
-    <meta name="twitter:description" content="Soft facial masks, landmarks, and live analyze-head demo — same pipeline as AutoRig production.">
+    <meta name="twitter:title" content="面部绑定与动画指南 | AutoRig Online">
+    <meta name="twitter:description" content="面部软蒙版、关键点与 analyze-head 在线演示 — 与 AutoRig 生产管线一致。">
     <meta name="twitter:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
 
     <script type="application/ld+json">
@@ -56,54 +56,54 @@
             },
             {
                 "@type": "WebPage",
-                "@id": "https://autorig.online/face-rig-animation#webpage",
-                "url": "https://autorig.online/face-rig-animation",
-                "name": "Face Rig & Facial Animation Guide — Soft Masks, Landmarks & Lip Sync",
-                "description": "How AutoRig analyzes a frontal head render into soft facial masks and landmarks for animation and lip sync, with a live API demo.",
-                "inLanguage": "en-US",
+                "@id": "https://autorig.online/face-rig-animation-zh#webpage",
+                "url": "https://autorig.online/face-rig-animation-zh",
+                "name": "面部绑定与动画 — 软蒙版、关键点与口型同步",
+                "description": "AutoRig 如何将正面头部渲染解析为面部软蒙版与关键点，用于动画与口型同步，并提供在线 API 演示。",
+                "inLanguage": "zh-CN",
                 "isPartOf": { "@id": "https://autorig.online/#website" },
                 "primaryImageOfPage": {
                     "@type": "ImageObject",
                     "url": "https://autorig.online/static/images/guides/face-rig-demo-head.png"
                 },
-                "breadcrumb": { "@id": "https://autorig.online/face-rig-animation#breadcrumb" }
+                "breadcrumb": { "@id": "https://autorig.online/face-rig-animation-zh#breadcrumb" }
             },
             {
                 "@type": "BreadcrumbList",
-                "@id": "https://autorig.online/face-rig-animation#breadcrumb",
+                "@id": "https://autorig.online/face-rig-animation-zh#breadcrumb",
                 "itemListElement": [
                     {
                         "@type": "ListItem",
                         "position": 1,
-                        "name": "Home",
+                        "name": "首页",
                         "item": "https://autorig.online/"
                     },
                     {
                         "@type": "ListItem",
                         "position": 2,
-                        "name": "Guides",
+                        "name": "指南",
                         "item": "https://autorig.online/guides"
                     },
                     {
                         "@type": "ListItem",
                         "position": 3,
-                        "name": "Face Rig & Animation",
-                        "item": "https://autorig.online/face-rig-animation"
+                        "name": "面部绑定与动画",
+                        "item": "https://autorig.online/face-rig-animation-zh"
                     }
                 ]
             },
             {
                 "@type": "Article",
-                "headline": "Face Rig & Facial Animation — Soft Masks, Landmarks & Lip Sync",
-                "description": "Guide to AutoRig face analysis: RGB + synthetic depth/alpha, region confidence, 2D landmarks, and soft masks for facial animation.",
+                "headline": "面部绑定与动画 — 软蒙版、关键点与口型同步",
+                "description": "AutoRig 面部分析指南：RGB、合成深度/Alpha、分区置信度、2D 关键点与用于面部动画的软蒙版。",
                 "author": { "@type": "Organization", "name": "AutoRig Online" },
                 "publisher": { "@id": "https://autorig.online/#organization" },
                 "image": ["https://autorig.online/static/images/guides/face-rig-demo-head.png"],
                 "datePublished": "2026-03-24",
                 "dateModified": "2026-03-24",
-                "mainEntityOfPage": { "@id": "https://autorig.online/face-rig-animation#webpage" },
+                "mainEntityOfPage": { "@id": "https://autorig.online/face-rig-animation-zh#webpage" },
                 "articleSection": "Guides",
-                "keywords": ["face rig", "facial animation", "face masks", "landmarks", "lip sync", "character rigging", "3D head analysis"]
+                "keywords": ["面部绑定", "面部动画", "蒙版", "关键点", "口型同步", "角色绑定", "头部分析"]
             }
         ]
     }
@@ -633,22 +633,22 @@
                 <div>
                     <nav class="fr-breadcrumb" aria-label="Breadcrumb">
                         <ol>
-                            <li><a href="/">Home</a></li>
-                            <li><a href="/guides">Guides</a></li>
-                            <li aria-current="page">Face Rig &amp; Animation</li>
+                            <li><a href="/">首页</a></li>
+                            <li><a href="/guides">指南</a></li>
+                            <li aria-current="page">面部绑定与动画</li>
                         </ol>
                     </nav>
-                    <h1>Face Rig &amp; Animation</h1>
-                    <p class="hero-subtitle">Frontal head render → soft facial masks, 2D landmarks, and region scores for lip sync and expression in the AutoRig pipeline.</p>
+                    <h1>面部绑定与动画</h1>
+                    <p class="hero-subtitle">正面头部渲染 → 面部软蒙版、2D 关键点与分区评分，用于 AutoRig 管线中的口型与表情。</p>
                     <div class="fr-chips" aria-hidden="true">
-                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt=""> Head analysis</span>
-                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt=""> Soft masks</span>
-                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt=""> Landmarks</span>
+                        <span class="fr-chip"><img src="/static/images/icons/ai.svg" alt=""> 头部分析</span>
+                        <span class="fr-chip"><img src="/static/images/icons/animations.svg" alt=""> 软蒙版</span>
+                        <span class="fr-chip"><img src="/static/images/icons/target.svg" alt=""> 关键点</span>
                     </div>
                 </div>
                 <div class="fr-hero-aside">
-                    <a href="#live-demo" class="fr-cta">Open interactive demo</a>
-                    <p class="fr-mini">Runs the same <code>analyze-head</code> call as the worker tester.</p>
+                    <a href="#live-demo" class="fr-cta">打开交互演示</a>
+                    <p class="fr-mini">与 worker 测试页相同的 analyze-head 调用。</p>
                 </div>
             </div>
         </div>
@@ -658,25 +658,21 @@
         <div class="container">
             <div class="fr-insight-grid">
                 <div class="fr-insight">
-                    <h2>Pipeline</h2>
+                    <h2>流程</h2>
                     <p>
-                        Service ingests RGB plus synthetic depth (luminance) and alpha, like the
-                        <a href="https://worker-0001.free3d.online/test/test.html" rel="noopener noreferrer">pipeline tester</a>.
-                        Output: region confidence, landmarks, contours, and <strong>soft masks</strong> for eyes, mouth, brows, etc.
+                        服务接收 RGB 与按亮度合成的深度及 Alpha，与 <a href="https://worker-0001.free3d.online/test/test.html" rel="noopener noreferrer">pipeline tester</a> 一致。输出：分区置信度、关键点、轮廓以及眼、口、眉等 <strong>软蒙版</strong>。
                     </p>
                 </div>
                 <div class="fr-insight">
-                    <h2>Why masks</h2>
+                    <h2>为何需要蒙版</h2>
                     <p>
-                        Masks delimit where mesh deformation and speech motion apply. Clean separation keeps
-                        talking, blinking, and emotion layers from fighting each other at runtime.
+                        蒙版限定网格变形与语音运动的范围。清晰分区让说话、眨眼与情绪层在运行时互不干扰。
                     </p>
                 </div>
                 <div class="fr-insight">
-                    <h2>In AutoRig</h2>
+                    <h2>在 AutoRig 中</h2>
                     <p>
-                        After body rigging, the worker can analyze the head so you skip hand-painted weights per zone.
-                        Demo uses <code>POST …/api/face-rig/analyze-head</code> on the live worker.
+                        身体绑定后，worker 可分析头部，省去逐区手绘权重。演示在正式 worker 上调用 <code>POST …/api/face-rig/analyze-head</code>。
                     </p>
                 </div>
             </div>
@@ -684,19 +680,19 @@
             <div id="live-demo" class="fr-section">
                 <div class="fr-studio">
                     <div class="fr-studio-head">
-                        <h2>Interactive demo</h2>
-                        <p>Sample image runs on load. Replace the image, then <strong>Run analysis</strong> to refresh masks.</p>
+                        <h2>交互演示</h2>
+                        <p>页面加载后会自动运行示例图。更换图片后点击 <strong>运行分析</strong> 以刷新蒙版。</p>
                     </div>
                     <div class="fr-studio-body">
                         <div class="fr-input-col">
                             <div class="fr-drop" id="fr-drop" role="button" tabindex="0">
                                 <span style="font-size: 1.25rem; opacity: 0.85;">🖼</span>
-                                <p class="fr-drop-hint">Drop or click to choose image</p>
+                                <p class="fr-drop-hint">拖放或点击选择图片</p>
                                 <input type="file" id="fr-file" accept="image/*" style="display:none" aria-hidden="true">
                                 <img id="fr-preview" class="fr-preview" alt="Preview" src="/static/images/guides/face-rig-demo-head.png">
                             </div>
                             <p class="fr-meta" id="fr-file-label"></p>
-                            <button type="button" class="btn btn-primary fr-run" id="fr-run">Run analysis</button>
+                            <button type="button" class="btn btn-primary fr-run" id="fr-run">运行分析</button>
                             <p class="fr-api-note">
                                 <code>POST https://worker-0001.free3d.online/api/face-rig/analyze-head</code>
                             </p>
@@ -711,12 +707,11 @@
             </div>
 
             <div class="fr-next">
-                <h2>Next steps</h2>
+                <h2>下一步</h2>
                 <p>
-                    Add engine-specific notes (Unity blendshapes, Unreal poses), capture tips for stable front lighting,
-                    or troubleshooting when confidence is low. Well-lit, centered faces work best.
+                    可在此补充引擎相关说明（Unity blendshape、Unreal）、正面布光与低置信度排查。正面、光线均匀效果最好。
                 </p>
-                <p style="margin-bottom: 0;"><a href="/"><strong>Run the full auto-rig pipeline on a character →</strong></a></p>
+                <p style="margin-bottom: 0;"><a href="/"><strong>为角色运行完整 auto-rig 流程 →</strong></a></p>
             </div>
         </div>
     </section>
@@ -724,11 +719,11 @@
 
     <section class="related-section">
         <div class="container">
-            <h2>Related guides</h2>
+            <h2>相关指南</h2>
             <div class="related-links">
-                <a href="/animation-retargeting" class="related-link">Animation Retargeting</a>
-                <a href="/how-it-works" class="related-link">How It Works</a>
-                <a href="/guides" class="related-link">All guides</a>
+                <a href="/animation-retargeting-zh" class="related-link">动画重定向</a>
+                <a href="/how-it-works" class="related-link">工作原理</a>
+                <a href="/guides" class="related-link">全部指南</a>
             </div>
         </div>
     </section>
@@ -788,6 +783,17 @@
         </div>
     </footer>
 
+<script>
+window.__FR_I18N = {
+  running: '正在分析…',
+  softMasks: '软蒙版',
+  regionConfidence: '分区置信度',
+  landmarks: '关键点',
+  analysis: '分析',
+  sampleLabel: '示例：捆绑的正面头部渲染',
+  resultsIdle: '首次运行后结果将显示在此处。'
+};
+</script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
     <script>

@@ -46,6 +46,11 @@ Allow: /animation-retargeting-ru
 Allow: /animation-retargeting-zh
 Allow: /animation-retargeting-hi
 
+Allow: /face-rig-animation
+Allow: /face-rig-animation-ru
+Allow: /face-rig-animation-zh
+Allow: /face-rig-animation-hi
+
 Allow: /auto-rig-obj
 Allow: /auto-rig-obj-ru
 Allow: /auto-rig-obj-zh

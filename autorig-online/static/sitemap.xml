@@ -423,6 +423,55 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animation-retargeting"/>
   </url>
 
+  <!-- Face rig & animation guide (4 languages) -->
+  <url>
+    <loc>https://autorig.online/face-rig-animation</loc>
+    <lastmod>2026-03-24</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.75</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/face-rig-animation-ru</loc>
+    <lastmod>2026-03-24</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/face-rig-animation-zh</loc>
+    <lastmod>2026-03-24</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/face-rig-animation-hi</loc>
+    <lastmod>2026-03-24</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/face-rig-animation"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/face-rig-animation-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/face-rig-animation-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/face-rig-animation-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/face-rig-animation"/>
+  </url>
+
   <!-- Auto-rig OBJ (4 languages) -->
   <url>
     <loc>https://autorig.online/auto-rig-obj</loc>

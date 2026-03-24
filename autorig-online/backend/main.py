@@ -6466,6 +6466,21 @@ async def face_rig_animation_page():
     return FileResponse(str(STATIC_DIR / "face-rig-animation.html"))
 
 
+@app.get("/face-rig-animation-ru")
+async def face_rig_animation_ru_page():
+    return FileResponse(str(STATIC_DIR / "face-rig-animation-ru.html"))
+
+
+@app.get("/face-rig-animation-zh")
+async def face_rig_animation_zh_page():
+    return FileResponse(str(STATIC_DIR / "face-rig-animation-zh.html"))
+
+
+@app.get("/face-rig-animation-hi")
+async def face_rig_animation_hi_page():
+    return FileResponse(str(STATIC_DIR / "face-rig-animation-hi.html"))
+
+
 # Auto-rig OBJ pages (4 languages)
 @app.get("/auto-rig-obj")
 async def auto_rig_obj_page():
