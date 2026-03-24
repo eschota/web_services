@@ -885,6 +885,35 @@ def _infer_worker_root_and_guid(task) -> tuple[Optional[str], Optional[str]]:
     return worker_root, guid
 
 
+def _task_urls_indicate_animation_bundle(combined_urls: List[str]) -> bool:
+    """
+    True if task output/ready URLs include a combined animations deliverable (GLB or FBX pack).
+    Used to allow synthetic per-animation FBX URLs when the worker model-files API is empty.
+    Previously only _all_animations_unity.fbx was detected; many pipelines only expose *_all_animations.glb.
+    """
+    for u in combined_urls:
+        if not u or not isinstance(u, str):
+            continue
+        ul = u.lower()
+        if "_all_animations" not in ul:
+            continue
+        if ".glb" in ul or ul.endswith(".glb"):
+            return True
+        if ".fbx" in ul or ul.endswith(".fbx"):
+            return True
+    return False
+
+
+def _task_urls_suggest_100k_animation_layout(combined_urls: List[str]) -> bool:
+    """True if any task URL points at the common .../{guid}_100k/... layout for FBX outputs."""
+    for u in combined_urls:
+        if not u or not isinstance(u, str):
+            continue
+        if "_100k" in u.lower():
+            return True
+    return False
+
+
 def _upsert_animation_file_map(result: Dict[str, dict], key: str, rec: dict) -> None:
     """
     Merge records with priority:
@@ -1039,6 +1068,8 @@ async def _build_task_animation_file_map(
     output_urls = [u.strip() for u in (task.output_urls or []) if isinstance(u, str)]
     ready_urls = [u.strip() for u in (task.ready_urls or []) if isinstance(u, str)]
     ready_url_set = set(ready_urls)
+    output_url_set = set(output_urls)
+    terminal = getattr(task, "status", None) == "done"
 
     # Use both output and ready URLs, preserving order and uniqueness.
     combined_urls: List[str] = []
@@ -1049,10 +1080,11 @@ async def _build_task_animation_file_map(
             combined_urls.append(u)
 
     for idx, file_url in enumerate(combined_urls):
+        url_ready = file_url in ready_url_set or (terminal and file_url in output_url_set)
         _add_animation_file_url_to_map(
             result=result,
             file_url=file_url,
-            ready=(file_url in ready_url_set),
+            ready=url_ready,
             index=idx,
             synthetic=False
         )
@@ -1070,9 +1102,10 @@ async def _build_task_animation_file_map(
                 synthetic=False
             )
 
-    # Synthesize URLs by convention: /{guid}/{guid}_{animation_name}.fbx
+    # Synthesize URLs by convention: /{guid}/{guid}_{animation_name}.fbx or under {guid}_100k/
     # Only enabled when task likely contains generated animation set.
-    has_animation_bundle = any("_all_animations_unity.fbx" in (u or "").lower() for u in combined_urls)
+    has_animation_bundle = _task_urls_indicate_animation_bundle(combined_urls)
+    use_100k = _task_urls_suggest_100k_animation_layout(combined_urls)
     # Important: if worker model-files API returns concrete list, trust it and avoid
     # marking missing animations as available via synthetic guesses.
     can_synthesize = bool(worker_root and guid and manifest_items and has_animation_bundle and not worker_file_urls)
@@ -1096,7 +1129,10 @@ async def _build_task_animation_file_map(
             if not key:
                 continue
             file_name = f"{guid}_{anim_name}.fbx"
-            file_url = f"{worker_root}/{guid}/{quote(file_name)}"
+            if use_100k:
+                file_url = f"{worker_root}/{guid}/{guid}_100k/{quote(file_name)}"
+            else:
+                file_url = f"{worker_root}/{guid}/{quote(file_name)}"
             _add_animation_file_url_to_map(
                 result=result,
                 file_url=file_url,

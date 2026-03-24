@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from datetime import datetime, UTC
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+from sqlalchemy import delete
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -55,6 +57,16 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             task.ready_urls = [walk_url]
 
             db.add_all([owner, buyer, task])
+            await db.commit()
+
+    async def asyncTearDown(self):
+        async with self.database.AsyncSessionLocal() as db:
+            await db.execute(delete(self.database.TaskLike))
+            await db.execute(delete(self.database.TaskFilePurchase))
+            await db.execute(delete(self.database.TaskAnimationPurchase))
+            await db.execute(delete(self.database.TaskAnimationBundlePurchase))
+            await db.execute(delete(self.database.Task))
+            await db.execute(delete(self.database.User))
             await db.commit()
 
     async def test_custom_animation_and_bundle_pricing(self):
@@ -127,6 +139,68 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
 
             await db.refresh(owner)
             self.assertEqual(owner.balance_credits, 21)  # 1 + 10 + 10
+
+    async def test_zz_catalog_synthesizes_when_only_all_animations_glb_and_worker_list_empty(self):
+        """Regression: many tasks list *_all_animations.glb but not *_all_animations_unity.fbx."""
+        task_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        guid = "ffffffff-1111-2222-3333-444444444444"
+        worker = "http://worker.example"
+        bundle = f"{worker}/converter/glb/{guid}/{guid}_all_animations.glb"
+
+        async with self.database.AsyncSessionLocal() as db:
+            task = self.database.Task(
+                id=task_id,
+                owner_type="user",
+                owner_id="owner@example.com",
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+                status="done",
+                guid=guid,
+                worker_api=f"{worker}/converter/glb/{guid}/",
+                output_urls=[bundle],
+                ready_urls=[bundle],
+            )
+            db.add(task)
+            await db.commit()
+
+        with patch.object(self.main, "_fetch_worker_animation_file_urls", new=AsyncMock(return_value=[])):
+            async with self.database.AsyncSessionLocal() as db:
+                catalog = await self.main.api_get_animation_catalog(task_id, user=None, db=db)
+                walking = next((a for a in catalog.animations if a.id == "walking"), None)
+                self.assertIsNotNone(walking)
+                self.assertTrue(walking.available)
+                self.assertTrue(walking.ready)
+
+    async def test_zz_synthetic_fbx_path_uses_100k_when_task_urls_contain_100k(self):
+        task_id = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        guid = "99999999-aaaa-bbbb-cccc-dddddddddddd"
+        worker = "http://worker2.example"
+        bundle = f"{worker}/converter/glb/{guid}/{guid}_all_animations.glb"
+        hint = f"{worker}/converter/glb/{guid}/{guid}_100k/{guid}_all_animations_unity.fbx"
+
+        async with self.database.AsyncSessionLocal() as db:
+            task = self.database.Task(
+                id=task_id,
+                owner_type="user",
+                owner_id="owner@example.com",
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+                status="done",
+                guid=guid,
+                worker_api=f"{worker}/converter/glb/{guid}/",
+                output_urls=[bundle, hint],
+                ready_urls=[bundle, hint],
+            )
+            db.add(task)
+            await db.commit()
+
+        with patch.object(self.main, "_fetch_worker_animation_file_urls", new=AsyncMock(return_value=[])):
+            async with self.database.AsyncSessionLocal() as db:
+                task_row = await self.main.get_task_by_id(db, task_id)
+                manifest = self.main._load_animation_manifest()
+                raw_items = manifest.get("animations") or []
+                fm = await self.main._build_task_animation_file_map(task_row, raw_items)
+                hit = fm.get("walking")
+                self.assertIsNotNone(hit)
+                self.assertIn("_100k", hit["url"])
 
     def _fake_request(self) -> Request:
         return Request(

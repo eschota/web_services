@@ -4551,6 +4551,10 @@
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
 
+                // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
+                // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
+                void this.loadAnimationCatalog().catch(() => {});
+
             },
 
             progressLogLoaded: false,
@@ -5606,6 +5610,19 @@
                 ) || null;
             },
 
+            /** Fields that affect GET /animations/catalog (must match server-side resolution). */
+            taskCatalogTaskKey(task) {
+                if (!task) return '';
+                return JSON.stringify({
+                    o: task.output_urls || [],
+                    r: task.ready_urls || [],
+                    s: task.status || '',
+                    g: task.guid || '',
+                    w: task.worker_api || '',
+                    p: task.progress_page || ''
+                });
+            },
+
             async loadAnimationCatalog(force = false) {
                 if (!this.taskId) return;
                 const wrap = document.getElementById('custom-animations-wrap');
@@ -5615,9 +5632,7 @@
                     return;
                 }
 
-                const stateHash = JSON.stringify(this.task?.output_urls || [])
-                    + JSON.stringify(this.task?.ready_urls || [])
-                    + (this.task?.status || '')
+                const stateHash = this.taskCatalogTaskKey(this.task)
                     + `|${this.purchaseState?.user_credits || 0}`;
 
                 if (!force && this.animationCatalogLoaded && this.animationCatalogHash === stateHash) {
