@@ -124,3 +124,25 @@ autorig-online/venv/
 autorig-online/static/tasks/
 autorig-online/static/glb_cache/
 autorig/uploads/
+
+# =============================================================================
+# Local / runtime data (avoid merge noise; do not commit instance DBs)
+# =============================================================================
+.bash_history
+.bash_logout.local
+
+# Renderfarm / bot runtime JSON
+renderfarmer_data/*.json
+
+# SQLite instance databases (created at runtime; migrations live in code)
+autorig-online/backend/db/
+autorig-online/backend/autorig.db
+autorig/db/
+qwerty_vpn/gateway/data/*.db
+CGTrader_SUBMIT_SERVER/db/*.db
+
+# Snap Chromium user profile under $HOME (revisioned paths change often)
+snap/
+
+# NSS certificate DBs under $HOME (browser)
+.pki/
