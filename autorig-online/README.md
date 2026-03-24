@@ -184,6 +184,9 @@ sudo mkdir -p /var/autorig/uploads
 # Копирование файлов
 sudo cp -r /root/autorig-online/* /opt/autorig-online/
 
+# Обновление уже установленного продакшена после git pull (backend + /developers + i18n)
+# sudo /root/autorig-online/deploy/sync-prod-from-repo.sh
+
 # Создание виртуального окружения
 cd /opt/autorig-online
 sudo python3.11 -m venv venv

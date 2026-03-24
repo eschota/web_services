@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Deploy AutoRig from the git checkout into the production tree (systemd WorkingDirectory).
+# Single source of truth: repository. Run on the server after: cd /root && git pull
+#
+# Default layout matches deploy/autorig.service:
+#   PROD_ROOT=/opt/autorig-online  →  backend/ main.py, static/
+#
+set -euo pipefail
+REPO_ROOT="${REPO_ROOT:-/root/autorig-online}"
+PROD_ROOT="${PROD_ROOT:-/opt/autorig-online}"
+
+if [[ ! -f "${REPO_ROOT}/backend/main.py" ]]; then
+  echo "ERROR: REPO_ROOT=${REPO_ROOT} has no backend/main.py" >&2
+  exit 1
+fi
+
+sudo mkdir -p "${PROD_ROOT}/backend" "${PROD_ROOT}/static/i18n"
+
+sudo cp -a "${REPO_ROOT}/backend/"*.py "${PROD_ROOT}/backend/"
+sudo cp -a "${REPO_ROOT}/static/developers.html" "${PROD_ROOT}/static/"
+sudo cp -a "${REPO_ROOT}/static/i18n/"*.json "${PROD_ROOT}/static/i18n/"
+
+sudo systemctl restart autorig
+
+echo "OK: backend *.py + static/developers.html + i18n → ${PROD_ROOT}; autorig restarted."
