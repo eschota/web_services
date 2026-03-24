@@ -1616,11 +1616,14 @@ async def api_create_task(
         if raw_ga is not None:
             ga_client_id = str(raw_ga)
         fu = form.get("file")
-        if isinstance(fu, UploadFile):
+        # Accept any Starlette/FastAPI upload object (isinstance can fail across re-exports).
+        if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
             file = fu
 
     # Handle file upload
     final_url = input_url
+    if file is not None:
+        source = "upload"
     if source == "upload" and file:
         # Save uploaded file
         upload_token = str(uuid.uuid4())
@@ -6456,6 +6459,11 @@ async def animation_retargeting_zh_page():
 @app.get("/animation-retargeting-hi")
 async def animation_retargeting_hi_page():
     return FileResponse(str(STATIC_DIR / "animation-retargeting-hi.html"))
+
+
+@app.get("/face-rig-animation")
+async def face_rig_animation_page():
+    return FileResponse(str(STATIC_DIR / "face-rig-animation.html"))
 
 
 # Auto-rig OBJ pages (4 languages)

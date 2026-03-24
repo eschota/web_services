@@ -97,6 +97,7 @@
     "footer_glb_vs_fbx": "GLB vs FBX",
     "footer_tpose": "T-Pose vs A-Pose",
     "footer_retargeting": "Ретаргетинг анимаций",
+    "footer_face_rig": "Face Rig и анимация",
     "footer_company": "Компания",
     "footer_how_it_works": "Как это работает",
     "footer_faq": "FAQ",
@@ -125,6 +126,8 @@
 
     "guide_retargeting_title": "Animation Retargeting",
     "guide_retargeting_desc": "Руководство по retargeting анимаций Unity & Unreal. Простой пайплайн для auto-rigged персонажей.",
+    "guide_face_rig_title": "Face Rig и анимация",
+    "guide_face_rig_desc": "Как анализ головы строит мягкие маски лица и лендмарки для анимации и липсинка.",
 
     "read_guide": "Читать Руководство →",
 

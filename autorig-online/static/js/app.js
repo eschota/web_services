@@ -348,18 +348,32 @@ const App = {
             window.location.href = '/auth/login';
             return;
         }
+
+        // Keep JS state in sync with the visible tab (fixes stale activeTab vs DOM).
+        const activeTabBtn = document.querySelector('.tab.active');
+        const domTab = activeTabBtn && activeTabBtn.getAttribute('data-tab');
+        if (domTab === 'upload' || domTab === 'link') {
+            this.state.activeTab = domTab;
+        }
         
         const linkInput = document.getElementById('link-input');
         const startBtn = document.getElementById('start-btn');
         
         let formData = new FormData();
-        
+        const linkVal = (linkInput && typeof linkInput.value === 'string')
+            ? linkInput.value.trim()
+            : '';
+
         if (this.state.activeTab === 'upload' && this.state.selectedFile) {
             formData.append('source', 'upload');
             formData.append('file', this.state.selectedFile);
-        } else if (this.state.activeTab === 'link' && linkInput?.value) {
+        } else if (this.state.activeTab === 'link' && linkVal) {
             formData.append('source', 'link');
-            formData.append('input_url', linkInput.value);
+            formData.append('input_url', linkVal);
+        } else if (this.state.selectedFile) {
+            // Tab state was stale vs DOM; user picked a file but activeTab still said "link".
+            formData.append('source', 'upload');
+            formData.append('file', this.state.selectedFile);
         } else {
             alert(t('error_no_file'));
             return;

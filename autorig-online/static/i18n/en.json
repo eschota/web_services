@@ -97,6 +97,7 @@
     "footer_glb_vs_fbx": "GLB vs FBX",
     "footer_tpose": "T-Pose vs A-Pose",
     "footer_retargeting": "Animation Retargeting",
+    "footer_face_rig": "Face Rig & Animation",
     "footer_company": "Company",
     "footer_how_it_works": "How It Works",
     "footer_faq": "FAQ",
@@ -206,6 +207,8 @@
 
     "guide_retargeting_title": "Animation Retargeting",
     "guide_retargeting_desc": "Guide to retargeting animations in Unity & Unreal. Simple pipeline for auto-rigged characters.",
+    "guide_face_rig_title": "Face Rig & Animation",
+    "guide_face_rig_desc": "How head analysis builds facial soft masks and landmarks for animation and lip sync.",
 
     "read_guide": "Read Guide →",
 

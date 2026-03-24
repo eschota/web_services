@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Rig &amp; Animation — Facial Masks &amp; Analysis | AutoRig Online</title>
+    <meta name="description" content="How face rig analysis builds soft masks, landmarks, and contours from a frontal head render. Live demo using the same pipeline as the Auto-Rig worker.">
+    <meta name="keywords" content="face rig, facial animation, blendshapes, face masks, character rigging, 3D head">
+
+    <meta property="og:title" content="Face Rig &amp; Animation — AutoRig Online">
+    <meta property="og:description" content="Face rig analysis: soft masks and landmarks for animation-ready characters.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/face-rig-animation">
+    <meta property="og:image" content="https://autorig.online/static/images/guides/face-rig-demo-head.png">
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "Face Rig & Animation",
+        "description": "Overview of facial analysis masks and animation workflow for auto-rigged characters.",
+        "author": {"@type": "Organization", "name": "AutoRig Online"},
+        "publisher": {"@type": "Organization", "name": "AutoRig Online"},
+        "datePublished": "2026-03-24",
+        "mainEntityOfPage": {"@type": "WebPage", "@id": "https://autorig.online/face-rig-animation"},
+        "articleSection": "Guides"
+    }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        .fr-demo-wrap {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+        }
+        .fr-demo-wrap h2 { margin-bottom: 0.75rem; font-size: 1.25rem; }
+        .fr-demo-layout {
+            display: grid;
+            grid-template-columns: minmax(260px, 340px) 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        @media (max-width: 900px) {
+            .fr-demo-layout { grid-template-columns: 1fr; }
+        }
+        .fr-drop {
+            border: 2px dashed var(--glass-border);
+            border-radius: var(--radius-sm);
+            padding: 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .fr-drop:hover, .fr-drop.fr-drag { border-color: var(--accent); background: rgba(99, 102, 241, 0.06); }
+        .fr-preview {
+            max-width: 100%;
+            max-height: 280px;
+            border-radius: var(--radius-sm);
+            margin-top: 0.75rem;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .fr-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.75rem;
+            word-break: break-all;
+        }
+        .fr-results { min-height: 120px; }
+        .fr-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .fr-card h3 { font-size: 1rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+        .fr-badge { font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; }
+        .fr-badge.ok { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .fr-badge.err { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .fr-scores { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
+        .fr-score {
+            display: flex; justify-content: space-between; font-size: 0.8rem;
+            padding: 0.35rem 0.5rem; background: var(--bg-card); border-radius: 4px;
+        }
+        .fr-masks-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+        .fr-mask-card { text-align: center; }
+        .fr-mask-card img {
+            width: 100%;
+            border-radius: 4px;
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+        }
+        .fr-mask-name { font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.35rem; word-break: break-all; }
+        .fr-lm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
+        .fr-lm { font-size: 0.75rem; padding: 0.4rem 0.5rem; background: var(--bg-card); border-radius: 4px; }
+        .fr-error { color: #ef4444; font-size: 0.85rem; }
+        .fr-api-note { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.5rem; }
+    </style>
+
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="header-inner">
+                <a href="/" class="logo">
+                    <img src="/static/images/logo/autorig-logo.png"
+                         srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x"
+                         alt="Autorig.Online"
+                         class="logo-img"
+                         height="240">
+                </a>
+                <nav class="nav">
+                    <a href="/guides" class="nav-link active" data-i18n="nav_guides">Guides</a>
+                    <a href="/gallery" class="nav-link" data-i18n="nav_gallery">Gallery</a>
+                    <a href="/buy-credits" class="nav-link" data-i18n="nav_buy">Buy</a>
+                    <a href="/developers" class="nav-link" data-i18n="nav_api">API</a>
+                </nav>
+                <div class="header-actions">
+                    <div class="credits-badge">
+                        <span id="credits-label" data-i18n="credits_free">Free conversions left</span>
+                        <span class="count" id="credits-count">3</span>
+                    </div>
+                    <div class="lang-selector">
+                        <button class="lang-btn">
+                            <span>EN</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+                        </button>
+                        <div class="lang-dropdown">
+                            <button class="lang-option" data-lang="en">English</button>
+                            <button class="lang-option" data-lang="ru">Русский</button>
+                            <button class="lang-option" data-lang="zh">中文</button>
+                            <button class="lang-option" data-lang="hi">हिंदी</button>
+                        </div>
+                    </div>
+                    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">🌙</button>
+                    <a href="/auth/login" class="btn btn-google" id="login-btn">
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        <span data-i18n="btn_login">Sign in with Google</span>
+                    </a>
+                    <div id="user-info" class="hidden flex items-center gap-2">
+                        <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
+                        <span class="user-name"></span>
+                        <a href="/auth/logout" class="btn btn-ghost" data-i18n="btn_logout">Sign out</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>Face Rig &amp; Animation</h1>
+                <p class="hero-subtitle">From a frontal head render to soft facial masks and landmarks used for animation and lip sync in the AutoRig pipeline.</p>
+                <div class="hero-features">
+                    <div class="feature">
+                        <img src="/static/images/icons/ai.svg" alt="Analysis" class="feature-icon" width="96" height="96">
+                        <span>Head analysis</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/animations.svg" alt="Masks" class="feature-icon" width="96" height="96">
+                        <span>Soft masks</span>
+                    </div>
+                    <div class="feature">
+                        <img src="/static/images/icons/target.svg" alt="Landmarks" class="feature-icon" width="96" height="96">
+                        <span>Landmarks</span>
+                    </div>
+                </div>
+                <a href="#live-demo" class="cta-button">Try the live demo</a>
+            </div>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <h2>What this pipeline does</h2>
+                <p>
+                    Face rigging starts with a <strong>frontal view</strong> of the head. The analysis service
+                    ingests the RGB image together with companion buffers (here we follow the same convention as the
+                    <a href="https://worker-0001.free3d.online/test/test.html" rel="noopener noreferrer">Auto-Rig pipeline tester</a>):
+                    a grayscale depth pass derived from the image and a simple alpha matte. The model then predicts
+                    <strong>region confidence</strong>, <strong>2D landmarks</strong>, <strong>contours</strong>, and a set of
+                    <strong>soft masks</strong> (eyes, mouth, brows, etc.). Those masks drive blendshape-style zones and
+                    runtime animation in the full AutoRig task flow.
+                </p>
+
+                <h2>Why masks matter</h2>
+                <p>
+                    Soft masks are not just for visualization: they define where deformation and speech-related motion
+                    are allowed on the mesh. Good separation between mouth, eyes, and brows keeps expressions stable
+                    when you combine talking, blinking, and emotions.
+                </p>
+
+                <h2>How it fits AutoRig</h2>
+                <p>
+                    After body rigging, the same worker stack can run head analysis so your character supports
+                    facial animation without hand-painting weight maps for every zone. The demo below calls the
+                    production <code>POST /api/face-rig/analyze-head</code> endpoint on the worker and shows the
+                    returned mask set for the default sample image (or for an image you upload).
+                </p>
+            </article>
+
+            <div id="live-demo" class="fr-demo-wrap">
+                <h2>Live demo</h2>
+                <p style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 1rem;">
+                    On load, the sample head is analyzed automatically. Drop another image or click the zone to replace it, then click <strong>Run analysis</strong>.
+                </p>
+                <div class="fr-demo-layout">
+                    <div>
+                        <div class="fr-drop" id="fr-drop" role="button" tabindex="0">
+                            <span style="font-size: 1.75rem;">🖼</span>
+                            <p style="margin-top: 0.5rem; font-size: 0.9rem;">Drop an image here or click to browse</p>
+                            <input type="file" id="fr-file" accept="image/*" style="display:none" aria-hidden="true">
+                            <img id="fr-preview" class="fr-preview" alt="Preview" src="/static/images/guides/face-rig-demo-head.png">
+                        </div>
+                        <p class="fr-meta" id="fr-file-label">Sample: bundled frontal head render</p>
+                        <button type="button" class="btn btn-primary" id="fr-run" style="width:100%; margin-top: 0.75rem;">Run analysis</button>
+                        <p class="fr-api-note">
+                            Endpoint: <code>https://worker-0001.free3d.online/api/face-rig/analyze-head</code>
+                            (same as &ldquo;Face Rig Analysis&rdquo; in the pipeline tester).
+                        </p>
+                    </div>
+                    <div class="fr-results" id="fr-results">
+                        <p style="color: var(--text-secondary); font-size: 0.9rem;">Results will appear after analysis.</p>
+                    </div>
+                </div>
+            </div>
+
+            <article style="margin-top: 2rem;">
+                <h2>Next steps</h2>
+                <p>
+                    This page is a starting point: you can extend it with engine-specific notes (Unity blendshapes,
+                    Unreal pose assets), recording tips for clean frontal captures, or troubleshooting when regions
+                    score low confidence. Upload a well-lit, front-facing head render for the most reliable masks.
+                </p>
+                <p><a href="/"><strong>Upload a full character and run the complete auto-rig pipeline</strong></a></p>
+            </article>
+        </div>
+    </section>
+
+    <section class="related-section">
+        <div class="container">
+            <h2>Related guides</h2>
+            <div class="related-links">
+                <a href="/animation-retargeting" class="related-link">Animation Retargeting</a>
+                <a href="/how-it-works" class="related-link">How It Works</a>
+                <a href="/guides" class="related-link">All guides</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <a href="/" class="footer-logo">
+                    <img src="/static/images/logo/autorig-logo.png" alt="AutoRig Online" height="120">
+                    </a>
+                    <p class="footer-tagline" data-i18n="footer_tagline">AI-powered automatic 3D character rigging. Upload your model and get it rigged with animations in minutes.</p>
+                </div>
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_services">Services</h4>
+                    <ul>
+                        <li><a href="/glb-auto-rig" data-i18n="footer_glb_rig">GLB Auto Rigging</a></li>
+                        <li><a href="/fbx-auto-rig" data-i18n="footer_fbx_rig">FBX Auto Rigging</a></li>
+                        <li><a href="/obj-auto-rig" data-i18n="footer_obj_rig">OBJ Auto Rigging</a></li>
+                        <li><a href="/gallery" data-i18n="nav_gallery">Gallery</a></li>
+                    </ul>
+                </div>
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_guides">Guides</h4>
+                    <ul>
+                        <li><a href="/mixamo-alternative" data-i18n="footer_mixamo_alt">Mixamo Alternative</a></li>
+                        <li><a href="/rig-glb-unity" data-i18n="footer_glb_unity">GLB for Unity</a></li>
+                        <li><a href="/rig-fbx-unreal" data-i18n="footer_fbx_unreal">FBX for Unreal</a></li>
+                        <li><a href="/glb-vs-fbx" data-i18n="footer_glb_vs_fbx">GLB vs FBX</a></li>
+                        <li><a href="/t-pose-vs-a-pose" data-i18n="footer_tpose">T-Pose vs A-Pose</a></li>
+                        <li><a href="/animation-retargeting" data-i18n="footer_retargeting">Animation Retargeting</a></li>
+                        <li><a href="/face-rig-animation" data-i18n="footer_face_rig">Face Rig &amp; Animation</a></li>
+                    </ul>
+                </div>
+                <div class="footer-links">
+                    <h4 class="footer-heading" data-i18n="footer_company">Company</h4>
+                    <ul>
+                        <li><a href="/guides" data-i18n="nav_guides">All Guides</a></li>
+                        <li><a href="/how-it-works" data-i18n="footer_how_it_works">How It Works</a></li>
+                        <li><a href="/faq" data-i18n="footer_faq">FAQ</a></li>
+                        <li><a href="/buy-credits" data-i18n="nav_buy">Buy Credits</a></li>
+                        <li><a href="/developers" data-i18n="nav_api">API</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p class="footer-copyright" data-i18n="footer_copyright">© 2026 AutoRig Online. All rights reserved.</p>
+                <div class="footer-social">
+                    <a href="https://t.me/autorigonline" target="_blank" rel="noopener noreferrer" class="footer-social-link" title="Telegram">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                        </svg>
+                        <span>Telegram</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+(function () {
+    const API_BASE = 'https://worker-0001.free3d.online';
+    const DEFAULT_SRC = '/static/images/guides/face-rig-demo-head.png';
+
+    const drop = document.getElementById('fr-drop');
+    const fileInput = document.getElementById('fr-file');
+    const preview = document.getElementById('fr-preview');
+    const results = document.getElementById('fr-results');
+    const runBtn = document.getElementById('fr-run');
+    const fileLabel = document.getElementById('fr-file-label');
+
+    let selectedFile = null;
+
+    function loadImageFromFile(file) {
+        return new Promise(function (resolve) {
+            const img = new Image();
+            img.onload = function () { resolve(img); };
+            img.src = URL.createObjectURL(file);
+        });
+    }
+
+    function canvasToBlob(canvas) {
+        return new Promise(function (resolve) {
+            canvas.toBlob(function (b) { resolve(b); }, 'image/png');
+        });
+    }
+
+    async function fileFromDefaultUrl() {
+        const r = await fetch(DEFAULT_SRC, { cache: 'force-cache' });
+        const blob = await r.blob();
+        const name = 'face-rig-demo-head.png';
+        const type = blob.type || 'image/png';
+        return new File([blob], name, { type: type });
+    }
+
+    function setPreviewFromFile(file) {
+        const url = URL.createObjectURL(file);
+        preview.src = url;
+    }
+
+    async function runFaceRig(file) {
+        const img = await loadImageFromFile(file);
+        const w = img.width;
+        const h = img.height;
+        URL.revokeObjectURL(img.src);
+
+        const depthCanvas = document.createElement('canvas');
+        depthCanvas.width = w;
+        depthCanvas.height = h;
+        const dCtx = depthCanvas.getContext('2d');
+        dCtx.drawImage(img, 0, 0);
+        const idata = dCtx.getImageData(0, 0, w, h);
+        for (let i = 0; i < idata.data.length; i += 4) {
+            const gray = Math.round(
+                idata.data[i] * 0.299 +
+                idata.data[i + 1] * 0.587 +
+                idata.data[i + 2] * 0.114
+            );
+            idata.data[i] = idata.data[i + 1] = idata.data[i + 2] = gray;
+        }
+        dCtx.putImageData(idata, 0, 0);
+
+        const alphaCanvas = document.createElement('canvas');
+        alphaCanvas.width = w;
+        alphaCanvas.height = h;
+        const aCtx = alphaCanvas.getContext('2d');
+        aCtx.fillStyle = '#fff';
+        aCtx.fillRect(0, 0, w, h);
+
+        const depthBlob = await canvasToBlob(depthCanvas);
+        const alphaBlob = await canvasToBlob(alphaCanvas);
+
+        const fd = new FormData();
+        fd.append('front_rgb_pbr', file);
+        fd.append('front_depth', depthBlob, 'depth.png');
+        fd.append('front_alpha', alphaBlob, 'alpha.png');
+        fd.append('metadata', JSON.stringify({
+            job_id: 'guide-' + Date.now(),
+            image_size: { width: w, height: h },
+            camera: { projection: 'orthographic', views: { front: {}, left_3q: {}, right_3q: {} } },
+            head_bounds: { min: [0, 0, 0], max: [1, 1, 1] }
+        }));
+
+        const t0 = performance.now();
+        const r = await fetch(API_BASE.replace(/\/+$/, '') + '/api/face-rig/analyze-head', {
+            method: 'POST',
+            body: fd
+        });
+        const ms = (performance.now() - t0).toFixed(0);
+        const data = await r.json();
+        return { data: data, ms: ms, httpOk: r.ok };
+    }
+
+    function renderOk(d, ms) {
+        const q = d.quality;
+        let html = '<div class="fr-card"><h3>Face rig analysis <span class="fr-badge ok">OK</span> <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary);">' + ms + ' ms</span></h3>';
+        html += '<p style="font-size:0.9rem;">Overall confidence: <strong>' + (q.overall_confidence * 100).toFixed(1) + '%</strong></p>';
+        html += '<div class="fr-scores">';
+        Object.keys(q.region_confidence).forEach(function (k) {
+            const v = q.region_confidence[k];
+            html += '<div class="fr-score"><span>' + k + '</span><span>' + (v * 100).toFixed(1) + '%</span></div>';
+        });
+        html += '</div></div>';
+
+        html += '<div class="fr-card"><h3>Landmarks</h3><div class="fr-lm-grid">';
+        Object.keys(d.landmarks).forEach(function (k) {
+            const v = d.landmarks[k];
+            html += '<div class="fr-lm"><strong>' + k + '</strong><br>x=' + v.x + ' y=' + v.y + ' · conf ' + v.confidence + '</div>';
+        });
+        html += '</div></div>';
+
+        html += '<div class="fr-card"><h3>Soft masks</h3><div class="fr-masks-grid">';
+        Object.keys(d.masks).forEach(function (k) {
+            const v = d.masks[k];
+            html += '<div class="fr-mask-card"><img src="data:image/png;base64,' + v.data + '" alt="' + k + '"><div class="fr-mask-name">' + k + '</div></div>';
+        });
+        html += '</div></div>';
+
+        results.innerHTML = html;
+    }
+
+    function renderErr(d, ms) {
+        let html = '<div class="fr-card"><h3>Face rig analysis <span class="fr-badge err">' + (d.code || 'error') + '</span> <span style="margin-left:auto;font-size:0.75rem;color:var(--text-secondary);">' + ms + ' ms</span></h3>';
+        html += '<p class="fr-error">' + (d.message || JSON.stringify(d)) + '</p>';
+        if (d.details) {
+            html += '<pre style="margin-top:0.75rem;font-size:0.72rem;overflow:auto;max-height:220px;color:var(--text-secondary);background:var(--bg-card);padding:0.75rem;border-radius:4px;">' +
+                JSON.stringify(d.details, null, 2) + '</pre>';
+        }
+        html += '</div>';
+        results.innerHTML = html;
+    }
+
+    async function analyze() {
+        if (!selectedFile) return;
+        runBtn.disabled = true;
+        results.innerHTML = '<p style="color:var(--text-secondary);">Running analysis…</p>';
+        try {
+            const out = await runFaceRig(selectedFile);
+            const d = out.data;
+            if (d.status === 'ok') {
+                renderOk(d, out.ms);
+            } else {
+                renderErr(d, out.ms);
+            }
+        } catch (e) {
+            results.innerHTML = '<div class="fr-card"><p class="fr-error">' + String(e.message || e) + '</p></div>';
+        }
+        runBtn.disabled = false;
+    }
+
+    function handlePick(file) {
+        if (!file || !file.type.startsWith('image/')) return;
+        selectedFile = file;
+        setPreviewFromFile(file);
+        fileLabel.textContent = file.name;
+    }
+
+    drop.addEventListener('click', function () { fileInput.click(); });
+    drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('fr-drag'); });
+    drop.addEventListener('dragleave', function () { drop.classList.remove('fr-drag'); });
+    drop.addEventListener('drop', function (e) {
+        e.preventDefault();
+        drop.classList.remove('fr-drag');
+        if (e.dataTransfer.files[0]) handlePick(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', function () {
+        if (fileInput.files[0]) handlePick(fileInput.files[0]);
+    });
+
+    runBtn.addEventListener('click', analyze);
+
+    async function boot() {
+        selectedFile = await fileFromDefaultUrl();
+        await analyze();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
+})();
+    </script>
+</body>
+</html>

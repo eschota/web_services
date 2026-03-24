@@ -49,6 +49,7 @@
     "footer_glb_vs_fbx": "GLB vs FBX",
     "footer_tpose": "T-Pose vs A-Pose",
     "footer_retargeting": "动画重定向",
+    "footer_face_rig": "面部绑定与动画",
     "footer_company": "公司",
     "footer_how_it_works": "工作原理",
     "footer_faq": "常见问题",
@@ -77,6 +78,8 @@
 
     "guide_retargeting_title": "动画重定向",
     "guide_retargeting_desc": "Unity和Unreal动画重定向指南。自动绑定角色的简单管道。",
+    "guide_face_rig_title": "面部绑定与动画",
+    "guide_face_rig_desc": "头部分析如何生成面部柔体遮罩与关键点，用于动画与口型同步。",
 
     "read_guide": "阅读指南 →",
 

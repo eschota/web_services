@@ -49,6 +49,7 @@
     "footer_glb_vs_fbx": "GLB vs FBX",
     "footer_tpose": "T-Pose vs A-Pose",
     "footer_retargeting": "एनिमेशन रिटारगेटिंग",
+    "footer_face_rig": "फेस रिग और एनीमेशन",
     "footer_company": "कंपनी",
     "footer_how_it_works": "यह कैसे काम करता है",
     "footer_faq": "FAQ",
@@ -77,6 +78,8 @@
 
     "guide_retargeting_title": "एनिमेशन रिटारगेटिंग",
     "guide_retargeting_desc": "Unity और Unreal एनिमेशन रिटारगेटिंग गाइड। ऑटो-रिग्ड कैरेक्टर के लिए साधारण पाइपलाइन।",
+    "guide_face_rig_title": "फेस रिग और एनीमेशन",
+    "guide_face_rig_desc": "हेड विश्लेषण चेहरे के सॉफ्ट मास्क और लैंडमार्क कैसे बनाता है—एनीमेशन और लिप सिंक के लिए।",
 
     "read_guide": "गाइड पढ़ें →",
 

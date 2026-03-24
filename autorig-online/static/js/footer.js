@@ -19,7 +19,7 @@ function renderSiteFooter() {
                 <!-- Brand Column -->
                 <div class="footer-brand">
                     <a href="/" class="footer-logo">
-                    <img src="/static/images/logo/autorig-logo.png" alt="AutoRig Online" height="60">
+                    <img src="/static/images/logo/autorig-logo.png" alt="AutoRig Online" height="120">
                     </a>
                     <p class="footer-tagline" data-i18n="footer_tagline">AI-powered automatic 3D character rigging. Upload your model and get it rigged with animations in minutes.</p>
                 </div>
@@ -45,6 +45,7 @@ function renderSiteFooter() {
                         <li><a href="/glb-vs-fbx" data-i18n="footer_glb_vs_fbx">GLB vs FBX</a></li>
                         <li><a href="/t-pose-vs-a-pose" data-i18n="footer_tpose">T-Pose vs A-Pose</a></li>
                         <li><a href="/animation-retargeting" data-i18n="footer_retargeting">Animation Retargeting</a></li>
+                        <li><a href="/face-rig-animation" data-i18n="footer_face_rig">Face Rig &amp; Animation</a></li>
                     </ul>
                 </div>
                 

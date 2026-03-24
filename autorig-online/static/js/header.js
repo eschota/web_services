@@ -54,7 +54,7 @@ function renderSiteHeader(options = {}) {
                          srcset="/static/images/logo/autorig-logo.png 1x, /static/images/logo/autorig-logo@2x.png 2x"
                          alt="Autorig.Online" 
                          class="logo-img" 
-                         height="120">
+                         height="240">
                 </a>
 
                 ${navHtml}
