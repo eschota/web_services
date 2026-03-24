@@ -13,7 +13,11 @@ class TaskCreateRequest(BaseModel):
     """JSON body for ``POST /api/task/create`` (``Content-Type: application/json``). Omitted fields use defaults."""
     source: str = Field(default="link", description="``link`` (URL) or ``upload`` (multipart file)")
     input_url: Optional[str] = Field(None, description="Public URL of the model (required for ``source=link``)")
-    type: str = Field(default="t_pose", description="Conversion type, e.g. ``t_pose``")
+    type: str = Field(default="t_pose", description="Conversion type, e.g. ``t_pose`` (empty/absent → ``t_pose``)")
+    input_type: Optional[str] = Field(
+        None,
+        description="Alias for ``type`` if ``type`` is omitted or empty",
+    )
     ga_client_id: Optional[str] = Field(None, description="Google Analytics client ID")
 
 

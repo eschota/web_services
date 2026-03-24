@@ -18,7 +18,8 @@ from workers import (
     check_urls_batch,
     check_video_availability,
     get_worker_base_url,
-    get_configured_workers
+    get_configured_workers,
+    normalize_task_type,
 )
 
 
@@ -185,6 +186,7 @@ async def create_conversion_task(
     Create a new conversion task.
     Returns: (task, error_message)
     """
+    task_type = normalize_task_type(task_type)
     # Create task record
     task_id = str(uuid.uuid4())
     task = Task(

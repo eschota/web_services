@@ -77,6 +77,7 @@ from workers import (
     quarantine_worker,
     clear_worker_quarantine,
     is_worker_quarantined,
+    normalize_task_type,
 )
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
@@ -484,17 +485,24 @@ async def background_task_updater():
                 if lock_f is not None:
                     try:
                         upstream_deleted = 0
+                        upstream_off = 0
                         for _round in range(GALLERY_UPSTREAM_PURGE_ROUNDS):
                             try:
                                 ur = await purge_gallery_upstream_dead_tasks(
-                                    db, batch=GALLERY_UPSTREAM_PURGE_BATCH
+                                    db,
+                                    batch=GALLERY_UPSTREAM_PURGE_BATCH,
+                                    offset=upstream_off,
                                 )
                             except Exception as e:
                                 print(f"[Background Worker] Gallery upstream purge error: {e}")
                                 break
                             upstream_deleted += ur["deleted"]
-                            if ur["scanned"] == 0 or ur["deleted"] == 0:
+                            if ur["scanned"] == 0:
                                 break
+                            if ur["deleted"] > 0:
+                                upstream_off = 0
+                            else:
+                                upstream_off += ur["scanned"]
                         if upstream_deleted > 0:
                             print(
                                 f"[Background Worker] Gallery upstream purge: deleted {upstream_deleted} "
@@ -1585,6 +1593,8 @@ async def api_create_task(
         if raw_url is not None and str(raw_url).strip():
             input_url = str(raw_url).strip()
         raw_t = data.get("type")
+        if raw_t is None or not str(raw_t).strip():
+            raw_t = data.get("input_type")
         if raw_t is not None and str(raw_t).strip():
             input_type = str(raw_t).strip()
         raw_ga = data.get("ga_client_id")
@@ -1598,6 +1608,8 @@ async def api_create_task(
         if raw_url is not None and str(raw_url).strip():
             input_url = str(raw_url).strip()
         raw_t = form.get("type")
+        if raw_t is None or not str(raw_t).strip():
+            raw_t = form.get("input_type")
         if raw_t is not None and str(raw_t).strip():
             input_type = str(raw_t).strip()
         raw_ga = form.get("ga_client_id")
@@ -1647,7 +1659,9 @@ async def api_create_task(
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
-    
+
+    input_type = normalize_task_type(input_type)
+
     # Create task
     task, error = await create_conversion_task(
         db, final_url, input_type, owner_type, owner_id, created_via_api=via_api
@@ -3642,9 +3656,33 @@ async def api_admin_purge_no_poster_video(
     Admin only — same as background jobs.
     """
     a = await purge_tasks_without_poster_and_video(db)
-    b = await purge_gallery_upstream_dead_tasks(db, batch=max(GALLERY_UPSTREAM_PURGE_BATCH, 200))
-    print(f"[Admin] purge-no-poster-video by {admin.email}: string={a} upstream={b}")
-    return {"ok": True, "string_purge": a, "upstream_purge": b}
+    upstream_total = 0
+    upstream_off = 0
+    rounds = 0
+    last_b: dict = {}
+    batch = max(GALLERY_UPSTREAM_PURGE_BATCH, 200)
+    for _ in range(500):
+        b = await purge_gallery_upstream_dead_tasks(db, batch=batch, offset=upstream_off)
+        last_b = b
+        upstream_total += b["deleted"]
+        rounds += 1
+        if b["scanned"] == 0:
+            break
+        if b["deleted"] > 0:
+            upstream_off = 0
+        else:
+            upstream_off += b["scanned"]
+    print(
+        f"[Admin] purge-no-poster-video by {admin.email}: string={a} "
+        f"upstream_deleted={upstream_total} rounds={rounds} last={last_b}"
+    )
+    return {
+        "ok": True,
+        "string_purge": a,
+        "upstream_purge": last_b,
+        "upstream_deleted_total": upstream_total,
+        "upstream_rounds": rounds,
+    }
 
 
 @app.post("/api/admin/cleanup")
@@ -4784,11 +4822,13 @@ async def _probe_http_asset_reachable(client, url: str) -> bool:
 
 
 async def purge_gallery_upstream_dead_tasks(
-    db: AsyncSession, batch: Optional[int] = None
+    db: AsyncSession, batch: Optional[int] = None, offset: int = 0
 ) -> dict:
     """
     Remove done+video_ready tasks that still match gallery SQL but poster or video 404 on worker.
     Workers delete files over time; DB strings become stale — this aligns DB with reality.
+
+    Use ``offset`` to skip a block of rows that already passed HEAD checks (no deletes in prior batch).
     """
     import httpx
 
@@ -4801,11 +4841,12 @@ async def purge_gallery_upstream_dead_tasks(
             _gallery_task_has_poster_sql(),
         )
         .order_by(Task.created_at.asc())
+        .offset(max(0, offset))
         .limit(limit)
     )
     rows = list(result.scalars().all())
     if not rows:
-        return {"deleted": 0, "scanned": 0, "upstream": True}
+        return {"deleted": 0, "scanned": 0, "upstream": True, "offset": offset}
 
     deleted = 0
     async with httpx.AsyncClient() as client:
@@ -4837,7 +4878,12 @@ async def purge_gallery_upstream_dead_tasks(
                 except Exception as e:
                     await db.rollback()
                     print(f"[Gallery upstream purge] Failed {task.id} (dead video): {e}")
-    return {"deleted": deleted, "scanned": len(rows), "upstream": True}
+    return {
+        "deleted": deleted,
+        "scanned": len(rows),
+        "upstream": True,
+        "offset": offset,
+    }
 
 
 async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:

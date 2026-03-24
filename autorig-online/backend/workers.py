@@ -24,6 +24,12 @@ from config import (
 )
 
 
+def normalize_task_type(value: Optional[str]) -> str:
+    """Rigging mode sent to workers; empty/whitespace must default to t_pose."""
+    s = (value or "").strip()
+    return s if s else "t_pose"
+
+
 # =============================================================================
 # Data Classes
 # =============================================================================
@@ -252,6 +258,8 @@ async def send_task_to_worker(
         task_type: Type of task (t_pose, etc.)
         transform_params: Optional dict with local_position, local_rotation, local_scale arrays
     """
+    task_type = normalize_task_type(task_type)
+
     async with httpx.AsyncClient() as client:
         try:
             # Standard payload for all file types - workers handle GLB/FBX/OBJ

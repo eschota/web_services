@@ -36,12 +36,19 @@ async def run() -> None:
             sp = await purge_tasks_without_poster_and_video(db)
             print("[run_task_cleanup] string_purge", sp)
             total = 0
+            off = 0
             for i in range(GALLERY_UPSTREAM_PURGE_ROUNDS):
-                up = await purge_gallery_upstream_dead_tasks(db, batch=GALLERY_UPSTREAM_PURGE_BATCH)
+                up = await purge_gallery_upstream_dead_tasks(
+                    db, batch=GALLERY_UPSTREAM_PURGE_BATCH, offset=off
+                )
                 total += up["deleted"]
                 print(f"[run_task_cleanup] upstream_round_{i + 1}", up)
-                if up["scanned"] == 0 or up["deleted"] == 0:
+                if up["scanned"] == 0:
                     break
+                if up["deleted"] > 0:
+                    off = 0
+                else:
+                    off += up["scanned"]
             print("[run_task_cleanup] upstream_deleted_total", total)
     finally:
         _release_gallery_purge_lock(lock_f)
