@@ -19,7 +19,14 @@ os.chdir(BACKEND)
 
 async def run() -> None:
     from database import AsyncSessionLocal, init_db
-    from config import GALLERY_UPSTREAM_PURGE_BATCH, GALLERY_UPSTREAM_PURGE_ROUNDS
+    from config import (
+        AUTOMATIC_TASK_DB_DELETION,
+        GALLERY_UPSTREAM_PURGE_BATCH,
+        GALLERY_UPSTREAM_PURGE_ROUNDS,
+    )
+    if not AUTOMATIC_TASK_DB_DELETION:
+        print("[run_task_cleanup] AUTOMATIC_TASK_DB_DELETION is disabled; exiting without DB changes.")
+        return
     from main import (
         _release_gallery_purge_lock,
         _try_acquire_gallery_purge_lock,

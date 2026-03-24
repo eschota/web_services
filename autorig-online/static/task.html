@@ -23,8 +23,6 @@
         gtag('config', 'G-T4E781EHE4');
     </script>
     
-    <!-- Telegram Web App SDK -->
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     
     <!-- Loading Overlay Styles -->
     <style>
@@ -3491,6 +3489,19 @@
     <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
     <script src="/static/js/i18n.js"></script>
     <script>
+        (function initTaskPageDebug() {
+            try {
+                const p = new URLSearchParams(window.location.search);
+                window.__taskDebug = p.has('debug') || p.get('debug') === '1' || window.localStorage.getItem('taskDebug') === '1';
+            } catch (e) {
+                window.__taskDebug = false;
+            }
+            window.taskDbg = function (...args) {
+                if (!window.__taskDebug) return;
+                console.log.apply(console, args);
+            };
+        })();
+
         window.__taskPerf = window.__taskPerf || {
             mainViewerFps: 0,
             faceViewerFps: 0,
@@ -3498,6 +3509,7 @@
             faceViewerMicState: 'off',
             blockStates: {},
             log(scope, event, data = null) {
+                if (!window.__taskDebug) return;
                 if (data && Object.keys(data).length) {
                     console.log(`[Perf][${scope}] ${event}`, data);
                 } else {
@@ -3869,6 +3881,8 @@
             taskId: null,
             pollInterval: null,
             queueStatusInterval: null,
+            /** Set when task fetch + progress-log polling is stopped (done/error). */
+            backgroundSyncStopped: false,
             task: null,
             taskFetchedAt: 0,
             fetchInFlight: false,
@@ -3910,15 +3924,10 @@
                 const rawId = params.get('id') || '';
                 this.taskId = rawId.split('?')[0];
                 
-                // Check webapp mode
+                // Minimal layout for ?mode=webapp (no Telegram SDK — embedders open link directly)
                 this.isWebAppMode = params.get('mode') === 'webapp';
                 if (this.isWebAppMode) {
                     document.body.classList.add('webapp-mode');
-                    // Init Telegram Web App if available
-                    if (window.Telegram?.WebApp) {
-                        window.Telegram.WebApp.ready();
-                        window.Telegram.WebApp.expand();
-                    }
                 }
                 
                 if (!this.taskId) {
@@ -3968,6 +3977,10 @@
                     this.__visibilityBound = true;
                     document.addEventListener('visibilitychange', () => {
                         if (!document.hidden) {
+                            if (this.backgroundSyncStopped) {
+                                if (!this.isWebAppMode) this.loadQueueStatus();
+                                return;
+                            }
                             this.fetchTask();
                             this.refreshProgressLog();
                             if (!this.isWebAppMode) this.loadQueueStatus();
@@ -4297,6 +4310,7 @@
             
             startTaskPolling() {
                 if (this.pollInterval) return;
+                if (this.task && (this.task.status === 'done' || this.task.status === 'error')) return;
                 this.pollInterval = setInterval(() => {
                     if (!document.hidden) this.fetchTask();
                 }, 4000);
@@ -4330,8 +4344,9 @@
                         preparedGlbReady: !!this.task?.prepared_glb_ready
                     });
                     
-                    // Stop polling when done or error
+                    // Stop periodic fetch + progress log when pipeline finished (final log fetch first)
                     if (this.task.status === 'done' || this.task.status === 'error') {
+                        try { await this.refreshProgressLog(); } catch (_) {}
                         this.stopPolling();
                     }
                 } catch (error) {
@@ -4400,15 +4415,11 @@
                 if (task.status === 'done') {
                     statusBadge.classList.add('task-status-pill--done');
                     statusText.textContent = t('task_status_done');
-                    // Show Telegram share button when task is done
                     const shareBtn = document.getElementById('task-share-btn');
                     if (shareBtn) shareBtn.style.display = 'flex';
-                    // Haptic feedback for Telegram Web App
-                    if (window.TelegramApp) TelegramApp.hapticFeedback('success');
                 } else if (task.status === 'error') {
                     statusBadge.classList.add('task-status-pill--error');
                     statusText.textContent = t('task_status_error');
-                    if (window.TelegramApp) TelegramApp.hapticFeedback('error');
                 } else if (task.status === 'processing') {
                     statusBadge.classList.add('task-status-pill--processing');
                     statusText.textContent = t('task_status_processing');
@@ -4714,7 +4725,7 @@
                     // Trigger early viewer load when prepared model is ready
                     if (logText.includes('Model preparation completed') && !this.preparedModelTriggered) {
                         this.preparedModelTriggered = true;
-                        console.log('[TaskPage] Model preparation completed - triggering early viewer load');
+                        window.taskDbg('[TaskPage] Model preparation completed - triggering early viewer load');
                         window.dispatchEvent(new CustomEvent('preparedModelReady'));
                     }
                     window.__taskPerf?.measureEnd('TaskPage', 'refreshProgressLog', {
@@ -6434,19 +6445,25 @@
                     clearInterval(this.pollInterval);
                     this.pollInterval = null;
                 }
-                if (this.queueStatusInterval) {
-                    clearInterval(this.queueStatusInterval);
-                    this.queueStatusInterval = null;
+                if (this.progressLogInterval) {
+                    clearInterval(this.progressLogInterval);
+                    this.progressLogInterval = null;
                 }
+                this.backgroundSyncStopped = true;
             },
 
             progressLogInterval: null,
             startProgressLogPolling() {
                 if (this.progressLogInterval) return;
+                // fetchTask already ran final refresh + stopPolling for terminal tasks
+                if (this.backgroundSyncStopped) return;
                 const tick = async () => {
                     try { await this.refreshProgressLog(); } catch (_) {}
                 };
                 tick();
+                if (this.task && (this.task.status === 'done' || this.task.status === 'error')) {
+                    return;
+                }
                 this.progressLogInterval = setInterval(tick, 10000);
 
                 // Cleanup on unload
@@ -6639,7 +6656,7 @@
                     }
                 });
                 
-                console.log('[Viewer] Focus handlers set up - click viewer to enable keyboard shortcuts');
+                window.taskDbg('[Viewer] Focus handlers set up - click viewer to enable keyboard shortcuts');
             }
             setupViewerFocus();
 
@@ -6807,7 +6824,7 @@
                     }
                 });
 
-                console.log(
+                window.taskDbg(
                     `[Viewer] Normalized FBX clip units by ${FBX_CLIP_POSITION_SCALE_FACTOR} (max position ${maxAbsPosition.toFixed(2)})`
                 );
                 return scaled;
@@ -6914,7 +6931,7 @@
                     if ('environmentIntensity' in scene) {
                         scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
                     }
-                    console.log('[Viewer] IBL ready (RoomEnvironment PMREM)');
+                    window.taskDbg('[Viewer] IBL ready (RoomEnvironment PMREM)');
                     return true;
                 } catch (e) {
                     console.error('[Viewer] IBL setup failed:', e);
@@ -7076,7 +7093,7 @@
 
             async function saveDefaultViewerSettings(source = 'unknown') {
                 const isAdmin = await ensureViewerAdmin();
-                console.log('[Viewer] Save default settings requested:', { source, isAdmin });
+                window.taskDbg('[Viewer] Save default settings requested:', { source, isAdmin });
                 if (!isAdmin) {
                     alert('Admin only');
                     return;
@@ -7093,7 +7110,7 @@
                         alert(data.detail || 'Failed to save defaults');
                         return;
                     }
-                    console.log('[Viewer] Default viewer settings saved');
+                    window.taskDbg('[Viewer] Default viewer settings saved');
                     alert('Default viewer settings saved');
                 } catch (e) {
                     console.error('[Viewer] Failed to save default settings:', e);
@@ -7132,7 +7149,7 @@
                         if (settings.camera && settings.camera.position && settings.camera.target) {
                             savedCameraPosition = { ...settings.camera.position };
                             savedCameraTarget = { ...settings.camera.target };
-                            console.log('[Viewer] Saved camera position for later:', savedCameraPosition);
+                            window.taskDbg('[Viewer] Saved camera position for later:', savedCameraPosition);
                         }
                         
                         if (settings.adjustments) {
@@ -7162,15 +7179,15 @@
                                 rotation: settings.modelTransform.rotation || { x: 0, y: 0, z: 0 },
                                 scale: settings.modelTransform.scale || { x: 1, y: 1, z: 1 }
                             };
-                            console.log('[Viewer] Loaded model transform:', viewerState.modelTransform);
+                            window.taskDbg('[Viewer] Loaded model transform:', viewerState.modelTransform);
                         }
 
                         applyViewerState(); // Apply everything EXCEPT camera
                         updateViewerUI();
                         lastSyncedState = JSON.stringify(viewerState);
-                        console.log('[Viewer] Loaded settings (camera will be applied after model loads)');
+                        window.taskDbg('[Viewer] Loaded settings (camera will be applied after model loads)');
                     } else {
-                        console.log('[Viewer] No settings on server, using defaults');
+                        window.taskDbg('[Viewer] No settings on server, using defaults');
                     }
                 } catch (e) {
                     console.warn('[Viewer] Failed to load settings:', e);
@@ -7180,10 +7197,10 @@
                 const isOwner = window.TaskUI && window.TaskUI.purchaseState && window.TaskUI.purchaseState.is_owner;
                 
                 if (isAdmin || isOwner) {
-                    console.log('[Viewer] Starting periodic sync (owner/admin)');
+                    window.taskDbg('[Viewer] Starting periodic sync (owner/admin)');
                     startPeriodicSync();
                 } else {
-                    console.log('[Viewer] Periodic sync disabled (not owner/admin)');
+                    window.taskDbg('[Viewer] Periodic sync disabled (not owner/admin)');
                 }
             }
             
@@ -7198,7 +7215,7 @@
             // Restore camera from saved position (called ONCE after model loads)
             function restoreSavedCamera() {
                 if (savedCameraPosition && savedCameraTarget && camera && controls) {
-                    console.log('[Viewer] Restoring saved camera position:', savedCameraPosition);
+                    window.taskDbg('[Viewer] Restoring saved camera position:', savedCameraPosition);
                     camera.position.set(savedCameraPosition.x, savedCameraPosition.y, savedCameraPosition.z);
                     controls.target.set(savedCameraTarget.x, savedCameraTarget.y, savedCameraTarget.z);
                     controls.update();
@@ -7212,9 +7229,9 @@
                         viewerControls.skipNextFocusOnModel();
                     }
                     
-                    console.log('[Viewer] Camera restored successfully');
+                    window.taskDbg('[Viewer] Camera restored successfully');
                 } else {
-                    console.log('[Viewer] No saved camera position, using current/default');
+                    window.taskDbg('[Viewer] No saved camera position, using current/default');
                 }
                 // Now allow camera sync in render loop
                 cameraInitialized = true;
@@ -7349,7 +7366,7 @@
                     if (resp.ok) {
                         lastSyncedState = currentState;
                         const mt = viewerState.modelTransform;
-                        console.log('[Viewer] ✓ FORCE SYNC to server. Transform:',
+                        window.taskDbg('[Viewer] ✓ FORCE SYNC to server. Transform:',
                             mt ? `pos=(${mt.position.x.toFixed(3)},${mt.position.y.toFixed(3)},${mt.position.z.toFixed(3)}) rot=(${(mt.rotation.x*180/Math.PI).toFixed(1)}°,${(mt.rotation.y*180/Math.PI).toFixed(1)}°,${(mt.rotation.z*180/Math.PI).toFixed(1)}°)` : 'none'
                         );
                         return true;
@@ -7362,13 +7379,13 @@
             window.forceSyncToServer = forceSyncToServer;
             
             function startPeriodicSync() {
-                console.log('[Viewer] Starting periodic sync (every 3s)');
+                window.taskDbg('[Viewer] Starting periodic sync (every 3s)');
                 setInterval(async () => {
                     if (!mainViewerEnabled || document.hidden) return;
                     if (isDefaultComparisonOn) return; // Don't sync defaults
                     const currentState = JSON.stringify(viewerState);
                     if (currentState !== lastSyncedState) {
-                        console.log('[Viewer] State changed, syncing...');
+                        window.taskDbg('[Viewer] State changed, syncing...');
                         try {
                             const resp = await fetch(`/api/task/${taskId}/viewer-settings`, {
                                 method: 'POST',
@@ -7378,7 +7395,7 @@
                             if (resp.ok) {
                                 lastSyncedState = currentState;
                                 const mt = viewerState.modelTransform;
-                                console.log('[Viewer] ✓ Settings synced to server. Transform:',
+                                window.taskDbg('[Viewer] ✓ Settings synced to server. Transform:',
                                     mt ? `pos=(${mt.position.x.toFixed(3)},${mt.position.y.toFixed(3)},${mt.position.z.toFixed(3)}) rot=(${(mt.rotation.x*180/Math.PI).toFixed(1)}°,${(mt.rotation.y*180/Math.PI).toFixed(1)}°,${(mt.rotation.z*180/Math.PI).toFixed(1)}°)` : 'none'
                                 );
                             } else {
@@ -7678,7 +7695,7 @@
 
             // Fullscreen functionality
             function toggleFullscreen() {
-                console.log('[Viewer] toggleFullscreen called, current state:', isFullscreen);
+                window.taskDbg('[Viewer] toggleFullscreen called, current state:', isFullscreen);
 
                 if (!isFullscreen) {
                     enterFullscreen();
@@ -7688,7 +7705,7 @@
             }
 
             function enterFullscreen() {
-                console.log('[Viewer] enterFullscreen called');
+                window.taskDbg('[Viewer] enterFullscreen called');
                 if (!renderer || !host) {
                     console.error('[Viewer] Renderer or host not available');
                     return;
@@ -7697,7 +7714,7 @@
                 // Save current canvas size
                 normalCanvasSize.width = host.clientWidth;
                 normalCanvasSize.height = host.clientHeight;
-                console.log('[Viewer] Saved normal size:', normalCanvasSize);
+                window.taskDbg('[Viewer] Saved normal size:', normalCanvasSize);
 
                 // Enter fullscreen on the viewer host element (not the whole page)
                 const targetElement = host;
@@ -7705,13 +7722,13 @@
                 
                 if (targetElement.requestFullscreen) {
                     fullscreenPromise = targetElement.requestFullscreen();
-                    console.log('[Viewer] Called host.requestFullscreen()');
+                    window.taskDbg('[Viewer] Called host.requestFullscreen()');
                 } else if (targetElement.webkitRequestFullscreen) {
                     fullscreenPromise = targetElement.webkitRequestFullscreen();
-                    console.log('[Viewer] Called host.webkitRequestFullscreen()');
+                    window.taskDbg('[Viewer] Called host.webkitRequestFullscreen()');
                 } else if (targetElement.msRequestFullscreen) {
                     fullscreenPromise = targetElement.msRequestFullscreen();
-                    console.log('[Viewer] Called host.msRequestFullscreen()');
+                    window.taskDbg('[Viewer] Called host.msRequestFullscreen()');
                 } else {
                     console.error('[Viewer] No fullscreen API available');
                     return;
@@ -7720,7 +7737,7 @@
                 // Handle fullscreen promise if available
                 if (fullscreenPromise) {
                     fullscreenPromise.then(() => {
-                        console.log('[Viewer] Fullscreen request successful');
+                        window.taskDbg('[Viewer] Fullscreen request successful');
                         isFullscreen = true;
                         
                         // Update renderer size to fill the fullscreen element
@@ -7733,7 +7750,7 @@
                             camera.updateProjectionMatrix();
                         }
                         
-                        console.log('[Viewer] Renderer resized to:', window.screen.width, 'x', window.screen.height);
+                        window.taskDbg('[Viewer] Renderer resized to:', window.screen.width, 'x', window.screen.height);
                         
                         updateFullscreenButton();
                         // Add ESC key handler
@@ -7745,7 +7762,7 @@
                     // Fallback for browsers that don't return a promise
                     setTimeout(() => {
                         if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
-                            console.log('[Viewer] Fullscreen entered (fallback check)');
+                            window.taskDbg('[Viewer] Fullscreen entered (fallback check)');
                             isFullscreen = true;
                             
                             // Update renderer size
@@ -7767,19 +7784,19 @@
             }
 
             function exitFullscreen() {
-                console.log('[Viewer] exitFullscreen called');
+                window.taskDbg('[Viewer] exitFullscreen called');
                 // Exit fullscreen
                 if (document.exitFullscreen) {
                     document.exitFullscreen();
-                    console.log('[Viewer] Called document.exitFullscreen()');
+                    window.taskDbg('[Viewer] Called document.exitFullscreen()');
                 } else if (document.webkitExitFullscreen) {
                     document.webkitExitFullscreen();
-                    console.log('[Viewer] Called document.webkitExitFullscreen()');
+                    window.taskDbg('[Viewer] Called document.webkitExitFullscreen()');
                 } else if (document.msExitFullscreen) {
                     document.msExitFullscreen();
-                    console.log('[Viewer] Called document.msExitFullscreen()');
+                    window.taskDbg('[Viewer] Called document.msExitFullscreen()');
                 } else {
-                    console.log('[Viewer] No exit fullscreen API available');
+                    window.taskDbg('[Viewer] No exit fullscreen API available');
                 }
             }
 
@@ -7788,7 +7805,7 @@
                                            document.webkitFullscreenElement || 
                                            document.msFullscreenElement);
                 
-                console.log('[Viewer] Fullscreen changed:', isNowFullscreen, 'was:', isFullscreen);
+                window.taskDbg('[Viewer] Fullscreen changed:', isNowFullscreen, 'was:', isFullscreen);
                 
                 if (isNowFullscreen && !isFullscreen) {
                     // Just entered fullscreen
@@ -7811,7 +7828,7 @@
                     document.removeEventListener('keydown', handleFullscreenKeydown);
                     
                     updateFullscreenButton();
-                    console.log('[Viewer] Exited fullscreen mode');
+                    window.taskDbg('[Viewer] Exited fullscreen mode');
                 }
             }
 
@@ -7984,7 +8001,7 @@
                 const maxAllowedDistance = Math.max(maxDim * 10, 50);
                 
                 if (distanceFromModel > maxAllowedDistance) {
-                    console.log('[Viewer] Camera lost - auto-centering, distance:', distanceFromModel.toFixed(2));
+                    window.taskDbg('[Viewer] Camera lost - auto-centering, distance:', distanceFromModel.toFixed(2));
                     if (viewerControls && viewerControls.focusOnModel) {
                         viewerControls.focusOnModel(true);
                     }
@@ -8013,7 +8030,7 @@
                             input.dispatchEvent(new Event('input', { bubbles: true }));
                         }
                     } catch (e) {
-                        console.log('EyeDropper cancelled or failed:', e);
+                        window.taskDbg('EyeDropper cancelled or failed:', e);
                     }
                 }
 
@@ -8177,7 +8194,7 @@
                     if (aoRebakeTimeout) clearTimeout(aoRebakeTimeout);
                     aoRebakeTimeout = setTimeout(() => {
                         if (viewerControls) {
-                            console.log('[Viewer] Auto-rebaking AO with settings:', viewerState.aoSettings);
+                            window.taskDbg('[Viewer] Auto-rebaking AO with settings:', viewerState.aoSettings);
                             viewerControls.setAOSettings(viewerState.aoSettings);
                             viewerControls.rebakeAO();
                         }
@@ -8207,7 +8224,7 @@
                 
                 document.getElementById('ao-rebake-btn')?.addEventListener('click', () => {
                     if (viewerControls) {
-                        console.log('[Viewer] Manual AO rebake with settings:', viewerState.aoSettings);
+                        window.taskDbg('[Viewer] Manual AO rebake with settings:', viewerState.aoSettings);
                         viewerControls.setAOSettings(viewerState.aoSettings);
                         viewerControls.rebakeAO();
                     }
@@ -8584,7 +8601,7 @@
                             'fly': 'Fly'
                         };
                         if (label) label.textContent = modeLabels[mode] || mode;
-                        console.log('[Viewer] Camera mode changed to:', mode);
+                        window.taskDbg('[Viewer] Camera mode changed to:', mode);
                         
                         // Auto-focus on model when camera mode changes
                         if (viewerControls && currentModel) {
@@ -8594,12 +8611,12 @@
                     onChannelChange: (channel) => {
                         const select = document.getElementById('viewer-channel-select');
                         if (select) select.value = String(channel);
-                        console.log('[Viewer] Channel changed to:', channel);
+                        window.taskDbg('[Viewer] Channel changed to:', channel);
                     },
                     onRigTypeChange: (rigType) => {
                         const select = document.getElementById('viewer-rigtype-select');
                         if (select) select.value = rigType;
-                        console.log('[Viewer] Rig type changed to:', rigType);
+                        window.taskDbg('[Viewer] Rig type changed to:', rigType);
                     }
                 });
                 window.viewerControls = viewerControls; // Make global for debugging
@@ -8611,12 +8628,12 @@
                     renderer,
                     controls,
                     onModeChange: (mode, prevMode) => {
-                        console.log('[Viewer] Transform mode changed:', prevMode, '->', mode);
+                        window.taskDbg('[Viewer] Transform mode changed:', prevMode, '->', mode);
                         updateTransformToolbarUI(mode);
                         showSelectionInfo(transformManager?.selectionSystem?.getSelected());
                     },
                     onTransform: (object, mode) => {
-                        console.log('[Viewer] Object transformed:', object?.name, 'mode:', mode);
+                        window.taskDbg('[Viewer] Object transformed:', object?.name, 'mode:', mode);
                         // Sync transform values to context panel
                         if (window.updateContextPanelValues) {
                             window.updateContextPanelValues(object);
@@ -8643,7 +8660,7 @@
                 hierarchyNavigator = new HierarchyNavigator({
                     selectionSystem: transformManager.selectionSystem,
                     onNavigate: (level, action) => {
-                        console.log('[Viewer] Hierarchy navigation:', action, level?.name || level?.type);
+                        window.taskDbg('[Viewer] Hierarchy navigation:', action, level?.name || level?.type);
                         window.updateHierarchyUI();
                     }
                 });
@@ -8653,7 +8670,7 @@
                 transformTests = new TransformSystemTests();
                 window.transformTests = transformTests;
                 window.runTransformTests = () => transformTests.runAll(transformManager, viewerControls, tPoseReference);
-                console.log('[Viewer] Transform system ready. Run window.runTransformTests() to test.');
+                window.taskDbg('[Viewer] Transform system ready. Run window.runTransformTests() to test.');
                 
                 // Setup QWER toolbar UI
                 setupTransformToolbar();
@@ -8674,10 +8691,10 @@
                     rigType: RigType.CHAR,
                     t,
                     onRestart: async (rigType) => {
-                        console.log('[RigEditor] Restarting with rig type:', rigType);
+                        window.taskDbg('[RigEditor] Restarting with rig type:', rigType);
                         // Get transform params to send to worker
                         const transformParams = window.getModelTransform ? window.getModelTransform() : null;
-                        console.log('[RigEditor] Sending transform:', transformParams);
+                        window.taskDbg('[RigEditor] Sending transform:', transformParams);
                         // Call the restart API
                         const resp = await fetch(`/api/task/${taskId}/restart`, {
                             method: 'POST',
@@ -8692,7 +8709,7 @@
                         window.location.reload();
                     },
                     onRigTypeChange: (rigType) => {
-                        console.log('[RigEditor] Rig type changed to:', rigType);
+                        window.taskDbg('[RigEditor] Rig type changed to:', rigType);
                         if (viewerControls) {
                             viewerControls.setRigType(rigType);
                         }
@@ -8724,7 +8741,7 @@
                         const visible = tPoseReference.toggle();
                         const btn = document.getElementById('tpose-toggle-btn');
                         if (btn) btn.classList.toggle('active', visible);
-                        console.log('[Viewer] T-pose toggle:', visible);
+                        window.taskDbg('[Viewer] T-pose toggle:', visible);
                         e.preventDefault();
                         return;
                     }
@@ -8860,7 +8877,7 @@
                                         gizmosBtn.style.opacity = '1';
                                         gizmosBtn.style.background = 'rgba(0,0,0,0.75)';
                                     }
-                                    console.log('[Viewer] Auto-enabled gizmos on QWER mode change');
+                                    window.taskDbg('[Viewer] Auto-enabled gizmos on QWER mode change');
                                 }
                             });
                         }
@@ -8888,12 +8905,12 @@
                                     forceSyncToServer();
                                 }
                                 
-                                console.log('[Viewer] Model reset to origin (0,0,0)');
+                                window.taskDbg('[Viewer] Model reset to origin (0,0,0)');
                             }
                         });
                     }
 
-                    console.log('[Viewer] QWER toolbar setup complete');
+                    window.taskDbg('[Viewer] QWER toolbar setup complete');
                 }
                 
                 // Update QWER toolbar active state and context panel
@@ -8937,7 +8954,7 @@
                         });
                     }
                     
-                    console.log('[Viewer] Hierarchy nav setup complete');
+                    window.taskDbg('[Viewer] Hierarchy nav setup complete');
                 }
                 
                 // Update hierarchy UI (global for access from loadGlb/loadFbx)
@@ -8987,7 +9004,7 @@
                         });
                     }
                     
-                    console.log('[Viewer] T-pose toggle and controls setup complete');
+                    window.taskDbg('[Viewer] T-pose toggle and controls setup complete');
                 }
                 
                 // Setup snap settings inputs (now integrated into context panels)
@@ -9022,7 +9039,7 @@
                         if (checkbox) checkbox.addEventListener('change', updateSnap);
                     });
                     
-                    console.log('[Viewer] Snap settings setup complete');
+                    window.taskDbg('[Viewer] Snap settings setup complete');
                 }
                 
                 // Setup Settings Toggle Button
@@ -9052,10 +9069,10 @@
                                 if (qwerToolbar) qwerToolbar.style.display = isActive ? 'none' : 'flex';
                             }
 
-                            console.log('[Viewer] Settings toggle:', isActive);
+                            window.taskDbg('[Viewer] Settings toggle:', isActive);
                         });
                     }
-                    console.log('[Viewer] Settings toggle setup complete');
+                    window.taskDbg('[Viewer] Settings toggle setup complete');
                 }
                 
                 // Setup View Mode Selector (T-Pose / RIG / Animation)
@@ -9074,7 +9091,7 @@
                 function swapToCache(cacheKey) {
                     if (!modelCache[cacheKey]) return false;
                     
-                    console.log(`[Viewer] Swapping to cached ${cacheKey} model`);
+                    window.taskDbg(`[Viewer] Swapping to cached ${cacheKey} model`);
                     
                     // Remove current model
                     if (currentModel) {
@@ -9147,7 +9164,7 @@
                     };
                     
                     setActiveMode = async (mode) => {
-                        console.log('[Viewer] setActiveMode:', mode, 
+                        window.taskDbg('[Viewer] setActiveMode:', mode, 
                             'currentType:', currentModelType, 
                             'cacheHasPrepared:', !!modelCache.prepared,
                             'cacheHasAnimations:', !!modelCache.animations);
@@ -9192,10 +9209,10 @@
                                         if (playBtn) playBtn.classList.add('hidden');
                                         if (pauseBtn) pauseBtn.classList.add('hidden');
                                         
-                                        console.log('[Viewer] ✓ Swapped to cached prepared model');
+                                        window.taskDbg('[Viewer] ✓ Swapped to cached prepared model');
                                     } else {
                                         // Need to load from server
-                                        console.log('[Viewer] Loading prepared.glb from server...');
+                                        window.taskDbg('[Viewer] Loading prepared.glb from server...');
                                         setLoadingUIState(true);
                                         loadingManager.show('Loading Model');
                                         loadingManager.setQueue([{ name: 'Prepared Model', status: 'pending' }]);
@@ -9205,7 +9222,7 @@
                                             // Cache for future use
                                             modelCache.prepared = currentModel;
                                             modelCache.preparedData = [];
-                                            console.log('[Viewer] ✓ Cached prepared model');
+                                            window.taskDbg('[Viewer] ✓ Cached prepared model');
                                             // Stop animations if any
                                             if (mixer) {
                                                 mixer.stopAllAction();
@@ -9232,7 +9249,7 @@
                                     // Try cache first (instant swap)
                                     if (modelCache.animations && swapToCache('animations')) {
                                         currentModelType = 'animations';
-                                        console.log('[Viewer] ✓ Swapped to cached animations model');
+                                        window.taskDbg('[Viewer] ✓ Swapped to cached animations model');
                                         
                                         // Setup animation UI after cache swap
                                         if (animations.length && sel && playBtn && pauseBtn) {
@@ -9244,14 +9261,14 @@
                                             // Auto-play first animation
                                             try {
                                                 play(sel.value);
-                                                console.log('[Viewer] ✓ Auto-playing animation after cache swap:', sel.value);
+                                                window.taskDbg('[Viewer] ✓ Auto-playing animation after cache swap:', sel.value);
                                             } catch (e) {
                                                 console.warn('[Viewer] Auto-play after cache swap failed:', e);
                                             }
                                         }
                                     } else {
                                         // Need to load from server
-                                        console.log('[Viewer] Loading animations.glb from server...');
+                                        window.taskDbg('[Viewer] Loading animations.glb from server...');
                                         setLoadingUIState(true);
                                         loadingManager.show('Loading Animations');
                                         loadingManager.setQueue([
@@ -9268,7 +9285,7 @@
                                             // Cache for future use
                                             modelCache.animations = currentModel;
                                             modelCache.animationsData = [...animations];
-                                            console.log('[Viewer] ✓ Cached animations model');
+                                            window.taskDbg('[Viewer] ✓ Cached animations model');
                                         } else {
                                             console.error('[Viewer] Animations GLB failed; file is unavailable or corrupted');
                                             setStatus('Animations GLB unavailable/corrupted');
@@ -9315,7 +9332,7 @@
                         if (tposeToggleBtn) tposeToggleBtn.classList.add('active');
                     }
                     
-                    console.log('[Viewer] View mode selector setup complete');
+                    window.taskDbg('[Viewer] View mode selector setup complete');
                 }
                 
                 // Setup Context Panels for QWER modes
@@ -9467,7 +9484,7 @@
                                 y: currentModel.scale.y,
                                 z: currentModel.scale.z
                             };
-                            console.log('[Viewer] Model transform saved to viewerState (gizmo):', viewerState.modelTransform);
+                            window.taskDbg('[Viewer] Model transform saved to viewerState (gizmo):', viewerState.modelTransform);
                         }
                     };
                     
@@ -9491,7 +9508,7 @@
                                     y: currentModel.position.y, 
                                     z: currentModel.position.z 
                                 };
-                                console.log('[Transform] Reset position saved');
+                                window.taskDbg('[Transform] Reset position saved');
                             }
                         }
                     });
@@ -9508,7 +9525,7 @@
                                     y: currentModel.rotation.y, 
                                     z: currentModel.rotation.z 
                                 };
-                                console.log('[Transform] Reset rotation saved');
+                                window.taskDbg('[Transform] Reset rotation saved');
                             }
                         }
                     });
@@ -9524,7 +9541,7 @@
                                     y: currentModel.scale.y, 
                                     z: currentModel.scale.z 
                                 };
-                                console.log('[Transform] Reset scale saved');
+                                window.taskDbg('[Transform] Reset scale saved');
                             }
                             updateScaleContext();
                         }
@@ -9565,7 +9582,7 @@
                             return false;
                         }
 
-                        console.log(`[Transform] Applying ${type}.${axis} = ${value} to root model`);
+                        window.taskDbg(`[Transform] Applying ${type}.${axis} = ${value} to root model`);
                         
                         if (type === 'position') {
                             target.position[axis] = value;
@@ -9592,7 +9609,7 @@
                                 y: target.scale.y,
                                 z: target.scale.z
                             };
-                            console.log('[Transform] Saved to viewerState:', JSON.stringify(viewerState.modelTransform));
+                            window.taskDbg('[Transform] Saved to viewerState:', JSON.stringify(viewerState.modelTransform));
                             
                             // Debounced sync - will sync in next interval or use forceSyncToServer()
                         }
@@ -9703,7 +9720,7 @@
                         el.addEventListener('change', handler);
                     });
                     
-                    console.log('[Viewer] Context panels setup complete');
+                    window.taskDbg('[Viewer] Context panels setup complete');
                 }
                 
                 // Show selection info popup and control transform panel visibility
@@ -9836,7 +9853,7 @@
                         try {
                             // Get current model transform to send to worker
                             const transformParams = getModelTransform();
-                            console.log('[Viewer] Sending transform params:', transformParams);
+                            window.taskDbg('[Viewer] Sending transform params:', transformParams);
                             
                             const resp = await fetch(`/api/task/${taskId}/restart`, {
                                 method: 'POST',
@@ -9868,7 +9885,7 @@
                         const nextIdx = (currentIdx + 1) % modes.length;
                         viewerControls.setCameraMode(modes[nextIdx]);
                     });
-                    console.log('[Viewer] Camera mode button wired');
+                    window.taskDbg('[Viewer] Camera mode button wired');
                 }
 
                 // Gizmos visibility button
@@ -9880,7 +9897,7 @@
                         gizmosBtn.style.opacity = visible ? '1' : '0.4';
                         gizmosBtn.style.background = visible ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.4)';
                     });
-                    console.log('[Viewer] Gizmos toggle button wired');
+                    window.taskDbg('[Viewer] Gizmos toggle button wired');
                 }
 
                 // Zoom In/Out buttons
@@ -9892,7 +9909,7 @@
                         zoomState.velocity -= zoomState.sensitivity * 3; // Zoom in (negative = closer)
                         controls.autoRotate = false;
                     });
-                    console.log('[Viewer] Zoom In button wired');
+                    window.taskDbg('[Viewer] Zoom In button wired');
                 }
                 if (zoomOutBtn) {
                     zoomOutBtn.addEventListener('click', () => {
@@ -9900,7 +9917,7 @@
                         zoomState.velocity += zoomState.sensitivity * 3; // Zoom out (positive = further)
                         controls.autoRotate = false;
                     });
-                    console.log('[Viewer] Zoom Out button wired');
+                    window.taskDbg('[Viewer] Zoom Out button wired');
                 }
 
                 // Wireframe overlay toggle
@@ -10007,7 +10024,7 @@
                     // Initialize button state
                     wireframeBtn.style.opacity = '0.4';
                     wireframeBtn.style.background = 'rgba(0,0,0,0.4)';
-                    console.log('[Viewer] Wireframe toggle button wired');
+                    window.taskDbg('[Viewer] Wireframe toggle button wired');
                 }
 
                 // Fullscreen button
@@ -10017,7 +10034,7 @@
                         toggleFullscreen();
                     });
                     updateFullscreenButton(); // Initialize button state
-                    console.log('[Viewer] Fullscreen button wired');
+                    window.taskDbg('[Viewer] Fullscreen button wired');
                 }
 
                 // Default/Saved comparison toggle
@@ -10080,7 +10097,7 @@
                             defaultToggleBtn.style.opacity = '0.5';
                         }
                     });
-                    console.log('[Viewer] Default toggle button wired');
+                    window.taskDbg('[Viewer] Default toggle button wired');
                 }
 
                 // Collapsible Panels
@@ -10115,10 +10132,10 @@
                 if (rigTypeSelect && viewerControls) {
                     rigTypeSelect.addEventListener('change', (e) => {
                         const rigType = e.target.value;
-                        console.log('[Viewer] Switching rig type to:', rigType);
+                        window.taskDbg('[Viewer] Switching rig type to:', rigType);
                         viewerControls.setRigType(rigType);
                     });
-                    console.log('[Viewer] Rig type selector wired');
+                    window.taskDbg('[Viewer] Rig type selector wired');
                 }
 
                 // Channel selector
@@ -10128,7 +10145,7 @@
                         const channel = parseInt(e.target.value, 10);
                         viewerControls.setMaterialChannel(channel);
                     });
-                    console.log('[Viewer] Channel selector wired');
+                    window.taskDbg('[Viewer] Channel selector wired');
                 }
 
                 // ================================================================
@@ -10177,7 +10194,7 @@
                     // Force sync to server
                     forceSyncToServer();
                     
-                    console.log(`[Rotation] ${axis.toUpperCase()} +90° → rot(${modelRotationDegrees.x}°, ${modelRotationDegrees.y}°, ${modelRotationDegrees.z}°) pos(${currentModel.position.x.toFixed(2)}, ${currentModel.position.y.toFixed(2)}, ${currentModel.position.z.toFixed(2)})`);
+                    window.taskDbg(`[Rotation] ${axis.toUpperCase()} +90° → rot(${modelRotationDegrees.x}°, ${modelRotationDegrees.y}°, ${modelRotationDegrees.z}°) pos(${currentModel.position.x.toFixed(2)}, ${currentModel.position.y.toFixed(2)}, ${currentModel.position.z.toFixed(2)})`);
                 }
                 
                 // Update ground plane to model's lowest Y point
@@ -10207,7 +10224,7 @@
                         window.wireframeOverlay.position.copy(currentModel.position);
                     }
 
-                    console.log('[Rotation] Model centered and grounded. Position:', 
+                    window.taskDbg('[Rotation] Model centered and grounded. Position:', 
                         currentModel.position.x.toFixed(3), 
                         currentModel.position.y.toFixed(3), 
                         currentModel.position.z.toFixed(3));
@@ -10227,7 +10244,7 @@
                 if (rotateZBtn) {
                     rotateZBtn.addEventListener('click', () => rotateModel('z'));
                 }
-                console.log('[Viewer] XYZ rotation buttons wired');
+                window.taskDbg('[Viewer] XYZ rotation buttons wired');
                 
                 // Initialize rotation from saved state
                 function initRotationFromState() {
@@ -10238,7 +10255,7 @@
                             y: Math.round(THREE.MathUtils.radToDeg(rot.y || 0)) % 360,
                             z: Math.round(THREE.MathUtils.radToDeg(rot.z || 0)) % 360
                         };
-                        console.log('[Rotation] Initialized from state:', modelRotationDegrees);
+                        window.taskDbg('[Rotation] Initialized from state:', modelRotationDegrees);
                     }
                 }
                 
@@ -10264,11 +10281,11 @@
                         try {
                             // 1. Force sync current state to server
                             await forceSyncToServer();
-                            console.log('[SaveRig] Settings synced to server');
+                            window.taskDbg('[SaveRig] Settings synced to server');
                             
                             // 2. Get current model transform for restart
                             const transformParams = getModelTransform();
-                            console.log('[SaveRig] Transform params:', transformParams);
+                            window.taskDbg('[SaveRig] Transform params:', transformParams);
                             
                             // 3. Call restart endpoint
                             const resp = await fetch(`/api/task/${taskId}/restart`, {
@@ -10282,7 +10299,7 @@
                                 throw new Error(data.detail || 'Restart failed');
                             }
                             
-                            console.log('[SaveRig] Task restarted, reloading page...');
+                            window.taskDbg('[SaveRig] Task restarted, reloading page...');
                             
                             // 4. Reload page (will load saved transforms)
                             window.location.reload();
@@ -10294,7 +10311,7 @@
                             saveRigBtn.innerHTML = originalText;
                         }
                     });
-                    console.log('[Viewer] SAVE RIG T-POSE button wired');
+                    window.taskDbg('[Viewer] SAVE RIG T-POSE button wired');
                 }
                 // ================================================================
 
@@ -10344,7 +10361,7 @@
                         });
                     }
                     
-                    console.log('[Viewer] Admin Z button added to settings area');
+                    window.taskDbg('[Viewer] Admin Z button added to settings area');
                 });
             }
 
@@ -10385,7 +10402,7 @@
                                 mat.envMapIntensity = 1.5;  // Enhanced reflections
                                 mat.needsUpdate = true;
                                 
-                                console.log('[Materials] Applied improved material (no texture):', child.name);
+                                window.taskDbg('[Materials] Applied improved material (no texture):', child.name);
                             }
                         } else {
                             // Model with texture - make slightly darker and more reflective
@@ -10399,7 +10416,7 @@
                     }
                 });
                 
-                console.log('[Materials] Applied improved materials to model');
+                window.taskDbg('[Materials] Applied improved materials to model');
             }
 
             async function loadModel(glbUrl, label = 'GLB', retryCount = 0, timeoutMs = 30000) {
@@ -10407,7 +10424,7 @@
 
                 setStatus(`Loading ${label}...`);
                 perfLogger?.measureStart('mainViewerLoadModel');
-                console.log(`[Viewer] loadModel started: ${label} from ${glbUrl}`);
+                window.taskDbg(`[Viewer] loadModel started: ${label} from ${glbUrl}`);
                 
                 // Show loading overlay
                 if (!loadingManager.isVisible) {
@@ -10462,7 +10479,7 @@
                     
                     if (gltf === null) {
                         loadingManager.updateProgress(5, `Retrying ${label}...`);
-                        console.log(`[Viewer] Retrying ${label} in 1s...`);
+                        window.taskDbg(`[Viewer] Retrying ${label} in 1s...`);
                         // Wait a bit before retry
                         await new Promise(r => setTimeout(r, 1000));
                         return await loadModel(glbUrl, label, retryCount + 1, TIMEOUT_MS);
@@ -10526,7 +10543,7 @@
                             viewerState.modelTransform.position = { x: 0, y: 0, z: 0 };
                             viewerState.modelTransform.rotation = { x: 0, y: rotY, z: 0 };
                             viewerState.modelTransform.scale = { x: 1, y: 1, z: 1 };
-                            console.log('[Viewer] Free3D model: position=origin, rotation Y=-90deg');
+                            window.taskDbg('[Viewer] Free3D model: position=origin, rotation Y=-90deg');
                         } else {
                             // Non-Free3D: position (0,0,0), rotation (0,0,0), scale (1,1,1)
                             model.position.set(0, 0, 0);
@@ -10535,14 +10552,14 @@
                             viewerState.modelTransform.position = { x: 0, y: 0, z: 0 };
                             viewerState.modelTransform.rotation = { x: 0, y: 0, z: 0 };
                             viewerState.modelTransform.scale = { x: 1, y: 1, z: 1 };
-                            console.log('[Viewer] First load: position=origin, rotation=0');
+                            window.taskDbg('[Viewer] First load: position=origin, rotation=0');
                         }
                     } else {
                         // Apply saved transform
                         model.position.set(mt.position.x, mt.position.y, mt.position.z);
                         model.rotation.set(mt.rotation.x, mt.rotation.y, mt.rotation.z);
                         model.scale.set(mt.scale.x, mt.scale.y, mt.scale.z);
-                        console.log('[Viewer] Applied saved model transform');
+                        window.taskDbg('[Viewer] Applied saved model transform');
                     }
                 }
                 
@@ -10578,7 +10595,7 @@
                     restoreSavedCamera();
                 } else {
                     // No saved camera - calculate static above-side position based on model size
-                        console.log('[Viewer] Setting up static camera for T-pose view');
+                        window.taskDbg('[Viewer] Setting up static camera for T-pose view');
                         try {
                             const box = new THREE.Box3().setFromObject(model);
                             const center = box.getCenter(new THREE.Vector3());
@@ -10609,7 +10626,7 @@
                                 },
                                 target: { x: 0, y: targetY, z: 0 }
                             };
-                            console.log('[Viewer] Static camera set:', viewerState.camera);
+                            window.taskDbg('[Viewer] Static camera set:', viewerState.camera);
                         } catch (err) {
                             console.error('[Viewer] Camera setup error:', err);
                         }
@@ -10624,16 +10641,16 @@
                 setTimeout(() => hideLoadingOverlay(), 300);
 
                 animations = gltf.animations || [];
-                console.log(`[Viewer] ${label} loaded. Animations found:`, animations.length);
+                window.taskDbg(`[Viewer] ${label} loaded. Animations found:`, animations.length);
                 if (animations.length) {
-                    console.log('[Viewer] Animation names:', animations.map(a => a.name));
+                    window.taskDbg('[Viewer] Animation names:', animations.map(a => a.name));
                 }
                 
                 mixer = animations.length ? new THREE.AnimationMixer(model) : null;
 
                 // UI for animations
                 if (sel && playBtn && pauseBtn && animations.length) {
-                    console.log('[Viewer] Setting up animation UI controls...');
+                    window.taskDbg('[Viewer] Setting up animation UI controls...');
                     sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
                     sel.classList.remove('hidden');
                     playBtn.classList.remove('hidden');
@@ -10653,26 +10670,26 @@
                     pauseBtn = newPauseBtn;
                     
                     sel.addEventListener('change', () => {
-                        console.log('[Viewer] Animation changed to:', sel.value);
+                        window.taskDbg('[Viewer] Animation changed to:', sel.value);
                         play(sel.value);
                     });
                     playBtn.addEventListener('click', () => {
-                        console.log('[Viewer] Play clicked, animation:', sel.value);
+                        window.taskDbg('[Viewer] Play clicked, animation:', sel.value);
                         play(sel.value);
                     });
                     pauseBtn.addEventListener('click', () => {
-                        console.log('[Viewer] Pause clicked');
+                        window.taskDbg('[Viewer] Pause clicked');
                         if (mixer) mixer.timeScale = 0;
                     });
                     
                     try {
-                        console.log('[Viewer] Auto-playing first animation:', sel.value);
+                        window.taskDbg('[Viewer] Auto-playing first animation:', sel.value);
                         play(sel.value);
                     } catch (e) {
                         console.warn('[Viewer] Auto-play failed:', e);
                     }
                 } else {
-                    console.log('[Viewer] No animations or UI elements missing');
+                    window.taskDbg('[Viewer] No animations or UI elements missing');
                     sel?.classList.add('hidden');
                     playBtn?.classList.add('hidden');
                     pauseBtn?.classList.add('hidden');
@@ -10680,7 +10697,7 @@
 
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';
                 setStatus(statusText);
-                console.log('[Viewer] Status:', statusText);
+                window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
                 return true;
@@ -10775,7 +10792,7 @@
                             viewerState.modelTransform.position = { x: 0, y: 0, z: 0 };
                             viewerState.modelTransform.rotation = { x: 0, y: rotY, z: 0 };
                             viewerState.modelTransform.scale = { x: 1, y: 1, z: 1 };
-                            console.log('[Viewer] Free3D FBX model: position=origin, rotation Y=-90deg');
+                            window.taskDbg('[Viewer] Free3D FBX model: position=origin, rotation Y=-90deg');
                         } else {
                             // Non-Free3D: position (0,0,0), rotation (0,0,0), scale (1,1,1)
                             model.position.set(0, 0, 0);
@@ -10784,14 +10801,14 @@
                             viewerState.modelTransform.position = { x: 0, y: 0, z: 0 };
                             viewerState.modelTransform.rotation = { x: 0, y: 0, z: 0 };
                             viewerState.modelTransform.scale = { x: 1, y: 1, z: 1 };
-                            console.log('[Viewer] First load (FBX): position=origin, rotation=0');
+                            window.taskDbg('[Viewer] First load (FBX): position=origin, rotation=0');
                         }
                     } else {
                         // Apply saved transform
                         model.position.set(mt.position.x, mt.position.y, mt.position.z);
                         model.rotation.set(mt.rotation.x, mt.rotation.y, mt.rotation.z);
                         model.scale.set(mt.scale.x, mt.scale.y, mt.scale.z);
-                        console.log('[Viewer] Applied saved model transform (FBX)');
+                        window.taskDbg('[Viewer] Applied saved model transform (FBX)');
                     }
                 }
                 
@@ -10827,7 +10844,7 @@
                     restoreSavedCamera();
                 } else {
                     // No saved camera - calculate static above-side position (FBX)
-                    console.log('[Viewer] Setting up static camera for T-pose view (FBX)');
+                    window.taskDbg('[Viewer] Setting up static camera for T-pose view (FBX)');
                     try {
                         const box = new THREE.Box3().setFromObject(model);
                         const center = box.getCenter(new THREE.Vector3());
@@ -10857,7 +10874,7 @@
                             },
                             target: { x: 0, y: targetY, z: 0 }
                         };
-                        console.log('[Viewer] Static camera set (FBX):', viewerState.camera);
+                        window.taskDbg('[Viewer] Static camera set (FBX):', viewerState.camera);
                     } catch (err) {
                         console.error('[Viewer] FBX camera setup error:', err);
                     }
@@ -10873,16 +10890,16 @@
 
                 // FBX animations are stored on the model object directly
                 animations = model.animations || [];
-                console.log(`[Viewer] ${label} loaded. Animations found:`, animations.length);
+                window.taskDbg(`[Viewer] ${label} loaded. Animations found:`, animations.length);
                 if (animations.length) {
-                    console.log('[Viewer] Animation names:', animations.map(a => a.name));
+                    window.taskDbg('[Viewer] Animation names:', animations.map(a => a.name));
                 }
                 
                 mixer = animations.length ? new THREE.AnimationMixer(model) : null;
 
                 // UI for animations
                 if (sel && playBtn && pauseBtn && animations.length) {
-                    console.log('[Viewer] Setting up animation UI controls...');
+                    window.taskDbg('[Viewer] Setting up animation UI controls...');
                     sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
                     sel.classList.remove('hidden');
                     playBtn.classList.remove('hidden');
@@ -10902,26 +10919,26 @@
                     pauseBtn = newPauseBtn;
                     
                     sel.addEventListener('change', () => {
-                        console.log('[Viewer] Animation changed to:', sel.value);
+                        window.taskDbg('[Viewer] Animation changed to:', sel.value);
                         play(sel.value);
                     });
                     playBtn.addEventListener('click', () => {
-                        console.log('[Viewer] Play clicked, animation:', sel.value);
+                        window.taskDbg('[Viewer] Play clicked, animation:', sel.value);
                         play(sel.value);
                     });
                     pauseBtn.addEventListener('click', () => {
-                        console.log('[Viewer] Pause clicked');
+                        window.taskDbg('[Viewer] Pause clicked');
                         if (mixer) mixer.timeScale = 0;
                     });
                     
                     try {
-                        console.log('[Viewer] Auto-playing first animation:', sel.value);
+                        window.taskDbg('[Viewer] Auto-playing first animation:', sel.value);
                         play(sel.value);
                     } catch (e) {
                         console.warn('[Viewer] Auto-play failed:', e);
                     }
                 } else {
-                    console.log('[Viewer] No animations or UI elements missing');
+                    window.taskDbg('[Viewer] No animations or UI elements missing');
                     sel?.classList.add('hidden');
                     playBtn?.classList.add('hidden');
                     pauseBtn?.classList.add('hidden');
@@ -10929,7 +10946,7 @@
 
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';
                 setStatus(statusText);
-                console.log('[Viewer] Status:', statusText);
+                window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
                 return true;
@@ -10960,6 +10977,8 @@
 
             // Background loader for animations (non-blocking)
             let animationsLoadingInBackground = false;
+            /** True after loadAnimationsInBackground finished (success or failure), so viewer poll can stop. */
+            let animationsBackgroundFinished = false;
             
             async function loadAnimationsInBackground() {
                 const modelCache = getSharedModelCache();
@@ -10968,7 +10987,7 @@
                 }
                 
                 animationsLoadingInBackground = true;
-                console.log('[Viewer] 🔄 Starting background load of animations...');
+                window.taskDbg('[Viewer] 🔄 Starting background load of animations...');
                 
                 try {
                     // Load animations GLB silently (no loading overlay)
@@ -10982,7 +11001,7 @@
                             (xhr) => {
                                 if (xhr.total > 0) {
                                     const pct = Math.round((xhr.loaded / xhr.total) * 100);
-                                    console.log(`[Viewer] Background animations: ${pct}%`);
+                                    window.taskDbg(`[Viewer] Background animations: ${pct}%`);
                                 }
                             },
                             reject
@@ -10997,14 +11016,14 @@
                     modelCache.animationsData = loadedAnimations;
                     animationsLoaded = true;
                     
-                    console.log('[Viewer] ✓ Background animations loaded and cached!', loadedAnimations.length, 'animations');
+                    window.taskDbg('[Viewer] ✓ Background animations loaded and cached!', loadedAnimations.length, 'animations');
                     
                     // Show notification that animations are ready
                     showAnimationsReadyNotification();
                     
                     // Auto-switch to animation mode if we are in prepared mode
                     if (typeof setActiveMode === 'function') {
-                        console.log('[Viewer] Auto-switching to animation mode');
+                        window.taskDbg('[Viewer] Auto-switching to animation mode');
                         setActiveMode('animation');
                     }
                     
@@ -11012,6 +11031,7 @@
                     console.warn('[Viewer] Background animations load failed, will try FBX later:', err.message);
                 } finally {
                     animationsLoadingInBackground = false;
+                    animationsBackgroundFinished = true;
                 }
             }
             
@@ -11650,7 +11670,7 @@
                     }
 
                     const decodedStatus = Object.fromEntries(relevantKeys.map(k => [k, decodedMasks[k] ? `${decodedMasks[k].width}x${decodedMasks[k].height}` : 'null']));
-                    console.log('[FaceRig] Projection stats:', JSON.stringify(projStats), 'Decoded masks:', JSON.stringify(decodedStatus), 'Image size:', width, 'x', height);
+                    window.taskDbg('[FaceRig] Projection stats:', JSON.stringify(projStats), 'Decoded masks:', JSON.stringify(decodedStatus), 'Image size:', width, 'x', height);
                     return maskMap;
                 }
 
@@ -11662,7 +11682,7 @@
                     const debug = controller.getDebugInfo();
                     const zones = debug.endpointActiveZones || [];
                     const range = debug.mouthWeightRange || {};
-                    console.log(`[FaceRig] Endpoint masks applied. Active zones: [${zones.join(', ')}]. Mouth vertices: ${debug.mouthVertexCount}. Weight range: ${range.min} – ${range.max}.`);
+                    window.taskDbg(`[FaceRig] Endpoint masks applied. Active zones: [${zones.join(', ')}]. Mouth vertices: ${debug.mouthVertexCount}. Weight range: ${range.min} – ${range.max}.`);
                     syncDebugVisualization({ skipCapture: true });
                     if (debugZonesToggle.checked) requestDebugRenderCapture();
                     return true;
@@ -12401,7 +12421,7 @@
                         relevantBones: Array.isArray(debug?.relevantBones) ? debug.relevantBones.join(', ') : getFaceRigBoneSummary(mesh).join(', ')
                     };
                     perfLogger?.log('FaceViewer', 'diagnostics', summary);
-                    console.log('[FaceRig][Diagnostics]', summary);
+                    window.taskDbg('[FaceRig][Diagnostics]', summary);
                 }
 
                 function createFaceRigDebugMaterials(targetMesh) {
@@ -13145,7 +13165,7 @@
                         setTimeout(waitAndInitViewer, 5000);
                         return;
                     }
-                    console.log('[Viewer] Polling task status...');
+                    window.taskDbg('[Viewer] Polling task status...');
                     const t = await getLatestTaskState();
                     
                     // Check if animations are ready in ready_urls
@@ -13153,14 +13173,14 @@
                         url.toLowerCase().includes('_all_animations') && url.toLowerCase().endsWith('.glb')
                     );
                     
-                    console.log('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
+                    window.taskDbg('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
 
                     const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
                     window.currentTaskIsFree3D = isFree3DTask; // Global flag for loadModel to use
 
                     // 1. FREE3D: Load immediately from free3d.online (no waiting for worker)
                     if (isFree3DTask && !free3dModelLoaded) {
-                        console.log('[Viewer] Free3D task detected - loading directly from free3d.online...');
+                        window.taskDbg('[Viewer] Free3D task detected - loading directly from free3d.online...');
 
                         // Setup loading queue for Free3D
                         loadingManager.show('Loading Free3D Model');
@@ -13168,7 +13188,7 @@
 
                         // Default to X -90 fix for Free3D models
                         if (viewerState.modelRotation === 'none' || viewerState.modelRotation === 'z180') {
-                            console.log('[Viewer] Defaulting Free3D to X -90 rotation');
+                            window.taskDbg('[Viewer] Defaulting Free3D to X -90 rotation');
                             viewerState.modelRotation = 'x90_neg';
                             updateViewerUI();
                         }
@@ -13182,7 +13202,7 @@
                                 free3dModelLoaded = true;
                                 preparedLoaded = true;
                                 // Transform already applied in loadModel based on window.currentTaskIsFree3D
-                                console.log('[Viewer] ✓ Free3D model loaded immediately');
+                                window.taskDbg('[Viewer] ✓ Free3D model loaded immediately');
                             }
                         }
                     }
@@ -13190,7 +13210,7 @@
                     // 2. Load PREPARED model first for instant preview (non-blocking)
                     if (!isFree3DTask && t && t.prepared_glb_ready && !preparedLoaded && !preparedLoadingInProgress) {
                         preparedLoadingInProgress = true;
-                        console.log('[Viewer] Loading prepared model for instant preview...');
+                        window.taskDbg('[Viewer] Loading prepared model for instant preview...');
                         
                         // Setup loading queue for preview
                         loadingManager.show('Loading Model');
@@ -13204,7 +13224,7 @@
                                 // Cache prepared model
                                 modelCache.prepared = currentModel;
                                 modelCache.preparedData = [];
-                                console.log('[Viewer] ✓ Prepared model loaded and cached');
+                                window.taskDbg('[Viewer] ✓ Prepared model loaded and cached');
                                 
                                 // Start loading animations in BACKGROUND (non-blocking)
                                 if ((t.status === 'done' || animationsReady) && !modelCache.animations) {
@@ -13224,14 +13244,14 @@
                     // 4. If task is done or animations ready and animations are cached but not shown, we can auto-switch
                     if (t && (t.status === 'done' || animationsReady) && modelCache.animations && !finalLoaded) {
                         finalLoaded = true;
-                        console.log('[Viewer] ✓ Task complete or animations ready, animations ready in cache');
+                        window.taskDbg('[Viewer] ✓ Task complete or animations ready, animations ready in cache');
                         
                         // Mark it as ready
                         showAnimationsReadyNotification();
 
                         // Auto-switch to animation mode
                         if (typeof setActiveMode === 'function') {
-                            console.log('[Viewer] Auto-switching to animation mode (ready)');
+                            window.taskDbg('[Viewer] Auto-switching to animation mode (ready)');
                             setActiveMode('animation');
                         }
                     }
@@ -13239,9 +13259,13 @@
                     // Update RigEditor status
                     if (rigEditor && t) rigEditor.setTaskStatus(t.status);
                     
-                    // Stop polling if task is done and everything is loaded
-                    if (t && t.status === 'done' && preparedLoaded && (modelCache.animations || animationsLoadingInBackground)) {
-                        console.log('[Viewer] Task done, models loaded/loading. Stopping poll.');
+                    if (t && t.status === 'error') {
+                        window.taskDbg('[Viewer] Task error. Stopping poll.');
+                        return;
+                    }
+                    // Stop when task is done, preview is up, and animations load finished (ok or failed)
+                    if (t && t.status === 'done' && preparedLoaded && (modelCache.animations || animationsBackgroundFinished)) {
+                        window.taskDbg('[Viewer] Task done, viewer settled. Stopping poll.');
                         return;
                     }
                     
@@ -13252,7 +13276,7 @@
                 setTimeout(waitAndInitViewer, 5000);
             }
 
-            console.log('[Viewer] Starting viewer initialization...');
+            window.taskDbg('[Viewer] Starting viewer initialization...');
             startPerfSummaryLogger();
             window.addEventListener('taskPageDeferredReady', () => {
                 faceRigViewer?.init();
@@ -13265,11 +13289,11 @@
                     return;
                 }
                 if (preparedLoaded || finalLoaded || preparedLoadingInProgress) {
-                    console.log('[Viewer] preparedModelReady event: already loaded/loading, skipping');
+                    window.taskDbg('[Viewer] preparedModelReady event: already loaded/loading, skipping');
                     return;
                 }
                 preparedLoadingInProgress = true;
-                console.log('[Viewer] preparedModelReady event: attempting early load...');
+                window.taskDbg('[Viewer] preparedModelReady event: attempting early load...');
                 
                 try {
                     const ok = await loadModel(`/api/task/${taskId}/prepared.glb`, 'Prepared Model (Early)');
@@ -13279,7 +13303,7 @@
                         currentModelType = 'prepared';
                         modelCache.prepared = currentModel;
                         modelCache.preparedData = [];
-                        console.log('[Viewer] ✓ Prepared model loaded from event trigger');
+                        window.taskDbg('[Viewer] ✓ Prepared model loaded from event trigger');
                         
                         // Start background animations load
                         loadAnimationsInBackground();
@@ -13463,33 +13487,16 @@
         })();
     </script>
 
-    <!-- Telegram WebApp Integration -->
+    <!-- Optional: share to Telegram (opens t.me; no Telegram WebApp SDK) -->
     <script>
         window.TelegramApp = {
             shareTask(taskId) {
-                const webappUrl = `${window.location.origin}/task?id=${taskId}&mode=webapp`;
-                
-                if (window.Telegram?.WebApp) {
-                    // Inside Telegram - use switchInlineQuery to share
-                    window.Telegram.WebApp.switchInlineQuery(webappUrl, ['users', 'groups', 'channels']);
-                } else {
-                    // Outside Telegram - open Telegram share URL
-                    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(webappUrl)}&text=${encodeURIComponent('Check out this 3D model!')}`;
-                    window.open(shareUrl, '_blank');
-                }
+                const webappUrl = `${window.location.origin}/task?id=${encodeURIComponent(taskId)}&mode=webapp`;
+                const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(webappUrl)}&text=${encodeURIComponent('Check out this 3D model!')}`;
+                window.open(shareUrl, '_blank', 'noopener,noreferrer');
             },
-            hapticFeedback(type) {
-                if (window.Telegram?.WebApp?.HapticFeedback) {
-                    if (type === 'success') window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-                    else if (type === 'error') window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
-                }
-            }
+            hapticFeedback() {}
         };
-        
-        // Log if running as Telegram WebApp
-        if (window.Telegram?.WebApp?.initData) {
-            console.log('[Telegram] Running as Telegram WebApp');
-        }
     </script>
 
 </body>

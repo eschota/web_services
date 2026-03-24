@@ -128,6 +128,11 @@ TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "AutoRigOnlineBot")
 # =============================================================================
 # Disk Cleanup Settings
 # =============================================================================
+# When false (default): background worker does NOT purge gallery/no-asset rows; disk-pressure cleanup
+# does NOT delete Task rows (only orphan cache/upload/video files). Systemd run_task_cleanup.py exits immediately.
+# Set AUTOMATIC_TASK_DB_DELETION=1 to restore legacy automatic DB row deletion.
+AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
+
 MIN_FREE_SPACE_GB = int(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)

@@ -38,6 +38,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
+    AUTOMATIC_TASK_DB_DELETION,
     GALLERY_DB_PURGE_INTERVAL_CYCLES,
     GALLERY_UPSTREAM_PURGE_BATCH,
     GALLERY_UPSTREAM_PURGE_ROUNDS,
@@ -472,7 +473,11 @@ async def background_task_updater():
                 if background_worker_cycle_count % CLEANUP_CHECK_INTERVAL_CYCLES == 0:
                     try:
                         from main import cleanup_disk_space
-                        result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB, db=db)
+                        result = await cleanup_disk_space(
+                            min_free_gb=MIN_FREE_SPACE_GB,
+                            db=db,
+                            delete_task_rows=AUTOMATIC_TASK_DB_DELETION,
+                        )
                         if result["deleted_count"] > 0:
                             print(f"[Background Worker] Disk cleanup: freed {result['freed_gb']:.2f} GB, deleted {result['deleted_count']} items")
                     except Exception as e:
@@ -482,7 +487,7 @@ async def background_task_updater():
                 # 2.6–2.7 Gallery DB cleanup (single-worker lock; multi-round upstream)
                 # Default: once per week (GALLERY_DB_PURGE_INTERVAL_CYCLES) — not every worker tick.
                 # =============================================================
-                if background_worker_cycle_count % GALLERY_DB_PURGE_INTERVAL_CYCLES == 0:
+                if AUTOMATIC_TASK_DB_DELETION and background_worker_cycle_count % GALLERY_DB_PURGE_INTERVAL_CYCLES == 0:
                     lock_f = _try_acquire_gallery_purge_lock()
                     if lock_f is not None:
                         try:
@@ -3659,6 +3664,11 @@ async def api_admin_purge_no_poster_video(
     2) Purge gallery-eligible rows whose poster/video URLs 404 on workers (files TTL-expired).
     Admin only — same as background jobs.
     """
+    if not AUTOMATIC_TASK_DB_DELETION:
+        raise HTTPException(
+            status_code=403,
+            detail="Automatic task DB deletion is disabled (set AUTOMATIC_TASK_DB_DELETION=1 to enable).",
+        )
     a = await purge_tasks_without_poster_and_video(db)
     upstream_total = 0
     upstream_off = 0
@@ -3705,9 +3715,13 @@ async def api_admin_cleanup(
     disk_usage = shutil.disk_usage("/")
     initial_free_gb = disk_usage.free / (1024**3)
     
-    # Run cleanup
+    # Run cleanup (task rows only if AUTOMATIC_TASK_DB_DELETION)
     from main import cleanup_disk_space
-    result = await cleanup_disk_space(min_free_gb=MIN_FREE_SPACE_GB, db=db)
+    result = await cleanup_disk_space(
+        min_free_gb=MIN_FREE_SPACE_GB,
+        db=db,
+        delete_task_rows=AUTOMATIC_TASK_DB_DELETION,
+    )
     
     # Get final disk stats
     disk_usage = shutil.disk_usage("/")
@@ -3767,6 +3781,7 @@ async def api_admin_disk_stats(
             "cleanup_interval_cycles": CLEANUP_CHECK_INTERVAL_CYCLES,
             "min_age_hours": CLEANUP_MIN_AGE_HOURS,
             "gallery_db_purge_interval_cycles": GALLERY_DB_PURGE_INTERVAL_CYCLES,
+            "automatic_task_db_deletion": AUTOMATIC_TASK_DB_DELETION,
         }
     }
 
@@ -5838,14 +5853,21 @@ async def cleanup_old_cached_files(max_age_days: int = 30):
     return removed_count
 
 
-async def cleanup_disk_space(min_free_gb: int = 10, db: Optional[AsyncSession] = None) -> dict:
+async def cleanup_disk_space(
+    min_free_gb: int = 10,
+    db: Optional[AsyncSession] = None,
+    *,
+    delete_task_rows: Optional[bool] = None,
+) -> dict:
     """
     Clean up old files when disk space is low.
 
     Priority:
-    1. Remove the oldest completed/error tasks physically and delete their DB rows.
+    1. Remove the oldest completed/error tasks physically and delete their DB rows (if delete_task_rows).
     2. Remove orphaned cache/upload/video files not referenced by any remaining task.
     """
+    if delete_task_rows is None:
+        delete_task_rows = AUTOMATIC_TASK_DB_DELETION
     from datetime import timedelta
     import shutil
 
@@ -5903,38 +5925,39 @@ async def cleanup_disk_space(min_free_gb: int = 10, db: Optional[AsyncSession] =
                 ):
                     task_cleanup_candidates.append(task)
 
-            for task in task_cleanup_candidates:
-                disk_usage = shutil.disk_usage("/")
-                free_bytes = disk_usage.free
-                if free_bytes >= min_free_bytes:
-                    break
+            if delete_task_rows:
+                for task in task_cleanup_candidates:
+                    disk_usage = shutil.disk_usage("/")
+                    free_bytes = disk_usage.free
+                    if free_bytes >= min_free_bytes:
+                        break
 
-                deleted_items, freed_bytes = _delete_task_artifacts(task)
-                if deleted_items <= 0 and freed_bytes <= 0:
-                    continue
+                    deleted_items, freed_bytes = _delete_task_artifacts(task)
+                    if deleted_items <= 0 and freed_bytes <= 0:
+                        continue
 
-                try:
-                    await _delete_task_record_and_related(cleanup_db, task.id)
-                except Exception as e:
-                    await cleanup_db.rollback()
-                    print(f"[Disk Cleanup] Failed to delete task {task.id} from DB: {e}")
-                    continue
+                    try:
+                        await _delete_task_record_and_related(cleanup_db, task.id)
+                    except Exception as e:
+                        await cleanup_db.rollback()
+                        print(f"[Disk Cleanup] Failed to delete task {task.id} from DB: {e}")
+                        continue
 
-                result["deleted_count"] += deleted_items
-                result["deleted_task_rows"] += 1
-                result["freed_bytes"] += freed_bytes
-                result["deleted_items"].append({
-                    "path": task.id,
-                    "type": "task",
-                    "size_mb": freed_bytes / (1024**2)
-                })
-                existing_task_ids.discard(task.id)
+                    result["deleted_count"] += deleted_items
+                    result["deleted_task_rows"] += 1
+                    result["freed_bytes"] += freed_bytes
+                    result["deleted_items"].append({
+                        "path": task.id,
+                        "type": "task",
+                        "size_mb": freed_bytes / (1024**2)
+                    })
+                    existing_task_ids.discard(task.id)
 
-                upload_token = _extract_upload_token_from_input_url(task.input_url)
-                if upload_token:
-                    upload_tokens_in_use.discard(upload_token)
+                    upload_token = _extract_upload_token_from_input_url(task.input_url)
+                    if upload_token:
+                        upload_tokens_in_use.discard(upload_token)
 
-                print(f"[Disk Cleanup] Deleted task {task.id} with {deleted_items} local item(s), freed {freed_bytes / (1024**2):.1f} MB")
+                    print(f"[Disk Cleanup] Deleted task {task.id} with {deleted_items} local item(s), freed {freed_bytes / (1024**2):.1f} MB")
 
         if TASK_CACHE_DIR.exists():
             for item in TASK_CACHE_DIR.iterdir():
@@ -6057,6 +6080,16 @@ async def cleanup_disk_space(min_free_gb: int = 10, db: Optional[AsyncSession] =
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+FAVICON_SVG = STATIC_DIR / "images" / "logo" / "favicon.svg"
+
+
+@app.get("/favicon.ico")
+async def favicon_ico():
+    """Browsers request /favicon.ico by default; serve existing SVG (no separate .ico asset)."""
+    if not FAVICON_SVG.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(str(FAVICON_SVG), media_type="image/svg+xml")
 
 
 @app.get("/")

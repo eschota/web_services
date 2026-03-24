@@ -8,6 +8,8 @@ User=www-data
 Group=www-data
 WorkingDirectory=/opt/autorig-online/backend
 Environment="PATH=/opt/autorig-online/venv/bin"
+# Matches backend default: no automatic task row deletion. Override with AUTOMATIC_TASK_DB_DELETION=1 if needed.
+Environment=AUTOMATIC_TASK_DB_DELETION=0
 ExecStart=/opt/autorig-online/venv/bin/python scripts/run_task_cleanup.py
 Nice=10
 
