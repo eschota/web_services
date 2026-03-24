@@ -1201,9 +1201,9 @@ export class ViewerControls {
             varying vec2 vUv;
 
             void main() {
-                // SAMPLE FROM LOD 1 (effectively 2x smaller in each dimension)
-                // for performance during adjustments
-                vec4 texel = texture2D(tMap, vUv, 1.0);
+                // Use a standard texture sample here so the shader stays valid
+                // across both WebGL1 and WebGL2 without extension juggling.
+                vec4 texel = texture2D(tMap, vUv);
                 vec3 color;
                 
                 if (isSingleChannel) {
@@ -1316,11 +1316,6 @@ export class ViewerControls {
 
                 #ifndef APPLY_ADJ_FUNC
                 #define APPLY_ADJ_FUNC
-                // Helper to get correct LOD based on debug mode
-                float getLOD() {
-                    return u_debug_mode > 0.5 ? 1.0 : 0.0;
-                }
-
                 vec3 applyAdj(vec3 color, float b, float c, float s) {
                     vec3 res = color * b;
                     float grey = dot(res, vec3(0.299, 0.587, 0.114));
@@ -1425,7 +1420,7 @@ export class ViewerControls {
             shader.fragmentShader = shader.fragmentShader.replace(
                 normalRegex,
                 `
-                vec3 myNormalTex = texture2D( normalMap, vNormalMapUv, getLOD() ).xyz;
+                vec3 myNormalTex = texture2D( normalMap, vNormalMapUv ).xyz;
                 if (u_debug_mode < 0.5) {
                     myNormalTex = applyAdj(myNormalTex, u_normal_b, u_normal_c, u_normal_s);
                     extraEmissive += getEmissiveMask(myNormalTex, u_normal_mode, u_normal_mcol, u_normal_soft, u_normal_mult, u_normal_bcol, u_normal_inv);
@@ -1434,7 +1429,8 @@ export class ViewerControls {
                 `
             );
             
-            // 8.5 Robust replacements for other texture2D calls to include LOD support
+            // 8.5 Keep standard texture sampling for compatibility with the
+            // WebGL2 shader pipeline used by the viewer.
             const textureMaps = [
                 { id: 'map', uv: 'vMapUv' },
                 { id: 'roughnessMap', uv: 'vRoughnessMapUv' },
@@ -1445,7 +1441,7 @@ export class ViewerControls {
 
             textureMaps.forEach(m => {
                 const regex = new RegExp(`texture2D\\s*\\(\\s*${m.id}\\s*,\\s*${m.uv}\\s*\\)`, 'g');
-                shader.fragmentShader = shader.fragmentShader.replace(regex, `texture2D(${m.id}, ${m.uv}, getLOD())`);
+                shader.fragmentShader = shader.fragmentShader.replace(regex, `texture2D(${m.id}, ${m.uv})`);
             });
 
             // 9. Output Debug Overrides
@@ -1462,7 +1458,7 @@ export class ViewerControls {
                     if (u_debug_mode < 1.5) {
                         // AO - read directly from aoMap
                         #ifdef USE_AOMAP
-                            vec4 aoTexel = texture2D(aoMap, vAoMapUv, getLOD());
+                            vec4 aoTexel = texture2D(aoMap, vAoMapUv);
                             debugCol = vec3(aoTexel.r);
                         #else
                             debugCol = vec3(1.0); // No AO = white
@@ -1471,7 +1467,7 @@ export class ViewerControls {
                     else if (u_debug_mode < 2.5) {
                         // Normal - read directly from normalMap
                         #ifdef USE_NORMALMAP
-                            vec3 normalTexel = texture2D(normalMap, vNormalMapUv, getLOD()).xyz;
+                            vec3 normalTexel = texture2D(normalMap, vNormalMapUv).xyz;
                             debugCol = normalTexel; // Show as-is (0-1 range)
                         #else
                             debugCol = vec3(0.5, 0.5, 1.0); // Flat normal
@@ -1480,7 +1476,7 @@ export class ViewerControls {
                     else if (u_debug_mode < 3.5) {
                         // Albedo - read directly from map (base color)
                         #ifdef USE_MAP
-                            vec4 albedoTexel = texture2D(map, vMapUv, getLOD());
+                            vec4 albedoTexel = texture2D(map, vMapUv);
                             debugCol = albedoTexel.rgb;
                         #else
                             debugCol = diffuseColor.rgb; // Use material color
@@ -1489,7 +1485,7 @@ export class ViewerControls {
                     else if (u_debug_mode < 4.5) {
                         // Metalness - read from metalnessMap (blue channel for GLB)
                         #ifdef USE_METALNESSMAP
-                            vec4 metalnessTexel = texture2D(metalnessMap, vMetalnessMapUv, getLOD());
+                            vec4 metalnessTexel = texture2D(metalnessMap, vMetalnessMapUv);
                             debugCol = vec3(metalnessTexel.b); // Blue channel = metalness
                         #else
                             debugCol = vec3(metalness); // Use material value
@@ -1498,7 +1494,7 @@ export class ViewerControls {
                     else if (u_debug_mode < 5.5) {
                         // Roughness - read from roughnessMap (green channel for GLB)
                         #ifdef USE_ROUGHNESSMAP
-                            vec4 roughnessTexel = texture2D(roughnessMap, vRoughnessMapUv, getLOD());
+                            vec4 roughnessTexel = texture2D(roughnessMap, vRoughnessMapUv);
                             debugCol = vec3(roughnessTexel.g); // Green channel = roughness
                         #else
                             debugCol = vec3(roughness); // Use material value
@@ -1507,7 +1503,7 @@ export class ViewerControls {
                     else if (u_debug_mode < 6.5) {
                         // Emissive - read directly from emissiveMap
                         #ifdef USE_EMISSIVEMAP
-                            vec4 emissiveTexel = texture2D(emissiveMap, vEmissiveMapUv, getLOD());
+                            vec4 emissiveTexel = texture2D(emissiveMap, vEmissiveMapUv);
                             debugCol = emissiveTexel.rgb * emissive;
                         #else
                             debugCol = emissive; // Use material emissive color

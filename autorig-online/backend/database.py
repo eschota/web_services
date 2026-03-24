@@ -180,6 +180,8 @@ class Task(Base):
 
     # Viewer settings (JSON string). Used by task.html to persist viewer state per-task.
     viewer_settings = Column(Text, nullable=True)
+    face_rig_analysis = Column(Text, nullable=True)
+    face_rig_analysis_updated_at = Column(DateTime, nullable=True)
     ga_client_id = Column(String(100), nullable=True)
     
     @property
@@ -268,11 +270,12 @@ class GumroadPurchase(Base):
 
 
 class ApiKey(Base):
-    """User API keys (stored hashed)."""
+    """API keys (stored hashed): either bound to a registered user or an anonymous session."""
     __tablename__ = "api_keys"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    anon_id = Column(String(36), nullable=True, index=True)
     key_prefix = Column(String(16), nullable=False, index=True)
     key_hash = Column(String(64), nullable=False, index=True)  # sha256 hex
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -385,6 +388,57 @@ class SceneLike(Base):
 # =============================================================================
 # Database Initialization
 # =============================================================================
+def _migrate_api_keys_sqlite_for_anon(sync_conn):
+    """Rebuild api_keys so user_id is nullable and anon_id exists (SQLite)."""
+    from sqlalchemy import text
+
+    try:
+        r = sync_conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='api_keys'")
+        )
+        if r.scalar() is None:
+            return
+    except Exception:
+        return
+    r = sync_conn.execute(text("PRAGMA table_info(api_keys)"))
+    cols = [row[1] for row in r.fetchall()]
+    if "anon_id" in cols:
+        return
+
+    sync_conn.execute(text("PRAGMA foreign_keys=OFF"))
+    sync_conn.execute(
+        text(
+            """
+            CREATE TABLE api_keys_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                anon_id VARCHAR(36),
+                key_prefix VARCHAR(16) NOT NULL,
+                key_hash VARCHAR(64) NOT NULL,
+                created_at DATETIME,
+                revoked_at DATETIME,
+                last_used_at DATETIME
+            )
+            """
+        )
+    )
+    sync_conn.execute(
+        text(
+            """
+            INSERT INTO api_keys_new (id, user_id, anon_id, key_prefix, key_hash, created_at, revoked_at, last_used_at)
+            SELECT id, user_id, NULL, key_prefix, key_hash, created_at, revoked_at, last_used_at FROM api_keys
+            """
+        )
+    )
+    sync_conn.execute(text("DROP TABLE api_keys"))
+    sync_conn.execute(text("ALTER TABLE api_keys_new RENAME TO api_keys"))
+    sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_user_id ON api_keys (user_id)"))
+    sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_anon_id ON api_keys (anon_id)"))
+    sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_key_prefix ON api_keys (key_prefix)"))
+    sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_key_hash ON api_keys (key_hash)"))
+    sync_conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
 async def init_db():
     """Create all tables"""
     async with engine.begin() as conn:
@@ -393,6 +447,7 @@ async def init_db():
         # Lightweight sqlite "migration" to add new columns without a migration framework.
         # Safe to run repeatedly (errors are ignored when column already exists).
         if "sqlite" in DATABASE_URL:
+            await conn.run_sync(_migrate_api_keys_sqlite_for_anon)
             async def _try_add_column(sql: str):
                 try:
                     await conn.exec_driver_sql(sql)
@@ -408,6 +463,8 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_settings TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN face_rig_analysis TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN face_rig_analysis_updated_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN ga_client_id VARCHAR(100)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_new_notified_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_done_notified_at DATETIME")

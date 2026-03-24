@@ -97,6 +97,31 @@ from tasks import (
 import re
 import httpx
 
+FACE_RIG_ANALYZE_HEAD_PROXY_URL = os.getenv(
+    "FACE_RIG_ANALYZE_HEAD_PROXY_URL",
+    "https://worker-0001.free3d.online/api/face-rig/analyze-head",
+)
+_face_rig_analysis_locks: Dict[str, asyncio.Lock] = {}
+
+
+def _get_face_rig_analysis_lock(task_id: str) -> asyncio.Lock:
+    lock = _face_rig_analysis_locks.get(task_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _face_rig_analysis_locks[task_id] = lock
+    return lock
+
+
+def _load_face_rig_analysis(task: Task) -> Optional[dict]:
+    raw = getattr(task, "face_rig_analysis", None)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
 # =============================================================================
 # Google Analytics 4 Helper
 # =============================================================================
@@ -534,53 +559,66 @@ ANON_COOKIE = "anon_id"
 SESSION_COOKIE = "session"
 
 
+def _effective_anon_id(request: Request) -> Optional[str]:
+    """Cookie anon session and/or API key bound to anon (Bearer without browser cookie)."""
+    return getattr(request.state, "api_key_anon_id", None) or request.cookies.get(ANON_COOKIE)
+
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> Optional[User]:
-    """Get current authenticated user from session cookie"""
+    """Session cookie user, or user resolved from API key; anon API keys set request.state.api_key_anon_id."""
+    request.state.api_key_anon_id = None
     session_token = request.cookies.get(SESSION_COOKIE)
-    if not session_token:
-        # API Key auth fallback (REST API usage)
-        api_key = request.headers.get("x-api-key")
-        auth = request.headers.get("authorization") or ""
-        if not api_key and auth.lower().startswith("bearer "):
-            api_key = auth.split(" ", 1)[1].strip()
+    if session_token:
+        return await get_user_by_session(db, session_token)
 
-        if not api_key:
-            return None
+    api_key = request.headers.get("x-api-key")
+    auth = request.headers.get("authorization") or ""
+    if not api_key and auth.lower().startswith("bearer "):
+        api_key = auth.split(" ", 1)[1].strip()
 
-        # Expected format: ar_<prefix>_<secret>
-        prefix = None
-        if api_key.startswith("ar_") and api_key.count("_") >= 2:
-            try:
-                prefix = api_key.split("_", 2)[1]
-            except Exception:
-                prefix = None
-        if not prefix:
-            return None
+    if not api_key:
+        return None
 
-        key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-        krs = await db.execute(
-            select(ApiKey).where(
-                ApiKey.key_prefix == prefix,
-                ApiKey.revoked_at.is_(None)
-            )
+    prefix = None
+    if api_key.startswith("ar_") and api_key.count("_") >= 2:
+        try:
+            prefix = api_key.split("_", 2)[1]
+        except Exception:
+            prefix = None
+    if not prefix:
+        return None
+
+    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    krs = await db.execute(
+        select(ApiKey).where(
+            ApiKey.key_prefix == prefix,
+            ApiKey.revoked_at.is_(None)
         )
-        key_rec = krs.scalar_one_or_none()
-        if not key_rec:
-            return None
-        if not hmac.compare_digest(key_rec.key_hash, key_hash):
-            return None
+    )
+    key_rec = krs.scalar_one_or_none()
+    if not key_rec:
+        return None
+    if not hmac.compare_digest(key_rec.key_hash, key_hash):
+        return None
 
+    key_rec.last_used_at = datetime.utcnow()
+    if key_rec.user_id is not None:
         urs = await db.execute(select(User).where(User.id == key_rec.user_id))
         user = urs.scalar_one_or_none()
         if user:
-            key_rec.last_used_at = datetime.utcnow()
             await db.commit()
         return user
 
-    return await get_user_by_session(db, session_token)
+    if key_rec.anon_id:
+        request.state.api_key_anon_id = key_rec.anon_id
+        await db.commit()
+        return None
+
+    await db.commit()
+    return None
 
 
 async def get_anon_session(
@@ -1237,12 +1275,17 @@ def _make_api_key() -> tuple[str, str, str]:
 
 @app.get("/api/user/api-keys", response_model=ApiKeyListResponse)
 async def api_list_api_keys(
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    rs = await db.execute(select(ApiKey).where(ApiKey.user_id == user.id).order_by(ApiKey.created_at.desc()))
+    if user:
+        rs = await db.execute(select(ApiKey).where(ApiKey.user_id == user.id).order_by(ApiKey.created_at.desc()))
+    else:
+        anon_id = request.cookies.get(ANON_COOKIE)
+        if not anon_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        rs = await db.execute(select(ApiKey).where(ApiKey.anon_id == anon_id).order_by(ApiKey.created_at.desc()))
     keys = rs.scalars().all()
     return ApiKeyListResponse(
         keys=[
@@ -1260,23 +1303,31 @@ async def api_list_api_keys(
 
 @app.post("/api/user/api-keys", response_model=ApiKeyCreateResponse)
 async def api_create_api_key(
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    # Revoke existing active keys (keep history)
-    rs = await db.execute(
-        select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.revoked_at.is_(None))
-    )
+    if user:
+        rs = await db.execute(
+            select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.revoked_at.is_(None))
+        )
+    else:
+        anon_id = request.cookies.get(ANON_COOKIE)
+        if not anon_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        rs = await db.execute(
+            select(ApiKey).where(ApiKey.anon_id == anon_id, ApiKey.revoked_at.is_(None))
+        )
     active = rs.scalars().all()
     now = datetime.utcnow()
     for k in active:
         k.revoked_at = now
 
     api_key, prefix, key_hash = _make_api_key()
-    rec = ApiKey(user_id=user.id, key_prefix=prefix, key_hash=key_hash)
+    if user:
+        rec = ApiKey(user_id=user.id, anon_id=None, key_prefix=prefix, key_hash=key_hash)
+    else:
+        rec = ApiKey(user_id=None, anon_id=anon_id, key_prefix=prefix, key_hash=key_hash)
     db.add(rec)
     await db.commit()
     await db.refresh(rec)
@@ -1296,12 +1347,17 @@ async def api_create_api_key(
 @app.post("/api/user/api-keys/{key_id}/revoke", status_code=200)
 async def api_revoke_api_key(
     key_id: int,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    rs = await db.execute(select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == user.id))
+    if user:
+        rs = await db.execute(select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == user.id))
+    else:
+        anon_id = request.cookies.get(ANON_COOKIE)
+        if not anon_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        rs = await db.execute(select(ApiKey).where(ApiKey.id == key_id, ApiKey.anon_id == anon_id))
     rec = rs.scalar_one_or_none()
     if not rec:
         raise HTTPException(status_code=404, detail="API key not found")
@@ -1411,14 +1467,15 @@ async def api_create_task(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new conversion task"""
-    # Get anon session
-    anon_session = await get_anon_session(request, response, db)
-    
-    # Task creation is free for everyone
+    api_key_anon = getattr(request.state, "api_key_anon_id", None)
     if user:
         owner_type = "user"
         owner_id = user.email
+    elif api_key_anon:
+        owner_type = "anon"
+        owner_id = api_key_anon
     else:
+        anon_session = await get_anon_session(request, response, db)
         owner_type = "anon"
         owner_id = anon_session.anon_id
     
@@ -4731,19 +4788,24 @@ async def api_proxy_thumb(
         raise HTTPException(status_code=404, detail="Thumbnail not available")
     
     # Download and return the image (not streaming - more compatible with HTTP/2)
-    async with httpx.AsyncClient() as client:
-        response = await client.get(poster_url, timeout=30.0, follow_redirects=True)
-        if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Thumbnail not available")
-        
-        return Response(
-            content=response.content,
-            media_type="image/jpeg",
-            headers={
-                "Cache-Control": "public, max-age=86400",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(poster_url, timeout=30.0, follow_redirects=True)
+            if response.status_code != 200:
+                raise HTTPException(status_code=404, detail="Thumbnail not available")
+            
+            return Response(
+                content=response.content,
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+    except httpx.TimeoutException as error:
+        raise HTTPException(status_code=504, detail="Thumbnail upstream timed out") from error
+    except httpx.RequestError as error:
+        raise HTTPException(status_code=502, detail=f"Thumbnail upstream request failed: {error}") from error
 
 
 # =============================================================================
@@ -5191,6 +5253,122 @@ async def api_set_task_viewer_settings(
     task.viewer_settings = json.dumps(settings, ensure_ascii=False)
     await db.commit()
     return {"ok": True}
+
+
+@app.get("/api/task/{task_id}/face-rig/analysis")
+async def api_get_face_rig_analysis(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    analysis = _load_face_rig_analysis(task)
+    return {
+        "ready": bool(analysis),
+        "analysis": analysis,
+        "updated_at": task.face_rig_analysis_updated_at.isoformat() if getattr(task, "face_rig_analysis_updated_at", None) else None,
+    }
+
+
+@app.post("/api/task/{task_id}/face-rig/analyze-head")
+async def api_proxy_face_rig_analyze_head(
+    task_id: str,
+    metadata: str = Form(...),
+    force: str = Form("0"),
+    front_rgb_pbr: UploadFile = File(...),
+    front_depth: UploadFile = File(...),
+    front_alpha: UploadFile = File(...),
+    front_albedo: Optional[UploadFile] = File(None),
+    front_normal: Optional[UploadFile] = File(None),
+    left_3q_rgb_pbr: Optional[UploadFile] = File(None),
+    right_3q_rgb_pbr: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Proxy face-rig head analysis requests to the external HTTPS worker."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    force_refresh = str(force).strip().lower() in {"1", "true", "yes", "on"}
+
+    if not force_refresh:
+        cached = _load_face_rig_analysis(task)
+        if cached:
+            return JSONResponse(content=cached, headers={"Cache-Control": "no-store", "X-Face-Rig-Cache": "hit"})
+
+    uploads = {
+        "front_rgb_pbr": front_rgb_pbr,
+        "front_depth": front_depth,
+        "front_alpha": front_alpha,
+        "front_albedo": front_albedo,
+        "front_normal": front_normal,
+        "left_3q_rgb_pbr": left_3q_rgb_pbr,
+        "right_3q_rgb_pbr": right_3q_rgb_pbr,
+    }
+
+    multipart_files = []
+    lock = _get_face_rig_analysis_lock(task_id)
+    async with lock:
+        await db.refresh(task)
+        if not force_refresh:
+            cached = _load_face_rig_analysis(task)
+            if cached:
+                for upload in uploads.values():
+                    if upload:
+                        await upload.close()
+                return JSONResponse(content=cached, headers={"Cache-Control": "no-store", "X-Face-Rig-Cache": "hit"})
+
+        try:
+            for field_name, upload in uploads.items():
+                if not upload:
+                    continue
+                content = await upload.read()
+                multipart_files.append((
+                    field_name,
+                    (
+                        upload.filename or f"{field_name}.png",
+                        content,
+                        upload.content_type or "application/octet-stream",
+                    ),
+                ))
+
+            timeout = httpx.Timeout(connect=20.0, read=240.0, write=240.0, pool=20.0)
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                upstream = await client.post(
+                    FACE_RIG_ANALYZE_HEAD_PROXY_URL,
+                    data={"metadata": metadata},
+                    files=multipart_files,
+                )
+        except httpx.RequestError as error:
+            raise HTTPException(status_code=502, detail=f"Face rig worker request failed: {error}") from error
+        finally:
+            for upload in uploads.values():
+                if upload:
+                    await upload.close()
+
+        content_type = upstream.headers.get("content-type", "application/json")
+        if upstream.status_code == 200 and "application/json" in content_type:
+            try:
+                cached_payload = upstream.json()
+                task.face_rig_analysis = json.dumps(cached_payload, ensure_ascii=False)
+                task.face_rig_analysis_updated_at = datetime.utcnow()
+                await db.commit()
+                return JSONResponse(
+                    content=cached_payload,
+                    headers={"Cache-Control": "no-store", "X-Face-Rig-Cache": "miss"},
+                )
+            except Exception as error:
+                print(f"[FaceRig] Failed to cache analysis for task {task_id}: {error}")
+
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            headers={
+                "Content-Type": content_type,
+                "Cache-Control": "no-store",
+                "X-Face-Rig-Cache": "bypass" if force_refresh else "miss",
+            },
+        )
 
 
 # =============================================================================
@@ -5768,6 +5946,12 @@ async def buy_credits_page():
     return FileResponse(str(STATIC_DIR / "buy-credits.html"))
 
 
+@app.get("/developers")
+async def developers_page():
+    """API documentation and key management for developers."""
+    return FileResponse(str(STATIC_DIR / "developers.html"))
+
+
 @app.get("/payment/success")
 async def payment_success_page():
     """Serve payment success info page (no credit logic here)."""
@@ -6012,13 +6196,11 @@ async def bing_verification():
 async def create_scene(
     request: SceneCreateRequest,
     req: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new scene from one or two tasks"""
-    # Get user/anon info
-    user = await get_user_by_session(req, db)
-    anon_id = req.cookies.get("anon_id")
-    
+    anon_id = _effective_anon_id(req)
     if user:
         owner_type = "user"
         owner_id = user.email
@@ -6100,6 +6282,7 @@ async def create_scene(
 async def get_scene(
     scene_id: str,
     req: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get scene data"""
@@ -6109,8 +6292,7 @@ async def get_scene(
         raise HTTPException(status_code=404, detail="Scene not found")
     
     # Check ownership for private scenes
-    user = await get_user_by_session(req, db)
-    anon_id = req.cookies.get("anon_id")
+    anon_id = _effective_anon_id(req)
     
     is_owner = False
     if scene.owner_type == "user" and user and user.email == scene.owner_id:
@@ -6169,6 +6351,7 @@ async def update_scene(
     scene_id: str,
     request: SceneUpdateRequest,
     req: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Update scene transforms, hierarchy, or metadata"""
@@ -6178,8 +6361,7 @@ async def update_scene(
         raise HTTPException(status_code=404, detail="Scene not found")
     
     # Check ownership
-    user = await get_user_by_session(req, db)
-    anon_id = req.cookies.get("anon_id")
+    anon_id = _effective_anon_id(req)
     
     is_owner = False
     if scene.owner_type == "user" and user and user.email == scene.owner_id:
@@ -6241,6 +6423,7 @@ async def add_model_to_scene(
     scene_id: str,
     request: SceneAddModelRequest,
     req: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Add a model to an existing scene"""
@@ -6250,8 +6433,7 @@ async def add_model_to_scene(
         raise HTTPException(status_code=404, detail="Scene not found")
     
     # Check ownership
-    user = await get_user_by_session(req, db)
-    anon_id = req.cookies.get("anon_id")
+    anon_id = _effective_anon_id(req)
     
     is_owner = False
     if scene.owner_type == "user" and user and user.email == scene.owner_id:
@@ -6330,6 +6512,7 @@ async def remove_model_from_scene(
     scene_id: str,
     task_id: str,
     req: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Remove a model from a scene"""
@@ -6339,8 +6522,7 @@ async def remove_model_from_scene(
         raise HTTPException(status_code=404, detail="Scene not found")
     
     # Check ownership
-    user = await get_user_by_session(req, db)
-    anon_id = req.cookies.get("anon_id")
+    anon_id = _effective_anon_id(req)
     
     is_owner = False
     if scene.owner_type == "user" and user and user.email == scene.owner_id:
@@ -6376,10 +6558,10 @@ async def remove_model_from_scene(
 async def like_scene(
     scene_id: str,
     req: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Like/unlike a scene"""
-    user = await get_user_by_session(req, db)
     if not user:
         raise HTTPException(status_code=401, detail="Login required to like scenes")
     
@@ -6425,11 +6607,11 @@ async def list_scenes(
     page: int = 1,
     per_page: int = 20,
     public_only: bool = False,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """List user's scenes or public scenes"""
-    user = await get_user_by_session(req, db)
-    anon_id = req.cookies.get("anon_id")
+    anon_id = _effective_anon_id(req)
     
     from sqlalchemy import func, desc
     
@@ -6479,6 +6661,7 @@ async def list_scenes(
 async def delete_scene(
     scene_id: str,
     req: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a scene"""
@@ -6488,8 +6671,7 @@ async def delete_scene(
         raise HTTPException(status_code=404, detail="Scene not found")
     
     # Check ownership
-    user = await get_user_by_session(req, db)
-    anon_id = req.cookies.get("anon_id")
+    anon_id = _effective_anon_id(req)
     
     is_owner = False
     if scene.owner_type == "user" and user and user.email == scene.owner_id:

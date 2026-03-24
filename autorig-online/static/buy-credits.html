@@ -398,7 +398,7 @@
             listEl.textContent = t('api_access_loading');
             const resp = await fetch('/api/user/api-keys');
             if (!resp.ok) {
-                listEl.textContent = t('api_access_login_required');
+                listEl.textContent = resp.status === 401 ? t('api_access_need_cookie') : t('api_access_login_required');
                 return;
             }
             const data = await resp.json();
@@ -431,8 +431,7 @@
         async function generateApiKey() {
             const resp = await fetch('/api/user/api-keys', { method: 'POST' });
             if (!resp.ok) {
-                alert(t('api_access_login_required'));
-                window.location.href = '/auth/login';
+                alert(resp.status === 401 ? t('api_access_need_cookie') : t('api_access_login_required'));
                 return;
             }
             const data = await resp.json();
