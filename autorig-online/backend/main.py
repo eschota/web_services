@@ -40,6 +40,7 @@ from config import (
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
     NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES,
     GALLERY_UPSTREAM_PURGE_BATCH,
+    GALLERY_UPSTREAM_PURGE_ROUNDS,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
 )
@@ -265,6 +266,46 @@ def _atomic_write_json_file(path: str, data: dict) -> None:
 # =============================================================================
 background_task_running = False
 background_worker_cycle_count = 0  # Track cycles for periodic stale task checks
+
+
+def _try_acquire_gallery_purge_lock():
+    """
+    Exclusive non-blocking lock so only one uvicorn worker runs gallery DB purge at a time
+    (--workers N would otherwise execute N purges in parallel).
+    """
+    import fcntl
+
+    path = os.getenv("GALLERY_PURGE_LOCK_PATH", "/var/autorig/locks/gallery_purge.lock")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except Exception:
+        path = "/tmp/autorig_gallery_purge.lock"
+    f = None
+    try:
+        f = open(path, "a+")
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return f
+    except (BlockingIOError, OSError):
+        if f is not None:
+            try:
+                f.close()
+            except Exception:
+                pass
+        return None
+
+
+def _release_gallery_purge_lock(lock_file) -> None:
+    if lock_file is None:
+        return
+    import fcntl
+
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
+    except Exception:
+        pass
+
+
 STALLED_ALERT_REPEAT_SECONDS = int(os.getenv("STALLED_ALERT_REPEAT_SECONDS", "3600"))
 STALLED_TASK_THRESHOLD = int(os.getenv("STALLED_TASK_THRESHOLD", "2"))
 STALLED_RECOVERY_HEALTHY_CYCLES = int(os.getenv("STALLED_RECOVERY_HEALTHY_CYCLES", "3"))
@@ -437,31 +478,41 @@ async def background_task_updater():
                         print(f"[Background Worker] Disk cleanup error: {e}")
 
                 # =============================================================
-                # 2.6. Gallery: purge rows whose poster/video 404 on worker (JSON paths still present)
+                # 2.6–2.7 Gallery DB cleanup (single-worker lock; multi-round upstream)
                 # =============================================================
-                try:
-                    ur = await purge_gallery_upstream_dead_tasks(db, batch=GALLERY_UPSTREAM_PURGE_BATCH)
-                    if ur["deleted"] > 0:
-                        print(
-                            f"[Background Worker] Gallery upstream purge: deleted {ur['deleted']} "
-                            f"(scanned {ur['scanned']})"
-                        )
-                except Exception as e:
-                    print(f"[Background Worker] Gallery upstream purge error: {e}")
-
-                # =============================================================
-                # 2.7. Purge terminal tasks with no poster filename in JSON (no HTTP)
-                # =============================================================
-                if background_worker_cycle_count % NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES == 0:
+                lock_f = _try_acquire_gallery_purge_lock()
+                if lock_f is not None:
                     try:
-                        pr = await purge_tasks_without_poster_and_video(db)
-                        if pr["deleted"] > 0:
+                        upstream_deleted = 0
+                        for _round in range(GALLERY_UPSTREAM_PURGE_ROUNDS):
+                            try:
+                                ur = await purge_gallery_upstream_dead_tasks(
+                                    db, batch=GALLERY_UPSTREAM_PURGE_BATCH
+                                )
+                            except Exception as e:
+                                print(f"[Background Worker] Gallery upstream purge error: {e}")
+                                break
+                            upstream_deleted += ur["deleted"]
+                            if ur["scanned"] == 0 or ur["deleted"] == 0:
+                                break
+                        if upstream_deleted > 0:
                             print(
-                                f"[Background Worker] Purged {pr['deleted']} stale task(s) "
-                                f"(no poster paths in JSON); scanned {pr['scanned']}"
+                                f"[Background Worker] Gallery upstream purge: deleted {upstream_deleted} "
+                                f"task(s) in up to {GALLERY_UPSTREAM_PURGE_ROUNDS} round(s)"
                             )
-                    except Exception as e:
-                        print(f"[Background Worker] No-assets purge error: {e}")
+
+                        if background_worker_cycle_count % NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES == 0:
+                            try:
+                                pr = await purge_tasks_without_poster_and_video(db)
+                                if pr["deleted"] > 0:
+                                    print(
+                                        f"[Background Worker] Purged {pr['deleted']} stale task(s) "
+                                        f"(no poster paths in JSON); scanned {pr['scanned']}"
+                                    )
+                            except Exception as e:
+                                print(f"[Background Worker] No-assets purge error: {e}")
+                    finally:
+                        _release_gallery_purge_lock(lock_f)
 
                 # =============================================================
                 # 3. Update progress for all processing tasks

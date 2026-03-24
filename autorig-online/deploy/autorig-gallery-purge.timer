@@ -1,0 +1,12 @@
+[Unit]
+Description=Run AutoRig gallery/task DB cleanup every 15 minutes
+
+[Timer]
+Unit=autorig-gallery-purge.service
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

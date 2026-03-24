@@ -75,3 +75,19 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo systemctl status autorig --no-pager
 curl -sI https://autorig.online/developers | head -5
 ```
+
+## Автоочистка БД (галерея / мёртвые таски на воркерах)
+
+В **`main.py`** фоновый воркер каждые ~30 с (с блокировкой между процессами uvicorn) чистит: строки без путей к постеру в JSON, и задачи, у которых постер/видео **404** на воркере. Несколько раундов подряд: `GALLERY_UPSTREAM_PURGE_ROUNDS` × `GALLERY_UPSTREAM_PURGE_BATCH` за цикл.
+
+Дополнительно на проде можно включить **timer** (раз в 15 минут тот же код через отдельный процесс):
+
+```bash
+sudo cp /root/autorig-online/deploy/autorig-gallery-purge.service /etc/systemd/system/
+sudo cp /root/autorig-online/deploy/autorig-gallery-purge.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now autorig-gallery-purge.timer
+```
+
+Ручной запуск: `sudo systemctl start autorig-gallery-purge.service` или  
+`/opt/autorig-online/venv/bin/python /opt/autorig-online/backend/scripts/run_task_cleanup.py`.

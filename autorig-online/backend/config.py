@@ -139,6 +139,8 @@ NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES = int(
 
 # HEAD/GET probe of worker URLs: gallery rows with deleted worker files still have JSON paths — purge in batches
 GALLERY_UPSTREAM_PURGE_BATCH = int(os.getenv("GALLERY_UPSTREAM_PURGE_BATCH", "80"))
+# How many upstream purge rounds per background cycle (each round processes up to BATCH rows)
+GALLERY_UPSTREAM_PURGE_ROUNDS = int(os.getenv("GALLERY_UPSTREAM_PURGE_ROUNDS", "25"))
 
 # =============================================================================
 # Google Analytics 4 (Measurement Protocol)
