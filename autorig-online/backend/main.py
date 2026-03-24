@@ -1458,15 +1458,17 @@ async def delete_feedback(
 async def api_create_task(
     request: Request,
     response: Response,
-    source: str = Form(...),
-    input_url: Optional[str] = Form(None),
-    type: str = Form("t_pose"),
-    ga_client_id: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new conversion task"""
+    """
+    Create a new conversion task.
+
+    - ``application/json``: ``{"input_url": "https://..."}`` is enough; ``source`` defaults to ``link``,
+      ``type`` to ``t_pose``. Optional: ``source``, ``type``, ``ga_client_id``.
+    - ``multipart/form-data`` / ``application/x-www-form-urlencoded``: same fields as before;
+      ``source`` defaults to ``link`` if omitted. Use ``source=upload`` + ``file`` for uploads.
+    """
     api_key_anon = getattr(request.state, "api_key_anon_id", None)
     if user:
         owner_type = "user"
@@ -1478,7 +1480,49 @@ async def api_create_task(
         anon_session = await get_anon_session(request, response, db)
         owner_type = "anon"
         owner_id = anon_session.anon_id
-    
+
+    content_type = (request.headers.get("content-type") or "").lower()
+    source = "link"
+    input_url: Optional[str] = None
+    input_type = "t_pose"
+    ga_client_id: Optional[str] = None
+    file: Optional[UploadFile] = None
+
+    if "application/json" in content_type:
+        try:
+            data = await request.json()
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="JSON body must be an object")
+        raw_source = data.get("source")
+        source = str(raw_source).strip() if raw_source not in (None, "") else "link"
+        raw_url = data.get("input_url")
+        if raw_url is not None and str(raw_url).strip():
+            input_url = str(raw_url).strip()
+        raw_t = data.get("type")
+        if raw_t is not None and str(raw_t).strip():
+            input_type = str(raw_t).strip()
+        raw_ga = data.get("ga_client_id")
+        if raw_ga is not None:
+            ga_client_id = str(raw_ga)
+    else:
+        form = await request.form()
+        raw_source = form.get("source")
+        source = str(raw_source).strip() if raw_source not in (None, "") else "link"
+        raw_url = form.get("input_url")
+        if raw_url is not None and str(raw_url).strip():
+            input_url = str(raw_url).strip()
+        raw_t = form.get("type")
+        if raw_t is not None and str(raw_t).strip():
+            input_type = str(raw_t).strip()
+        raw_ga = form.get("ga_client_id")
+        if raw_ga is not None:
+            ga_client_id = str(raw_ga)
+        fu = form.get("file")
+        if isinstance(fu, UploadFile):
+            file = fu
+
     # Handle file upload
     final_url = input_url
     if source == "upload" and file:
@@ -1522,7 +1566,7 @@ async def api_create_task(
     
     # Create task
     task, error = await create_conversion_task(
-        db, final_url, type, owner_type, owner_id
+        db, final_url, input_type, owner_type, owner_id
     )
     
     if error and not task:
@@ -1537,7 +1581,7 @@ async def api_create_task(
         asyncio.create_task(send_ga4_event(
             ga_client_id, 
             "task_created", 
-            {"source": source, "type": type}
+            {"source": source, "type": input_type}
         ))
     
     # Try to dispatch immediately to a free worker (don't wait for background cycle)

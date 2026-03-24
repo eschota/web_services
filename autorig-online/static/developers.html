@@ -133,9 +133,12 @@
                 <p style="color: var(--text-muted); font-size: 0.9rem;" data-i18n="developers_examples_note">Replace TASK_ID and YOUR_API_KEY. For link-based input, use a publicly reachable URL to your GLB/FBX/OBJ.</p>
                 <pre style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; line-height: 1.5;"><code>curl -X POST "$BASE/api/task/create" \
   -H "Authorization: Bearer YOUR_API_KEY" \
-  -F "source=link" \
-  -F "input_url=https://example.com/model.glb" \
-  -F "type=t_pose"
+  -H "Content-Type: application/json" \
+  -d '{"input_url":"https://example.com/model.glb"}'
+
+curl -X POST "$BASE/api/task/create" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "input_url=https://example.com/model.glb"
 
 curl -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID"
 
@@ -236,7 +239,7 @@ curl -o out.glb -H "Authorization: Bearer YOUR_API_KEY" "$BASE/api/task/TASK_ID/
                     keyFormat: "ar_<prefix>_<secret>"
                 },
                 workflow: [
-                    "POST /api/task/create (multipart form: source=link|upload, input_url, type=t_pose, optional file)",
+                    "POST /api/task/create — Content-Type: application/json with {\"input_url\":\"...\"} (defaults: source=link, type=t_pose); or multipart/form-data with input_url, optional file for upload",
                     "GET /api/task/{task_id} until status is done or error",
                     "GET /api/task/{task_id}/cached-files for file list",
                     "Download GLB/FBX via GET /api/task/{task_id}/prepared.glb, animations.glb, animations.fbx, model.glb"
