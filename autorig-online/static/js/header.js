@@ -108,10 +108,12 @@ function renderSiteHeader(options = {}) {
                         <span data-i18n="btn_login">Sign in with Google</span>
                     </a>
                     
-                    <!-- User Info (hidden when not logged in) -->
+                    <!-- User Info (hidden when not logged in); avatar+name → /dashboard -->
                     <div id="user-info" class="hidden flex items-center gap-2">
-                        <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
-                        <span class="user-name"></span>
+                        <a href="/dashboard" class="user-account-hit" title="Dashboard">
+                            <img class="user-avatar" src="" alt="" style="width:32px;height:32px;border-radius:50%;">
+                            <span class="user-name"></span>
+                        </a>
                         <a href="/auth/logout" class="btn btn-ghost" data-i18n="btn_logout">Sign out</a>
                     </div>
                 </div>

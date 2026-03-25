@@ -14,12 +14,16 @@ if [[ ! -f "${REPO_ROOT}/backend/main.py" ]]; then
   exit 1
 fi
 
-sudo mkdir -p "${PROD_ROOT}/backend" "${PROD_ROOT}/static/i18n"
+sudo mkdir -p "${PROD_ROOT}/backend" "${PROD_ROOT}/static/i18n" "${PROD_ROOT}/static/js" "${PROD_ROOT}/static/css"
 
 sudo cp -a "${REPO_ROOT}/backend/"*.py "${PROD_ROOT}/backend/"
 sudo cp -a "${REPO_ROOT}/static/developers.html" "${PROD_ROOT}/static/"
+sudo cp -a "${REPO_ROOT}/static/dashboard.html" "${PROD_ROOT}/static/"
+sudo cp -a "${REPO_ROOT}/static/task.html" "${PROD_ROOT}/static/"
+sudo cp -a "${REPO_ROOT}/static/js/header.js" "${REPO_ROOT}/static/js/footer.js" "${REPO_ROOT}/static/js/site-layout.js" "${PROD_ROOT}/static/js/"
+sudo cp -a "${REPO_ROOT}/static/css/styles.css" "${PROD_ROOT}/static/css/"
 sudo cp -a "${REPO_ROOT}/static/i18n/"*.json "${PROD_ROOT}/static/i18n/"
 
 sudo systemctl restart autorig
 
-echo "OK: backend *.py + static/developers.html + i18n → ${PROD_ROOT}; autorig restarted."
+echo "OK: backend *.py + static (task, dashboard, layout JS, styles, developers, i18n) → ${PROD_ROOT}; autorig restarted."

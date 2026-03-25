@@ -6,7 +6,7 @@ from typing import Optional
 import json
 
 from sqlalchemy import (
-    Column, String, Integer, BigInteger, Boolean, DateTime, Text,
+    Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
     UniqueConstraint, create_engine, event
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -57,6 +57,7 @@ class User(Base):
     balance_credits = Column(Integer, default=0)
     total_tasks = Column(Integer, default=0)
     youtube_bonus_received = Column(Boolean, default=False)
+    email_task_completed = Column(Boolean, default=True, nullable=False)  # task-ready emails; False = unsubscribed
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, default=datetime.utcnow)
     
@@ -185,6 +186,18 @@ class Task(Base):
     ga_client_id = Column(String(100), nullable=True)
     created_via_api = Column(Boolean, default=False)  # True if POST /api/task/create used API key auth
 
+    # Server-side NSFW classification from task poster URL (ready_urls); not client-controlled.
+    content_rating = Column(String(20), nullable=False, default="unknown")  # safe | suggestive | adult | unknown
+    content_score = Column(Float, nullable=True)  # 0..1 composite from detector
+    content_classified_at = Column(DateTime, nullable=True)
+    content_classifier_version = Column(String(64), nullable=True)
+
+    # YouTube auto-upload (server uses OAuth refresh token; see youtube_upload.py)
+    youtube_video_id = Column(String(64), nullable=True)
+    youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
+    youtube_upload_error = Column(Text, nullable=True)
+    youtube_uploaded_at = Column(DateTime, nullable=True)
+
     @property
     def output_urls(self) -> list:
         return json.loads(self._output_urls) if self._output_urls else []
@@ -206,6 +219,15 @@ class Task(Base):
         if self.total_count == 0:
             return 0
         return int((self.ready_count / self.total_count) * 100)
+
+
+class YoutubeCredentials(Base):
+    """Single-row store for YouTube channel OAuth (refresh token for uploads)."""
+    __tablename__ = "youtube_credentials"
+
+    id = Column(Integer, primary_key=True)  # always 1
+    refresh_token = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class WorkerEndpoint(Base):
@@ -458,6 +480,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN gumroad_email VARCHAR(255)")
             await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
@@ -470,6 +493,14 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN created_via_api BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_new_notified_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN telegram_done_notified_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN content_rating VARCHAR(20) DEFAULT 'unknown'")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN content_score REAL")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN content_classified_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN content_classifier_version VARCHAR(64)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_video_id VARCHAR(64)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_upload_status VARCHAR(32)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_upload_error TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_uploaded_at DATETIME")
             
             # Scene table migrations
             await _try_add_column("ALTER TABLE scenes ADD COLUMN is_public BOOLEAN DEFAULT 0")
@@ -620,6 +651,42 @@ async def init_db():
                 )
             except Exception:
                 pass
+
+        else:
+            # PostgreSQL (and others): create_all does not ALTER existing tables.
+            async def _try_add_column_any(sql: str):
+                try:
+                    await conn.exec_driver_sql(sql)
+                except Exception:
+                    pass
+
+            await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_task_completed BOOLEAN DEFAULT TRUE NOT NULL"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_rating VARCHAR(20) NOT NULL DEFAULT 'unknown'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_score DOUBLE PRECISION"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_classified_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_classifier_version VARCHAR(64)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_video_id VARCHAR(64)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_upload_status VARCHAR(32)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_upload_error TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_uploaded_at TIMESTAMP"
+            )
 
 
 async def get_db():

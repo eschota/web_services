@@ -367,6 +367,45 @@ async def broadcast_purchase_intent(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def broadcast_full_bundle_download(task_id: str, user_email: str | None = None) -> None:
+    """Notify admins when a user downloads the full-task ZIP bundle (archive endpoint)."""
+    print(f"[Telegram] broadcast_full_bundle_download task={task_id} user={user_email}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping full bundle download notification")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    url = _task_url(task_id)
+    actor = user_email or "unknown"
+    text = (
+        f'📦 <b>Full bundle download</b>\n'
+        f'🔗 <a href="{html.escape(url)}">Task</a> | 👤 {html.escape(actor)}'
+    )
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False,
+            ))
+            if result:
+                print(f"[Telegram] Full bundle download notice sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
 async def broadcast_credits_purchase_click(
     package: str,
     price: str,
@@ -403,6 +442,62 @@ async def broadcast_credits_purchase_click(
             ))
             if result:
                 print(f"[Telegram] Credits purchase click sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
+async def broadcast_youtube_token_refresh_needed(detail: str = "") -> None:
+    """
+    Notify admins that YouTube OAuth refresh token must be renewed (invalid_grant / revoked).
+    At most once per calendar day per chat (reserve_notification).
+    """
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping YouTube OAuth refresh notice")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    day = datetime.utcnow().strftime("%Y-%m-%d")
+    oauth_url = f"{APP_URL.rstrip('/')}/api/admin/youtube/oauth/start"
+    detail_line = ""
+    if detail:
+        d = detail.strip().replace("\n", " ")
+        if len(d) > 400:
+            d = d[:400] + "…"
+        detail_line = f"\n<code>{html.escape(d)}</code>"
+
+    text = (
+        "⚠️ <b>YouTube: нужно обновить токен</b>\n"
+        "Refresh-токен недействителен или отозван — автозагрузка роликов на канал не работает."
+        f"{detail_line}\n"
+        f'→ <a href="{html.escape(oauth_url)}">Подключить канал заново</a>'
+    )
+
+    bot = Bot(token=token)
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            reserved = await reserve_notification(chat_id, "youtube_token", f"refresh_{day}")
+            if not reserved:
+                print(f"[Telegram] Skip duplicate YouTube token notice chat={chat_id} day={day}")
+                return
+            result = await _send_with_retry(
+                lambda cid=chat_id: bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=False,
+                )
+            )
+            if result:
+                print(f"[Telegram] YouTube token refresh notice sent to chat {chat_id}")
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 

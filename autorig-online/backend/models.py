@@ -60,6 +60,9 @@ class TaskStatusResponse(BaseModel):
     error_message: Optional[str] = None
     # GUID for direct file access (e.g., ZIP download)
     guid: Optional[str] = None
+    # Server-side poster NSFW classification (see content_moderation.py)
+    content_rating: Optional[str] = None  # safe | suggestive | adult | unknown
+    content_score: Optional[float] = None
     created_at: datetime
     updated_at: datetime
 
@@ -73,6 +76,7 @@ class TaskHistoryItem(BaseModel):
     input_url: Optional[str]
     video_ready: bool
     thumbnail_url: Optional[str] = None
+    content_rating: Optional[str] = None
 
 
 class TaskHistoryResponse(BaseModel):
@@ -96,6 +100,12 @@ class UserInfo(BaseModel):
     total_tasks: int
     youtube_bonus_received: bool
     is_admin: bool
+    email_task_completed: bool = True  # receive task-ready emails
+
+
+class UserNotificationSettingsUpdate(BaseModel):
+    """PATCH /api/user/notification-settings"""
+    email_task_completed: bool
 
 
 class AnonInfo(BaseModel):
@@ -182,6 +192,7 @@ class AdminUserTaskItem(BaseModel):
     created_at: datetime
     updated_at: datetime
     input_url: Optional[str] = None
+    content_rating: Optional[str] = None
 
 
 class AdminUserTasksResponse(BaseModel):
@@ -212,6 +223,9 @@ class AdminTaskListItem(BaseModel):
     input_url: Optional[str] = None
     worker_api: Optional[str] = None
     video_ready: bool = False
+    content_rating: Optional[str] = None
+    content_score: Optional[float] = None
+    content_classifier_version: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -268,6 +282,7 @@ class GalleryItem(BaseModel):
     author_email: Optional[str] = None  # Owner email if owner_type == "user"
     author_nickname: Optional[str] = None  # Preferred display name (fallback to email)
     version: int = 1  # restart_count + 1
+    content_rating: Optional[str] = None
 
 
 class GalleryResponse(BaseModel):
@@ -296,6 +311,7 @@ class TaskCardInfo(BaseModel):
     author_nickname: Optional[str] = None
     time_ago: str = ""
     version: int = 1  # restart_count + 1
+    content_rating: Optional[str] = None
 
 
 # =============================================================================

@@ -60,7 +60,8 @@
     
     --text-primary: #f0f0f5;
     --text-secondary: #a0a0b0;
-    --text-muted: #606070;
+    /* Was #606070 — too dark on --bg-primary; keep below secondary for hierarchy */
+    --text-muted: #8b8b9e;
     
     --accent: #6366f1;
     --accent-hover: #818cf8;
@@ -276,6 +277,36 @@ h3 { font-size: 1.25rem; }
     display: flex;
     align-items: center;
     gap: 1.5rem;
+}
+
+/* Logged-in user: avatar + name link to /dashboard (not a separate nav tab) */
+.user-account-hit {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    color: inherit;
+    border-radius: var(--radius);
+    padding: 0.15rem 0.4rem 0.15rem 0.15rem;
+    margin: -0.15rem 0;
+    max-width: min(220px, 40vw);
+    transition: background var(--transition), opacity var(--transition);
+}
+
+.user-account-hit:hover {
+    background: var(--bg-card-hover);
+}
+
+.user-account-hit:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.user-account-hit .user-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
 }
 
 .credits-badge {

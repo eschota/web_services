@@ -8,9 +8,13 @@ User=www-data
 Group=www-data
 WorkingDirectory=/opt/autorig-online/backend
 Environment="PATH=/opt/autorig-online/venv/bin"
+# Optional: RESEND_API_KEY, EMAIL_FROM — see deploy/environment.example
+EnvironmentFile=-/etc/autorig-online/environment
 ExecStart=/opt/autorig-online/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 4
 Restart=always
 RestartSec=5
+# Uvicorn may wait indefinitely on "background tasks" during SIGTERM; cap stop so deploy/restart cannot hang the site.
+TimeoutStopSec=45
 
 # Security
 NoNewPrivileges=true

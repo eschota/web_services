@@ -62,7 +62,33 @@ else
   echo "==> Nginx: skipped (SKIP_NGINX=1)"
 fi
 
+# Uvicorn often blocks shutdown on "Waiting for background tasks to complete" — without a cap,
+# systemctl restart can leave the site down until manual SIGKILL. Drop-in merges with any host unit.
+if [[ "${SKIP_SYSTEMD_AUTORIG_DROPIN:-0}" != "1" ]]; then
+  echo "==> Systemd: autorig stop timeout (drop-in)"
+  sudo mkdir -p /etc/systemd/system/autorig.service.d
+  sudo cp -a "${AUTORIG_ROOT}/deploy/autorig.service.d/timeout.conf" /etc/systemd/system/autorig.service.d/timeout.conf
+  sudo systemctl daemon-reload
+else
+  echo "==> Systemd: skipped drop-in (SKIP_SYSTEMD_AUTORIG_DROPIN=1)"
+fi
+
 echo "==> Backend: restart autorig"
 sudo systemctl restart autorig
 
-echo "OK: pushed, deployed to ${PROD_ROOT}, autorig restarted."
+BACKEND_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:8000/}"
+echo "==> Backend: wait for ${BACKEND_URL}"
+_ok=0
+for _i in $(seq 1 45); do
+  if curl -sf -o /dev/null --connect-timeout 2 --max-time 5 "${BACKEND_URL}"; then
+    _ok=1
+    break
+  fi
+  sleep 1
+done
+if [[ "${_ok}" != "1" ]]; then
+  echo "ERROR: backend did not respond after restart. Check: systemctl status autorig; journalctl -u autorig -n 80" >&2
+  exit 1
+fi
+
+echo "OK: pushed, deployed to ${PROD_ROOT}, autorig restarted and healthy."

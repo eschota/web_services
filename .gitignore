@@ -125,6 +125,10 @@ autorig-online/static/tasks/
 autorig-online/static/glb_cache/
 autorig/uploads/
 
+# Google OAuth client downloads (never commit)
+client_secret*.json
+**/client_secret*.json
+
 # =============================================================================
 # Local / runtime data (avoid merge noise; do not commit instance DBs)
 # =============================================================================

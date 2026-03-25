@@ -294,6 +294,7 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     # Track if task just completed
     was_processing = task.status == "processing"
     previous_ready_count = task.ready_count
+    video_was_ready = task.video_ready
 
     # Get already ready URLs
     already_ready = set(task.ready_urls)
@@ -333,18 +334,38 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     
     await db.commit()
     await db.refresh(task)
+
+    if (
+        task.status == "done"
+        and task.video_ready
+        and not video_was_ready
+    ):
+        try:
+            from youtube_upload import schedule_youtube_upload_if_eligible
+
+            schedule_youtube_upload_if_eligible(task.id)
+        except Exception as e:
+            print(f"[Tasks] Failed to schedule YouTube upload for task {task.id}: {e}")
     
     # Send email notification if task just completed (100%)
     if was_processing and task.status == "done" and task.owner_type == "user":
         try:
             from email_service import send_task_completed_email
-            worker_base = get_worker_base_url(task.worker_api)
-            await send_task_completed_email(
-                to_email=task.owner_id,  # owner_id contains user email
-                task_id=task.id,
-                guid=task.guid,
-                worker_base=worker_base
-            )
+
+            rs_owner = await db.execute(select(User).where(User.email == task.owner_id))
+            owner_user = rs_owner.scalar_one_or_none()
+            if owner_user is not None and not owner_user.email_task_completed:
+                print(
+                    f"[Tasks] Skipping completion email for task {task.id}: user opted out of task-ready emails"
+                )
+            else:
+                worker_base = get_worker_base_url(task.worker_api)
+                await send_task_completed_email(
+                    to_email=task.owner_id,  # owner_id contains user email
+                    task_id=task.id,
+                    guid=task.guid,
+                    worker_base=worker_base,
+                )
         except Exception as e:
             print(f"[Tasks] Failed to send completion email for task {task.id}: {e}")
     
@@ -356,6 +377,12 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             asyncio.create_task(cache_task_files(task.id, task.ready_urls, task.guid))
         except Exception as e:
             print(f"[Tasks] Failed to cache files for task {task.id}: {e}")
+        try:
+            from content_moderation import schedule_task_poster_classification
+
+            schedule_task_poster_classification(task.id)
+        except Exception as e:
+            print(f"[Tasks] Failed to schedule poster classification for task {task.id}: {e}")
     
     # Telegram notification if task just completed
     if was_processing and task.status == "done":

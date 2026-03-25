@@ -6,8 +6,10 @@ import base64
 import httpx
 import resend
 from typing import Optional
+from urllib.parse import quote
 
 from config import RESEND_API_KEY, EMAIL_FROM, APP_URL
+from unsubscribe_tokens import build_unsubscribe_token
 
 
 # Initialize Resend
@@ -26,15 +28,36 @@ async def download_image(image_url: str) -> Optional[bytes]:
     return None
 
 
-def get_email_html(task_id: str, has_image: bool = True) -> str:
+def get_email_html(
+    task_id: str,
+    has_image: bool = True,
+    unsubscribe_url: Optional[str] = None,
+    dashboard_url: Optional[str] = None,
+) -> str:
     """Generate HTML email template"""
-    task_url = f"{APP_URL}/task?id={task_id}"
+    base = APP_URL.rstrip("/")
+    task_url = f"{base}/task?id={task_id}"
+    dash = dashboard_url or f"{base}/dashboard"
+    unsub_block = ""
+    if unsubscribe_url:
+        unsub_block = f"""
+                            <p style="color: #d0d4e0; font-size: 12px; text-align: center; margin: 20px 0 0 0; line-height: 1.5;">
+                                <a href="{dash}" style="color: #a5b4fc; text-decoration: underline;">Dashboard</a>
+                                <span style="color: #e8eaf0;"> — notification settings / отписка от уведомлений</span>
+                            </p>
+                            <p style="color: #d0d4e0; font-size: 12px; text-align: center; margin: 10px 0 0 0;">
+                                <a href="{unsubscribe_url}" style="color: #a5b4fc; text-decoration: underline;">One-click unsubscribe</a>
+                                <span style="color: #e8eaf0;"> · Мгновенная отписка по ссылке</span>
+                            </p>
+        """
     
     image_section = ""
     if has_image:
-        image_section = """
+        image_section = f"""
         <div style="text-align: center; margin: 30px 0;">
-            <img src="cid:preview_image" alt="3D Model Preview" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            <a href="{task_url}" style="display: inline-block; text-decoration: none; border-radius: 12px;">
+                <img src="cid:preview_image" alt="3D Model Preview" border="0" style="display: block; max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            </a>
         </div>
         """
     
@@ -77,20 +100,21 @@ def get_email_html(task_id: str, has_image: bool = True) -> str:
                                 </a>
                             </div>
                             
-                            <p style="color: #606070; font-size: 14px; text-align: center; margin: 30px 0 0 0;">
+                            <p style="color: #d0d4e0; font-size: 14px; text-align: center; margin: 30px 0 0 0; line-height: 1.5;">
                                 Your files are available in multiple formats: 3ds Max, Maya, Cinema 4D, Unity, Unreal Engine, and more.
                             </p>
+                            {unsub_block}
                         </td>
                     </tr>
                     
                     <!-- Footer -->
                     <tr>
                         <td style="background-color: #12121a; padding: 20px 30px; text-align: center;">
-                            <p style="color: #606070; font-size: 12px; margin: 0;">
-                                © 2025 AutoRig.online — Automatic 3D Character Rigging
+                            <p style="color: #c8ccd8; font-size: 12px; margin: 0; line-height: 1.5;">
+                                © 2026 AutoRig.online — Automatic 3D Character Rigging
                             </p>
-                            <p style="color: #606070; font-size: 12px; margin: 10px 0 0 0;">
-                                <a href="{APP_URL}" style="color: #6366f1; text-decoration: none;">Visit Website</a>
+                            <p style="color: #c8ccd8; font-size: 12px; margin: 10px 0 0 0;">
+                                <a href="{base}" style="color: #a5b4fc; text-decoration: none; font-weight: 600;">Visit Website</a>
                             </p>
                         </td>
                     </tr>
@@ -130,21 +154,32 @@ async def send_task_completed_email(
         return False
     
     try:
-        # Build image URL: {worker_base}/converter/glb/{guid}/{guid}_100k/{guid}_VRayCam001_view.jpg
-        image_url = f"{worker_base}/converter/glb/{guid}/{guid}_100k/{guid}_VRayCam001_view.jpg"
-        print(f"[Email] Downloading preview image from: {image_url}")
-        
-        # Download image
-        image_data = await download_image(image_url)
-        has_image = image_data is not None
-        
-        if has_image:
-            print(f"[Email] Image downloaded successfully, size: {len(image_data)} bytes")
+        base = APP_URL.rstrip("/")
+        thumb_url = f"{base}/api/thumb/{task_id}"
+        print(f"[Email] Trying video poster (thumb): {thumb_url}")
+        image_data = await download_image(thumb_url)
+        if image_data:
+            print(f"[Email] Using video poster, size: {len(image_data)} bytes")
         else:
-            print("[Email] Failed to download image, sending email without preview")
-        
-        # Generate HTML
-        html_content = get_email_html(task_id, has_image)
+            # Fallback: worker render preview (e.g. thumb not ready yet when mail is sent)
+            image_url = (
+                f"{worker_base}/converter/glb/{guid}/{guid}_100k/{guid}_VRayCam001_view.jpg"
+            )
+            print(f"[Email] Thumb unavailable, trying worker preview: {image_url}")
+            image_data = await download_image(image_url)
+            if image_data:
+                print(f"[Email] Using worker preview, size: {len(image_data)} bytes")
+            else:
+                print("[Email] No preview image available")
+
+        has_image = image_data is not None
+
+        tok = build_unsubscribe_token(to_email)
+        unsubscribe_url = f"{base}/unsubscribe?token={quote(tok, safe='')}"
+        dashboard_url = f"{base}/dashboard"
+        html_content = get_email_html(
+            task_id, has_image, unsubscribe_url, dashboard_url=dashboard_url
+        )
         
         # Prepare email params
         email_params: resend.Emails.SendParams = {
@@ -181,6 +216,10 @@ async def send_test_email(to_email: str) -> bool:
         return False
     
     try:
+        base = APP_URL.rstrip("/")
+        tt = build_unsubscribe_token(to_email)
+        test_unsub = f"{base}/unsubscribe?token={quote(tt, safe='')}"
+        test_dash = f"{base}/dashboard"
         email_params: resend.Emails.SendParams = {
             "from": f"AutoRig.online <{EMAIL_FROM}>",
             "to": [to_email],
@@ -190,8 +229,16 @@ async def send_test_email(to_email: str) -> bool:
                 <h1 style="color: #6366f1;">AutoRig.online</h1>
                 <p>This is a test email to verify that the email service is configured correctly.</p>
                 <p>If you received this email, everything is working!</p>
-                <p style="color: #606070; font-size: 12px; margin-top: 30px;">
-                    Sent from <a href="{APP_URL}" style="color: #6366f1;">AutoRig.online</a>
+                <p style="color: #c8ccd8; font-size: 12px; margin-top: 30px;">
+                    Sent from <a href="{base}" style="color: #a5b4fc; font-weight: 600;">AutoRig.online</a>
+                </p>
+                <p style="color: #d0d4e0; font-size: 12px; margin-top: 16px;">
+                    <a href="{test_dash}" style="color: #a5b4fc;">Dashboard</a>
+                    <span style="color: #e8eaf0;"> — notification settings / отписка</span>
+                </p>
+                <p style="color: #d0d4e0; font-size: 12px; margin-top: 8px;">
+                    <a href="{test_unsub}" style="color: #a5b4fc;">One-click unsubscribe</a>
+                    <span style="color: #e8eaf0;"> · Мгновенная отписка</span>
                 </p>
             </div>
             """,

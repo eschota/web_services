@@ -35,6 +35,19 @@ GOOGLE_REDIRECT_URI = os.getenv(
     f"{APP_URL}/auth/callback"
 )
 
+# YouTube Data API (same Google OAuth client; separate redirect URI + scope youtube.upload)
+YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
+    "YOUTUBE_OAUTH_REDIRECT_URI",
+    f"{APP_URL.rstrip('/')}/api/oauth/youtube/callback",
+)
+# private | unlisted | public
+YOUTUBE_UPLOAD_PRIVACY = os.getenv("YOUTUBE_UPLOAD_PRIVACY", "unlisted").strip().lower()
+if YOUTUBE_UPLOAD_PRIVACY not in ("private", "unlisted", "public"):
+    YOUTUBE_UPLOAD_PRIVACY = "unlisted"
+
+# Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
+YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()
+
 # =============================================================================
 # Admin
 # =============================================================================
