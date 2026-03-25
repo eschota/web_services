@@ -7142,7 +7142,11 @@
             window.CustomAnimationViewerBridge = {
                 async playByName(name) {
                     try {
-                        if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
+                        if (
+                            typeof setActiveMode === 'function' &&
+                            currentModelType !== 'animations' &&
+                            currentModelType !== 'custom_fbx'
+                        ) {
                             await setActiveMode('animation');
                         }
                     } catch (_) {
@@ -7151,49 +7155,22 @@
                     return playAnimationByBestMatch(name);
                 },
                 async playByFbxUrl(url, hints = []) {
-                    const mc = typeof getSharedModelCache === 'function' ? getSharedModelCache() : window.modelCache || {};
-
-                    if (mc.animations) {
-                        try {
-                            if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
-                                await setActiveMode('animation');
-                            }
-                        } catch (_) {
-                            // ignore mode switch errors
-                        }
-                        if (currentModelType !== 'animations' || !currentModel) {
-                            setStatus('Animations GLB is not ready yet');
-                            return false;
-                        }
-                    } else {
-                        const waited =
-                            typeof waitForPreparedForCustomAnim === 'function'
-                                ? await waitForPreparedForCustomAnim()
-                                : preparedLoaded && currentModel;
-                        if (!waited) {
-                            setStatus('Model preview is not ready yet');
-                            return false;
-                        }
-                        try {
-                            if (typeof setActiveMode === 'function') {
-                                await setActiveMode('tpose');
-                            }
-                        } catch (_) {
-                            // ignore mode switch errors
-                        }
-                        if (currentModelType !== 'prepared' || !currentModel) {
-                            setStatus('Prepared model is not ready yet');
-                            return false;
-                        }
+                    // Load the full FBX scene so skeleton names match animation tracks. Applying
+                    // extracted clips onto prepared.glb or animations.glb often fails (different bone names).
+                    try {
                         if (typeof window.setAnimationModeUIOnly === 'function') {
                             window.setAnimationModeUIOnly();
                         }
+                    } catch (_) {
+                        // ignore
                     }
-
-                    const clips = await loadAnimationClipsFromFbxUrl(url, 'Custom Animation FBX');
-                    if (!clips.length) return false;
-
-                    return applyAnimationClipsToCurrentModel(clips, hints);
+                    const raw = String(url || '').trim();
+                    if (!raw) return false;
+                    const absUrl = raw.startsWith('http') ? raw : new URL(raw, window.location.origin).href;
+                    const ok = await loadFBX(absUrl, 'Custom Animation FBX');
+                    if (!ok) return false;
+                    currentModelType = 'custom_fbx';
+                    return true;
                 },
                 listClipNames() {
                     return (animations || []).map(c => c.name);
