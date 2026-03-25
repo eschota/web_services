@@ -5906,9 +5906,6 @@
                     wrap.classList.remove('hidden');
                     window.__taskPageBoot?.revealElement(wrap, 0);
                     this.renderAnimationCatalog();
-                    if (typeof window.__tryEarlyCustomAnimPreview === 'function') {
-                        void window.__tryEarlyCustomAnimPreview(this);
-                    }
                 } catch (e) {
                     console.warn('Failed to load animation catalog:', e);
                     wrap.classList.remove('hidden');
@@ -6057,11 +6054,11 @@
             async applySelectedAnimationToViewer(applyToken = null) {
                 const token = applyToken ?? ++this.animationApplyToken;
                 const selected = this.getSelectedAnimationItem();
-                if (!selected) return false;
-                if (token !== this.animationApplyToken) return false;
+                if (!selected) return;
+                if (token !== this.animationApplyToken) return;
 
                 const bridge = window.CustomAnimationViewerBridge;
-                if (!bridge) return false;
+                if (!bridge) return;
 
                 if (selected.preview_url && typeof bridge.playByFbxUrl === 'function') {
                     try {
@@ -6070,27 +6067,26 @@
                             selected.id,
                             selected.file_name
                         ]);
-                        if (ok) return true;
+                        if (ok) return;
                     } catch (e) {
                         console.warn('FBX preview playback failed:', e);
                     }
                 }
-                if (token !== this.animationApplyToken) return false;
+                if (token !== this.animationApplyToken) return;
 
-                if (typeof bridge.playByName !== 'function') return false;
+                if (typeof bridge.playByName !== 'function') return;
 
                 const candidates = [selected.name, selected.id];
                 for (const c of candidates) {
-                    if (token !== this.animationApplyToken) return false;
+                    if (token !== this.animationApplyToken) return;
                     try {
                         const ok = await bridge.playByName(c);
-                        if (ok) return true;
+                        if (ok) return;
                     } catch (_) {
                         // try next candidate
                     }
                 }
                 console.warn('No matching clip found for animation:', selected.id, selected.name);
-                return false;
             },
 
             updateCustomAnimationActions() {
@@ -6993,12 +6989,7 @@
             }
 
             function applyAnimationClipsToCurrentModel(clips, hints = []) {
-                if (
-                    (currentModelType !== 'animations' && currentModelType !== 'prepared') ||
-                    !currentModel ||
-                    !Array.isArray(clips) ||
-                    !clips.length
-                ) {
+                if (currentModelType !== 'animations' || !currentModel || !Array.isArray(clips) || !clips.length) {
                     return false;
                 }
                 if (mixer) {
@@ -7142,11 +7133,7 @@
             window.CustomAnimationViewerBridge = {
                 async playByName(name) {
                     try {
-                        if (
-                            typeof setActiveMode === 'function' &&
-                            currentModelType !== 'animations' &&
-                            currentModelType !== 'custom_fbx'
-                        ) {
+                        if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
                             await setActiveMode('animation');
                         }
                     } catch (_) {
@@ -7155,22 +7142,22 @@
                     return playAnimationByBestMatch(name);
                 },
                 async playByFbxUrl(url, hints = []) {
-                    // Load the full FBX scene so skeleton names match animation tracks. Applying
-                    // extracted clips onto prepared.glb or animations.glb often fails (different bone names).
                     try {
-                        if (typeof window.setAnimationModeUIOnly === 'function') {
-                            window.setAnimationModeUIOnly();
+                        if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
+                            await setActiveMode('animation');
                         }
                     } catch (_) {
-                        // ignore
+                        // ignore mode switch errors
                     }
-                    const raw = String(url || '').trim();
-                    if (!raw) return false;
-                    const absUrl = raw.startsWith('http') ? raw : new URL(raw, window.location.origin).href;
-                    const ok = await loadFBX(absUrl, 'Custom Animation FBX');
-                    if (!ok) return false;
-                    currentModelType = 'custom_fbx';
-                    return true;
+
+                    if (currentModelType !== 'animations' || !currentModel) {
+                        setStatus('Animations GLB is not ready yet');
+                        return false;
+                    }
+                    const clips = await loadAnimationClipsFromFbxUrl(url, 'Custom Animation FBX');
+                    if (!clips.length) return false;
+
+                    return applyAnimationClipsToCurrentModel(clips, hints);
                 },
                 listClipNames() {
                     return (animations || []).map(c => c.name);
@@ -9419,20 +9406,6 @@
                             saveRigWrap.classList.toggle('hidden', !visible);
                         }
                     };
-
-                    window.setAnimationModeUIOnly = function () {
-                        allBtns.forEach((b) => b?.classList.remove('active'));
-                        animBtn?.classList.add('active');
-                        setEditControlsVisible(false);
-                        if (tPoseReference) {
-                            tPoseReference.setVisible(false);
-                            const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
-                            if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
-                        }
-                        if (viewerControls) {
-                            viewerControls.setViewMode('animation');
-                        }
-                    };
                     
                     setActiveMode = async (mode) => {
                         window.taskDbg('[Viewer] setActiveMode:', mode, 
@@ -11248,41 +11221,6 @@
                 }
                 return window.modelCache;
             }
-
-            /** Wait until prepared GLB is in the viewer (for custom FBX clips before _all_animations.glb exists). */
-            async function waitForPreparedForCustomAnim(maxMs = 120000) {
-                const start = Date.now();
-                while (Date.now() - start < maxMs) {
-                    if (
-                        preparedLoaded &&
-                        currentModel &&
-                        (currentModelType === 'prepared' || window.modelCache?.prepared)
-                    ) {
-                        return true;
-                    }
-                    await new Promise((r) => setTimeout(r, 200));
-                }
-                return false;
-            }
-
-            let earlyCustomAnimPreviewApplied = false;
-            window.__tryEarlyCustomAnimPreview = async function (taskPage) {
-                if (earlyCustomAnimPreviewApplied) return false;
-                if (!taskPage?.animationCatalog?.animations?.length) return false;
-                if (!window.CustomAnimationViewerBridge?.playByFbxUrl) return false;
-                const readyAll = taskPage.animationCatalog.animations.filter(
-                    (a) => Boolean(a?.available) && Boolean(a?.ready)
-                );
-                if (!readyAll.length) return false;
-                const walkItems = readyAll.filter((a) => String(a.type || '').toLowerCase() === 'walk');
-                const preferred = walkItems[0] || readyAll[0];
-                if (!preferred?.id) return false;
-                taskPage.selectedAnimationId = taskPage.normalizeAnimationKey(preferred.id);
-                taskPage.renderAnimationCatalog();
-                const ok = await taskPage.applySelectedAnimationToViewer();
-                if (ok) earlyCustomAnimPreviewApplied = true;
-                return ok;
-            };
 
             // Background loader for animations (non-blocking)
             let animationsLoadingInBackground = false;
