@@ -7,6 +7,7 @@ import os
 import uuid
 import shutil
 import asyncio
+import time
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import hashlib
@@ -82,7 +83,7 @@ from workers import (
     is_worker_quarantined,
     normalize_task_type,
 )
-from content_moderation import build_free3d_similar_query
+from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -105,6 +106,28 @@ from tasks import (
 
 import re
 import httpx
+
+# Throttle poster-classification recovery triggers from GET /api/task (per task_id).
+_poster_recovery_throttle: Dict[str, float] = {}
+POSTER_RECOVERY_THROTTLE_SEC = 20.0
+
+
+def _task_needs_poster_classification(task) -> bool:
+    if getattr(task, "status", None) != "done":
+        return False
+    return getattr(task, "content_classified_at", None) is None
+
+
+def _schedule_poster_recovery_throttled(task_id: str) -> None:
+    now = time.monotonic()
+    last = _poster_recovery_throttle.get(task_id, 0.0)
+    if now - last < POSTER_RECOVERY_THROTTLE_SEC:
+        return
+    _poster_recovery_throttle[task_id] = now
+    if len(_poster_recovery_throttle) > 5000:
+        for k in list(_poster_recovery_throttle.keys())[:2500]:
+            del _poster_recovery_throttle[k]
+    schedule_task_poster_classification(task_id)
 
 
 def _url_path_endswith_glb(url: str) -> bool:
@@ -572,6 +595,26 @@ async def background_task_updater():
                     # Pass task IDs, not task objects (to get fresh data in each session)
                     task_ids = [t.id for t in processing_tasks]
                     await asyncio.gather(*[_update_one(tid) for tid in task_ids])
+
+                # =============================================================
+                # 4. Poster classification recovery (done but content_classified_at never set)
+                # =============================================================
+                try:
+                    async with AsyncSessionLocal() as db:
+                        r2 = await db.execute(
+                            select(Task.id).where(
+                                Task.status == "done",
+                                Task.content_classified_at.is_(None),
+                            ).limit(25)
+                        )
+                        pending_poster = list(r2.scalars().all())
+                    for tid in pending_poster:
+                        try:
+                            schedule_task_poster_classification(tid)
+                        except Exception as e:
+                            print(f"[Background Worker] Poster recovery schedule failed {tid}: {e}")
+                except Exception as e:
+                    print(f"[Background Worker] Poster recovery query error: {e}")
                 
         except Exception as e:
             print(f"[Background Worker] Error: {e}")
@@ -2637,6 +2680,9 @@ async def api_get_task(
     elif task.status == "done" and not task.video_ready:
         # Check video availability for completed tasks
         task = await update_task_progress(db, task)
+
+    if _task_needs_poster_classification(task):
+        _schedule_poster_recovery_throttled(task.id)
     
     # Find viewer HTML file (_100k .html)
     viewer_html_url = None

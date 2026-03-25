@@ -12,7 +12,7 @@ import base64
 import json
 import threading
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
 import httpx
@@ -26,6 +26,46 @@ _POSTER_SUBSTR = "video_poster"
 
 CONTENT_CLASSIFIER_VERSION = "nudenet-320n-3.4"
 OPENAI_POSTER_MODEL = "gpt-4o-mini"
+
+# One lock per task so concurrent recovery + poll do not double-run classification.
+_classifier_locks: Dict[str, asyncio.Lock] = {}
+_classifier_locks_guard = asyncio.Lock()
+
+
+async def _classifier_lock_for(task_id: str) -> asyncio.Lock:
+    async with _classifier_locks_guard:
+        if task_id not in _classifier_locks:
+            if len(_classifier_locks) > 400:
+                for k in list(_classifier_locks.keys())[:200]:
+                    del _classifier_locks[k]
+            _classifier_locks[task_id] = asyncio.Lock()
+        return _classifier_locks[task_id]
+
+
+async def _commit_poster_pipeline_crash(task_id: str, exc: BaseException) -> None:
+    """If classification raised before any branch committed, still finalize DB so UI never stalls."""
+    print(f"[ContentModeration] Pipeline crash task {task_id}: {exc!r}")
+    async with AsyncSessionLocal() as db:
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task or task.status != "done":
+            return
+        if task.content_classified_at is not None:
+            return
+        now = datetime.utcnow()
+        task.content_rating = "unknown"
+        task.content_score = None
+        task.content_classified_at = now
+        task.content_classifier_version = f"{CONTENT_CLASSIFIER_VERSION}:pipeline_error"
+        task.updated_at = now
+        await db.commit()
+    try:
+        schedule_youtube_upload_if_eligible(task_id)
+    except Exception as e:
+        print(f"[ContentModeration] YouTube schedule after pipeline_error: {e}")
+    try:
+        await reserve_and_broadcast_task_done(task_id)
+    except Exception as e:
+        print(f"[ContentModeration] reserve_and_broadcast after pipeline_error: {e}")
 
 _EXPLICIT_LABELS = frozenset(
     {
@@ -277,7 +317,7 @@ def build_free3d_similar_query(
     return q
 
 
-async def run_task_poster_classification(task_id: str) -> None:
+async def _run_task_poster_classification_impl(task_id: str) -> None:
     """
     Download poster from ready_urls, classify, persist Task fields.
     Idempotent: skips if content_classified_at is already set.
@@ -373,6 +413,15 @@ async def run_task_poster_classification(task_id: str) -> None:
         await db.commit()
         schedule_youtube_upload_if_eligible(task_id)
         await reserve_and_broadcast_task_done(task_id)
+
+
+async def run_task_poster_classification(task_id: str) -> None:
+    lock = await _classifier_lock_for(task_id)
+    async with lock:
+        try:
+            await _run_task_poster_classification_impl(task_id)
+        except Exception as e:
+            await _commit_poster_pipeline_crash(task_id, e)
 
 
 def schedule_task_poster_classification(task_id: str) -> None:

@@ -40,10 +40,8 @@ YOUTUBE_OAUTH_REDIRECT_URI = os.getenv(
     "YOUTUBE_OAUTH_REDIRECT_URI",
     f"{APP_URL.rstrip('/')}/api/oauth/youtube/callback",
 )
-# private | unlisted | public
-YOUTUBE_UPLOAD_PRIVACY = os.getenv("YOUTUBE_UPLOAD_PRIVACY", "unlisted").strip().lower()
-if YOUTUBE_UPLOAD_PRIVACY not in ("private", "unlisted", "public"):
-    YOUTUBE_UPLOAD_PRIVACY = "unlisted"
+# Auto-uploads are always public (not unlisted / not link-only). Not overridable via env.
+YOUTUBE_UPLOAD_PRIVACY = "public"
 
 # Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()

@@ -121,6 +121,17 @@
             display: block;
             background: #111;
         }
+
+        /* Poster LLM keywords → Free3D public search */
+        a.task-meta-keyword-link {
+            color: inherit;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        a.task-meta-keyword-link:hover {
+            text-decoration: underline;
+            opacity: 0.92;
+        }
         .texture-tile .label {
             padding: 0.5rem;
             text-align: center;
@@ -3354,12 +3365,12 @@
                 </div>
                 <div id="task-poster-meta-body" class="task-poster-meta-body" style="padding: 0 0 0.5rem 0; font-size: 0.88rem; line-height: 1.5; color: var(--text-primary);">
                     <p class="task-meta-wait hidden" id="task-meta-wait" data-i18n="task_meta_classifying">Classifying poster…</p>
+                    <p class="task-meta-wait hidden" id="task-meta-wait-stale" style="margin:0.35rem 0 0 0; font-size:0.8rem; color:var(--text-muted);" data-i18n="task_meta_classify_stale">This is taking longer than usual. Refresh the page in a moment.</p>
                     <div id="task-meta-content" class="hidden">
-                        <p style="margin:0 0 0.6rem 0;"><strong data-i18n="task_meta_rating_label">Content rating</strong>: <span id="task-meta-rating-value"></span><span id="task-meta-score-wrap" class="hidden"> · <span data-i18n="task_meta_score_label">score</span> <span id="task-meta-score-value"></span></span></p>
-                        <div id="task-meta-llm-unavailable" class="hidden" style="margin:0 0 0.75rem 0; padding:0.55rem 0.75rem; border-radius:8px; background:rgba(99,102,241,0.08); border:1px solid var(--glass-border); font-size:0.82rem; color:var(--text-secondary); line-height:1.45;">
-                            <p id="task-meta-llm-unavailable-text" style="margin:0;"></p>
-                            <p id="task-meta-classifier-version-line" class="hidden" style="margin:0.4rem 0 0 0; font-size:0.74rem; opacity:0.8;"></p>
+                        <div id="task-meta-error-block" class="hidden" style="margin:0 0 0.75rem 0; padding:0.55rem 0.75rem; border-radius:8px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.28); font-size:0.82rem; color:var(--text-secondary); line-height:1.45;">
+                            <p id="task-meta-error-text" style="margin:0;"></p>
                         </div>
+                        <p style="margin:0 0 0.6rem 0;"><strong data-i18n="task_meta_rating_label">Content rating</strong>: <span id="task-meta-rating-value"></span><span id="task-meta-score-wrap" class="hidden"> · <span data-i18n="task_meta_score_label">score</span> <span id="task-meta-score-value"></span></span></p>
                         <div id="task-meta-llm-block" class="hidden">
                             <p id="task-meta-llm-title" class="task-meta-llm-title-line" style="margin:0 0 0.75rem 0; white-space: pre-wrap; font-weight: 600; font-size: 0.95rem;"></p>
                             <p style="margin:0.5rem 0 0.35rem 0;"><strong data-i18n="task_meta_keywords">Keywords</strong></p>
@@ -4429,8 +4440,11 @@
             renderPosterMetadataSection() {
                 const section = document.getElementById('task-poster-meta-section');
                 const waitEl = document.getElementById('task-meta-wait');
+                const staleEl = document.getElementById('task-meta-wait-stale');
                 const contentEl = document.getElementById('task-meta-content');
                 const llmBlock = document.getElementById('task-meta-llm-block');
+                const errBlock = document.getElementById('task-meta-error-block');
+                const errText = document.getElementById('task-meta-error-text');
                 if (!section || !waitEl || !contentEl) return;
 
                 const task = this.task;
@@ -4444,6 +4458,11 @@
 
                 if (!done && !classified) {
                     section.classList.add('hidden');
+                    if (this._posterClassifyPollInterval) {
+                        clearInterval(this._posterClassifyPollInterval);
+                        this._posterClassifyPollInterval = null;
+                    }
+                    this._posterClassifyWaitStarted = null;
                     return;
                 }
 
@@ -4454,12 +4473,57 @@
 
                 if (!classified) {
                     waitEl.classList.remove('hidden');
+                    if (staleEl) staleEl.classList.add('hidden');
                     contentEl.classList.add('hidden');
+                    if (this._posterClassifyWaitStarted == null) this._posterClassifyWaitStarted = Date.now();
+                    if (staleEl && this._posterClassifyWaitStarted && Date.now() - this._posterClassifyWaitStarted > 90000) {
+                        staleEl.classList.remove('hidden');
+                    }
+                    if (!this._posterClassifyPollInterval) {
+                        this._posterClassifyPollInterval = setInterval(() => {
+                            if (document.hidden || !this.taskId) return;
+                            if (this.task && this.task.content_classified_at) {
+                                clearInterval(this._posterClassifyPollInterval);
+                                this._posterClassifyPollInterval = null;
+                                return;
+                            }
+                            this.fetchTask();
+                        }, 5000);
+                    }
                     return;
                 }
 
+                if (this._posterClassifyPollInterval) {
+                    clearInterval(this._posterClassifyPollInterval);
+                    this._posterClassifyPollInterval = null;
+                }
+                this._posterClassifyWaitStarted = null;
                 waitEl.classList.add('hidden');
+                if (staleEl) staleEl.classList.add('hidden');
                 contentEl.classList.remove('hidden');
+
+                const cv = String(task.content_classifier_version || '');
+                const classifyFailed = /:fetch_error|:classify_error|:openai_error|:pipeline_error/.test(cv);
+                const tFn = (k, fb) => (window.t ? window.t(k) : fb);
+                if (errBlock && errText) {
+                    if (classifyFailed) {
+                        errBlock.classList.remove('hidden');
+                        let msg = tFn('task_meta_poster_err_generic', 'Poster check did not complete successfully.');
+                        if (cv.includes(':fetch_error')) {
+                            msg = tFn('task_meta_poster_err_fetch', 'Could not load the poster image for analysis.');
+                        } else if (cv.includes(':classify_error')) {
+                            msg = tFn('task_meta_poster_err_classify', 'Safety analysis failed for this poster.');
+                        } else if (cv.includes(':openai_error')) {
+                            msg = tFn('task_meta_poster_err_openai', 'Title and keywords could not be generated (AI step failed).');
+                        } else if (cv.includes(':pipeline_error')) {
+                            msg = tFn('task_meta_poster_err_pipeline', 'Poster pipeline failed unexpectedly. Try refreshing the page.');
+                        }
+                        errText.textContent = msg;
+                    } else {
+                        errBlock.classList.add('hidden');
+                        errText.textContent = '';
+                    }
+                }
 
                 const rating = (task.content_rating || 'unknown').toLowerCase();
                 const ratingEl = document.getElementById('task-meta-rating-value');
@@ -4478,57 +4542,24 @@
                 }
 
                 const hasLlm = !!(task.poster_llm_title && String(task.poster_llm_title).trim());
-                const cv = String(task.content_classifier_version || '');
-                const missEl = document.getElementById('task-meta-llm-unavailable');
-                const missText = document.getElementById('task-meta-llm-unavailable-text');
-                const cvLine = document.getElementById('task-meta-classifier-version-line');
-                if (missEl && missText) {
-                    if (hasLlm) {
-                        missEl.classList.add('hidden');
-                    } else {
-                        missEl.classList.remove('hidden');
-                        const tFn = (k, fb) => (window.t ? window.t(k) : fb);
-                        let explain = tFn('task_meta_llm_unavailable_default', '');
-                        if (cv.includes(':openai_error')) {
-                            explain = tFn(
-                                'task_meta_llm_unavailable_openai',
-                                'Suggested title, description, and keywords require OpenAI. The OpenAI step failed for this task (check server logs and API key).'
-                            );
-                        } else if (cv.includes(':fetch_error') || cv.includes(':classify_error')) {
-                            explain = tFn(
-                                'task_meta_llm_unavailable_poster',
-                                'Poster image could not be fetched or analyzed, so no AI metadata was generated.'
-                            );
-                        } else {
-                            explain = tFn(
-                                'task_meta_llm_unavailable_no_key',
-                                'Suggested title, description, and keywords are generated with OpenAI using the same poster image as the safety rating. They appear only if OPENAI_API_KEY is set on the server and the call succeeds. This task has only the NudeNet rating in the database.'
-                            );
-                        }
-                        missText.textContent = explain;
-                        if (cvLine) {
-                            if (cv) {
-                                cvLine.classList.remove('hidden');
-                                cvLine.textContent = `${tFn('task_meta_classifier_build', 'Classifier')}: ${cv}`;
-                            } else {
-                                cvLine.classList.add('hidden');
-                                cvLine.textContent = '';
-                            }
-                        }
-                    }
-                }
                 if (llmBlock) {
-                    if (hasLlm) {
+                    if (hasLlm && !classifyFailed) {
                         llmBlock.classList.remove('hidden');
                         const titleEl = document.getElementById('task-meta-llm-title');
                         const kwEl = document.getElementById('task-meta-keywords');
                         if (titleEl) titleEl.textContent = String(task.poster_llm_title);
                         if (kwEl) {
                             const kws = Array.isArray(task.poster_llm_keywords) ? task.poster_llm_keywords : [];
+                            const esc = (t) => String(t)
+                                .replace(/&/g, '&amp;')
+                                .replace(/</g, '&lt;')
+                                .replace(/>/g, '&gt;')
+                                .replace(/"/g, '&quot;');
                             kwEl.innerHTML = kws.map((k) => {
                                 const s = String(k || '').trim();
                                 if (!s) return '';
-                                return `<span style="display:inline-block; padding:0.15rem 0.45rem; border-radius:6px; background:rgba(99,102,241,0.15); font-size:0.78rem;">${s.replace(/</g, '&lt;')}</span>`;
+                                const href = `https://free3d.online/search?q=${encodeURIComponent(s)}`;
+                                return `<a href="${esc(href)}" class="task-meta-keyword-link" target="_blank" rel="noopener noreferrer" style="display:inline-block; padding:0.15rem 0.45rem; border-radius:6px; background:rgba(99,102,241,0.15); font-size:0.78rem;">${esc(s)}</a>`;
                             }).filter(Boolean).join('');
                         }
                     } else {

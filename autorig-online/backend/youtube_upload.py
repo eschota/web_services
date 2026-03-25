@@ -1,5 +1,5 @@
 """
-YouTube Data API: upload completed task videos when NSFW poster rating is safe.
+YouTube Data API: upload completed task videos when poster content rating is safe or suggestive.
 
 Requires one-time admin OAuth (refresh token in youtube_credentials).
 Uses GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET and YOUTUBE_OAUTH_REDIRECT_URI from config.
@@ -101,6 +101,30 @@ def _youtube_tags_from_poster_keywords_json(raw: Optional[str]) -> List[str]:
         if len(tags) >= 30:
             break
     return tags
+
+
+def _youtube_tags_with_shorts_first(tags: List[str]) -> List[str]:
+    """First tag is always 'shorts' (Shorts shelf); dedupe case-insensitive; same budget as keyword tags."""
+    shorts = "shorts"
+    rest: List[str] = []
+    for x in tags:
+        t = str(x).strip()[:30]
+        if not t:
+            continue
+        if t.lower() == shorts:
+            continue
+        rest.append(t)
+    out: List[str] = [shorts]
+    total_len = len(shorts)
+    for t in rest:
+        add = len(t) + 1
+        if total_len + add > 480:
+            break
+        out.append(t)
+        total_len += add
+        if len(out) >= 30:
+            break
+    return out
 
 
 def _youtube_error_needs_new_oauth(exc: BaseException) -> bool:
@@ -249,7 +273,7 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         if task.youtube_video_id:
             return
 
-        if task.content_rating == "safe":
+        if task.content_rating in ("safe", "suggestive"):
             pass
         elif task.content_rating == "unknown":
             if task.youtube_upload_status is None:
@@ -282,10 +306,13 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
                 return
             upload_title = pt[:100]
             upload_desc = pd[:5000]
-            upload_tags = _youtube_tags_from_poster_keywords_json(task.poster_llm_keywords)
+            upload_tags = _youtube_tags_with_shorts_first(
+                _youtube_tags_from_poster_keywords_json(task.poster_llm_keywords)
+            )
         else:
             upload_title = YOUTUBE_VIDEO_TITLE
             upload_desc = _build_youtube_description(task.id)
+            upload_tags = _youtube_tags_with_shorts_first([])
 
         cred_row = await db.get(YoutubeCredentials, 1)
         if cred_row and cred_row.refresh_token:

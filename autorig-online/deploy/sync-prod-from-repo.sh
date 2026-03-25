@@ -18,7 +18,8 @@ sudo mkdir -p "${PROD_ROOT}/backend" "${PROD_ROOT}/static/i18n" "${PROD_ROOT}/st
 
 # Production venv must match backend/requirements.txt (nudenet, onnxruntime, google-api-python-client, etc.)
 echo "==> pip install -r backend/requirements.txt → ${PROD_ROOT}/venv"
-sudo "${PROD_ROOT}/venv/bin/pip" install -r "${REPO_ROOT}/backend/requirements.txt" -q
+# Use `python -m pip` so packages always land in PROD_ROOT venv (pip shim can point elsewhere).
+sudo "${PROD_ROOT}/venv/bin/python" -m pip install -r "${REPO_ROOT}/backend/requirements.txt" -q
 
 sudo cp -a "${REPO_ROOT}/backend/"*.py "${PROD_ROOT}/backend/"
 sudo cp -a "${REPO_ROOT}/static/developers.html" "${PROD_ROOT}/static/"
