@@ -3340,12 +3340,32 @@
                 </div>
             </div>
 
-            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-free3d-popular-section">
+            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-free3d-similar-section">
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-                    <h3 class="card-title" style="margin:0;">🔥 Popular Free3D Characters - Download for free!</h3>
-                    <div style="font-size:0.78rem; color:var(--text-muted);">6 random picks from top popular characters</div>
+                    <h3 class="card-title" style="margin:0;" data-i18n="task_free3d_similar_title">Similar 3D models</h3>
+                    <div style="font-size:0.78rem; color:var(--text-muted);" data-i18n="task_free3d_similar_subtitle">From AI keywords (Free3D)</div>
                 </div>
-                <div id="task-free3d-popular-results" class="free3d-results" style="padding-top:0;"></div>
+                <div id="task-free3d-similar-results" class="free3d-results" style="padding-top:0;"></div>
+            </div>
+
+            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-poster-meta-section">
+                <div class="card-header">
+                    <h3 class="card-title" style="margin:0;" data-i18n="task_meta_section_title">Poster classification &amp; metadata</h3>
+                </div>
+                <div id="task-poster-meta-body" class="task-poster-meta-body" style="padding: 0 0 0.5rem 0; font-size: 0.88rem; line-height: 1.5; color: var(--text-primary);">
+                    <p class="task-meta-wait hidden" id="task-meta-wait" data-i18n="task_meta_classifying">Classifying poster…</p>
+                    <div id="task-meta-content" class="hidden">
+                        <p style="margin:0 0 0.6rem 0;"><strong data-i18n="task_meta_rating_label">Content rating</strong>: <span id="task-meta-rating-value"></span><span id="task-meta-score-wrap" class="hidden"> · <span data-i18n="task_meta_score_label">score</span> <span id="task-meta-score-value"></span></span></p>
+                        <div id="task-meta-llm-block" class="hidden">
+                            <p style="margin:0.5rem 0 0.25rem 0;"><strong data-i18n="task_meta_youtube_title">Suggested title</strong></p>
+                            <p id="task-meta-llm-title" style="margin:0 0 0.75rem 0; white-space: pre-wrap;"></p>
+                            <p style="margin:0.5rem 0 0.25rem 0;"><strong data-i18n="task_meta_youtube_description">Suggested description</strong></p>
+                            <div id="task-meta-llm-desc" style="margin:0 0 0.75rem 0; max-height: 12rem; overflow: auto; white-space: pre-wrap; color: var(--text-secondary); font-size: 0.86rem;"></div>
+                            <p style="margin:0.5rem 0 0.35rem 0;"><strong data-i18n="task_meta_keywords">Keywords</strong></p>
+                            <div id="task-meta-keywords" class="task-meta-keyword-chips" style="display:flex; flex-wrap:wrap; gap:0.35rem;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Actions removed (buttons moved into header) -->
@@ -3969,8 +3989,8 @@
             spriteSheetDebounceTimer: null,
             spriteSheetLastPack: null,
             animationTypeFilter: 'walk',
-            free3dPopularPool: [],
-            free3dPopularLoaded: false,
+            free3dSimilarPool: [],
+            free3dSimilarCacheKey: '',
             videoPreviewObserver: null,
             videoPreviewVisible: true,
             videoPreviewBound: false,
@@ -4072,7 +4092,7 @@
 
                     this.scheduleDeferredWork(async () => {
                         await this.loadAnimationCatalog().catch(() => {});
-                        await this.loadPopularFree3DCharacters().catch(() => {});
+                        await this.loadSimilarFree3DCharacters(false).catch(() => {});
                         window.dispatchEvent(new CustomEvent('taskPageDeferredReady'));
                         window.__taskPageBoot?.markExtrasReady('Additional blocks ready');
                     }, 250);
@@ -4257,8 +4277,8 @@
                 });
             },
 
-            ensurePopularFree3DSection() {
-                return document.getElementById('task-free3d-popular-section');
+            ensureSimilarFree3DSection() {
+                return document.getElementById('task-free3d-similar-section');
             },
 
             normalizeFree3DItem(model) {
@@ -4291,7 +4311,7 @@
             },
 
             pickRandomFree3DItems(count = 5) {
-                const pool = Array.isArray(this.free3dPopularPool) ? [...this.free3dPopularPool] : [];
+                const pool = Array.isArray(this.free3dSimilarPool) ? [...this.free3dSimilarPool] : [];
                 for (let i = pool.length - 1; i > 0; i -= 1) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -4299,9 +4319,9 @@
                 return pool.slice(0, Math.min(count, pool.length));
             },
 
-            renderPopularFree3DCharacters() {
-                const section = this.ensurePopularFree3DSection();
-                const container = document.getElementById('task-free3d-popular-results');
+            renderSimilarFree3DCharacters() {
+                const section = this.ensureSimilarFree3DSection();
+                const container = document.getElementById('task-free3d-similar-results');
                 if (!section || !container) return;
 
                 const picks = this.pickRandomFree3DItems(6);
@@ -4330,25 +4350,44 @@
                 window.__taskPageBoot?.revealElement(section, 0);
             },
 
-            async loadPopularFree3DCharacters(force = false) {
-                const section = this.ensurePopularFree3DSection();
-                const container = document.getElementById('task-free3d-popular-results');
+            /**
+             * Semantic Free3D search using at most 3 keywords from server-only poster_llm_keywords.
+             */
+            async loadSimilarFree3DCharacters(force = false) {
+                const section = this.ensureSimilarFree3DSection();
+                const container = document.getElementById('task-free3d-similar-results');
                 if (!section || !container) return;
 
-                if (this.free3dPopularLoaded && !force) {
-                    this.renderPopularFree3DCharacters();
+                const task = this.task;
+                const kw = Array.isArray(task?.poster_llm_keywords) ? task.poster_llm_keywords : [];
+                const parts = [];
+                for (const k of kw) {
+                    const t = String(k || '').trim();
+                    if (!t) continue;
+                    const low = t.toLowerCase();
+                    if (!parts.some((p) => p.toLowerCase() === low)) parts.push(t);
+                    if (parts.length >= 3) break;
+                }
+                const q = parts.join(' ').trim();
+                if (!q) {
+                    section.classList.add('hidden');
                     return;
                 }
 
-                container.innerHTML = '<div style="padding: 1rem; color: var(--text-muted);">Loading popular characters...</div>';
+                if (!force && this.free3dSimilarCacheKey === q && Array.isArray(this.free3dSimilarPool) && this.free3dSimilarPool.length) {
+                    this.renderSimilarFree3DCharacters();
+                    return;
+                }
+
+                const tLoad = (window.t && window.t('task_free3d_loading')) || 'Loading similar models…';
+                container.innerHTML = `<div style="padding: 1rem; color: var(--text-muted);">${tLoad}</div>`;
 
                 try {
                     const params = new URLSearchParams({
-                        mode: 'browse',
-                        sort: 'popular',
-                        category: 'characters',
-                        topK: '24',
-                        type: '1',
+                        mode: 'semantic',
+                        q,
+                        topK: '18',
+                        sort: 'relevance',
                         _: String(Date.now()),
                     });
                     const response = await fetch(`/api/free3d/search?${params.toString()}`, { cache: 'no-store' });
@@ -4364,13 +4403,89 @@
                         return;
                     }
 
-                    this.free3dPopularPool = normalized;
-                    this.free3dPopularLoaded = true;
-                    this.renderPopularFree3DCharacters();
+                    this.free3dSimilarPool = normalized;
+                    this.free3dSimilarCacheKey = q;
+                    this.renderSimilarFree3DCharacters();
                 } catch (error) {
-                    console.warn('[TaskPage] Failed to load popular Free3D characters:', error);
+                    console.warn('[TaskPage] Failed to load similar Free3D models:', error);
                     section.classList.add('hidden');
                 }
+            },
+
+            renderPosterMetadataSection() {
+                const section = document.getElementById('task-poster-meta-section');
+                const waitEl = document.getElementById('task-meta-wait');
+                const contentEl = document.getElementById('task-meta-content');
+                const llmBlock = document.getElementById('task-meta-llm-block');
+                if (!section || !waitEl || !contentEl) return;
+
+                const task = this.task;
+                if (!task) {
+                    section.classList.add('hidden');
+                    return;
+                }
+
+                const classified = !!task.content_classified_at;
+                const done = task.status === 'done';
+
+                if (!done && !classified) {
+                    section.classList.add('hidden');
+                    return;
+                }
+
+                section.classList.remove('hidden');
+                try {
+                    window.__taskPageBoot?.revealElement(section, 0);
+                } catch (_) { /* noop */ }
+
+                if (!classified) {
+                    waitEl.classList.remove('hidden');
+                    contentEl.classList.add('hidden');
+                    return;
+                }
+
+                waitEl.classList.add('hidden');
+                contentEl.classList.remove('hidden');
+
+                const rating = (task.content_rating || 'unknown').toLowerCase();
+                const ratingEl = document.getElementById('task-meta-rating-value');
+                if (ratingEl) {
+                    const labels = { safe: '🟢 safe', suggestive: '🟡 suggestive', adult: '🔴 adult', unknown: '⚪ unknown' };
+                    ratingEl.textContent = labels[rating] || rating;
+                }
+                const scoreWrap = document.getElementById('task-meta-score-wrap');
+                const scoreVal = document.getElementById('task-meta-score-value');
+                const sc = task.content_score;
+                if (scoreWrap && scoreVal && typeof sc === 'number' && !Number.isNaN(sc)) {
+                    scoreWrap.classList.remove('hidden');
+                    scoreVal.textContent = sc.toFixed(3);
+                } else if (scoreWrap) {
+                    scoreWrap.classList.add('hidden');
+                }
+
+                const hasLlm = !!(task.poster_llm_title && task.poster_llm_description);
+                if (llmBlock) {
+                    if (hasLlm) {
+                        llmBlock.classList.remove('hidden');
+                        const titleEl = document.getElementById('task-meta-llm-title');
+                        const descEl = document.getElementById('task-meta-llm-desc');
+                        const kwEl = document.getElementById('task-meta-keywords');
+                        if (titleEl) titleEl.textContent = String(task.poster_llm_title);
+                        if (descEl) descEl.textContent = String(task.poster_llm_description);
+                        if (kwEl) {
+                            const kws = Array.isArray(task.poster_llm_keywords) ? task.poster_llm_keywords : [];
+                            kwEl.innerHTML = kws.map((k) => {
+                                const s = String(k || '').trim();
+                                if (!s) return '';
+                                return `<span style="display:inline-block; padding:0.15rem 0.45rem; border-radius:6px; background:rgba(99,102,241,0.15); font-size:0.78rem;">${s.replace(/</g, '&lt;')}</span>`;
+                            }).filter(Boolean).join('');
+                        }
+                    } else {
+                        llmBlock.classList.add('hidden');
+                    }
+                }
+
+                if (window.I18n) window.I18n.applyTranslations();
             },
             
             startTaskPolling() {
@@ -4679,6 +4794,9 @@
                 // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
                 // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
                 void this.loadAnimationCatalog().catch(() => {});
+
+                this.renderPosterMetadataSection();
+                void this.loadSimilarFree3DCharacters(false).catch(() => {});
 
             },
 

@@ -36,6 +36,17 @@
     "credits_free": "剩余免费转换",
     "credits_login_hint": "登录获取7次额外免费转换",
 
+    "task_free3d_similar_title": "相似3D模型",
+    "task_free3d_similar_subtitle": "语义搜索（AI关键词，最多3个）",
+    "task_free3d_loading": "正在加载相似模型…",
+    "task_meta_section_title": "海报分类与元数据",
+    "task_meta_classifying": "正在分类海报…",
+    "task_meta_rating_label": "内容评级",
+    "task_meta_score_label": "分数",
+    "task_meta_youtube_title": "建议标题（YouTube）",
+    "task_meta_youtube_description": "建议描述（YouTube）",
+    "task_meta_keywords": "关键词",
+
     "footer_text": "AutoRig Online © 2026",
     "footer_tagline": "AI驱动的自动3D角色绑定。上传您的模型，几分钟内即可获得带动画的绑定模型。",
     "footer_services": "服务",
@@ -54,6 +65,8 @@
     "footer_how_it_works": "工作原理",
     "footer_faq": "常见问题",
     "footer_copyright": "© 2026 AutoRig Online. 保留所有权利。",
+    "footer_terms": "使用条款",
+    "footer_user_agreement": "用户协议",
 
     "guides_title": "指南和教程",
     "guides_intro": "了解更多关于角色绑定、Unity/Unreal工作流程和最佳实践的信息",

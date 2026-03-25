@@ -47,6 +47,17 @@
     "task_video_ready": "Video Preview",
     "task_video_pending": "Video is being generated...",
 
+    "task_free3d_similar_title": "Similar 3D models",
+    "task_free3d_similar_subtitle": "Semantic search (AI keywords, max 3)",
+    "task_free3d_loading": "Loading similar models…",
+    "task_meta_section_title": "Poster classification & metadata",
+    "task_meta_classifying": "Classifying poster…",
+    "task_meta_rating_label": "Content rating",
+    "task_meta_score_label": "score",
+    "task_meta_youtube_title": "Suggested title (YouTube)",
+    "task_meta_youtube_description": "Suggested description (YouTube)",
+    "task_meta_keywords": "Keywords",
+
     "task_fbx_glb_title": "FBX → GLB",
     "task_fbx_glb_pending": "Converting FBX to GLB...",
     "task_fbx_glb_ready": "FBX converted to GLB",
@@ -108,6 +119,8 @@
     "footer_how_it_works": "How It Works",
     "footer_faq": "FAQ",
     "footer_copyright": "© 2026 AutoRig Online. All rights reserved.",
+    "footer_terms": "Terms of Use",
+    "footer_user_agreement": "User Agreement",
 
     "nav_home": "Home",
     "nav_guides": "Guides",

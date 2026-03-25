@@ -2229,10 +2229,42 @@ img[loading="lazy"] {
     gap: 1rem;
 }
 
+.footer-bottom-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.footer-legal {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+.footer-legal a {
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.footer-legal a:hover {
+    color: var(--accent);
+}
+
+.footer-legal-sep {
+    color: var(--text-muted);
+    user-select: none;
+}
+
 @media (max-width: 576px) {
     .footer-bottom {
         flex-direction: column;
         text-align: center;
+    }
+
+    .footer-bottom-left {
+        align-items: center;
     }
 }
 

@@ -64,7 +64,14 @@ function renderSiteFooter() {
             
             <!-- Bottom Bar -->
             <div class="footer-bottom">
-                <p class="footer-copyright" data-i18n="footer_copyright">© 2026 AutoRig Online. All rights reserved.</p>
+                <div class="footer-bottom-left">
+                    <p class="footer-copyright" data-i18n="footer_copyright">© 2026 AutoRig Online. All rights reserved.</p>
+                    <nav class="footer-legal" aria-label="Legal">
+                        <a href="/terms" data-i18n="footer_terms">Terms of Use</a>
+                        <span class="footer-legal-sep" aria-hidden="true">·</span>
+                        <a href="/user-agreement" data-i18n="footer_user_agreement">User Agreement</a>
+                    </nav>
+                </div>
                 <div class="footer-social">
                     <a href="https://t.me/autorigonline" target="_blank" rel="noopener noreferrer" class="footer-social-link" title="Telegram">
                         ${TELEGRAM_ICON_SVG}

@@ -2,11 +2,14 @@
 Server-side NSFW classification for task posters (images referenced in ready_urls).
 
 Uses NudeNet ONNX detector on poster bytes downloaded from the worker URL.
+Optional: OpenAI vision for YouTube title/description/keywords (same image bytes).
 Policy: single pipeline — no alternate client-only source of truth for DB fields.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import threading
 from datetime import datetime
 from typing import Any, List, Optional, Tuple
@@ -22,6 +25,7 @@ from telegram_bot import reserve_and_broadcast_task_done
 _POSTER_SUBSTR = "video_poster"
 
 CONTENT_CLASSIFIER_VERSION = "nudenet-320n-3.4"
+OPENAI_POSTER_MODEL = "gpt-4o-mini"
 
 _EXPLICIT_LABELS = frozenset(
     {
@@ -100,11 +104,129 @@ def classify_image_bytes(image_bytes: bytes) -> Tuple[str, float]:
     return detections_to_rating(raw)
 
 
+def _normalize_keyword_list(keywords: List[Any]) -> List[str]:
+    """Ensure exactly 25 non-empty keyword strings for storage."""
+    cleaned: List[str] = []
+    for x in keywords:
+        t = str(x).strip()
+        if t and t not in cleaned:
+            cleaned.append(t)
+        if len(cleaned) >= 25:
+            return cleaned[:25]
+    pool = [
+        "3d character",
+        "character rig",
+        "game ready",
+        "glb",
+        "fbx",
+        "unity",
+        "unreal",
+        "animation",
+        "t pose",
+        "skeletal mesh",
+        "rigging",
+        "3d model",
+        "low poly",
+        "pbr",
+        "download",
+    ]
+    pi = 0
+    while len(cleaned) < 25:
+        p = pool[pi % len(pool)]
+        pi += 1
+        if p not in cleaned:
+            cleaned.append(p)
+        else:
+            cleaned.append(f"{p}-{pi}")
+    return cleaned[:25]
+
+
+def analyze_poster_llm_metadata(image_bytes: bytes) -> Optional[dict]:
+    """
+    Sync OpenAI vision call. Returns dict with title, description, keywords (25 strings), or None on failure.
+    """
+    from config import OPENAI_API_KEY
+
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        print(f"[ContentModeration] openai package missing: {e}")
+        return None
+
+    b64 = base64.standard_b64encode(image_bytes).decode("ascii")
+    data_url = f"data:image/jpeg;base64,{b64}"
+
+    prompt = """You label a preview image from an automatic 3D character rigging service (AutoRig Online).
+Return a single JSON object with exactly these keys:
+- "title": string, English, YouTube-style title, max 95 characters, describe the character/subject and that it is rigged for games (no clickbait).
+- "description": string, English, 2-4 short paragraphs for YouTube description: what the viewer sees, suitable for Unity/Unreal/Blender, mention rig and animations where relevant. Plain text, no HTML.
+- "keywords": JSON array of exactly 25 short English keyword strings for YouTube tags: 3D, character, rigging, game art, formats, use cases. No hashtags. No NSFW or policy-evading content.
+
+Output only valid JSON, no markdown."""
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    resp = client.chat.completions.create(
+        model=OPENAI_POSTER_MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ],
+        response_format={"type": "json_object"},
+        max_tokens=2500,
+        temperature=0.4,
+    )
+    choice = resp.choices[0].message.content
+    if not choice:
+        return None
+    data = json.loads(choice)
+    title = (data.get("title") or "").strip()
+    desc = (data.get("description") or "").strip()
+    kw_raw = data.get("keywords")
+    if not title or not desc or not isinstance(kw_raw, list):
+        print("[ContentModeration] OpenAI JSON missing title/description/keywords array")
+        return None
+    keywords = _normalize_keyword_list(kw_raw)
+    if len(keywords) != 25:
+        return None
+    return {
+        "title": title[:256],
+        "description": desc[:5000],
+        "keywords": keywords,
+    }
+
+
+def build_free3d_query_from_keywords(keywords: Optional[List[str]]) -> Optional[str]:
+    """Use at most 3 distinct keywords for Free3D semantic search query."""
+    if not keywords:
+        return None
+    parts: List[str] = []
+    for k in keywords:
+        t = (k or "").strip()
+        if not t:
+            continue
+        if t.lower() not in {p.lower() for p in parts}:
+            parts.append(t)
+        if len(parts) >= 3:
+            break
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
 async def run_task_poster_classification(task_id: str) -> None:
     """
     Download poster from ready_urls, classify, persist Task fields.
     Idempotent: skips if content_classified_at is already set.
     """
+    from config import OPENAI_API_KEY
+
     async with AsyncSessionLocal() as db:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task:
@@ -161,10 +283,35 @@ async def run_task_poster_classification(task_id: str) -> None:
             await reserve_and_broadcast_task_done(task_id)
             return
 
+        llm_title: Optional[str] = None
+        llm_desc: Optional[str] = None
+        llm_keywords_json: Optional[str] = None
+        llm_at: Optional[datetime] = None
+        cv = version
+
+        if OPENAI_API_KEY:
+            try:
+                llm = await asyncio.to_thread(analyze_poster_llm_metadata, image_bytes)
+            except Exception as e:
+                print(f"[ContentModeration] OpenAI poster metadata failed for task {task_id}: {e}")
+                llm = None
+            if llm:
+                llm_title = llm["title"]
+                llm_desc = llm["description"]
+                llm_keywords_json = json.dumps(llm["keywords"])
+                llm_at = datetime.utcnow()
+                cv = f"{version}+{OPENAI_POSTER_MODEL}"
+            else:
+                cv = f"{version}:openai_error"
+
         task.content_rating = rating
         task.content_score = score
         task.content_classified_at = now
-        task.content_classifier_version = version
+        task.content_classifier_version = cv
+        task.poster_llm_title = llm_title
+        task.poster_llm_description = llm_desc
+        task.poster_llm_keywords = llm_keywords_json
+        task.poster_llm_at = llm_at
         task.updated_at = now
         await db.commit()
         schedule_youtube_upload_if_eligible(task_id)

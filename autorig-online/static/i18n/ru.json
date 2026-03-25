@@ -47,6 +47,17 @@
     "task_video_ready": "Видео превью",
     "task_video_pending": "Видео генерируется...",
 
+    "task_free3d_similar_title": "Похожие 3D модели",
+    "task_free3d_similar_subtitle": "Семантический поиск (ключевые слова ИИ, до 3)",
+    "task_free3d_loading": "Загрузка похожих моделей…",
+    "task_meta_section_title": "Классификация постера и метаданные",
+    "task_meta_classifying": "Классификация постера…",
+    "task_meta_rating_label": "Рейтинг контента",
+    "task_meta_score_label": "score",
+    "task_meta_youtube_title": "Предлагаемый заголовок (YouTube)",
+    "task_meta_youtube_description": "Предлагаемое описание (YouTube)",
+    "task_meta_keywords": "Ключевые слова",
+
     "task_fbx_glb_title": "FBX → GLB",
     "task_fbx_glb_pending": "Конвертация FBX в GLB...",
     "task_fbx_glb_ready": "FBX сконвертирован в GLB",
@@ -108,6 +119,8 @@
     "footer_how_it_works": "Как это работает",
     "footer_faq": "FAQ",
     "footer_copyright": "© 2026 AutoRig Online. Все права защищены.",
+    "footer_terms": "Условия использования",
+    "footer_user_agreement": "Пользовательское соглашение",
 
     "guides_title": "Руководства и Туториалы",
     "guides_intro": "Узнайте больше о rigging персонажей, рабочих процессах Unity/Unreal и лучших практиках",

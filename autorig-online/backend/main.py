@@ -2685,6 +2685,20 @@ async def api_get_task(
         task.fbx_glb_ready
     )
     
+    def _poster_llm_keywords_list() -> Optional[list]:
+        raw = getattr(task, "poster_llm_keywords", None)
+        if not raw:
+            return None
+        try:
+            import json
+            data = json.loads(raw)
+            if isinstance(data, list):
+                out = [str(x).strip() for x in data if str(x).strip()]
+                return out or None
+        except Exception:
+            pass
+        return None
+
     return TaskStatusResponse(
         task_id=task.id,
         status=task.status,
@@ -2708,6 +2722,11 @@ async def api_get_task(
         guid=task.guid,
         content_rating=getattr(task, "content_rating", None),
         content_score=getattr(task, "content_score", None),
+        content_classified_at=getattr(task, "content_classified_at", None),
+        poster_llm_title=getattr(task, "poster_llm_title", None),
+        poster_llm_description=getattr(task, "poster_llm_description", None),
+        poster_llm_keywords=_poster_llm_keywords_list(),
+        poster_llm_at=getattr(task, "poster_llm_at", None),
         created_at=task.created_at,
         updated_at=task.updated_at,
         pipeline=getattr(task, "pipeline_kind", None) or "rig",
@@ -7274,6 +7293,18 @@ async def how_it_works_page():
 async def faq_page():
     """FAQ page"""
     return FileResponse(str(STATIC_DIR / "faq.html"))
+
+
+@app.get("/terms")
+async def terms_of_use_page():
+    """Terms of Use (website)."""
+    return FileResponse(str(STATIC_DIR / "terms-of-use.html"))
+
+
+@app.get("/user-agreement")
+async def user_agreement_page():
+    """User Agreement (content license, previews, promotional use)."""
+    return FileResponse(str(STATIC_DIR / "user-agreement.html"))
 
 
 @app.get("/guides")

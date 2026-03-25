@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import tempfile
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -29,6 +30,7 @@ from config import (
     APP_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
+    OPENAI_API_KEY,
     YOUTUBE_OAUTH_REDIRECT_URI,
     YOUTUBE_REFRESH_TOKEN,
     YOUTUBE_UPLOAD_PRIVACY,
@@ -52,9 +54,9 @@ async def _lock_for_sha256(sha256_hex: str) -> asyncio.Lock:
         return _sha256_upload_locks[sha256_hex]
 
 
-def _build_youtube_description(task_id: str, input_url: Optional[str]) -> str:
+def _build_youtube_description(task_id: str) -> str:
     """
-    English description: service pitch, links to AutoRig and this task, optional source URL.
+    English description: service pitch and links to AutoRig and this task (no third-party source URLs).
     YouTube max description length 5000.
     """
     base = APP_URL.rstrip("/")
@@ -65,8 +67,6 @@ def _build_youtube_description(task_id: str, input_url: Optional[str]) -> str:
         f"Website: {base}",
         f"This task (3D viewer & downloads): {task_link}",
     ]
-    if input_url and input_url.strip():
-        parts.extend(["", f"Source model: {input_url.strip()}"])
     parts.extend(
         [
             "",
@@ -75,6 +75,32 @@ def _build_youtube_description(task_id: str, input_url: Optional[str]) -> str:
     )
     text = "\n".join(parts)
     return text[:5000]
+
+
+def _youtube_tags_from_poster_keywords_json(raw: Optional[str]) -> List[str]:
+    """YouTube allows up to ~30 tags; cap total character budget conservatively."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    tags: List[str] = []
+    total_len = 0
+    for x in data:
+        t = str(x).strip()[:30]
+        if not t:
+            continue
+        add = len(t) if not tags else len(t) + 1
+        if total_len + add > 480:
+            break
+        tags.append(t)
+        total_len += add
+        if len(tags) >= 30:
+            break
+    return tags
 
 
 def _youtube_error_needs_new_oauth(exc: BaseException) -> bool:
@@ -168,6 +194,7 @@ def _upload_video_file_blocking(
     title: str,
     description: str,
     refresh_token: str,
+    tags: Optional[List[str]] = None,
 ) -> str:
     creds = _youtube_credentials_from_db(refresh_token)
     creds.refresh(Request())
@@ -178,12 +205,15 @@ def _upload_video_file_blocking(
         resumable=True,
         mimetype="video/*",
     )
+    snippet: dict = {
+        "title": title[:100],
+        "description": description[:5000],
+        "categoryId": "28",
+    }
+    if tags:
+        snippet["tags"] = tags
     body = {
-        "snippet": {
-            "title": title[:100],
-            "description": description[:5000],
-            "categoryId": "28",
-        },
+        "snippet": snippet,
         "status": {
             "privacyStatus": YOUTUBE_UPLOAD_PRIVACY,
             "selfDeclaredMadeForKids": False,
@@ -204,9 +234,11 @@ def _upload_video_file_blocking(
 
 async def run_youtube_upload_for_task(task_id: str) -> None:
     video_url: Optional[str] = None
-    input_url: Optional[str] = None
     tid: Optional[str] = None
     refresh_token: Optional[str] = None
+    upload_title: str = YOUTUBE_VIDEO_TITLE
+    upload_desc: str = ""
+    upload_tags: List[str] = []
 
     async with AsyncSessionLocal() as db:
         task = await db.scalar(select(Task).where(Task.id == task_id))
@@ -237,6 +269,24 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         if not task.video_ready or not task.video_url:
             return
 
+        if OPENAI_API_KEY:
+            pt = (task.poster_llm_title or "").strip()
+            pd = (task.poster_llm_description or "").strip()
+            if not pt or not pd:
+                if task.youtube_upload_status is None:
+                    task.youtube_upload_status = "skipped"
+                    task.youtube_upload_error = "poster_llm_missing"
+                    task.updated_at = datetime.utcnow()
+                    await db.commit()
+                print(f"[YouTube] Skip task {task_id}: OPENAI_API_KEY set but poster LLM title/description missing")
+                return
+            upload_title = pt[:100]
+            upload_desc = pd[:5000]
+            upload_tags = _youtube_tags_from_poster_keywords_json(task.poster_llm_keywords)
+        else:
+            upload_title = YOUTUBE_VIDEO_TITLE
+            upload_desc = _build_youtube_description(task.id)
+
         cred_row = await db.get(YoutubeCredentials, 1)
         if cred_row and cred_row.refresh_token:
             refresh_token = cred_row.refresh_token
@@ -250,11 +300,10 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         if not video_url:
             return
 
-        input_url = task.input_url
         tid = task.id
 
-    title = YOUTUBE_VIDEO_TITLE
-    desc = _build_youtube_description(tid, input_url)
+    title = upload_title
+    desc = upload_desc if upload_desc else _build_youtube_description(tid)
 
     tmp_path: Optional[str] = None
     try:
@@ -304,6 +353,7 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
                     title=title,
                     description=desc,
                     refresh_token=refresh_token,
+                    tags=upload_tags if upload_tags else None,
                 )
             except RefreshError as e:
                 print(f"[YouTube] OAuth refresh failed task {task_id}: {e}")

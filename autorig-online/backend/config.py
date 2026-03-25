@@ -48,6 +48,9 @@ if YOUTUBE_UPLOAD_PRIVACY not in ("private", "unlisted", "public"):
 # Optional: paste refresh token from OAuth (or use /api/admin/youtube/oauth/start + DB row)
 YOUTUBE_REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()
 
+# OpenAI (poster vision metadata for YouTube / task UI; set in production env only)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+
 # =============================================================================
 # Admin
 # =============================================================================

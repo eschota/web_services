@@ -22,3 +22,6 @@ google-api-python-client==2.159.0
 google-auth==2.35.0
 google-auth-httplib2==0.2.0
 
+# OpenAI vision (poster metadata for YouTube / task UI)
+openai>=1.40.0
+

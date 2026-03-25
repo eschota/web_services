@@ -195,6 +195,12 @@ class Task(Base):
     content_classified_at = Column(DateTime, nullable=True)
     content_classifier_version = Column(String(64), nullable=True)
 
+    # OpenAI vision metadata from poster (same image as NudeNet); JSON array in poster_llm_keywords
+    poster_llm_title = Column(String(256), nullable=True)
+    poster_llm_description = Column(Text, nullable=True)
+    poster_llm_keywords = Column(Text, nullable=True)
+    poster_llm_at = Column(DateTime, nullable=True)
+
     # YouTube auto-upload (server uses OAuth refresh token; see youtube_upload.py)
     youtube_video_id = Column(String(64), nullable=True)
     youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
@@ -518,6 +524,10 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_uploaded_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_source_sha256 VARCHAR(64)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN pipeline_kind VARCHAR(20) DEFAULT 'rig'")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_title VARCHAR(256)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_description TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_keywords TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
             try:
                 await conn.exec_driver_sql(
                     """
@@ -722,6 +732,18 @@ async def init_db():
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pipeline_kind VARCHAR(20) NOT NULL DEFAULT 'rig'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_title VARCHAR(256)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_description TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_keywords TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_at TIMESTAMP"
             )
             try:
                 await conn.exec_driver_sql(
