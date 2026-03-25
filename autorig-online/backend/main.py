@@ -98,11 +98,24 @@ from tasks import (
     find_file_by_pattern,
     get_stalled_processing_tasks_by_worker,
     get_task_no_progress_minutes,
+    resolve_prepared_glb_source_url,
 )
 
 
 import re
 import httpx
+
+
+def _url_path_endswith_glb(url: str) -> bool:
+    """True if URL path ends with .glb (query/fragment ignored)."""
+    from urllib.parse import urlparse
+
+    try:
+        path = urlparse(url or "").path or ""
+    except Exception:
+        path = url or ""
+    return path.lower().endswith(".glb")
+
 
 FACE_RIG_ANALYZE_HEAD_PROXY_URL = os.getenv(
     "FACE_RIG_ANALYZE_HEAD_PROXY_URL",
@@ -1434,6 +1447,60 @@ async def _estimate_archive_total_bytes(entries: List[Dict[str, Any]]) -> tuple[
     return total, complete
 
 
+async def _filter_reachable_archive_entries(
+    entries: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Drop entries that are not on disk and whose source_url returns 404/410 (or connection error).
+    HEAD first; if not definitive, one GET stream check. Avoids failing the whole ZIP on one bad worker URL.
+    """
+    if not entries:
+        return [], []
+
+    sem = asyncio.Semaphore(32)
+
+    async def _probe(client: httpx.AsyncClient, ent: dict) -> tuple[Optional[dict], Optional[str]]:
+        p = ent["cache_path"]
+        if p.exists() and p.is_file():
+            return ent, None
+        url = (ent.get("source_url") or "").strip()
+        arc = ent.get("arcname", "?")
+        if not url:
+            return None, f"{arc}: missing URL"
+        async with sem:
+            try:
+                r = await client.head(url, follow_redirects=True)
+                if r.status_code == 200:
+                    return ent, None
+                if r.status_code in (404, 410):
+                    return None, f"{arc}: HTTP {r.status_code}"
+            except Exception:
+                pass
+            try:
+                async with client.stream("GET", url, follow_redirects=True) as s:
+                    code = s.status_code
+                    if code == 200:
+                        return ent, None
+                    if code in (404, 410):
+                        return None, f"{arc}: HTTP {code}"
+                    if code >= 400:
+                        return None, f"{arc}: HTTP {code}"
+                    return ent, None
+            except Exception as e:
+                return None, f"{arc}: GET {e}"
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        pairs = await asyncio.gather(*[_probe(client, e) for e in entries])
+    kept: List[Dict[str, Any]] = []
+    skipped: List[str] = []
+    for ent, reason in pairs:
+        if ent is not None:
+            kept.append(ent)
+        elif reason:
+            skipped.append(reason)
+    return kept, skipped
+
+
 def _archive_job_paths(task_id: str, job_id: str) -> tuple[Path, Path]:
     job_dir = TASK_CACHE_DIR / task_id / "archive_jobs"
     return job_dir / f"{job_id}.json", job_dir / f"{job_id}.zip"
@@ -1496,7 +1563,11 @@ def _build_zip_bundle_sync(
                 else:
                     with client.stream("GET", url, follow_redirects=True) as r:
                         if r.status_code != 200:
-                            raise RuntimeError(f"HTTP {r.status_code} for {arcname}")
+                            print(
+                                f"[Archive] Skip unreachable (HTTP {r.status_code}): {arcname}",
+                                flush=True,
+                            )
+                            continue
                         with zf.open(zinfo, "w") as dest:
                             for chunk in r.iter_bytes(1024 * 1024):
                                 if chunk:
@@ -1536,6 +1607,26 @@ async def _run_archive_bundle_job(task_id: str, job_id: str, user_email: str) ->
             )
             return
 
+        entries, skipped_unreachable = await _filter_reachable_archive_entries(entries)
+        if skipped_unreachable:
+            preview = skipped_unreachable[:12]
+            more = len(skipped_unreachable) - len(preview)
+            extra = f" (+{more} more)" if more > 0 else ""
+            print(
+                f"[Archive] Skipped {len(skipped_unreachable)} unreachable file(s): {preview}{extra}",
+                flush=True,
+            )
+        if not entries:
+            _write_archive_job_state(
+                task_id,
+                job_id,
+                done=False,
+                error="No downloadable files (sources returned 404 or errors).",
+                phase="error",
+                percent=0,
+            )
+            return
+
         _write_archive_job_state(
             task_id,
             job_id,
@@ -1544,6 +1635,7 @@ async def _run_archive_bundle_job(task_id: str, job_id: str, user_email: str) ->
             done=False,
             error=None,
             total_files=len(entries),
+            skipped_unreachable=len(skipped_unreachable),
         )
 
         try:
@@ -2118,6 +2210,7 @@ async def api_create_task(
     input_type = "t_pose"
     ga_client_id: Optional[str] = None
     file: Optional[UploadFile] = None
+    pipeline = "rig"
 
     if "application/json" in content_type:
         try:
@@ -2139,6 +2232,9 @@ async def api_create_task(
         raw_ga = data.get("ga_client_id")
         if raw_ga is not None:
             ga_client_id = str(raw_ga)
+        raw_pipeline = data.get("pipeline")
+        if raw_pipeline is not None and str(raw_pipeline).strip():
+            pipeline = str(raw_pipeline).strip().lower()
     else:
         form = await request.form()
         raw_source = form.get("source")
@@ -2154,6 +2250,9 @@ async def api_create_task(
         raw_ga = form.get("ga_client_id")
         if raw_ga is not None:
             ga_client_id = str(raw_ga)
+        raw_pipeline = form.get("pipeline")
+        if raw_pipeline is not None and str(raw_pipeline).strip():
+            pipeline = str(raw_pipeline).strip().lower()
         fu = form.get("file")
         # Accept any Starlette/FastAPI upload object (isinstance can fail across re-exports).
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
@@ -2202,11 +2301,26 @@ async def api_create_task(
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
+    if pipeline not in ("rig", "convert"):
+        pipeline = "rig"
+
+    if pipeline == "convert" and not _url_path_endswith_glb(final_url):
+        raise HTTPException(
+            status_code=400,
+            detail="pipeline=convert requires a .glb input URL or .glb upload filename.",
+        )
+
     input_type = normalize_task_type(input_type)
 
     # Create task
     task, error = await create_conversion_task(
-        db, final_url, input_type, owner_type, owner_id, created_via_api=via_api
+        db,
+        final_url,
+        input_type,
+        owner_type,
+        owner_id,
+        created_via_api=via_api,
+        pipeline_kind=pipeline,
     )
     
     if error and not task:
@@ -2219,9 +2333,9 @@ async def api_create_task(
         
         # Send GA4 event
         asyncio.create_task(send_ga4_event(
-            ga_client_id, 
-            "task_created", 
-            {"source": source, "type": input_type}
+            ga_client_id,
+            "task_created",
+            {"source": source, "type": input_type, "pipeline": pipeline},
         ))
     
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
@@ -2241,6 +2355,107 @@ async def api_create_task(
     except Exception as e:
         # Don't fail task creation if immediate dispatch fails - background worker will pick it up
         print(f"[Immediate Dispatch] Failed for task {task.id}: {e}")
+
+    await db.refresh(task)
+
+    return TaskCreateResponse(
+        task_id=task.id,
+        status=task.status,
+        message=error,
+    )
+
+
+@app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
+@limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
+async def api_create_convert_from_rig_task(
+    parent_task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start an Auto Convert task from a **completed** rig task.
+    The server resolves the prepared GLB URL; clients must not pass arbitrary URLs.
+    """
+    via_api = bool(getattr(request.state, "auth_via_api_key", False))
+    api_key_anon = getattr(request.state, "api_key_anon_id", None)
+    if user:
+        owner_type = "user"
+        owner_id = user.email
+    elif api_key_anon:
+        owner_type = "anon"
+        owner_id = api_key_anon
+    else:
+        anon_session = await get_anon_session(request, response, db)
+        owner_type = "anon"
+        owner_id = anon_session.anon_id
+
+    parent = await get_task_by_id(db, parent_task_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = await get_anon_session(request, response, db)
+    is_admin = bool(user and user.email in ADMIN_EMAILS)
+    is_owner = (
+        (user and parent.owner_type == "user" and parent.owner_id == user.email)
+        or (parent.owner_type == "anon" and parent.owner_id == anon_session.anon_id)
+    )
+    if not (is_owner or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to use this task")
+
+    pk_parent = getattr(parent, "pipeline_kind", None) or "rig"
+    if pk_parent == "convert":
+        raise HTTPException(
+            status_code=400,
+            detail="Auto Convert can only be started from a rig task",
+        )
+
+    if parent.status != "done":
+        raise HTTPException(
+            status_code=400,
+            detail="Rig task must be completed before starting Auto Convert",
+        )
+
+    prepared_url = resolve_prepared_glb_source_url(parent)
+    if not prepared_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Prepared GLB is not available for this task",
+        )
+
+    task, error = await create_conversion_task(
+        db,
+        prepared_url,
+        "t_pose",
+        owner_type,
+        owner_id,
+        created_via_api=via_api,
+        pipeline_kind="convert",
+    )
+
+    if error and not task:
+        raise HTTPException(status_code=500, detail=error)
+
+    try:
+        queue_status = await get_global_queue_status(db=db)
+        free_worker = next(
+            (
+                w
+                for w in queue_status.workers
+                if w.available
+                and (w.total_active < w.max_concurrent)
+                and (w.queue_size <= 0)
+            ),
+            None,
+        )
+        if free_worker:
+            await db.refresh(task)
+            if task.status == "created":
+                await start_task_on_worker(db, task, free_worker.url)
+                print(f"[Immediate Dispatch] Convert task {task.id} sent to {free_worker.url}")
+    except Exception as e:
+        print(f"[Immediate Dispatch] Failed for convert task {task.id}: {e}")
 
     await db.refresh(task)
 
@@ -2494,7 +2709,8 @@ async def api_get_task(
         content_rating=getattr(task, "content_rating", None),
         content_score=getattr(task, "content_score", None),
         created_at=task.created_at,
-        updated_at=task.updated_at
+        updated_at=task.updated_at,
+        pipeline=getattr(task, "pipeline_kind", None) or "rig",
     )
 
 
@@ -2646,8 +2862,12 @@ async def api_retry_task(
     
     # Create new task (don't deduct credits - it's a retry)
     new_task, error = await create_conversion_task(
-        db, task.input_url, task.input_type or "t_pose", 
-        task.owner_type, task.owner_id
+        db,
+        task.input_url,
+        task.input_type or "t_pose",
+        task.owner_type,
+        task.owner_id,
+        pipeline_kind=getattr(task, "pipeline_kind", None) or "rig",
     )
     
     if error and not new_task:
@@ -2760,61 +2980,67 @@ async def api_restart_task(
     task.worker_api = worker_url
     task.status = "processing"
 
-    # Parse transform params from request body (if any)
-    transform_params = None
-    try:
-        body = await request.body()
-        if body:
-            import json as json_module
-            body_data = json_module.loads(body)
-            if isinstance(body_data, dict):
-                # Extract transform params if present
-                if any(k in body_data for k in ("local_position", "local_rotation", "local_scale")):
-                    transform_params = {
-                        "local_position": body_data.get("local_position"),
-                        "local_rotation": body_data.get("local_rotation"),
-                        "local_scale": body_data.get("local_scale")
-                    }
-                    print(f"[Restart] Transform params from request: {transform_params}")
-    except Exception as e:
-        print(f"[Restart] Could not parse body: {e}")
+    pk_restart = getattr(task, "pipeline_kind", None) or "rig"
+    if pk_restart not in ("rig", "convert"):
+        pk_restart = "rig"
 
-    # Fallback: read from saved viewer_settings if no transforms in request
-    if not transform_params and task.viewer_settings:
+    # Parse transform params from request body (rig pipeline only)
+    transform_params = None
+    if pk_restart == "rig":
         try:
-            settings = json.loads(task.viewer_settings)
-            mt = settings.get("modelTransform")
-            if mt and isinstance(mt, dict):
-                pos = mt.get("position", {})
-                rot = mt.get("rotation", {})
-                scale = mt.get("scale", {})
-                # Only use if any value is non-default
-                has_transform = (
-                    any(v != 0 for v in [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)]) or
-                    any(v != 0 for v in [rot.get("x", 0), rot.get("y", 0), rot.get("z", 0)]) or
-                    any(v != 1 for v in [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)])
-                )
-                if has_transform:
-                    rad_to_deg = 180 / 3.14159265359
-                    transform_params = {
-                        "local_position": [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)],
-                        "local_rotation": [
-                            rot.get("x", 0) * rad_to_deg,
-                            rot.get("y", 0) * rad_to_deg,
-                            rot.get("z", 0) * rad_to_deg
-                        ],
-                        "local_scale": [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)]
-                    }
-                    print(f"[Restart] Transform params from viewer_settings: {transform_params}")
+            body = await request.body()
+            if body:
+                import json as json_module
+                body_data = json_module.loads(body)
+                if isinstance(body_data, dict):
+                    # Extract transform params if present
+                    if any(k in body_data for k in ("local_position", "local_rotation", "local_scale")):
+                        transform_params = {
+                            "local_position": body_data.get("local_position"),
+                            "local_rotation": body_data.get("local_rotation"),
+                            "local_scale": body_data.get("local_scale")
+                        }
+                        print(f"[Restart] Transform params from request: {transform_params}")
         except Exception as e:
-            print(f"[Restart] Could not read viewer_settings: {e}")
+            print(f"[Restart] Could not parse body: {e}")
+
+        # Fallback: read from saved viewer_settings if no transforms in request
+        if not transform_params and task.viewer_settings:
+            try:
+                settings = json.loads(task.viewer_settings)
+                mt = settings.get("modelTransform")
+                if mt and isinstance(mt, dict):
+                    pos = mt.get("position", {})
+                    rot = mt.get("rotation", {})
+                    scale = mt.get("scale", {})
+                    # Only use if any value is non-default
+                    has_transform = (
+                        any(v != 0 for v in [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)]) or
+                        any(v != 0 for v in [rot.get("x", 0), rot.get("y", 0), rot.get("z", 0)]) or
+                        any(v != 1 for v in [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)])
+                    )
+                    if has_transform:
+                        rad_to_deg = 180 / 3.14159265359
+                        transform_params = {
+                            "local_position": [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)],
+                            "local_rotation": [
+                                rot.get("x", 0) * rad_to_deg,
+                                rot.get("y", 0) * rad_to_deg,
+                                rot.get("z", 0) * rad_to_deg
+                            ],
+                            "local_scale": [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)]
+                        }
+                        print(f"[Restart] Transform params from viewer_settings: {transform_params}")
+            except Exception as e:
+                print(f"[Restart] Could not read viewer_settings: {e}")
 
     # Send directly to worker - workers handle GLB/FBX/OBJ natively
     result = await send_task_to_worker(
-        worker_url, 
-        task.input_url, 
+        worker_url,
+        task.input_url,
         task.input_type or "t_pose",
-        transform_params=transform_params
+        transform_params=transform_params,
+        pipeline_kind=pk_restart,
     )
     if not result.success:
         task.status = "error"
@@ -4407,7 +4633,15 @@ async def api_admin_restart_incomplete_tasks(
                     task.worker_api = worker_url
                     task.status = "processing"
                     
-                    send_result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+                    pk_ad = getattr(task, "pipeline_kind", None) or "rig"
+                    if pk_ad not in ("rig", "convert"):
+                        pk_ad = "rig"
+                    send_result = await send_task_to_worker(
+                        worker_url,
+                        task.input_url,
+                        task.input_type or "t_pose",
+                        pipeline_kind=pk_ad,
+                    )
                     if not send_result.success:
                         task.status = "error"
                         task.error_message = send_result.error

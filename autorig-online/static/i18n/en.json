@@ -31,6 +31,12 @@
     "history_view": "View",
     
     "task_title": "AutoRig task",
+    "task_title_convert": "Auto Convert task",
+    "retopo_convert_title": "Retopology and Convert Formats",
+    "retopo_convert_lead": "Need retopology or a new format? We convert to 12 formats for free, professional quad retopology, and free LODs. Click the button below.",
+    "retopo_convert_time": "Conversion can take up to 30 minutes depending on model complexity.",
+    "retopo_convert_cta": "Start Retopology and Convert Formats",
+    "retopo_convert_tooltip": "1. Conversion to 3ds Max, Maya, Unity, Unreal, Blender, Marmoset, Cinema 4D, STL, OBJ, GLB, FBX. 2. Quad retopology at 100k, 10k, and 1k polygons while preserving rig, skin, and animations.",
     "task_status_created": "Created",
     "task_status_processing": "Processing",
     "task_status_done": "Completed",

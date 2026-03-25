@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 
 from database import AsyncSessionLocal, TelegramChat, TelegramNotification, Task
 from config import APP_URL
+from workers import get_worker_base_url
 
 
 def _get_token() -> str | None:
@@ -34,6 +35,13 @@ def _task_url(task_id: str) -> str:
     base = (APP_URL or "").rstrip("/")
     ts = int(time.time())
     return f"{base}/task?id={task_id}&t={ts}"
+
+
+def _format_content_rating_line(rating: str | None) -> str:
+    """HTML line for server-side NSFW poster rating (Task.content_rating)."""
+    r = (rating or "unknown").strip().lower()
+    emoji = {"safe": "🟢", "suggestive": "🟡", "adult": "🔴", "unknown": "⚪"}.get(r, "⚪")
+    return f"{emoji} Content rating: <code>{html.escape(r)}</code>"
 
 
 def _task_summary(input_url: str | None, input_type: str | None) -> str:
@@ -785,6 +793,44 @@ async def broadcast_bulk_restart_summary(total: int, restarted: int, errors: lis
     ])
 
 
+async def reserve_and_broadcast_task_done(task_id: str) -> None:
+    """
+    Atomically reserve telegram_done_notified_at and enqueue the Telegram "task completed"
+    message. Call only after Task.content_rating / content_classified_at are committed so
+    the notification always reflects server-side classification.
+    """
+    async with AsyncSessionLocal() as db:
+        now = datetime.utcnow()
+        stmt = (
+            update(Task)
+            .where(Task.id == task_id)
+            .where(Task.telegram_done_notified_at.is_(None))
+            .values(telegram_done_notified_at=now)
+        )
+        res = await db.execute(stmt)
+        await db.commit()
+
+        if res.rowcount != 1:
+            return
+
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task:
+            return
+
+        duration = None
+        if task.created_at:
+            duration = int((datetime.utcnow() - task.created_at).total_seconds())
+        progress_url = None
+        if task.guid and task.worker_api:
+            worker_base = get_worker_base_url(task.worker_api)
+            progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+
+        print(f"[Telegram] Scheduling done notification for task {task_id} (after content rating)")
+        asyncio.create_task(
+            broadcast_task_done(task_id, duration_seconds=duration, progress_page=progress_url)
+        )
+
+
 async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:
     print(f"[Telegram] broadcast_task_done called for task {task_id}")
     token = _get_token()
@@ -799,37 +845,27 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     url = _task_url(task_id)
     metrics_line = _format_task_metrics(await _task_telegram_metrics(task_id))
 
-    # Get task details including owner for author line
     owner_email = None
-    if not progress_page:
-        try:
-            async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
-                result = await db.execute(select(Task).where(Task.id == task_id))
-                task = result.scalar_one_or_none()
-                if task:
-                    # Get author email if owner is a user
-                    if task.owner_type == "user":
-                        owner_email = task.owner_id
-                    # Construct progress_page URL from worker_api and guid
-                    if task.guid and task.worker_api:
-                        from urllib.parse import urlparse
-                        parsed = urlparse(task.worker_api)
-                        worker_base = f"{parsed.scheme}://{parsed.netloc}"
-                        progress_page = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
-        except Exception as e:
-            print(f"[Telegram] Failed to get task details: {e}")
-    else:
-        # Still need to fetch owner_email even if progress_page is passed
-        try:
-            async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
-                result = await db.execute(select(Task).where(Task.id == task_id))
-                task = result.scalar_one_or_none()
-                if task and task.owner_type == "user":
+    content_rating = "unknown"
+    resolved_progress = progress_page
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Task).where(Task.id == task_id))
+            task = result.scalar_one_or_none()
+            if task:
+                if task.owner_type == "user":
                     owner_email = task.owner_id
-        except Exception as e:
-            print(f"[Telegram] Failed to get owner_email: {e}")
+                cr = getattr(task, "content_rating", None)
+                if cr:
+                    content_rating = str(cr).strip().lower()
+                if not resolved_progress and task.guid and task.worker_api:
+                    parsed = urlparse(task.worker_api)
+                    worker_base = f"{parsed.scheme}://{parsed.netloc}"
+                    resolved_progress = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+    except Exception as e:
+        print(f"[Telegram] Failed to get task details for done notification: {e}")
+
+    rating_line = _format_content_rating_line(content_rating)
 
     dur = _format_duration(duration_seconds)
     done_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
@@ -839,10 +875,9 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
         done_parts.append(f"⏱ {html.escape(dur)}")
     done_parts.append(html.escape(metrics_line))
 
-    # Table-like formatting in 2 lines using HTML
-    text = f"✅ <b>Task completed</b>\n" + " | ".join(done_parts)
-    if progress_page:
-        text += f'\n🔧 <a href="{html.escape(progress_page)}">Worker Logs</a>'
+    text = f"✅ <b>Task completed</b>\n{rating_line}\n" + " | ".join(done_parts)
+    if resolved_progress:
+        text += f'\n🔧 <a href="{html.escape(resolved_progress)}">Worker Logs</a>'
 
     # Try to find cached video
     mp4_path = f"/var/autorig/videos/{task_id}.mp4"

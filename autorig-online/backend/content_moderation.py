@@ -16,6 +16,7 @@ import httpx
 from sqlalchemy import select
 from database import AsyncSessionLocal, Task
 from youtube_upload import schedule_youtube_upload_if_eligible
+from telegram_bot import reserve_and_broadcast_task_done
 
 # Matches worker poster naming used by task.html filters (video_poster*.jpeg / jpg).
 _POSTER_SUBSTR = "video_poster"
@@ -111,6 +112,7 @@ async def run_task_poster_classification(task_id: str) -> None:
         if task.status != "done":
             return
         if task.content_classified_at is not None:
+            await reserve_and_broadcast_task_done(task_id)
             return
 
         poster_url = find_poster_url(task.ready_urls or [])
@@ -125,6 +127,7 @@ async def run_task_poster_classification(task_id: str) -> None:
             task.updated_at = now
             await db.commit()
             schedule_youtube_upload_if_eligible(task_id)
+            await reserve_and_broadcast_task_done(task_id)
             return
 
         try:
@@ -141,6 +144,7 @@ async def run_task_poster_classification(task_id: str) -> None:
             task.updated_at = now
             await db.commit()
             schedule_youtube_upload_if_eligible(task_id)
+            await reserve_and_broadcast_task_done(task_id)
             return
 
         try:
@@ -154,6 +158,7 @@ async def run_task_poster_classification(task_id: str) -> None:
             task.updated_at = now
             await db.commit()
             schedule_youtube_upload_if_eligible(task_id)
+            await reserve_and_broadcast_task_done(task_id)
             return
 
         task.content_rating = rating
@@ -163,6 +168,7 @@ async def run_task_poster_classification(task_id: str) -> None:
         task.updated_at = now
         await db.commit()
         schedule_youtube_upload_if_eligible(task_id)
+        await reserve_and_broadcast_task_done(task_id)
 
 
 def schedule_task_poster_classification(task_id: str) -> None:

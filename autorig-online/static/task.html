@@ -41,6 +41,8 @@
         body.webapp-mode #task-share-btn { display: inline-flex !important; }
         /* Hide downloads and video player in webapp mode - only 3D viewer */
         body.webapp-mode #downloads-card { display: none !important; }
+        body.webapp-mode #retopo-convert-card { display: none !important; }
+        body.webapp-mode #sprite-sheet-card { display: none !important; }
         body.webapp-mode #video-player { display: none !important; }
         body.webapp-mode #hdrp-renders { display: none !important; }
         body.webapp-mode #video-pending { display: none !important; }
@@ -1190,6 +1192,15 @@
             border-top: 1px solid rgba(255, 255, 255, 0.1);
             padding-top: 1rem;
             margin-top: 1rem;
+        }
+
+        /* Retopo + sprite: separate cards in the right column (not inside #task-sidebar-bundle) */
+        #task-columns-secondary #retopo-convert-card.card,
+        #task-columns-secondary #sprite-sheet-card.card {
+            width: 540px;
+            max-width: 100%;
+            box-sizing: border-box;
+            padding: 1rem 1.25rem 1.25rem;
         }
 
         main.task-page-main.container-sm {
@@ -3329,47 +3340,6 @@
                 </div>
             </div>
 
-            <!-- Sprite sheet MVP: auto-renders 5 standard views -->
-            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="sprite-sheet-card">
-                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-                    <h3 class="card-title" style="margin:0; font-size:1rem;">2D Sprite sheet</h3>
-                    <div style="font-size:0.72rem; color:var(--text-muted);">Five views · PNG atlas · Three.js</div>
-                </div>
-                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.55rem;">
-                    Same custom animations as in 3D preview. Renders automatically when you pick an animation (or change options).
-                </div>
-                <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap; margin-bottom:0.45rem;">
-                    <label for="sprite-sheet-anim-type" style="font-size:0.72rem; color:var(--text-muted);">Type:</label>
-                    <select id="sprite-sheet-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
-                        <option value="walk" selected>Walk</option>
-                    </select>
-                    <div id="sprite-sheet-anim-stats" style="font-size:0.72rem; color:var(--text-muted);"></div>
-                </div>
-                <div id="sprite-sheet-anim-grid" class="custom-anim-grid">
-                    <div style="grid-column:1/-1; color:var(--text-muted);">Loading…</div>
-                </div>
-                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.65rem; padding-top:0.55rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
-                    <label for="sprite-sheet-resolution" style="font-size:0.72rem; color:var(--text-muted);">Cell size</label>
-                    <select id="sprite-sheet-resolution" class="form-input" style="max-width:120px; padding:0.35rem 0.45rem; font-size:0.75rem;">
-                        <option value="64">64 px</option>
-                        <option value="128">128 px</option>
-                        <option value="256" selected>256 px</option>
-                        <option value="512">512 px</option>
-                        <option value="1024">1024 px</option>
-                    </select>
-                    <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
-                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="30" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
-                    <span style="font-size:0.68rem; color:var(--text-muted);">Views: front, back, left, top, top-right 45°</span>
-                </div>
-                <div id="sprite-sheet-progress" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem; min-height:1.2em;"></div>
-                <div id="sprite-sheet-views-grid" class="sprite-sheet-views-grid"></div>
-                <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.62rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:160px;"></pre>
-                <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
-                    <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download pack JSON</button>
-                    <button type="button" id="sprite-sheet-download-all-png-btn" class="btn btn-primary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download all PNGs</button>
-                </div>
-            </div>
-
             <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-free3d-popular-section">
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <h3 class="card-title" style="margin:0;">🔥 Popular Free3D Characters - Download for free!</h3>
@@ -3381,7 +3351,7 @@
             <!-- Actions removed (buttons moved into header) -->
         </div>
 
-        <!-- Video + model params + downloads: single 540px sidebar card (column via ensureTaskDesktopColumns) -->
+        <!-- Video + model params + downloads (right column). Retopo + sprite are separate .card siblings below. -->
         <div id="task-sidebar-bundle" class="card mt-3 boot-deferred-section">
             <div class="alert alert-info hidden" id="video-pending">
                 <span data-i18n="task_video_pending">Video is being generated...</span>
@@ -3432,6 +3402,65 @@
                 </li>
             </ul>
             </div>
+        </div>
+
+        <div id="retopo-convert-card" class="card mt-3 boot-deferred-section boot-reveal-surface hidden">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.45rem;">
+                    <h3 class="card-title" style="margin:0; font-size:1rem;" data-i18n="retopo_convert_title">Retopology and Convert Formats</h3>
+                </div>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin:0 0 0.55rem 0;" data-i18n="retopo_convert_lead">
+                    Need retopology or a new format? We convert to 12 formats for free, professional quad retopology, and free LODs. Click the button below.
+                </p>
+                <p style="font-size:0.72rem; color:var(--text-muted); margin:0 0 0.65rem 0;" data-i18n="retopo_convert_time">
+                    Conversion can take up to 30 minutes depending on model complexity.
+                </p>
+                <button type="button" id="retopo-convert-start-btn" class="btn btn-primary" style="width:100%; display:inline-flex; align-items:center; justify-content:center; gap:0.45rem; padding:0.56rem 0.8rem; font-size:0.78rem;"
+                    data-i18n-title="retopo_convert_tooltip"
+                    title="1. Conversion to 3ds Max, Maya, Unity, Unreal, Blender, Marmoset, Cinema 4D, STL, OBJ, GLB, FBX. 2. Quad retopology at 100k, 10k, and 1k polygons while preserving rig, skin, and animations."
+                    data-i18n="retopo_convert_cta">
+                    Start Retopology and Convert Formats
+                </button>
+        </div>
+
+            <!-- Sprite sheet MVP: separate card below Retopo -->
+            <div id="sprite-sheet-card" class="card mt-3 hidden boot-deferred-section boot-reveal-surface">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                    <h3 class="card-title" style="margin:0; font-size:1rem;">2D Sprite sheet</h3>
+                    <div style="font-size:0.72rem; color:var(--text-muted);">Five views · PNG atlas · Three.js</div>
+                </div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.55rem;">
+                    Same custom animations as in 3D preview. Renders automatically when you pick an animation (or change options).
+                </div>
+                <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap; margin-bottom:0.45rem;">
+                    <label for="sprite-sheet-anim-type" style="font-size:0.72rem; color:var(--text-muted);">Type:</label>
+                    <select id="sprite-sheet-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
+                        <option value="walk" selected>Walk</option>
+                    </select>
+                    <div id="sprite-sheet-anim-stats" style="font-size:0.72rem; color:var(--text-muted);"></div>
+                </div>
+                <div id="sprite-sheet-anim-grid" class="custom-anim-grid">
+                    <div style="grid-column:1/-1; color:var(--text-muted);">Loading…</div>
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.65rem; padding-top:0.55rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
+                    <label for="sprite-sheet-resolution" style="font-size:0.72rem; color:var(--text-muted);">Cell size</label>
+                    <select id="sprite-sheet-resolution" class="form-input" style="max-width:120px; padding:0.35rem 0.45rem; font-size:0.75rem;">
+                        <option value="64">64 px</option>
+                        <option value="128">128 px</option>
+                        <option value="256" selected>256 px</option>
+                        <option value="512">512 px</option>
+                        <option value="1024">1024 px</option>
+                    </select>
+                    <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
+                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="30" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
+                    <span style="font-size:0.68rem; color:var(--text-muted);">Views: front, back, left, top, top-right 45°</span>
+                </div>
+                <div id="sprite-sheet-progress" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem; min-height:1.2em;"></div>
+                <div id="sprite-sheet-views-grid" class="sprite-sheet-views-grid"></div>
+                <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.62rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:160px;"></pre>
+                <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
+                    <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download pack JSON</button>
+                    <button type="button" id="sprite-sheet-download-all-png-btn" class="btn btn-primary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download all PNGs</button>
+                </div>
         </div>
         
         <!-- Additional Content (Textures) -->
@@ -4370,11 +4399,11 @@
                     this.task = await response.json();
                     this.taskFetchedAt = Date.now();
                     window.dispatchEvent(new CustomEvent('taskDataUpdated', { detail: this.task }));
-                    await this.updateUI();
-                    window.__taskPageBoot?.markTaskReady('Task data loaded');
                     if (window.I18n) {
                         I18n.applyTranslations();
                     }
+                    await this.updateUI();
+                    window.__taskPageBoot?.markTaskReady('Task data loaded');
                     window.__taskPerf?.measureEnd('TaskPage', 'fetchTask', {
                         status: this.task?.status || 'unknown',
                         preparedGlbReady: !!this.task?.prepared_glb_ready
@@ -4462,6 +4491,61 @@
                 } else {
                     statusBadge.classList.add('task-status-pill--queued');
                     statusText.textContent = t('task_status_created');
+                }
+
+                const titleEl = document.querySelector('.task-status-header-title');
+                if (titleEl) {
+                    const pl = task.pipeline || 'rig';
+                    titleEl.textContent = pl === 'convert' ? t('task_title_convert') : t('task_title');
+                }
+
+                const retopoCard = document.getElementById('retopo-convert-card');
+                if (retopoCard) {
+                    const pl = task.pipeline || 'rig';
+                    if (task.status === 'done' && pl === 'rig') {
+                        retopoCard.classList.remove('hidden');
+                        try {
+                            window.__taskPageBoot?.revealElement('retopo-convert-card', 0);
+                        } catch (_) { /* noop */ }
+                    } else {
+                        retopoCard.classList.add('hidden');
+                    }
+                }
+
+                const retopoBtn = document.getElementById('retopo-convert-start-btn');
+                if (retopoBtn && !retopoBtn.__retopoWired) {
+                    retopoBtn.__retopoWired = true;
+                    retopoBtn.addEventListener('click', async () => {
+                        const tid = this.taskId;
+                        if (!tid) return;
+                        retopoBtn.disabled = true;
+                        try {
+                            const r = await fetch(`/api/task/${encodeURIComponent(tid)}/create-convert`, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { Accept: 'application/json' },
+                            });
+                            let errDetail = '';
+                            try {
+                                const data = await r.json();
+                                if (r.ok && data.task_id) {
+                                    window.location.href = `/task?id=${encodeURIComponent(data.task_id)}`;
+                                    return;
+                                }
+                                errDetail = data.detail || data.message || '';
+                                if (typeof errDetail !== 'string') {
+                                    errDetail = Array.isArray(errDetail)
+                                        ? errDetail.map((x) => (x && x.msg) || x).join(' ')
+                                        : String(errDetail);
+                                }
+                            } catch (_) {
+                                errDetail = `HTTP ${r.status}`;
+                            }
+                            alert(errDetail || `HTTP ${r.status}`);
+                        } finally {
+                            retopoBtn.disabled = false;
+                        }
+                    });
                 }
                 
                 // Hide progress blocks when task is done
@@ -5704,6 +5788,8 @@
                 };
 
                 moveToSecondary(taskSidebarBundle);
+                moveToSecondary(document.getElementById('retopo-convert-card'));
+                moveToSecondary(document.getElementById('sprite-sheet-card'));
                 moveToSecondary(additionalSection);
             },
 

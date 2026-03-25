@@ -25,11 +25,11 @@
 
 ## 3. Вызов воркера
 
-`send_task_to_worker(worker_url, input_url, task_type)`:
+`send_task_to_worker(worker_url, input_url, task_type, transform_params=..., pipeline_kind="rig")`:
 
 - **HTTP:** `POST` на URL воркера (в конфиге это `.../api-converter-glb`, плюс таблица `worker_endpoints` с весами).
-- **JSON:** `input_url`, `type` (как `input_type` таска), **`mode`: `"only_rig"`** — отдельные режимы конвертации на стороне сайта не задаются, только риг.
-- Опционально при **рестарте** таска: `local_position` / `local_rotation` / `local_scale` из тела запроса или из сохранённых `viewer_settings.modelTransform`.
+- **JSON (по умолчанию, Auto Rig):** `input_url`, `type` (как `input_type` таска), **`mode`: `"only_rig"`**. Опционально при **рестарте** таска: `local_position` / `local_rotation` / `local_scale` из тела запроса или из сохранённых `viewer_settings.modelTransform`.
+- **JSON (`pipeline_kind="convert"`):** только `input_url` и `type` — без `mode` и без трансформов (см. §10).
 
 **Ответ воркера (успех):** `task_id`, список **`output_urls`** (ожидаемые файлы), `progress_page` / `progress_url`, из которых извлекается **`guid`** (UUID задачи на стороне воркера).
 
@@ -107,6 +107,18 @@
 ## 9. Замечание для следующей фичи (спрайт-листы)
 
 Сейчас **нет** серверного рендера покадровой 2D-текстуры из сцены: всё 3D — в браузерном вьювере и в выгружаемых GLB/FBX/pакетах движков. Любая генерация пиксельного спрайт-листа поверх текущего стека потребует отдельного контура (клиентский offscreen render, серверный рендер, или новый этап на воркере) и явной спецификации: FPS, ракурс, разрешение, стилизация.
+
+---
+
+## 10. Auto Convert (`pipeline_kind = convert`)
+
+Отдельный тип задачи для **ретопологии / конвертации форматов** на том же воркерном HTTP-эндпоинте, но с **другим телом запроса**:
+
+- **`send_task_to_worker(..., pipeline_kind="convert")`** шлёт **только** `{"input_url": "<glb>", "type": "t_pose"}` — **без** `mode`, **без** трансформов.
+- **Создание с сайта после завершённого рига:** `POST /api/task/{parent_task_id}/create-convert` — сервер сам выбирает URL prepared GLB (`resolve_prepared_glb_source_url`), клиент не передаёт произвольный `input_url`.
+- **API:** `POST /api/task/create` с JSON `pipeline: "convert"` и `input_url`, указывающим на **`.glb`** (путь после разбора URL).
+
+Ожидаемые **`output_urls`** для convert задаются **ответом воркера** при приёме задачи (как для рига): сайт хранит список и поллит готовность по HEAD. Для проверки вручную: `POST` на URL воркера с телом выше и публичным `input_url` на GLB; в ответе смотреть `output_urls` и `progress_page`.
 
 ---
 

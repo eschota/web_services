@@ -245,38 +245,50 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
 
 
 async def send_task_to_worker(
-    worker_url: str, 
-    input_url: str, 
+    worker_url: str,
+    input_url: str,
     task_type: str = "t_pose",
-    transform_params: dict = None
+    transform_params: dict = None,
+    *,
+    pipeline_kind: str = "rig",
 ) -> WorkerTaskResult:
-    """Send conversion task to worker. Always uses mode: only_rig
-    
+    """Send task to worker.
+
+    - pipeline_kind ``rig`` (default): ``mode: only_rig`` and optional transform params (Auto Rig).
+    - pipeline_kind ``convert``: only ``input_url`` and ``type`` (retopo / format conversion).
+
     Args:
         worker_url: Worker API endpoint
         input_url: URL to input model file
         task_type: Type of task (t_pose, etc.)
-        transform_params: Optional dict with local_position, local_rotation, local_scale arrays
+        transform_params: Optional dict with local_position, local_rotation, local_scale arrays (rig only)
+        pipeline_kind: ``rig`` or ``convert``
     """
     task_type = normalize_task_type(task_type)
+    pk = (pipeline_kind or "rig").strip().lower()
+    if pk not in ("rig", "convert"):
+        pk = "rig"
 
     async with httpx.AsyncClient() as client:
         try:
-            # Standard payload for all file types - workers handle GLB/FBX/OBJ
-            payload = {
-                "input_url": input_url,
-                "type": task_type,
-                "mode": "only_rig"
-            }
-            
-            # Add transform parameters if provided
-            if transform_params:
-                if transform_params.get("local_position"):
-                    payload["local_position"] = transform_params["local_position"]
-                if transform_params.get("local_rotation"):
-                    payload["local_rotation"] = transform_params["local_rotation"]
-                if transform_params.get("local_scale"):
-                    payload["local_scale"] = transform_params["local_scale"]
+            if pk == "convert":
+                payload = {
+                    "input_url": input_url,
+                    "type": task_type,
+                }
+            else:
+                payload = {
+                    "input_url": input_url,
+                    "type": task_type,
+                    "mode": "only_rig",
+                }
+                if transform_params:
+                    if transform_params.get("local_position"):
+                        payload["local_position"] = transform_params["local_position"]
+                    if transform_params.get("local_rotation"):
+                        payload["local_rotation"] = transform_params["local_rotation"]
+                    if transform_params.get("local_scale"):
+                        payload["local_scale"] = transform_params["local_scale"]
             
             response = await client.post(
                 worker_url,

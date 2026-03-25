@@ -186,6 +186,9 @@ class Task(Base):
     ga_client_id = Column(String(100), nullable=True)
     created_via_api = Column(Boolean, default=False)  # True if POST /api/task/create used API key auth
 
+    # rig: Auto Rig worker payload with mode=only_rig; convert: minimal {input_url, type} only
+    pipeline_kind = Column(String(20), nullable=False, default="rig")
+
     # Server-side NSFW classification from task poster URL (ready_urls); not client-controlled.
     content_rating = Column(String(20), nullable=False, default="unknown")  # safe | suggestive | adult | unknown
     content_score = Column(Float, nullable=True)  # 0..1 composite from detector
@@ -197,6 +200,8 @@ class Task(Base):
     youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
     youtube_upload_error = Column(Text, nullable=True)
     youtube_uploaded_at = Column(DateTime, nullable=True)
+    # SHA-256 hex of uploaded video bytes (dedupe + audit)
+    youtube_source_sha256 = Column(String(64), nullable=True)
 
     @property
     def output_urls(self) -> list:
@@ -228,6 +233,16 @@ class YoutubeCredentials(Base):
     id = Column(Integer, primary_key=True)  # always 1
     refresh_token = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class YoutubeUploadedHash(Base):
+    """SHA-256 of video file bytes already uploaded to YouTube (dedupe by content)."""
+    __tablename__ = "youtube_uploaded_hashes"
+
+    sha256_hex = Column(String(64), primary_key=True)
+    youtube_video_id = Column(String(64), nullable=False)
+    first_task_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class WorkerEndpoint(Base):
@@ -501,6 +516,21 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_upload_status VARCHAR(32)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_upload_error TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_uploaded_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_source_sha256 VARCHAR(64)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN pipeline_kind VARCHAR(20) DEFAULT 'rig'")
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS youtube_uploaded_hashes (
+                        sha256_hex VARCHAR(64) PRIMARY KEY,
+                        youtube_video_id VARCHAR(64) NOT NULL,
+                        first_task_id VARCHAR(36),
+                        created_at DATETIME
+                    )
+                    """
+                )
+            except Exception:
+                pass
             
             # Scene table migrations
             await _try_add_column("ALTER TABLE scenes ADD COLUMN is_public BOOLEAN DEFAULT 0")
@@ -687,6 +717,25 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_uploaded_at TIMESTAMP"
             )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_source_sha256 VARCHAR(64)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pipeline_kind VARCHAR(20) NOT NULL DEFAULT 'rig'"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS youtube_uploaded_hashes (
+                        sha256_hex VARCHAR(64) PRIMARY KEY,
+                        youtube_video_id VARCHAR(64) NOT NULL,
+                        first_task_id VARCHAR(36),
+                        created_at TIMESTAMP
+                    )
+                    """
+                )
+            except Exception:
+                pass
 
 
 async def get_db():

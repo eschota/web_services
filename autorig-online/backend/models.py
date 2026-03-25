@@ -18,6 +18,10 @@ class TaskCreateRequest(BaseModel):
         None,
         description="Alias for ``type`` if ``type`` is omitted or empty",
     )
+    pipeline: str = Field(
+        default="rig",
+        description="``rig`` (default Auto Rig) or ``convert`` (GLB-only retopo/format pipeline; ``input_url`` must be ``.glb``)",
+    )
     ga_client_id: Optional[str] = Field(None, description="Google Analytics client ID")
 
 
@@ -65,6 +69,7 @@ class TaskStatusResponse(BaseModel):
     content_score: Optional[float] = None
     created_at: datetime
     updated_at: datetime
+    pipeline: str = Field(default="rig", description="``rig`` or ``convert``")
 
 
 class TaskHistoryItem(BaseModel):

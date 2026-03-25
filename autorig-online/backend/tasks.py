@@ -73,6 +73,22 @@ def find_file_by_pattern(ready_urls: List[str], pattern: str, quality: str = "10
     return None
 
 
+def resolve_prepared_glb_source_url(task: Task) -> Optional[str]:
+    """
+    Best URL for Auto Convert input: rigged prepared GLB (same sources as /api/task/.../prepared.glb).
+    """
+    for url in task.ready_urls or []:
+        u = (url or "").strip()
+        if "_model_prepared.glb" in u.lower():
+            return u
+    if task.guid and task.worker_api:
+        wb = get_worker_base_url(task.worker_api)
+        return f"{wb}/converter/glb/{task.guid}/{task.guid}_model_prepared.glb"
+    if task.fbx_glb_output_url and task.fbx_glb_ready:
+        return (task.fbx_glb_output_url or "").strip() or None
+    return None
+
+
 def _is_fbx_url(input_url: str) -> bool:
     """Return True if input_url path ends with .fbx (case-insensitive), ignoring query/fragment."""
     try:
@@ -133,7 +149,8 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
                     result = await send_task_to_worker(
                         task.worker_api,
                         task.fbx_glb_output_url,
-                        task.input_type or "t_pose"
+                        task.input_type or "t_pose",
+                        pipeline_kind="rig",
                     )
                     if not result.success:
                         task.status = "error"
@@ -181,12 +198,16 @@ async def create_conversion_task(
     owner_id: str,
     *,
     created_via_api: bool = False,
+    pipeline_kind: str = "rig",
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
     Returns: (task, error_message)
     """
     task_type = normalize_task_type(task_type)
+    pk = (pipeline_kind or "rig").strip().lower()
+    if pk not in ("rig", "convert"):
+        pk = "rig"
     # Create task record
     task_id = str(uuid.uuid4())
     task = Task(
@@ -197,6 +218,7 @@ async def create_conversion_task(
         input_type=task_type,
         status="created",
         created_via_api=created_via_api,
+        pipeline_kind=pk,
     )
 
     db.add(task)
@@ -220,8 +242,13 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     await db.commit()
     await db.refresh(task)
 
+    pk = getattr(task, "pipeline_kind", None) or "rig"
+    if pk not in ("rig", "convert"):
+        pk = "rig"
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
-    result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+    result = await send_task_to_worker(
+        worker_url, task.input_url, task.input_type or "t_pose", pipeline_kind=pk
+    )
     if not result.success:
         task.status = "error"
         task.error_message = result.error
@@ -377,57 +404,32 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             asyncio.create_task(cache_task_files(task.id, task.ready_urls, task.guid))
         except Exception as e:
             print(f"[Tasks] Failed to cache files for task {task.id}: {e}")
+    if was_processing and task.status == "done":
         try:
             from content_moderation import schedule_task_poster_classification
 
             schedule_task_poster_classification(task.id)
         except Exception as e:
             print(f"[Tasks] Failed to schedule poster classification for task {task.id}: {e}")
-    
-    # Telegram notification if task just completed
+
+    # GA4 rig_completed (fires when task reaches done; Telegram done waits on poster classification)
     if was_processing and task.status == "done":
         try:
-            from telegram_bot import broadcast_task_done
-            from sqlalchemy import update
-            
-            # Atomic check-and-set to prevent duplicate notifications
-            now = datetime.utcnow()
-            stmt = (
-                update(Task)
-                .where(Task.id == task.id)
-                .where(Task.telegram_done_notified_at.is_(None))
-                .values(telegram_done_notified_at=now)
-            )
-            res = await db.execute(stmt)
-            await db.commit()
-            
-            if res.rowcount == 1:
-                duration = None
-                if task.created_at:
-                    duration = int((datetime.utcnow() - task.created_at).total_seconds())
-                # Construct progress_page URL
-                progress_url = None
-                if task.guid and task.worker_api:
-                    worker_base = get_worker_base_url(task.worker_api)
-                    progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
-                print(f"[Tasks] Scheduling Telegram done notification for task {task.id}")
-                asyncio.create_task(broadcast_task_done(task.id, duration_seconds=duration, progress_page=progress_url))
-                
-                # GA4 rig_completed event
-                if task.ga_client_id:
-                    from main import send_ga4_event
-                    asyncio.create_task(send_ga4_event(
-                        task.ga_client_id, 
-                        "rig_completed", 
-                        {"duration": duration, "task_id": task.id}
-                    ))
-            else:
-                print(f"[Tasks] Done notification already sent for {task.id}, skipping")
-                
+            duration = None
+            if task.created_at:
+                duration = int((datetime.utcnow() - task.created_at).total_seconds())
+            if task.ga_client_id:
+                from main import send_ga4_event
+
+                asyncio.create_task(
+                    send_ga4_event(
+                        task.ga_client_id,
+                        "rig_completed",
+                        {"duration": duration, "task_id": task.id},
+                    )
+                )
         except Exception as e:
-            print(f"[Telegram] Failed to notify done: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"[Tasks] Failed to send GA4 rig_completed for task {task.id}: {e}")
     
     return task
 

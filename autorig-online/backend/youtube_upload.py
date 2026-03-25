@@ -7,9 +7,9 @@ Uses GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET and YOUTUBE_OAUTH_REDIRECT_URI from
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import tempfile
-import uuid
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlencode
@@ -22,6 +22,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import (
@@ -32,12 +33,23 @@ from config import (
     YOUTUBE_REFRESH_TOKEN,
     YOUTUBE_UPLOAD_PRIVACY,
 )
-from database import AsyncSessionLocal, Task, YoutubeCredentials
+from database import AsyncSessionLocal, Task, YoutubeCredentials, YoutubeUploadedHash
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 
 # Fixed title for all auto-uploaded showcase videos
 YOUTUBE_VIDEO_TITLE = "autorig character"
+
+# Serialize uploads per SHA-256 so two tasks with identical bytes cannot double-upload.
+_hash_lock_registry_lock = asyncio.Lock()
+_sha256_upload_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _lock_for_sha256(sha256_hex: str) -> asyncio.Lock:
+    async with _hash_lock_registry_lock:
+        if sha256_hex not in _sha256_upload_locks:
+            _sha256_upload_locks[sha256_hex] = asyncio.Lock()
+        return _sha256_upload_locks[sha256_hex]
 
 
 def _build_youtube_description(task_id: str, input_url: Optional[str]) -> str:
@@ -191,6 +203,11 @@ def _upload_video_file_blocking(
 
 
 async def run_youtube_upload_for_task(task_id: str) -> None:
+    video_url: Optional[str] = None
+    input_url: Optional[str] = None
+    tid: Optional[str] = None
+    refresh_token: Optional[str] = None
+
     async with AsyncSessionLocal() as db:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task or task.status != "done":
@@ -221,7 +238,6 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             return
 
         cred_row = await db.get(YoutubeCredentials, 1)
-        refresh_token = None
         if cred_row and cred_row.refresh_token:
             refresh_token = cred_row.refresh_token
         elif YOUTUBE_REFRESH_TOKEN:
@@ -234,15 +250,42 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         if not video_url:
             return
 
-        title = YOUTUBE_VIDEO_TITLE
-        desc = _build_youtube_description(task.id, task.input_url)
+        input_url = task.input_url
+        tid = task.id
 
-        tmp_path = None
-        try:
-            async with httpx.AsyncClient(timeout=600.0, follow_redirects=True) as client:
-                resp = await client.get(video_url)
-                resp.raise_for_status()
-                data = resp.content
+    title = YOUTUBE_VIDEO_TITLE
+    desc = _build_youtube_description(tid, input_url)
+
+    tmp_path: Optional[str] = None
+    try:
+        async with httpx.AsyncClient(timeout=600.0, follow_redirects=True) as client:
+            resp = await client.get(video_url)
+            resp.raise_for_status()
+            data = resp.content
+
+        sha256_hex = hashlib.sha256(data).hexdigest()
+        lock = await _lock_for_sha256(sha256_hex)
+        async with lock:
+            async with AsyncSessionLocal() as db:
+                existing = await db.scalar(
+                    select(YoutubeUploadedHash).where(YoutubeUploadedHash.sha256_hex == sha256_hex)
+                )
+                if existing:
+                    t = await db.get(Task, task_id)
+                    if t:
+                        t.youtube_video_id = existing.youtube_video_id
+                        t.youtube_upload_status = "uploaded"
+                        t.youtube_upload_error = None
+                        t.youtube_source_sha256 = sha256_hex
+                        t.youtube_uploaded_at = datetime.utcnow()
+                        t.updated_at = datetime.utcnow()
+                        await db.commit()
+                    print(
+                        f"[YouTube] Dedup task {task_id} -> video {existing.youtube_video_id} "
+                        f"(sha256={sha256_hex[:16]}…)"
+                    )
+                    return
+
             suffix = ".mp4"
             low = video_url.lower().split("?", 1)[0]
             if low.endswith(".webm"):
@@ -254,42 +297,98 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             with open(tmp_path, "wb") as f:
                 f.write(data)
 
-            video_id = await asyncio.to_thread(
-                _upload_video_file_blocking,
-                file_path=tmp_path,
-                title=title,
-                description=desc,
-                refresh_token=refresh_token,
-            )
-
-            task.youtube_video_id = video_id
-            task.youtube_upload_status = "uploaded"
-            task.youtube_upload_error = None
-            task.youtube_uploaded_at = datetime.utcnow()
-            task.updated_at = datetime.utcnow()
-            await db.commit()
-            print(f"[YouTube] Uploaded task {task_id} as video {video_id}")
-        except RefreshError as e:
-            print(f"[YouTube] OAuth refresh failed task {task_id}: {e}")
-            await _telegram_youtube_token_notice(str(e))
-            await _mark_failed(task_id, f"oauth_refresh:{e}")
-        except HttpError as e:
-            err = str(e)[:2000]
-            print(f"[YouTube] Upload HttpError task {task_id}: {err}")
-            if _youtube_error_needs_new_oauth(e):
-                await _telegram_youtube_token_notice(err)
-            await _mark_failed(task_id, err)
-        except Exception as e:
-            print(f"[YouTube] Upload failed task {task_id}: {e}")
-            if _youtube_error_needs_new_oauth(e):
+            try:
+                video_id = await asyncio.to_thread(
+                    _upload_video_file_blocking,
+                    file_path=tmp_path,
+                    title=title,
+                    description=desc,
+                    refresh_token=refresh_token,
+                )
+            except RefreshError as e:
+                print(f"[YouTube] OAuth refresh failed task {task_id}: {e}")
                 await _telegram_youtube_token_notice(str(e))
-            await _mark_failed(task_id, str(e)[:2000])
-        finally:
-            if tmp_path and os.path.isfile(tmp_path):
+                await _mark_failed(task_id, f"oauth_refresh:{e}")
+                return
+            except HttpError as e:
+                err = str(e)[:2000]
+                print(f"[YouTube] Upload HttpError task {task_id}: {err}")
+                if _youtube_error_needs_new_oauth(e):
+                    await _telegram_youtube_token_notice(err)
+                await _mark_failed(task_id, err)
+                return
+            except Exception as e:
+                print(f"[YouTube] Upload failed task {task_id}: {e}")
+                if _youtube_error_needs_new_oauth(e):
+                    await _telegram_youtube_token_notice(str(e))
+                await _mark_failed(task_id, str(e)[:2000])
+                return
+
+            now = datetime.utcnow()
+            async with AsyncSessionLocal() as db:
+                t = await db.get(Task, task_id)
+                if not t:
+                    return
+                db.add(
+                    YoutubeUploadedHash(
+                        sha256_hex=sha256_hex,
+                        youtube_video_id=video_id,
+                        first_task_id=task_id,
+                        created_at=now,
+                    )
+                )
+                t.youtube_video_id = video_id
+                t.youtube_upload_status = "uploaded"
+                t.youtube_upload_error = None
+                t.youtube_source_sha256 = sha256_hex
+                t.youtube_uploaded_at = now
+                t.updated_at = now
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+                    await db.commit()
+                except IntegrityError:
+                    await db.rollback()
+                    async with AsyncSessionLocal() as db2:
+                        row = await db2.scalar(
+                            select(YoutubeUploadedHash).where(
+                                YoutubeUploadedHash.sha256_hex == sha256_hex
+                            )
+                        )
+                        if row:
+                            t2 = await db2.get(Task, task_id)
+                            if t2:
+                                t2.youtube_video_id = row.youtube_video_id
+                                t2.youtube_upload_status = "uploaded"
+                                t2.youtube_upload_error = None
+                                t2.youtube_source_sha256 = sha256_hex
+                                t2.youtube_uploaded_at = datetime.utcnow()
+                                t2.updated_at = datetime.utcnow()
+                                await db2.commit()
+                            print(
+                                f"[YouTube] Dedup after race task {task_id} -> video {row.youtube_video_id}"
+                            )
+                    return
+            print(f"[YouTube] Uploaded task {task_id} as video {video_id}")
+    except RefreshError as e:
+        print(f"[YouTube] OAuth refresh failed task {task_id}: {e}")
+        await _telegram_youtube_token_notice(str(e))
+        await _mark_failed(task_id, f"oauth_refresh:{e}")
+    except HttpError as e:
+        err = str(e)[:2000]
+        print(f"[YouTube] Upload HttpError task {task_id}: {err}")
+        if _youtube_error_needs_new_oauth(e):
+            await _telegram_youtube_token_notice(err)
+        await _mark_failed(task_id, err)
+    except Exception as e:
+        print(f"[YouTube] Upload failed task {task_id}: {e}")
+        if _youtube_error_needs_new_oauth(e):
+            await _telegram_youtube_token_notice(str(e))
+        await _mark_failed(task_id, str(e)[:2000])
+    finally:
+        if tmp_path and os.path.isfile(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 async def _mark_failed(task_id: str, message: str) -> None:
