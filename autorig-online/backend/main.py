@@ -82,6 +82,7 @@ from workers import (
     is_worker_quarantined,
     normalize_task_type,
 )
+from content_moderation import build_free3d_similar_query
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -2699,6 +2700,12 @@ async def api_get_task(
             pass
         return None
 
+    kw_list = _poster_llm_keywords_list()
+    poster_free3d_query = build_free3d_similar_query(
+        getattr(task, "poster_llm_title", None),
+        kw_list,
+    )
+
     return TaskStatusResponse(
         task_id=task.id,
         status=task.status,
@@ -2723,10 +2730,12 @@ async def api_get_task(
         content_rating=getattr(task, "content_rating", None),
         content_score=getattr(task, "content_score", None),
         content_classified_at=getattr(task, "content_classified_at", None),
+        content_classifier_version=getattr(task, "content_classifier_version", None),
         poster_llm_title=getattr(task, "poster_llm_title", None),
         poster_llm_description=getattr(task, "poster_llm_description", None),
-        poster_llm_keywords=_poster_llm_keywords_list(),
+        poster_llm_keywords=kw_list,
         poster_llm_at=getattr(task, "poster_llm_at", None),
+        poster_free3d_query=poster_free3d_query,
         created_at=task.created_at,
         updated_at=task.updated_at,
         pipeline=getattr(task, "pipeline_kind", None) or "rig",

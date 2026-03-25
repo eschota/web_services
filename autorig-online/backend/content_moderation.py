@@ -144,6 +144,7 @@ def _normalize_keyword_list(keywords: List[Any]) -> List[str]:
 def analyze_poster_llm_metadata(image_bytes: bytes) -> Optional[dict]:
     """
     Sync OpenAI vision call. Returns dict with title, description, keywords (25 strings), or None on failure.
+    Title describes who/what is on the poster (role, outfit, gear); description is for YouTube only.
     """
     from config import OPENAI_API_KEY
 
@@ -158,11 +159,11 @@ def analyze_poster_llm_metadata(image_bytes: bytes) -> Optional[dict]:
     b64 = base64.standard_b64encode(image_bytes).decode("ascii")
     data_url = f"data:image/jpeg;base64,{b64}"
 
-    prompt = """You label a preview image from an automatic 3D character rigging service (AutoRig Online).
+    prompt = """You look at a preview render of a 3D character (AutoRig Online task poster). The viewer already knows it is a 3D model — do NOT waste the title on that.
 Return a single JSON object with exactly these keys:
-- "title": string, English, YouTube-style title, max 95 characters, describe the character/subject and that it is rigged for games (no clickbait).
-- "description": string, English, 2-4 short paragraphs for YouTube description: what the viewer sees, suitable for Unity/Unreal/Blender, mention rig and animations where relevant. Plain text, no HTML.
-- "keywords": JSON array of exactly 25 short English keyword strings for YouTube tags: 3D, character, rigging, game art, formats, use cases. No hashtags. No NSFW or policy-evading content.
+- "title": string, English, max 95 characters. Describe ONLY what is visible about the subject: role or archetype (soldier, knight, robot, …), clothing or uniform, notable gear (gas mask, sword, grenades, helmet, …), faction or style if clear. No marketing phrases, no "rigged for Unity/Unreal", no "3D character", no "perfect for games", no engine names.
+- "description": string, English, 2-4 short paragraphs for a YouTube video description: what appears in the render, tone/style, suitable for games/Blender; mention rig/animations only if relevant. Plain text, no HTML.
+- "keywords": JSON array of exactly 25 short English strings for YouTube tags. Order matters: put the MOST SPECIFIC tags first (role, outfit, weapons, props, art style). Put generic tags last (3d, character, rigging, game asset, unity, unreal, blender, animation, glb, fbx). No hashtags. No NSFW or policy-evading content.
 
 Output only valid JSON, no markdown."""
 
@@ -218,6 +219,62 @@ def build_free3d_query_from_keywords(keywords: Optional[List[str]]) -> Optional[
     if not parts:
         return None
     return " ".join(parts)
+
+
+def build_free3d_similar_query(
+    title: Optional[str],
+    keywords: Optional[List[str]],
+    *,
+    max_len: int = 280,
+) -> Optional[str]:
+    """
+    Build a single semantic search string for Free3D Similar models: poster subject title
+    plus up to 3 distinct keywords, skipping duplicates already covered by the title.
+    """
+    t = (title or "").strip()
+    kw_parts: List[str] = []
+    if keywords:
+        for k in keywords:
+            s = (k or "").strip()
+            if not s:
+                continue
+            if s.lower() not in {p.lower() for p in kw_parts}:
+                kw_parts.append(s)
+            if len(kw_parts) >= 3:
+                break
+
+    if not t and not kw_parts:
+        return None
+
+    if not t:
+        return build_free3d_query_from_keywords(kw_parts)
+
+    title_lower = t.lower()
+    title_tokens = set()
+    for w in t.replace(",", " ").split():
+        w = w.strip().lower()
+        if len(w) > 1:
+            title_tokens.add(w)
+
+    parts: List[str] = [t]
+    for k in kw_parts:
+        kl = k.lower()
+        if kl and kl in title_lower:
+            continue
+        if all((len(w) <= 2) or (w.lower() in title_tokens) for w in k.split()):
+            continue
+        parts.append(k)
+
+    q = " ".join(parts).strip()
+    if not q:
+        return None
+    if len(q) <= max_len:
+        return q
+    q = q[:max_len].rstrip()
+    last_space = q.rfind(" ")
+    if last_space > max_len // 2:
+        q = q[:last_space]
+    return q
 
 
 async def run_task_poster_classification(task_id: str) -> None:

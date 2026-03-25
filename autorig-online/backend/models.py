@@ -68,11 +68,15 @@ class TaskStatusResponse(BaseModel):
     content_rating: Optional[str] = None  # safe | suggestive | adult | unknown
     content_score: Optional[float] = None
     content_classified_at: Optional[datetime] = None
+    # e.g. nudenet-320n-3.4, nudenet...+gpt-4o-mini, or ...:openai_error
+    content_classifier_version: Optional[str] = None
     # OpenAI vision metadata from poster (YouTube + task UI)
     poster_llm_title: Optional[str] = None
     poster_llm_description: Optional[str] = None
     poster_llm_keywords: Optional[List[str]] = None
     poster_llm_at: Optional[datetime] = None
+    # Semantic search string for Similar 3D models (title + top keywords); server-computed
+    poster_free3d_query: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     pipeline: str = Field(default="rig", description="``rig`` or ``convert``")

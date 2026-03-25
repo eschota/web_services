@@ -3343,7 +3343,7 @@
             <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-free3d-similar-section">
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <h3 class="card-title" style="margin:0;" data-i18n="task_free3d_similar_title">Similar 3D models</h3>
-                    <div style="font-size:0.78rem; color:var(--text-muted);" data-i18n="task_free3d_similar_subtitle">From AI keywords (Free3D)</div>
+                    <div style="font-size:0.78rem; color:var(--text-muted);" data-i18n="task_free3d_similar_subtitle">Semantic search from poster title + keywords (Free3D)</div>
                 </div>
                 <div id="task-free3d-similar-results" class="free3d-results" style="padding-top:0;"></div>
             </div>
@@ -3356,11 +3356,12 @@
                     <p class="task-meta-wait hidden" id="task-meta-wait" data-i18n="task_meta_classifying">Classifying poster…</p>
                     <div id="task-meta-content" class="hidden">
                         <p style="margin:0 0 0.6rem 0;"><strong data-i18n="task_meta_rating_label">Content rating</strong>: <span id="task-meta-rating-value"></span><span id="task-meta-score-wrap" class="hidden"> · <span data-i18n="task_meta_score_label">score</span> <span id="task-meta-score-value"></span></span></p>
+                        <div id="task-meta-llm-unavailable" class="hidden" style="margin:0 0 0.75rem 0; padding:0.55rem 0.75rem; border-radius:8px; background:rgba(99,102,241,0.08); border:1px solid var(--glass-border); font-size:0.82rem; color:var(--text-secondary); line-height:1.45;">
+                            <p id="task-meta-llm-unavailable-text" style="margin:0;"></p>
+                            <p id="task-meta-classifier-version-line" class="hidden" style="margin:0.4rem 0 0 0; font-size:0.74rem; opacity:0.8;"></p>
+                        </div>
                         <div id="task-meta-llm-block" class="hidden">
-                            <p style="margin:0.5rem 0 0.25rem 0;"><strong data-i18n="task_meta_youtube_title">Suggested title</strong></p>
-                            <p id="task-meta-llm-title" style="margin:0 0 0.75rem 0; white-space: pre-wrap;"></p>
-                            <p style="margin:0.5rem 0 0.25rem 0;"><strong data-i18n="task_meta_youtube_description">Suggested description</strong></p>
-                            <div id="task-meta-llm-desc" style="margin:0 0 0.75rem 0; max-height: 12rem; overflow: auto; white-space: pre-wrap; color: var(--text-secondary); font-size: 0.86rem;"></div>
+                            <p id="task-meta-llm-title" class="task-meta-llm-title-line" style="margin:0 0 0.75rem 0; white-space: pre-wrap; font-weight: 600; font-size: 0.95rem;"></p>
                             <p style="margin:0.5rem 0 0.35rem 0;"><strong data-i18n="task_meta_keywords">Keywords</strong></p>
                             <div id="task-meta-keywords" class="task-meta-keyword-chips" style="display:flex; flex-wrap:wrap; gap:0.35rem;"></div>
                         </div>
@@ -4307,16 +4308,22 @@
                     title: (title && String(title).trim()) || 'Untitled',
                     preview: preview || '/static/images/placeholder-thumb.svg',
                     pageUrl: String(pageUrl).trim(),
+                    assetType: model.type,
+                    category: model.category,
                 };
             },
 
-            pickRandomFree3DItems(count = 5) {
-                const pool = Array.isArray(this.free3dSimilarPool) ? [...this.free3dSimilarPool] : [];
-                for (let i = pool.length - 1; i > 0; i -= 1) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [pool[i], pool[j]] = [pool[j], pool[i]];
-                }
-                return pool.slice(0, Math.min(count, pool.length));
+            pickTopSimilarFree3DItems(pool, count = 6) {
+                const list = Array.isArray(pool) ? pool : [];
+                const isCharacterLike = (m) => {
+                    const t = m?.assetType;
+                    if (t === 1 || t === '1') return true;
+                    const c = String(m?.category || '').toLowerCase();
+                    return c.includes('character');
+                };
+                const charFiltered = list.filter(isCharacterLike);
+                const ordered = charFiltered.length >= 3 ? charFiltered : list;
+                return ordered.slice(0, Math.min(count, ordered.length));
             },
 
             renderSimilarFree3DCharacters() {
@@ -4324,7 +4331,7 @@
                 const container = document.getElementById('task-free3d-similar-results');
                 if (!section || !container) return;
 
-                const picks = this.pickRandomFree3DItems(6);
+                const picks = this.pickTopSimilarFree3DItems(this.free3dSimilarPool, 6);
                 if (!picks.length) {
                     section.classList.add('hidden');
                     return;
@@ -4359,16 +4366,22 @@
                 if (!section || !container) return;
 
                 const task = this.task;
-                const kw = Array.isArray(task?.poster_llm_keywords) ? task.poster_llm_keywords : [];
-                const parts = [];
-                for (const k of kw) {
-                    const t = String(k || '').trim();
-                    if (!t) continue;
-                    const low = t.toLowerCase();
-                    if (!parts.some((p) => p.toLowerCase() === low)) parts.push(t);
-                    if (parts.length >= 3) break;
+                let q = '';
+                const serverQ = task?.poster_free3d_query && String(task.poster_free3d_query).trim();
+                if (serverQ) {
+                    q = serverQ;
+                } else {
+                    const kw = Array.isArray(task?.poster_llm_keywords) ? task.poster_llm_keywords : [];
+                    const parts = [];
+                    for (const k of kw) {
+                        const t = String(k || '').trim();
+                        if (!t) continue;
+                        const low = t.toLowerCase();
+                        if (!parts.some((p) => p.toLowerCase() === low)) parts.push(t);
+                        if (parts.length >= 3) break;
+                    }
+                    q = parts.join(' ').trim();
                 }
-                const q = parts.join(' ').trim();
                 if (!q) {
                     section.classList.add('hidden');
                     return;
@@ -4388,6 +4401,7 @@
                         q,
                         topK: '18',
                         sort: 'relevance',
+                        type: '1',
                         _: String(Date.now()),
                     });
                     const response = await fetch(`/api/free3d/search?${params.toString()}`, { cache: 'no-store' });
@@ -4463,15 +4477,52 @@
                     scoreWrap.classList.add('hidden');
                 }
 
-                const hasLlm = !!(task.poster_llm_title && task.poster_llm_description);
+                const hasLlm = !!(task.poster_llm_title && String(task.poster_llm_title).trim());
+                const cv = String(task.content_classifier_version || '');
+                const missEl = document.getElementById('task-meta-llm-unavailable');
+                const missText = document.getElementById('task-meta-llm-unavailable-text');
+                const cvLine = document.getElementById('task-meta-classifier-version-line');
+                if (missEl && missText) {
+                    if (hasLlm) {
+                        missEl.classList.add('hidden');
+                    } else {
+                        missEl.classList.remove('hidden');
+                        const tFn = (k, fb) => (window.t ? window.t(k) : fb);
+                        let explain = tFn('task_meta_llm_unavailable_default', '');
+                        if (cv.includes(':openai_error')) {
+                            explain = tFn(
+                                'task_meta_llm_unavailable_openai',
+                                'Suggested title, description, and keywords require OpenAI. The OpenAI step failed for this task (check server logs and API key).'
+                            );
+                        } else if (cv.includes(':fetch_error') || cv.includes(':classify_error')) {
+                            explain = tFn(
+                                'task_meta_llm_unavailable_poster',
+                                'Poster image could not be fetched or analyzed, so no AI metadata was generated.'
+                            );
+                        } else {
+                            explain = tFn(
+                                'task_meta_llm_unavailable_no_key',
+                                'Suggested title, description, and keywords are generated with OpenAI using the same poster image as the safety rating. They appear only if OPENAI_API_KEY is set on the server and the call succeeds. This task has only the NudeNet rating in the database.'
+                            );
+                        }
+                        missText.textContent = explain;
+                        if (cvLine) {
+                            if (cv) {
+                                cvLine.classList.remove('hidden');
+                                cvLine.textContent = `${tFn('task_meta_classifier_build', 'Classifier')}: ${cv}`;
+                            } else {
+                                cvLine.classList.add('hidden');
+                                cvLine.textContent = '';
+                            }
+                        }
+                    }
+                }
                 if (llmBlock) {
                     if (hasLlm) {
                         llmBlock.classList.remove('hidden');
                         const titleEl = document.getElementById('task-meta-llm-title');
-                        const descEl = document.getElementById('task-meta-llm-desc');
                         const kwEl = document.getElementById('task-meta-keywords');
                         if (titleEl) titleEl.textContent = String(task.poster_llm_title);
-                        if (descEl) descEl.textContent = String(task.poster_llm_description);
                         if (kwEl) {
                             const kws = Array.isArray(task.poster_llm_keywords) ? task.poster_llm_keywords : [];
                             kwEl.innerHTML = kws.map((k) => {
