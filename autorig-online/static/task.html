@@ -5315,9 +5315,11 @@
             // Cached files for download (replaces ZIP)
             cachedFilesData: null,
             isDownloadingAll: false,
+            /** Count for "Download All N files" — cached file list, else task.total_count, else manifest items */
+            downloadBundleLabelCount: 0,
 
             buildDownloadAllButtonLabel() {
-                const fileCount = (this.downloadItems || []).length;
+                const fileCount = Number(this.downloadBundleLabelCount || 0);
                 const word = this.tSafe('download_all_files_word', 'files');
                 if (this.task?.status === 'done' && fileCount > 0) {
                     return `📦 ${this.tSafe('btn_download_all', 'Download All')} ${fileCount} ${word}`;
@@ -5338,8 +5340,9 @@
             },
 
             async downloadAllFiles() {
-                const files = this.downloadItems || [];
-                if (this.isDownloadingAll || files.length === 0) return;
+                const total = Number(this.task?.total_count || 0);
+                const readyN = (this.downloadItems || []).length;
+                if (this.isDownloadingAll || (readyN === 0 && total === 0)) return;
 
                 const tPrep = (k, fb) => (window.t ? window.t(k) : fb);
                 this.isDownloadingAll = true;
@@ -5369,12 +5372,12 @@
                         return;
                     }
                     const data = await resp.json();
-                    const url = data && data.url;
-                    if (!url) {
+                    if (!data || !data.task_id) {
                         alert(tPrep('archive_failed', 'Download failed'));
                         return;
                     }
-                    window.location.href = url;
+                    // Same-origin HTTPS: /bundle.zip aligns with model.glb-style routes; /downloads/bundle kept as alias
+                    window.location.href = `/api/task/${this.taskId}/bundle.zip`;
                 } catch (e) {
                     console.error('Bundle download error:', e);
                     alert(tPrep('archive_failed', 'Download failed'));
@@ -5388,7 +5391,9 @@
 
             async downloadAllOrPurchase() {
                 if (this.isDownloadingAll) return;
-                if (!this.downloadItems || this.downloadItems.length === 0) {
+                const total = Number(this.task?.total_count || 0);
+                const readyN = (this.downloadItems || []).length;
+                if (this.task?.status !== 'done' || (readyN === 0 && total === 0)) {
                     alert(t('error_generic'));
                     return;
                 }
@@ -6502,6 +6507,14 @@
                 const readyItems = items.filter(item => item.isReady);
                 this.downloadItems = readyItems;
 
+                const totalFromTask = Number(task?.total_count || 0);
+                const cachedFc =
+                    this.cachedFilesData?.cached && typeof this.cachedFilesData.file_count === 'number'
+                        ? this.cachedFilesData.file_count
+                        : 0;
+                this.downloadBundleLabelCount =
+                    cachedFc > 0 ? cachedFc : totalFromTask > 0 ? totalFromTask : items.length;
+
                 const filesHtml = items.map((item) => {
                     const iconHtml = item.icon
                         ? `<img src="${item.icon}" alt="" aria-hidden="true" style="height: 2.5em; width: auto; object-fit: contain; display: block;" onerror="this.style.display='none'">`
@@ -6533,9 +6546,10 @@
                 // Single "Download All" button (purchase if needed)
                 let downloadAllHtml = '';
                 if (items.length > 0) {
-                    const fileCount = this.downloadItems.length;
                     const buttonLabel = this.buildDownloadAllButtonLabel();
-                    const buttonDisabled = fileCount === 0;
+                    const buttonDisabled =
+                        task?.status !== 'done' ||
+                        !(items.length > 0 || totalFromTask > 0 || readyItems.length > 0);
 
                     const archiveDesc = `<div style="margin-top: 0.75rem; font-size: 0.95rem; color: var(--text-primary); line-height: 1.4; text-align: center; font-weight: 500;" data-i18n="download_archive_desc">
                         ${t('download_archive_desc')}

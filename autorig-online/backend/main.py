@@ -9,7 +9,7 @@ import shutil
 import asyncio
 import time
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import hashlib
 import hmac
 import secrets
@@ -4765,16 +4765,13 @@ async def api_task_cached_files(
     }
 
 
-@app.get("/api/task/{task_id}/downloads/bundle-url")
-async def api_task_worker_bundle_url(
+async def _ensure_purchased_worker_bundle_zip_url(
+    db: AsyncSession,
+    user: Optional[User],
     task_id: str,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Return absolute URL to the worker-hosted full bundle ZIP under /converter/glb/.
-    Requires full-task download purchase. Verifies presence via GET + Range (HEAD often 404s on static).
-    """
+    *,
+    verify_worker_byte: bool,
+) -> Tuple[Task, str]:
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     task = await get_task_by_id(db, task_id)
@@ -4789,29 +4786,84 @@ async def api_task_worker_bundle_url(
     if not zip_url:
         raise HTTPException(status_code=404, detail="Worker bundle URL could not be resolved")
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream(
-                "GET",
-                zip_url,
-                follow_redirects=True,
-                headers={"Range": "bytes=0-0"},
-            ) as r:
-                if r.status_code not in (200, 206):
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Worker bundle not available (HTTP {r.status_code})",
-                    )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Worker bundle check failed: {e}") from e
+    if verify_worker_byte:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream(
+                    "GET",
+                    zip_url,
+                    follow_redirects=True,
+                    headers={"Range": "bytes=0-0"},
+                ) as r:
+                    if r.status_code not in (200, 206):
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Worker bundle not available (HTTP {r.status_code})",
+                        )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Worker bundle check failed: {e}") from e
 
+    return task, zip_url
+
+
+@app.get("/api/task/{task_id}/downloads/bundle-url")
+async def api_task_worker_bundle_url(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return absolute URL to the worker-hosted full bundle ZIP under /converter/glb/.
+    Requires full-task download purchase. Verifies presence via GET + Range (HEAD often 404s on static).
+    Browsers should download via GET /downloads/bundle (same-origin HTTPS) to avoid mixed-content warnings.
+    """
+    _, zip_url = await _ensure_purchased_worker_bundle_zip_url(
+        db, user, task_id, verify_worker_byte=True
+    )
+
+    return {"task_id": task_id, "url": zip_url}
+
+
+async def _stream_purchased_task_bundle_zip(
+    task_id: str,
+    user: Optional[User],
+    db: AsyncSession,
+) -> StreamingResponse:
+    """Stream full-task ZIP from worker over HTTPS (same checks as bundle-url except byte probe)."""
+    task, zip_url = await _ensure_purchased_worker_bundle_zip_url(
+        db, user, task_id, verify_worker_byte=False
+    )
     from telegram_bot import broadcast_full_bundle_download
 
     asyncio.create_task(broadcast_full_bundle_download(task_id, user.email))
 
-    return {"task_id": task_id, "url": zip_url}
+    safe_guid = (task.guid or task_id).strip()
+    filename = f"{safe_guid}.zip"
+    return await _proxy_model_file(zip_url, filename, as_attachment=True)
+
+
+@app.get("/api/task/{task_id}/downloads/bundle")
+async def api_task_download_bundle(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Stream worker ZIP over HTTPS (proxied). Same purchase checks as bundle-url; avoids http:// worker in the browser.
+    """
+    return await _stream_purchased_task_bundle_zip(task_id, user, db)
+
+
+@app.get("/api/task/{task_id}/bundle.zip")
+async def api_task_download_bundle_zip(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same as /downloads/bundle — stable path next to model.glb / prepared.glb (avoids missing route on some deploys)."""
+    return await _stream_purchased_task_bundle_zip(task_id, user, db)
 
 
 @app.get("/api/task/{task_id}/viewer")
@@ -5113,7 +5165,12 @@ _GLB_FILE_HTTP_HEADERS: Dict[str, str] = {
 }
 
 
-async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
+async def _proxy_model_file(
+    url: str,
+    filename: str,
+    *,
+    as_attachment: bool = False,
+) -> StreamingResponse:
     """Proxy a model file from worker with streaming.
 
     Uses streaming to avoid timeout on slow workers.
@@ -5124,11 +5181,12 @@ async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
     content_types = {
         "glb": "model/gltf-binary",
         "fbx": "application/octet-stream",
+        "zip": "application/zip",
     }
     content_type = content_types.get(ext, "application/octet-stream")
     
-    # Create client that lives through the response
-    client = httpx.AsyncClient(timeout=300.0, follow_redirects=True)
+    # Large ZIP bundles: allow long reads from worker (nginx should use long proxy_read_timeout too).
+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0), follow_redirects=True)
     try:
         req = client.build_request("GET", url)
         upstream = await client.send(req, stream=True)
@@ -5150,9 +5208,10 @@ async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
         finally:
             await client.aclose()
 
+    disp = "attachment" if as_attachment else "inline"
     headers = {
-        "Content-Disposition": f"inline; filename={filename}",
-        "Cache-Control": "public, max-age=86400",  # 24 hours cache
+        "Content-Disposition": f'{disp}; filename="{filename}"',
+        "Cache-Control": "private, max-age=0" if as_attachment else "public, max-age=86400",
         "Access-Control-Allow-Origin": "*",
         "X-Content-Type-Options": "nosniff",
         "Content-Encoding": "identity",
