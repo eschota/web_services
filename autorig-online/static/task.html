@@ -3434,6 +3434,7 @@
                 <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.55rem;">
                     Same custom animations as in 3D preview. Renders automatically when you pick an animation (or change options).
                 </div>
+                <div id="sprite-sheet-mode-hint" class="hidden" style="font-size:0.78rem; color:var(--accent); margin-bottom:0.5rem; line-height:1.35;"></div>
                 <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap; margin-bottom:0.45rem;">
                     <label for="sprite-sheet-anim-type" style="font-size:0.72rem; color:var(--text-muted);">Type:</label>
                     <select id="sprite-sheet-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
@@ -5564,13 +5565,16 @@
 
             updateSpriteSheetControlsState() {
                 const card = document.getElementById('sprite-sheet-card');
+                const hint = document.getElementById('sprite-sheet-mode-hint');
                 const getCtx = window.__getViewerSpriteSheetContext;
                 const selected = this.getSelectedAnimationItem();
-                let ok = false;
-                if (getCtx && selected?.ready && selected?.preview_url) {
+                const hasSelection = Boolean(selected?.ready && selected?.preview_url);
+
+                let viewerReadyForSprite = false;
+                if (getCtx && hasSelection) {
                     try {
                         const ctx = getCtx();
-                        ok = Boolean(
+                        viewerReadyForSprite = Boolean(
                             ctx?.currentModelType === 'animations' &&
                             ctx?.currentModel &&
                             ctx?.mixer &&
@@ -5578,23 +5582,41 @@
                             ctx?.renderer
                         );
                     } catch (_) {
-                        ok = false;
+                        viewerReadyForSprite = false;
                     }
                 }
-                if (card) {
-                    if (ok) {
-                        card.classList.remove('hidden');
-                        window.__taskPageBoot?.revealElement('sprite-sheet-card', 0);
-                    } else {
-                        card.classList.add('hidden');
-                        this._stopSpriteSheetPreviews();
-                        const pr = document.getElementById('sprite-sheet-progress');
-                        if (pr) pr.textContent = '';
-                    }
+
+                const pr = document.getElementById('sprite-sheet-progress');
+                if (!card || !hint) {
+                    return;
                 }
-                if (ok) {
-                    this.scheduleSpriteSheetAutoRender();
+
+                if (!getCtx || !hasSelection) {
+                    card.classList.add('hidden');
+                    hint.classList.add('hidden');
+                    hint.textContent = '';
+                    this._stopSpriteSheetPreviews();
+                    if (pr) pr.textContent = '';
+                    return;
                 }
+
+                card.classList.remove('hidden');
+                window.__taskPageBoot?.revealElement('sprite-sheet-card', 0);
+
+                if (!viewerReadyForSprite) {
+                    hint.classList.remove('hidden');
+                    hint.textContent = this.tSafe(
+                        'sprite_sheet_switch_animation_mode',
+                        'Switch the 3D viewer to Animation mode (top toolbar) to render sprite sheets.'
+                    );
+                    this._stopSpriteSheetPreviews();
+                    if (pr) pr.textContent = '';
+                    return;
+                }
+
+                hint.classList.add('hidden');
+                hint.textContent = '';
+                this.scheduleSpriteSheetAutoRender();
             },
 
             scheduleSpriteSheetAutoRender() {
@@ -11267,6 +11289,8 @@
             
             // Prevent race condition between preparedModelReady event and waitAndInitViewer
             let preparedLoadingInProgress = false;
+            /** True after prepared.glb load returned false (so poll can stop without a loaded preview). */
+            let preparedPreviewFailed = false;
 
             function getSharedModelCache() {
                 if (!window.modelCache) {
@@ -11292,7 +11316,9 @@
                 }
                 
                 animationsLoadingInBackground = true;
-                window.taskDbg('[Viewer] 🔄 Starting background load of animations...');
+                window.taskDbg(
+                    '[Viewer] Starting background load of animations.glb — if clips stay empty until you click Animation, check Network for this URL and errors.'
+                );
                 
                 try {
                     // Load animations GLB silently (no loading overlay)
@@ -11333,7 +11359,10 @@
                     }
                     
                 } catch (err) {
-                    console.warn('[Viewer] Background animations load failed, will try FBX later:', err.message);
+                    console.warn(
+                        '[Viewer] Background animations.glb load failed (Diagnose: Network tab /api/task/.../animations.glb). Animation mode will retry on click:',
+                        err.message
+                    );
                 } finally {
                     animationsLoadingInBackground = false;
                     animationsBackgroundFinished = true;
@@ -13535,14 +13564,22 @@
                                 if ((t.status === 'done' || animationsReady) && !modelCache.animations) {
                                     loadAnimationsInBackground();
                                 }
+                            } else {
+                                preparedPreviewFailed = true;
+                                window.taskDbg(
+                                    '[Viewer] Prepared model load failed; animations.glb will still load in background when task is ready (see Network tab).'
+                                );
                             }
                         } finally {
                             preparedLoadingInProgress = false;
                         }
                     }
                     
-                    // 3. If task is done or animations ready and we haven't started background load yet, start it
-                    if (t && (t.status === 'done' || animationsReady) && preparedLoaded && !modelCache.animations && !animationsLoadingInBackground) {
+                    // 3. Background animations: do not wait for prepared preview (prepared may fail while animations.glb is fine)
+                    if (t && (t.status === 'done' || animationsReady) && !modelCache.animations && !animationsLoadingInBackground) {
+                        window.taskDbg(
+                            '[Viewer] Starting background animations.glb load (independent of prepared preview; verify in Network if clips stay empty).'
+                        );
                         loadAnimationsInBackground();
                     }
                     
@@ -13568,10 +13605,18 @@
                         window.taskDbg('[Viewer] Task error. Stopping poll.');
                         return;
                     }
-                    // Stop when task is done, preview is up, and animations load finished (ok or failed)
-                    if (t && t.status === 'done' && preparedLoaded && (modelCache.animations || animationsBackgroundFinished)) {
-                        window.taskDbg('[Viewer] Task done, viewer settled. Stopping poll.');
-                        return;
+                    // Stop when task is done, preview settled (or unavailable), and animations load finished (ok or failed)
+                    if (t && t.status === 'done') {
+                        const previewSettled =
+                            preparedLoaded ||
+                            free3dModelLoaded ||
+                            !t.prepared_glb_ready ||
+                            preparedPreviewFailed;
+                        const animSettled = modelCache.animations || animationsBackgroundFinished;
+                        if (previewSettled && animSettled) {
+                            window.taskDbg('[Viewer] Task done, viewer settled. Stopping poll.');
+                            return;
+                        }
                     }
                     
                 } catch (e) {
@@ -13613,9 +13658,11 @@
                         // Start background animations load
                         loadAnimationsInBackground();
                     } else {
+                        preparedPreviewFailed = true;
                         console.warn('[Viewer] preparedModelReady: loadModel returned false');
                     }
                 } catch (err) {
+                    preparedPreviewFailed = true;
                     console.error('[Viewer] preparedModelReady: load error:', err);
                 } finally {
                     preparedLoadingInProgress = false;
