@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import random
 import os
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import httpx
 
@@ -453,9 +454,27 @@ async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[boo
 
 
 def get_worker_base_url(worker_api_url: str) -> str:
-    """Extract base URL from worker API URL"""
-    # http://5.129.157.224:5267/api-converter-glb -> http://5.129.157.224:5267
-    return worker_api_url.replace('/api-converter-glb', '')
+    """
+    HTTP origin (scheme://host:port) for paths like /converter/glb/{guid}/...
+
+    worker_api is often either:
+    - http://host:port/api-converter-glb
+    - http://host:port/converter/glb/{guid}/  (task folder URL)
+
+    Stripping only /api-converter-glb leaves the second form broken and produces
+    duplicate /converter/glb/... segments in derived URLs (404 on bundle zip).
+    """
+    raw = (worker_api_url or "").strip()
+    if not raw:
+        return ""
+    if "/api-converter-glb" in raw:
+        raw = raw.split("/api-converter-glb", 1)[0].rstrip("/")
+    elif "/converter/glb" in raw:
+        raw = raw.split("/converter/glb", 1)[0].rstrip("/")
+    parsed = urlparse(raw)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return raw.rstrip("/")
 
 
 # =============================================================================

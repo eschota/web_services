@@ -914,6 +914,11 @@ def _infer_worker_root_and_guid(task) -> tuple[Optional[str], Optional[str]]:
     progress_page = (task.progress_page or "").strip()
     if progress_page:
         m = re.search(r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})/', progress_page)
+        if not m:
+            m = re.search(
+                r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})\.zip',
+                progress_page,
+            )
         if m:
             if not worker_root:
                 worker_root = f"{m.group(1)}/converter/glb"
@@ -930,6 +935,11 @@ def _infer_worker_root_and_guid(task) -> tuple[Optional[str], Optional[str]]:
             if not url:
                 continue
             m = re.search(r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})/', url)
+            if not m:
+                m = re.search(
+                    r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})\.zip',
+                    url,
+                )
             if m:
                 if not worker_root:
                     worker_root = f"{m.group(1)}/converter/glb"
@@ -1311,15 +1321,14 @@ async def _has_full_task_download_purchase(db: AsyncSession, user: Optional[User
 
 def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
     """
-    Absolute URL to the worker-built full bundle: /converter/glb/{guid}/{guid}.zip
+    Absolute URL to the worker-built full bundle: {worker_root}/{guid}.zip
+    (worker_root is http://host/converter/glb — same inference as gallery / artifacts).
     """
-    guid = getattr(task, "guid", None)
-    if not guid:
+    worker_root, inferred_guid = _infer_worker_root_and_guid(task)
+    guid = ((getattr(task, "guid", None) or "") or "").strip() or inferred_guid
+    if not worker_root or not guid:
         return None
-    base = _resolve_worker_base_from_task(task)
-    if not base:
-        return None
-    return f"{str(base).rstrip('/')}/converter/glb/{guid}/{guid}.zip"
+    return f"{worker_root.rstrip('/')}/{guid}.zip"
 
 
 async def _credit_task_owner_for_sale(db: AsyncSession, task, buyer_user: User, amount: int) -> None:
@@ -4763,8 +4772,8 @@ async def api_task_worker_bundle_url(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Return absolute URL to the worker-hosted full bundle ZIP ({guid}.zip).
-    Requires full-task download purchase. Verifies the file exists on the worker (HEAD).
+    Return absolute URL to the worker-hosted full bundle ZIP under /converter/glb/.
+    Requires full-task download purchase. Verifies presence via GET + Range (HEAD often 404s on static).
     """
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -4782,12 +4791,17 @@ async def api_task_worker_bundle_url(
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.head(zip_url, follow_redirects=True)
-        if r.status_code != 200:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Worker bundle not available (HTTP {r.status_code})",
-            )
+            async with client.stream(
+                "GET",
+                zip_url,
+                follow_redirects=True,
+                headers={"Range": "bytes=0-0"},
+            ) as r:
+                if r.status_code not in (200, 206):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Worker bundle not available (HTTP {r.status_code})",
+                    )
     except HTTPException:
         raise
     except Exception as e:

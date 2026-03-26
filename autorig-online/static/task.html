@@ -7075,6 +7075,9 @@
                 if (mixer) {
                     try {
                         mixer.stopAllAction();
+                        if (typeof mixer.uncacheRoot === 'function') {
+                            mixer.uncacheRoot(currentModel);
+                        }
                     } catch (_) {
                         // ignore stop errors
                     }
