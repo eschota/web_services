@@ -2141,35 +2141,6 @@
         #download-all-btn.hidden {
             display: none !important;
         }
-        .download-all-archive-progress {
-            width: 100%;
-            padding: 0.55rem 0;
-        }
-        .download-all-archive-progress.hidden {
-            display: none !important;
-        }
-        .download-all-archive-track {
-            width: 100%;
-            height: 10px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.1);
-            overflow: hidden;
-            border: 1px solid rgba(99, 102, 241, 0.35);
-        }
-        .download-all-archive-fill {
-            height: 100%;
-            border-radius: inherit;
-            background: linear-gradient(90deg, #6366f1, #22c55e);
-            width: 0%;
-            transition: width 0.2s ease-out;
-        }
-        .download-all-archive-label {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-align: center;
-            margin-top: 0.35rem;
-        }
     </style>
 </head>
 <body data-layout-free3d-ribbon="1" data-layout-free3d-init="task">
@@ -4865,11 +4836,6 @@
                 }
                 // Use output_urls for Downloads (all expected files), fallback to ready_urls
                 const downloadUrls = (task.output_urls && task.output_urls.length > 0) ? task.output_urls : task.ready_urls;
-                if (task.status === 'done') {
-                    await this.fetchArchiveEstimate();
-                } else {
-                    this.archiveEstimate = null;
-                }
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
 
@@ -5347,47 +5313,15 @@
 
             // Cached files for download (replaces ZIP)
             cachedFilesData: null,
-            /** From GET /downloads/archive/estimate — real bundle file count + approx size */
-            archiveEstimate: null,
             isDownloadingAll: false,
 
-            formatApproxBytes(bytes) {
-                if (bytes == null || bytes < 0 || Number.isNaN(bytes)) return '';
-                const n = Number(bytes);
-                if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-                if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
-                return `${n} B`;
-            },
-
             buildDownloadAllButtonLabel() {
-                const est = this.archiveEstimate;
-                const fileCount = est?.file_count != null ? est.file_count : (this.downloadItems || []).length;
-                const approxBytes = est?.approx_bytes;
-                const approxComplete = est?.approx_bytes_complete !== false;
-                let sizePart = '';
-                if (approxBytes != null && approxBytes >= 0) {
-                    const base = this.formatApproxBytes(approxBytes);
-                    const s = approxComplete ? base : `${base}+`;
-                    sizePart = ` (~${s})`;
-                }
-                if (est?.file_count != null) {
-                    return `📦 ${this.tSafe('btn_download_all', 'Download All')} ${fileCount} ${this.tSafe('download_all_files_word', 'files')}${sizePart}`;
-                }
-                if (this.task?.status === 'done') {
-                    return this.tSafe('preparing_downloads', 'Preparing downloads…');
+                const fileCount = (this.downloadItems || []).length;
+                const word = this.tSafe('download_all_files_word', 'files');
+                if (this.task?.status === 'done' && fileCount > 0) {
+                    return `📦 ${this.tSafe('btn_download_all', 'Download All')} ${fileCount} ${word}`;
                 }
                 return this.tSafe('preparing_downloads', 'Preparing downloads…');
-            },
-
-            async fetchArchiveEstimate() {
-                if (!this.taskId) return;
-                try {
-                    const r = await fetch(`/api/task/${this.taskId}/downloads/archive/estimate`, { cache: 'no-store' });
-                    this.archiveEstimate = r.ok ? await r.json() : null;
-                } catch (e) {
-                    console.warn('archive estimate failed:', e);
-                    this.archiveEstimate = null;
-                }
             },
 
             async checkCachedFiles() {
@@ -5407,115 +5341,47 @@
                 if (this.isDownloadingAll || files.length === 0) return;
 
                 const tPrep = (k, fb) => (window.t ? window.t(k) : fb);
-                const labelFmt = (pct) => `${tPrep('archive_preparing', 'Preparing files')} — ${pct}%`;
-
                 this.isDownloadingAll = true;
                 const downloadBtn = document.getElementById('download-all-btn');
-                const progressWrap = document.getElementById('download-all-archive-progress');
-                const progressFill = document.getElementById('download-all-archive-fill');
-                const progressLabel = document.getElementById('download-all-archive-label');
-
                 if (downloadBtn) {
                     downloadBtn.disabled = true;
-                    downloadBtn.classList.add('hidden');
                 }
-                if (progressWrap) {
-                    progressWrap.classList.remove('hidden');
-                }
-                if (progressFill) {
-                    progressFill.style.width = '0%';
-                }
-                if (progressLabel) {
-                    progressLabel.textContent = labelFmt(0);
-                }
-
-                const showButtonAgain = () => {
-                    if (downloadBtn) {
-                        downloadBtn.disabled = false;
-                        downloadBtn.classList.remove('hidden');
-                        downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">${this.buildDownloadAllButtonLabel()}</span>`;
-                    }
-                    if (progressWrap) {
-                        progressWrap.classList.add('hidden');
-                    }
-                };
 
                 try {
-                    const prep = await fetch(`/api/task/${this.taskId}/downloads/archive/prepare`, {
-                        method: 'POST',
+                    const resp = await fetch(`/api/task/${this.taskId}/downloads/bundle-url`, {
                         credentials: 'same-origin',
                         headers: { Accept: 'application/json' },
                     });
-                    if (prep.status === 401) {
+                    if (resp.status === 401) {
                         window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
                         return;
                     }
-                    if (!prep.ok) {
-                        let detail = tPrep('archive_failed', 'Could not prepare archive');
+                    if (!resp.ok) {
+                        let detail = tPrep('archive_failed', 'Download failed');
                         try {
-                            const err = await prep.json();
+                            const err = await resp.json();
                             if (err.detail) detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
                         } catch (e) {
                             /* ignore */
                         }
                         alert(detail);
-                        showButtonAgain();
                         return;
                     }
-                    const { job_id: jobId } = await prep.json();
-                    if (!jobId) {
-                        alert(tPrep('archive_failed', 'Could not prepare archive'));
-                        showButtonAgain();
+                    const data = await resp.json();
+                    const url = data && data.url;
+                    if (!url) {
+                        alert(tPrep('archive_failed', 'Download failed'));
                         return;
                     }
-
-                    const pollIntervalMs = 400;
-                    for (;;) {
-                        const stResp = await fetch(
-                            `/api/task/${this.taskId}/downloads/archive/status/${encodeURIComponent(jobId)}`,
-                            { credentials: 'same-origin', headers: { Accept: 'application/json' } }
-                        );
-                        if (stResp.status === 401) {
-                            window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
-                            return;
-                        }
-                        if (!stResp.ok) {
-                            break;
-                        }
-                        const st = await stResp.json();
-                        const pct = Math.max(0, Math.min(100, Number(st.percent) || 0));
-                        if (progressFill) {
-                            progressFill.style.width = `${pct}%`;
-                        }
-                        if (progressLabel) {
-                            progressLabel.textContent = labelFmt(pct);
-                        }
-                        if (st.error && !st.done) {
-                            alert(st.error || tPrep('archive_failed', 'Could not prepare archive'));
-                            showButtonAgain();
-                            return;
-                        }
-                        if (st.done) {
-                            const url = `/api/task/${this.taskId}/downloads/archive/file/${encodeURIComponent(jobId)}`;
-                            window.location.href = url;
-                            if (progressLabel) {
-                                progressLabel.textContent = tPrep('archive_download_started', 'Download started');
-                            }
-                            setTimeout(() => {
-                                showButtonAgain();
-                            }, 1500);
-                            return;
-                        }
-                        await new Promise((r) => setTimeout(r, pollIntervalMs));
-                    }
-                    alert(tPrep('archive_failed', 'Could not prepare archive'));
-                    showButtonAgain();
+                    window.location.href = url;
                 } catch (e) {
-                    console.error('Archive download error:', e);
-                    alert(tPrep('archive_failed', 'Could not prepare archive'));
-                    showButtonAgain();
+                    console.error('Bundle download error:', e);
+                    alert(tPrep('archive_failed', 'Download failed'));
                 } finally {
                     this.isDownloadingAll = false;
+                    if (downloadBtn) {
+                        downloadBtn.disabled = false;
+                    }
                 }
             },
 
@@ -6645,9 +6511,7 @@
                 // Single "Download All" button (purchase if needed)
                 let downloadAllHtml = '';
                 if (items.length > 0) {
-                    const fileCount = this.archiveEstimate?.file_count != null
-                        ? this.archiveEstimate.file_count
-                        : this.downloadItems.length;
+                    const fileCount = this.downloadItems.length;
                     const buttonLabel = this.buildDownloadAllButtonLabel();
                     const buttonDisabled = fileCount === 0;
 
@@ -6663,12 +6527,6 @@
                                     <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18" style="filter: brightness(10);">
                                     <span style="font-weight: 700;">${buttonLabel}</span>
                                 </button>
-                                <div id="download-all-archive-progress" class="download-all-archive-progress hidden" aria-live="polite">
-                                    <div class="download-all-archive-track">
-                                        <div id="download-all-archive-fill" class="download-all-archive-fill" style="width:0%"></div>
-                                    </div>
-                                    <div id="download-all-archive-label" class="download-all-archive-label">${this.tSafe('archive_preparing', 'Preparing files')} — 0%</div>
-                                </div>
                             </div>
                             ${archiveDesc}
                         </li>

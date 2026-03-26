@@ -15,7 +15,6 @@ import hmac
 import secrets
 import json
 import tempfile
-import zipfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, quote, unquote, parse_qsl
@@ -690,8 +689,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add GZip compression for responses > 500 bytes
-# GLB files compress very well (50-70% size reduction)
+# Add GZip compression for responses > 500 bytes.
+# GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
@@ -1310,412 +1309,17 @@ async def _has_full_task_download_purchase(db: AsyncSession, user: Optional[User
     return row.scalar_one_or_none() is not None
 
 
-def _expand_download_urls_for_archive(urls: Optional[List[str]]) -> List[str]:
-    """Match task.html expandedUrls: split concatenated GUID filenames into separate URLs."""
-    if not urls:
-        return []
-    guid_pattern = re.compile(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_", re.I
-    )
-    expanded: List[str] = []
-    for url in urls:
-        url_clean = (url or "").strip()
-        if not url_clean:
-            continue
-        raw_filename = url_clean.split("/")[-1] or ""
-        matches = list(guid_pattern.finditer(raw_filename))
-        if len(matches) > 1:
-            parts = [p for p in guid_pattern.split(raw_filename) if p]
-            base_url = url_clean[: url_clean.rindex("/") + 1]
-            for i, m in enumerate(matches):
-                if i < len(parts):
-                    expanded.append(base_url + m.group(0) + parts[i])
-        else:
-            expanded.append(url_clean)
-    return expanded
-
-
-def _should_skip_archive_base_filename(clean_name: str) -> bool:
-    """Same filters as task.html updateFileList (cleaned filename, no GUID)."""
-    fn = (clean_name or "").lower()
-    if re.search(r"_video\.(mp4|mov)$", fn):
-        return True
-    if re.search(r"_video_poster\.jpe?g$", fn):
-        return True
-    if re.search(r"^video\.(mp4|mov)$", fn):
-        return True
-    if re.search(r"^video_poster\.jpe?g$", fn):
-        return True
-    if re.search(r"_unity_hdrp_render_[1-3]_view\.jpe?g$", fn):
-        return True
-    if re.search(r"^unity_hdrp_render_[1-3]_view\.jpe?g$", fn):
-        return True
-    if re.search(r"model_prepared\.glb$", fn):
-        return True
-    return False
-
-
-async def _collect_archive_bundle_entries(
-    task: Task,
-    db: AsyncSession,
-    user_email: str,
-    *,
-    include_all_ready_animations: bool = False,
-) -> List[Dict[str, Any]]:
+def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
     """
-    Build ordered list of {arcname, source_url, cache_path} for ZIP (ZIP_STORED).
-    Includes base task outputs (same rules as Downloads UI) + permitted custom animation FBX.
-    If include_all_ready_animations=True, every ready custom animation is included (for public estimate).
+    Absolute URL to the worker-built full bundle: /converter/glb/{guid}/{guid}.zip
     """
-    task_id = task.id
     guid = getattr(task, "guid", None)
-
-    out_urls = task.output_urls or []
-    download_urls: List[str] = list(out_urls) if len(out_urls) > 0 else list(task.ready_urls or [])
-    expanded = _expand_download_urls_for_archive(download_urls)
-
-    purchased_ids: set = set()
-    purchased_all_anim = False
-    if not include_all_ready_animations:
-        user_row = await db.execute(select(User).where(User.email == user_email))
-        user_obj = user_row.scalar_one_or_none()
-        if user_obj:
-            purchased_ids, purchased_all_anim = await _get_animation_purchase_state(db, user_obj, task_id)
-    entries: List[Dict[str, Any]] = []
-    seen_urls: set = set()
-    used_arcnames: set = set()
-
-    cache_root = TASK_CACHE_DIR / task_id
-
-    for url in expanded:
-        url_clean = (url or "").strip()
-        raw_filename = url_clean.split("/")[-1] or ""
-        clean_name = _clean_filename_for_cache(url_clean, guid)
-        if _should_skip_archive_base_filename(clean_name):
-            continue
-        if url_clean in seen_urls:
-            continue
-        seen_urls.add(url_clean)
-
-        arcname = clean_name
-        if arcname in used_arcnames:
-            stem, ext = os.path.splitext(clean_name)
-            n = 2
-            while f"{stem}_{n}{ext}" in used_arcnames:
-                n += 1
-            arcname = f"{stem}_{n}{ext}"
-        used_arcnames.add(arcname)
-
-        cache_path = cache_root / clean_name
-        entries.append(
-            {
-                "arcname": arcname,
-                "source_url": url_clean,
-                "cache_path": cache_path,
-            }
-        )
-
-    manifest = _load_animation_manifest()
-    raw_items = manifest.get("animations") or []
-    file_map = await _build_task_animation_file_map(task, raw_items)
-
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        if item.get("enabled", True) is False:
-            continue
-        anim_key = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
-        if not anim_key:
-            continue
-        resolved = _resolve_animation_file(item, file_map)
-        if not resolved or not resolved.get("ready"):
-            continue
-        if not include_all_ready_animations:
-            if not purchased_all_anim and anim_key not in purchased_ids:
-                continue
-        anim_url = (resolved.get("url") or "").strip()
-        if not anim_url:
-            continue
-        if anim_url in seen_urls:
-            continue
-        seen_urls.add(anim_url)
-        clean_fn = resolved.get("clean_filename") or resolved.get("raw_filename") or "animation.fbx"
-        clean_fn = clean_fn.replace("\\", "/").split("/")[-1]
-        arcname = f"custom_animations/{clean_fn}"
-        if arcname in used_arcnames:
-            stem, ext = os.path.splitext(clean_fn)
-            n = 2
-            while f"custom_animations/{stem}_{n}{ext}" in used_arcnames:
-                n += 1
-            arcname = f"custom_animations/{stem}_{n}{ext}"
-        used_arcnames.add(arcname)
-        cache_name = _clean_filename_for_cache(anim_url, guid)
-        cache_path = cache_root / cache_name
-        entries.append(
-            {
-                "arcname": arcname,
-                "source_url": anim_url,
-                "cache_path": cache_path,
-            }
-        )
-
-    return entries
-
-
-async def _estimate_archive_total_bytes(entries: List[Dict[str, Any]]) -> tuple[int, bool]:
-    """Sum bytes from local cache or HTTP Content-Length; False if any entry size unknown."""
-    if not entries:
-        return 0, True
-    sem = asyncio.Semaphore(24)
-
-    async def _size_one(client: httpx.AsyncClient, ent: dict) -> tuple[int, bool]:
-        p = ent["cache_path"]
-        try:
-            if p.exists() and p.is_file():
-                return (p.stat().st_size, True)
-            async with sem:
-                r = await client.head(ent["source_url"], follow_redirects=True)
-            if r.status_code >= 400:
-                return (0, False)
-            cl = r.headers.get("content-length")
-            if cl and str(cl).isdigit():
-                return (int(cl), True)
-            return (0, False)
-        except Exception:
-            return (0, False)
-
-    async with httpx.AsyncClient(timeout=25.0) as client:
-        parts = await asyncio.gather(*[_size_one(client, e) for e in entries])
-    total = sum(p[0] for p in parts)
-    complete = all(p[1] for p in parts)
-    return total, complete
-
-
-async def _filter_reachable_archive_entries(
-    entries: List[Dict[str, Any]],
-) -> tuple[List[Dict[str, Any]], List[str]]:
-    """
-    Drop entries that are not on disk and whose source_url returns 404/410 (or connection error).
-    HEAD first; if not definitive, one GET stream check. Avoids failing the whole ZIP on one bad worker URL.
-    """
-    if not entries:
-        return [], []
-
-    sem = asyncio.Semaphore(32)
-
-    async def _probe(client: httpx.AsyncClient, ent: dict) -> tuple[Optional[dict], Optional[str]]:
-        p = ent["cache_path"]
-        if p.exists() and p.is_file():
-            return ent, None
-        url = (ent.get("source_url") or "").strip()
-        arc = ent.get("arcname", "?")
-        if not url:
-            return None, f"{arc}: missing URL"
-        async with sem:
-            try:
-                r = await client.head(url, follow_redirects=True)
-                if r.status_code == 200:
-                    return ent, None
-                if r.status_code in (404, 410):
-                    return None, f"{arc}: HTTP {r.status_code}"
-            except Exception:
-                pass
-            try:
-                async with client.stream("GET", url, follow_redirects=True) as s:
-                    code = s.status_code
-                    if code == 200:
-                        return ent, None
-                    if code in (404, 410):
-                        return None, f"{arc}: HTTP {code}"
-                    if code >= 400:
-                        return None, f"{arc}: HTTP {code}"
-                    return ent, None
-            except Exception as e:
-                return None, f"{arc}: GET {e}"
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        pairs = await asyncio.gather(*[_probe(client, e) for e in entries])
-    kept: List[Dict[str, Any]] = []
-    skipped: List[str] = []
-    for ent, reason in pairs:
-        if ent is not None:
-            kept.append(ent)
-        elif reason:
-            skipped.append(reason)
-    return kept, skipped
-
-
-def _archive_job_paths(task_id: str, job_id: str) -> tuple[Path, Path]:
-    job_dir = TASK_CACHE_DIR / task_id / "archive_jobs"
-    return job_dir / f"{job_id}.json", job_dir / f"{job_id}.zip"
-
-
-def _write_archive_job_state(task_id: str, job_id: str, **fields: Any) -> None:
-    json_path, _ = _archive_job_paths(task_id, job_id)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    data: Dict[str, Any] = {}
-    if json_path.exists():
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data.update(fields)
-    json_path.write_text(json.dumps(data, ensure_ascii=False, indent=0), encoding="utf-8")
-
-
-def _read_archive_job_state(task_id: str, job_id: str) -> Optional[Dict[str, Any]]:
-    json_path, _ = _archive_job_paths(task_id, job_id)
-    if not json_path.exists():
+    if not guid:
         return None
-    try:
-        return json.loads(json_path.read_text(encoding="utf-8"))
-    except Exception:
+    base = _resolve_worker_base_from_task(task)
+    if not base:
         return None
-
-
-def _build_zip_bundle_sync(
-    task_id: str,
-    job_id: str,
-    entries: List[Dict[str, Any]],
-    zip_path: Path,
-    total: int,
-) -> None:
-    """Sync: stream files into stored-only ZIP; update job JSON progress."""
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
-        with httpx.Client(timeout=600.0) as client:
-            for i, ent in enumerate(entries):
-                arcname = ent["arcname"]
-                url = ent["source_url"]
-                cache_path: Path = ent["cache_path"]
-                pct = int(((i + 1) / max(total, 1)) * 100)
-                pct = min(99, pct) if i + 1 < total else 100
-                _write_archive_job_state(
-                    task_id,
-                    job_id,
-                    percent=pct,
-                    phase="packing",
-                    done=False,
-                    error=None,
-                )
-
-                zinfo = zipfile.ZipInfo(arcname)
-                zinfo.compress_type = zipfile.ZIP_STORED
-
-                if cache_path.exists() and cache_path.is_file():
-                    with open(cache_path, "rb") as src, zf.open(zinfo, "w") as dest:
-                        shutil.copyfileobj(src, dest, 1024 * 1024)
-                else:
-                    with client.stream("GET", url, follow_redirects=True) as r:
-                        if r.status_code != 200:
-                            print(
-                                f"[Archive] Skip unreachable (HTTP {r.status_code}): {arcname}",
-                                flush=True,
-                            )
-                            continue
-                        with zf.open(zinfo, "w") as dest:
-                            for chunk in r.iter_bytes(1024 * 1024):
-                                if chunk:
-                                    dest.write(chunk)
-
-
-async def _run_archive_bundle_job(task_id: str, job_id: str, user_email: str) -> None:
-    json_path, zip_path = _archive_job_paths(task_id, job_id)
-    try:
-        async with AsyncSessionLocal() as db:
-            task = await get_task_by_id(db, task_id)
-            if not task:
-                _write_archive_job_state(
-                    task_id, job_id, done=False, error="Task not found", phase="error", percent=0
-                )
-                return
-            if task.status != "done":
-                _write_archive_job_state(
-                    task_id,
-                    job_id,
-                    done=False,
-                    error="Task is not completed yet",
-                    phase="error",
-                    percent=0,
-                )
-                return
-            entries = await _collect_archive_bundle_entries(task, db, user_email)
-
-        if not entries:
-            _write_archive_job_state(
-                task_id,
-                job_id,
-                done=False,
-                error="No files to archive",
-                phase="error",
-                percent=0,
-            )
-            return
-
-        entries, skipped_unreachable = await _filter_reachable_archive_entries(entries)
-        if skipped_unreachable:
-            preview = skipped_unreachable[:12]
-            more = len(skipped_unreachable) - len(preview)
-            extra = f" (+{more} more)" if more > 0 else ""
-            print(
-                f"[Archive] Skipped {len(skipped_unreachable)} unreachable file(s): {preview}{extra}",
-                flush=True,
-            )
-        if not entries:
-            _write_archive_job_state(
-                task_id,
-                job_id,
-                done=False,
-                error="No downloadable files (sources returned 404 or errors).",
-                phase="error",
-                percent=0,
-            )
-            return
-
-        _write_archive_job_state(
-            task_id,
-            job_id,
-            percent=0,
-            phase="collecting",
-            done=False,
-            error=None,
-            total_files=len(entries),
-            skipped_unreachable=len(skipped_unreachable),
-        )
-
-        try:
-            if zip_path.exists():
-                zip_path.unlink()
-        except OSError:
-            pass
-
-        await asyncio.to_thread(
-            _build_zip_bundle_sync, task_id, job_id, entries, zip_path, len(entries)
-        )
-
-        _write_archive_job_state(
-            task_id,
-            job_id,
-            percent=100,
-            phase="done",
-            done=True,
-            error=None,
-            zip_path=str(zip_path),
-        )
-    except Exception as e:
-        print(f"[Archive] Job {job_id} failed: {e}", flush=True)
-        try:
-            if zip_path.exists():
-                zip_path.unlink()
-        except OSError:
-            pass
-        _write_archive_job_state(
-            task_id,
-            job_id,
-            done=False,
-            error=str(e) or "Archive failed",
-            phase="error",
-            percent=0,
-        )
+    return f"{str(base).rstrip('/')}/converter/glb/{guid}/{guid}.zip"
 
 
 async def _credit_task_owner_for_sale(db: AsyncSession, task, buyer_user: User, amount: int) -> None:
@@ -4942,11 +4546,14 @@ async def proxy_file(
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename
     if cached_path.exists():
+        file_headers: Dict[str, str] = {"Cache-Control": "public, max-age=86400"}
+        if content_type == "model/gltf-binary":
+            file_headers["Content-Encoding"] = "identity"
         return FileResponse(
             cached_path,
             media_type=content_type,
             filename=clean_filename,
-            headers={"Cache-Control": "public, max-age=86400"}
+            headers=file_headers,
         )
     
     async def stream_file():
@@ -4957,13 +4564,16 @@ async def proxy_file(
                 async for chunk in response.aiter_bytes(chunk_size=65536):
                     yield chunk
     
+    stream_headers: Dict[str, str] = {
+        "Content-Disposition": f"attachment; filename={clean_filename}",
+        "Cache-Control": "public, max-age=86400",
+    }
+    if content_type == "model/gltf-binary":
+        stream_headers["Content-Encoding"] = "identity"
     return StreamingResponse(
         stream_file(),
         media_type=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename={clean_filename}",
-            "Cache-Control": "public, max-age=86400"
-        }
+        headers=stream_headers,
     )
 
 
@@ -5044,11 +4654,14 @@ async def proxy_file_by_name(
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename
     if cached_path.exists():
+        file_headers_dn: Dict[str, str] = {"Cache-Control": "public, max-age=86400"}
+        if content_type == "model/gltf-binary":
+            file_headers_dn["Content-Encoding"] = "identity"
         return FileResponse(
             cached_path,
             media_type=content_type,
             filename=clean_filename,
-            headers={"Cache-Control": "public, max-age=86400"}
+            headers=file_headers_dn,
         )
     
     async def stream_file():
@@ -5059,13 +4672,16 @@ async def proxy_file_by_name(
                 async for chunk in response.aiter_bytes(chunk_size=65536):
                     yield chunk
     
+    stream_headers_dn: Dict[str, str] = {
+        "Content-Disposition": f"attachment; filename={clean_filename}",
+        "Cache-Control": "public, max-age=86400",
+    }
+    if content_type == "model/gltf-binary":
+        stream_headers_dn["Content-Encoding"] = "identity"
     return StreamingResponse(
         stream_file(),
         media_type=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename={clean_filename}",
-            "Cache-Control": "public, max-age=86400"
-        }
+        headers=stream_headers_dn,
     )
 
 
@@ -5140,139 +4756,48 @@ async def api_task_cached_files(
     }
 
 
-@app.get("/api/task/{task_id}/downloads/archive/estimate")
-async def api_task_archive_estimate(
-    task_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Approximate file count and total size for the full bundle ZIP (same rules as the archive:
-    all downloadable outputs + all ready custom animation FBX). Sizes use cache stat() or
-    HTTP HEAD Content-Length when available.
-    """
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if task.status != "done":
-        return {
-            "task_id": task_id,
-            "file_count": 0,
-            "approx_bytes": None,
-            "approx_bytes_complete": False,
-        }
-    entries = await _collect_archive_bundle_entries(
-        task, db, "", include_all_ready_animations=True
-    )
-    approx, complete = await _estimate_archive_total_bytes(entries)
-    return {
-        "task_id": task_id,
-        "file_count": len(entries),
-        "approx_bytes": approx,
-        "approx_bytes_complete": complete,
-    }
-
-
-@app.post("/api/task/{task_id}/downloads/archive/prepare")
-async def api_prepare_task_archive(
+@app.get("/api/task/{task_id}/downloads/bundle-url")
+async def api_task_worker_bundle_url(
     task_id: str,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Start building a single ZIP (no compression) of all downloadable task files
-    plus permitted custom animation FBX. Requires full-task download purchase.
+    Return absolute URL to the worker-hosted full bundle ZIP ({guid}.zip).
+    Requires full-task download purchase. Verifies the file exists on the worker (HEAD).
     """
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != "done":
+        raise HTTPException(status_code=400, detail="Task is not completed yet")
     if not await _has_full_task_download_purchase(db, user, task_id):
         raise HTTPException(status_code=402, detail="Full download purchase required")
 
-    job_id = str(uuid.uuid4())
-    _write_archive_job_state(
-        task_id,
-        job_id,
-        user_email=user.email,
-        percent=0,
-        phase="pending",
-        done=False,
-        error=None,
-    )
-    asyncio.create_task(_run_archive_bundle_job(task_id, job_id, user.email))
-    return {"job_id": job_id, "task_id": task_id}
+    zip_url = resolve_worker_full_bundle_zip_url(task)
+    if not zip_url:
+        raise HTTPException(status_code=404, detail="Worker bundle URL could not be resolved")
 
-
-@app.get("/api/task/{task_id}/downloads/archive/status/{job_id}")
-async def api_task_archive_status(
-    task_id: str,
-    job_id: str,
-    user: Optional[User] = Depends(get_current_user),
-):
-    st = _read_archive_job_state(task_id, job_id)
-    if not st:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    if st.get("user_email") != user.email:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return {
-        "percent": int(st.get("percent", 0)),
-        "phase": st.get("phase", "pending"),
-        "done": bool(st.get("done", False)),
-        "error": st.get("error"),
-    }
-
-
-@app.get("/api/task/{task_id}/downloads/archive/file/{job_id}")
-async def api_task_archive_download(
-    task_id: str,
-    job_id: str,
-    user: Optional[User] = Depends(get_current_user),
-):
-    st = _read_archive_job_state(task_id, job_id)
-    if not st:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    if st.get("user_email") != user.email:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if st.get("error") and not st.get("done"):
-        raise HTTPException(status_code=400, detail=st.get("error") or "Archive failed")
-    if not st.get("done"):
-        raise HTTPException(status_code=400, detail="Archive not ready yet")
-    zip_str = st.get("zip_path")
-    if not zip_str:
-        raise HTTPException(status_code=404, detail="Archive path missing")
-    zip_path = Path(zip_str)
-    if not zip_path.is_file():
-        raise HTTPException(status_code=404, detail="Archive file not found")
-
-    json_path, _zp = _archive_job_paths(task_id, job_id)
-
-    def _cleanup_archive_files() -> None:
-        try:
-            if json_path.exists():
-                json_path.unlink()
-        except OSError:
-            pass
-        try:
-            if zip_path.exists():
-                zip_path.unlink()
-        except OSError:
-            pass
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.head(zip_url, follow_redirects=True)
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Worker bundle not available (HTTP {r.status_code})",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Worker bundle check failed: {e}") from e
 
     from telegram_bot import broadcast_full_bundle_download
 
     asyncio.create_task(broadcast_full_bundle_download(task_id, user.email))
 
-    return FileResponse(
-        zip_path,
-        media_type="application/zip",
-        filename=f"{task_id}_autorig_bundle.zip",
-        background=BackgroundTask(_cleanup_archive_files),
-    )
+    return {"task_id": task_id, "url": zip_url}
 
 
 @app.get("/api/task/{task_id}/viewer")
@@ -5565,11 +5090,20 @@ def _resolve_worker_base_from_task(task) -> Optional[str]:
     return None
 
 
+# Skip GZipMiddleware for GLB: browsers send Accept-Encoding: gzip; streaming gzip
+# over HTTP/2 has caused ERR_HTTP2_PROTOCOL_ERROR in the wild (same idea as video proxy).
+_GLB_FILE_HTTP_HEADERS: Dict[str, str] = {
+    "Cache-Control": "public, max-age=86400",
+    "Access-Control-Allow-Origin": "*",
+    "Content-Encoding": "identity",
+}
+
+
 async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
     """Proxy a model file from worker with streaming.
-    
+
     Uses streaming to avoid timeout on slow workers.
-    GZip middleware will compress responses automatically.
+    Content-Encoding identity skips app-level gzip on binary streams.
     """
     # Determine content type
     ext = filename.split(".")[-1].lower()
@@ -5606,7 +5140,8 @@ async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
         "Content-Disposition": f"inline; filename={filename}",
         "Cache-Control": "public, max-age=86400",  # 24 hours cache
         "Access-Control-Allow-Origin": "*",
-        "X-Content-Type-Options": "nosniff"
+        "X-Content-Type-Options": "nosniff",
+        "Content-Encoding": "identity",
     }
     content_length = upstream.headers.get("content-length")
     last_modified = upstream.headers.get("last-modified")
@@ -5912,10 +5447,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
                     path=str(cache_path),
                     media_type="model/gltf-binary",
                     filename=f"{task_id}_{cache_name}.glb",
-                    headers={
-                        "Cache-Control": "public, max-age=86400",
-                        "Access-Control-Allow-Origin": "*",
-                    }
+                    headers=dict(_GLB_FILE_HTTP_HEADERS),
                 )
         except Exception as e:
             print(f"[GLB Cache] Error validating cached file: {e}")
@@ -5948,10 +5480,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
                 path=str(cache_path),
                 media_type="model/gltf-binary",
                 filename=f"{task_id}_{cache_name}.glb",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "Access-Control-Allow-Origin": "*",
-                }
+                headers=dict(_GLB_FILE_HTTP_HEADERS),
             )
     except Exception as e:
         print(f"[GLB Cache] Failed to cache {cache_name} for {task_id}: {e}")
@@ -5998,10 +5527,7 @@ async def api_proxy_animations_glb(
             path=str(cache_path),
             media_type="model/gltf-binary",
             filename=f"{task_id}_animations.glb",
-            headers={
-                "Cache-Control": "public, max-age=86400",
-                "Access-Control-Allow-Origin": "*",
-            }
+            headers=dict(_GLB_FILE_HTTP_HEADERS),
         )
     
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
@@ -6072,10 +5598,7 @@ async def api_proxy_prepared_glb(
             path=str(cache_path),
             media_type="model/gltf-binary",
             filename=f"{task_id}_prepared.glb",
-            headers={
-                "Cache-Control": "public, max-age=86400",
-                "Access-Control-Allow-Origin": "*",
-            }
+            headers=dict(_GLB_FILE_HTTP_HEADERS),
         )
     
     # 1. Try to find _model_prepared.glb in ready_urls (best option for preview)
@@ -6338,7 +5861,8 @@ async def api_free3d_glb(guid: str, filename: str):
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "public, max-age=86400",
-            "Access-Control-Allow-Origin": "*"
+            "Access-Control-Allow-Origin": "*",
+            "Content-Encoding": "identity",
         }
     )
 
@@ -7848,261 +7372,3 @@ async def add_model_to_scene(
     scene.task_ids = task_ids
     
     # Add transform
-    transforms = scene.transforms
-    if request.transform:
-        transforms[request.task_id] = {
-            "position": request.transform.position,
-            "rotation": request.transform.rotation,
-            "scale": request.transform.scale
-        }
-    else:
-        # Default position offset based on number of models
-        offset_x = len(task_ids) * 2
-        transforms[request.task_id] = {"position": [offset_x, 0, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1]}
-    scene.transforms = transforms
-    
-    scene.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(scene)
-    
-    # Build model info
-    models = []
-    for tid in scene.task_ids:
-        t = await db.execute(select(Task).where(Task.id == tid))
-        t = t.scalar_one_or_none()
-        if t:
-            models.append(SceneModelInfo(
-                task_id=tid,
-                input_url=t.input_url,
-                glb_url=f"/api/task/{tid}/prepared.glb" if t.status == "done" else None,
-                transform=TransformData(**transforms.get(tid, {}))
-            ))
-    
-    return SceneResponse(
-        scene_id=scene.id,
-        name=scene.name,
-        task_ids=scene.task_ids,
-        transforms=scene.transforms,
-        hierarchy=scene.hierarchy,
-        models=models,
-        is_public=scene.is_public,
-        like_count=scene.like_count,
-        liked_by_me=False,
-        owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
-        created_at=scene.created_at,
-        updated_at=scene.updated_at
-    )
-
-
-@app.delete("/api/scene/{scene_id}/model/{task_id}")
-async def remove_model_from_scene(
-    scene_id: str,
-    task_id: str,
-    req: Request,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Remove a model from a scene"""
-    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
-    scene = scene.scalar_one_or_none()
-    if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
-    
-    # Check ownership
-    anon_id = _effective_anon_id(req)
-    
-    is_owner = False
-    if scene.owner_type == "user" and user and user.email == scene.owner_id:
-        is_owner = True
-    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
-        is_owner = True
-    
-    if not is_owner:
-        raise HTTPException(status_code=403, detail="Only scene owner can remove models")
-    
-    task_ids = scene.task_ids
-    if task_id not in task_ids:
-        raise HTTPException(status_code=404, detail="Task not in scene")
-    
-    if len(task_ids) <= 1:
-        raise HTTPException(status_code=400, detail="Scene must have at least one model")
-    
-    task_ids.remove(task_id)
-    scene.task_ids = task_ids
-    
-    # Remove transform
-    transforms = scene.transforms
-    transforms.pop(task_id, None)
-    scene.transforms = transforms
-    
-    scene.updated_at = datetime.utcnow()
-    await db.commit()
-    
-    return {"status": "ok", "removed_task_id": task_id}
-
-
-@app.post("/api/scene/{scene_id}/like", response_model=SceneLikeResponse)
-async def like_scene(
-    scene_id: str,
-    req: Request,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Like/unlike a scene"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Login required to like scenes")
-    
-    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
-    scene = scene.scalar_one_or_none()
-    if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
-    
-    # Check existing like
-    existing = await db.execute(
-        select(SceneLike).where(
-            SceneLike.scene_id == scene_id,
-            SceneLike.user_email == user.email
-        )
-    )
-    existing = existing.scalar_one_or_none()
-    
-    if existing:
-        # Unlike
-        await db.delete(existing)
-        scene.like_count = max(0, scene.like_count - 1)
-        liked_by_me = False
-    else:
-        # Like
-        like = SceneLike(scene_id=scene_id, user_email=user.email)
-        db.add(like)
-        scene.like_count += 1
-        liked_by_me = True
-    
-    await db.commit()
-    await db.refresh(scene)
-    
-    return SceneLikeResponse(
-        scene_id=scene.id,
-        like_count=scene.like_count,
-        liked_by_me=liked_by_me
-    )
-
-
-@app.get("/api/scenes", response_model=SceneListResponse)
-async def list_scenes(
-    req: Request,
-    page: int = 1,
-    per_page: int = 20,
-    public_only: bool = False,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """List user's scenes or public scenes"""
-    anon_id = _effective_anon_id(req)
-    
-    from sqlalchemy import func, desc
-    
-    query = select(Scene)
-    
-    if public_only:
-        query = query.where(Scene.is_public == True)
-    else:
-        # User's own scenes
-        if user:
-            query = query.where(Scene.owner_type == "user", Scene.owner_id == user.email)
-        elif anon_id:
-            query = query.where(Scene.owner_type == "anon", Scene.owner_id == anon_id)
-        else:
-            return SceneListResponse(scenes=[], total=0, page=page, per_page=per_page)
-    
-    # Count total
-    count_query = select(func.count()).select_from(query.subquery())
-    total = (await db.execute(count_query)).scalar()
-    
-    # Paginate
-    query = query.order_by(desc(Scene.updated_at)).offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(query)
-    scenes = result.scalars().all()
-    
-    items = [
-        SceneListItem(
-            scene_id=s.id,
-            name=s.name,
-            task_count=len(s.task_ids),
-            is_public=s.is_public,
-            like_count=s.like_count,
-            created_at=s.created_at
-        )
-        for s in scenes
-    ]
-    
-    return SceneListResponse(
-        scenes=items,
-        total=total,
-        page=page,
-        per_page=per_page
-    )
-
-
-@app.delete("/api/scene/{scene_id}")
-async def delete_scene(
-    scene_id: str,
-    req: Request,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Delete a scene"""
-    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
-    scene = scene.scalar_one_or_none()
-    if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
-    
-    # Check ownership
-    anon_id = _effective_anon_id(req)
-    
-    is_owner = False
-    if scene.owner_type == "user" and user and user.email == scene.owner_id:
-        is_owner = True
-    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
-        is_owner = True
-    
-    # Admins can delete any scene
-    if user and user.is_admin:
-        is_owner = True
-    
-    if not is_owner:
-        raise HTTPException(status_code=403, detail="Only scene owner can delete")
-    
-    # Delete likes
-    await db.execute(
-        SceneLike.__table__.delete().where(SceneLike.scene_id == scene_id)
-    )
-    
-    await db.delete(scene)
-    await db.commit()
-    
-    return {"status": "ok", "deleted_scene_id": scene_id}
-
-
-# =============================================================================
-# Health Check
-# =============================================================================
-@app.get("/health")
-async def health():
-    """Health check endpoint"""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
-
-
-# =============================================================================
-# Run
-# =============================================================================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=DEBUG
-    )
-
