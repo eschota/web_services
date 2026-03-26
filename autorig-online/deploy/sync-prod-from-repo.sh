@@ -26,7 +26,8 @@ sudo cp -a "${REPO_ROOT}/static/developers.html" "${PROD_ROOT}/static/"
 sudo cp -a "${REPO_ROOT}/static/dashboard.html" "${PROD_ROOT}/static/"
 sudo cp -a "${REPO_ROOT}/static/task.html" "${PROD_ROOT}/static/"
 sudo cp -a "${REPO_ROOT}/static/terms-of-use.html" "${REPO_ROOT}/static/user-agreement.html" "${PROD_ROOT}/static/"
-sudo cp -a "${REPO_ROOT}/static/js/header.js" "${REPO_ROOT}/static/js/footer.js" "${REPO_ROOT}/static/js/site-layout.js" "${PROD_ROOT}/static/js/"
+sudo cp -a "${REPO_ROOT}/static/js/header.js" "${REPO_ROOT}/static/js/footer.js" "${REPO_ROOT}/static/js/site-layout.js" \
+  "${REPO_ROOT}/static/js/rig-editor.js" "${REPO_ROOT}/static/js/sprite-sheet-mvp.js" "${PROD_ROOT}/static/js/"
 sudo cp -a "${REPO_ROOT}/static/css/styles.css" "${PROD_ROOT}/static/css/"
 sudo cp -a "${REPO_ROOT}/static/i18n/"*.json "${PROD_ROOT}/static/i18n/"
 
