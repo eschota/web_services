@@ -12,6 +12,11 @@
     "upload_progress_uploading": "正在上传模型…",
     "upload_progress_creating_task": "正在创建任务…",
     "upload_progress_btn": "请稍候…",
+    "upload_busy_tips_title": "等待期间",
+    "upload_busy_tip_1": "角色手臂应在肩部高度并向两侧水平伸直（T 字姿势）。",
+    "upload_busy_tip_2": "双腿站立宽度约与肩同宽。",
+    "upload_busy_tip_3": "网格拓扑应足以在动画关键部位（肘、膝、手指等）良好弯曲变形。",
+    "upload_busy_tip_4": "绑定通常约需 5 分钟或更长，视模型复杂度而定。请耐心等待并放松，进入任务页后流程会自动继续。",
 
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "模型URL",

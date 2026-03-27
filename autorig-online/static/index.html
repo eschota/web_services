@@ -18,7 +18,7 @@
     <link rel="alternate icon" href="/static/images/logo/favicon.svg">
     
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=upload-busy-1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=upload-busy-tips-1">
     
     <!-- Schema.org SoftwareApplication markup -->
     <script type="application/ld+json">
@@ -142,8 +142,22 @@
                 </form>
                 <div id="convert-form-busy" class="form-busy-overlay hidden" role="status" aria-live="polite" aria-busy="false">
                     <div class="form-busy-inner">
-                        <div class="form-busy-spinner" aria-hidden="true"></div>
                         <p class="form-busy-text" id="convert-form-busy-text" data-i18n="upload_progress_uploading">Uploading your model…</p>
+                        <div class="form-busy-progress-wrap" id="convert-form-busy-progress-wrap">
+                            <div class="form-busy-progress-track" id="convert-form-busy-progress-track">
+                                <div class="form-busy-progress-fill" id="convert-form-busy-progress-fill"></div>
+                            </div>
+                            <span class="form-busy-progress-pct" id="convert-form-busy-progress-pct" aria-hidden="true">0%</span>
+                        </div>
+                        <div class="form-busy-tips">
+                            <p class="form-busy-tips-title" data-i18n="upload_busy_tips_title">While you wait</p>
+                            <ul class="form-busy-tips-list">
+                                <li data-i18n="upload_busy_tip_1">Characters should have arms at shoulder height, extended to the sides (T-pose).</li>
+                                <li data-i18n="upload_busy_tip_2">Legs should stand about shoulder-width apart.</li>
+                                <li data-i18n="upload_busy_tip_3">Mesh topology should be sufficient for bending at animation hotspots: elbows, knees, fingers, and similar areas.</li>
+                                <li data-i18n="upload_busy_tip_4">Rigging usually takes from about 5 minutes depending on model complexity. Please be patient and relax—the rest runs automatically.</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -215,7 +229,7 @@
     <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/task-card.js"></script>
-    <script src="/static/js/app.js?v=upload-busy-1"></script>
+    <script src="/static/js/app.js?v=upload-busy-tips-1"></script>
 </body>
 </html>
 

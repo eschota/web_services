@@ -538,33 +538,106 @@ h3 { font-size: 1.25rem; }
 }
 
 .form-busy-inner {
-    text-align: center;
-    padding: 1.5rem;
-    max-width: 22rem;
-}
-
-.form-busy-spinner {
-    width: 2.5rem;
-    height: 2.5rem;
-    margin: 0 auto 1rem;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: form-busy-spin 0.72s linear infinite;
-}
-
-@keyframes form-busy-spin {
-    to {
-        transform: rotate(360deg);
-    }
+    text-align: left;
+    padding: 1.25rem 1.35rem;
+    max-width: min(34rem, 94vw);
+    max-height: min(88vh, 42rem);
+    overflow-y: auto;
 }
 
 .form-busy-text {
-    margin: 0;
-    font-size: 1rem;
+    margin: 0 0 0.85rem;
+    font-size: 1.05rem;
     font-weight: 600;
-    line-height: 1.4;
+    line-height: 1.35;
     color: var(--text-primary);
+    text-align: center;
+}
+
+.form-busy-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-bottom: 1.1rem;
+}
+
+.form-busy-progress-track {
+    flex: 1;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    min-width: 0;
+}
+
+[data-theme="light"] .form-busy-progress-track {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+.form-busy-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-hover), var(--accent));
+    transition: width 0.12s ease-out;
+}
+
+.form-busy-progress-track.indeterminate .form-busy-progress-fill {
+    width: 38% !important;
+    transition: none;
+    animation: form-busy-indet 1.15s ease-in-out infinite;
+}
+
+@keyframes form-busy-indet {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(280%);
+    }
+}
+
+.form-busy-progress-pct {
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    min-width: 2.5rem;
+    text-align: right;
+}
+
+.form-busy-progress-wrap.link-mode .form-busy-progress-pct {
+    visibility: hidden;
+    width: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.form-busy-tips-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+}
+
+.form-busy-tips-list {
+    margin: 0;
+    padding-left: 1.15rem;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.form-busy-tips-list li {
+    margin-bottom: 0.45rem;
+}
+
+.form-busy-tips-list li:last-child {
+    margin-bottom: 0;
 }
 
 .card-header {

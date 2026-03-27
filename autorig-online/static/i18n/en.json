@@ -12,6 +12,11 @@
     "upload_progress_uploading": "Uploading your model…",
     "upload_progress_creating_task": "Creating your task…",
     "upload_progress_btn": "Please wait…",
+    "upload_busy_tips_title": "While you wait",
+    "upload_busy_tip_1": "Characters should have arms at shoulder height, extended to the sides (T-pose).",
+    "upload_busy_tip_2": "Legs should stand about shoulder-width apart.",
+    "upload_busy_tip_3": "Mesh topology should be enough for clean deformation at animation hotspots—elbows, knees, fingers, and similar joints.",
+    "upload_busy_tip_4": "Rigging usually takes from about 5 minutes depending on model complexity. Take a breath—the pipeline continues automatically once you land on the task page.",
     
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "Model URL",

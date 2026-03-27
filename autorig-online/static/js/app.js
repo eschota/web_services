@@ -165,10 +165,52 @@ const App = {
     /**
      * Home convert form: full-card overlay while POST /api/task/create is in flight.
      */
+    setConvertFormBusyMessage(i18nKey) {
+        const textEl = document.getElementById('convert-form-busy-text');
+        if (!textEl || !i18nKey) return;
+        textEl.setAttribute('data-i18n', i18nKey);
+        textEl.textContent = typeof t === 'function' ? t(i18nKey) : '';
+    },
+
+    setConvertFormUploadProgress(pct) {
+        const wrap = document.getElementById('convert-form-busy-progress-wrap');
+        const track = document.getElementById('convert-form-busy-progress-track');
+        const fill = document.getElementById('convert-form-busy-progress-fill');
+        const pctEl = document.getElementById('convert-form-busy-progress-pct');
+        if (!track || !fill || !pctEl || !wrap || wrap.classList.contains('link-mode')) {
+            return;
+        }
+        if (pct === null || pct === undefined) {
+            track.classList.add('indeterminate');
+            pctEl.textContent = '…';
+            return;
+        }
+        track.classList.remove('indeterminate');
+        const v = Math.max(0, Math.min(100, pct));
+        fill.style.width = `${v}%`;
+        pctEl.textContent = `${v}%`;
+    },
+
+    resetConvertFormProgressUI(mode) {
+        const wrap = document.getElementById('convert-form-busy-progress-wrap');
+        const track = document.getElementById('convert-form-busy-progress-track');
+        const fill = document.getElementById('convert-form-busy-progress-fill');
+        const pctEl = document.getElementById('convert-form-busy-progress-pct');
+        if (!wrap || !track || !fill || !pctEl) return;
+        track.classList.remove('indeterminate');
+        fill.style.width = '0%';
+        pctEl.textContent = '0%';
+        if (mode === 'link') {
+            wrap.classList.add('link-mode');
+            track.classList.add('indeterminate');
+        } else {
+            wrap.classList.remove('link-mode');
+        }
+    },
+
     setConvertFormBusy(isBusy, mode) {
         const overlay = document.getElementById('convert-form-busy');
         const card = document.querySelector('.convert-form-card');
-        const textEl = document.getElementById('convert-form-busy-text');
         if (!overlay) return;
 
         this.state.taskSubmitInProgress = !!isBusy;
@@ -176,10 +218,8 @@ const App = {
         if (isBusy) {
             const key =
                 mode === 'upload' ? 'upload_progress_uploading' : 'upload_progress_creating_task';
-            if (textEl) {
-                textEl.setAttribute('data-i18n', key);
-                textEl.textContent = typeof t === 'function' ? t(key) : '';
-            }
+            this.setConvertFormBusyMessage(key);
+            this.resetConvertFormProgressUI(mode);
             overlay.classList.remove('hidden');
             overlay.setAttribute('aria-busy', 'true');
             card?.classList.add('form-is-busy');
@@ -187,7 +227,46 @@ const App = {
             overlay.classList.add('hidden');
             overlay.setAttribute('aria-busy', 'false');
             card?.classList.remove('form-is-busy');
+            this.resetConvertFormProgressUI('upload');
+            const track = document.getElementById('convert-form-busy-progress-track');
+            track?.classList.remove('indeterminate');
         }
+    },
+
+    /**
+     * Multipart POST with upload progress (fetch cannot report upload bytes).
+     */
+    postTaskCreateMultipart(formData, onProgress) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/task/create');
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable && e.total > 0) {
+                    onProgress(Math.min(100, Math.round((100 * e.loaded) / e.total)));
+                } else {
+                    onProgress(null);
+                }
+            });
+            xhr.upload.addEventListener('load', () => {
+                this.setConvertFormUploadProgress(100);
+                this.setConvertFormBusyMessage('upload_progress_creating_task');
+            });
+            xhr.onload = () => {
+                let data = {};
+                try {
+                    data = JSON.parse(xhr.responseText || '{}');
+                } catch (err) {
+                    data = {};
+                }
+                resolve({
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    status: xhr.status,
+                    data,
+                });
+            };
+            xhr.onerror = () => reject(new Error('network'));
+            xhr.send(formData);
+        });
     },
 
     showFree3DCreateOverlay(title) {
@@ -457,6 +536,7 @@ const App = {
         }
 
         const busyMode = formData.get('source') === 'upload' ? 'upload' : 'link';
+        const isUpload = busyMode === 'upload';
         this.setConvertFormBusy(true, busyMode);
 
         // Disable button (visible on link tab)
@@ -466,21 +546,34 @@ const App = {
         }
 
         try {
-            const response = await fetch('/api/task/create', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const data = await response.json();
-            
-            if (response.ok) {
-                // Redirect to task page
+            let ok;
+            let status;
+            let data;
+
+            if (isUpload) {
+                const result = await this.postTaskCreateMultipart(formData, (pct) =>
+                    this.setConvertFormUploadProgress(pct)
+                );
+                ok = result.ok;
+                status = result.status;
+                data = result.data;
+            } else {
+                const response = await fetch('/api/task/create', {
+                    method: 'POST',
+                    body: formData,
+                });
+                status = response.status;
+                data = await response.json();
+                ok = response.ok;
+            }
+
+            if (ok) {
                 window.location.href = `/task?id=${data.task_id}`;
             } else {
-                if (response.status === 401) {
+                if (status === 401) {
                     alert(t('error_login_required'));
                     window.location.href = '/auth/login';
-                } else if (response.status === 402) {
+                } else if (status === 402) {
                     window.location.href = '/buy-credits';
                 } else {
                     alert(data.detail || t('error_generic'));
