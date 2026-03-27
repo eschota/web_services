@@ -111,6 +111,8 @@ STALE_CHECK_INTERVAL_CYCLES = 2  # Check for stale tasks every N background work
 # Rate Limiting
 # =============================================================================
 RATE_LIMIT_TASKS_PER_MINUTE = 5
+# AI agent self-registration (POST /api/agents/register), per client IP
+RATE_LIMIT_AGENT_REGISTER = os.getenv("RATE_LIMIT_AGENT_REGISTER", "15/hour")
 
 # =============================================================================
 # Email (Resend)
@@ -141,6 +143,60 @@ AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
 # Public donation thermometer on buy-credits (USD)
 DONATION_GOAL_USD = int(os.getenv("DONATION_GOAL_USD", "1000"))
 DONATION_BASELINE_USD = float(os.getenv("DONATION_BASELINE_USD", "19"))
+
+# =============================================================================
+# Direct crypto (buy-credits / agents); credits added manually after tx review
+# =============================================================================
+CRYPTO_DISCOUNT_FRACTION = float(os.getenv("CRYPTO_DISCOUNT_FRACTION", "0.2"))
+CRYPTO_BTC_USD_RATE = float(os.getenv("CRYPTO_BTC_USD_RATE", "95000"))
+# (gumroad_permalink_key, credits, list_price_usd)
+AUTORIG_CRYPTO_TIERS: list[tuple[str, int, float]] = [
+    ("autorig-100", 100, 10.0),
+    ("autorig-500", 500, 30.0),
+    ("autorig-1000", 1000, 100.0),
+]
+CRYPTO_ALLOWED_TIER_KEYS = frozenset(t[0] for t in AUTORIG_CRYPTO_TIERS)
+
+# id must match API + frontend; warning is default EN (UI may localize by id)
+CRYPTO_RECEIVE_NETWORKS: list[dict[str, str]] = [
+    {
+        "id": "usdt_trc20",
+        "label": "USDT (TRC20 / Tron)",
+        "asset": "USDT",
+        "address": "TJgQSMo6vxKh9jxoQjAVf12m5HTpyPhCze",
+        "warning": "Send only USDT TRC20 to this address. Sending assets on other networks or NFTs will result in permanent loss.",
+    },
+    {
+        "id": "usdt_ton",
+        "label": "USDT (TON)",
+        "asset": "USDT",
+        "address": "UQCd5N49Xpzw6CfYg89AnJMDtbdULHD1KWcisDdc1R7kSd5D",
+        "warning": "Send only USDT TON to this address. Sending other assets, jettons, or NFTs will result in permanent loss.",
+    },
+    {
+        "id": "usdt_sol",
+        "label": "USDT (Solana)",
+        "asset": "USDT",
+        "address": "DPFN9HjM6Q2mr5e8wLm7ccmemzRKpWKXXe4K9UZCeCwb",
+        "warning": "Send only USDT on Solana to this address. Sending assets on other networks or NFTs will result in permanent loss.",
+    },
+    {
+        "id": "usdt_erc20",
+        "label": "USDT (ERC20 / Ethereum)",
+        "asset": "USDT",
+        "address": "0xCfbd896042041fa1117bF53A1e0a45B2Bd84B6Cb",
+        "warning": "Send only USDT ERC20 to this address. Sending assets on other networks or NFTs will result in permanent loss.",
+    },
+    {
+        "id": "btc",
+        "label": "Bitcoin (BTC)",
+        "asset": "BTC",
+        "address": "bc1qhtawy98e22rur8qz9wp9u0y7g7ur4d7904g3ek",
+        "warning": "Send only Bitcoin (BTC) to this address. Sending assets on other networks or NFTs will result in permanent loss.",
+    },
+]
+CRYPTO_ALLOWED_NETWORK_IDS = frozenset(n["id"] for n in CRYPTO_RECEIVE_NETWORKS)
+RATE_LIMIT_CRYPTO_SUBMIT = os.getenv("RATE_LIMIT_CRYPTO_SUBMIT", "20/hour")
 
 # =============================================================================
 # Telegram Bot

@@ -75,6 +75,9 @@ class AnonSession(Base):
     free_used = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen_at = Column(DateTime, default=datetime.utcnow)
+    agent_name = Column(String(255), nullable=True)
+    agent_description = Column(Text, nullable=True)
+    registered_as_agent = Column(Boolean, default=False)
 
 
 class TaskLike(Base):
@@ -377,6 +380,22 @@ class RoadmapVote(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class CryptoPaymentReport(Base):
+    """User/agent-reported crypto payment pending manual credit."""
+
+    __tablename__ = "crypto_payment_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    tier = Column(String(64), nullable=False)
+    network_id = Column(String(32), nullable=False)
+    tx_id = Column(String(256), nullable=False)
+    contact_note = Column(Text, nullable=True)
+    user_email = Column(String(255), nullable=True, index=True)
+    agent_anon_id = Column(String(36), nullable=True, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+
+
 class Scene(Base):
     """Scene combining multiple GLB models with transforms"""
     __tablename__ = "scenes"
@@ -514,6 +533,10 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
             await _try_add_column("ALTER TABLE feedback ADD COLUMN parent_id INTEGER")
+
+            await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_name VARCHAR(255)")
+            await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_description TEXT")
+            await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN registered_as_agent BOOLEAN DEFAULT 0")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
@@ -678,6 +701,31 @@ async def init_db():
             except Exception:
                 pass
 
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS crypto_payment_reports (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        created_at DATETIME,
+                        tier VARCHAR(64) NOT NULL,
+                        network_id VARCHAR(32) NOT NULL,
+                        tx_id VARCHAR(256) NOT NULL,
+                        contact_note TEXT,
+                        user_email VARCHAR(255),
+                        agent_anon_id VARCHAR(36),
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending'
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_created ON crypto_payment_reports (created_at)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_status ON crypto_payment_reports (status)"
+                )
+            except Exception:
+                pass
+
             # Custom animation purchase tables/indexes (safe to run repeatedly)
             try:
                 await conn.exec_driver_sql(
@@ -774,6 +822,15 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS parent_id INTEGER"
             )
+            await _try_add_column_any(
+                "ALTER TABLE anon_sessions ADD COLUMN IF NOT EXISTS agent_name VARCHAR(255)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE anon_sessions ADD COLUMN IF NOT EXISTS agent_description TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE anon_sessions ADD COLUMN IF NOT EXISTS registered_as_agent BOOLEAN DEFAULT FALSE"
+            )
             try:
                 await conn.exec_driver_sql(
                     """
@@ -796,6 +853,30 @@ async def init_db():
                         created_at TIMESTAMP
                     )
                     """
+                )
+            except Exception:
+                pass
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS crypto_payment_reports (
+                        id SERIAL PRIMARY KEY,
+                        created_at TIMESTAMP,
+                        tier VARCHAR(64) NOT NULL,
+                        network_id VARCHAR(32) NOT NULL,
+                        tx_id VARCHAR(256) NOT NULL,
+                        contact_note TEXT,
+                        user_email VARCHAR(255),
+                        agent_anon_id VARCHAR(36),
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending'
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_created ON crypto_payment_reports (created_at)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_status ON crypto_payment_reports (status)"
                 )
             except Exception:
                 pass

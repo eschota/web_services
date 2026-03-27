@@ -34,7 +34,7 @@ from slowapi.errors import RateLimitExceeded
 from config import (
     APP_NAME, APP_URL, DEBUG, SECRET_KEY,
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
-    RATE_LIMIT_TASKS_PER_MINUTE, ADMIN_EMAILS,
+    RATE_LIMIT_TASKS_PER_MINUTE, RATE_LIMIT_AGENT_REGISTER, ADMIN_EMAILS,
     ANON_FREE_LIMIT,
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
@@ -49,12 +49,20 @@ from config import (
     AUTORIG_DONATION_PRODUCT_KEYS,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
+    AUTORIG_CRYPTO_TIERS,
+    CRYPTO_RECEIVE_NETWORKS,
+    CRYPTO_ALLOWED_TIER_KEYS,
+    CRYPTO_ALLOWED_NETWORK_IDS,
+    CRYPTO_DISCOUNT_FRACTION,
+    CRYPTO_BTC_USD_RATE,
+    RATE_LIMIT_CRYPTO_SUBMIT,
     YOUTUBE_REFRESH_TOKEN,
 )
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
-    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote
+    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
+    CryptoPaymentReport,
 )
 from models import (
     TaskCreateResponse, TaskStatusResponse,
@@ -77,8 +85,11 @@ from models import (
     # Feedback models
     FeedbackCreateRequest, FeedbackItem, FeedbackListResponse,
     DonationStatsResponse, RoadmapVotesResponse, RoadmapVoteRequest,
+    CryptoBuyConfigResponse, CryptoNetworkItem, CryptoTierItem,
+    CryptoPaymentSubmitRequest, CryptoPaymentSubmitResponse,
     # Scene list models
-    SceneListItem, SceneListResponse, SceneLikeResponse
+    SceneListItem, SceneListResponse, SceneLikeResponse,
+    AgentRegisterRequest, AgentRegisterResponse, AgentMeResponse,
 )
 from workers import (
     get_global_queue_status,
@@ -718,6 +729,75 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 ANON_COOKIE = "anon_id"
 SESSION_COOKIE = "session"
 
+_API_KEY_IDENTITY_SENTINEL = object()
+
+
+async def resolve_api_key_identity(
+    request: Request, db: AsyncSession
+) -> Tuple[Optional[User], Optional[str]]:
+    """
+    Parse X-Api-Key / Authorization Bearer, validate against ApiKey rows.
+    Cached per request. Updates last_used_at and commits on success.
+    Returns (user, anon_id) where at most one of anon_id / user is set for a valid key.
+    """
+    cached = getattr(request.state, "_api_key_identity_result", _API_KEY_IDENTITY_SENTINEL)
+    if cached is not _API_KEY_IDENTITY_SENTINEL:
+        return cached  # type: ignore[return-value]
+
+    api_key = request.headers.get("x-api-key")
+    auth = request.headers.get("authorization") or ""
+    if not api_key and auth.lower().startswith("bearer "):
+        api_key = auth.split(" ", 1)[1].strip()
+
+    if not api_key:
+        out: Tuple[Optional[User], Optional[str]] = (None, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    prefix = None
+    if api_key.startswith("ar_") and api_key.count("_") >= 2:
+        try:
+            prefix = api_key.split("_", 2)[1]
+        except Exception:
+            prefix = None
+    if not prefix:
+        out = (None, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    krs = await db.execute(
+        select(ApiKey).where(
+            ApiKey.key_prefix == prefix,
+            ApiKey.revoked_at.is_(None),
+        )
+    )
+    key_rec = krs.scalar_one_or_none()
+    if not key_rec or not hmac.compare_digest(key_rec.key_hash, key_hash):
+        out = (None, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    key_rec.last_used_at = datetime.utcnow()
+    if key_rec.user_id is not None:
+        urs = await db.execute(select(User).where(User.id == key_rec.user_id))
+        user = urs.scalar_one_or_none()
+        await db.commit()
+        out = (user, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    if key_rec.anon_id:
+        await db.commit()
+        out = (None, key_rec.anon_id)
+        request.state._api_key_identity_result = out
+        return out
+
+    await db.commit()
+    out = (None, None)
+    request.state._api_key_identity_result = out
+    return out
+
 
 def _effective_anon_id(request: Request) -> Optional[str]:
     """Cookie anon session and/or API key bound to anon (Bearer without browser cookie)."""
@@ -733,55 +813,14 @@ async def get_current_user(
     request.state.auth_via_api_key = False
     session_token = request.cookies.get(SESSION_COOKIE)
     if session_token:
-        return await get_user_by_session(db, session_token)
-
-    api_key = request.headers.get("x-api-key")
-    auth = request.headers.get("authorization") or ""
-    if not api_key and auth.lower().startswith("bearer "):
-        api_key = auth.split(" ", 1)[1].strip()
-
-    if not api_key:
-        return None
-
-    prefix = None
-    if api_key.startswith("ar_") and api_key.count("_") >= 2:
-        try:
-            prefix = api_key.split("_", 2)[1]
-        except Exception:
-            prefix = None
-    if not prefix:
-        return None
-
-    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-    krs = await db.execute(
-        select(ApiKey).where(
-            ApiKey.key_prefix == prefix,
-            ApiKey.revoked_at.is_(None)
-        )
-    )
-    key_rec = krs.scalar_one_or_none()
-    if not key_rec:
-        return None
-    if not hmac.compare_digest(key_rec.key_hash, key_hash):
-        return None
-
-    key_rec.last_used_at = datetime.utcnow()
-    if key_rec.user_id is not None:
-        urs = await db.execute(select(User).where(User.id == key_rec.user_id))
-        user = urs.scalar_one_or_none()
+        user = await get_user_by_session(db, session_token)
         if user:
-            request.state.auth_via_api_key = True
-            await db.commit()
-        return user
+            return user
 
-    if key_rec.anon_id:
-        request.state.api_key_anon_id = key_rec.anon_id
-        request.state.auth_via_api_key = True
-        await db.commit()
-        return None
-
-    await db.commit()
-    return None
+    user, anon_id = await resolve_api_key_identity(request, db)
+    request.state.api_key_anon_id = anon_id
+    request.state.auth_via_api_key = bool(user is not None or anon_id is not None)
+    return user
 
 
 async def get_anon_session(
@@ -789,19 +828,23 @@ async def get_anon_session(
     response: Response,
     db: AsyncSession = Depends(get_db)
 ) -> AnonSession:
-    """Get or create anonymous session"""
+    """Browser cookie session, or anon id from API key (same identity as task owner for Bearer agents)."""
+    _user_k, anon_from_key = await resolve_api_key_identity(request, db)
+    if anon_from_key:
+        return await get_or_create_anon_session(db, anon_from_key)
+
     anon_id = request.cookies.get(ANON_COOKIE)
-    
+
     if not anon_id:
         anon_id = str(uuid.uuid4())
         response.set_cookie(
-            ANON_COOKIE, 
-            anon_id, 
-            max_age=365*24*60*60,  # 1 year
+            ANON_COOKIE,
+            anon_id,
+            max_age=365 * 24 * 60 * 60,  # 1 year
             httponly=True,
-            samesite="lax"
+            samesite="lax",
         )
-    
+
     return await get_or_create_anon_session(db, anon_id)
 
 
@@ -1770,6 +1813,75 @@ async def api_revoke_api_key(
 
 
 # =============================================================================
+# AI agents (register without Google; Bearer API key)
+# =============================================================================
+def _skill_md_candidate_paths() -> List[Path]:
+    """Primary: autorig-online/skill.md next to backend/; fallback: parent of repo root."""
+    here = Path(__file__).resolve().parent
+    return [here.parent.parent / "skill.md", here.parent.parent.parent / "skill.md"]
+
+
+@app.post("/api/agents/register", response_model=AgentRegisterResponse)
+@limiter.limit(RATE_LIMIT_AGENT_REGISTER)
+async def api_agents_register(
+    request: Request,
+    body: AgentRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    anon_id = str(uuid.uuid4())
+    name = (body.name or "").strip() or None
+    desc = (body.description or "").strip() or None
+    sess = AnonSession(
+        anon_id=anon_id,
+        agent_name=name,
+        agent_description=desc,
+        registered_as_agent=True,
+    )
+    db.add(sess)
+    api_key, prefix, key_hash = _make_api_key()
+    db.add(ApiKey(user_id=None, anon_id=anon_id, key_prefix=prefix, key_hash=key_hash))
+    await db.commit()
+    return AgentRegisterResponse(api_key=api_key, agent_id=anon_id)
+
+
+@app.get("/api/agents/me", response_model=AgentMeResponse)
+async def api_agents_me(
+    request: Request,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user:
+        raise HTTPException(
+            status_code=400,
+            detail="Use GET /auth/me for Google accounts; this endpoint is for agent API keys only.",
+        )
+    anon_id = getattr(request.state, "api_key_anon_id", None)
+    if not anon_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required (Bearer agent API key or X-Api-Key)",
+        )
+    rs = await db.execute(select(AnonSession).where(AnonSession.anon_id == anon_id))
+    sess = rs.scalar_one_or_none()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+    remaining = get_remaining_credits_anon(sess)
+    note = (
+        "Credit balance and paid file purchases are tied to Google sign-in on the website. "
+        "This agent id uses the anonymous free tier only (see free_remaining)."
+    )
+    return AgentMeResponse(
+        agent_id=anon_id,
+        name=sess.agent_name,
+        description=sess.agent_description,
+        registered_as_agent=bool(sess.registered_as_agent),
+        free_used=int(sess.free_used or 0),
+        free_remaining=remaining,
+        account_note=note,
+    )
+
+
+# =============================================================================
 # Buy-credits: donations (Gumroad) & roadmap votes
 # =============================================================================
 @app.get("/api/buy-credits/donation-stats", response_model=DonationStatsResponse)
@@ -1797,6 +1909,111 @@ async def api_buy_credits_donation_stats(db: AsyncSession = Depends(get_db)):
         currency="USD",
         purchase_count=purchase_count,
     )
+
+
+def _build_crypto_buy_config_response() -> CryptoBuyConfigResponse:
+    disc = CRYPTO_DISCOUNT_FRACTION
+    rate = CRYPTO_BTC_USD_RATE
+    if rate <= 0:
+        rate = 95000.0
+    tiers_out: List[CryptoTierItem] = []
+    for key, credits, usd_std in AUTORIG_CRYPTO_TIERS:
+        usd_disc = round(usd_std * (1.0 - disc), 2)
+        usdt_amt = usd_disc
+        btc_approx = round(usd_disc / rate, 8)
+        per = round(usd_disc / max(credits, 1), 4)
+        tiers_out.append(
+            CryptoTierItem(
+                tier_key=key,
+                credits=credits,
+                usd_standard=usd_std,
+                usd_discounted=usd_disc,
+                usdt_amount=usdt_amt,
+                btc_amount_approx=btc_approx,
+                usd_per_credit_discounted=per,
+            )
+        )
+    nets = [
+        CryptoNetworkItem(
+            id=n["id"],
+            label=n["label"],
+            asset=n["asset"],
+            address=n["address"],
+            warning=n["warning"],
+        )
+        for n in CRYPTO_RECEIVE_NETWORKS
+    ]
+    return CryptoBuyConfigResponse(
+        discount_fraction=disc,
+        btc_usd_rate=rate,
+        networks=nets,
+        tiers=tiers_out,
+    )
+
+
+@app.get("/api/buy-credits/crypto-config", response_model=CryptoBuyConfigResponse)
+async def api_buy_credits_crypto_config():
+    """Public tiers, discount math, and receive addresses for UI and AI agents."""
+    return _build_crypto_buy_config_response()
+
+
+@app.post("/api/buy-credits/crypto-submit", response_model=CryptoPaymentSubmitResponse)
+@limiter.limit(RATE_LIMIT_CRYPTO_SUBMIT)
+async def api_buy_credits_crypto_submit(
+    request: Request,
+    body: CryptoPaymentSubmitRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Report a crypto payment tx for manual verification and crediting."""
+    t = body.tier.strip().lower()
+    if t not in CRYPTO_ALLOWED_TIER_KEYS:
+        raise HTTPException(status_code=400, detail="Invalid tier")
+    nid = body.network_id.strip().lower()
+    if nid not in CRYPTO_ALLOWED_NETWORK_IDS:
+        raise HTTPException(status_code=400, detail="Invalid network_id")
+    tx = body.tx_id.strip()
+    if len(tx) < 8 or len(tx) > 256:
+        raise HTTPException(status_code=400, detail="Invalid tx_id")
+
+    agent_anon = getattr(request.state, "api_key_anon_id", None)
+    uemail = user.email if user else None
+    if not uemail and not agent_anon:
+        note = (body.contact_note or "").strip()
+        if len(note) < 5:
+            raise HTTPException(
+                status_code=400,
+                detail="contact_note required when not authenticated (include email or agent id for crediting)",
+            )
+
+    row = CryptoPaymentReport(
+        tier=t,
+        network_id=nid,
+        tx_id=tx[:256],
+        contact_note=(body.contact_note or "").strip() or None,
+        user_email=uemail,
+        agent_anon_id=agent_anon,
+        status="pending",
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    from telegram_bot import broadcast_crypto_payment_submitted
+
+    asyncio.create_task(
+        broadcast_crypto_payment_submitted(
+            report_id=row.id,
+            tier=t,
+            network_id=nid,
+            tx_id=tx,
+            user_email=uemail,
+            agent_anon_id=agent_anon,
+            contact_note=row.contact_note,
+        )
+    )
+
+    return CryptoPaymentSubmitResponse(id=row.id)
 
 
 @app.get("/api/roadmap/votes", response_model=RoadmapVotesResponse)
@@ -6950,6 +7167,14 @@ async def cleanup_disk_space(
         print(f"[Disk Cleanup] Free space now: {result['final_free_gb']:.2f} GB")
 
     return result
+
+
+@app.get("/skill.md")
+async def serve_skill_md():
+    for p in _skill_md_candidate_paths():
+        if p.is_file():
+            return FileResponse(p, media_type="text/markdown; charset=utf-8")
+    raise HTTPException(status_code=404, detail="skill.md not found")
 
 
 # Mount static files

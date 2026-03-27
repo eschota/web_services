@@ -22,7 +22,11 @@ echo "==> pip install -r backend/requirements.txt → ${PROD_ROOT}/venv"
 sudo "${PROD_ROOT}/venv/bin/python" -m pip install -r "${REPO_ROOT}/backend/requirements.txt" -q
 
 sudo cp -a "${REPO_ROOT}/backend/"*.py "${PROD_ROOT}/backend/"
+if [[ -f "${REPO_ROOT}/skill.md" ]]; then
+  sudo cp -a "${REPO_ROOT}/skill.md" "${PROD_ROOT}/skill.md"
+fi
 sudo cp -a "${REPO_ROOT}/static/developers.html" "${PROD_ROOT}/static/"
+sudo cp -a "${REPO_ROOT}/static/buy-credits.html" "${PROD_ROOT}/static/"
 sudo cp -a "${REPO_ROOT}/static/dashboard.html" "${PROD_ROOT}/static/"
 sudo cp -a "${REPO_ROOT}/static/task.html" "${PROD_ROOT}/static/"
 sudo cp -a "${REPO_ROOT}/static/terms-of-use.html" "${REPO_ROOT}/static/user-agreement.html" "${PROD_ROOT}/static/"
@@ -33,4 +37,4 @@ sudo cp -a "${REPO_ROOT}/static/i18n/"*.json "${PROD_ROOT}/static/i18n/"
 
 sudo systemctl restart autorig
 
-echo "OK: backend *.py + static (task, dashboard, layout JS, styles, developers, i18n) → ${PROD_ROOT}; autorig restarted."
+echo "OK: backend *.py + static (task, dashboard, buy-credits, layout JS, styles, developers, i18n) → ${PROD_ROOT}; autorig restarted."

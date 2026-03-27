@@ -629,6 +629,53 @@ async def broadcast_feedback_submitted(
     ])
 
 
+async def broadcast_crypto_payment_submitted(
+    report_id: int,
+    tier: str,
+    network_id: str,
+    tx_id: str,
+    user_email: str | None,
+    agent_anon_id: str | None,
+    contact_note: str | None,
+) -> None:
+    """Notify admins: crypto payment report pending manual credit."""
+    print(
+        f"[Telegram] broadcast_crypto_payment_submitted id={report_id} tier={tier} net={network_id} tx={tx_id[:32]}..."
+    )
+    token = _get_token()
+    if not token:
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    who_parts: list[str] = []
+    if user_email:
+        who_parts.append(f"👤 User: {html.escape(user_email)}")
+    if agent_anon_id:
+        who_parts.append(f"🤖 Agent id: <code>{html.escape(agent_anon_id)}</code>")
+    who = "\n".join(who_parts) if who_parts else "👤 Anonymous (see note)"
+    note_line = ""
+    if contact_note:
+        note_line = f"\n📝 Note: {html.escape(contact_note[:500])}"
+    text = (
+        f"₿ <b>Crypto payment report</b> #{report_id} <i>pending</i>\n"
+        f"📦 Tier: <code>{html.escape(tier)}</code> | 🌐 Network: <code>{html.escape(network_id)}</code>\n"
+        f"🔗 Tx: <code>{html.escape(tx_id[:200])}</code>\n"
+        f"{who}{note_line}"
+    )
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    await asyncio.gather(*[
+        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML))
+        for cid in chat_ids
+    ])
+
+
 async def broadcast_credits_purchased(
     credits: int,
     price: str,

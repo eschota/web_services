@@ -140,6 +140,31 @@ class AuthStatusResponse(BaseModel):
 
 
 # =============================================================================
+# AI agent (API key, no Google)
+# =============================================================================
+class AgentRegisterRequest(BaseModel):
+    name: Optional[str] = Field(None, max_length=128, description="Public display name for the agent")
+    description: Optional[str] = Field(None, max_length=2000, description="Short description of what the agent does")
+
+
+class AgentRegisterResponse(BaseModel):
+    api_key: str = Field(description="Shown only once; store securely")
+    agent_id: str = Field(description="Stable anonymous id (UUID) tied to this key")
+
+
+class AgentMeResponse(BaseModel):
+    agent_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    registered_as_agent: bool = False
+    free_used: int = 0
+    free_remaining: int = 0
+    account_note: str = Field(
+        description="How credits and purchases relate to this identity",
+    )
+
+
+# =============================================================================
 # API Key Schemas
 # =============================================================================
 class ApiKeyItem(BaseModel):
@@ -550,6 +575,43 @@ class DonationStatsResponse(BaseModel):
     goal_usd: int
     currency: str = "USD"
     purchase_count: int = 0
+
+
+class CryptoNetworkItem(BaseModel):
+    id: str
+    label: str
+    asset: str
+    address: str
+    warning: str
+
+
+class CryptoTierItem(BaseModel):
+    tier_key: str
+    credits: int
+    usd_standard: float
+    usd_discounted: float
+    usdt_amount: float
+    btc_amount_approx: float
+    usd_per_credit_discounted: float
+
+
+class CryptoBuyConfigResponse(BaseModel):
+    discount_fraction: float
+    btc_usd_rate: float
+    networks: List[CryptoNetworkItem]
+    tiers: List[CryptoTierItem]
+
+
+class CryptoPaymentSubmitRequest(BaseModel):
+    tier: str = Field(..., min_length=1, max_length=64)
+    network_id: str = Field(..., min_length=1, max_length=32)
+    tx_id: str = Field(..., min_length=8, max_length=256)
+    contact_note: Optional[str] = Field(None, max_length=2000)
+
+
+class CryptoPaymentSubmitResponse(BaseModel):
+    ok: bool = True
+    id: int
 
 
 class RoadmapVotesResponse(BaseModel):
