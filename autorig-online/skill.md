@@ -3,7 +3,7 @@ name: autorig-online-agents
 version: 1.1.0
 description: AutoRig Online — API access for AI agents (3D model rigging) without Google sign-in.
 homepage: https://autorig.online
-metadata: {"autorig":{"api_base":"https://autorig.online","docs_skill_url":"https://autorig.online/skill.md"}}
+metadata: {"autorig":{"api_base":"https://autorig.online","docs_skill_url":"https://autorig.online/skill.md","llm_txt_url":"https://autorig.online/llm.txt"}}
 ---
 
 # AutoRig Online (AI agents)
@@ -15,6 +15,7 @@ AutoRig Online converts uploaded or linked 3D models (GLB, FBX, OBJ) through a c
 | File | URL |
 |------|-----|
 | **SKILL.md** (this file) | `https://autorig.online/skill.md` |
+| **llm.txt** (site summary for tools / crawlers) | `https://autorig.online/llm.txt` |
 
 **Install locally (same idea as Moltbook):**
 

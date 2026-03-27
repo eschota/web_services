@@ -42,6 +42,17 @@ YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 # Fixed title for all auto-uploaded showcase videos
 YOUTUBE_VIDEO_TITLE = "autorig character"
 
+
+def youtube_source_video_url(site_video_url: str) -> str:
+    """
+    Task.video_url prefers _video_small.mp4 for the website. YouTube must use the full encode.
+    """
+    u = (site_video_url or "").strip()
+    if "_video_small.mp4" in u:
+        return u.replace("_video_small.mp4", "_video.mp4")
+    return u
+
+
 # Serialize uploads per SHA-256 so two tasks with identical bytes cannot double-upload.
 _hash_lock_registry_lock = asyncio.Lock()
 _sha256_upload_locks: dict[str, asyncio.Lock] = {}
@@ -323,14 +334,16 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             print(f"[YouTube] No channel credentials (DB or YOUTUBE_REFRESH_TOKEN); skip task {task_id}")
             return
 
-        video_url = task.video_url.strip()
-        if not video_url:
+        site_video_url = task.video_url.strip()
+        if not site_video_url:
             return
 
         tid = task.id
 
     title = upload_title
     desc = upload_desc if upload_desc else _build_youtube_description(tid)
+
+    video_url = youtube_source_video_url(site_video_url)
 
     tmp_path: Optional[str] = None
     try:

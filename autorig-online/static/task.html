@@ -6479,7 +6479,7 @@
                     const filename = cleanFilename(rawFilename);
 
                     // Hide video artifacts (video is already shown on page)
-                    if (/_video\.(mp4|mov)$/i.test(filename)) return;
+                    if (/_video(_small)?\.(mp4|mov)$/i.test(filename)) return;
                     if (/_video_poster\.jpe?g$/i.test(filename)) return;
                     if (/video\.(mp4|mov)$/i.test(filename)) return;
                     if (/video_poster\.jpe?g$/i.test(filename)) return;

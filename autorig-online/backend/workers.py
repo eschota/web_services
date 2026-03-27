@@ -430,26 +430,37 @@ async def check_urls_batch(
 
 async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[bool, Optional[str]]:
     """
-    Check if video file is available.
+    Check if a preview or full video is available on the worker.
     Returns: (is_ready, video_url)
-    
-    Video is located at: {worker_base}/converter/glb/{guid}/{guid}_video.mp4
+
+    Prefers ``{guid}_video_small.mp4`` for the site /api/video proxy; falls back to
+    ``{guid}_video.mp4`` for older tasks or before the small encode exists.
+
     worker_base_url is already without /api-converter-glb (e.g., http://5.129.157.224:5267)
     """
-    if not guid:
+    if not guid or not (worker_base_url or "").strip():
         return False, None
-    
+
+    base = worker_base_url.rstrip("/")
+    small_url = f"{base}/converter/glb/{guid}/{guid}_video_small.mp4"
+    large_url = f"{base}/converter/glb/{guid}/{guid}_video.mp4"
+
+    async def _head_ok(client: httpx.AsyncClient, url: str) -> bool:
+        try:
+            response = await client.head(url, timeout=5.0, follow_redirects=True)
+            return response.status_code == 200
+        except Exception:
+            return False
+
     try:
-        # worker_base_url is already the base (e.g., http://5.129.157.224:5267)
-        video_url = f"{worker_base_url}/converter/glb/{guid}/{guid}_video.mp4"
-        
         async with httpx.AsyncClient() as client:
-            response = await client.head(video_url, timeout=5.0, follow_redirects=True)
-            if response.status_code == 200:
-                return True, video_url
-    except Exception as e:
+            if await _head_ok(client, small_url):
+                return True, small_url
+            if await _head_ok(client, large_url):
+                return True, large_url
+    except Exception:
         pass
-    
+
     return False, None
 
 

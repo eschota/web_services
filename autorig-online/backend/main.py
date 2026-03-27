@@ -4800,8 +4800,13 @@ async def proxy_video(
         finally:
             await client.aclose()
 
+    _vname = (
+        f"{task_id}_video_small.mp4"
+        if "_video_small.mp4" in (task.video_url or "")
+        else f"{task_id}_video.mp4"
+    )
     response_headers: Dict[str, str] = {
-        "Content-Disposition": f"inline; filename={task_id}_video.mp4",
+        "Content-Disposition": f'inline; filename="{_vname}"',
         "Cache-Control": "public, max-age=86400",
         # Prevent GZip middleware from wrapping video stream and breaking ranges.
         "Content-Encoding": "identity",
@@ -7175,6 +7180,15 @@ async def serve_skill_md():
         if p.is_file():
             return FileResponse(p, media_type="text/markdown; charset=utf-8")
     raise HTTPException(status_code=404, detail="skill.md not found")
+
+
+@app.get("/llm.txt")
+async def serve_llm_txt():
+    """Root llm.txt for crawlers and LLM tooling (plain-text site summary + links)."""
+    path = STATIC_DIR / "llm.txt"
+    if path.is_file():
+        return FileResponse(str(path), media_type="text/plain; charset=utf-8")
+    raise HTTPException(status_code=404, detail="llm.txt not found")
 
 
 # Mount static files

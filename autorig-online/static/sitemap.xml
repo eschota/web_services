@@ -39,6 +39,20 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/developers"/>
   </url>
 
+  <url>
+    <loc>https://autorig.online/skill.md</loc>
+    <lastmod>2026-03-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/llm.txt</loc>
+    <lastmod>2026-03-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.55</priority>
+  </url>
+
   <!-- How It Works (4 languages) -->
   <url>
     <loc>https://autorig.online/how-it-works</loc>

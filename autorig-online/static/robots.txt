@@ -9,6 +9,10 @@ Allow: /buy-credits
 Allow: /how-it-works
 Allow: /faq
 
+# Agents / LLM discovery
+Allow: /skill.md
+Allow: /llm.txt
+
 # Format-specific landing pages
 Allow: /glb-auto-rig
 Allow: /fbx-auto-rig

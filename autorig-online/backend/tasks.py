@@ -355,14 +355,22 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         if task.total_count > 0 and task.ready_count >= task.total_count:
             task.status = "done"
     
-    # Check video availability (for both processing and done tasks)
-    if task.guid and not task.video_ready:
+    # Video: prefer _video_small.mp4 for site proxy; upgrade from large when small appears later.
+    if task.guid and task.worker_api:
         worker_base = get_worker_base_url(task.worker_api)
-        video_ready, video_url = await check_video_availability(task.guid, worker_base)
-        if video_ready:
-            task.video_ready = True
-            task.video_url = video_url
-            task.updated_at = datetime.utcnow()
+        if worker_base:
+            if task.video_url and "_video_small.mp4" in task.video_url:
+                if not task.video_ready:
+                    task.video_ready = True
+                    task.updated_at = datetime.utcnow()
+            else:
+                video_ready, video_url = await check_video_availability(task.guid, worker_base)
+                if video_ready and video_url:
+                    changed = (not task.video_ready) or (task.video_url != video_url)
+                    if changed:
+                        task.video_ready = True
+                        task.video_url = video_url
+                        task.updated_at = datetime.utcnow()
     
     await db.commit()
     await db.refresh(task)
