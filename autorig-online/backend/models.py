@@ -80,6 +80,9 @@ class TaskStatusResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     pipeline: str = Field(default="rig", description="``rig`` or ``convert``")
+    # YouTube auto-upload (public video id when upload succeeded)
+    youtube_video_id: Optional[str] = None
+    youtube_upload_status: Optional[str] = None  # uploaded | skipped | failed
 
 
 class TaskHistoryItem(BaseModel):

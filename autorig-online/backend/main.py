@@ -2760,6 +2760,8 @@ async def api_get_task(
         created_at=task.created_at,
         updated_at=task.updated_at,
         pipeline=getattr(task, "pipeline_kind", None) or "rig",
+        youtube_video_id=getattr(task, "youtube_video_id", None),
+        youtube_upload_status=getattr(task, "youtube_upload_status", None),
     )
 
 

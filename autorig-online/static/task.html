@@ -39,6 +39,8 @@
         body.webapp-mode #retopo-convert-card { display: none !important; }
         body.webapp-mode #sprite-sheet-card { display: none !important; }
         body.webapp-mode #video-player { display: none !important; }
+        body.webapp-mode #video-youtube-embed { display: none !important; }
+        body.webapp-mode #video-youtube-bar { display: none !important; }
         body.webapp-mode #hdrp-renders { display: none !important; }
         body.webapp-mode #video-pending { display: none !important; }
         
@@ -1261,6 +1263,50 @@
             display: block;
             border-radius: 12px;
             background: #000;
+        }
+
+        #video-youtube-embed {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+            border-radius: 12px;
+            display: none;
+            background: #000;
+        }
+
+        #video-player-wrap.video-youtube-active #video-youtube-embed {
+            display: block;
+        }
+
+        #video-player-wrap.video-youtube-active #video-player {
+            display: none !important;
+        }
+
+        #video-youtube-bar {
+            margin-top: 0.75rem;
+            text-align: center;
+        }
+
+        #video-youtube-bar .video-youtube-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.5rem 1rem;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            text-decoration: none;
+            background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
+            color: #fff;
+            box-shadow: 0 2px 12px rgba(255, 0, 0, 0.35);
+        }
+
+        #video-youtube-bar .video-youtube-link:hover {
+            color: #fff;
+            filter: brightness(1.08);
         }
 
         /* Overlay must not participate in intrinsic min-width (flex/grid) or widen narrow aspect-ratio box */
@@ -3358,6 +3404,12 @@
                 <!-- Video Player with overlay badges -->
                 <div id="video-player-wrap">
                     <div class="boot-skeleton-overlay" data-label="Preparing video preview..."></div>
+                    <iframe id="video-youtube-embed"
+                        data-i18n-title="task_youtube_embed_title"
+                        title="Showcase video on YouTube"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowfullscreen
+                        loading="lazy"></iframe>
                     <video id="video-player" controls muted playsinline preload="metadata" loop></video>
                     
                     <!-- Author overlay - top left -->
@@ -3370,6 +3422,9 @@
                             <span id="task-sales-count">0</span>
                         </span>
                     </div>
+                </div>
+                <div id="video-youtube-bar" class="hidden">
+                    <a id="video-youtube-link" class="video-youtube-link" href="#" target="_blank" rel="noopener noreferrer" data-i18n="task_youtube_open">Open on YouTube</a>
                 </div>
                 <div id="hdrp-renders" class="hidden"
                      style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 1rem;">
@@ -4167,10 +4222,84 @@
                 const container = document.getElementById('video-container');
                 const pending = document.getElementById('video-pending');
                 const video = document.getElementById('video-player');
+                const videoWrap = document.getElementById('video-player-wrap');
+                const iframe = document.getElementById('video-youtube-embed');
+                const youtubeBar = document.getElementById('video-youtube-bar');
+                const youtubeLink = document.getElementById('video-youtube-link');
                 if (!container || !pending || !video) return;
 
                 this.ensureVideoPreviewController();
                 window.__taskPageBoot?.beginVideo('Preparing video preview...');
+
+                const ytOk = task.youtube_upload_status === 'uploaded' && task.youtube_video_id;
+
+                const clearYouTubeMode = () => {
+                    if (videoWrap) videoWrap.classList.remove('video-youtube-active');
+                    if (iframe) {
+                        iframe.removeAttribute('src');
+                        delete iframe.dataset.embedSrc;
+                    }
+                    if (youtubeBar) youtubeBar.classList.add('hidden');
+                    video.style.removeProperty('display');
+                };
+
+                if (ytOk) {
+                    const encId = encodeURIComponent(task.youtube_video_id);
+                    const embedUrl = `https://www.youtube-nocookie.com/embed/${encId}?rel=0&mute=1&autoplay=1`;
+
+                    container.classList.remove('hidden');
+                    window.__taskPageBoot?.revealElement(container, 1);
+                    pending.classList.add('hidden');
+
+                    if (videoWrap) {
+                        videoWrap.classList.add('video-youtube-active');
+                        videoWrap.style.setProperty('--vp-w', '16');
+                        videoWrap.style.setProperty('--vp-h', '9');
+                    }
+
+                    if (typeof this.pauseVideoPreview === 'function') {
+                        this.pauseVideoPreview('youtube-mode');
+                    }
+                    video.removeAttribute('src');
+                    video.removeAttribute('poster');
+                    delete video.dataset.previewSrc;
+                    video.load();
+
+                    if (iframe) {
+                        if (iframe.dataset.embedSrc !== embedUrl) {
+                            iframe.dataset.embedSrc = embedUrl;
+                            iframe.src = embedUrl;
+                        }
+                    }
+                    if (youtubeLink) {
+                        youtubeLink.href = `https://www.youtube.com/watch?v=${encId}`;
+                    }
+                    if (youtubeBar) youtubeBar.classList.remove('hidden');
+                    if (window.I18n && typeof window.I18n.applyTranslations === 'function') {
+                        window.I18n.applyTranslations();
+                    }
+
+                    const boot = window.__taskPageBoot;
+                    let resolved = false;
+                    const resolveVideoPhase = (text) => {
+                        if (resolved) return;
+                        resolved = true;
+                        boot?.revealElement(container, 1);
+                        boot?.markVideoReady(text);
+                    };
+                    if (iframe) {
+                        const onIframeLoad = () => resolveVideoPhase('Video preview ready');
+                        iframe.addEventListener('load', onIframeLoad, { once: true });
+                    }
+                    window.setTimeout(() => resolveVideoPhase('Video preview queued'), 1800);
+                    return;
+                }
+
+                clearYouTubeMode();
+                if (videoWrap) {
+                    videoWrap.style.removeProperty('--vp-w');
+                    videoWrap.style.removeProperty('--vp-h');
+                }
 
                 if (task.video_ready) {
                     container.classList.remove('hidden');
@@ -4184,7 +4313,6 @@
                         if (typeof this.pauseVideoPreview === 'function') {
                             this.pauseVideoPreview('source-update');
                         }
-                        const videoWrap = document.getElementById('video-player-wrap');
                         if (videoWrap) {
                             videoWrap.style.removeProperty('--vp-w');
                             videoWrap.style.removeProperty('--vp-h');
