@@ -22,7 +22,7 @@ from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, or_
@@ -7672,12 +7672,79 @@ async def auto_rig_obj_hi_page():
 
 # Sitemap and robots.txt
 @app.get("/sitemap.xml")
-async def sitemap():
-    """Serve sitemap.xml for SEO"""
-    return FileResponse(
-        str(STATIC_DIR / "sitemap.xml"),
-        media_type="application/xml"
-    )
+async def sitemap_index(db: AsyncSession = Depends(get_db)):
+    """
+    Sitemap index: static marketing pages + gallery /m/{id} urlsets by day (max 50 URLs per part).
+    Regenerated on each request so lastmod stays current without a separate cron.
+    """
+    from seo_gallery import build_sitemap_index_xml, gallery_sitemap_day_parts
+
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    child_locs: List[Tuple[str, Optional[datetime]]] = [(f"{base}/sitemap/pages.xml", None)]
+    for day_str, parts in await gallery_sitemap_day_parts(db):
+        for p in range(parts):
+            child_locs.append((f"{base}/sitemap/gallery/{day_str}/{p}.xml", None))
+    xml = build_sitemap_index_xml(base, child_locs)
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.get("/sitemap/pages.xml")
+async def sitemap_pages():
+    """Marketing / guide urlset (was static/sitemap.xml)."""
+    path = STATIC_DIR / "sitemap-pages.xml"
+    if not path.is_file():
+        return FileResponse(
+            str(STATIC_DIR / "sitemap.xml"),
+            media_type="application/xml",
+        )
+    return FileResponse(str(path), media_type="application/xml")
+
+
+@app.get("/sitemap/gallery/{day}/{part}.xml")
+async def sitemap_gallery_chunk(day: str, part: int, db: AsyncSession = Depends(get_db)):
+    """One chunk (max 50) of /m/{task_id} URLs for tasks created on ``day`` (UTC date)."""
+    from seo_gallery import GALLERY_SEO_URLS_PER_SITEMAP, build_urlset_xml, gallery_sitemap_urls_for_chunk
+
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day) or part < 0:
+        raise HTTPException(status_code=404, detail="Invalid sitemap chunk")
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    urls = await gallery_sitemap_urls_for_chunk(db, day, part)
+    if not urls:
+        raise HTTPException(status_code=404, detail="Empty sitemap chunk")
+    xml = build_urlset_xml(base, urls)
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.get("/m/{task_id}", response_class=HTMLResponse)
+async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Lightweight indexable landing: poster + LLM metadata + link to full /task viewer.
+    Gallery-eligible tasks only; adult-rated tasks excluded (same as sitemap).
+    """
+    from seo_gallery import build_public_model_page_html, load_task_for_public_model_page
+
+    task = await load_task_for_public_model_page(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Not found")
+    base = APP_URL or "https://autorig.online"
+    title = (getattr(task, "poster_llm_title", None) or "").strip() or "Rigged 3D character"
+    desc = (getattr(task, "poster_llm_description", None) or "").strip()
+    if not desc:
+        desc = (
+            "Rigged 3D model with skeleton and animations. Open the viewer to preview and download "
+            "GLB, FBX, OBJ, and engine packages."
+        )
+    keywords: List[str] = []
+    raw_kw = getattr(task, "poster_llm_keywords", None)
+    if raw_kw:
+        try:
+            data = json.loads(raw_kw)
+            if isinstance(data, list):
+                keywords = [str(x).strip() for x in data if str(x).strip()]
+        except Exception:
+            pass
+    html_page = build_public_model_page_html(base, task_id, title, desc, keywords)
+    return HTMLResponse(content=html_page)
 
 
 @app.get("/robots.txt")

@@ -37,7 +37,7 @@ sudo cp -a "${REPO_ROOT}/static/js/header.js" "${REPO_ROOT}/static/js/footer.js"
 sudo cp -a "${REPO_ROOT}/static/css/styles.css" "${PROD_ROOT}/static/css/"
 sudo cp -a "${REPO_ROOT}/static/fonts/"*.woff2 "${PROD_ROOT}/static/fonts/"
 sudo cp -a "${REPO_ROOT}/static/i18n/"*.json "${PROD_ROOT}/static/i18n/"
-sudo cp -a "${REPO_ROOT}/static/llm.txt" "${REPO_ROOT}/static/sitemap.xml" "${REPO_ROOT}/static/robots.txt" "${PROD_ROOT}/static/"
+sudo cp -a "${REPO_ROOT}/static/llm.txt" "${REPO_ROOT}/static/sitemap.xml" "${REPO_ROOT}/static/sitemap-pages.xml" "${REPO_ROOT}/static/robots.txt" "${PROD_ROOT}/static/"
 
 sudo systemctl restart autorig
 

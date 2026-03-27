@@ -55,7 +55,6 @@
     "task_video_ready": "Video Preview",
     "task_video_pending": "Video is being generated...",
     "task_youtube_open": "Open on YouTube",
-    "task_youtube_embed_title": "Showcase video on YouTube",
 
     "task_free3d_similar_title": "Similar 3D models",
     "task_free3d_similar_subtitle": "Semantic search from poster title + keywords (Free3D)",

@@ -13,5 +13,5 @@
 
 ## Discovery
 
-- **Sitemap:** https://autorig.online/sitemap.xml
+- **Sitemap index (updates on request; includes marketing pages + public model landings `/m/{task_id}` by day):** https://autorig.online/sitemap.xml
 - **This file (llm.txt):** https://autorig.online/llm.txt
