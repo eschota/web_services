@@ -9,6 +9,9 @@
     "upload_title": "Перетащите 3D модель сюда",
     "upload_subtitle": "или нажмите для выбора (GLB, FBX, OBJ до 100МБ)",
     "upload_selected": "Выбранный файл",
+    "upload_progress_uploading": "Загрузка модели…",
+    "upload_progress_creating_task": "Создаём задачу…",
+    "upload_progress_btn": "Подождите…",
     
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "URL модели",

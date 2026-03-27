@@ -14,7 +14,7 @@ if [[ ! -f "${REPO_ROOT}/backend/main.py" ]]; then
   exit 1
 fi
 
-sudo mkdir -p "${PROD_ROOT}/backend" "${PROD_ROOT}/static/i18n" "${PROD_ROOT}/static/js" "${PROD_ROOT}/static/css"
+sudo mkdir -p "${PROD_ROOT}/backend" "${PROD_ROOT}/static/i18n" "${PROD_ROOT}/static/js" "${PROD_ROOT}/static/css" "${PROD_ROOT}/static/fonts"
 
 # Production venv must match backend/requirements.txt (nudenet, onnxruntime, google-api-python-client, etc.)
 echo "==> pip install -r backend/requirements.txt → ${PROD_ROOT}/venv"
@@ -33,6 +33,7 @@ sudo cp -a "${REPO_ROOT}/static/terms-of-use.html" "${REPO_ROOT}/static/user-agr
 sudo cp -a "${REPO_ROOT}/static/js/header.js" "${REPO_ROOT}/static/js/footer.js" "${REPO_ROOT}/static/js/site-layout.js" \
   "${REPO_ROOT}/static/js/rig-editor.js" "${REPO_ROOT}/static/js/sprite-sheet-mvp.js" "${PROD_ROOT}/static/js/"
 sudo cp -a "${REPO_ROOT}/static/css/styles.css" "${PROD_ROOT}/static/css/"
+sudo cp -a "${REPO_ROOT}/static/fonts/"*.woff2 "${PROD_ROOT}/static/fonts/"
 sudo cp -a "${REPO_ROOT}/static/i18n/"*.json "${PROD_ROOT}/static/i18n/"
 
 sudo systemctl restart autorig

@@ -9,6 +9,9 @@
     "upload_title": "3D मॉडल को यहां खींचें",
     "upload_subtitle": "GLB, FBX, OBJ अधिकतम 100MB",
     "upload_selected": "चयनित फाइल",
+    "upload_progress_uploading": "मॉडल अपलोड हो रहा है…",
+    "upload_progress_creating_task": "कार्य बनाया जा रहा है…",
+    "upload_progress_btn": "कृपया प्रतीक्षा करें…",
 
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "मॉडल URL",

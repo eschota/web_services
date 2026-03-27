@@ -10,7 +10,8 @@ const App = {
         loginRequired: false,
         selectedFile: null,
         activeTab: 'upload',
-        free3dCreateInFlight: false
+        free3dCreateInFlight: false,
+        taskSubmitInProgress: false
     },
 
     scheduleNonCriticalWork(callback, timeout = 1200) {
@@ -144,9 +145,11 @@ const App = {
                 startBtn.textContent = t('btn_login_continue');
                 startBtn.onclick = () => window.location.href = '/auth/login';
             } else {
-                startBtn.textContent = t('btn_start');
-                startBtn.disabled = false;
                 startBtn.onclick = () => this.submitTask();
+                if (!this.state.taskSubmitInProgress) {
+                    startBtn.textContent = t('btn_start');
+                    startBtn.disabled = false;
+                }
             }
         }
     },
@@ -157,6 +160,34 @@ const App = {
     updateUI() {
         this.updateAuthUI();
         I18n.applyTranslations();
+    },
+
+    /**
+     * Home convert form: full-card overlay while POST /api/task/create is in flight.
+     */
+    setConvertFormBusy(isBusy, mode) {
+        const overlay = document.getElementById('convert-form-busy');
+        const card = document.querySelector('.convert-form-card');
+        const textEl = document.getElementById('convert-form-busy-text');
+        if (!overlay) return;
+
+        this.state.taskSubmitInProgress = !!isBusy;
+
+        if (isBusy) {
+            const key =
+                mode === 'upload' ? 'upload_progress_uploading' : 'upload_progress_creating_task';
+            if (textEl) {
+                textEl.setAttribute('data-i18n', key);
+                textEl.textContent = typeof t === 'function' ? t(key) : '';
+            }
+            overlay.classList.remove('hidden');
+            overlay.setAttribute('aria-busy', 'true');
+            card?.classList.add('form-is-busy');
+        } else {
+            overlay.classList.add('hidden');
+            overlay.setAttribute('aria-busy', 'false');
+            card?.classList.remove('form-is-busy');
+        }
     },
 
     showFree3DCreateOverlay(title) {
@@ -234,6 +265,9 @@ const App = {
         
         tabs.forEach(tab => {
             tab.addEventListener('click', () => {
+                if (this.state.taskSubmitInProgress) {
+                    return;
+                }
                 const target = tab.getAttribute('data-tab');
                 this.state.activeTab = target;
                 
@@ -266,11 +300,19 @@ const App = {
         if (!zone || !input) return;
         
         // Click to upload
-        zone.addEventListener('click', () => input.click());
+        zone.addEventListener('click', () => {
+            if (this.state.taskSubmitInProgress) {
+                return;
+            }
+            input.click();
+        });
         
         // Drag events
         zone.addEventListener('dragover', (e) => {
             e.preventDefault();
+            if (this.state.taskSubmitInProgress) {
+                return;
+            }
             zone.classList.add('dragover');
         });
         
@@ -281,7 +323,10 @@ const App = {
         zone.addEventListener('drop', (e) => {
             e.preventDefault();
             zone.classList.remove('dragover');
-            
+            if (this.state.taskSubmitInProgress) {
+                return;
+            }
+
             const files = e.dataTransfer.files;
             if (files.length > 0) {
                 this.handleFileSelect(files[0]);
@@ -290,6 +335,10 @@ const App = {
         
         // File input change
         input.addEventListener('change', () => {
+            if (this.state.taskSubmitInProgress) {
+                input.value = '';
+                return;
+            }
             if (input.files.length > 0) {
                 this.handleFileSelect(input.files[0]);
             }
@@ -298,6 +347,9 @@ const App = {
         // Remove file
         removeBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (this.state.taskSubmitInProgress) {
+                return;
+            }
             this.state.selectedFile = null;
             input.value = '';
             fileInfo?.classList.add('hidden');
@@ -305,6 +357,9 @@ const App = {
     },
     
     handleFileSelect(file) {
+        if (this.state.taskSubmitInProgress) {
+            return;
+        }
         const allowedExtensions = ['.glb', '.fbx', '.obj'];
         const ext = '.' + file.name.split('.').pop().toLowerCase();
         
@@ -346,6 +401,10 @@ const App = {
     async submitTask() {
         if (this.state.loginRequired) {
             window.location.href = '/auth/login';
+            return;
+        }
+
+        if (this.state.taskSubmitInProgress) {
             return;
         }
 
@@ -396,13 +455,16 @@ const App = {
         } catch (e) {
             console.warn('[GA4] Failed to get client_id:', e);
         }
-        
-        // Disable button
+
+        const busyMode = formData.get('source') === 'upload' ? 'upload' : 'link';
+        this.setConvertFormBusy(true, busyMode);
+
+        // Disable button (visible on link tab)
         if (startBtn) {
             startBtn.disabled = true;
-            startBtn.textContent = 'Processing...';
+            startBtn.textContent = typeof t === 'function' ? t('upload_progress_btn') : 'Please wait…';
         }
-        
+
         try {
             const response = await fetch('/api/task/create', {
                 method: 'POST',
@@ -428,6 +490,7 @@ const App = {
             console.error('Submit error:', error);
             alert(t('error_generic'));
         } finally {
+            this.setConvertFormBusy(false);
             if (startBtn) {
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn_start');

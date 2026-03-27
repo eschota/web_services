@@ -9,6 +9,9 @@
     "upload_title": "Drop your 3D model here",
     "upload_subtitle": "or click to browse (GLB, FBX, OBJ up to 100MB)",
     "upload_selected": "Selected file",
+    "upload_progress_uploading": "Uploading your model…",
+    "upload_progress_creating_task": "Creating your task…",
+    "upload_progress_btn": "Please wait…",
     
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "Model URL",

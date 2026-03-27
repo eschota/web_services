@@ -90,6 +90,21 @@
             display: block;
             flex-shrink: 0;
         }
+        .pay-logo--visa svg {
+            height: 22px;
+            width: auto;
+            border-radius: 4px;
+            vertical-align: middle;
+        }
+        .pay-logo--paypal svg {
+            height: 22px;
+            width: auto;
+            vertical-align: middle;
+        }
+        .pay-logo--mc svg {
+            height: 22px;
+            width: auto;
+        }
         .billing-discount-pill {
             font-size: 0.7rem;
             font-weight: 700;
@@ -167,9 +182,28 @@
                     <div id="billing-tabs" class="billing-method-row" role="tablist" aria-label="Payment method">
                         <button type="button" class="billing-method-btn billing-tab-active" id="billing-tab-card" data-billing="card" role="tab" aria-selected="true" data-i18n-title="buy_pay_methods_a11y" title="Pay with Visa, Mastercard, or PayPal (Gumroad)">
                             <span class="pay-icons" aria-hidden="true">
-                                <svg width="34" height="11" viewBox="0 0 48 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><text x="0" y="12" fill="#1434CB" font-family="Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="800" letter-spacing="0.04em">VISA</text></svg>
-                                <svg width="28" height="18" viewBox="0 0 40 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="15" cy="12" r="10" fill="#EB001B"/><circle cx="25" cy="12" r="10" fill="#F79E1B" fill-opacity="0.95"/></svg>
-                                <svg width="44" height="11" viewBox="0 0 54 14" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><text x="0" y="11" fill="#003087" font-family="Helvetica Neue, Arial, sans-serif" font-size="9" font-weight="700">PayPal</text></svg>
+                                <span class="pay-logo--visa">
+                                    <svg viewBox="0 0 40 24" width="40" height="24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <rect width="40" height="24" rx="4" fill="#1434CB"/>
+                                        <g fill="#fff" transform="translate(6.25 3.35) scale(1.02)">
+                                            <path d="M9.112 8.262L5.97 15.758H3.92L2.374 9.775c-.094-.368-.175-.503-.461-.658C1.447 8.864.677 8.627 0 8.479l.046-.217h3.3a.904.904 0 01.894.764l.817 4.338 2.018-5.102zm8.033 5.049c.008-1.979-2.736-2.088-2.717-2.972.006-.269.262-.555.822-.628a3.66 3.66 0 011.913.336l.34-1.59a5.207 5.207 0 00-1.814-.333c-1.917 0-3.266 1.02-3.278 2.479-.012 1.079.963 1.68 1.698 2.04.756.367 1.01.603 1.006.931-.005.504-.602.725-1.16.734-.975.015-1.54-.263-1.992-.473l-.351 1.642c.453.208 1.289.39 2.156.398 2.037 0 3.37-1.006 3.377-2.564m5.061 2.447H24l-1.565-7.496h-1.656a.883.883 0 00-.826.55l-2.909 6.946h2.036l.405-1.12h2.488zm-2.163-2.656l1.02-2.815.588 2.815zm-8.16-4.84l-1.603 7.496H8.34l1.605-7.496z"/>
+                                        </g>
+                                    </svg>
+                                </span>
+                                <span class="pay-logo--mc">
+                                    <svg viewBox="0 0 40 24" width="34" height="22" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <circle cx="15" cy="12" r="10" fill="#EB001B"/>
+                                        <circle cx="25" cy="12" r="10" fill="#F79E1B" fill-opacity="0.95"/>
+                                    </svg>
+                                </span>
+                                <span class="pay-logo--paypal">
+                                    <svg viewBox="0 0 52 24" width="52" height="24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <rect width="52" height="24" rx="4" fill="#f0f2f5"/>
+                                        <g transform="translate(6.5 2.25) scale(0.82)">
+                                            <path fill="#003087" d="M15.607 4.653H8.941L6.645 19.251H1.82L4.862 0h7.995c3.754 0 6.375 2.294 6.473 5.513-.648-.478-2.105-.86-3.722-.86m6.57 5.546c0 3.41-3.01 6.853-6.958 6.853h-2.493L11.595 24H6.74l1.845-11.538h3.592c4.208 0 7.346-3.634 7.153-6.949a5.24 5.24 0 0 1 2.848 4.686M9.653 5.546h6.408c.907 0 1.942.222 2.363.541-.195 2.741-2.655 5.483-6.441 5.483H8.714Z"/>
+                                        </g>
+                                    </svg>
+                                </span>
                             </span>
                             <span class="sr-only" data-i18n="buy_pay_methods_a11y">Pay with Visa, Mastercard, or PayPal</span>
                         </button>

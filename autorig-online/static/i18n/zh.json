@@ -9,6 +9,9 @@
     "upload_title": "将3D模型拖拽到此处",
     "upload_subtitle": "GLB、FBX、OBJ最高100MB",
     "upload_selected": "已选择文件",
+    "upload_progress_uploading": "正在上传模型…",
+    "upload_progress_creating_task": "正在创建任务…",
+    "upload_progress_btn": "请稍候…",
 
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "模型URL",

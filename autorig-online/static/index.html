@@ -17,13 +17,8 @@
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="alternate icon" href="/static/images/logo/favicon.svg">
     
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=free3d-glass">
+    <link rel="stylesheet" href="/static/css/styles.css?v=upload-busy-1">
     
     <!-- Schema.org SoftwareApplication markup -->
     <script type="application/ld+json">
@@ -83,7 +78,7 @@
     <main>
         <!-- Conversion Form -->
         <section class="container-sm">
-            <div class="card">
+            <div class="card convert-form-card">
                 <h1 style="text-align: center; margin: 0 0 1.5rem 0; font-size: 1.75rem;">
                     <span class="text-gradient" data-i18n="hero_title">Automatic 3D Model Rigging</span>
                 </h1>
@@ -145,6 +140,12 @@
                         <span data-i18n="btn_start">Start Rigging</span>
                     </button>
                 </form>
+                <div id="convert-form-busy" class="form-busy-overlay hidden" role="status" aria-live="polite" aria-busy="false">
+                    <div class="form-busy-inner">
+                        <div class="form-busy-spinner" aria-hidden="true"></div>
+                        <p class="form-busy-text" id="convert-form-busy-text" data-i18n="upload_progress_uploading">Uploading your model…</p>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -214,7 +215,7 @@
     <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/task-card.js"></script>
-    <script src="/static/js/app.js?v=likes-2"></script>
+    <script src="/static/js/app.js?v=upload-busy-1"></script>
 </body>
 </html>
 
