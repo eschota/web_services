@@ -2,7 +2,7 @@
 Pydantic models (schemas) for API request/response
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field
 
 
@@ -524,6 +524,7 @@ class SceneLikeResponse(BaseModel):
 class FeedbackCreateRequest(BaseModel):
     """Request to submit feedback"""
     text: str = Field(..., min_length=1, max_length=2000)
+    parent_id: Optional[int] = None
 
 
 class FeedbackItem(BaseModel):
@@ -533,9 +534,30 @@ class FeedbackItem(BaseModel):
     user_name: Optional[str]
     text: str
     created_at: datetime
+    parent_id: Optional[int] = None
+    user_picture: Optional[str] = None
+    parent_user_name: Optional[str] = None
+    parent_preview: Optional[str] = None
 
 
 class FeedbackListResponse(BaseModel):
     """Response for feedback list"""
     items: List[FeedbackItem]
+
+
+class DonationStatsResponse(BaseModel):
+    raised_usd: float
+    goal_usd: int
+    currency: str = "USD"
+    purchase_count: int = 0
+
+
+class RoadmapVotesResponse(BaseModel):
+    counts: Dict[str, int]
+    choice_order: List[str]
+    my_choice: Optional[str] = None
+
+
+class RoadmapVoteRequest(BaseModel):
+    choice: str = Field(..., min_length=1, max_length=64)
 

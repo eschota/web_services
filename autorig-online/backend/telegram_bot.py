@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import hashlib
 import html
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
@@ -394,6 +395,12 @@ async def broadcast_full_bundle_download(task_id: str, user_email: str | None = 
         f'🔗 <a href="{html.escape(url)}">Task</a> | 👤 {html.escape(actor)}'
     )
 
+    hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
+    # event_key max 128 chars (DB); hash task + user + hour for dedupe
+    event_key = hashlib.sha256(
+        f"{task_id}\0{(user_email or '')}\0{hour_bucket}".encode()
+    ).hexdigest()[:48]
+
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
         return
@@ -402,6 +409,10 @@ async def broadcast_full_bundle_download(task_id: str, user_email: str | None = 
 
     async def _one(chat_id: int):
         async with sem:
+            reserved = await reserve_notification(chat_id, "bundle_download", event_key)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate bundle download notice chat={chat_id} key={event_key}")
+                return
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid,
                 text=text,
@@ -506,6 +517,63 @@ async def broadcast_youtube_token_refresh_needed(detail: str = "") -> None:
             )
             if result:
                 print(f"[Telegram] YouTube token refresh notice sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
+async def broadcast_disk_space_low(
+    *,
+    free_gb: float,
+    target_gb: int,
+    zips_deleted: int,
+    tasks_purged: int,
+) -> None:
+    """
+    Alert admins: root filesystem still below target after new-task cleanup.
+    Throttled: at most once per UTC hour per chat (reserve_notification).
+    """
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping disk space low notice")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
+    event_key = f"below_{target_gb}g_{hour_bucket}"
+
+    text = (
+        "🚨 <b>Мало места на диске</b>\n"
+        f"Свободно на <code>/</code>: <b>{free_gb:.2f} GB</b> "
+        f"(цель при создании задачи: <b>{target_gb} GB</b>)\n"
+        f"Очистка при создании задачи: удалено ZIP: <code>{zips_deleted}</code>, "
+        f"задач (done/error): <code>{tasks_purged}</code>"
+    )
+
+    bot = Bot(token=token)
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            reserved = await reserve_notification(chat_id, "disk_low", event_key)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate disk-low notice chat={chat_id} hour={hour_bucket}")
+                return
+            result = await _send_with_retry(
+                lambda cid=chat_id: bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            )
+            if result:
+                print(f"[Telegram] Disk space low notice sent to chat {chat_id}")
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 

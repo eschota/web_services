@@ -208,6 +208,11 @@ async def create_conversion_task(
     pk = (pipeline_kind or "rig").strip().lower()
     if pk not in ("rig", "convert"):
         pk = "rig"
+
+    from main import ensure_disk_headroom_for_new_task
+
+    await ensure_disk_headroom_for_new_task(db)
+
     # Create task record
     task_id = str(uuid.uuid4())
     task = Task(

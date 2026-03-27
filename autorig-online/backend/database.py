@@ -7,7 +7,7 @@ import json
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
-    UniqueConstraint, create_engine, event
+    UniqueConstraint, ForeignKey, create_engine, event
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -364,6 +364,17 @@ class Feedback(Base):
     user_name = Column(String(255), nullable=True)
     text = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    parent_id = Column(Integer, ForeignKey("feedback.id"), nullable=True, index=True)
+
+
+class RoadmapVote(Base):
+    """One roadmap priority vote per registered user (choice can be updated)."""
+    __tablename__ = "roadmap_votes"
+    __table_args__ = ()
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    choice = Column(String(64), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Scene(Base):
@@ -502,6 +513,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
+            await _try_add_column("ALTER TABLE feedback ADD COLUMN parent_id INTEGER")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
@@ -652,6 +664,20 @@ async def init_db():
             except Exception:
                 pass
 
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS roadmap_votes (
+                        user_id INTEGER NOT NULL PRIMARY KEY,
+                        choice VARCHAR(64) NOT NULL,
+                        updated_at DATETIME,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    )
+                    """
+                )
+            except Exception:
+                pass
+
             # Custom animation purchase tables/indexes (safe to run repeatedly)
             try:
                 await conn.exec_driver_sql(
@@ -745,6 +771,21 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_at TIMESTAMP"
             )
+            await _try_add_column_any(
+                "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS parent_id INTEGER"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS roadmap_votes (
+                        user_id INTEGER NOT NULL PRIMARY KEY,
+                        choice VARCHAR(64) NOT NULL,
+                        updated_at TIMESTAMP
+                    )
+                    """
+                )
+            except Exception:
+                pass
             try:
                 await conn.exec_driver_sql(
                     """

@@ -47,9 +47,9 @@ async def main(task_id: str) -> int:
             print(f"ERROR: task not found: {task_id}")
             return 1
 
-        poster_url = find_poster_url(task.ready_urls or [])
+        poster_url = find_poster_url(task.ready_urls or [], task.output_urls or [])
         if not poster_url:
-            print("ERROR: no video_poster*.jpg/jpeg in ready_urls")
+            print("ERROR: no poster-like image URL in ready_urls/output_urls")
             return 1
 
         print(f"Poster URL: {poster_url[:120]}...")

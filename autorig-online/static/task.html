@@ -5345,10 +5345,37 @@
                 if (this.isDownloadingAll || (readyN === 0 && total === 0)) return;
 
                 const tPrep = (k, fb) => (window.t ? window.t(k) : fb);
-                this.isDownloadingAll = true;
                 const downloadBtn = document.getElementById('download-all-btn');
+                const labelSpan = downloadBtn?.querySelector('span');
+                const startedAt = Date.now();
+                const MIN_PREPARE_MS = 5000;
+
+                const waitUntilMinPrepareElapsed = async () => {
+                    const remaining = MIN_PREPARE_MS - (Date.now() - startedAt);
+                    if (remaining > 0) {
+                        await new Promise((resolve) => setTimeout(resolve, remaining));
+                    }
+                };
+
+                const releaseDownloadAllUi = async (afterFullWait) => {
+                    if (afterFullWait) {
+                        await waitUntilMinPrepareElapsed();
+                    }
+                    this.isDownloadingAll = false;
+                    if (downloadBtn) {
+                        downloadBtn.disabled = false;
+                        if (labelSpan) {
+                            labelSpan.textContent = this.buildDownloadAllButtonLabel();
+                        }
+                    }
+                };
+
+                this.isDownloadingAll = true;
                 if (downloadBtn) {
                     downloadBtn.disabled = true;
+                    if (labelSpan) {
+                        labelSpan.textContent = tPrep('prepare_files', 'Prepare Files');
+                    }
                 }
 
                 try {
@@ -5357,6 +5384,7 @@
                         headers: { Accept: 'application/json' },
                     });
                     if (resp.status === 401) {
+                        await releaseDownloadAllUi(false);
                         window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
                         return;
                     }
@@ -5369,23 +5397,22 @@
                             /* ignore */
                         }
                         alert(detail);
+                        await releaseDownloadAllUi(false);
                         return;
                     }
                     const data = await resp.json();
                     if (!data || !data.task_id) {
                         alert(tPrep('archive_failed', 'Download failed'));
+                        await releaseDownloadAllUi(false);
                         return;
                     }
                     // Same-origin HTTPS: /bundle.zip aligns with model.glb-style routes; /downloads/bundle kept as alias
                     window.location.href = `/api/task/${this.taskId}/bundle.zip`;
+                    await releaseDownloadAllUi(true);
                 } catch (e) {
                     console.error('Bundle download error:', e);
                     alert(tPrep('archive_failed', 'Download failed'));
-                } finally {
-                    this.isDownloadingAll = false;
-                    if (downloadBtn) {
-                        downloadBtn.disabled = false;
-                    }
+                    await releaseDownloadAllUi(false);
                 }
             },
 

@@ -133,6 +133,15 @@ GUMROAD_PRODUCT_CREDITS = {
     "autorig-1000": 1000,
 }
 
+# Gumroad product_permalinks (lowercase) that count toward /buy-credits donation progress
+AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
+    k.strip().lower() for k in GUMROAD_PRODUCT_CREDITS if str(k).strip().lower().startswith("autorig-")
+)
+
+# Public donation thermometer on buy-credits (USD)
+DONATION_GOAL_USD = int(os.getenv("DONATION_GOAL_USD", "1000"))
+DONATION_BASELINE_USD = float(os.getenv("DONATION_BASELINE_USD", "19"))
+
 # =============================================================================
 # Telegram Bot
 # =============================================================================
@@ -150,6 +159,11 @@ AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
 MIN_FREE_SPACE_GB = int(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
+
+# Before each new task: try to reach at least this much free space on /
+NEW_TASK_MIN_FREE_GB = int(os.getenv("NEW_TASK_MIN_FREE_GB", "2"))
+# If ZIP purge is not enough: delete oldest done/error tasks, but free at most this many bytes from disk in that phase
+NEW_TASK_PURGE_TASKS_MAX_FREED_GB = int(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "1"))
 
 # Purge DB rows for terminal tasks that have neither video nor any thumbnail URL in ready/output lists
 # (Used only as legacy env name; gallery purges are gated by GALLERY_DB_PURGE_INTERVAL_CYCLES below.)

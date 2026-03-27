@@ -39,18 +39,22 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
+    NEW_TASK_MIN_FREE_GB, NEW_TASK_PURGE_TASKS_MAX_FREED_GB,
     AUTOMATIC_TASK_DB_DELETION,
     GALLERY_DB_PURGE_INTERVAL_CYCLES,
     GALLERY_UPSTREAM_PURGE_BATCH,
     GALLERY_UPSTREAM_PURGE_ROUNDS,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
+    AUTORIG_DONATION_PRODUCT_KEYS,
+    DONATION_GOAL_USD,
+    DONATION_BASELINE_USD,
     YOUTUBE_REFRESH_TOKEN,
 )
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
-    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase
+    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote
 )
 from models import (
     TaskCreateResponse, TaskStatusResponse,
@@ -72,6 +76,7 @@ from models import (
     SceneResponse, SceneModelInfo, TransformData,
     # Feedback models
     FeedbackCreateRequest, FeedbackItem, FeedbackListResponse,
+    DonationStatsResponse, RoadmapVotesResponse, RoadmapVoteRequest,
     # Scene list models
     SceneListItem, SceneListResponse, SceneLikeResponse
 )
@@ -809,6 +814,21 @@ async def require_admin(
     if user.email not in ADMIN_EMAILS:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+async def require_login_user(
+    user: Optional[User] = Depends(get_current_user),
+) -> User:
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
+    "face_rig_animation",
+    "animals_rig_animation",
+    "avatar_speech_lipsync",
+)
 
 
 def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
@@ -1750,6 +1770,84 @@ async def api_revoke_api_key(
 
 
 # =============================================================================
+# Buy-credits: donations (Gumroad) & roadmap votes
+# =============================================================================
+@app.get("/api/buy-credits/donation-stats", response_model=DonationStatsResponse)
+async def api_buy_credits_donation_stats(db: AsyncSession = Depends(get_db)):
+    """Sum successful AutoRig credit-pack sales (gumroad_purchases) in USD + optional baseline."""
+    lowered = [k.lower() for k in AUTORIG_DONATION_PRODUCT_KEYS]
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(GumroadPurchase.price), 0),
+                func.count(),
+            ).where(
+                GumroadPurchase.refunded.is_(False),
+                GumroadPurchase.test.is_(False),
+                func.lower(GumroadPurchase.product_permalink).in_(lowered),
+            )
+        )
+    ).one()
+    sum_cents = int(row[0] or 0)
+    purchase_count = int(row[1] or 0)
+    raised = DONATION_BASELINE_USD + (sum_cents / 100.0)
+    return DonationStatsResponse(
+        raised_usd=round(raised, 2),
+        goal_usd=DONATION_GOAL_USD,
+        currency="USD",
+        purchase_count=purchase_count,
+    )
+
+
+@app.get("/api/roadmap/votes", response_model=RoadmapVotesResponse)
+async def api_roadmap_votes_get(
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    counts = {k: 0 for k in ROADMAP_CHOICE_KEYS}
+    agg = await db.execute(
+        select(RoadmapVote.choice, func.count())
+        .where(RoadmapVote.choice.in_(ROADMAP_CHOICE_KEYS))
+        .group_by(RoadmapVote.choice)
+    )
+    for choice, n in agg.all():
+        if choice in counts:
+            counts[choice] = int(n)
+    my_choice: Optional[str] = None
+    if user:
+        rv = await db.execute(select(RoadmapVote).where(RoadmapVote.user_id == user.id))
+        rec = rv.scalar_one_or_none()
+        if rec and rec.choice in counts:
+            my_choice = rec.choice
+    return RoadmapVotesResponse(
+        counts=counts,
+        choice_order=list(ROADMAP_CHOICE_KEYS),
+        my_choice=my_choice,
+    )
+
+
+@app.post("/api/roadmap/vote", response_model=RoadmapVotesResponse)
+async def api_roadmap_vote_post(
+    body: RoadmapVoteRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_login_user),
+):
+    choice = body.choice.strip().lower()
+    if choice not in ROADMAP_CHOICE_KEYS:
+        raise HTTPException(status_code=400, detail="Invalid choice")
+    rs = await db.execute(select(RoadmapVote).where(RoadmapVote.user_id == user.id))
+    rec = rs.scalar_one_or_none()
+    now = datetime.utcnow()
+    if rec:
+        rec.choice = choice
+        rec.updated_at = now
+    else:
+        db.add(RoadmapVote(user_id=user.id, choice=choice, updated_at=now))
+    await db.commit()
+    return await api_roadmap_votes_get(db=db, user=user)
+
+
+# =============================================================================
 # YouTube Bonus & Feedback
 # =============================================================================
 @app.post("/api/user/grant-youtube-bonus")
@@ -1774,41 +1872,85 @@ async def grant_youtube_bonus(
 @app.post("/api/user/feedback")
 async def submit_feedback(
     req: FeedbackCreateRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_login_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Submit user feedback"""
+    parent_id = req.parent_id
+    if parent_id is not None:
+        chk = await db.execute(select(Feedback).where(Feedback.id == parent_id))
+        if chk.scalar_one_or_none() is None:
+            raise HTTPException(status_code=400, detail="Invalid parent_id")
     fb = Feedback(
         user_email=user.email,
         user_name=user.name or user.email,
-        text=req.text
+        text=req.text,
+        parent_id=parent_id,
     )
     db.add(fb)
     await db.commit()
-    
+
     from telegram_bot import broadcast_feedback_submitted
     asyncio.create_task(broadcast_feedback_submitted(user.email, req.text))
-    
+
     return {"ok": True}
+
+
+def _feedback_avatar_url(email: str, oauth_picture: Optional[str]) -> str:
+    if oauth_picture and str(oauth_picture).strip():
+        return str(oauth_picture).strip()
+    h = hashlib.md5((email or "").strip().lower().encode("utf-8")).hexdigest()
+    return f"https://www.gravatar.com/avatar/{h}?d=identicon&s=96"
+
+
+def _feedback_parent_preview(text: str, max_len: int = 100) -> str:
+    t = (text or "").strip().replace("\n", " ")
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1] + "…"
 
 
 @app.get("/api/feedback", response_model=FeedbackListResponse)
 async def get_feedback_list(
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all feedback items"""
-    from sqlalchemy import select
-    result = await db.execute(select(Feedback).order_by(Feedback.created_at.desc()))
-    items = result.scalars().all()
-    return FeedbackListResponse(items=[
-        FeedbackItem(
-            id=i.id,
-            user_email=i.user_email,
-            user_name=i.user_name,
-            text=i.text,
-            created_at=i.created_at
-        ) for i in items
-    ])
+    """Get all feedback items (with user avatars when linked to a Google OAuth user)."""
+    stmt = (
+        select(Feedback, User.picture)
+        .outerjoin(User, func.lower(User.email) == func.lower(Feedback.user_email))
+        .order_by(Feedback.created_at.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+    parent_ids = {fb.parent_id for fb, _pic in rows if getattr(fb, "parent_id", None)}
+    parent_map: Dict[int, Feedback] = {}
+    if parent_ids:
+        pr = await db.execute(select(Feedback).where(Feedback.id.in_(parent_ids)))
+        for p in pr.scalars().all():
+            parent_map[p.id] = p
+
+    out: List[FeedbackItem] = []
+    for fb, user_picture in rows:
+        parent_user_name = None
+        parent_preview = None
+        pid = getattr(fb, "parent_id", None)
+        if pid and pid in parent_map:
+            par = parent_map[pid]
+            parent_user_name = par.user_name or par.user_email
+            parent_preview = _feedback_parent_preview(par.text)
+        out.append(
+            FeedbackItem(
+                id=fb.id,
+                user_email=fb.user_email,
+                user_name=fb.user_name,
+                text=fb.text,
+                created_at=fb.created_at,
+                parent_id=pid,
+                user_picture=_feedback_avatar_url(fb.user_email, user_picture),
+                parent_user_name=parent_user_name,
+                parent_preview=parent_preview,
+            )
+        )
+    return FeedbackListResponse(items=out)
 
 
 @app.delete("/api/feedback/{feedback_id}")
@@ -1817,16 +1959,16 @@ async def delete_feedback(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete feedback (admin only)"""
-    if not user.is_admin:
+    """Delete feedback (admin only); replies referencing this row are removed first."""
+    if not user or not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-    
-    from sqlalchemy import select
+
     result = await db.execute(select(Feedback).where(Feedback.id == feedback_id))
     fb = result.scalar_one_or_none()
     if not fb:
         raise HTTPException(status_code=404, detail="Feedback not found")
-    
+
+    await db.execute(delete(Feedback).where(Feedback.parent_id == feedback_id))
     await db.delete(fb)
     await db.commit()
     return {"ok": True}
@@ -5390,6 +5532,134 @@ async def _delete_task_record_and_related(db: AsyncSession, task_id: str) -> Non
     await db.commit()
 
 
+def purge_task_cache_bundle_zips(
+    record_items: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[int, int]:
+    """
+    Remove regenerable **/*.zip under TASK_CACHE_DIR (full-task download bundles).
+    If record_items is a list, append the same entries cleanup_disk_space uses for admin summaries.
+    Returns (deleted_file_count, freed_bytes).
+    """
+    deleted = 0
+    freed = 0
+    if not TASK_CACHE_DIR.exists():
+        return deleted, freed
+    for zp in TASK_CACHE_DIR.rglob("*.zip"):
+        if not zp.is_file():
+            continue
+        try:
+            sz = zp.stat().st_size
+            zp.unlink()
+            deleted += 1
+            freed += sz
+            print(f"[Disk] Removed bundle zip {zp} ({sz / (1024**2):.1f} MB)")
+            if record_items is not None:
+                try:
+                    rel = str(zp.relative_to(TASK_CACHE_DIR))
+                except ValueError:
+                    rel = zp.name
+                record_items.append(
+                    {"path": rel, "type": "bundle_zip", "size_mb": sz / (1024**2)}
+                )
+        except Exception as e:
+            print(f"[Disk] Failed to remove zip {zp}: {e}")
+    return deleted, freed
+
+
+async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
+    """
+    Run when creating a new task: if free space on / is below NEW_TASK_MIN_FREE_GB,
+    first delete bundle ZIPs; if still low, delete oldest done/error tasks (DB + artifacts)
+    until free space target is met or NEW_TASK_PURGE_TASKS_MAX_FREED_GB of data was removed
+    in that second phase (whichever comes first).
+    """
+    target_bytes = NEW_TASK_MIN_FREE_GB * 1024 * 1024 * 1024
+    max_task_phase_bytes = NEW_TASK_PURGE_TASKS_MAX_FREED_GB * 1024 * 1024 * 1024
+
+    free_bytes = shutil.disk_usage("/").free
+    summary: Dict[str, Any] = {
+        "initial_free_gb": free_bytes / (1024**3),
+        "zips_deleted": 0,
+        "zip_freed_bytes": 0,
+        "tasks_purged": 0,
+        "task_phase_freed_bytes": 0,
+        "final_free_gb": free_bytes / (1024**3),
+    }
+
+    if free_bytes >= target_bytes:
+        return summary
+
+    zd, zb = purge_task_cache_bundle_zips()
+    summary["zips_deleted"] = zd
+    summary["zip_freed_bytes"] = zb
+
+    free_bytes = shutil.disk_usage("/").free
+    summary["final_free_gb"] = free_bytes / (1024**3)
+    if free_bytes >= target_bytes:
+        if zd:
+            print(
+                f"[NewTask Disk] ZIP purge: removed {zd} file(s), "
+                f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB)"
+            )
+        return summary
+
+    task_phase_freed = 0
+    res = await db.execute(
+        select(Task)
+        .where(Task.status.in_(["done", "error"]))
+        .order_by(Task.created_at.asc().nulls_last())
+    )
+    candidates: List[Task] = list(res.scalars().all())
+
+    for task in candidates:
+        free_bytes = shutil.disk_usage("/").free
+        if free_bytes >= target_bytes:
+            break
+        if task_phase_freed >= max_task_phase_bytes:
+            print(
+                f"[NewTask Disk] Task purge cap reached "
+                f"({task_phase_freed / (1024**3):.2f} / {NEW_TASK_PURGE_TASKS_MAX_FREED_GB} GB); "
+                f"free {free_bytes / (1024**3):.2f} GB"
+            )
+            break
+
+        _del_n, f_bytes = _delete_task_artifacts(task)
+        try:
+            await _delete_task_record_and_related(db, task.id)
+            summary["tasks_purged"] += 1
+            task_phase_freed += f_bytes
+            summary["task_phase_freed_bytes"] = task_phase_freed
+            print(
+                f"[NewTask Disk] Purged oldest terminal task {task.id} ({task.status}), "
+                f"~{f_bytes / (1024**2):.1f} MB artifacts"
+            )
+        except Exception as e:
+            await db.rollback()
+            print(f"[NewTask Disk] Failed to purge task {task.id}: {e}")
+
+    free_bytes = shutil.disk_usage("/").free
+    summary["final_free_gb"] = free_bytes / (1024**3)
+    if summary["zips_deleted"] or summary["tasks_purged"]:
+        print(
+            f"[NewTask Disk] Headroom pass done: zips={summary['zips_deleted']}, "
+            f"tasks={summary['tasks_purged']}, free now {summary['final_free_gb']:.2f} GB "
+            f"(target {NEW_TASK_MIN_FREE_GB} GB)"
+        )
+    if free_bytes < target_bytes:
+        try:
+            from telegram_bot import broadcast_disk_space_low
+
+            await broadcast_disk_space_low(
+                free_gb=summary["final_free_gb"],
+                target_gb=NEW_TASK_MIN_FREE_GB,
+                zips_deleted=summary["zips_deleted"],
+                tasks_purged=summary["tasks_purged"],
+            )
+        except Exception as e:
+            print(f"[NewTask Disk] Telegram disk-low notify failed: {e}")
+    return summary
+
+
 async def purge_tasks_without_poster_and_video(db: AsyncSession) -> dict:
     """
     Delete terminal tasks (done/error) with no poster-like URL in ready_urls/output_urls.
@@ -6480,23 +6750,9 @@ async def cleanup_disk_space(
 
     # Step 0: "Download all" bundle ZIPs under task cache are regenerable and can accumulate
     # to many GB; remove them before orphan/task DB cleanup.
-    if TASK_CACHE_DIR.exists():
-        for zp in TASK_CACHE_DIR.rglob("*.zip"):
-            if not zp.is_file():
-                continue
-            try:
-                sz = zp.stat().st_size
-                zp.unlink()
-                result["deleted_count"] += 1
-                result["freed_bytes"] += sz
-                result["deleted_items"].append({
-                    "path": str(zp.relative_to(TASK_CACHE_DIR)) if zp.is_relative_to(TASK_CACHE_DIR) else zp.name,
-                    "type": "bundle_zip",
-                    "size_mb": sz / (1024**2),
-                })
-                print(f"[Disk Cleanup] Deleted bundle_zip: {zp} ({sz / (1024**2):.1f} MB)")
-            except Exception as e:
-                print(f"[Disk Cleanup] Failed to delete zip {zp}: {e}")
+    zd, zb = purge_task_cache_bundle_zips(record_items=result["deleted_items"])
+    result["deleted_count"] += zd
+    result["freed_bytes"] += zb
 
     disk_usage = shutil.disk_usage("/")
     free_bytes = disk_usage.free

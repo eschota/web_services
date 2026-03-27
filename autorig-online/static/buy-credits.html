@@ -28,6 +28,21 @@
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="donation_title">Support the project</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="donation_subtitle">Credit purchases help fund development. Progress includes all completed AutoRig credit pack sales plus a starting baseline.</p>
+                <div id="donation-stats-line" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">—</div>
+                <div style="background: rgba(255,255,255,0.06); border-radius: 999px; height: 14px; overflow: hidden; border: 1px solid var(--border);">
+                    <div id="donation-bar-fill" style="height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease;"></div>
+                </div>
+            </div>
+
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="roadmap_title">Roadmap — your vote</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="roadmap_intro">Pick what we should prioritize next. You can change your vote anytime.</p>
+                <div id="roadmap-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;"></div>
+            </div>
+
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
                 <h1 style="margin-top: 0;" data-i18n="buy_title">Buy Credits</h1>
                 <p style="color: var(--text-secondary);" data-i18n="buy_subtitle">
                     Credits are needed to download finished 3D models with rigging and all animations.
@@ -40,21 +55,21 @@
             <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem;">
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">100 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$3</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.01 per credit</div>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$10</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
                     <button class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center; border: 2px solid var(--accent); position: relative;">
                     <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;">POPULAR</span>
                     <h3 style="margin-top: 0;">500 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$10</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.02 per credit</div>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$30</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.06 per credit</div>
                     <button class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">1000 credits</h3>
                     <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$100</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.1 per credit</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
                     <button class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
             </div>
@@ -62,6 +77,13 @@
             <!-- Feedback Form Section -->
             <div id="feedback-section" class="card hidden" style="padding: 2rem; margin-top: 1rem;">
                 <h2 style="margin-top: 0;" data-i18n="feedback_title">Leave Feedback</h2>
+                <div id="feedback-reply-banner" class="hidden" style="margin-top: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; background: rgba(var(--accent-rgb), 0.12); border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem;">
+                    <div style="font-size: 0.9rem; color: var(--text-secondary);">
+                        <span data-i18n="feedback_replying_to">Replying to</span>
+                        <span id="feedback-reply-preview" style="color: var(--text-primary); font-weight: 600;"></span>
+                    </div>
+                    <button type="button" class="btn btn-ghost" id="feedback-reply-cancel" style="padding: 0.25rem 0.5rem; flex-shrink: 0;" data-i18n="feedback_reply_cancel">Cancel</button>
+                </div>
                 <div style="margin-top: 1rem;">
                     <textarea id="feedback-text" style="width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="What do you think about the RIG? What should we improve?"></textarea>
                     <button class="btn btn-primary" id="btn-submit-feedback" style="margin-top: 1rem;" data-i18n="feedback_submit">Submit Feedback</button>
@@ -73,33 +95,6 @@
                 <h2 style="margin-top: 0;" data-i18n="feedback_list_title">User Feedback</h2>
                 <div id="feedback-list" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
                     <div style="color: var(--text-muted);" data-i18n="feedback_loading">Loading feedback...</div>
-                </div>
-            </div>
-
-            <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;" data-i18n="api_access_title">API Access</h2>
-                <p style="color: var(--text-secondary);" data-i18n="api_access_desc">
-                    Generate an API key to use AutoRig REST API from external tools.
-                </p>
-
-                <div style="display:flex; gap: 0.75rem; align-items:center; flex-wrap: wrap; margin-top: 1rem;">
-                    <button class="btn btn-secondary" id="btn-generate-key" data-i18n="api_access_generate">Generate API Key</button>
-                    <button class="btn btn-ghost" id="btn-refresh-keys" data-i18n="api_access_refresh">Refresh</button>
-                </div>
-
-                <div id="api-key-once" class="alert alert-info hidden" style="margin-top: 1rem;">
-                    <div style="display:flex; gap: 0.75rem; align-items:center; justify-content: space-between; flex-wrap: wrap;">
-                        <div>
-                            <div style="font-weight: 600;" data-i18n="api_access_key_once">Your API key (shown once):</div>
-                            <code id="api-key-plain" style="display:block; margin-top:0.5rem; word-break: break-all;"></code>
-                        </div>
-                        <button class="btn btn-ghost" id="btn-copy-key" data-i18n="btn_copy">Copy</button>
-                    </div>
-                </div>
-
-                <div style="margin-top: 1rem;">
-                    <div style="font-weight:600; margin-bottom: 0.5rem;" data-i18n="api_access_keys">Your keys</div>
-                    <div id="api-keys-list" style="color: var(--text-muted);">-</div>
                 </div>
             </div>
         </div>
@@ -140,7 +135,7 @@
             document.querySelectorAll('.lang-option').forEach(opt => {
                 opt.addEventListener('click', async () => {
                     const lang = opt.getAttribute('data-lang');
-                    await I18n.setLanguage(lang);
+                    await I18n.switchLanguage(lang);
                     dropdown?.classList.remove('open');
                 });
             });
@@ -162,6 +157,116 @@
             } catch (e) {
                 console.error('Auth load failed:', e);
             }
+        }
+
+        function escapeHtml(str) {
+            return String(str ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        const ROADMAP_KEYS = ['face_rig_animation', 'animals_rig_animation', 'avatar_speech_lipsync'];
+
+        function roadmapTitleKey(k) {
+            return ({ face_rig_animation: 'roadmap_face_rig_title', animals_rig_animation: 'roadmap_animals_title', avatar_speech_lipsync: 'roadmap_avatar_title' })[k] || k;
+        }
+
+        async function loadDonationStats() {
+            const line = document.getElementById('donation-stats-line');
+            const fill = document.getElementById('donation-bar-fill');
+            if (!line || !fill) return;
+            try {
+                const resp = await fetch('/api/buy-credits/donation-stats');
+                if (!resp.ok) throw new Error('bad status');
+                const d = await resp.json();
+                const raised = Number(d.raised_usd) || 0;
+                const goal = Number(d.goal_usd) || 1000;
+                const pct = Math.min(100, goal > 0 ? (raised / goal) * 100 : 0);
+                line.textContent = t('donation_progress_line', { raised: raised.toFixed(2), goal: String(goal) });
+                fill.style.width = pct.toFixed(2) + '%';
+            } catch (e) {
+                console.error('Donation stats failed:', e);
+                line.textContent = '—';
+            }
+        }
+
+        async function loadRoadmap() {
+            const host = document.getElementById('roadmap-cards');
+            if (!host) return;
+            try {
+                const resp = await fetch('/api/roadmap/votes');
+                if (!resp.ok) throw new Error('bad status');
+                const d = await resp.json();
+                const counts = d.counts || {};
+                const my = d.my_choice;
+                host.innerHTML = ROADMAP_KEYS.map((key) => {
+                    const n = Number(counts[key] || 0);
+                    const active = my === key;
+                    const title = t(roadmapTitleKey(key));
+                    return `
+                        <div class="card" style="padding: 1rem; text-align: center; border: 2px solid ${active ? 'var(--accent)' : 'var(--border)'};">
+                            <div style="font-weight: 700; margin-bottom: 0.5rem; line-height: 1.3;">${escapeHtml(title)}</div>
+                            <div style="font-size: 1.75rem; font-weight: 800; color: var(--accent); margin: 0.5rem 0;">${n}</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">${t('roadmap_votes_label')}</div>
+                            <button type="button" class="btn btn-primary roadmap-vote-btn" data-choice="${escapeHtml(key)}" style="width:100%;">${t('roadmap_vote')}</button>
+                        </div>
+                    `;
+                }).join('');
+                host.querySelectorAll('.roadmap-vote-btn').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        if (!window.__authedUser) {
+                            alert(t('buy_login_required'));
+                            window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                            return;
+                        }
+                        const choice = btn.getAttribute('data-choice');
+                        btn.disabled = true;
+                        try {
+                            const r = await fetch('/api/roadmap/vote', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ choice }),
+                                credentials: 'same-origin',
+                            });
+                            if (!r.ok) throw new Error('vote failed');
+                            await loadRoadmap();
+                        } catch (err) {
+                            console.error(err);
+                            alert(t('error_generic'));
+                        } finally {
+                            btn.disabled = false;
+                        }
+                    });
+                });
+            } catch (e) {
+                console.error('Roadmap load failed:', e);
+                host.innerHTML = `<div style="color: var(--text-muted);">${escapeHtml(t('roadmap_load_error'))}</div>`;
+            }
+        }
+
+        window.__feedbackReplyTo = null;
+        window.__feedbackById = {};
+
+        function clearFeedbackReply() {
+            window.__feedbackReplyTo = null;
+            document.getElementById('feedback-reply-banner')?.classList.add('hidden');
+        }
+
+        function startReplyTo(item) {
+            if (!window.__authedUser) {
+                alert(t('buy_login_required'));
+                window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                return;
+            }
+            const name = item.user_name || item.user_email || '';
+            const snippet = (item.text || '').replace(/\s+/g, ' ').trim().slice(0, 72);
+            window.__feedbackReplyTo = { id: item.id };
+            const prev = document.getElementById('feedback-reply-preview');
+            if (prev) prev.textContent = `${name}: ${snippet}${(item.text || '').length > 72 ? '…' : ''}`;
+            document.getElementById('feedback-reply-banner')?.classList.remove('hidden');
+            document.getElementById('feedback-text')?.focus();
         }
 
         async function setupYouTubeBonus() {
@@ -192,27 +297,51 @@
                 const resp = await fetch('/api/feedback');
                 const data = await resp.json();
                 if (!data.items || data.items.length === 0) {
+                    window.__feedbackById = {};
                     listEl.innerHTML = `<div style="color: var(--text-muted);">${t('feedback_empty')}</div>`;
                     return;
                 }
-                
+                window.__feedbackById = Object.fromEntries(data.items.map((i) => [i.id, i]));
+
                 const isAdmin = window.__authedUser?.is_admin;
-                
-                listEl.innerHTML = data.items.map(item => `
-                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
+                const loggedIn = !!window.__authedUser;
+
+                listEl.innerHTML = data.items.map((item) => {
+                    const indent = item.parent_id ? 'margin-left: 1.5rem; border-left: 3px solid var(--accent); padding-left: 0.75rem;' : '';
+                    const pic = item.user_picture || '';
+                    const replyTo = item.parent_id && item.parent_user_name
+                        ? `<div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">${escapeHtml(t('feedback_in_reply_to'))} ${escapeHtml(item.parent_user_name)}${item.parent_preview ? ': ' + escapeHtml(item.parent_preview) : ''}</div>`
+                        : '';
+                    return `
+                    <div class="card feedback-row" data-feedback-id="${item.id}" style="padding: 1rem; background: rgba(255,255,255,0.03); ${indent}">
                         <div style="display:flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
-                            <div style="flex: 1;">
-                                <div style="font-weight: 600; font-size: 0.9rem; color: var(--accent);">${item.user_name}</div>
-                                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">${new Date(item.created_at).toLocaleString()}</div>
-                                <div style="white-space: pre-wrap; line-height: 1.5;">${item.text}</div>
+                            <div style="display:flex; gap: 0.75rem; flex: 1; min-width: 0;">
+                                <img src="${escapeHtml(pic)}" alt="" width="40" height="40" style="border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--border);" loading="lazy" referrerpolicy="no-referrer">
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="font-weight: 600; font-size: 0.9rem; color: var(--accent);">${escapeHtml(item.user_name)}</div>
+                                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">${escapeHtml(new Date(item.created_at).toLocaleString())}</div>
+                                    ${replyTo}
+                                    <div style="white-space: pre-wrap; line-height: 1.5;">${escapeHtml(item.text)}</div>
+                                </div>
                             </div>
-                            ${isAdmin ? `<button class="btn btn-ghost" style="color: #ef4444; padding: 0.25rem 0.5rem;" onclick="deleteFeedback(${item.id})">Delete</button>` : ''}
+                            <div style="display:flex; flex-direction: column; gap: 0.35rem; align-items: flex-end;">
+                                ${loggedIn ? `<button type="button" class="btn btn-ghost feedback-reply-btn" data-id="${item.id}" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">${escapeHtml(t('feedback_reply'))}</button>` : ''}
+                                ${isAdmin ? `<button type="button" class="btn btn-ghost" style="color: #ef4444; padding: 0.25rem 0.5rem;" onclick="deleteFeedback(${item.id})">Delete</button>` : ''}
+                            </div>
                         </div>
-                    </div>
-                `).join('');
+                    </div>`;
+                }).join('');
+
+                listEl.querySelectorAll('.feedback-reply-btn').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        const id = Number(btn.getAttribute('data-id'));
+                        const item = window.__feedbackById[id];
+                        if (item) startReplyTo(item);
+                    });
+                });
             } catch (e) {
                 console.error('Load feedback failed:', e);
-                listEl.innerHTML = `<div style="color: #ef4444;">Failed to load feedback</div>`;
+                listEl.innerHTML = `<div style="color: #ef4444;">${escapeHtml(t('feedback_load_error'))}</div>`;
             }
         }
 
@@ -232,19 +361,23 @@
         function setupFeedbackForm() {
             const btn = document.getElementById('btn-submit-feedback');
             const textarea = document.getElementById('feedback-text');
+            document.getElementById('feedback-reply-cancel')?.addEventListener('click', () => clearFeedbackReply());
             btn?.addEventListener('click', async () => {
                 const text = textarea.value.trim();
                 if (!text) return;
-                
+
                 btn.disabled = true;
                 try {
+                    const body = { text, parent_id: window.__feedbackReplyTo ? window.__feedbackReplyTo.id : null };
                     const resp = await fetch('/api/user/feedback', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text })
+                        body: JSON.stringify(body),
+                        credentials: 'same-origin',
                     });
                     if (resp.ok) {
                         textarea.value = '';
+                        clearFeedbackReply();
                         alert(t('feedback_success'));
                         await loadFeedback();
                     }
@@ -267,8 +400,8 @@
             const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
             
             const packageInfo = {
-                'autorig-100': { credits: '100', price: '$3' },
-                'autorig-500': { credits: '500', price: '$10' },
+                'autorig-100': { credits: '100', price: '$10' },
+                'autorig-500': { credits: '500', price: '$30' },
                 'autorig-1000': { credits: '1000', price: '$100' }
             };
             
@@ -295,74 +428,21 @@
             document.getElementById('buy-1000')?.addEventListener('click', () => go('autorig-1000'));
         }
 
-        async function loadApiKeys() {
-            const listEl = document.getElementById('api-keys-list');
-            listEl.textContent = t('api_access_loading');
-            const resp = await fetch('/api/user/api-keys');
-            if (!resp.ok) {
-                listEl.textContent = resp.status === 401 ? t('api_access_need_cookie') : t('api_access_login_required');
-                return;
-            }
-            const data = await resp.json();
-            if (!data.keys || data.keys.length === 0) {
-                listEl.textContent = t('api_access_no_keys');
-                return;
-            }
-            listEl.innerHTML = data.keys.map(k => {
-                const revoked = k.revoked_at ? ' (revoked)' : '';
-                return `
-                    <div style="display:flex; align-items:center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-                        <div>
-                            <div><span style="color: var(--text-secondary);">ar_${k.key_prefix}_…</span>${revoked}</div>
-                            <div style="color: var(--text-muted); font-size: 0.85rem;">${new Date(k.created_at).toLocaleString()}</div>
-                        </div>
-                        ${k.revoked_at ? '' : `<button class="btn btn-ghost" data-key-id="${k.id}">${t('api_access_revoke')}</button>`}
-                    </div>
-                `;
-            }).join('');
-            listEl.querySelectorAll('button[data-key-id]').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const id = btn.getAttribute('data-key-id');
-                    if (!confirm(t('api_access_revoke_confirm'))) return;
-                    await fetch(`/api/user/api-keys/${id}/revoke`, { method: 'POST' });
-                    await loadApiKeys();
-                });
-            });
-        }
-
-        async function generateApiKey() {
-            const resp = await fetch('/api/user/api-keys', { method: 'POST' });
-            if (!resp.ok) {
-                alert(resp.status === 401 ? t('api_access_need_cookie') : t('api_access_login_required'));
-                return;
-            }
-            const data = await resp.json();
-            const box = document.getElementById('api-key-once');
-            const code = document.getElementById('api-key-plain');
-            code.textContent = data.api_key;
-            box.classList.remove('hidden');
-            await loadApiKeys();
-        }
-
         document.addEventListener('DOMContentLoaded', async () => {
             await I18n.init();
             setupThemeToggle();
             setupLangSelector();
             await updateCreditsUI();
+            await loadDonationStats();
+            await loadRoadmap();
             setupBuyButtons();
             setupYouTubeBonus();
             setupFeedbackForm();
             await loadFeedback();
-
-            document.getElementById('btn-refresh-keys')?.addEventListener('click', loadApiKeys);
-            document.getElementById('btn-generate-key')?.addEventListener('click', generateApiKey);
-            document.getElementById('btn-copy-key')?.addEventListener('click', async () => {
-                const v = document.getElementById('api-key-plain').textContent;
-                await navigator.clipboard.writeText(v);
-                alert(t('api_access_copied'));
+            window.addEventListener('languageChanged', () => {
+                loadDonationStats();
+                loadRoadmap();
             });
-
-            await loadApiKeys();
         });
     </script>
 </body>
