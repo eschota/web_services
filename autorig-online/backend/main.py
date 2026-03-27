@@ -114,7 +114,10 @@ POSTER_RECOVERY_THROTTLE_SEC = 20.0
 def _task_needs_poster_classification(task) -> bool:
     if getattr(task, "status", None) != "done":
         return False
-    return getattr(task, "content_classified_at", None) is None
+    if getattr(task, "content_classified_at", None) is None:
+        return True
+    cv = getattr(task, "content_classifier_version", None) or ""
+    return ":pipeline_error" in cv
 
 
 def _schedule_poster_recovery_throttled(task_id: str) -> None:
@@ -6474,6 +6477,38 @@ async def cleanup_disk_space(
         return result
 
     print(f"[Disk Cleanup] Free space {free_bytes / (1024**3):.2f} GB < {min_free_gb} GB target. Starting cleanup...")
+
+    # Step 0: "Download all" bundle ZIPs under task cache are regenerable and can accumulate
+    # to many GB; remove them before orphan/task DB cleanup.
+    if TASK_CACHE_DIR.exists():
+        for zp in TASK_CACHE_DIR.rglob("*.zip"):
+            if not zp.is_file():
+                continue
+            try:
+                sz = zp.stat().st_size
+                zp.unlink()
+                result["deleted_count"] += 1
+                result["freed_bytes"] += sz
+                result["deleted_items"].append({
+                    "path": str(zp.relative_to(TASK_CACHE_DIR)) if zp.is_relative_to(TASK_CACHE_DIR) else zp.name,
+                    "type": "bundle_zip",
+                    "size_mb": sz / (1024**2),
+                })
+                print(f"[Disk Cleanup] Deleted bundle_zip: {zp} ({sz / (1024**2):.1f} MB)")
+            except Exception as e:
+                print(f"[Disk Cleanup] Failed to delete zip {zp}: {e}")
+
+    disk_usage = shutil.disk_usage("/")
+    free_bytes = disk_usage.free
+    if free_bytes >= min_free_bytes:
+        result["freed_gb"] = result["freed_bytes"] / (1024**3)
+        result["final_free_gb"] = free_bytes / (1024**3)
+        if result["deleted_count"] > 0:
+            print(
+                f"[Disk Cleanup] Target reached after bundle ZIP purge: "
+                f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
+            )
+        return result
 
     age_cutoff = datetime.utcnow() - timedelta(hours=min_age_hours)
     age_cutoff_timestamp = age_cutoff.timestamp()
