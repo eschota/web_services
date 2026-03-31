@@ -364,6 +364,66 @@
   border-color: rgba(255, 200, 120, 0.4);
 }
 
+/* Массовые действия (те же API, что и в шапке) */
+.admin-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(40, 90, 160, 0.12);
+  border: 1px solid rgba(120, 170, 255, 0.22);
+}
+
+.admin-bulk-meta {
+  font-size: 0.72rem;
+  color: #a8b8d0;
+  margin-right: 6px;
+}
+
+.admin-bulk-meta strong {
+  color: #e8f0ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-action-pill {
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  color: #f2f6ff;
+  transition: transform 0.08s, filter 0.12s;
+}
+
+.admin-action-pill:hover {
+  filter: brightness(1.1);
+}
+
+.admin-action-pill:active {
+  transform: scale(0.97);
+}
+
+.admin-action-rc {
+  background: linear-gradient(145deg, rgba(100, 160, 240, 0.45), rgba(50, 100, 200, 0.4));
+  border-color: rgba(140, 190, 255, 0.4);
+}
+
+.admin-action-rq {
+  background: linear-gradient(145deg, rgba(200, 80, 90, 0.5), rgba(140, 40, 55, 0.45));
+  border-color: rgba(255, 140, 150, 0.45);
+}
+
+.admin-action-copy {
+  background: linear-gradient(145deg, rgba(90, 110, 140, 0.55), rgba(50, 60, 80, 0.5));
+  border-color: rgba(180, 195, 220, 0.25);
+}
+
 .admin-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));

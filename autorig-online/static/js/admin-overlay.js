@@ -312,6 +312,13 @@
             '<button type="button" class="admin-sel-pill admin-sel-done" id="admin-sel-done" title="Оставить выбранными только done">готово</button>' +
             '<button type="button" class="admin-sel-pill admin-sel-act" id="admin-sel-act" title="Оставить выбранными только очередь и работу">в работе</button>' +
             '</div>' +
+            '<div class="admin-bulk-actions" role="toolbar" aria-label="Действия с выбранными задачами">' +
+            '<span class="admin-bulk-sel-label">Действия</span>' +
+            '<span class="admin-bulk-meta">выбрано: <strong id="admin-bulk-count">0</strong></span>' +
+            '<button type="button" class="admin-action-pill admin-action-rc" id="admin-bulk-bar-rc" title="Сбросить restart_count у всех отмеченных (все страницы)">сброс r</button>' +
+            '<button type="button" class="admin-action-pill admin-action-rq" id="admin-bulk-bar-rq" title="Requeue в created для всех отмеченных">requeue</button>' +
+            '<button type="button" class="admin-action-pill admin-action-copy" id="admin-bulk-bar-copy" title="Скопировать id отмеченных в буфер">копировать id</button>' +
+            '</div>' +
             '<div id="admin-card-grid" class="admin-card-grid"></div>' +
             '</div>' +
             '<aside class="admin-detail" id="admin-detail-panel">' +
@@ -434,6 +441,19 @@
         root.querySelector('#admin-sel-act').addEventListener('click', function (e) {
             e.preventDefault();
             selectVisibleByStatuses(['created', 'processing']);
+        });
+
+        root.querySelector('#admin-bulk-bar-rc').addEventListener('click', function (e) {
+            e.preventDefault();
+            bulkRestartCount();
+        });
+        root.querySelector('#admin-bulk-bar-rq').addEventListener('click', function (e) {
+            e.preventDefault();
+            bulkRequeue();
+        });
+        root.querySelector('#admin-bulk-bar-copy').addEventListener('click', function (e) {
+            e.preventDefault();
+            bulkCopySelectedIds();
         });
 
         document.addEventListener('visibilitychange', onVisibilityRefreshQueue);
@@ -572,6 +592,7 @@
         if (!tasks.length) {
             grid.innerHTML =
                 '<div style="color:var(--text-muted);padding:8px 0">Нет задач по текущему фильтру</div>';
+            updateBulkSelectionCount();
             return;
         }
         var html = tasks
@@ -724,11 +745,18 @@
             cb.addEventListener('change', function () {
                 if (cb.checked) bulkCheckedIds.add(tid);
                 else bulkCheckedIds.delete(tid);
+                updateBulkSelectionCount();
             });
         });
         document.querySelectorAll('.admin-card').forEach(function (c) {
             c.classList.toggle('is-selected', c.dataset.taskId === selectedTaskId);
         });
+        updateBulkSelectionCount();
+    }
+
+    function updateBulkSelectionCount() {
+        var el = document.getElementById('admin-bulk-count');
+        if (el) el.textContent = String(bulkCheckedIds.size);
     }
 
     function selectAllVisible() {
@@ -738,6 +766,7 @@
         document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
             cb.checked = true;
         });
+        updateBulkSelectionCount();
     }
 
     function selectNoneVisible() {
@@ -747,6 +776,7 @@
         document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
             cb.checked = false;
         });
+        updateBulkSelectionCount();
     }
 
     function invertVisible() {
@@ -758,6 +788,7 @@
         document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
             cb.checked = bulkCheckedIds.has(cb.dataset.taskId);
         });
+        updateBulkSelectionCount();
     }
 
     /** @param {string[]} statuses — нормализованные имена: created, processing, error, done */
@@ -775,6 +806,7 @@
         document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
             cb.checked = bulkCheckedIds.has(cb.dataset.taskId);
         });
+        updateBulkSelectionCount();
     }
 
     function selectCard(taskId) {
@@ -967,12 +999,23 @@
         }
     }
 
+    /** Все отмеченные id (включая другие страницы), не только видимые чекбоксы в DOM */
     function getSelectedIds() {
-        var ids = [];
-        document.querySelectorAll('.admin-card-cb:checked').forEach(function (cb) {
-            ids.push(cb.dataset.taskId);
-        });
-        return ids;
+        return Array.from(bulkCheckedIds);
+    }
+
+    function bulkCopySelectedIds() {
+        var ids = getSelectedIds();
+        if (!ids.length) {
+            alert('Нет выбранных задач');
+            return;
+        }
+        var text = ids.join('\n');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text);
+        } else {
+            alert(text);
+        }
     }
 
     function selectFirst10() {
@@ -983,6 +1026,7 @@
         document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
             cb.checked = bulkCheckedIds.has(cb.dataset.taskId);
         });
+        updateBulkSelectionCount();
     }
 
     async function postBulkRestart(ids) {
