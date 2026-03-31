@@ -216,6 +216,7 @@
             '<label class="admin-filter-label">Сортировка<select id="admin-sort-by">' +
             '<option value="created_at" selected>дата создания</option>' +
             '<option value="updated_at">дата обновления</option>' +
+            '<option value="id">id задачи</option>' +
             '<option value="pipeline_kind">тип pipeline</option>' +
             '<option value="status">статус</option>' +
             '<option value="progress">progress</option>' +
@@ -516,7 +517,11 @@
                     escAttr('Статус: ' + t.status) +
                     '"></span>' +
                     '<span class="admin-card-age-txt" title="' +
-                    escAttr('Создано (UTC): ' + String(t.created_at || '') + ' · возраст по серверу') +
+                    escAttr(
+                        'Прошло с создания записи · ' +
+                            String(t.created_at || '') +
+                            ' (UTC) · age_seconds с сервера'
+                    ) +
                     '">' +
                     formatAgeSeconds(resolveAgeSeconds(t)) +
                     '</span></div>' +
