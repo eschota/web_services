@@ -85,11 +85,12 @@
         sortBy: 'created_at',
         sortDesc: true,
         page: 1,
-        perPage: 50,
+        perPage: 30,
         q: '',
     };
 
-    var lastListMeta = { total: 0, page: 1, per_page: 50 };
+    var lastListMeta = { total: 0, page: 1, per_page: 30 };
+    var searchDebounceTimer = null;
 
     function syncListStateFromDom() {
         var st = document.getElementById('admin-filter-status');
@@ -99,7 +100,7 @@
         if (st) listState.status = st.value;
         if (pl) listState.pipeline = pl.value;
         if (sb) listState.sortBy = sb.value;
-        if (pp) listState.perPage = parseInt(pp.value, 10) || 50;
+        if (pp) listState.perPage = parseInt(pp.value, 10) || 30;
         var qel = document.getElementById('admin-search-q');
         if (qel) listState.q = qel.value.trim();
     }
@@ -212,15 +213,27 @@
             ICON +
             'arrow-down.svg" width="18" height="18" alt="" /></button>' +
             '<label class="admin-filter-label">На стр.<select id="admin-per-page">' +
+            '<option value="10">10</option>' +
             '<option value="20">20</option>' +
-            '<option value="50" selected>50</option>' +
+            '<option value="30" selected>30</option>' +
+            '<option value="50">50</option>' +
             '<option value="100">100</option>' +
             '</select></label>' +
-            '<label class="admin-filter-label admin-filter-search">Поиск<input type="search" id="admin-search-q" placeholder="task id или owner" autocomplete="off" /></label>' +
-            '<button type="button" id="admin-filter-apply" class="admin-filter-apply" title="Применить поиск" aria-label="Применить">' +
-            '<img src="' +
-            ICON +
-            'apply.svg" width="20" height="20" alt="" /></button>' +
+            '<label class="admin-filter-label admin-filter-search">Поиск<input type="search" id="admin-search-q" placeholder="id / owner / email" autocomplete="off" /></label>' +
+            '</div>' +
+            '<div class="admin-filter-quick" role="group" aria-label="Быстрый фильтр">' +
+            '<button type="button" class="admin-chip" data-status="all" title="Все статусы">Все</button>' +
+            '<button type="button" class="admin-chip" data-status="created,processing" title="Очередь и работа">Активные</button>' +
+            '<button type="button" class="admin-chip" data-status="created" title="created">Создано</button>' +
+            '<button type="button" class="admin-chip" data-status="processing" title="processing">В работе</button>' +
+            '<button type="button" class="admin-chip" data-status="done" title="done">Готово</button>' +
+            '<button type="button" class="admin-chip" data-status="error" title="error">Ошибка</button>' +
+            '</div>' +
+            '<div class="admin-filter-quick admin-filter-pipeline-row" role="group" aria-label="Pipeline">' +
+            '<span class="admin-filter-quick-label">Pipeline</span>' +
+            '<button type="button" class="admin-chip admin-chip-pipe" data-pipeline="" title="Все типы">Все</button>' +
+            '<button type="button" class="admin-chip admin-chip-pipe" data-pipeline="rig" title="rig">rig</button>' +
+            '<button type="button" class="admin-chip admin-chip-pipe" data-pipeline="convert" title="convert">convert</button>' +
             '</div>' +
             '<div class="admin-queue-toolbar">' +
             '<span id="admin-ov-count" class="admin-ov-count"></span>' +
@@ -285,15 +298,37 @@
             listState.sortDesc = !listState.sortDesc;
             loadQueue();
         });
-        root.querySelector('#admin-filter-apply').addEventListener('click', function () {
-            listState.page = 1;
-            loadQueue();
+        root.querySelectorAll('.admin-chip:not(.admin-chip-pipe)').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var st = btn.getAttribute('data-status');
+                var sel = document.getElementById('admin-filter-status');
+                if (sel && st != null) sel.value = st;
+                listState.page = 1;
+                loadQueue();
+            });
+        });
+        root.querySelectorAll('.admin-chip-pipe').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var pl = btn.getAttribute('data-pipeline');
+                var sel = document.getElementById('admin-filter-pipeline');
+                if (sel) sel.value = pl != null ? pl : '';
+                listState.page = 1;
+                loadQueue();
+            });
         });
         var sq = root.querySelector('#admin-search-q');
         if (sq) {
+            sq.addEventListener('input', function () {
+                clearTimeout(searchDebounceTimer);
+                searchDebounceTimer = setTimeout(function () {
+                    listState.page = 1;
+                    loadQueue();
+                }, 350);
+            });
             sq.addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
+                    clearTimeout(searchDebounceTimer);
                     listState.page = 1;
                     loadQueue();
                 }
@@ -345,6 +380,20 @@
         return 'created';
     }
 
+    function updateFilterChips() {
+        syncListStateFromDom();
+        document.querySelectorAll('.admin-chip:not(.admin-chip-pipe)').forEach(function (btn) {
+            var v = btn.getAttribute('data-status') || '';
+            btn.classList.toggle('is-active', v === listState.status);
+        });
+        document.querySelectorAll('.admin-chip-pipe').forEach(function (btn) {
+            var v = btn.getAttribute('data-pipeline');
+            var cur = listState.pipeline || '';
+            var btnPl = v != null ? String(v) : '';
+            btn.classList.toggle('is-active', btnPl === cur);
+        });
+    }
+
     async function loadQueue() {
         var grid = document.getElementById('admin-card-grid');
         var countEl = document.getElementById('admin-ov-count');
@@ -376,6 +425,7 @@
                     (listState.sortDesc ? '↓' : '↑');
             }
             updatePagerUI();
+            updateFilterChips();
             renderCards(lastCards);
         } catch (e) {
             grid.innerHTML = '<div style="color:#f88">' + esc(String(e)) + '</div>';
@@ -399,42 +449,31 @@
                 var wtip = t.worker_api ? escAttr(t.worker_api) : '';
                 var itip = t.input_url ? escAttr(t.input_url) : '';
                 var etip = t.error_message ? escAttr(t.error_message) : '';
-                var posterHtml = '';
-                if (t.poster_url) {
-                    posterHtml =
-                        '<div class="admin-card-poster-wrap">' +
-                        '<img class="admin-card-poster" src="' +
-                        escAttr(t.poster_url) +
-                        '" alt="" loading="lazy"/>' +
-                        '</div>';
-                } else if (st === 'done') {
-                    posterHtml =
-                        '<div class="admin-card-poster-wrap admin-card-poster-miss" title="Постер недоступен"></div>';
-                }
-                var loginBlock;
+                var thumbInner = t.poster_url
+                    ? '<img class="admin-card-poster" src="' +
+                      escAttr(t.poster_url) +
+                      '" alt="" loading="lazy"/>'
+                    : '<div class="admin-card-thumb-ph"></div>';
+                var oid = t.owner_id || '';
+                var userInline;
                 if (t.owner_email) {
                     var em = t.owner_email;
-                    var shortEm = em.length > 26 ? em.slice(0, 24) + '…' : em;
-                    loginBlock =
-                        '<div class="admin-card-user-row" title="' +
+                    var shortEm = em.length > 20 ? em.slice(0, 18) + '…' : em;
+                    userInline =
+                        '<span class="admin-card-user-inline" title="' +
                         escAttr(em) +
-                        '">' +
-                        '<img class="admin-card-user-ico" src="' +
+                        '"><img src="' +
                         ICON +
-                        'user.svg" width="14" height="14" alt="" />' +
-                        '<span class="admin-card-user-txt">' +
+                        'user.svg" width="12" height="12" alt="" />' +
                         esc(shortEm) +
-                        '</span></div>';
+                        '</span>';
                 } else {
-                    var oid = t.owner_id || '';
-                    loginBlock =
-                        '<div class="admin-card-user-row admin-card-user-anon" title="' +
+                    userInline =
+                        '<span class="admin-card-user-inline admin-card-user-anon" title="' +
                         escAttr(oid) +
-                        '">' +
-                        '<img class="admin-card-user-ico" src="' +
+                        '"><img src="' +
                         ICON +
-                        'user-anon.svg" width="14" height="14" alt="" />' +
-                        '<span class="admin-card-user-txt">anon</span></div>';
+                        'user-anon.svg" width="12" height="12" alt="" />anon</span>';
                 }
                 return (
                     '<div class="admin-card" data-task-id="' +
@@ -443,77 +482,81 @@
                     '<input type="checkbox" class="admin-card-cb" data-task-id="' +
                     escAttr(id) +
                     '" title="Выбрать" />' +
-                    posterHtml +
-                    '<div class="admin-card-body">' +
-                    '<div class="admin-card-age" title="' +
-                    escAttr('Создано (UTC): ' + String(t.created_at || '')) +
-                    ' · возраст по серверу">' +
-                    '<img class="admin-card-age-ico" src="' +
-                    ICON +
-                    'clock.svg" width="16" height="16" alt="" />' +
-                    '<span class="admin-card-age-txt">' +
-                    formatAgeSeconds(resolveAgeSeconds(t)) +
-                    '</span></div>' +
-                    '<div class="admin-card-status ' +
+                    '<div class="admin-card-inner">' +
+                    '<div class="admin-card-thumb">' +
+                    thumbInner +
+                    '</div>' +
+                    '<div class="admin-card-main admin-card-main--' +
                     st +
                     '">' +
-                    esc(t.status) +
-                    '</div>' +
+                    '<div class="admin-card-strip" aria-hidden="true"></div>' +
+                    '<div class="admin-card-line admin-card-line1">' +
+                    '<span class="admin-card-st-dot admin-card-st-dot--' +
+                    st +
+                    '" title="' +
+                    escAttr('Статус: ' + t.status) +
+                    '"></span>' +
+                    '<span class="admin-card-age-txt" title="' +
+                    escAttr('Создано (UTC): ' + String(t.created_at || '') + ' · возраст по серверу') +
+                    '">' +
+                    formatAgeSeconds(resolveAgeSeconds(t)) +
+                    '</span></div>' +
+                    '<div class="admin-card-line admin-card-line2">' +
                     '<div class="admin-card-progress-wrap"><div class="admin-card-progress-bar" style="width:' +
                     pct +
                     '%"></div></div>' +
-                    '<div class="admin-card-meta" title="Прогресс · готово/всего · retry · pipeline">' +
-                    '<span class="admin-meta-pct">' +
+                    '<span class="admin-card-meta-txt">' +
                     pct +
-                    '%</span>' +
-                    '<span class="admin-meta-step">' +
+                    '% · ' +
                     (t.ready_count | 0) +
                     '/' +
                     (t.total_count | 0) +
-                    '</span>' +
-                    '<span class="admin-meta-retry" title="restart_count">r' +
+                    ' · r' +
                     (t.restart_count | 0) +
-                    '</span>' +
-                    '<span class="admin-pipe-pill">' +
+                    ' · ' +
                     esc(t.pipeline_kind || '—') +
-                    '</span>' +
-                    '</div>' +
-                    loginBlock +
-                    '<div class="admin-card-size-line" title="Размер входа">' +
+                    '</span></div>' +
+                    '<div class="admin-card-line admin-card-line3">' +
+                    userInline +
+                    '<span class="admin-card-size" title="Размер входа">' +
                     formatBytes(t.input_bytes) +
-                    '</div>' +
-                    '<div class="admin-card-foot">' +
-                    '<a class="admin-card-ico-link" href="' +
+                    '</span>' +
+                    '<div class="admin-card-icons">' +
+                    '<a class="admin-card-ico-mini" href="' +
                     taskUrl +
                     '" target="_blank" rel="noopener" title="Страница задачи" onclick="event.stopPropagation()">' +
-                    imgIcon('external.svg', 'Открыть страницу задачи') +
+                    imgIcon('external.svg', 'Страница') +
                     '</a>' +
-                    '<div class="admin-card-icons">' +
                     (t.worker_api
-                        ? '<a href="' +
+                        ? '<a class="admin-card-ico-mini" href="' +
                           escAttr(t.worker_api) +
                           '" target="_blank" rel="noopener" title="' +
                           wtip +
                           '" onclick="event.stopPropagation()">' +
-                          imgIcon('wrench.svg', 'Worker API') +
+                          imgIcon('wrench.svg', 'Worker') +
                           '</a>'
-                        : '<span class="admin-ico-off">' + imgIcon('wrench.svg', 'Нет worker API') + '</span>') +
+                        : '<span class="admin-ico-off admin-card-ico-mini">' +
+                          imgIcon('wrench.svg', 'Нет worker') +
+                          '</span>') +
                     (t.input_url
-                        ? '<a href="' +
+                        ? '<a class="admin-card-ico-mini" href="' +
                           escAttr(t.input_url) +
                           '" target="_blank" rel="noopener" title="' +
                           itip +
                           '" onclick="event.stopPropagation()">' +
-                          imgIcon('clip.svg', 'Input URL') +
+                          imgIcon('clip.svg', 'Input') +
                           '</a>'
-                        : '<span class="admin-ico-off">' + imgIcon('clip.svg', 'Нет input') + '</span>') +
+                        : '<span class="admin-ico-off admin-card-ico-mini">' +
+                          imgIcon('clip.svg', 'Нет input') +
+                          '</span>') +
                     (t.error_message
-                        ? '<span class="admin-card-err-ico" title="' + etip + '">' +
+                        ? '<span class="admin-card-err-ico" title="' +
+                          etip +
+                          '">' +
                           imgIcon('alert.svg', 'Ошибка') +
                           '</span>'
                         : '') +
-                    '</div></div></div>' +
-                    '</div>'
+                    '</div></div></div></div></div>'
                 );
             })
             .join('');
