@@ -326,6 +326,12 @@ class AdminTaskInspectResponse(BaseModel):
     age_seconds: int = 0
 
 
+class AdminTaskCacheMaxUpdate(BaseModel):
+    """Persisted cap for total size of static/tasks (GB)."""
+
+    task_cache_max_gb: float = Field(..., gt=0, le=100000)
+
+
 class AdminBulkTaskIdsRequest(BaseModel):
     task_ids: List[str]
 

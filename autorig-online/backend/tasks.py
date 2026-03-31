@@ -215,8 +215,9 @@ async def create_conversion_task(
     if pk not in ("rig", "convert"):
         pk = "rig"
 
-    from main import ensure_disk_headroom_for_new_task
+    from main import ensure_disk_headroom_for_new_task, enforce_task_cache_max_size
 
+    await enforce_task_cache_max_size(db)
     await ensure_disk_headroom_for_new_task(db)
 
     # Create task record

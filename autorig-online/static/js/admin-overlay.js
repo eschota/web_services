@@ -309,6 +309,7 @@
             '<div class="admin-disk-panel">' +
             '<div class="admin-stats-title">Диск</div>' +
             '<div id="admin-disk-chart" class="admin-disk-chart">—</div>' +
+            '<div id="admin-disk-cache-cap" class="admin-disk-cache-cap"></div>' +
             '<div class="admin-disk-actions">' +
             '<button type="button" class="admin-disk-btn" id="admin-disk-refresh" title="Пересчитать размеры каталогов">Обновить</button>' +
             '<button type="button" class="admin-disk-btn admin-disk-btn-danger" id="admin-disk-cleanup" title="Запустить фоновую очистку до min free (как в API)">Очистка сейчас</button>' +
@@ -494,6 +495,14 @@
                 runAdminDiskCleanup();
             });
 
+        root.addEventListener('click', function (e) {
+            var t = e.target;
+            if (t && t.id === 'admin-task-cache-max-save') {
+                e.preventDefault();
+                saveTaskCacheMaxGb();
+            }
+        });
+
         document.addEventListener('visibilitychange', onVisibilityRefreshQueue);
 
         document.addEventListener('keydown', onKeyDown);
@@ -644,7 +653,12 @@
         if (b.database_sqlite != null && b.database_sqlite > 0) {
             rows.push({ k: 'database_sqlite', label: 'БД SQLite' });
         }
-        rows.push({ k: 'other_on_disk', label: 'Прочее на диске /' });
+        rows.push({
+            k: 'other_on_disk',
+            label: 'Прочее на диске /',
+            title:
+                'Остаток на разделе / после учёта static, uploads, videos и SQLite: логи, /opt, docker, снимки и т.д. Не относится к лимиту кэша задач.',
+        });
         var maxGb = 0.001;
         rows.forEach(function (r) {
             var v = Number(b[r.k] || 0);
@@ -668,10 +682,11 @@
             .map(function (r) {
                 var gb = Number(b[r.k] || 0);
                 var pct = Math.min(100, (gb / maxGb) * 100);
+                var tip = r.title != null ? r.title : r.label;
                 return (
                     '<div class="admin-disk-bar-row">' +
                     '<span class="admin-disk-bar-label" title="' +
-                    escAttr(r.label) +
+                    escAttr(tip) +
                     '">' +
                     esc(r.label) +
                     '</span>' +
@@ -685,6 +700,48 @@
             })
             .join('');
         el.innerHTML = freeLine + bars;
+        var capEl = document.getElementById('admin-disk-cache-cap');
+        if (capEl) {
+            var s = data.settings || {};
+            var maxGb =
+                data.task_cache_max_gb != null
+                    ? data.task_cache_max_gb
+                    : s.task_cache_max_gb != null
+                      ? s.task_cache_max_gb
+                      : 10;
+            capEl.innerHTML =
+                '<div class="admin-disk-cache-cap-row">' +
+                '<label class="admin-disk-cache-cap-label" for="admin-task-cache-max-gb" title="Суммарный размер static/tasks. При превышении при создании новой задачи удаляются целые каталоги старых задач (не трогаем created/processing).">Лимит кэша задач (GB)</label>' +
+                '<input type="number" class="admin-disk-cache-cap-input" id="admin-task-cache-max-gb" min="0.1" step="0.1" value="' +
+                escAttr(String(maxGb)) +
+                '" />' +
+                '<button type="button" class="admin-disk-btn" id="admin-task-cache-max-save">Сохранить</button>' +
+                '</div>';
+        }
+    }
+
+    async function saveTaskCacheMaxGb() {
+        var inp = document.getElementById('admin-task-cache-max-gb');
+        if (!inp) return;
+        var v = parseFloat(inp.value);
+        if (!isFinite(v) || v <= 0) {
+            alert('Укажите положительное число GB');
+            return;
+        }
+        try {
+            var r = await api('/api/admin/settings/task-cache-max', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_cache_max_gb: v }),
+            });
+            if (!r.ok) {
+                alert('Ошибка: ' + r.status);
+                return;
+            }
+            loadDiskStats();
+        } catch (e) {
+            alert(esc(humanFetchError(e)));
+        }
     }
 
     async function loadDiskStats() {

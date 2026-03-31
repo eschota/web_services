@@ -248,6 +248,8 @@ class AdminOverlayCounters(Base):
     id = Column(Integer, primary_key=True, default=1)
     completed_count = Column(Integer, nullable=False, default=0)
     total_duration_seconds = Column(Float, nullable=False, default=0.0)
+    # Upper bound for total size of static/tasks (GB); evict oldest cache dirs when exceeded
+    task_cache_max_gb = Column(Float, nullable=False, default=10.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -534,6 +536,7 @@ _ADMIN_OVERLAY_ROW_ID = 1
 
 async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlayCounters:
     from sqlalchemy import select
+    from config import TASK_CACHE_MAX_GB
 
     result = await db.execute(
         select(AdminOverlayCounters).where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
@@ -544,6 +547,7 @@ async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlay
             id=_ADMIN_OVERLAY_ROW_ID,
             completed_count=0,
             total_duration_seconds=0.0,
+            task_cache_max_gb=float(TASK_CACHE_MAX_GB),
         )
         db.add(row)
         await db.commit()
@@ -639,6 +643,9 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_keywords TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN stuck_hour_requeue_count INTEGER DEFAULT 0")
+            await _try_add_column(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 10"
+            )
             try:
                 await conn.exec_driver_sql(
                     """
@@ -900,6 +907,9 @@ async def init_db():
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stuck_hour_requeue_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 10"
             )
             await _try_add_column_any(
                 "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS parent_id INTEGER"

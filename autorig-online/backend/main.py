@@ -47,6 +47,7 @@ from config import (
     GALLERY_DB_PURGE_INTERVAL_CYCLES,
     GALLERY_UPSTREAM_PURGE_BATCH,
     GALLERY_UPSTREAM_PURGE_ROUNDS,
+    TASK_CACHE_MAX_GB,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
     AUTORIG_DONATION_PRODUCT_KEYS,
@@ -81,6 +82,7 @@ from models import (
     AdminTaskInspectResponse, AdminBulkTaskIdsRequest, AdminBulkRestartCountRecentRequest,
     AdminBulkAffectedResponse,
     AdminWorkerItem, AdminWorkerListResponse, AdminWorkerCreate, AdminWorkerUpdate,
+    AdminTaskCacheMaxUpdate,
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse, LikeResponse, TaskCardInfo,
     PurchaseStateResponse, PurchaseRequest, PurchaseResponse,
@@ -4864,6 +4866,7 @@ def _sqlite_db_path_and_bytes() -> Tuple[Optional[str], int]:
 async def api_admin_disk_stats(
     request: Request,
     admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get disk usage statistics (admin only).
@@ -4884,6 +4887,7 @@ async def api_admin_disk_stats(
     videos_count = len(list(videos_dir.iterdir())) if videos_dir.exists() else 0
 
     task_b = _dir_size_bytes(TASK_CACHE_DIR)
+    task_cache_max_gb = await get_effective_task_cache_max_gb(db)
     glb_b = _dir_size_bytes(GLB_CACHE_DIR)
     upload_b = _dir_size_bytes(upload_dir)
     videos_b = _dir_size_bytes(videos_dir)
@@ -4924,6 +4928,9 @@ async def api_admin_disk_stats(
             "uploads": upload_count,
             "videos": videos_count,
         },
+        "task_cache_bytes": task_b,
+        "task_cache_max_gb": round(float(task_cache_max_gb), 4),
+        "task_cache_max_gb_default": round(float(TASK_CACHE_MAX_GB), 4),
         "settings": {
             "min_free_space_gb": round(float(MIN_FREE_SPACE_GB), 2),
             "new_task_min_free_gb": round(float(NEW_TASK_MIN_FREE_GB), 2),
@@ -4932,8 +4939,23 @@ async def api_admin_disk_stats(
             "min_age_hours": CLEANUP_MIN_AGE_HOURS,
             "gallery_db_purge_interval_cycles": GALLERY_DB_PURGE_INTERVAL_CYCLES,
             "automatic_task_db_deletion": AUTOMATIC_TASK_DB_DELETION,
+            "task_cache_max_gb": round(float(task_cache_max_gb), 4),
+            "task_cache_max_gb_default": round(float(TASK_CACHE_MAX_GB), 4),
         },
     }
+
+
+@app.patch("/api/admin/settings/task-cache-max")
+async def api_admin_settings_task_cache_max(
+    body: AdminTaskCacheMaxUpdate,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await get_or_create_admin_overlay_counters(db)
+    row.task_cache_max_gb = float(body.task_cache_max_gb)
+    await db.commit()
+    await db.refresh(row)
+    return {"ok": True, "task_cache_max_gb": float(row.task_cache_max_gb)}
 
 
 @app.post("/api/admin/tasks/restart-incomplete")
@@ -6268,6 +6290,135 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
             )
         except Exception as e:
             print(f"[NewTask Disk] Telegram disk-low notify failed: {e}")
+    return summary
+
+
+def _parse_uuid_dirname(name: str) -> Optional[uuid.UUID]:
+    try:
+        return uuid.UUID(name)
+    except ValueError:
+        return None
+
+
+async def get_effective_task_cache_max_gb(db: AsyncSession) -> float:
+    row = await get_or_create_admin_overlay_counters(db)
+    v = getattr(row, "task_cache_max_gb", None)
+    if v is None or (isinstance(v, (int, float)) and float(v) <= 0):
+        return float(TASK_CACHE_MAX_GB)
+    return float(v)
+
+
+async def _task_cache_eviction_candidates(
+    db: AsyncSession,
+) -> List[Tuple[float, str]]:
+    """
+    Directories under TASK_CACHE_DIR that may be removed for cache cap enforcement.
+    Skips created/processing. Oldest-first sort key (unix timestamp).
+    """
+    if not TASK_CACHE_DIR.exists():
+        return []
+    subs = [p for p in TASK_CACHE_DIR.iterdir() if p.is_dir()]
+    uuid_names: List[str] = []
+    for p in subs:
+        u = _parse_uuid_dirname(p.name)
+        if u is not None:
+            uuid_names.append(p.name)
+    task_map: Dict[str, Task] = {}
+    if uuid_names:
+        res = await db.execute(select(Task).where(Task.id.in_(uuid_names)))
+        for t in res.scalars().all():
+            task_map[t.id] = t
+
+    out: List[Tuple[float, str]] = []
+    for p in subs:
+        u = _parse_uuid_dirname(p.name)
+        if u is None:
+            try:
+                out.append((p.stat().st_mtime, p.name))
+            except OSError:
+                pass
+            continue
+        tid = p.name
+        task = task_map.get(tid)
+        if task is None:
+            try:
+                out.append((p.stat().st_mtime, p.name))
+            except OSError:
+                pass
+            continue
+        if task.status in ("created", "processing"):
+            continue
+        tdt = task.updated_at or task.created_at
+        if tdt is None:
+            try:
+                out.append((p.stat().st_mtime, p.name))
+            except OSError:
+                pass
+        else:
+            ca = tdt
+            if ca.tzinfo is not None:
+                ca = ca.astimezone(timezone.utc).replace(tzinfo=None)
+            out.append((ca.timestamp(), p.name))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+async def enforce_task_cache_max_size(db: AsyncSession) -> Dict[str, Any]:
+    """
+    Before a new task: if static/tasks total exceeds the configured cap, remove whole
+    task directories oldest-first. Never deletes cache for tasks in created/processing.
+    If still over cap after dirs, strips regenerable bundle zips (same as headroom pass).
+    """
+    max_gb = await get_effective_task_cache_max_gb(db)
+    if max_gb <= 0:
+        return {"skipped": True, "reason": "cap_disabled"}
+    cap_bytes = int(max_gb * 1024 * 1024 * 1024)
+    total = _dir_size_bytes(TASK_CACHE_DIR)
+    summary: Dict[str, Any] = {
+        "cap_gb": round(max_gb, 4),
+        "initial_bytes": total,
+        "dirs_removed": 0,
+        "bytes_freed_dirs": 0,
+        "zips_deleted": 0,
+        "zip_freed_bytes": 0,
+        "final_bytes": total,
+    }
+    if total <= cap_bytes:
+        return summary
+
+    safety = 0
+    while _dir_size_bytes(TASK_CACHE_DIR) > cap_bytes:
+        safety += 1
+        if safety > 50000:
+            print("[TaskCacheCap] Safety stop: too many iterations")
+            break
+        candidates = await _task_cache_eviction_candidates(db)
+        if not candidates:
+            break
+        _ts, dirname = candidates[0]
+        target = TASK_CACHE_DIR / dirname
+        if not target.is_dir():
+            continue
+        try:
+            before = _dir_size_bytes(target)
+            shutil.rmtree(target)
+            summary["dirs_removed"] += 1
+            summary["bytes_freed_dirs"] += before
+            print(
+                f"[TaskCacheCap] Removed {dirname} (~{before / (1024**2):.1f} MB), "
+                f"task_cache now ~{_dir_size_bytes(TASK_CACHE_DIR) / (1024**3):.2f} GB (cap {max_gb} GB)"
+            )
+        except OSError as e:
+            print(f"[TaskCacheCap] Failed to remove {target}: {e}")
+            break
+
+    total = _dir_size_bytes(TASK_CACHE_DIR)
+    summary["final_bytes"] = total
+    if total > cap_bytes:
+        zd, zb = purge_task_cache_bundle_zips()
+        summary["zips_deleted"] = zd
+        summary["zip_freed_bytes"] = zb
+        summary["final_bytes"] = _dir_size_bytes(TASK_CACHE_DIR)
     return summary
 
 

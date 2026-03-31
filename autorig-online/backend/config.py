@@ -242,6 +242,9 @@ NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
 # (must be >= typical gap to NEW_TASK_MIN_FREE_GB or Telegram low-disk alerts will repeat)
 NEW_TASK_PURGE_TASKS_MAX_FREED_GB = float(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "8"))
 
+# Max total size of static/tasks (task file cache); enforced before new task; admin can override in DB
+TASK_CACHE_MAX_GB = float(os.getenv("TASK_CACHE_MAX_GB", "10.0"))
+
 # Purge DB rows for terminal tasks that have neither video nor any thumbnail URL in ready/output lists
 # (Used only as legacy env name; gallery purges are gated by GALLERY_DB_PURGE_INTERVAL_CYCLES below.)
 NO_ASSETS_TASK_PURGE_INTERVAL_CYCLES = int(
