@@ -2,6 +2,8 @@
 Configuration for AutoRig Online
 """
 import os
+from typing import Optional
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -57,6 +59,16 @@ ADMIN_EMAILS = [
     "eschota@gmail.com",
     "vladkcg@gmail.com",
 ]
+
+_ADMIN_EMAILS_LOWER = frozenset(e.strip().lower() for e in ADMIN_EMAILS)
+
+
+def is_admin_email(email: Optional[str]) -> bool:
+    """True if email is in ADMIN_EMAILS (case-insensitive)."""
+    if not email or not isinstance(email, str):
+        return False
+    return email.strip().lower() in _ADMIN_EMAILS_LOWER
+
 
 # =============================================================================
 # Workers (Converters)

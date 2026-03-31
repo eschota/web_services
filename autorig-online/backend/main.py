@@ -34,7 +34,7 @@ from slowapi.errors import RateLimitExceeded
 from config import (
     APP_NAME, APP_URL, DEBUG, SECRET_KEY,
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
-    RATE_LIMIT_TASKS_PER_MINUTE, RATE_LIMIT_AGENT_REGISTER, ADMIN_EMAILS,
+    RATE_LIMIT_TASKS_PER_MINUTE, RATE_LIMIT_AGENT_REGISTER, is_admin_email,
     ANON_FREE_LIMIT,
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
@@ -873,7 +873,7 @@ async def require_admin(
     """Require admin access"""
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user.email not in ADMIN_EMAILS:
+    if not is_admin_email(user.email):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
@@ -908,7 +908,7 @@ def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
 
 
 def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optional[AnonSession]) -> bool:
-    if user and user.email in ADMIN_EMAILS:
+    if user and is_admin_email(user.email):
         return True
     if user and task.owner_type == "user" and task.owner_id == user.email:
         return True
@@ -1549,7 +1549,7 @@ async def admin_youtube_oauth_callback(
 
     if error:
         return RedirectResponse(url=f"/?youtube_error={quote(error)}")
-    if not user or user.email not in ADMIN_EMAILS:
+    if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/?youtube_error=not_admin")
     cookie_state = request.cookies.get("yt_oauth_state")
     if not state or not cookie_state or state != cookie_state:
@@ -2436,7 +2436,7 @@ async def api_create_convert_from_rig_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     anon_session = await get_anon_session(request, response, db)
-    is_admin = bool(user and user.email in ADMIN_EMAILS)
+    is_admin = bool(user and is_admin_email(user.email))
     is_owner = (
         (user and parent.owner_type == "user" and parent.owner_id == user.email)
         or (parent.owner_type == "anon" and parent.owner_id == anon_session.anon_id)
@@ -2977,7 +2977,7 @@ async def api_restart_task(
 
     # Check ownership
     anon_session = await get_anon_session(request, response, db)
-    is_admin = bool(user and user.email in ADMIN_EMAILS)
+    is_admin = bool(user and is_admin_email(user.email))
     is_owner = (
         (user and task.owner_type == "user" and task.owner_id == user.email) or
         (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
@@ -7602,7 +7602,7 @@ async def api_purchase_intent(
 @app.get("/admin")
 async def admin_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin page"""
-    if not user or user.email not in ADMIN_EMAILS:
+    if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
     return FileResponse(str(STATIC_DIR / "admin.html"))
 
@@ -7610,7 +7610,7 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
 @app.get("/admin/workers")
 async def admin_workers_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin workers page (dedicated)."""
-    if not user or user.email not in ADMIN_EMAILS:
+    if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
     return FileResponse(str(STATIC_DIR / "admin-workers.html"))
 

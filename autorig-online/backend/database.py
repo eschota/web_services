@@ -63,8 +63,8 @@ class User(Base):
     
     @property
     def is_admin(self) -> bool:
-        from config import ADMIN_EMAILS
-        return self.email in ADMIN_EMAILS
+        from config import is_admin_email
+        return is_admin_email(self.email)
 
 
 class AnonSession(Base):

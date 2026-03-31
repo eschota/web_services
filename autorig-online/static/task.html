@@ -3765,7 +3765,10 @@
                     if (authResp.ok) {
                         const authData = await authResp.json();
                         const email = authData?.user?.email;
-                        return email && ALLOWED_ADMIN_EMAILS.includes(email);
+                        return (
+                            email &&
+                            ALLOWED_ADMIN_EMAILS.includes(String(email).toLowerCase())
+                        );
                     }
                 } catch (e) {
                     // ignore

@@ -72,6 +72,43 @@
         return null;
     }
 
+    /** Порт из worker_api (api-converter-glb и т.п.) */
+    function extractPortFromWorkerApi(raw) {
+        if (!raw || typeof raw !== 'string') return null;
+        var s = raw.trim();
+        var m = s.match(/:(\d{2,5})(?:\/|$|\?|#)/);
+        if (m) return parseInt(m[1], 10);
+        try {
+            var u = new URL(s.indexOf('://') === -1 ? 'http://' + s : s);
+            if (u.port) return parseInt(u.port, 10);
+        } catch (e) {}
+        return null;
+    }
+
+    /**
+     * Метка конвертера по порту (маппинг api-converter-glb: f1…f13).
+     */
+    var CONVERTER_BY_PORT = {
+        5132: { short: 'F1', hint: 'конвертер F1, порт 5132' },
+        5279: { short: 'F2', hint: 'конвертер F2, порт 5279' },
+        5131: { short: 'F7', hint: 'конвертер F7, порт 5131' },
+        5533: { short: 'F11', hint: 'конвертер F11, порт 5533' },
+        5267: { short: 'F13', hint: 'конвертер F13, порт 5267' },
+    };
+
+    /** @returns {{ short: string, title: string } | null} */
+    function converterBadgeFromWorkerApi(workerApi) {
+        if (!workerApi || typeof workerApi !== 'string') return null;
+        var port = extractPortFromWorkerApi(workerApi);
+        if (port == null) return null;
+        var row = CONVERTER_BY_PORT[port];
+        if (!row) return null;
+        return {
+            short: row.short,
+            title: row.hint + ' · ' + workerApi.trim(),
+        };
+    }
+
     var ICON = '/static/icons/admin/';
 
     function imgIcon(file, title, cls) {
@@ -103,6 +140,10 @@
 
     var lastListMeta = { total: 0, page: 1, per_page: 30 };
     var searchDebounceTimer = null;
+    /** id задач с отмеченным чекбоксом (в т.ч. после автообновления) */
+    var bulkCheckedIds = new Set();
+    var queuePollTimer = null;
+    var QUEUE_POLL_MS = 10000;
 
     function syncListStateFromDom() {
         var st = document.getElementById('admin-filter-status');
@@ -262,6 +303,15 @@
             'chevron-right.svg" width="18" height="18" alt="" /></button>' +
             '</div>' +
             '</div>' +
+            '<div class="admin-bulk-sel" role="toolbar" aria-label="Быстрый выбор">' +
+            '<span class="admin-bulk-sel-label">Выбор</span>' +
+            '<button type="button" class="admin-sel-pill admin-sel-all" id="admin-sel-all" title="Отметить все задачи на этой странице">все</button>' +
+            '<button type="button" class="admin-sel-pill admin-sel-none" id="admin-sel-none" title="Снять отметки на этой странице">снять</button>' +
+            '<button type="button" class="admin-sel-pill admin-sel-inv" id="admin-sel-inv" title="Инвертировать отметки на странице">инверт</button>' +
+            '<button type="button" class="admin-sel-pill admin-sel-err" id="admin-sel-err" title="Оставить выбранными только error">ошибки</button>' +
+            '<button type="button" class="admin-sel-pill admin-sel-done" id="admin-sel-done" title="Оставить выбранными только done">готово</button>' +
+            '<button type="button" class="admin-sel-pill admin-sel-act" id="admin-sel-act" title="Оставить выбранными только очередь и работу">в работе</button>' +
+            '</div>' +
             '<div id="admin-card-grid" class="admin-card-grid"></div>' +
             '</div>' +
             '<aside class="admin-detail" id="admin-detail-panel">' +
@@ -361,7 +411,41 @@
             }
         });
 
+        root.querySelector('#admin-sel-all').addEventListener('click', function (e) {
+            e.preventDefault();
+            selectAllVisible();
+        });
+        root.querySelector('#admin-sel-none').addEventListener('click', function (e) {
+            e.preventDefault();
+            selectNoneVisible();
+        });
+        root.querySelector('#admin-sel-inv').addEventListener('click', function (e) {
+            e.preventDefault();
+            invertVisible();
+        });
+        root.querySelector('#admin-sel-err').addEventListener('click', function (e) {
+            e.preventDefault();
+            selectVisibleByStatuses(['error']);
+        });
+        root.querySelector('#admin-sel-done').addEventListener('click', function (e) {
+            e.preventDefault();
+            selectVisibleByStatuses(['done']);
+        });
+        root.querySelector('#admin-sel-act').addEventListener('click', function (e) {
+            e.preventDefault();
+            selectVisibleByStatuses(['created', 'processing']);
+        });
+
+        document.addEventListener('visibilitychange', onVisibilityRefreshQueue);
+
         document.addEventListener('keydown', onKeyDown);
+    }
+
+    function onVisibilityRefreshQueue() {
+        if (document.hidden) return;
+        var root = document.getElementById('admin-overlay-root');
+        if (!root || !root.classList.contains('is-open')) return;
+        loadQueue({ silent: true });
     }
 
     function onKeyDown(e) {
@@ -371,15 +455,32 @@
         }
     }
 
+    function startQueuePoll() {
+        stopQueuePoll();
+        queuePollTimer = setInterval(function () {
+            if (typeof document !== 'undefined' && document.hidden) return;
+            loadQueue({ silent: true });
+        }, QUEUE_POLL_MS);
+    }
+
+    function stopQueuePoll() {
+        if (queuePollTimer != null) {
+            clearInterval(queuePollTimer);
+            queuePollTimer = null;
+        }
+    }
+
     function open() {
         var root = ensureRoot();
         root.classList.add('is-open');
         root.setAttribute('aria-hidden', 'false');
         document.body.classList.add('admin-overlay-open');
         loadQueue();
+        startQueuePoll();
     }
 
     function close() {
+        stopQueuePoll();
         var root = document.getElementById('admin-overlay-root');
         if (!root) return;
         root.classList.remove('is-open');
@@ -407,26 +508,37 @@
         });
     }
 
-    async function loadQueue() {
+    /**
+     * @param {{ silent?: boolean }} [opts] — silent: автообновление без «Загрузка…» и без затирания сетки при ошибке
+     */
+    async function loadQueue(opts) {
+        opts = opts || {};
+        var silent = !!opts.silent;
         var grid = document.getElementById('admin-card-grid');
         var countEl = document.getElementById('admin-ov-count');
         if (!grid) return;
         syncListStateFromDom();
-        grid.innerHTML = '<div style="padding:12px;color:var(--text-muted)">Загрузка…</div>';
+        if (!silent) {
+            grid.innerHTML = '<div style="padding:12px;color:var(--text-muted)">Загрузка…</div>';
+        }
         try {
             var url = buildListUrl();
             var r = await api(url);
             if (!r.ok) {
-                grid.innerHTML =
-                    '<div style="color:#f88">Нет доступа (admin) или ошибка API: HTTP ' + r.status + '</div>';
+                if (!silent) {
+                    grid.innerHTML =
+                        '<div style="color:#f88">Нет доступа (admin) или ошибка API: HTTP ' + r.status + '</div>';
+                }
                 return;
             }
             var data;
             try {
                 data = await r.json();
             } catch (je) {
-                grid.innerHTML =
-                    '<div style="color:#f88">Ответ /api/admin/tasks не JSON — проверьте прокси и бэкенд.</div>';
+                if (!silent) {
+                    grid.innerHTML =
+                        '<div style="color:#f88">Ответ /api/admin/tasks не JSON — проверьте прокси и бэкенд.</div>';
+                }
                 return;
             }
             lastCards = data.tasks || [];
@@ -448,7 +560,9 @@
             updateFilterChips();
             renderCards(lastCards);
         } catch (e) {
-            grid.innerHTML = '<div style="color:#f88">' + esc(humanFetchError(e)) + '</div>';
+            if (!silent) {
+                grid.innerHTML = '<div style="color:#f88">' + esc(humanFetchError(e)) + '</div>';
+            }
         }
     }
 
@@ -469,6 +583,10 @@
                 var wtip = t.worker_api ? escAttr(t.worker_api) : '';
                 var itip = t.input_url ? escAttr(t.input_url) : '';
                 var etip = t.error_message ? escAttr(t.error_message) : '';
+                var conv = converterBadgeFromWorkerApi(t.worker_api);
+                var convHtml = conv
+                    ? '<span class="admin-card-conv" title="' + escAttr(conv.title) + '">' + esc(conv.short) + '</span>'
+                    : '';
                 var thumbInner = t.poster_url
                     ? '<img class="admin-card-poster" src="' +
                       escAttr(t.poster_url) +
@@ -498,6 +616,8 @@
                 return (
                     '<div class="admin-card" data-task-id="' +
                     escAttr(id) +
+                    '" data-task-status="' +
+                    escAttr(st) +
                     '" tabindex="0">' +
                     '<input type="checkbox" class="admin-card-cb" data-task-id="' +
                     escAttr(id) +
@@ -511,6 +631,7 @@
                     '">' +
                     '<div class="admin-card-strip" aria-hidden="true"></div>' +
                     '<div class="admin-card-line admin-card-line1">' +
+                    '<span class="admin-card-line1-left">' +
                     '<span class="admin-card-st-dot admin-card-st-dot--' +
                     st +
                     '" title="' +
@@ -524,7 +645,9 @@
                     ) +
                     '">' +
                     formatAgeSeconds(resolveAgeSeconds(t)) +
-                    '</span></div>' +
+                    '</span></span>' +
+                    convHtml +
+                    '</div>' +
                     '<div class="admin-card-line admin-card-line2">' +
                     '<div class="admin-card-progress-wrap"><div class="admin-card-progress-bar" style="width:' +
                     pct +
@@ -593,12 +716,64 @@
             });
         });
         grid.querySelectorAll('.admin-card-cb').forEach(function (cb) {
+            var tid = cb.dataset.taskId;
+            cb.checked = bulkCheckedIds.has(tid);
             cb.addEventListener('click', function (e) {
                 e.stopPropagation();
+            });
+            cb.addEventListener('change', function () {
+                if (cb.checked) bulkCheckedIds.add(tid);
+                else bulkCheckedIds.delete(tid);
             });
         });
         document.querySelectorAll('.admin-card').forEach(function (c) {
             c.classList.toggle('is-selected', c.dataset.taskId === selectedTaskId);
+        });
+    }
+
+    function selectAllVisible() {
+        lastCards.forEach(function (t) {
+            bulkCheckedIds.add(t.task_id);
+        });
+        document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
+            cb.checked = true;
+        });
+    }
+
+    function selectNoneVisible() {
+        lastCards.forEach(function (t) {
+            bulkCheckedIds.delete(t.task_id);
+        });
+        document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
+            cb.checked = false;
+        });
+    }
+
+    function invertVisible() {
+        lastCards.forEach(function (t) {
+            var id = t.task_id;
+            if (bulkCheckedIds.has(id)) bulkCheckedIds.delete(id);
+            else bulkCheckedIds.add(id);
+        });
+        document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
+            cb.checked = bulkCheckedIds.has(cb.dataset.taskId);
+        });
+    }
+
+    /** @param {string[]} statuses — нормализованные имена: created, processing, error, done */
+    function selectVisibleByStatuses(statuses) {
+        var want = {};
+        statuses.forEach(function (s) {
+            want[s] = true;
+        });
+        lastCards.forEach(function (t) {
+            var id = t.task_id;
+            var st = statusClass(t.status);
+            if (want[st]) bulkCheckedIds.add(id);
+            else bulkCheckedIds.delete(id);
+        });
+        document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
+            cb.checked = bulkCheckedIds.has(cb.dataset.taskId);
         });
     }
 
@@ -801,9 +976,12 @@
     }
 
     function selectFirst10() {
-        var cbs = document.querySelectorAll('.admin-card-cb');
-        cbs.forEach(function (cb, i) {
-            cb.checked = i < 10;
+        lastCards.forEach(function (t, i) {
+            if (i < 10) bulkCheckedIds.add(t.task_id);
+            else bulkCheckedIds.delete(t.task_id);
+        });
+        document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
+            cb.checked = bulkCheckedIds.has(cb.dataset.taskId);
         });
     }
 
