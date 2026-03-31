@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, or_
+from sqlalchemy import select, func, delete, or_, update
 from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -73,6 +73,8 @@ from models import (
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
     AdminStatsResponse, AdminTaskListItem, AdminTaskListResponse,
+    AdminTaskInspectResponse, AdminBulkTaskIdsRequest, AdminBulkRestartCountRecentRequest,
+    AdminBulkAffectedResponse,
     AdminWorkerItem, AdminWorkerListResponse, AdminWorkerCreate, AdminWorkerUpdate,
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse, LikeResponse, TaskCardInfo,
@@ -116,6 +118,7 @@ from tasks import (
     get_stalled_processing_tasks_by_worker,
     get_task_no_progress_minutes,
     resolve_prepared_glb_source_url,
+    admin_requeue_task_to_created,
 )
 
 
@@ -4384,6 +4387,14 @@ async def api_admin_all_tasks(
     result = await db.execute(base_query.offset(offset).limit(per_page))
     tasks = result.scalars().all()
     
+    def _err_preview(msg: Optional[str]) -> Optional[str]:
+        if not msg:
+            return None
+        s = msg.strip()
+        if len(s) <= 280:
+            return s
+        return s[:279] + "…"
+
     return AdminTaskListResponse(
         tasks=[
             AdminTaskListItem(
@@ -4396,6 +4407,11 @@ async def api_admin_all_tasks(
                 total_count=t.total_count,
                 input_url=t.input_url,
                 worker_api=t.worker_api,
+                worker_task_id=t.worker_task_id,
+                guid=t.guid,
+                restart_count=t.restart_count or 0,
+                pipeline_kind=(getattr(t, "pipeline_kind", None) or "rig"),
+                error_message=_err_preview(t.error_message),
                 video_ready=t.video_ready,
                 content_rating=getattr(t, "content_rating", None),
                 content_score=getattr(t, "content_score", None),
@@ -4409,6 +4425,99 @@ async def api_admin_all_tasks(
         page=page,
         per_page=per_page
     )
+
+
+@app.get("/api/admin/task/{task_id}/inspect", response_model=AdminTaskInspectResponse)
+async def api_admin_task_inspect(
+    task_id: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extended task fields for admin overlay (admin only)."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return AdminTaskInspectResponse(
+        task_id=task.id,
+        owner_type=task.owner_type,
+        owner_id=task.owner_id,
+        status=task.status,
+        progress=task.progress,
+        ready_count=task.ready_count,
+        total_count=task.total_count,
+        restart_count=task.restart_count or 0,
+        input_url=task.input_url,
+        input_type=task.input_type,
+        pipeline_kind=(getattr(task, "pipeline_kind", None) or "rig"),
+        worker_api=task.worker_api,
+        worker_task_id=task.worker_task_id,
+        progress_page=task.progress_page,
+        guid=task.guid,
+        error_message=task.error_message,
+        last_progress_at=task.last_progress_at,
+        fbx_glb_output_url=task.fbx_glb_output_url,
+        fbx_glb_model_name=task.fbx_glb_model_name,
+        fbx_glb_ready=task.fbx_glb_ready,
+        fbx_glb_error=task.fbx_glb_error,
+        video_ready=task.video_ready,
+        video_url=task.video_url,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+    )
+
+
+@app.post("/api/admin/tasks/bulk-restart-count", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_restart_count(
+    body: AdminBulkTaskIdsRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set restart_count=0 for given task ids (admin only)."""
+    if not body.task_ids:
+        return AdminBulkAffectedResponse(affected=0)
+    r = await db.execute(
+        update(Task)
+        .where(Task.id.in_(body.task_ids))
+        .values(restart_count=0, updated_at=datetime.utcnow())
+    )
+    await db.commit()
+    return AdminBulkAffectedResponse(affected=int(r.rowcount or 0))
+
+
+@app.post("/api/admin/tasks/bulk-restart-count-recent", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_restart_count_recent(
+    body: AdminBulkRestartCountRecentRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set restart_count=0 for all tasks created within the last `hours` (admin only)."""
+    hours = max(0.01, float(body.hours))
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    r = await db.execute(
+        update(Task)
+        .where(Task.created_at >= cutoff)
+        .values(restart_count=0, updated_at=datetime.utcnow())
+    )
+    await db.commit()
+    return AdminBulkAffectedResponse(affected=int(r.rowcount or 0))
+
+
+@app.post("/api/admin/tasks/bulk-requeue", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_requeue(
+    body: AdminBulkTaskIdsRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Requeue tasks to status=created with cleared worker state (admin only)."""
+    n = 0
+    for tid in body.task_ids:
+        task = await get_task_by_id(db, tid)
+        if task:
+            await admin_requeue_task_to_created(db, task)
+            n += 1
+    if n:
+        await db.commit()
+    return AdminBulkAffectedResponse(affected=n)
 
 
 @app.delete("/api/admin/task/{task_id}")

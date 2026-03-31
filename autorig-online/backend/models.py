@@ -265,12 +265,58 @@ class AdminTaskListItem(BaseModel):
     total_count: int
     input_url: Optional[str] = None
     worker_api: Optional[str] = None
+    worker_task_id: Optional[str] = None
+    guid: Optional[str] = None
+    restart_count: int = 0
+    pipeline_kind: str = "rig"
+    error_message: Optional[str] = None
     video_ready: bool = False
     content_rating: Optional[str] = None
     content_score: Optional[float] = None
     content_classifier_version: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class AdminTaskInspectResponse(BaseModel):
+    """Extended task snapshot for admin overlay detail panel"""
+    task_id: str
+    owner_type: str
+    owner_id: str
+    status: str
+    progress: int
+    ready_count: int
+    total_count: int
+    restart_count: int = 0
+    input_url: Optional[str] = None
+    input_type: Optional[str] = None
+    pipeline_kind: str = "rig"
+    worker_api: Optional[str] = None
+    worker_task_id: Optional[str] = None
+    progress_page: Optional[str] = None
+    guid: Optional[str] = None
+    error_message: Optional[str] = None
+    last_progress_at: Optional[datetime] = None
+    fbx_glb_output_url: Optional[str] = None
+    fbx_glb_model_name: Optional[str] = None
+    fbx_glb_ready: Optional[bool] = None
+    fbx_glb_error: Optional[str] = None
+    video_ready: bool = False
+    video_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminBulkTaskIdsRequest(BaseModel):
+    task_ids: List[str]
+
+
+class AdminBulkRestartCountRecentRequest(BaseModel):
+    hours: float = 24.0
+
+
+class AdminBulkAffectedResponse(BaseModel):
+    affected: int
 
 
 class AdminTaskListResponse(BaseModel):

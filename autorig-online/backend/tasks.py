@@ -455,6 +455,32 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
 # =============================================================================
 # Stale Task Detection & Auto-Restart
 # =============================================================================
+async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
+    """
+    Operator recovery: move task back to queue like stale reset but restart_count := 0
+    (does not increment). Caller should commit.
+    """
+    task.status = "created"
+    task.ready_count = 0
+    task.ready_urls = []
+    task.output_urls = []
+    task.total_count = 0
+    task.worker_api = None
+    task.worker_task_id = None
+    task.progress_page = None
+    task.guid = None
+    task.video_ready = False
+    task.video_url = None
+    task.error_message = None
+    task.restart_count = 0
+    task.last_progress_at = None
+    task.updated_at = datetime.utcnow()
+    task.fbx_glb_output_url = None
+    task.fbx_glb_model_name = None
+    task.fbx_glb_ready = False
+    task.fbx_glb_error = None
+
+
 async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     """
     Reset a stale task for re-processing.
