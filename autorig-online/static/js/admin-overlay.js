@@ -650,15 +650,20 @@
             var v = Number(b[r.k] || 0);
             if (v > maxGb) maxGb = v;
         });
+        var panel = document.querySelector('.admin-disk-panel');
+        if (panel) {
+            panel.classList.toggle('admin-disk-panel--low', Number(d.free_gb) < 2.5);
+        }
         var freeLine =
             '<div class="admin-disk-summary">' +
-            'Свободно: <strong>' +
+            '<div class="admin-disk-summary-line">Свободно: <strong class="admin-disk-free-val">' +
             esc(String(d.free_gb)) +
-            '</strong> GB · занято: <strong>' +
+            '</strong> <span class="admin-disk-unit">GB</span></div>' +
+            '<div class="admin-disk-summary-line">Занято: <strong>' +
             esc(String(d.used_gb)) +
-            '</strong> GB из ' +
+            '</strong> GB <span class="admin-disk-of">из</span> ' +
             esc(String(d.total_gb)) +
-            ' GB</div>';
+            ' GB</div></div>';
         var bars = rows
             .map(function (r) {
                 var gb = Number(b[r.k] || 0);

@@ -207,10 +207,10 @@
 }
 
 .admin-stats-reset {
-  margin-top: 10px;
+  margin-top: 14px;
   width: 100%;
-  padding: 10px 12px;
-  font-size: 0.72rem;
+  padding: 11px 14px;
+  font-size: 0.78rem;
   font-weight: 700;
   border-radius: 8px;
   border: 1px solid rgba(255, 180, 100, 0.4);
@@ -224,98 +224,157 @@
   filter: brightness(1.08);
 }
 
+/* Блок «Диск» — крупно и заметно (метрики сервера) */
 .admin-disk-panel {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 14px;
+  padding: 14px 14px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(110, 170, 255, 0.35);
+  background: linear-gradient(165deg, rgba(25, 45, 75, 0.55), rgba(10, 18, 32, 0.65));
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.admin-disk-panel > .admin-stats-title {
+  font-size: 0.88rem;
+  letter-spacing: 0.14em;
+  color: #9ec8ff;
+  margin-bottom: 12px;
+}
+
+.admin-disk-panel--low {
+  border-color: rgba(255, 130, 100, 0.55);
+  background: linear-gradient(165deg, rgba(55, 28, 22, 0.65), rgba(12, 10, 18, 0.7));
+  box-shadow: 0 0 0 1px rgba(255, 100, 80, 0.15), 0 4px 28px rgba(0, 0, 0, 0.45);
 }
 
 .admin-disk-chart {
-  font-size: 0.72rem;
-  line-height: 1.35;
-  color: #d0d8e8;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #e2eaf5;
 }
 
 .admin-disk-loading {
-  color: #9aa3b2;
+  color: #b0bdd0;
+  font-size: 0.85rem;
 }
 
 .admin-disk-summary {
-  margin-bottom: 10px;
-  font-size: 0.7rem;
-  color: #b8c4d8;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: #d4deef;
+  border-radius: 10px;
+  background: rgba(15, 28, 48, 0.75);
+  border: 1px solid rgba(130, 180, 255, 0.22);
+}
+
+.admin-disk-panel--low .admin-disk-summary {
+  border-color: rgba(255, 140, 110, 0.45);
+  background: rgba(45, 18, 14, 0.55);
+}
+
+.admin-disk-summary-line {
+  display: block;
+}
+
+.admin-disk-summary-line + .admin-disk-summary-line {
+  margin-top: 6px;
 }
 
 .admin-disk-summary strong {
-  color: #e8ecf3;
+  color: #f2f7ff;
   font-variant-numeric: tabular-nums;
+  font-size: 1.05em;
+  font-weight: 800;
+}
+
+.admin-disk-free-val {
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+}
+
+.admin-disk-unit,
+.admin-disk-of {
+  font-size: 0.88em;
+  color: #a8b8d0;
+  font-weight: 600;
 }
 
 .admin-disk-bar-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(40px, 1.2fr) auto;
-  gap: 6px 8px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(48px, 1fr) minmax(5rem, auto);
+  gap: 10px 12px;
   align-items: center;
-  margin-bottom: 5px;
+  margin-bottom: 11px;
 }
 
 .admin-disk-bar-label {
-  color: #9aa3b2;
-  font-size: 0.65rem;
+  color: #c5d2e8;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .admin-disk-bar-track {
-  height: 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.1);
   overflow: hidden;
+  min-width: 0;
 }
 
 .admin-disk-bar-track > i {
   display: block;
   height: 100%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, rgba(100, 160, 255, 0.55), rgba(180, 120, 255, 0.45));
+  border-radius: 7px;
+  background: linear-gradient(90deg, rgba(90, 150, 255, 0.75), rgba(200, 130, 255, 0.65));
   max-width: 100%;
+  box-shadow: 0 0 12px rgba(120, 170, 255, 0.25);
 }
 
 .admin-disk-bar-val {
-  font-size: 0.65rem;
-  font-weight: 600;
+  font-size: 0.84rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: #e8ecf3;
+  color: #f0f4fc;
   flex-shrink: 0;
+  text-align: right;
+  min-width: 5rem;
 }
 
 .admin-disk-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .admin-disk-btn {
   flex: 1;
-  padding: 8px 10px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(60, 80, 120, 0.35);
-  color: #e8f0ff;
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(55, 85, 130, 0.55);
+  color: #f2f7ff;
   cursor: pointer;
   font: inherit;
+  letter-spacing: 0.02em;
 }
 
 .admin-disk-btn:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.1);
 }
 
 .admin-disk-btn-danger {
-  border-color: rgba(255, 140, 150, 0.45);
-  background: linear-gradient(145deg, rgba(200, 80, 90, 0.45), rgba(140, 40, 55, 0.4));
+  border-color: rgba(255, 150, 160, 0.55);
+  background: linear-gradient(145deg, rgba(210, 70, 85, 0.55), rgba(130, 35, 45, 0.5));
 }
 
 .admin-queue-filters {

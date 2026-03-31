@@ -256,12 +256,12 @@ function ensureAdminOverlayLoaded() {
         if (!document.querySelector('link[data-admin-overlay-css]')) {
             const l = document.createElement('link');
             l.rel = 'stylesheet';
-            l.href = '/static/css/admin-overlay.css?v=20260331disk';
+            l.href = '/static/css/admin-overlay.css?v=20260401diskui';
             l.setAttribute('data-admin-overlay-css', '1');
             document.head.appendChild(l);
         }
         const s = document.createElement('script');
-        s.src = '/static/js/admin-overlay.js?v=20260331disk';
+        s.src = '/static/js/admin-overlay.js?v=20260401diskui';
         s.onload = () => {
             _adminOverlayLoadPromise = null;
             resolve();
