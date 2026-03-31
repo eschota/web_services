@@ -306,7 +306,6 @@
             '<div class="admin-stats-panel">' +
             '<div class="admin-stats-title">Сводка</div>' +
             '<div id="admin-ov-stats-inner" class="admin-ov-stats-inner">—</div>' +
-            '<button type="button" class="admin-stats-reset" id="admin-ov-stats-reset" title="Обнулить счётчики периода (завершения и сумму длительностей) в БД">Сбросить счётчики периода</button>' +
             '<div class="admin-disk-panel">' +
             '<div class="admin-stats-title">Диск</div>' +
             '<div id="admin-disk-chart" class="admin-disk-chart">—</div>' +
@@ -314,6 +313,7 @@
             '<button type="button" class="admin-disk-btn" id="admin-disk-refresh" title="Пересчитать размеры каталогов">Обновить</button>' +
             '<button type="button" class="admin-disk-btn admin-disk-btn-danger" id="admin-disk-cleanup" title="Запустить фоновую очистку до min free (как в API)">Очистка сейчас</button>' +
             '</div></div>' +
+            '<button type="button" class="admin-stats-reset" id="admin-ov-stats-reset" title="Обнулить счётчики периода (завершения и сумму длительностей) в БД">Сбросить счётчики периода</button>' +
             '</div></div></div>' +
             '<div class="admin-bulk-sel" role="toolbar" aria-label="Быстрый выбор">' +
             '<span class="admin-bulk-sel-label">Выбор</span>' +

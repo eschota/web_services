@@ -1,0 +1,5 @@
+Outfit (woff2 files outfit-latin.woff2, outfit-latin-ext.woff2)
+Source: Google Fonts / Font Bureau
+License: SIL Open Font License 1.1 — https://openfontlicense.org
+
+Full license text: https://scripts.sil.org/OFL

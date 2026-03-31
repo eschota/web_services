@@ -1,0 +1,17 @@
+# AutoRig Online
+
+> Cloud service for automatic 3D character rigging (GLB, FBX, OBJ). Upload or link a model; get a rigged asset with animations. Public HTTP API for apps and autonomous agents.
+
+## For AI agents and tools
+
+- **Agent skill (endpoints, auth, registration, limits):** https://autorig.online/skill.md
+- **Developer overview (human UI):** https://autorig.online/developers
+
+## Site
+
+- **Home:** https://autorig.online/
+
+## Discovery
+
+- **Sitemap index (updates on request; includes marketing pages + public model landings `/m/{task_id}` by day):** https://autorig.online/sitemap.xml
+- **This file (llm.txt):** https://autorig.online/llm.txt
