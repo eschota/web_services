@@ -24,6 +24,7 @@ from workers import (
     get_worker_active_lookup,
     lookup_worker_queue_entry,
     task_visible_on_worker_refs,
+    find_worker_queue_status_for_task,
 )
 
 
@@ -514,10 +515,12 @@ async def find_and_reset_stale_tasks(
         STALE_TASK_TIMEOUT_MINUTES,
         GLOBAL_TASK_TIMEOUT_MINUTES,
         PARTIAL_PROGRESS_STALE_MINUTES,
+        WORKER_IDLE_STALE_MINUTES,
     )
 
     now = datetime.utcnow()
     stale_cutoff = now - timedelta(minutes=STALE_TASK_TIMEOUT_MINUTES)
+    worker_idle_cutoff = now - timedelta(minutes=WORKER_IDLE_STALE_MINUTES)
     global_cutoff = now - timedelta(minutes=GLOBAL_TASK_TIMEOUT_MINUTES)
     partial_cutoff = now - timedelta(minutes=PARTIAL_PROGRESS_STALE_MINUTES)
     lookup = get_worker_active_lookup(queue_status)
@@ -561,11 +564,23 @@ async def find_and_reset_stale_tasks(
             ):
                 lost_on_worker = True
 
+        ws = find_worker_queue_status_for_task(task.worker_api, queue_status)
+        worker_reports_idle = (
+            ws is not None
+            and ws.available
+            and (ws.total_active or 0) == 0
+            and (ws.queue_size or 0) <= 0
+            and (task.ready_count or 0) == 0
+        )
+
         should_reset = False
         reason = ""
         if lost_on_worker and reference_time < stale_cutoff:
             should_reset = True
             reason = "lost_on_worker"
+        elif worker_reports_idle and reference_time < worker_idle_cutoff:
+            should_reset = True
+            reason = "worker_reports_idle"
         elif reference_time < stale_cutoff and (task.ready_count or 0) == 0:
             should_reset = True
             reason = "no_ready_yet"

@@ -688,6 +688,25 @@ def lookup_worker_queue_entry(
     return None
 
 
+def find_worker_queue_status_for_task(
+    task_worker_api: Optional[str],
+    queue_status: Optional["GlobalQueueStatus"],
+) -> Optional[WorkerQueueStatus]:
+    """
+    Match task.worker_api (api-converter-glb root or similar) to a row from get_global_queue_status.
+    """
+    if not queue_status or not (task_worker_api or "").strip():
+        return None
+    wk = normalize_worker_url_key(task_worker_api)
+    for w in queue_status.workers:
+        ku = normalize_worker_url_key(w.url)
+        if ku == wk:
+            return w
+        if wk.startswith(ku) or ku.startswith(wk):
+            return w
+    return None
+
+
 @dataclass
 class GlobalQueueStatus:
     """Global queue status across all workers"""

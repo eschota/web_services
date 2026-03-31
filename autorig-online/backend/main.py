@@ -466,7 +466,8 @@ async def background_task_updater():
                 queue_status = None
                 force_stale_reset = False
                 # =============================================================
-                # 1. Dispatch queued tasks (status=created) to free workers
+                # 1. Queue snapshot + stall monitor, then stale reset, then dispatch
+                #    (reset must run before dispatch so tasks moved to "created" post in the same tick)
                 # =============================================================
                 try:
                     queue_status = await get_global_queue_status(db=db)
@@ -476,6 +477,15 @@ async def background_task_updater():
                             force_stale_reset = True
                     except Exception as e:
                         print(f"[Background Worker] Stalled monitor error: {e}")
+
+                    if force_stale_reset or (background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0):
+                        try:
+                            reset_count = await find_and_reset_stale_tasks(db, queue_status=queue_status)
+                            if reset_count > 0:
+                                reason = "forced" if force_stale_reset else "periodic"
+                                print(f"[Background Worker] Auto-reset {reset_count} stale task(s) [{reason}]")
+                        except Exception as e:
+                            print(f"[Background Worker] Stale task check error: {e}")
 
                     free_workers = [
                         w for w in queue_status.workers
@@ -529,18 +539,6 @@ async def background_task_updater():
                             )
                 except Exception as e:
                     print(f"[Background Worker] Queue dispatch error: {e}")
-
-                # =============================================================
-                # 2. Check for stale tasks periodically (or immediately on stall)
-                # =============================================================
-                if force_stale_reset or (background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0):
-                    try:
-                        reset_count = await find_and_reset_stale_tasks(db, queue_status=queue_status)
-                        if reset_count > 0:
-                            reason = "forced" if force_stale_reset else "periodic"
-                            print(f"[Background Worker] Auto-reset {reset_count} stale task(s) [{reason}]")
-                    except Exception as e:
-                        print(f"[Background Worker] Stale task check error: {e}")
 
                 # =============================================================
                 # 2.5. Disk space cleanup (every CLEANUP_CHECK_INTERVAL_CYCLES cycles)
