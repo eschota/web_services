@@ -220,11 +220,7 @@
             '<img src="' +
             ICON +
             'select.svg" width="20" height="20" alt="" /></button>' +
-            '<button type="button" class="admin-toolbar-ico" id="admin-ov-bulk-rc" title="Error → created (requeue); иначе только restart_count=0" aria-label="Сброс retry">' +
-            '<img src="' +
-            ICON +
-            'reset.svg" width="20" height="20" alt="" /></button>' +
-            '<button type="button" class="admin-toolbar-ico danger" id="admin-ov-bulk-rq" title="Requeue выбранных в created" aria-label="Requeue">' +
+            '<button type="button" class="admin-toolbar-ico danger" id="admin-ov-bulk-rq" title="Requeue: created, сброс состояния, restart_count и глобального таймаута (обновление времени)" aria-label="Requeue">' +
             '<img src="' +
             ICON +
             'requeue.svg" width="20" height="20" alt="" /></button>' +
@@ -324,8 +320,7 @@
             '<div class="admin-bulk-actions" role="toolbar" aria-label="Действия с выбранными задачами">' +
             '<span class="admin-bulk-sel-label">Действия</span>' +
             '<span class="admin-bulk-meta">выбрано: <strong id="admin-bulk-count">0</strong></span>' +
-            '<button type="button" class="admin-action-pill admin-action-rc" id="admin-bulk-bar-rc" title="Для error — полный requeue в created; иначе только restart_count=0">сброс r</button>' +
-            '<button type="button" class="admin-action-pill admin-action-rq" id="admin-bulk-bar-rq" title="Requeue в created для всех отмеченных">requeue</button>' +
+            '<button type="button" class="admin-action-pill admin-action-rq" id="admin-bulk-bar-rq" title="Requeue: created, сброс состояния, restart_count и глобального таймаута (обновление времени)">requeue</button>' +
             '<button type="button" class="admin-action-pill admin-action-copy" id="admin-bulk-bar-copy" title="Скопировать id отмеченных в буфер">копировать id</button>' +
             '</div>' +
             '<div id="admin-card-grid" class="admin-card-grid"></div>' +
@@ -346,7 +341,6 @@
         root.querySelector('#admin-ov-close').addEventListener('click', close);
         root.querySelector('#admin-ov-refresh').addEventListener('click', loadQueue);
         root.querySelector('#admin-ov-sel10').addEventListener('click', selectFirst10);
-        root.querySelector('#admin-ov-bulk-rc').addEventListener('click', bulkRestartCount);
         root.querySelector('#admin-ov-bulk-rq').addEventListener('click', bulkRequeue);
         root.querySelector('#admin-ov-recent24').addEventListener('click', bulkRecent24);
 
@@ -452,10 +446,6 @@
             selectVisibleByStatuses(['created', 'processing']);
         });
 
-        root.querySelector('#admin-bulk-bar-rc').addEventListener('click', function (e) {
-            e.preventDefault();
-            bulkRestartCount();
-        });
         root.querySelector('#admin-bulk-bar-rq').addEventListener('click', function (e) {
             e.preventDefault();
             bulkRequeue();
@@ -1051,15 +1041,11 @@
                       '</span></div>'
                     : '') +
                 '<div class="admin-detail-actions">' +
-                '<button type="button" class="admin-detail-icon-btn admin-detail-action" id="admin-dtl-rc" title="Сбросить restart_count">' +
-                imgIcon('reset-action.svg', 'Сбросить restart_count') +
-                '</button>' +
-                '<button type="button" class="admin-detail-icon-btn admin-detail-action is-danger" id="admin-dtl-rq" title="Requeue → created">' +
-                imgIcon('requeue-action.svg', 'Requeue → created') +
+                '<button type="button" class="admin-detail-icon-btn admin-detail-action is-danger" id="admin-dtl-rq" title="Requeue: created, сброс состояния, restart_count и глобального таймаута (обновление времени)">' +
+                imgIcon('requeue-action.svg', 'Requeue') +
                 '</button>' +
                 '</div>' +
                 '</div>';
-            var b1 = inner.querySelector('#admin-dtl-rc');
             var b2 = inner.querySelector('#admin-dtl-rq');
             var bCopy = inner.querySelector('#admin-dtl-copy');
             if (bCopy) {
@@ -1071,10 +1057,6 @@
                     }
                 });
             }
-            if (b1)
-                b1.addEventListener('click', function () {
-                    postBulkRestart([taskId]);
-                });
             if (b2)
                 b2.addEventListener('click', function () {
                     postBulkRequeue([taskId]);
@@ -1114,34 +1096,19 @@
         updateBulkSelectionCount();
     }
 
-    async function postBulkRestart(ids) {
-        if (!ids.length) {
-            alert('Нет выбранных задач');
-            return;
-        }
-        var r = await api('/api/admin/tasks/bulk-restart-count', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_ids: ids }),
-        });
-        var j = await r.json().catch(function () {
-            return {};
-        });
-        if (!r.ok) {
-            alert('Ошибка: ' + r.status);
-            return;
-        }
-        alert('Обновлено строк: ' + (j.affected | 0));
-        loadQueue();
-        if (selectedTaskId) loadDetail(selectedTaskId);
-    }
-
     async function postBulkRequeue(ids) {
         if (!ids.length) {
             alert('Нет выбранных задач');
             return;
         }
-        if (!confirm('Вернуть ' + ids.length + ' задач(и) в очередь (created)?')) return;
+        if (
+            !confirm(
+                'Вернуть ' +
+                    ids.length +
+                    ' задач(и) в очередь (created): сброс состояния, restart_count, глобального таймаута и обновление времени создания?'
+            )
+        )
+            return;
         var r = await api('/api/admin/tasks/bulk-requeue', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1157,10 +1124,6 @@
         alert('Requeue: ' + (j.affected | 0));
         loadQueue();
         if (selectedTaskId) loadDetail(selectedTaskId);
-    }
-
-    function bulkRestartCount() {
-        postBulkRestart(getSelectedIds());
     }
 
     function bulkRequeue() {

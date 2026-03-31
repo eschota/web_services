@@ -4619,7 +4619,7 @@ async def api_admin_bulk_requeue(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Requeue tasks to status=created with cleared worker state (admin only)."""
+    """Requeue tasks to status=created with cleared worker state; refreshes created_at for global timeout (admin only)."""
     ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
     n = 0
     for tid in ids:

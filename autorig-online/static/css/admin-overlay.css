@@ -498,11 +498,6 @@
   transform: scale(0.97);
 }
 
-.admin-action-rc {
-  background: linear-gradient(145deg, rgba(100, 160, 240, 0.45), rgba(50, 100, 200, 0.4));
-  border-color: rgba(140, 190, 255, 0.4);
-}
-
 .admin-action-rq {
   background: linear-gradient(145deg, rgba(200, 80, 90, 0.5), rgba(140, 40, 55, 0.45));
   border-color: rgba(255, 140, 150, 0.45);
