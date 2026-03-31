@@ -259,6 +259,7 @@ class AdminTaskListItem(BaseModel):
     task_id: str
     owner_type: str
     owner_id: str
+    owner_email: Optional[str] = None  # login email when owner_type == user (same as owner_id)
     status: str
     progress: int
     ready_count: int
@@ -274,8 +275,11 @@ class AdminTaskListItem(BaseModel):
     content_rating: Optional[str] = None
     content_score: Optional[float] = None
     content_classifier_version: Optional[str] = None
+    input_bytes: Optional[int] = None  # upload size or sum of cached task files when known
+    poster_url: Optional[str] = None  # /api/thumb/{id} when done and poster exists
     created_at: datetime
     updated_at: datetime
+    age_seconds: int = 0  # now(UTC) - created_at; server time
 
 
 class AdminTaskInspectResponse(BaseModel):
@@ -283,6 +287,7 @@ class AdminTaskInspectResponse(BaseModel):
     task_id: str
     owner_type: str
     owner_id: str
+    owner_email: Optional[str] = None
     status: str
     progress: int
     ready_count: int
@@ -291,6 +296,8 @@ class AdminTaskInspectResponse(BaseModel):
     input_url: Optional[str] = None
     input_type: Optional[str] = None
     pipeline_kind: str = "rig"
+    input_bytes: Optional[int] = None
+    poster_url: Optional[str] = None
     worker_api: Optional[str] = None
     worker_task_id: Optional[str] = None
     progress_page: Optional[str] = None
@@ -305,6 +312,7 @@ class AdminTaskInspectResponse(BaseModel):
     video_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    age_seconds: int = 0
 
 
 class AdminBulkTaskIdsRequest(BaseModel):

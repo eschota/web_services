@@ -204,6 +204,7 @@ async def create_conversion_task(
     *,
     created_via_api: bool = False,
     pipeline_kind: str = "rig",
+    input_bytes: Optional[int] = None,
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
@@ -229,6 +230,7 @@ async def create_conversion_task(
         status="created",
         created_via_api=created_via_api,
         pipeline_kind=pk,
+        input_bytes=input_bytes,
     )
 
     db.add(task)

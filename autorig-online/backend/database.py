@@ -192,6 +192,9 @@ class Task(Base):
     # rig: Auto Rig worker payload with mode=only_rig; convert: minimal {input_url, type} only
     pipeline_kind = Column(String(20), nullable=False, default="rig")
 
+    # Source size (bytes) when known from upload; optional for link-only tasks
+    input_bytes = Column(BigInteger, nullable=True)
+
     # Server-side NSFW classification from task poster URL (ready_urls); not client-controlled.
     content_rating = Column(String(20), nullable=False, default="unknown")  # safe | suggestive | adult | unknown
     content_score = Column(Float, nullable=True)  # 0..1 composite from detector
@@ -559,6 +562,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_uploaded_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_source_sha256 VARCHAR(64)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN pipeline_kind VARCHAR(20) DEFAULT 'rig'")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN input_bytes BIGINT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_title VARCHAR(256)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_description TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_keywords TEXT")
@@ -806,6 +810,9 @@ async def init_db():
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pipeline_kind VARCHAR(20) NOT NULL DEFAULT 'rig'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS input_bytes BIGINT"
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_title VARCHAR(256)"

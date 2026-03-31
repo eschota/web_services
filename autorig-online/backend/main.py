@@ -8,7 +8,7 @@ import uuid
 import shutil
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any, Tuple
 import hashlib
 import hmac
@@ -2249,6 +2249,7 @@ async def api_create_task(
     ga_client_id: Optional[str] = None
     file: Optional[UploadFile] = None
     pipeline = "rig"
+    uploaded_bytes: Optional[int] = None
 
     if "application/json" in content_type:
         try:
@@ -2359,6 +2360,7 @@ async def api_create_task(
         owner_id,
         created_via_api=via_api,
         pipeline_kind=pipeline,
+        input_bytes=uploaded_bytes,
     )
     
     if error and not task:
@@ -2470,6 +2472,7 @@ async def api_create_convert_from_rig_task(
         owner_id,
         created_via_api=via_api,
         pipeline_kind="convert",
+        input_bytes=getattr(parent, "input_bytes", None),
     )
 
     if error and not task:
@@ -2938,6 +2941,7 @@ async def api_retry_task(
         task.owner_type,
         task.owner_id,
         pipeline_kind=getattr(task, "pipeline_kind", None) or "rig",
+        input_bytes=getattr(task, "input_bytes", None),
     )
     
     if error and not new_task:
@@ -4341,6 +4345,7 @@ async def api_admin_user_tasks(
 @app.get("/api/admin/tasks", response_model=AdminTaskListResponse)
 async def api_admin_all_tasks(
     status: Optional[str] = None,
+    pipeline_kind: Optional[str] = None,
     query: Optional[str] = None,
     sort_by: str = "created_at",
     sort_desc: bool = True,
@@ -4352,13 +4357,27 @@ async def api_admin_all_tasks(
     """Get all tasks with filtering, sorting, and pagination (admin only)"""
     from sqlalchemy import func, or_, desc
     from database import Task
-    
+
+    page = max(1, page)
+    per_page = min(max(1, per_page), 200)
+
+    _VALID_STATUS = frozenset({"created", "processing", "done", "error"})
+    _ALLOWED_SORT = frozenset({"created_at", "updated_at", "pipeline_kind", "status", "progress", "id"})
+
     # Base query
     base_query = select(Task)
-    
-    # Filter by status
-    if status and status in ["created", "processing", "done", "error"]:
-        base_query = base_query.where(Task.status == status)
+
+    # Filter by status: omit / "all" = any; one value; or comma-separated (e.g. created,processing)
+    if status and status.strip() and status.strip().lower() != "all":
+        parts = [s.strip().lower() for s in status.split(",") if s.strip()]
+        parts = [p for p in parts if p in _VALID_STATUS]
+        if len(parts) == 1:
+            base_query = base_query.where(Task.status == parts[0])
+        elif len(parts) > 1:
+            base_query = base_query.where(Task.status.in_(parts))
+
+    if pipeline_kind and pipeline_kind in ("rig", "convert"):
+        base_query = base_query.where(Task.pipeline_kind == pipeline_kind)
     
     # Search by task_id or owner_id
     if query:
@@ -4374,8 +4393,10 @@ async def api_admin_all_tasks(
     count_query = select(func.count()).select_from(base_query.subquery())
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
-    
-    # Sort
+
+    # Sort (whitelist column names)
+    if sort_by not in _ALLOWED_SORT:
+        sort_by = "created_at"
     sort_column = getattr(Task, sort_by, Task.created_at)
     if sort_desc:
         base_query = base_query.order_by(desc(sort_column))
@@ -4395,12 +4416,26 @@ async def api_admin_all_tasks(
             return s
         return s[:279] + "…"
 
+    def _admin_input_bytes(t) -> Optional[int]:
+        ib = getattr(t, "input_bytes", None)
+        if ib is not None:
+            return int(ib)
+        return _task_cache_dir_size_bytes(t.id)
+
+    def _admin_poster_url(t) -> Optional[str]:
+        if t.status != "done":
+            return None
+        if not _task_has_poster(t):
+            return None
+        return f"/api/thumb/{t.id}"
+
     return AdminTaskListResponse(
         tasks=[
             AdminTaskListItem(
                 task_id=t.id,
                 owner_type=t.owner_type,
                 owner_id=t.owner_id,
+                owner_email=(t.owner_id if t.owner_type == "user" else None),
                 status=t.status,
                 progress=t.progress,
                 ready_count=t.ready_count,
@@ -4416,8 +4451,11 @@ async def api_admin_all_tasks(
                 content_rating=getattr(t, "content_rating", None),
                 content_score=getattr(t, "content_score", None),
                 content_classifier_version=getattr(t, "content_classifier_version", None),
+                input_bytes=_admin_input_bytes(t),
+                poster_url=_admin_poster_url(t),
                 created_at=t.created_at,
-                updated_at=t.updated_at
+                updated_at=t.updated_at,
+                age_seconds=_task_age_seconds(t.created_at),
             )
             for t in tasks
         ],
@@ -4437,10 +4475,21 @@ async def api_admin_task_inspect(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _ib = getattr(task, "input_bytes", None)
+    if _ib is not None:
+        _ib = int(_ib)
+    else:
+        _ib = _task_cache_dir_size_bytes(task.id)
+
+    _poster = None
+    if task.status == "done" and _task_has_poster(task):
+        _poster = f"/api/thumb/{task.id}"
+
     return AdminTaskInspectResponse(
         task_id=task.id,
         owner_type=task.owner_type,
         owner_id=task.owner_id,
+        owner_email=(task.owner_id if task.owner_type == "user" else None),
         status=task.status,
         progress=task.progress,
         ready_count=task.ready_count,
@@ -4449,6 +4498,8 @@ async def api_admin_task_inspect(
         input_url=task.input_url,
         input_type=task.input_type,
         pipeline_kind=(getattr(task, "pipeline_kind", None) or "rig"),
+        input_bytes=_ib,
+        poster_url=_poster,
         worker_api=task.worker_api,
         worker_task_id=task.worker_task_id,
         progress_page=task.progress_page,
@@ -4463,6 +4514,7 @@ async def api_admin_task_inspect(
         video_url=task.video_url,
         created_at=task.created_at,
         updated_at=task.updated_at,
+        age_seconds=_task_age_seconds(task.created_at),
     )
 
 
@@ -6935,6 +6987,37 @@ GLB_CACHE_DIR = STATIC_DIR / "glb_cache"  # Cached GLB files for fast loading
 # Ensure cache directories exist
 TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:
+    """Sum of file sizes under static/tasks/{task_id}/ when cache exists."""
+    d = TASK_CACHE_DIR / task_id
+    if not d.is_dir():
+        return None
+    total = 0
+    try:
+        for p in d.rglob("*"):
+            if p.is_file():
+                total += p.stat().st_size
+    except OSError:
+        return None
+    return total if total > 0 else None
+
+
+def _task_age_seconds(created_at: Optional[datetime]) -> int:
+    """Elapsed whole seconds from task creation to current UTC time (server clock)."""
+    if created_at is None:
+        return 0
+    try:
+        now = datetime.now(timezone.utc)
+        ca = created_at
+        if ca.tzinfo is None:
+            ca = ca.replace(tzinfo=timezone.utc)
+        else:
+            ca = ca.astimezone(timezone.utc)
+        return max(0, int((now - ca).total_seconds()))
+    except Exception:
+        return 0
 
 
 # =============================================================================
