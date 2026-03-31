@@ -5,7 +5,19 @@
     'use strict';
 
     function api(path, options) {
-        return fetch(path, Object.assign({ credentials: 'same-origin' }, options || {}));
+        return fetch(path, Object.assign({ credentials: 'same-origin', cache: 'no-store' }, options || {}));
+    }
+
+    /** Сообщение для пользователя вместо сырого TypeError: Failed to fetch */
+    function humanFetchError(e) {
+        if (typeof location !== 'undefined' && location.protocol === 'file:') {
+            return 'Откройте сайт по адресу https://… на сервере, а не как file:// — иначе браузер не выполнит запросы к API.';
+        }
+        var msg = String(e && e.message != null ? e.message : e);
+        if (msg.indexOf('Failed to fetch') !== -1 || msg.indexOf('NetworkError') !== -1) {
+            return 'Сервер не ответил (нет соединения с API). Убедитесь, что бэкенд запущен и страница открыта с того же сайта; не смешивайте http и https.';
+        }
+        return msg;
     }
 
     function esc(s) {
@@ -405,10 +417,17 @@
             var r = await api(url);
             if (!r.ok) {
                 grid.innerHTML =
-                    '<div style="color:#f88">Нет доступа (admin) или ошибка API: ' + r.status + '</div>';
+                    '<div style="color:#f88">Нет доступа (admin) или ошибка API: HTTP ' + r.status + '</div>';
                 return;
             }
-            var data = await r.json();
+            var data;
+            try {
+                data = await r.json();
+            } catch (je) {
+                grid.innerHTML =
+                    '<div style="color:#f88">Ответ /api/admin/tasks не JSON — проверьте прокси и бэкенд.</div>';
+                return;
+            }
             lastCards = data.tasks || [];
             lastListMeta = {
                 total: data.total | 0,
@@ -428,7 +447,7 @@
             updateFilterChips();
             renderCards(lastCards);
         } catch (e) {
-            grid.innerHTML = '<div style="color:#f88">' + esc(String(e)) + '</div>';
+            grid.innerHTML = '<div style="color:#f88">' + esc(humanFetchError(e)) + '</div>';
         }
     }
 
@@ -593,10 +612,17 @@
         try {
             var r = await api('/api/admin/task/' + encodeURIComponent(taskId) + '/inspect');
             if (!r.ok) {
-                inner.innerHTML = '<div class="admin-detail-empty">Ошибка ' + r.status + '</div>';
+                inner.innerHTML = '<div class="admin-detail-empty">Ошибка HTTP ' + r.status + '</div>';
                 return;
             }
-            var d = await r.json();
+            var d;
+            try {
+                d = await r.json();
+            } catch (je) {
+                inner.innerHTML =
+                    '<div class="admin-detail-empty">Ответ inspect не JSON — проверьте прокси.</div>';
+                return;
+            }
             var stCls = statusClass(d.status);
             var errShort =
                 d.error_message && d.error_message.length > 140
@@ -757,7 +783,7 @@
                     postBulkRequeue([taskId]);
                 });
         } catch (e) {
-            inner.innerHTML = '<div class="admin-detail-empty">' + esc(String(e)) + '</div>';
+            inner.innerHTML = '<div class="admin-detail-empty">' + esc(humanFetchError(e)) + '</div>';
         }
     }
 
