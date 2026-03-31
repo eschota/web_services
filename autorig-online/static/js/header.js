@@ -246,6 +246,7 @@ async function initSiteHeader() {
 
 let _adminOverlayLoadPromise = null;
 
+/** Bump ?v= when changing admin-overlay.js / admin-overlay.css so browsers skip stale cache. */
 function ensureAdminOverlayLoaded() {
     if (typeof window.AdminOverlay !== 'undefined' && window.AdminOverlay) {
         return Promise.resolve();
@@ -255,12 +256,12 @@ function ensureAdminOverlayLoaded() {
         if (!document.querySelector('link[data-admin-overlay-css]')) {
             const l = document.createElement('link');
             l.rel = 'stylesheet';
-            l.href = '/static/css/admin-overlay.css?v=20260327a';
+            l.href = '/static/css/admin-overlay.css?v=20260331disk';
             l.setAttribute('data-admin-overlay-css', '1');
             document.head.appendChild(l);
         }
         const s = document.createElement('script');
-        s.src = '/static/js/admin-overlay.js?v=20260327a';
+        s.src = '/static/js/admin-overlay.js?v=20260331disk';
         s.onload = () => {
             _adminOverlayLoadPromise = null;
             resolve();
