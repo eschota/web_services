@@ -3,7 +3,7 @@ Task management for AutoRig Online
 """
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple, List
 from urllib.parse import urlparse
 
@@ -20,6 +20,10 @@ from workers import (
     get_worker_base_url,
     get_configured_workers,
     normalize_task_type,
+    GlobalQueueStatus,
+    get_worker_active_lookup,
+    lookup_worker_queue_entry,
+    task_visible_on_worker_refs,
 )
 
 
@@ -490,18 +494,34 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     return True
 
 
-async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
+async def find_and_reset_stale_tasks(
+    db: AsyncSession,
+    queue_status: Optional[GlobalQueueStatus] = None,
+) -> int:
     """
     Find all stale processing tasks and reset them or mark as error.
     Returns number of tasks reset/marked as error.
+
+    When queue_status is provided, GET responses include optional active_tasks JSON; if our
+    worker_task_id/guid/output URLs do not appear while the worker lists active jobs (or lists
+    none), we requeue after STALE_TASK_TIMEOUT_MINUTES with no real progress.
+
+    Prod diagnostics for one stuck task_id (adjust table name for your DB):
+    SELECT id, status, worker_api, worker_task_id, guid, output_urls, total_count, ready_count,
+           last_progress_at, restart_count, created_at, updated_at FROM tasks WHERE id = ?;
     """
-    from config import STALE_TASK_TIMEOUT_MINUTES, GLOBAL_TASK_TIMEOUT_MINUTES
-    from datetime import timedelta
-    
+    from config import (
+        STALE_TASK_TIMEOUT_MINUTES,
+        GLOBAL_TASK_TIMEOUT_MINUTES,
+        PARTIAL_PROGRESS_STALE_MINUTES,
+    )
+
     now = datetime.utcnow()
     stale_cutoff = now - timedelta(minutes=STALE_TASK_TIMEOUT_MINUTES)
     global_cutoff = now - timedelta(minutes=GLOBAL_TASK_TIMEOUT_MINUTES)
-    
+    partial_cutoff = now - timedelta(minutes=PARTIAL_PROGRESS_STALE_MINUTES)
+    lookup = get_worker_active_lookup(queue_status)
+
     # Find all non-terminal tasks
     result = await db.execute(
         select(Task).where(
@@ -509,10 +529,10 @@ async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
         )
     )
     active_tasks = result.scalars().all()
-    
+
     action_count = 0
     for task in active_tasks:
-        # 1. Check for global hard timeout (3 hours)
+        # 1. Global hard timeout (default aligned with ~2h worker job cap via env)
         if task.created_at and task.created_at < global_cutoff:
             task.status = "error"
             task.error_message = f"Task timed out after {GLOBAL_TASK_TIMEOUT_MINUTES} minutes."
@@ -521,42 +541,75 @@ async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
             action_count += 1
             continue
 
-        # 2. Check for staleness (no progress for 10 minutes)
-        # Only for tasks that are actually in 'processing'
-        if task.status == "processing":
-            reference_time = get_task_progress_reference_time(task)
+        if task.status != "processing":
+            continue
 
-            if reference_time and reference_time < stale_cutoff:
-                # Additional check: if it has URLs but no progress, or just no progress at all
-                if task.ready_count == 0:
-                    no_progress_min = get_task_no_progress_minutes(task, now=now)
-                    print(
-                        f"[Stale Task] Detected stale task {task.id}: "
-                        f"worker={task.worker_api}, no_progress={no_progress_min:.1f}m, "
-                        f"since={reference_time}"
-                    )
-                    if await reset_stale_task(db, task):
-                        action_count += 1
-    
+        reference_time = get_task_progress_reference_time(task)
+        if not reference_time:
+            continue
+
+        entry = lookup_worker_queue_entry(task.worker_api, lookup)
+        lost_on_worker = False
+        if entry:
+            refs, has_payload = entry
+            if has_payload and not task_visible_on_worker_refs(
+                task.worker_task_id,
+                task.guid,
+                task.output_urls,
+                refs,
+                has_payload,
+            ):
+                lost_on_worker = True
+
+        should_reset = False
+        reason = ""
+        if lost_on_worker and reference_time < stale_cutoff:
+            should_reset = True
+            reason = "lost_on_worker"
+        elif reference_time < stale_cutoff and (task.ready_count or 0) == 0:
+            should_reset = True
+            reason = "no_ready_yet"
+        elif (
+            (task.total_count or 0) > 0
+            and (task.ready_count or 0) < (task.total_count or 0)
+            and reference_time < partial_cutoff
+        ):
+            should_reset = True
+            reason = "partial_progress_stale"
+
+        if should_reset:
+            no_progress_min = get_task_no_progress_minutes(task, now=now)
+            print(
+                f"[Stale Task] Detected stale task {task.id} ({reason}): "
+                f"worker={task.worker_api}, no_progress={no_progress_min:.1f}m, "
+                f"since={reference_time}"
+            )
+            if await reset_stale_task(db, task):
+                action_count += 1
+
     if action_count > 0:
         await db.commit()
-        
+
     return action_count
 
 
 async def get_stalled_processing_tasks_by_worker(
     db: AsyncSession,
     *,
-    min_stalled_minutes: int
+    min_stalled_minutes: int,
+    queue_status: Optional[GlobalQueueStatus] = None,
 ) -> dict[str, list[Task]]:
     """
-    Return processing tasks that have no real progress for at least N minutes,
-    grouped by worker_api.
+    Return processing tasks that look stalled (no progress, lost on worker per active_tasks JSON,
+    or partial progress beyond PARTIAL_PROGRESS_STALE_MINUTES), grouped by worker_api.
     """
-    from datetime import timedelta
+    from config import PARTIAL_PROGRESS_STALE_MINUTES
 
     now = datetime.utcnow()
-    cutoff = now - timedelta(minutes=min_stalled_minutes)
+    stale_cutoff = now - timedelta(minutes=min_stalled_minutes)
+    partial_cutoff = now - timedelta(minutes=PARTIAL_PROGRESS_STALE_MINUTES)
+    lookup = get_worker_active_lookup(queue_status)
+
     result = await db.execute(
         select(Task).where(Task.status == "processing")
     )
@@ -564,15 +617,40 @@ async def get_stalled_processing_tasks_by_worker(
 
     grouped: dict[str, list[Task]] = {}
     for task in processing_tasks:
-        if task.ready_count != 0:
-            continue
         ref = get_task_progress_reference_time(task)
-        if not ref or ref >= cutoff:
+        if not ref:
             continue
         worker = (task.worker_api or "").strip()
         if not worker:
             continue
-        grouped.setdefault(worker, []).append(task)
+
+        entry = lookup_worker_queue_entry(task.worker_api, lookup)
+        lost_on_worker = False
+        if entry:
+            refs, has_payload = entry
+            if has_payload and not task_visible_on_worker_refs(
+                task.worker_task_id,
+                task.guid,
+                task.output_urls,
+                refs,
+                has_payload,
+            ):
+                lost_on_worker = True
+
+        stalled = False
+        if lost_on_worker and ref < stale_cutoff:
+            stalled = True
+        elif ref < stale_cutoff and (task.ready_count or 0) == 0:
+            stalled = True
+        elif (
+            (task.total_count or 0) > 0
+            and (task.ready_count or 0) < (task.total_count or 0)
+            and ref < partial_cutoff
+        ):
+            stalled = True
+
+        if stalled:
+            grouped.setdefault(worker, []).append(task)
     return grouped
 
 

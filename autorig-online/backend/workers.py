@@ -4,8 +4,8 @@ Handles communication with conversion workers
 """
 import re
 import asyncio
-from typing import Optional, List, Tuple, Dict
-from dataclasses import dataclass
+from typing import Optional, List, Tuple, Dict, Any
+from dataclasses import dataclass, field
 import random
 import os
 from datetime import datetime, timedelta
@@ -372,13 +372,44 @@ async def send_fbx_to_glb(worker_api_url: str, input_url: str) -> FbxToGlbResult
 # =============================================================================
 # Progress Checking
 # =============================================================================
-async def check_url_availability(url: str, client: httpx.AsyncClient) -> bool:
-    """Check if a single URL is available (returns 200)"""
+async def probe_resource_available(url: str, client: httpx.AsyncClient) -> bool:
+    """
+    True if the URL looks fetchable (artifact exists on worker/CDN).
+
+    Uses HEAD first. Many reverse proxies return 403/405 for HEAD on static files while GET works;
+    in those cases we fall back to a 1-byte Range GET (cheap existence check).
+    """
     try:
-        response = await client.head(url, timeout=PROGRESS_CHECK_TIMEOUT, follow_redirects=True)
-        return response.status_code == 200
-    except:
+        r = await client.head(url, timeout=PROGRESS_CHECK_TIMEOUT, follow_redirects=True)
+        if r.status_code == 200:
+            return True
+        if r.status_code == 404:
+            return False
+        if r.status_code in (403, 405, 501) or r.status_code >= 500:
+            g = await client.get(
+                url,
+                timeout=PROGRESS_CHECK_TIMEOUT,
+                follow_redirects=True,
+                headers={"Range": "bytes=0-0"},
+            )
+            return g.status_code in (200, 206)
         return False
+    except Exception:
+        try:
+            g = await client.get(
+                url,
+                timeout=PROGRESS_CHECK_TIMEOUT,
+                follow_redirects=True,
+                headers={"Range": "bytes=0-0"},
+            )
+            return g.status_code in (200, 206)
+        except Exception:
+            return False
+
+
+async def check_url_availability(url: str, client: httpx.AsyncClient) -> bool:
+    """Check if a single output URL is available (HEAD or Range GET fallback)."""
+    return await probe_resource_available(url, client)
 
 
 async def check_urls_batch(
@@ -445,18 +476,11 @@ async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[boo
     small_url = f"{base}/converter/glb/{guid}/{guid}_video_small.mp4"
     large_url = f"{base}/converter/glb/{guid}/{guid}_video.mp4"
 
-    async def _head_ok(client: httpx.AsyncClient, url: str) -> bool:
-        try:
-            response = await client.head(url, timeout=5.0, follow_redirects=True)
-            return response.status_code == 200
-        except Exception:
-            return False
-
     try:
         async with httpx.AsyncClient() as client:
-            if await _head_ok(client, small_url):
+            if await probe_resource_available(small_url, client):
                 return True, small_url
-            if await _head_ok(client, large_url):
+            if await probe_resource_available(large_url, client):
                 return True, large_url
     except Exception:
         pass
@@ -502,7 +526,11 @@ class WorkerQueueStatus:
     max_concurrent: int = 1
     avg_task_time: float = 900.0  # Default 15 min in seconds
     error: Optional[str] = None
-    
+    # Flattened strings from worker JSON (active_tasks / similar) for matching Task.worker_task_id / guid / URLs
+    active_refs: List[str] = field(default_factory=list)
+    # True if JSON contained a non-null active_tasks (or alias) key — enables "lost on worker" detection
+    has_active_tasks_payload: bool = False
+
     @property
     def port(self) -> str:
         """Extract port from URL for display"""
@@ -510,6 +538,132 @@ class WorkerQueueStatus:
             return self.url.split(':')[-1].split('/')[0]
         except:
             return "?"
+
+
+# Expected GET worker JSON (api-converter-glb root): total_active, queue_size, max_concurrent,
+# average_time_converting_task, plus optional active_tasks (or activeTasks / running_tasks) — list or dict
+# of jobs; each job may include task_id, id, guid, output_urls, progress_page strings for correlation.
+
+
+def _walk_json_strings(obj: Any, depth: int = 0, max_depth: int = 10) -> List[str]:
+    """Collect string leaves from nested JSON for substring matching against our Task fields."""
+    if depth > max_depth or obj is None:
+        return []
+    if isinstance(obj, str):
+        s = obj.strip()
+        return [s] if s else []
+    if isinstance(obj, (int, float)):
+        return [str(obj)]
+    if isinstance(obj, dict):
+        out: List[str] = []
+        for _k, v in obj.items():
+            out.extend(_walk_json_strings(v, depth + 1, max_depth))
+        return out
+    if isinstance(obj, (list, tuple)):
+        out = []
+        for x in obj:
+            out.extend(_walk_json_strings(x, depth + 1, max_depth))
+        return out
+    return []
+
+
+def parse_worker_active_tasks_from_json(data: dict) -> Tuple[List[str], bool]:
+    """
+    Extract flattened reference strings and whether the payload included an explicit active-tasks key.
+    has_payload True + empty refs means the worker reports zero running jobs (all our processing tasks are lost).
+    """
+    if not isinstance(data, dict):
+        return [], False
+    keys = (
+        "active_tasks",
+        "activeTasks",
+        "running_tasks",
+        "runningTasks",
+        "current_tasks",
+        "currentTasks",
+    )
+    for key in keys:
+        if key not in data:
+            continue
+        val = data[key]
+        if val is None:
+            return [], True
+        if isinstance(val, (list, dict)):
+            return _walk_json_strings(val), True
+        if isinstance(val, (str, int, float)):
+            return [str(val).strip()] if str(val).strip() else [], True
+    return [], False
+
+
+def task_visible_on_worker_refs(
+    worker_task_id: Optional[str],
+    guid: Optional[str],
+    output_urls: Optional[List[str]],
+    active_refs: List[str],
+    has_active_tasks_payload: bool,
+) -> bool:
+    """
+    True if we cannot conclude the job was dropped, or the task matches worker-reported activity.
+    False when the worker explicitly lists active tasks but none reference our ids/urls/guid.
+    """
+    if not has_active_tasks_payload:
+        return True
+    if not active_refs:
+        return False
+    blob_lc = "\n".join(active_refs).lower()
+    tid = (worker_task_id or "").strip().lower()
+    if len(tid) >= 4 and tid in blob_lc:
+        return True
+    g = (guid or "").strip().lower()
+    if len(g) >= 8 and g in blob_lc:
+        return True
+    for u in output_urls or []:
+        if not isinstance(u, str):
+            continue
+        s = (u.strip().lower())
+        if len(s) >= 16 and s in blob_lc:
+            return True
+        for segment in s.split("/"):
+            seg = segment.strip().lower()
+            if len(seg) >= 8 and seg in blob_lc:
+                return True
+    return False
+
+
+def normalize_worker_url_key(url: str) -> str:
+    return (url or "").strip().rstrip("/")
+
+
+def get_worker_active_lookup(queue_status: Optional["GlobalQueueStatus"]) -> Dict[str, Tuple[List[str], bool]]:
+    """Map normalized worker root URL -> (active_refs, has_active_tasks_payload)."""
+    if queue_status is None:
+        return {}
+    out: Dict[str, Tuple[List[str], bool]] = {}
+    for w in queue_status.workers:
+        if not w.available:
+            continue
+        key = normalize_worker_url_key(w.url)
+        out[key] = (list(w.active_refs), bool(w.has_active_tasks_payload))
+    return out
+
+
+def lookup_worker_queue_entry(
+    task_worker_api: Optional[str],
+    lookup: Dict[str, Tuple[List[str], bool]],
+) -> Optional[Tuple[List[str], bool]]:
+    if not lookup:
+        return None
+    w = normalize_worker_url_key(task_worker_api or "")
+    if not w:
+        return None
+    if w in lookup:
+        return lookup[w]
+    for k, v in lookup.items():
+        if not k:
+            continue
+        if w.startswith(k) or k.startswith(w):
+            return v
+    return None
 
 
 @dataclass
@@ -531,6 +685,9 @@ async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) ->
         response = await client.get(worker_url, timeout=5.0)
         if response.status_code == 200:
             data = response.json()
+            if not isinstance(data, dict):
+                data = {}
+            active_refs, has_active_payload = parse_worker_active_tasks_from_json(data)
             return WorkerQueueStatus(
                 url=worker_url,
                 available=True,
@@ -538,7 +695,9 @@ async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) ->
                 total_pending=data.get("total_pending", 0),
                 queue_size=data.get("queue_size", 0),
                 max_concurrent=data.get("max_concurrent", 1),
-                avg_task_time=data.get("average_time_converting_task", 900.0)
+                avg_task_time=data.get("average_time_converting_task", 900.0),
+                active_refs=active_refs,
+                has_active_tasks_payload=has_active_payload,
             )
         return WorkerQueueStatus(
             url=worker_url,

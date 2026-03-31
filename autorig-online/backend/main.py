@@ -366,7 +366,7 @@ def _release_gallery_purge_lock(lock_file) -> None:
 
 
 STALLED_ALERT_REPEAT_SECONDS = int(os.getenv("STALLED_ALERT_REPEAT_SECONDS", "3600"))
-STALLED_TASK_THRESHOLD = int(os.getenv("STALLED_TASK_THRESHOLD", "2"))
+STALLED_TASK_THRESHOLD = int(os.getenv("STALLED_TASK_THRESHOLD", "1"))
 STALLED_RECOVERY_HEALTHY_CYCLES = int(os.getenv("STALLED_RECOVERY_HEALTHY_CYCLES", "3"))
 _stalled_worker_state: dict[str, dict] = {}
 
@@ -382,7 +382,8 @@ async def _monitor_stalled_workers(db: AsyncSession, queue_status=None) -> bool:
     now = datetime.utcnow()
     stalled_grouped = await get_stalled_processing_tasks_by_worker(
         db,
-        min_stalled_minutes=STALE_TASK_TIMEOUT_MINUTES
+        min_stalled_minutes=STALE_TASK_TIMEOUT_MINUTES,
+        queue_status=queue_status,
     )
     active_stalled_workers: set[str] = set()
     queue_by_url = {w.url: w for w in (queue_status.workers if queue_status else [])}
@@ -517,7 +518,7 @@ async def background_task_updater():
                 # =============================================================
                 if force_stale_reset or (background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0):
                     try:
-                        reset_count = await find_and_reset_stale_tasks(db)
+                        reset_count = await find_and_reset_stale_tasks(db, queue_status=queue_status)
                         if reset_count > 0:
                             reason = "forced" if force_stale_reset else "periodic"
                             print(f"[Background Worker] Auto-reset {reset_count} stale task(s) [{reason}]")

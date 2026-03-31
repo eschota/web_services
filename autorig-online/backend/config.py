@@ -102,8 +102,11 @@ PROGRESS_CHECK_TIMEOUT = 5  # Timeout for HEAD requests in seconds
 # =============================================================================
 # Stale Task Detection & Auto-Restart
 # =============================================================================
-STALE_TASK_TIMEOUT_MINUTES = 10  # Task is "stale" if no progress for this long
-GLOBAL_TASK_TIMEOUT_MINUTES = 180  # Hard timeout for any non-terminal task (3 hours)
+STALE_TASK_TIMEOUT_MINUTES = int(os.getenv("STALE_TASK_TIMEOUT_MINUTES", "10"))
+# Align with typical worker single-job timeout (~2h); non-terminal tasks older than this -> error
+GLOBAL_TASK_TIMEOUT_MINUTES = int(os.getenv("GLOBAL_TASK_TIMEOUT_MINUTES", "120"))
+# processing with ready_count < total_count and no new file for this long -> requeue (worker may be stuck mid-pipeline)
+PARTIAL_PROGRESS_STALE_MINUTES = int(os.getenv("PARTIAL_PROGRESS_STALE_MINUTES", "120"))
 MAX_TASK_RESTARTS = 3  # Maximum number of auto-restarts before marking as error
 STALE_CHECK_INTERVAL_CYCLES = 2  # Check for stale tasks every N background worker cycles
 
