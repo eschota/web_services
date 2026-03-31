@@ -556,7 +556,12 @@ def _walk_json_strings(obj: Any, depth: int = 0, max_depth: int = 10) -> List[st
         return [str(obj)]
     if isinstance(obj, dict):
         out: List[str] = []
-        for _k, v in obj.items():
+        for k, v in obj.items():
+            # api-converter-glb often maps task_id / guid -> object; ids live in dict keys
+            if isinstance(k, str):
+                ks = k.strip()
+                if ks:
+                    out.append(ks)
             out.extend(_walk_json_strings(v, depth + 1, max_depth))
         return out
     if isinstance(obj, (list, tuple)):
@@ -569,8 +574,9 @@ def _walk_json_strings(obj: Any, depth: int = 0, max_depth: int = 10) -> List[st
 
 def parse_worker_active_tasks_from_json(data: dict) -> Tuple[List[str], bool]:
     """
-    Extract flattened reference strings and whether the payload included an explicit active-tasks key.
-    has_payload True + empty refs means the worker reports zero running jobs (all our processing tasks are lost).
+    Extract flattened reference strings and whether the payload included explicit task-bucket keys.
+    Merge active_tasks + processing_tasks + pending_tasks — workers may use different buckets.
+    has_payload True + empty refs means the worker reports zero running jobs (idle).
     """
     if not isinstance(data, dict):
         return [], False
@@ -581,18 +587,34 @@ def parse_worker_active_tasks_from_json(data: dict) -> Tuple[List[str], bool]:
         "runningTasks",
         "current_tasks",
         "currentTasks",
+        "processing_tasks",
+        "processingTasks",
+        "pending_tasks",
+        "pendingTasks",
     )
+    has_payload = False
+    all_refs: List[str] = []
     for key in keys:
         if key not in data:
             continue
+        has_payload = True
         val = data[key]
         if val is None:
-            return [], True
+            continue
         if isinstance(val, (list, dict)):
-            return _walk_json_strings(val), True
-        if isinstance(val, (str, int, float)):
-            return [str(val).strip()] if str(val).strip() else [], True
-    return [], False
+            all_refs.extend(_walk_json_strings(val))
+        elif isinstance(val, (str, int, float)):
+            s = str(val).strip()
+            if s:
+                all_refs.append(s)
+    # Dedupe while keeping order
+    seen = set()
+    deduped: List[str] = []
+    for s in all_refs:
+        if s not in seen:
+            seen.add(s)
+            deduped.append(s)
+    return deduped, has_payload
 
 
 def task_visible_on_worker_refs(
@@ -679,6 +701,25 @@ class GlobalQueueStatus:
     estimated_wait_formatted: str
 
 
+def _safe_worker_int(value: Any, default: int = 0) -> int:
+    """Coerce worker JSON counters; bad types must not break dispatch (queue_size <= 0) filters."""
+    try:
+        if value is None:
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_worker_float(value: Any, default: float = 900.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) -> WorkerQueueStatus:
     """Get detailed queue status from a single worker"""
     try:
@@ -688,14 +729,15 @@ async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) ->
             if not isinstance(data, dict):
                 data = {}
             active_refs, has_active_payload = parse_worker_active_tasks_from_json(data)
+            max_c = max(1, _safe_worker_int(data.get("max_concurrent"), 1))
             return WorkerQueueStatus(
                 url=worker_url,
                 available=True,
-                total_active=data.get("total_active", 0),
-                total_pending=data.get("total_pending", 0),
-                queue_size=data.get("queue_size", 0),
-                max_concurrent=data.get("max_concurrent", 1),
-                avg_task_time=data.get("average_time_converting_task", 900.0),
+                total_active=_safe_worker_int(data.get("total_active"), 0),
+                total_pending=_safe_worker_int(data.get("total_pending"), 0),
+                queue_size=_safe_worker_int(data.get("queue_size"), 0),
+                max_concurrent=max_c,
+                avg_task_time=_safe_worker_float(data.get("average_time_converting_task"), 900.0),
                 active_refs=active_refs,
                 has_active_tasks_payload=has_active_payload,
             )

@@ -510,6 +510,23 @@ async def background_task_updater():
                                 await start_task_on_worker(db, task, worker.url)
                             except Exception as e:
                                 print(f"[Background Worker] Error dispatching task {task.id}: {e}")
+                    else:
+                        c_q = await db.execute(
+                            select(func.count()).select_from(Task).where(Task.status == "created")
+                        )
+                        n_created = int(c_q.scalar() or 0)
+                        if n_created > 0:
+                            for w in queue_status.workers:
+                                print(
+                                    f"[Background Worker] No free worker: url={w.url} "
+                                    f"available={w.available} err={w.error!r} "
+                                    f"active={w.total_active} max={w.max_concurrent} "
+                                    f"queue_size={w.queue_size} quarantined={is_worker_quarantined(w.url)}"
+                                )
+                            print(
+                                f"[Background Worker] {n_created} task(s) in status=created but "
+                                f"no worker passed filters (available, capacity, queue_size<=0)"
+                            )
                 except Exception as e:
                     print(f"[Background Worker] Queue dispatch error: {e}")
 
