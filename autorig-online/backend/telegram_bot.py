@@ -524,7 +524,7 @@ async def broadcast_youtube_token_refresh_needed(detail: str = "") -> None:
 async def broadcast_disk_space_low(
     *,
     free_gb: float,
-    target_gb: int,
+    target_gb: float,
     zips_deleted: int,
     tasks_purged: int,
 ) -> None:
@@ -541,12 +541,13 @@ async def broadcast_disk_space_low(
     from telegram.constants import ParseMode
 
     hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
-    event_key = f"below_{target_gb}g_{hour_bucket}"
+    tgt = f"{float(target_gb):.1f}".replace(".", "_")
+    event_key = f"below_{tgt}g_{hour_bucket}"
 
     text = (
         "🚨 <b>Мало места на диске</b>\n"
         f"Свободно на <code>/</code>: <b>{free_gb:.2f} GB</b> "
-        f"(цель при создании задачи: <b>{target_gb} GB</b>)\n"
+        f"(цель при создании задачи: <b>{float(target_gb):.1f} GB</b>)\n"
         f"Очистка при создании задачи: удалено ZIP: <code>{zips_deleted}</code>, "
         f"задач (done/error): <code>{tasks_purged}</code>"
     )

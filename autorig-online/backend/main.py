@@ -33,6 +33,7 @@ from slowapi.errors import RateLimitExceeded
 
 from config import (
     APP_NAME, APP_URL, DEBUG, SECRET_KEY,
+    DATABASE_URL,
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
     RATE_LIMIT_TASKS_PER_MINUTE, RATE_LIMIT_AGENT_REGISTER, is_admin_email,
     ANON_FREE_LIMIT,
@@ -4818,6 +4819,47 @@ async def api_admin_cleanup(
     }
 
 
+def _dir_size_bytes(path: Path) -> int:
+    """Sum file sizes under path (file or directory)."""
+    if not path.exists():
+        return 0
+    total = 0
+    try:
+        if path.is_file():
+            return path.stat().st_size
+        for root, _dirs, files in os.walk(str(path)):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                try:
+                    total += os.path.getsize(fp)
+                except OSError:
+                    pass
+    except OSError:
+        return 0
+    return total
+
+
+def _sqlite_db_path_and_bytes() -> Tuple[Optional[str], int]:
+    """If DATABASE_URL is SQLite, return (path string, file size) or (None, 0)."""
+    try:
+        from sqlalchemy.engine.url import make_url
+
+        u = make_url(DATABASE_URL)
+    except Exception:
+        return None, 0
+    if not u.drivername.startswith("sqlite") or not u.database:
+        return None, 0
+    p = Path(u.database)
+    if not p.is_absolute():
+        p = (BASE_DIR / p).resolve()
+    if not p.is_file():
+        return str(p), 0
+    try:
+        return str(p), p.stat().st_size
+    except OSError:
+        return str(p), 0
+
+
 @app.get("/api/admin/disk-stats")
 async def api_admin_disk_stats(
     request: Request,
@@ -4825,42 +4867,72 @@ async def api_admin_disk_stats(
 ):
     """
     Get disk usage statistics (admin only).
+    Includes per-directory size breakdown (GB) for main data categories.
     """
     import shutil
-    
+
     disk_usage = shutil.disk_usage("/")
-    
+
     # Count items in each cleanable directory
     task_cache_count = len(list(TASK_CACHE_DIR.iterdir())) if TASK_CACHE_DIR.exists() else 0
     glb_cache_count = len(list(GLB_CACHE_DIR.iterdir())) if GLB_CACHE_DIR.exists() else 0
-    
+
     upload_dir = pathlib.Path(UPLOAD_DIR)
     upload_count = len(list(upload_dir.iterdir())) if upload_dir.exists() else 0
-    
+
     videos_dir = pathlib.Path("/var/autorig/videos")
     videos_count = len(list(videos_dir.iterdir())) if videos_dir.exists() else 0
-    
+
+    task_b = _dir_size_bytes(TASK_CACHE_DIR)
+    glb_b = _dir_size_bytes(GLB_CACHE_DIR)
+    upload_b = _dir_size_bytes(upload_dir)
+    videos_b = _dir_size_bytes(videos_dir)
+    static_total_b = _dir_size_bytes(STATIC_DIR)
+    static_assets_b = max(0, static_total_b - task_b - glb_b)
+    db_path, db_b = _sqlite_db_path_and_bytes()
+
+    used_b = disk_usage.used
+    tracked_b = static_total_b + upload_b + videos_b + db_b
+    other_b = max(0, used_b - tracked_b)
+
+    def _gb(x: int) -> float:
+        return round(x / (1024**3), 2)
+
+    breakdown_gb = {
+        "task_cache": _gb(task_b),
+        "glb_cache": _gb(glb_b),
+        "static_assets": _gb(static_assets_b),
+        "uploads": _gb(upload_b),
+        "videos": _gb(videos_b),
+        "database_sqlite": _gb(db_b) if db_b > 0 else None,
+        "other_on_disk": _gb(other_b),
+    }
+
     return {
         "ok": True,
         "disk": {
             "total_gb": round(disk_usage.total / (1024**3), 2),
             "used_gb": round(disk_usage.used / (1024**3), 2),
             "free_gb": round(disk_usage.free / (1024**3), 2),
-            "percent_used": round(disk_usage.used / disk_usage.total * 100, 1)
+            "percent_used": round(disk_usage.used / disk_usage.total * 100, 1),
         },
+        "breakdown_gb": breakdown_gb,
+        "database_path": db_path,
         "cleanable_items": {
             "task_cache": task_cache_count,
             "glb_cache": glb_cache_count,
             "uploads": upload_count,
-            "videos": videos_count
+            "videos": videos_count,
         },
         "settings": {
-            "min_free_space_gb": MIN_FREE_SPACE_GB,
+            "min_free_space_gb": round(float(MIN_FREE_SPACE_GB), 2),
+            "new_task_min_free_gb": round(float(NEW_TASK_MIN_FREE_GB), 2),
+            "new_task_purge_max_freed_gb": round(float(NEW_TASK_PURGE_TASKS_MAX_FREED_GB), 2),
             "cleanup_interval_cycles": CLEANUP_CHECK_INTERVAL_CYCLES,
             "min_age_hours": CLEANUP_MIN_AGE_HOURS,
             "gallery_db_purge_interval_cycles": GALLERY_DB_PURGE_INTERVAL_CYCLES,
             "automatic_task_db_deletion": AUTOMATIC_TASK_DB_DELETION,
-        }
+        },
     }
 
 

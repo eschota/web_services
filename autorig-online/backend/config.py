@@ -232,14 +232,15 @@ TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "AutoRigOnlineBot")
 # Set AUTOMATIC_TASK_DB_DELETION=1 to restore legacy automatic DB row deletion.
 AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
 
-MIN_FREE_SPACE_GB = int(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain
+MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain (background cleanup)
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
 
 # Before each new task: try to reach at least this much free space on /
-NEW_TASK_MIN_FREE_GB = int(os.getenv("NEW_TASK_MIN_FREE_GB", "2"))
-# If ZIP purge is not enough: delete oldest done/error tasks, but free at most this many bytes from disk in that phase
-NEW_TASK_PURGE_TASKS_MAX_FREED_GB = int(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "1"))
+NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
+# If ZIP purge is not enough: delete oldest done/error tasks, but free at most this many GB from disk in that phase
+# (must be >= typical gap to NEW_TASK_MIN_FREE_GB or Telegram low-disk alerts will repeat)
+NEW_TASK_PURGE_TASKS_MAX_FREED_GB = float(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "8"))
 
 # Purge DB rows for terminal tasks that have neither video nor any thumbnail URL in ready/output lists
 # (Used only as legacy env name; gallery purges are gated by GALLERY_DB_PURGE_INTERVAL_CYCLES below.)

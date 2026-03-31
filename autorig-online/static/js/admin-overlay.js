@@ -307,6 +307,13 @@
             '<div class="admin-stats-title">Сводка</div>' +
             '<div id="admin-ov-stats-inner" class="admin-ov-stats-inner">—</div>' +
             '<button type="button" class="admin-stats-reset" id="admin-ov-stats-reset" title="Обнулить счётчики периода (завершения и сумму длительностей) в БД">Сбросить счётчики периода</button>' +
+            '<div class="admin-disk-panel">' +
+            '<div class="admin-stats-title">Диск</div>' +
+            '<div id="admin-disk-chart" class="admin-disk-chart">—</div>' +
+            '<div class="admin-disk-actions">' +
+            '<button type="button" class="admin-disk-btn" id="admin-disk-refresh" title="Пересчитать размеры каталогов">Обновить</button>' +
+            '<button type="button" class="admin-disk-btn admin-disk-btn-danger" id="admin-disk-cleanup" title="Запустить фоновую очистку до min free (как в API)">Очистка сейчас</button>' +
+            '</div></div>' +
             '</div></div></div>' +
             '<div class="admin-bulk-sel" role="toolbar" aria-label="Быстрый выбор">' +
             '<span class="admin-bulk-sel-label">Выбор</span>' +
@@ -478,6 +485,15 @@
             });
         });
 
+        var dr = root.querySelector('#admin-disk-refresh');
+        var dc = root.querySelector('#admin-disk-cleanup');
+        if (dr) dr.addEventListener('click', function (e) { e.preventDefault(); loadDiskStats(); });
+        if (dc)
+            dc.addEventListener('click', function (e) {
+                e.preventDefault();
+                runAdminDiskCleanup();
+            });
+
         document.addEventListener('visibilitychange', onVisibilityRefreshQueue);
 
         document.addEventListener('keydown', onKeyDown);
@@ -609,6 +625,113 @@
         }
     }
 
+    function renderDiskBreakdown(data) {
+        var el = document.getElementById('admin-disk-chart');
+        if (!el) return;
+        var d = data && data.disk;
+        var b = data && data.breakdown_gb;
+        if (!d || !b) {
+            el.innerHTML = '<span style="color:#f88">Нет данных</span>';
+            return;
+        }
+        var rows = [
+            { k: 'task_cache', label: 'Кэш задач (static/tasks)' },
+            { k: 'glb_cache', label: 'GLB кэш' },
+            { k: 'static_assets', label: 'Статика (без кэшей)' },
+            { k: 'uploads', label: 'Загрузки' },
+            { k: 'videos', label: 'Видео /var/autorig/videos' },
+        ];
+        if (b.database_sqlite != null && b.database_sqlite > 0) {
+            rows.push({ k: 'database_sqlite', label: 'БД SQLite' });
+        }
+        rows.push({ k: 'other_on_disk', label: 'Прочее на диске /' });
+        var maxGb = 0.001;
+        rows.forEach(function (r) {
+            var v = Number(b[r.k] || 0);
+            if (v > maxGb) maxGb = v;
+        });
+        var freeLine =
+            '<div class="admin-disk-summary">' +
+            'Свободно: <strong>' +
+            esc(String(d.free_gb)) +
+            '</strong> GB · занято: <strong>' +
+            esc(String(d.used_gb)) +
+            '</strong> GB из ' +
+            esc(String(d.total_gb)) +
+            ' GB</div>';
+        var bars = rows
+            .map(function (r) {
+                var gb = Number(b[r.k] || 0);
+                var pct = Math.min(100, (gb / maxGb) * 100);
+                return (
+                    '<div class="admin-disk-bar-row">' +
+                    '<span class="admin-disk-bar-label" title="' +
+                    escAttr(r.label) +
+                    '">' +
+                    esc(r.label) +
+                    '</span>' +
+                    '<div class="admin-disk-bar-track"><i style="width:' +
+                    pct.toFixed(1) +
+                    '%"></i></div>' +
+                    '<span class="admin-disk-bar-val">' +
+                    (gb >= 0.01 ? gb.toFixed(2) : gb.toFixed(3)) +
+                    ' GB</span></div>'
+                );
+            })
+            .join('');
+        el.innerHTML = freeLine + bars;
+    }
+
+    async function loadDiskStats() {
+        var el = document.getElementById('admin-disk-chart');
+        if (!el) return;
+        el.innerHTML = '<span class="admin-disk-loading">Считаю размеры…</span>';
+        try {
+            var r = await api('/api/admin/disk-stats');
+            if (!r.ok) {
+                el.innerHTML = '<span style="color:#f88">disk-stats: ' + r.status + '</span>';
+                return;
+            }
+            var data = await r.json();
+            renderDiskBreakdown(data);
+        } catch (e) {
+            el.innerHTML = '<span style="color:#f88">' + esc(humanFetchError(e)) + '</span>';
+        }
+    }
+
+    async function runAdminDiskCleanup() {
+        if (
+            !confirm(
+                'Запустить очистку диска до целевого свободного места (MIN_FREE_SPACE)? Удалятся старые файлы задач и/или сироты по правилам сервера.'
+            )
+        )
+            return;
+        try {
+            var r = await api('/api/admin/cleanup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+            var j = await r.json().catch(function () {
+                return {};
+            });
+            if (!r.ok) {
+                alert('Ошибка очистки: ' + r.status);
+                return;
+            }
+            alert(
+                'Очистка завершена.\nОсвобождено: ~' +
+                    (j.freed_gb != null ? j.freed_gb : '?') +
+                    ' GB\nСвободно сейчас: ~' +
+                    (j.final_free_gb != null ? j.final_free_gb : '?') +
+                    ' GB'
+            );
+            loadDiskStats();
+        } catch (e) {
+            alert(esc(humanFetchError(e)));
+        }
+    }
+
     function formatDurationSeconds(sec) {
         if (sec == null || sec === '' || !isFinite(Number(sec))) return '—';
         var s = Number(sec);
@@ -661,6 +784,7 @@
                 '<span class="admin-stat-v">' +
                 esc(avg) +
                 '</span></div>';
+            loadDiskStats();
         } catch (e) {
             inner.innerHTML = '<span style="color:#f88">' + esc(humanFetchError(e)) + '</span>';
         }

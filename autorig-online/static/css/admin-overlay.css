@@ -224,6 +224,100 @@
   filter: brightness(1.08);
 }
 
+.admin-disk-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.admin-disk-chart {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #d0d8e8;
+}
+
+.admin-disk-loading {
+  color: #9aa3b2;
+}
+
+.admin-disk-summary {
+  margin-bottom: 10px;
+  font-size: 0.7rem;
+  color: #b8c4d8;
+}
+
+.admin-disk-summary strong {
+  color: #e8ecf3;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-disk-bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(40px, 1.2fr) auto;
+  gap: 6px 8px;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.admin-disk-bar-label {
+  color: #9aa3b2;
+  font-size: 0.65rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-disk-bar-track {
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.admin-disk-bar-track > i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(100, 160, 255, 0.55), rgba(180, 120, 255, 0.45));
+  max-width: 100%;
+}
+
+.admin-disk-bar-val {
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e8ecf3;
+  flex-shrink: 0;
+}
+
+.admin-disk-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.admin-disk-btn {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(60, 80, 120, 0.35);
+  color: #e8f0ff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.admin-disk-btn:hover {
+  filter: brightness(1.08);
+}
+
+.admin-disk-btn-danger {
+  border-color: rgba(255, 140, 150, 0.45);
+  background: linear-gradient(145deg, rgba(200, 80, 90, 0.45), rgba(140, 40, 55, 0.4));
+}
+
 .admin-queue-filters {
   display: flex;
   flex-wrap: wrap;
