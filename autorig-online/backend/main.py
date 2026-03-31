@@ -41,6 +41,8 @@ from config import (
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
     NEW_TASK_MIN_FREE_GB, NEW_TASK_PURGE_TASKS_MAX_FREED_GB,
     AUTOMATIC_TASK_DB_DELETION,
+    STUCK_HOUR_MINUTES,
+    STUCK_HOUR_MAX_REQUEUES,
     GALLERY_DB_PURGE_INTERVAL_CYCLES,
     GALLERY_UPSTREAM_PURGE_BATCH,
     GALLERY_UPSTREAM_PURGE_ROUNDS,
@@ -491,6 +493,13 @@ async def background_task_updater():
                                 print(f"[Background Worker] Auto-reset {reset_count} stale task(s) [{reason}]")
                         except Exception as e:
                             print(f"[Background Worker] Stale task check error: {e}")
+
+                        try:
+                            sh = await process_stuck_hour_tasks(db)
+                            if sh > 0:
+                                print(f"[Background Worker] Stuck-hour policy: {sh} action(s)")
+                        except Exception as e:
+                            print(f"[Background Worker] Stuck-hour policy error: {e}")
 
                     free_workers = [
                         w for w in queue_status.workers
@@ -4619,7 +4628,7 @@ async def api_admin_bulk_requeue(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Requeue tasks to status=created with cleared worker state; refreshes created_at for global timeout (admin only)."""
+    """Requeue tasks to status=created with cleared worker state (admin only)."""
     ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
     n = 0
     for tid in ids:
@@ -4632,19 +4641,31 @@ async def api_admin_bulk_requeue(
     return AdminBulkAffectedResponse(affected=n)
 
 
+@app.post("/api/admin/tasks/bulk-delete", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_delete_tasks(
+    body: AdminBulkTaskIdsRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete tasks and on-disk artifacts (admin only)."""
+    ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
+    n = 0
+    for tid in ids:
+        if await admin_delete_task_full(db, tid):
+            n += 1
+    return AdminBulkAffectedResponse(affected=n)
+
+
 @app.delete("/api/admin/task/{task_id}")
 async def api_admin_delete_task(
     task_id: str,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a task by id (admin only)."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
+    """Delete a task by id including artifacts (admin only)."""
+    ok = await admin_delete_task_full(db, task_id)
+    if not ok:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    await db.delete(task)
-    await db.commit()
     return {"ok": True, "task_id": task_id}
 
 
@@ -5991,6 +6012,63 @@ async def _delete_task_record_and_related(db: AsyncSession, task_id: str) -> Non
     await db.execute(delete(TaskAnimationBundlePurchase).where(TaskAnimationBundlePurchase.task_id == task_id))
     await db.execute(delete(Task).where(Task.id == task_id))
     await db.commit()
+
+
+async def admin_delete_task_full(db: AsyncSession, task_id: str) -> bool:
+    """Remove task files on disk and DB row + related rows. Returns True if the task existed."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        return False
+    _delete_task_artifacts(task)
+    await _delete_task_record_and_related(db, task_id)
+    return True
+
+
+async def process_stuck_hour_tasks(db: AsyncSession) -> int:
+    """
+    processing + 0 ready, no real progress for >= STUCK_HOUR_MINUTES:
+    requeue (admin-style) up to STUCK_HOUR_MAX_REQUEUES times, then delete task + artifacts.
+    """
+    now = datetime.utcnow()
+    r = await db.execute(select(Task).where(Task.status == "processing"))
+    processing = list(r.scalars().all())
+    to_requeue: List[Task] = []
+    to_delete_ids: List[str] = []
+    for task in processing:
+        if (task.ready_count or 0) != 0:
+            continue
+        if get_task_no_progress_minutes(task, now=now) < STUCK_HOUR_MINUTES:
+            continue
+        cnt = task.stuck_hour_requeue_count or 0
+        if cnt >= STUCK_HOUR_MAX_REQUEUES:
+            to_delete_ids.append(task.id)
+        else:
+            to_requeue.append(task)
+    actions = 0
+    for task in to_requeue:
+        try:
+            await admin_requeue_task_to_created(db, task)
+            task.stuck_hour_requeue_count = (task.stuck_hour_requeue_count or 0) + 1
+            actions += 1
+            print(
+                f"[StuckHour] Requeued {task.id} (stuck_hour_requeue_count={task.stuck_hour_requeue_count})"
+            )
+        except Exception as e:
+            print(f"[StuckHour] Requeue failed {task.id}: {e}")
+    if to_requeue:
+        await db.commit()
+    for tid in to_delete_ids:
+        try:
+            t = await get_task_by_id(db, tid)
+            if not t:
+                continue
+            _delete_task_artifacts(t)
+            await _delete_task_record_and_related(db, tid)
+            actions += 1
+            print(f"[StuckHour] Deleted {tid} (stuck_hour requeues exhausted)")
+        except Exception as e:
+            print(f"[StuckHour] Delete failed {tid}: {e}")
+    return actions
 
 
 def purge_task_cache_bundle_zips(

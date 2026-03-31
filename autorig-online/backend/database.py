@@ -166,6 +166,8 @@ class Task(Base):
     
     # Auto-restart tracking for stale tasks
     restart_count = Column(Integer, default=0)  # Number of times task was auto-restarted
+    # Stuck-hour policy: auto requeues (admin-style) before full delete; not cleared by admin_requeue
+    stuck_hour_requeue_count = Column(Integer, default=0)
     last_progress_at = Column(DateTime, nullable=True)  # Last time progress changed
     
     # Video
@@ -636,6 +638,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_description TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_keywords TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN stuck_hour_requeue_count INTEGER DEFAULT 0")
             try:
                 await conn.exec_driver_sql(
                     """
@@ -894,6 +897,9 @@ async def init_db():
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stuck_hour_requeue_count INTEGER NOT NULL DEFAULT 0"
             )
             await _try_add_column_any(
                 "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS parent_id INTEGER"

@@ -468,10 +468,8 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
 async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
     """
     Operator recovery: move task back to queue like stale reset but restart_count := 0
-    (does not increment). Refreshes created_at/updated_at so GLOBAL_TASK_TIMEOUT_MINUTES
-    (find_and_reset_stale_tasks) does not immediately re-error the task. Caller should commit.
+    (does not increment). Caller should commit.
     """
-    now = datetime.utcnow()
     task.status = "created"
     task.ready_count = 0
     task.ready_urls = []
@@ -486,8 +484,7 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
     task.error_message = None
     task.restart_count = 0
     task.last_progress_at = None
-    task.created_at = now
-    task.updated_at = now
+    task.updated_at = datetime.utcnow()
     task.fbx_glb_output_url = None
     task.fbx_glb_model_name = None
     task.fbx_glb_ready = False

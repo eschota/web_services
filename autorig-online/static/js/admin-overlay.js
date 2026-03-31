@@ -321,6 +321,7 @@
             '<span class="admin-bulk-sel-label">Действия</span>' +
             '<span class="admin-bulk-meta">выбрано: <strong id="admin-bulk-count">0</strong></span>' +
             '<button type="button" class="admin-action-pill admin-action-rq" id="admin-bulk-bar-rq" title="Requeue: created, сброс состояния, restart_count и глобального таймаута (обновление времени)">requeue</button>' +
+            '<button type="button" class="admin-action-pill admin-action-del" id="admin-bulk-bar-del" title="Удалить задачи и файлы на сервере (безвозвратно)">удалить</button>' +
             '<button type="button" class="admin-action-pill admin-action-copy" id="admin-bulk-bar-copy" title="Скопировать id отмеченных в буфер">копировать id</button>' +
             '</div>' +
             '<div id="admin-card-grid" class="admin-card-grid"></div>' +
@@ -449,6 +450,10 @@
         root.querySelector('#admin-bulk-bar-rq').addEventListener('click', function (e) {
             e.preventDefault();
             bulkRequeue();
+        });
+        root.querySelector('#admin-bulk-bar-del').addEventListener('click', function (e) {
+            e.preventDefault();
+            bulkDelete();
         });
         root.querySelector('#admin-bulk-bar-copy').addEventListener('click', function (e) {
             e.preventDefault();
@@ -1071,6 +1076,20 @@
         return Array.from(bulkCheckedIds);
     }
 
+    function clearBulkSelection() {
+        bulkCheckedIds.clear();
+        document.querySelectorAll('#admin-card-grid .admin-card-cb').forEach(function (cb) {
+            cb.checked = false;
+        });
+        updateBulkSelectionCount();
+        selectedTaskId = null;
+        document.querySelectorAll('#admin-card-grid .admin-card').forEach(function (c) {
+            c.classList.remove('is-selected');
+        });
+        var inner = document.getElementById('admin-detail-inner');
+        if (inner) inner.innerHTML = '<div class="admin-detail-empty">Выберите карточку</div>';
+    }
+
     function bulkCopySelectedIds() {
         var ids = getSelectedIds();
         if (!ids.length) {
@@ -1122,12 +1141,46 @@
             return;
         }
         alert('Requeue: ' + (j.affected | 0));
+        clearBulkSelection();
         loadQueue();
-        if (selectedTaskId) loadDetail(selectedTaskId);
     }
 
     function bulkRequeue() {
         postBulkRequeue(getSelectedIds());
+    }
+
+    async function postBulkDelete(ids) {
+        if (!ids.length) {
+            alert('Нет выбранных задач');
+            return;
+        }
+        if (
+            !confirm(
+                'Безвозвратно удалить ' +
+                    ids.length +
+                    ' задач(и) вместе с файлами на сервере?'
+            )
+        )
+            return;
+        var r = await api('/api/admin/tasks/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_ids: ids }),
+        });
+        var j = await r.json().catch(function () {
+            return {};
+        });
+        if (!r.ok) {
+            alert('Ошибка: ' + r.status);
+            return;
+        }
+        alert('Удалено: ' + (j.affected | 0));
+        clearBulkSelection();
+        loadQueue();
+    }
+
+    function bulkDelete() {
+        postBulkDelete(getSelectedIds());
     }
 
     async function bulkRecent24() {
@@ -1150,8 +1203,8 @@
             return;
         }
         alert('Обновлено строк: ' + (j.affected | 0));
+        clearBulkSelection();
         loadQueue();
-        if (selectedTaskId) loadDetail(selectedTaskId);
     }
 
     window.AdminOverlay = {

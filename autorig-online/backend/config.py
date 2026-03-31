@@ -123,6 +123,9 @@ GLOBAL_TASK_TIMEOUT_MINUTES = int(os.getenv("GLOBAL_TASK_TIMEOUT_MINUTES", "120"
 PARTIAL_PROGRESS_STALE_MINUTES = int(os.getenv("PARTIAL_PROGRESS_STALE_MINUTES", "120"))
 MAX_TASK_RESTARTS = 3  # Maximum number of auto-restarts before marking as error
 STALE_CHECK_INTERVAL_CYCLES = int(os.getenv("STALE_CHECK_INTERVAL_CYCLES", "1"))
+# Stuck processing (0% progress) longer than this -> auto requeue up to STUCK_HOUR_MAX_REQUEUES, then delete
+STUCK_HOUR_MINUTES = int(os.getenv("STUCK_HOUR_MINUTES", "60"))
+STUCK_HOUR_MAX_REQUEUES = int(os.getenv("STUCK_HOUR_MAX_REQUEUES", "3"))
 
 # =============================================================================
 # Rate Limiting

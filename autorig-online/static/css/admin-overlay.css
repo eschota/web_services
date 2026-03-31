@@ -503,6 +503,12 @@
   border-color: rgba(255, 140, 150, 0.45);
 }
 
+.admin-action-del {
+  background: linear-gradient(145deg, rgba(120, 35, 45, 0.65), rgba(70, 20, 30, 0.6));
+  border-color: rgba(255, 100, 110, 0.4);
+  color: #ffe8ea;
+}
+
 .admin-action-copy {
   background: linear-gradient(145deg, rgba(90, 110, 140, 0.55), rgba(50, 60, 80, 0.5));
   border-color: rgba(180, 195, 220, 0.25);
