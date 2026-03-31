@@ -254,6 +254,17 @@ class AdminStatsResponse(BaseModel):
     total_credits: int
 
 
+class AdminOverlayMetricsResponse(BaseModel):
+    """Сводка для админ-оверлея: live по БД + периодные счётчики (сбрасываются вручную)."""
+
+    tasks_by_status: dict  # created, processing, done, error
+    total_tasks: int
+    rating_percent: Optional[float] = None  # 100 * done / (done + error), если есть terminal
+    session_completed: int = 0
+    session_total_duration_seconds: float = 0.0
+    session_avg_seconds: Optional[float] = None
+
+
 class AdminTaskListItem(BaseModel):
     """Task item for admin all-tasks list"""
     task_id: str

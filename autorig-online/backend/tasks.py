@@ -450,7 +450,15 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
                 )
         except Exception as e:
             print(f"[Tasks] Failed to send GA4 rig_completed for task {task.id}: {e}")
-    
+
+    if was_processing and task.status == "done":
+        try:
+            from database import bump_admin_overlay_task_completed
+
+            await bump_admin_overlay_task_completed(db, task)
+        except Exception as e:
+            print(f"[Tasks] Admin overlay metrics bump: {e}")
+
     return task
 
 

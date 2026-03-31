@@ -63,6 +63,8 @@ from database import (
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
     TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
     CryptoPaymentReport,
+    reset_admin_overlay_counters,
+    get_or_create_admin_overlay_counters,
 )
 from models import (
     TaskCreateResponse, TaskStatusResponse,
@@ -72,7 +74,7 @@ from models import (
     AdminUserListItem, AdminUserListResponse,
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
-    AdminStatsResponse, AdminTaskListItem, AdminTaskListResponse,
+    AdminStatsResponse, AdminOverlayMetricsResponse, AdminTaskListItem, AdminTaskListResponse,
     AdminTaskInspectResponse, AdminBulkTaskIdsRequest, AdminBulkRestartCountRecentRequest,
     AdminBulkAffectedResponse,
     AdminWorkerItem, AdminWorkerListResponse, AdminWorkerCreate, AdminWorkerUpdate,
@@ -4240,6 +4242,52 @@ async def api_admin_stats(
     )
 
 
+@app.get("/api/admin/overlay-metrics", response_model=AdminOverlayMetricsResponse)
+async def api_admin_overlay_metrics(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Статистика для панели оверлея: текущие статусы по БД + периодные счётчики завершений."""
+    tasks_by_status: dict = {}
+    for status in ["created", "processing", "done", "error"]:
+        count_result = await db.execute(
+            select(func.count(Task.id)).where(Task.status == status)
+        )
+        tasks_by_status[status] = count_result.scalar() or 0
+    total_tasks = sum(tasks_by_status.values())
+    done_n = tasks_by_status.get("done", 0) or 0
+    err_n = tasks_by_status.get("error", 0) or 0
+    rating_percent = None
+    if done_n + err_n > 0:
+        rating_percent = round(100.0 * float(done_n) / float(done_n + err_n), 1)
+
+    row = await get_or_create_admin_overlay_counters(db)
+    sc = int(row.completed_count or 0)
+    st = float(row.total_duration_seconds or 0.0)
+    session_avg = None
+    if sc > 0:
+        session_avg = round(st / float(sc), 1)
+
+    return AdminOverlayMetricsResponse(
+        tasks_by_status=tasks_by_status,
+        total_tasks=total_tasks,
+        rating_percent=rating_percent,
+        session_completed=sc,
+        session_total_duration_seconds=st,
+        session_avg_seconds=session_avg,
+    )
+
+
+@app.post("/api/admin/overlay-metrics/reset", response_model=AdminBulkAffectedResponse)
+async def api_admin_overlay_metrics_reset(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Обнулить периодные счётчики (завершения и сумму длительностей) в БД."""
+    await reset_admin_overlay_counters(db)
+    return AdminBulkAffectedResponse(affected=1)
+
+
 @app.get("/api/admin/users", response_model=AdminUserListResponse)
 async def api_admin_users(
     query: Optional[str] = None,
@@ -4524,16 +4572,27 @@ async def api_admin_bulk_restart_count(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Set restart_count=0 for given task ids (admin only)."""
-    if not body.task_ids:
+    """
+    Admin only. Для задач в status=error — полный requeue в created (как в карточке).
+    Для остальных — только restart_count=0.
+    """
+    ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
+    if not ids:
         return AdminBulkAffectedResponse(affected=0)
-    r = await db.execute(
-        update(Task)
-        .where(Task.id.in_(body.task_ids))
-        .values(restart_count=0, updated_at=datetime.utcnow())
-    )
-    await db.commit()
-    return AdminBulkAffectedResponse(affected=int(r.rowcount or 0))
+    n = 0
+    for tid in ids:
+        task = await get_task_by_id(db, tid)
+        if not task:
+            continue
+        if task.status == "error":
+            await admin_requeue_task_to_created(db, task)
+        else:
+            task.restart_count = 0
+            task.updated_at = datetime.utcnow()
+        n += 1
+    if n:
+        await db.commit()
+    return AdminBulkAffectedResponse(affected=n)
 
 
 @app.post("/api/admin/tasks/bulk-restart-count-recent", response_model=AdminBulkAffectedResponse)
@@ -4561,8 +4620,9 @@ async def api_admin_bulk_requeue(
     db: AsyncSession = Depends(get_db),
 ):
     """Requeue tasks to status=created with cleared worker state (admin only)."""
+    ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
     n = 0
-    for tid in body.task_ids:
+    for tid in ids:
         task = await get_task_by_id(db, tid)
         if task:
             await admin_requeue_task_to_created(db, task)

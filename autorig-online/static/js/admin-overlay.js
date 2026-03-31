@@ -220,7 +220,7 @@
             '<img src="' +
             ICON +
             'select.svg" width="20" height="20" alt="" /></button>' +
-            '<button type="button" class="admin-toolbar-ico" id="admin-ov-bulk-rc" title="Сбросить restart у выбранных" aria-label="Сброс retry">' +
+            '<button type="button" class="admin-toolbar-ico" id="admin-ov-bulk-rc" title="Error → created (requeue); иначе только restart_count=0" aria-label="Сброс retry">' +
             '<img src="' +
             ICON +
             'reset.svg" width="20" height="20" alt="" /></button>' +
@@ -240,6 +240,8 @@
             '</div>' +
             '<div class="admin-overlay-body">' +
             '<div class="admin-queue-scroll">' +
+            '<div class="admin-queue-two-cols">' +
+            '<div class="admin-queue-col-left">' +
             '<div class="admin-queue-filters">' +
             '<label class="admin-filter-label">Статус<select id="admin-filter-status">' +
             '<option value="all" selected>Все</option>' +
@@ -303,6 +305,13 @@
             'chevron-right.svg" width="18" height="18" alt="" /></button>' +
             '</div>' +
             '</div>' +
+            '</div>' +
+            '<div class="admin-queue-col-right">' +
+            '<div class="admin-stats-panel">' +
+            '<div class="admin-stats-title">Сводка</div>' +
+            '<div id="admin-ov-stats-inner" class="admin-ov-stats-inner">—</div>' +
+            '<button type="button" class="admin-stats-reset" id="admin-ov-stats-reset" title="Обнулить счётчики периода (завершения и сумму длительностей) в БД">Сбросить счётчики периода</button>' +
+            '</div></div></div>' +
             '<div class="admin-bulk-sel" role="toolbar" aria-label="Быстрый выбор">' +
             '<span class="admin-bulk-sel-label">Выбор</span>' +
             '<button type="button" class="admin-sel-pill admin-sel-all" id="admin-sel-all" title="Отметить все задачи на этой странице">все</button>' +
@@ -315,7 +324,7 @@
             '<div class="admin-bulk-actions" role="toolbar" aria-label="Действия с выбранными задачами">' +
             '<span class="admin-bulk-sel-label">Действия</span>' +
             '<span class="admin-bulk-meta">выбрано: <strong id="admin-bulk-count">0</strong></span>' +
-            '<button type="button" class="admin-action-pill admin-action-rc" id="admin-bulk-bar-rc" title="Сбросить restart_count у всех отмеченных (все страницы)">сброс r</button>' +
+            '<button type="button" class="admin-action-pill admin-action-rc" id="admin-bulk-bar-rc" title="Для error — полный requeue в created; иначе только restart_count=0">сброс r</button>' +
             '<button type="button" class="admin-action-pill admin-action-rq" id="admin-bulk-bar-rq" title="Requeue в created для всех отмеченных">requeue</button>' +
             '<button type="button" class="admin-action-pill admin-action-copy" id="admin-bulk-bar-copy" title="Скопировать id отмеченных в буфер">копировать id</button>' +
             '</div>' +
@@ -456,6 +465,24 @@
             bulkCopySelectedIds();
         });
 
+        root.querySelector('#admin-ov-stats-reset').addEventListener('click', function (e) {
+            e.preventDefault();
+            if (
+                !confirm(
+                    'Обнулить счётчики периода в БД (число завершений и сумму длительностей)?'
+                )
+            )
+                return;
+            api('/api/admin/overlay-metrics/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            }).then(function (r) {
+                if (r.ok) loadOverlayMetrics();
+                else alert('Ошибка: ' + r.status);
+            });
+        });
+
         document.addEventListener('visibilitychange', onVisibilityRefreshQueue);
 
         document.addEventListener('keydown', onKeyDown);
@@ -579,10 +606,68 @@
             updatePagerUI();
             updateFilterChips();
             renderCards(lastCards);
+            loadOverlayMetrics();
         } catch (e) {
             if (!silent) {
                 grid.innerHTML = '<div style="color:#f88">' + esc(humanFetchError(e)) + '</div>';
             }
+        }
+    }
+
+    function formatDurationSeconds(sec) {
+        if (sec == null || sec === '' || !isFinite(Number(sec))) return '—';
+        var s = Number(sec);
+        if (s < 60) return Math.round(s) + ' сек';
+        if (s < 3600) return (s / 60).toFixed(1) + ' мин';
+        return (s / 3600).toFixed(1) + ' ч';
+    }
+
+    async function loadOverlayMetrics() {
+        var inner = document.getElementById('admin-ov-stats-inner');
+        if (!inner) return;
+        try {
+            var r = await api('/api/admin/overlay-metrics');
+            if (!r.ok) {
+                inner.innerHTML = '<span style="color:#f88">Нет доступа к метрикам</span>';
+                return;
+            }
+            var m = await r.json();
+            var ts = m.tasks_by_status || {};
+            var rating =
+                m.rating_percent != null && m.rating_percent !== ''
+                    ? String(m.rating_percent) + '%'
+                    : '—';
+            var avg = formatDurationSeconds(m.session_avg_seconds);
+            inner.innerHTML =
+                '<div class="admin-stat-row"><span class="admin-stat-k">Рейтинг (done / (done+err))</span>' +
+                '<span class="admin-stat-v">' +
+                esc(rating) +
+                '</span></div>' +
+                '<div class="admin-stat-row"><span class="admin-stat-k">Статусы в БД</span>' +
+                '<span class="admin-stat-v">c ' +
+                (ts.created | 0) +
+                ' · pr ' +
+                (ts.processing | 0) +
+                ' · ✓ ' +
+                (ts.done | 0) +
+                ' · ✗ ' +
+                (ts.error | 0) +
+                '</span></div>' +
+                '<div class="admin-stat-row"><span class="admin-stat-k">Всего задач</span>' +
+                '<span class="admin-stat-v">' +
+                (m.total_tasks | 0) +
+                '</span></div>' +
+                '<div class="admin-stat-sub">Период (счётчик сбрасывается кнопкой)</div>' +
+                '<div class="admin-stat-row"><span class="admin-stat-k">Завершено за период</span>' +
+                '<span class="admin-stat-v">' +
+                (m.session_completed | 0) +
+                '</span></div>' +
+                '<div class="admin-stat-row"><span class="admin-stat-k">Средняя длительность (период)</span>' +
+                '<span class="admin-stat-v">' +
+                esc(avg) +
+                '</span></div>';
+        } catch (e) {
+            inner.innerHTML = '<span style="color:#f88">' + esc(humanFetchError(e)) + '</span>';
         }
     }
 

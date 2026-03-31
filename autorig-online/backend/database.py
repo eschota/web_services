@@ -238,6 +238,17 @@ class Task(Base):
         return int((self.ready_count / self.total_count) * 100)
 
 
+class AdminOverlayCounters(Base):
+    """Singleton (id=1): периодные счётчики для админ-оверлея; сброс вручную."""
+
+    __tablename__ = "admin_overlay_counters"
+
+    id = Column(Integer, primary_key=True, default=1)
+    completed_count = Column(Integer, nullable=False, default=0)
+    total_duration_seconds = Column(Float, nullable=False, default=0.0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class YoutubeCredentials(Base):
     """Single-row store for YouTube channel OAuth (refresh token for uploads)."""
     __tablename__ = "youtube_credentials"
@@ -514,6 +525,64 @@ def _migrate_api_keys_sqlite_for_anon(sync_conn):
     sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_key_prefix ON api_keys (key_prefix)"))
     sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_key_hash ON api_keys (key_hash)"))
     sync_conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+_ADMIN_OVERLAY_ROW_ID = 1
+
+
+async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlayCounters:
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(AdminOverlayCounters).where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = AdminOverlayCounters(
+            id=_ADMIN_OVERLAY_ROW_ID,
+            completed_count=0,
+            total_duration_seconds=0.0,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    return row
+
+
+async def bump_admin_overlay_task_completed(db: AsyncSession, task: Task) -> None:
+    """Счётчик периода: +1 done и сумма длительностей (created→updated)."""
+    from sqlalchemy import update
+
+    await get_or_create_admin_overlay_counters(db)
+    dur = 0.0
+    if task.created_at and task.updated_at:
+        dur = max(0.0, (task.updated_at - task.created_at).total_seconds())
+    await db.execute(
+        update(AdminOverlayCounters)
+        .where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
+        .values(
+            completed_count=AdminOverlayCounters.completed_count + 1,
+            total_duration_seconds=AdminOverlayCounters.total_duration_seconds + dur,
+            updated_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+
+
+async def reset_admin_overlay_counters(db: AsyncSession) -> None:
+    from sqlalchemy import update
+
+    await get_or_create_admin_overlay_counters(db)
+    await db.execute(
+        update(AdminOverlayCounters)
+        .where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
+        .values(
+            completed_count=0,
+            total_duration_seconds=0.0,
+            updated_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
 
 
 async def init_db():
