@@ -260,6 +260,17 @@ sudo crontab -e
 0 */6 * * * find /var/autorig/uploads -type d -empty -delete
 ```
 
+### 📇 Ежедневный дамп задач для SEO (sitemap snapshot)
+
+Скрипт [`backend/scripts/dump_sitemap_tasks.py`](backend/scripts/dump_sitemap_tasks.py) выгружает в JSON все задачи, попадающие в те же условия, что и `/sitemap/gallery` (и публичные `/m/{id}`): поля `poster_llm_*`, даты, `pipeline_kind`. Файл не подменяет живую генерацию sitemap по HTTP — только для аудита и мониторинга.
+
+```bash
+# Раз в сутки (пример: 03:00 UTC), путь к venv подставьте свой
+0 3 * * * cd /opt/autorig-online/backend && /opt/autorig-online/venv/bin/python scripts/dump_sitemap_tasks.py --output /opt/autorig-online/backend/data/sitemap_tasks_snapshot.json
+```
+
+По умолчанию `--output` указывает на `backend/data/sitemap_tasks_snapshot.json` (каталог создаётся автоматически; снимок в `.gitignore`).
+
 ## 🔧 Переменные окружения
 
 | Переменная | Описание | По умолчанию |

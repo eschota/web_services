@@ -140,6 +140,7 @@ renderfarmer_data/*.json
 
 # SQLite instance databases (created at runtime; migrations live in code)
 autorig-online/backend/db/
+autorig-online/backend/data/sitemap_tasks_snapshot.json
 autorig-online/backend/autorig.db
 autorig/db/
 qwerty_vpn/gateway/data/*.db

@@ -26,6 +26,82 @@ from database import Task
 
 GALLERY_SEO_URLS_PER_SITEMAP = 50
 
+# Server-side SEO theme terms merged with poster_llm_keywords on /m/{id} pages.
+SEO_LEXICON: Tuple[str, ...] = (
+    "face rig",
+    "animation",
+    "retargeting",
+    "ai animation",
+    "ai rig",
+    "animal rig",
+    "humanoid rig",
+)
+
+_DEFAULT_PUBLIC_TITLE = "Rigged 3D character — AI rig & animation"
+_DEFAULT_PUBLIC_DESC = (
+    "Rigged 3D model with skeleton and animations. Open the viewer to preview and download "
+    "GLB, FBX, OBJ, and engine packages."
+)
+
+
+def enrich_seo_metadata(task: Task) -> Tuple[str, str, List[str], str]:
+    """
+    Merge poster_llm_* with SEO_LEXICON for /m pages.
+    Returns: title, description, keywords (deduped, capped), visible semantic paragraph (plain text).
+    """
+    raw_title = (getattr(task, "poster_llm_title", None) or "").strip()
+    title = raw_title if raw_title else _DEFAULT_PUBLIC_TITLE
+
+    raw_desc = (getattr(task, "poster_llm_description", None) or "").strip()
+    desc = raw_desc if raw_desc else _DEFAULT_PUBLIC_DESC
+    if len(desc) < 160 and raw_desc:
+        desc = f"{desc} Animation retargeting and engine-ready exports (Unity, Unreal)."
+    elif len(desc) < 160:
+        desc = (
+            f"{_DEFAULT_PUBLIC_DESC} Ideal for AI rig workflows, humanoid or creature setups, "
+            "and animation retargeting."
+        )
+
+    keywords: List[str] = []
+    raw_kw = getattr(task, "poster_llm_keywords", None)
+    if raw_kw:
+        try:
+            data = json.loads(raw_kw)
+            if isinstance(data, list):
+                keywords = [str(x).strip() for x in data if str(x).strip()]
+        except Exception:
+            pass
+
+    seen_lower = {_normalize_kw_for_dedupe(k) for k in keywords}
+    for term in SEO_LEXICON:
+        if len(keywords) >= 24:
+            break
+        tl = _normalize_kw_for_dedupe(term)
+        if tl in seen_lower:
+            continue
+        keywords.append(term)
+        seen_lower.add(tl)
+
+    pk = (getattr(task, "pipeline_kind", None) or "rig").strip().lower()
+    if pk not in ("rig", "convert"):
+        pk = "rig"
+    if pk == "convert":
+        semantic = (
+            "This model was processed with the convert pipeline: clean mesh workflow with rigging "
+            "and animation outputs suitable for retargeting and real-time engines."
+        )
+    else:
+        semantic = (
+            "This AutoRig showcase highlights AI-assisted rigging: body and face-friendly setups, "
+            "animation and retargeting options, plus exports for humanoid or stylized characters."
+        )
+
+    return title, desc[:2000], keywords[:24], semantic
+
+
+def _normalize_kw_for_dedupe(s: str) -> str:
+    return " ".join(s.lower().split())
+
 
 def _utc_day_bounds_naive(day_str: str) -> Tuple[datetime, datetime]:
     """Inclusive start, exclusive end in naive UTC (matches Task.created_at storage)."""
@@ -83,8 +159,14 @@ def build_sitemap_index_xml(base_url: str, child_locs: Sequence[Tuple[str, datet
     return "\n".join(lines) + "\n"
 
 
-def build_urlset_xml(base_url: str, urls: Sequence[Tuple[str, datetime | None]]) -> str:
-    """urls: (path or full URL of public page, lastmod)."""
+def build_urlset_xml(
+    base_url: str,
+    urls: Sequence[Tuple[str, datetime | None]],
+    *,
+    changefreq: str = "weekly",
+    priority: str = "0.65",
+) -> str:
+    """urls: (path or full URL of public page, lastmod). Gallery /m URLs use daily + higher priority."""
     base = base_url.rstrip("/")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -98,8 +180,8 @@ def build_urlset_xml(base_url: str, urls: Sequence[Tuple[str, datetime | None]])
         lines.append("  <url>")
         lines.append(f"    <loc>{xml_escape_loc(loc)}</loc>")
         lines.append(f"    <lastmod>{_w3c_datetime(lm)}</lastmod>")
-        lines.append("    <changefreq>weekly</changefreq>")
-        lines.append("    <priority>0.65</priority>")
+        lines.append(f"    <changefreq>{xml_escape_text(changefreq)}</changefreq>")
+        lines.append(f"    <priority>{priority}</priority>")
         lines.append("  </url>")
     lines.append("</urlset>")
     return "\n".join(lines) + "\n"
@@ -148,7 +230,7 @@ async def gallery_sitemap_urls_for_chunk(
         Task.created_at < day_end,
     ]
     q = (
-        select(Task.id, Task.updated_at)
+        select(Task.id, Task.updated_at, Task.created_at)
         .where(*conds)
         .order_by(Task.created_at.asc())
         .offset(offset)
@@ -156,7 +238,7 @@ async def gallery_sitemap_urls_for_chunk(
     )
     result = await db.execute(q)
     rows = result.all()
-    return [(f"/m/{tid}", u_at) for tid, u_at in rows]
+    return [(f"/m/{tid}", u_at or c_at) for tid, u_at, c_at in rows]
 
 
 def build_public_model_page_html(
@@ -165,6 +247,8 @@ def build_public_model_page_html(
     title: str,
     description: str,
     keywords: List[str],
+    *,
+    semantic_section: str = "",
 ) -> str:
     """Minimal indexable HTML: meta + OG + JSON-LD; full viewer stays on /task."""
     base = base_url.rstrip("/")
@@ -177,7 +261,7 @@ def build_public_model_page_html(
         html.escape(str(k).strip()[:80], quote=True) for k in keywords[:24] if str(k).strip()
     )
 
-    json_ld = {
+    json_ld: dict = {
         "@context": "https://schema.org",
         "@type": "CreativeWork",
         "name": title[:200],
@@ -186,8 +270,20 @@ def build_public_model_page_html(
         "image": thumb_url,
         "mainEntityOfPage": canonical,
     }
+    if keywords:
+        json_ld["keywords"] = ", ".join(keywords[:24])
     json_ld_str = json.dumps(json_ld, ensure_ascii=False)
     keywords_meta = f'  <meta name="keywords" content="{kw_csv}">\n' if kw_csv else ""
+
+    about_block = ""
+    if semantic_section.strip():
+        st = xml_escape_text(semantic_section.strip())[:1200]
+        about_block = (
+            f'  <section class="seo-about" aria-labelledby="about-heading">\n'
+            f'    <h2 id="about-heading">About this rig</h2>\n'
+            f"    <p>{st}</p>\n"
+            f"  </section>\n"
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -218,13 +314,16 @@ def build_public_model_page_html(
       background: #6366f1; color: #fff; text-decoration: none; font-weight: 600; }}
     a.btn:hover {{ filter: brightness(1.08); }}
     .muted {{ color: #9ca3af; font-size: 0.9rem; margin-top: 1.5rem; }}
+    .seo-about {{ margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.1); }}
+    .seo-about h2 {{ font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem; color: #c4c9d8; }}
+    .seo-about p {{ margin: 0; color: #b8c0d0; font-size: 0.95rem; }}
   </style>
 </head>
 <body>
   <h1>{safe_title}</h1>
   <p>{safe_desc}</p>
   <p><img src="{xml_escape_loc(thumb_url)}" width="640" height="360" alt="{safe_title}" loading="lazy"></p>
-  <p><a class="btn" href="{xml_escape_loc(viewer_url)}">Open 3D viewer &amp; downloads</a></p>
+{about_block}  <p><a class="btn" href="{xml_escape_loc(viewer_url)}">Open 3D viewer &amp; downloads</a></p>
   <p class="muted">AutoRig Online — automatic character rigging (GLB, FBX, Unity, Unreal).</p>
 </body>
 </html>

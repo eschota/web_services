@@ -8280,7 +8280,7 @@ async def sitemap_gallery_chunk(day: str, part: int, db: AsyncSession = Depends(
     urls = await gallery_sitemap_urls_for_chunk(db, day, part)
     if not urls:
         raise HTTPException(status_code=404, detail="Empty sitemap chunk")
-    xml = build_urlset_xml(base, urls)
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
@@ -8290,29 +8290,20 @@ async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)
     Lightweight indexable landing: poster + LLM metadata + link to full /task viewer.
     Gallery-eligible tasks only; adult-rated tasks excluded (same as sitemap).
     """
-    from seo_gallery import build_public_model_page_html, load_task_for_public_model_page
+    from seo_gallery import (
+        build_public_model_page_html,
+        enrich_seo_metadata,
+        load_task_for_public_model_page,
+    )
 
     task = await load_task_for_public_model_page(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Not found")
     base = APP_URL or "https://autorig.online"
-    title = (getattr(task, "poster_llm_title", None) or "").strip() or "Rigged 3D character"
-    desc = (getattr(task, "poster_llm_description", None) or "").strip()
-    if not desc:
-        desc = (
-            "Rigged 3D model with skeleton and animations. Open the viewer to preview and download "
-            "GLB, FBX, OBJ, and engine packages."
-        )
-    keywords: List[str] = []
-    raw_kw = getattr(task, "poster_llm_keywords", None)
-    if raw_kw:
-        try:
-            data = json.loads(raw_kw)
-            if isinstance(data, list):
-                keywords = [str(x).strip() for x in data if str(x).strip()]
-        except Exception:
-            pass
-    html_page = build_public_model_page_html(base, task_id, title, desc, keywords)
+    title, desc, keywords, semantic = enrich_seo_metadata(task)
+    html_page = build_public_model_page_html(
+        base, task_id, title, desc, keywords, semantic_section=semantic
+    )
     return HTMLResponse(content=html_page)
 
 
