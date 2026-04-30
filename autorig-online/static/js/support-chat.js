@@ -334,6 +334,7 @@
             pollTimer: null,
             openBool: false,
             afterIdInt: 0,
+            renderedMessageIds: {},
             unreadInt: 0,
         };
 
@@ -477,6 +478,12 @@
         function appendMsgRow(item) {
             var dir = item.direction_string || '';
             var mod = dir === 'admin' ? 'admin' : dir === 'user' ? 'user' : 'system';
+            var mid = parseInt(item.id_int, 10);
+
+            if (!isNaN(mid)) {
+                if (state.renderedMessageIds[mid]) return;
+                state.renderedMessageIds[mid] = true;
+            }
 
             var row = el('div', 'ar-support-chat-msg ar-support-chat-msg--' + mod);
 
@@ -515,14 +522,13 @@
 
             log.appendChild(row);
             log.scrollTop = log.scrollHeight;
-            var mid = parseInt(item.id_int, 10);
             if (!isNaN(mid) && mid > state.afterIdInt) state.afterIdInt = mid;
         }
 
         function applyPollPayload(data, renderBool) {
             var list = data && data.messages ? data.messages : [];
             var sid = parseInt(state.sessionIdInt, 10) || 0;
-            var prevCursor = renderBool ? 0 : getPollCursor(sid);
+            var prevCursor = renderBool && state.afterIdInt === 0 ? 0 : getPollCursor(sid);
             var maxInBatch = prevCursor;
             list.forEach(function (m) {
                 var mid = parseInt(m.id_int, 10);
@@ -575,7 +581,7 @@
         function pollMessages(renderBool) {
             if (!state.sessionIdInt || !state.visitorId) return Promise.resolve();
             var sid = parseInt(state.sessionIdInt, 10) || 0;
-            var after = renderBool ? 0 : getPollCursor(sid);
+            var after = renderBool && state.afterIdInt === 0 ? 0 : getPollCursor(sid);
             var q =
                 '?visitor_id_string=' +
                 encodeURIComponent(state.visitorId) +
@@ -609,6 +615,7 @@
             stopPoll();
             log.innerHTML = '';
             state.afterIdInt = 0;
+            state.renderedMessageIds = {};
             state.unreadInt = 0;
             updateBadge();
             ensureSession(true)
