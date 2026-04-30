@@ -251,7 +251,8 @@ async def telegram_send_support_message_html(
             text=html,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
-        )
+        ),
+        raise_last=True,
     )
     if not msg:
         raise RuntimeError("send_support_message failed")
@@ -416,7 +417,13 @@ def _format_task_metrics(metrics: dict[str, int]) -> str:
     return f"#{ordinal} | 24h {current_24h} | {trend} {delta_str}"
 
 
-async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network: bool = True):
+async def _send_with_retry(
+    coro_factory,
+    *,
+    max_retries: int = 2,
+    retry_network: bool = True,
+    raise_last: bool = False,
+):
     """Best-effort retry for Telegram rate limits/transient errors."""
     from telegram.error import RetryAfter, TimedOut, NetworkError
 
@@ -429,16 +436,22 @@ async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network:
             print(f"[Telegram] Rate limited, retry {attempt}/{max_retries}")
             if attempt > max_retries:
                 print("[Telegram] Max retries exceeded (rate limit)")
+                if raise_last:
+                    raise
                 return None
             await asyncio.sleep(float(getattr(e, "retry_after", 1.0)) + 0.5)
         except (TimedOut, NetworkError) as e:
             if not retry_network:
                 print(f"[Telegram] Network error (no retry mode): {e}")
+                if raise_last:
+                    raise
                 return None
             attempt += 1
             print(f"[Telegram] Network error: {e}, retry {attempt}/{max_retries}")
             if attempt > max_retries:
                 print("[Telegram] Max retries exceeded (network)")
+                if raise_last:
+                    raise
                 return None
             await asyncio.sleep(1.0 * attempt)
         except Exception as e:
@@ -446,6 +459,8 @@ async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network:
             print(f"[Telegram] API Error: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
+            if raise_last:
+                raise
             return None
 
 

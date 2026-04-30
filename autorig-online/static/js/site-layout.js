@@ -90,7 +90,7 @@
             if (document.querySelector('script[data-support-chat-js="1"]')) return;
 
             const s = document.createElement('script');
-            s.src = '/static/js/support-chat.js?v=20260430-sup4';
+            s.src = '/static/js/support-chat.js?v=20260430-sup5';
             s.async = true;
             s.setAttribute('data-support-chat-js', '1');
             s.onload = function () {

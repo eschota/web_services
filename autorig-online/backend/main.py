@@ -2535,11 +2535,34 @@ async def api_support_chat_message_post(
             html=tg_html,
         )
     except Exception as exc:
-        print(f"[SupportChat] telegram send failed: {type(exc).__name__}: {exc}")
-        raise HTTPException(
-            status_code=503,
-            detail="Support chat is temporarily unavailable. Please try again later.",
-        ) from exc
+        if "message thread not found" not in str(exc).lower():
+            print(f"[SupportChat] telegram send failed: {type(exc).__name__}: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="Support chat is temporarily unavailable. Please try again later.",
+            ) from exc
+
+        print(f"[SupportChat] stale telegram thread, recreating topic: {type(exc).__name__}: {exc}")
+        label = sess.user_email or sess.visitor_id[:12]
+        topic = (f"Support #{sess.id} · {label}")[:128]
+        try:
+            fcid, mtid = await telegram_create_support_topic(db, topic)
+            sess.telegram_chat_id = int(fcid)
+            sess.telegram_thread_id = int(mtid)
+            sess.topic_name = topic
+            await db.commit()
+            await db.refresh(sess)
+            telegram_message_id_int = await telegram_send_support_message_html(
+                forum_chat_id=int(sess.telegram_chat_id),
+                message_thread_id=int(sess.telegram_thread_id),
+                html=tg_html,
+            )
+        except Exception as retry_exc:
+            print(f"[SupportChat] telegram send retry failed: {type(retry_exc).__name__}: {retry_exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="Support chat is temporarily unavailable. Please try again later.",
+            ) from retry_exc
 
     msg_row = SupportChatMessage(
         session_id=sess.id,
