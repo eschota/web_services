@@ -5,6 +5,146 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Buy Credits | AutoRig.online</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        #roadmap-cards {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+            align-items: stretch;
+        }
+        @media (max-width: 800px) {
+            #roadmap-cards { grid-template-columns: 1fr; }
+        }
+        .feedback-reply-btn {
+            padding: 0.4rem 0.95rem !important;
+            font-size: 0.8125rem !important;
+            font-weight: 600 !important;
+            border-radius: 999px !important;
+            line-height: 1.2;
+            box-shadow: 0 2px 12px var(--accent-glow) !important;
+        }
+        .feedback-reply-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px var(--accent-glow) !important;
+        }
+        .feedback-user-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+            background: var(--border);
+        }
+        #crypto-modal-overlay:not(.hidden) {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+        }
+        #crypto-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.72);
+            z-index: 10000;
+            padding: 1rem;
+        }
+        #crypto-qr-host img {
+            display: block;
+            margin: 0 auto;
+        }
+        .billing-tab-active {
+            box-shadow: 0 0 0 2px var(--accent);
+            background: rgba(var(--accent-rgb), 0.12);
+        }
+        .billing-method-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            align-items: center;
+        }
+        .billing-method-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.4rem 0.65rem;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            cursor: pointer;
+            line-height: 1;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        }
+        .billing-method-btn:hover {
+            border-color: var(--accent);
+        }
+        .billing-method-btn .pay-icons {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .billing-method-btn .pay-icons svg {
+            display: block;
+            flex-shrink: 0;
+        }
+        .pay-logo--visa svg {
+            height: 22px;
+            width: auto;
+            border-radius: 4px;
+            vertical-align: middle;
+        }
+        .pay-logo--paypal svg {
+            height: 22px;
+            width: auto;
+            vertical-align: middle;
+        }
+        .pay-logo--mc svg {
+            height: 22px;
+            width: auto;
+        }
+        .billing-discount-pill {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 0.15rem 0.4rem;
+            border-radius: 6px;
+            background: rgba(var(--accent-rgb), 0.25);
+            color: var(--accent);
+        }
+        .buy-credits-hint {
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            margin: 0 0 0.85rem;
+            line-height: 1.35;
+            max-width: 40rem;
+        }
+        .buy-credits-header h2 {
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        @media (max-width: 720px) {
+            .pricing-grid-billing {
+                grid-template-columns: 1fr !important;
+            }
+            .buy-credits-header {
+                flex-direction: column;
+                align-items: flex-start !important;
+            }
+        }
+    </style>
 </head>
 <body data-layout-free3d-init="none">
     <div id="site-header"></div>
@@ -28,40 +168,142 @@
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h1 style="margin-top: 0;" data-i18n="buy_title">Buy Credits</h1>
-                <p style="color: var(--text-secondary);" data-i18n="buy_subtitle">
-                    Credits are needed to download finished 3D models with rigging and all animations.
-                </p>
-                <p style="color: var(--text-muted); margin-top: 0.5rem;" data-i18n="buy_notice">
-                    Credits are added automatically within 1–2 minutes after payment.
-                </p>
+                <h2 style="margin-top: 0;" data-i18n="donation_title">Support the project</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="donation_subtitle">Credit purchases help fund development. Progress includes all completed AutoRig credit pack sales plus a starting baseline.</p>
+                <div id="donation-stats-line" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">—</div>
+                <div style="background: rgba(255,255,255,0.06); border-radius: 999px; height: 14px; overflow: hidden; border: 1px solid var(--border);">
+                    <div id="donation-bar-fill" style="height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease;"></div>
+                </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem;">
+            <div class="card" style="padding: 1.25rem 1.5rem; margin-top: 1rem;">
+                <div class="buy-credits-header" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.65rem 1rem; margin-bottom: 0.5rem;">
+                    <h2 style="margin: 0;" data-i18n="buy_title">Buy Credits</h2>
+                    <div id="billing-tabs" class="billing-method-row" role="tablist" aria-label="Payment method">
+                        <button type="button" class="billing-method-btn billing-tab-active" id="billing-tab-card" data-billing="card" role="tab" aria-selected="true" data-i18n-title="buy_pay_methods_a11y" title="Pay with Visa, Mastercard, or PayPal (Gumroad)">
+                            <span class="pay-icons" aria-hidden="true">
+                                <span class="pay-logo--visa">
+                                    <svg viewBox="0 0 40 24" width="40" height="24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <rect width="40" height="24" rx="4" fill="#1434CB"/>
+                                        <g fill="#fff" transform="translate(6.25 3.35) scale(1.02)">
+                                            <path d="M9.112 8.262L5.97 15.758H3.92L2.374 9.775c-.094-.368-.175-.503-.461-.658C1.447 8.864.677 8.627 0 8.479l.046-.217h3.3a.904.904 0 01.894.764l.817 4.338 2.018-5.102zm8.033 5.049c.008-1.979-2.736-2.088-2.717-2.972.006-.269.262-.555.822-.628a3.66 3.66 0 011.913.336l.34-1.59a5.207 5.207 0 00-1.814-.333c-1.917 0-3.266 1.02-3.278 2.479-.012 1.079.963 1.68 1.698 2.04.756.367 1.01.603 1.006.931-.005.504-.602.725-1.16.734-.975.015-1.54-.263-1.992-.473l-.351 1.642c.453.208 1.289.39 2.156.398 2.037 0 3.37-1.006 3.377-2.564m5.061 2.447H24l-1.565-7.496h-1.656a.883.883 0 00-.826.55l-2.909 6.946h2.036l.405-1.12h2.488zm-2.163-2.656l1.02-2.815.588 2.815zm-8.16-4.84l-1.603 7.496H8.34l1.605-7.496z"/>
+                                        </g>
+                                    </svg>
+                                </span>
+                                <span class="pay-logo--mc">
+                                    <svg viewBox="0 0 40 24" width="34" height="22" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <circle cx="15" cy="12" r="10" fill="#EB001B"/>
+                                        <circle cx="25" cy="12" r="10" fill="#F79E1B" fill-opacity="0.95"/>
+                                    </svg>
+                                </span>
+                                <span class="pay-logo--paypal">
+                                    <svg viewBox="0 0 52 24" width="52" height="24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <rect width="52" height="24" rx="4" fill="#f0f2f5"/>
+                                        <g transform="translate(6.5 2.25) scale(0.82)">
+                                            <path fill="#003087" d="M15.607 4.653H8.941L6.645 19.251H1.82L4.862 0h7.995c3.754 0 6.375 2.294 6.473 5.513-.648-.478-2.105-.86-3.722-.86m6.57 5.546c0 3.41-3.01 6.853-6.958 6.853h-2.493L11.595 24H6.74l1.845-11.538h3.592c4.208 0 7.346-3.634 7.153-6.949a5.24 5.24 0 0 1 2.848 4.686M9.653 5.546h6.408c.907 0 1.942.222 2.363.541-.195 2.741-2.655 5.483-6.441 5.483H8.714Z"/>
+                                        </g>
+                                    </svg>
+                                </span>
+                            </span>
+                            <span class="sr-only" data-i18n="buy_pay_methods_a11y">Pay with Visa, Mastercard, or PayPal</span>
+                        </button>
+                        <button type="button" class="billing-method-btn" id="billing-tab-crypto" data-billing="crypto" role="tab" aria-selected="false">
+                            <span aria-hidden="true" style="font-size: 1rem; opacity: 0.9;">₿</span>
+                            <span data-i18n="buy_tab_crypto_short">Crypto</span>
+                            <span class="billing-discount-pill" data-i18n="buy_tab_crypto_badge">−20%</span>
+                        </button>
+                    </div>
+                </div>
+                <p id="buy-notice-gumroad" class="buy-credits-hint" data-i18n="buy_notice">
+                    Credits are added automatically within 1–2 minutes after payment.
+                </p>
+                <p id="buy-notice-crypto" class="buy-credits-hint hidden" data-i18n="buy_crypto_notice">
+                    Pay with crypto on this page. After you send funds, submit your transaction ID. Credits are added manually after we verify the payment (usually within a day).
+                </p>
+
+            <div id="panel-billing-card" class="billing-panel pricing-grid-billing" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 0;">
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">100 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$3</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.01 per credit</div>
-                    <button class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$10</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
+                    <button type="button" class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center; border: 2px solid var(--accent); position: relative;">
-                    <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;">POPULAR</span>
+                    <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;" data-i18n="buy_popular">POPULAR</span>
                     <h3 style="margin-top: 0;">500 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$10</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.02 per credit</div>
-                    <button class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$30</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.06 per credit</div>
+                    <button type="button" class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</button>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">1000 credits</h3>
                     <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$100</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.1 per credit</div>
-                    <button class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
+                    <button type="button" class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                </div>
+            </div>
+
+            <div id="panel-billing-crypto" class="billing-panel pricing-grid-billing hidden" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 0;">
+                <div class="card" style="padding: 1.5rem; text-align: center;">
+                    <h3 style="margin-top: 0;">100 <span data-i18n="buy_credits_word">credits</span></h3>
+                    <div class="crypto-price-main" style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">—</div>
+                    <div class="crypto-price-per" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem;">—</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;" data-i18n="buy_crypto_discount_label">20% off card price</div>
+                    <button type="button" class="btn btn-primary crypto-open-modal" data-tier="autorig-100" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
+                </div>
+                <div class="card" style="padding: 1.5rem; text-align: center; border: 2px solid var(--accent); position: relative;">
+                    <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;" data-i18n="buy_popular">POPULAR</span>
+                    <h3 style="margin-top: 0;">500 <span data-i18n="buy_credits_word">credits</span></h3>
+                    <div class="crypto-price-main" style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">—</div>
+                    <div class="crypto-price-per" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem;">—</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;" data-i18n="buy_crypto_discount_label">20% off card price</div>
+                    <button type="button" class="btn btn-primary crypto-open-modal" data-tier="autorig-500" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
+                </div>
+                <div class="card" style="padding: 1.5rem; text-align: center;">
+                    <h3 style="margin-top: 0;">1000 <span data-i18n="buy_credits_word">credits</span></h3>
+                    <div class="crypto-price-main" style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">—</div>
+                    <div class="crypto-price-per" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem;">—</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;" data-i18n="buy_crypto_discount_label">20% off card price</div>
+                    <button type="button" class="btn btn-primary crypto-open-modal" data-tier="autorig-1000" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
+                </div>
+            </div>
+            </div>
+
+            <div id="crypto-modal-overlay" class="hidden" role="dialog" aria-modal="true">
+                <div class="card" style="max-width: 440px; width: 100%; max-height: 92vh; overflow-y: auto; position: relative; padding: 1.5rem;">
+                    <button type="button" class="btn btn-ghost" id="crypto-modal-close" style="position: absolute; top: 0.35rem; right: 0.35rem; padding: 0.25rem 0.6rem;" aria-label="Close">×</button>
+                    <h2 style="margin-top: 0; padding-right: 2rem;" data-i18n="crypto_modal_title">Pay with cryptocurrency</h2>
+                    <p id="crypto-modal-tier-line" style="color: var(--text-secondary); font-size: 0.95rem;"></p>
+                    <label style="display: block; margin-top: 1rem; font-weight: 600;" for="crypto-network-select" data-i18n="crypto_network_label">Network</label>
+                    <select id="crypto-network-select" style="width: 100%; margin-top: 0.35rem; padding: 0.5rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit;"></select>
+                    <p id="crypto-modal-warning" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); line-height: 1.45;"></p>
+                    <p id="crypto-modal-amount" style="font-size: 1.1rem; font-weight: 600; margin-top: 0.75rem;"></p>
+                    <div style="background: rgba(255,255,255,0.06); border-radius: 12px; padding: 1rem; margin-top: 0.75rem; text-align: center;">
+                        <div id="crypto-qr-host" style="min-height: 180px; display: flex; align-items: center; justify-content: center;"></div>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0.5rem 0 0;" data-i18n="crypto_scan_hint">Scan with your wallet app</p>
+                    </div>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem; word-break: break-all; font-family: ui-monospace, monospace;" id="crypto-modal-address"></p>
+                    <button type="button" class="btn btn-secondary" id="crypto-copy-address" style="width: 100%; margin-top: 0.5rem;" data-i18n="crypto_copy_address">Copy address</button>
+                    <hr style="border: none; border-top: 1px solid var(--border); margin: 1.25rem 0;">
+                    <label for="crypto-tx-id" style="font-weight: 600;" data-i18n="crypto_tx_label">Transaction ID / hash</label>
+                    <input type="text" id="crypto-tx-id" autocomplete="off" style="width: 100%; margin-top: 0.35rem; padding: 0.5rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit;">
+                    <label for="crypto-contact-note" style="display: block; margin-top: 0.75rem; font-weight: 600;" data-i18n="crypto_note_label">Note (required if not signed in)</label>
+                    <textarea id="crypto-contact-note" rows="2" style="width: 100%; margin-top: 0.35rem; padding: 0.5rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="Email or agent id for crediting"></textarea>
+                    <button type="button" class="btn btn-primary" id="crypto-submit-report" style="width: 100%; margin-top: 1rem;" data-i18n="crypto_submit_btn">I sent the payment — submit</button>
+                    <p id="crypto-submit-msg" style="font-size: 0.85rem; margin-top: 0.75rem; color: var(--text-muted);"></p>
                 </div>
             </div>
 
             <!-- Feedback Form Section -->
             <div id="feedback-section" class="card hidden" style="padding: 2rem; margin-top: 1rem;">
                 <h2 style="margin-top: 0;" data-i18n="feedback_title">Leave Feedback</h2>
+                <div id="feedback-reply-banner" class="hidden" style="margin-top: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; background: rgba(var(--accent-rgb), 0.12); border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem;">
+                    <div style="font-size: 0.9rem; color: var(--text-secondary);">
+                        <span data-i18n="feedback_replying_to">Replying to</span>
+                        <span id="feedback-reply-preview" style="color: var(--text-primary); font-weight: 600;"></span>
+                    </div>
+                    <button type="button" class="btn btn-ghost" id="feedback-reply-cancel" style="padding: 0.25rem 0.5rem; flex-shrink: 0;" data-i18n="feedback_reply_cancel">Cancel</button>
+                </div>
                 <div style="margin-top: 1rem;">
                     <textarea id="feedback-text" style="width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="What do you think about the RIG? What should we improve?"></textarea>
                     <button class="btn btn-primary" id="btn-submit-feedback" style="margin-top: 1rem;" data-i18n="feedback_submit">Submit Feedback</button>
@@ -77,30 +319,9 @@
             </div>
 
             <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;" data-i18n="api_access_title">API Access</h2>
-                <p style="color: var(--text-secondary);" data-i18n="api_access_desc">
-                    Generate an API key to use AutoRig REST API from external tools.
-                </p>
-
-                <div style="display:flex; gap: 0.75rem; align-items:center; flex-wrap: wrap; margin-top: 1rem;">
-                    <button class="btn btn-secondary" id="btn-generate-key" data-i18n="api_access_generate">Generate API Key</button>
-                    <button class="btn btn-ghost" id="btn-refresh-keys" data-i18n="api_access_refresh">Refresh</button>
-                </div>
-
-                <div id="api-key-once" class="alert alert-info hidden" style="margin-top: 1rem;">
-                    <div style="display:flex; gap: 0.75rem; align-items:center; justify-content: space-between; flex-wrap: wrap;">
-                        <div>
-                            <div style="font-weight: 600;" data-i18n="api_access_key_once">Your API key (shown once):</div>
-                            <code id="api-key-plain" style="display:block; margin-top:0.5rem; word-break: break-all;"></code>
-                        </div>
-                        <button class="btn btn-ghost" id="btn-copy-key" data-i18n="btn_copy">Copy</button>
-                    </div>
-                </div>
-
-                <div style="margin-top: 1rem;">
-                    <div style="font-weight:600; margin-bottom: 0.5rem;" data-i18n="api_access_keys">Your keys</div>
-                    <div id="api-keys-list" style="color: var(--text-muted);">-</div>
-                </div>
+                <h2 style="margin-top: 0;" data-i18n="roadmap_title">Roadmap — your vote</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="roadmap_intro">Pick what we should prioritize next. You can change your vote anytime.</p>
+                <div id="roadmap-cards"></div>
             </div>
         </div>
     </main>
@@ -109,6 +330,7 @@
         <script src="/static/js/header.js?v=20260324-sitelayout"></script>
     <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
     <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
 <script src="/static/js/i18n.js"></script>
     <script>
         async function loadAuth() {
@@ -140,7 +362,7 @@
             document.querySelectorAll('.lang-option').forEach(opt => {
                 opt.addEventListener('click', async () => {
                     const lang = opt.getAttribute('data-lang');
-                    await I18n.setLanguage(lang);
+                    await I18n.switchLanguage(lang);
                     dropdown?.classList.remove('open');
                 });
             });
@@ -162,6 +384,116 @@
             } catch (e) {
                 console.error('Auth load failed:', e);
             }
+        }
+
+        function escapeHtml(str) {
+            return String(str ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        const ROADMAP_KEYS = ['face_rig_animation', 'animals_rig_animation', 'avatar_speech_lipsync'];
+
+        function roadmapTitleKey(k) {
+            return ({ face_rig_animation: 'roadmap_face_rig_title', animals_rig_animation: 'roadmap_animals_title', avatar_speech_lipsync: 'roadmap_avatar_title' })[k] || k;
+        }
+
+        async function loadDonationStats() {
+            const line = document.getElementById('donation-stats-line');
+            const fill = document.getElementById('donation-bar-fill');
+            if (!line || !fill) return;
+            try {
+                const resp = await fetch('/api/buy-credits/donation-stats');
+                if (!resp.ok) throw new Error('bad status');
+                const d = await resp.json();
+                const raised = Number(d.raised_usd) || 0;
+                const goal = Number(d.goal_usd) || 1000;
+                const pct = Math.min(100, goal > 0 ? (raised / goal) * 100 : 0);
+                line.textContent = t('donation_progress_line', { raised: raised.toFixed(2), goal: String(goal) });
+                fill.style.width = pct.toFixed(2) + '%';
+            } catch (e) {
+                console.error('Donation stats failed:', e);
+                line.textContent = '—';
+            }
+        }
+
+        async function loadRoadmap() {
+            const host = document.getElementById('roadmap-cards');
+            if (!host) return;
+            try {
+                const resp = await fetch('/api/roadmap/votes');
+                if (!resp.ok) throw new Error('bad status');
+                const d = await resp.json();
+                const counts = d.counts || {};
+                const my = d.my_choice;
+                host.innerHTML = ROADMAP_KEYS.map((key) => {
+                    const n = Number(counts[key] || 0);
+                    const active = my === key;
+                    const title = t(roadmapTitleKey(key));
+                    return `
+                        <div class="card roadmap-vote-card" style="padding: 1rem; text-align: center; border: 2px solid ${active ? 'var(--accent)' : 'var(--border)'}; display: flex; flex-direction: column; height: 100%; min-height: 0; box-sizing: border-box;">
+                            <div style="font-weight: 700; line-height: 1.35; min-height: 4.05em; display: flex; align-items: center; justify-content: center; text-align: center;">${escapeHtml(title)}</div>
+                            <div style="font-size: 1.75rem; font-weight: 800; color: var(--accent); margin: 0.5rem 0;">${n}</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">${t('roadmap_votes_label')}</div>
+                            <button type="button" class="btn btn-primary roadmap-vote-btn" data-choice="${escapeHtml(key)}" style="width:100%; margin-top: auto;">${t('roadmap_vote')}</button>
+                        </div>
+                    `;
+                }).join('');
+                host.querySelectorAll('.roadmap-vote-btn').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        if (!window.__authedUser) {
+                            alert(t('buy_login_required'));
+                            window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                            return;
+                        }
+                        const choice = btn.getAttribute('data-choice');
+                        btn.disabled = true;
+                        try {
+                            const r = await fetch('/api/roadmap/vote', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ choice }),
+                                credentials: 'same-origin',
+                            });
+                            if (!r.ok) throw new Error('vote failed');
+                            await loadRoadmap();
+                        } catch (err) {
+                            console.error(err);
+                            alert(t('error_generic'));
+                        } finally {
+                            btn.disabled = false;
+                        }
+                    });
+                });
+            } catch (e) {
+                console.error('Roadmap load failed:', e);
+                host.innerHTML = `<div style="color: var(--text-muted);">${escapeHtml(t('roadmap_load_error'))}</div>`;
+            }
+        }
+
+        window.__feedbackReplyTo = null;
+        window.__feedbackById = {};
+
+        function clearFeedbackReply() {
+            window.__feedbackReplyTo = null;
+            document.getElementById('feedback-reply-banner')?.classList.add('hidden');
+        }
+
+        function startReplyTo(item) {
+            if (!window.__authedUser) {
+                alert(t('buy_login_required'));
+                window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                return;
+            }
+            const name = item.user_name || item.user_email || '';
+            const snippet = (item.text || '').replace(/\s+/g, ' ').trim().slice(0, 72);
+            window.__feedbackReplyTo = { id: item.id };
+            const prev = document.getElementById('feedback-reply-preview');
+            if (prev) prev.textContent = `${name}: ${snippet}${(item.text || '').length > 72 ? '…' : ''}`;
+            document.getElementById('feedback-reply-banner')?.classList.remove('hidden');
+            document.getElementById('feedback-text')?.focus();
         }
 
         async function setupYouTubeBonus() {
@@ -186,33 +518,88 @@
             });
         }
 
+        function buildFeedbackChildrenMap(items) {
+            const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+            const childrenMap = new Map();
+            items.forEach((i) => {
+                const p = i.parent_id;
+                if (p == null || p === undefined) return;
+                if (!childrenMap.has(p)) childrenMap.set(p, []);
+                childrenMap.get(p).push(i);
+            });
+            childrenMap.forEach((arr) => {
+                arr.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            });
+            const roots = items.filter((i) => {
+                if (!i.parent_id) return true;
+                return !byId[i.parent_id];
+            });
+            roots.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            return { byId, childrenMap, roots };
+        }
+
         async function loadFeedback() {
             const listEl = document.getElementById('feedback-list');
             try {
                 const resp = await fetch('/api/feedback');
                 const data = await resp.json();
                 if (!data.items || data.items.length === 0) {
+                    window.__feedbackById = {};
                     listEl.innerHTML = `<div style="color: var(--text-muted);">${t('feedback_empty')}</div>`;
                     return;
                 }
-                
+                window.__feedbackById = Object.fromEntries(data.items.map((i) => [i.id, i]));
+
                 const isAdmin = window.__authedUser?.is_admin;
-                
-                listEl.innerHTML = data.items.map(item => `
-                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
-                        <div style="display:flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
-                            <div style="flex: 1;">
-                                <div style="font-weight: 600; font-size: 0.9rem; color: var(--accent);">${item.user_name}</div>
-                                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">${new Date(item.created_at).toLocaleString()}</div>
-                                <div style="white-space: pre-wrap; line-height: 1.5;">${item.text}</div>
+                const loggedIn = !!window.__authedUser;
+                const { childrenMap, roots } = buildFeedbackChildrenMap(data.items);
+
+                function renderOneFeedback(item, depth) {
+                    const indent =
+                        depth > 0
+                            ? `margin-left: ${Math.min(depth, 8) * 1.1}rem; border-left: 3px solid var(--accent); padding-left: 0.75rem;`
+                            : '';
+                    const pic = item.user_picture || '';
+                    const dateOnly = new Date(item.created_at).toLocaleDateString();
+                    return `
+                    <div class="card feedback-row" data-feedback-id="${item.id}" style="padding: 1rem; background: rgba(255,255,255,0.03); ${indent}">
+                        <div style="display:flex; justify-content: space-between; align-items: center; gap: 1rem;">
+                            <div style="display:flex; gap: 0.75rem; flex: 1; min-width: 0; align-items: center;">
+                                <img class="feedback-user-avatar" src="${escapeHtml(pic)}" alt="" width="80" height="80" loading="lazy" referrerpolicy="no-referrer">
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.35rem;">
+                                        <span style="font-weight: 600; font-size: 0.9rem; color: var(--accent);">${escapeHtml(item.user_name)}</span>
+                                        <span style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">${escapeHtml(dateOnly)}</span>
+                                    </div>
+                                    <div style="white-space: pre-wrap; line-height: 1.5;">${escapeHtml(item.text)}</div>
+                                </div>
                             </div>
-                            ${isAdmin ? `<button class="btn btn-ghost" style="color: #ef4444; padding: 0.25rem 0.5rem;" onclick="deleteFeedback(${item.id})">Delete</button>` : ''}
+                            <div style="display:flex; flex-direction: column; gap: 0.35rem; align-items: flex-end;">
+                                ${loggedIn ? `<button type="button" class="btn btn-primary feedback-reply-btn" data-id="${item.id}">${escapeHtml(t('feedback_reply'))}</button>` : ''}
+                                ${isAdmin ? `<button type="button" class="btn btn-ghost" style="color: #ef4444; padding: 0.25rem 0.5rem;" onclick="deleteFeedback(${item.id})">Delete</button>` : ''}
+                            </div>
                         </div>
                     </div>
-                `).join('');
+                    ${(childrenMap.get(item.id) || []).map((ch) => renderOneFeedback(ch, depth + 1)).join('')}`;
+                }
+
+                listEl.innerHTML = roots
+                    .map(
+                        (root) =>
+                            `<div class="feedback-thread" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem;">${renderOneFeedback(root, 0)}</div>`
+                    )
+                    .join('');
+
+                listEl.querySelectorAll('.feedback-reply-btn').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        const id = Number(btn.getAttribute('data-id'));
+                        const item = window.__feedbackById[id];
+                        if (item) startReplyTo(item);
+                    });
+                });
             } catch (e) {
                 console.error('Load feedback failed:', e);
-                listEl.innerHTML = `<div style="color: #ef4444;">Failed to load feedback</div>`;
+                listEl.innerHTML = `<div style="color: #ef4444;">${escapeHtml(t('feedback_load_error'))}</div>`;
             }
         }
 
@@ -232,19 +619,23 @@
         function setupFeedbackForm() {
             const btn = document.getElementById('btn-submit-feedback');
             const textarea = document.getElementById('feedback-text');
+            document.getElementById('feedback-reply-cancel')?.addEventListener('click', () => clearFeedbackReply());
             btn?.addEventListener('click', async () => {
                 const text = textarea.value.trim();
                 if (!text) return;
-                
+
                 btn.disabled = true;
                 try {
+                    const body = { text, parent_id: window.__feedbackReplyTo ? window.__feedbackReplyTo.id : null };
                     const resp = await fetch('/api/user/feedback', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text })
+                        body: JSON.stringify(body),
+                        credentials: 'same-origin',
                     });
                     if (resp.ok) {
                         textarea.value = '';
+                        clearFeedbackReply();
                         alert(t('feedback_success'));
                         await loadFeedback();
                     }
@@ -263,12 +654,260 @@
             return `${base}?${params.toString()}`;
         }
 
+        window.__cryptoConfig = null;
+        window.__cryptoModalTierKey = null;
+
+        async function loadCryptoConfig() {
+            if (window.__cryptoConfig) return;
+            const resp = await fetch('/api/buy-credits/crypto-config');
+            if (!resp.ok) throw new Error('crypto-config');
+            window.__cryptoConfig = await resp.json();
+            applyCryptoPricesToCards();
+            populateCryptoNetworkSelect();
+        }
+
+        function applyCryptoPricesToCards() {
+            const cfg = window.__cryptoConfig;
+            if (!cfg || !cfg.tiers) return;
+            const cards = document.querySelectorAll('#panel-billing-crypto .card');
+            cfg.tiers.forEach((tier, i) => {
+                const card = cards[i];
+                if (!card) return;
+                const main = card.querySelector('.crypto-price-main');
+                const per = card.querySelector('.crypto-price-per');
+                if (main) main.textContent = `$${tier.usd_discounted}`;
+                if (per) {
+                    const suffix = typeof t === 'function' ? t('buy_per_credit_suffix') : '/ credit';
+                    per.textContent = `$${tier.usd_per_credit_discounted} ${suffix}`;
+                }
+            });
+        }
+
+        function populateCryptoNetworkSelect() {
+            const sel = document.getElementById('crypto-network-select');
+            const cfg = window.__cryptoConfig;
+            if (!sel || !cfg || !cfg.networks) return;
+            const v = sel.value;
+            sel.innerHTML = cfg.networks.map((n) => `<option value="${escapeHtml(n.id)}">${escapeHtml(n.label)}</option>`).join('');
+            if (v && cfg.networks.some((n) => n.id === v)) sel.value = v;
+        }
+
+        function networkWarningText(net) {
+            if (!net) return '';
+            const key = `crypto_warn_${net.id}`;
+            const tr = typeof t === 'function' ? t(key) : key;
+            return tr !== key ? tr : net.warning;
+        }
+
+        function renderCryptoQr(address) {
+            const host = document.getElementById('crypto-qr-host');
+            if (!host || !address) return;
+            host.innerHTML = '';
+            if (typeof QRCode !== 'undefined') {
+                new QRCode(host, { text: address, width: 180, height: 180 });
+            } else {
+                host.textContent = address;
+            }
+        }
+
+        function updateCryptoModalNetwork() {
+            const cfg = window.__cryptoConfig;
+            const sel = document.getElementById('crypto-network-select');
+            const tierKey = window.__cryptoModalTierKey;
+            if (!cfg || !sel || !tierKey) return;
+            const tier = cfg.tiers.find((x) => x.tier_key === tierKey);
+            const net = cfg.networks.find((n) => n.id === sel.value);
+            if (!tier || !net) return;
+            document.getElementById('crypto-modal-warning').textContent = networkWarningText(net);
+            document.getElementById('crypto-modal-address').textContent = net.address;
+            const amtEl = document.getElementById('crypto-modal-amount');
+            if (net.asset === 'BTC') {
+                amtEl.textContent =
+                    (typeof t === 'function' ? t('crypto_send_btc') : 'Send approximately') +
+                    ` ${tier.btc_amount_approx} BTC (~$${tier.usd_discounted})`;
+            } else {
+                amtEl.textContent =
+                    (typeof t === 'function' ? t('crypto_send_usdt') : 'Send exactly') +
+                    ` ${tier.usdt_amount} USDT`;
+            }
+            renderCryptoQr(net.address);
+        }
+
+        function openCryptoModal(tierKey) {
+            window.__cryptoModalTierKey = tierKey;
+            const cfg = window.__cryptoConfig;
+            const tier = cfg && cfg.tiers.find((x) => x.tier_key === tierKey);
+            if (!tier) return;
+            const line = document.getElementById('crypto-modal-tier-line');
+            if (line) {
+                const tmpl =
+                    typeof t === 'function'
+                        ? t('crypto_modal_tier_line', {
+                              credits: String(tier.credits),
+                              usd: String(tier.usd_discounted),
+                              btc: String(tier.btc_amount_approx),
+                          })
+                        : `${tier.credits} credits — $${tier.usd_discounted} (USDT) or ~${tier.btc_amount_approx} BTC`;
+                line.textContent = tmpl;
+            }
+            document.getElementById('crypto-tx-id').value = '';
+            document.getElementById('crypto-contact-note').value = '';
+            document.getElementById('crypto-submit-msg').textContent = '';
+            const noteLbl = document.querySelector('label[for="crypto-contact-note"]');
+            const logged = !!(window.__authedUser && window.__authedUser.email);
+            if (noteLbl) {
+                noteLbl.textContent = logged
+                    ? t('crypto_note_optional')
+                    : t('crypto_note_label');
+            }
+            const ta = document.getElementById('crypto-contact-note');
+            if (ta) {
+                ta.placeholder = logged
+                    ? t('crypto_note_placeholder_optional')
+                    : t('crypto_note_placeholder_required');
+            }
+            populateCryptoNetworkSelect();
+            updateCryptoModalNetwork();
+            const ov = document.getElementById('crypto-modal-overlay');
+            ov.classList.remove('hidden');
+        }
+
+        function closeCryptoModal() {
+            document.getElementById('crypto-modal-overlay')?.classList.add('hidden');
+        }
+
+        function setBillingMode(mode) {
+            const cardPanel = document.getElementById('panel-billing-card');
+            const cryptoPanel = document.getElementById('panel-billing-crypto');
+            const tabCard = document.getElementById('billing-tab-card');
+            const tabCrypto = document.getElementById('billing-tab-crypto');
+            const noticeG = document.getElementById('buy-notice-gumroad');
+            const noticeC = document.getElementById('buy-notice-crypto');
+            if (mode === 'crypto') {
+                cardPanel?.classList.add('hidden');
+                cryptoPanel?.classList.remove('hidden');
+                noticeG?.classList.add('hidden');
+                noticeC?.classList.remove('hidden');
+                tabCard?.classList.remove('billing-tab-active');
+                tabCard?.setAttribute('aria-selected', 'false');
+                tabCrypto?.classList.add('billing-tab-active');
+                tabCrypto?.setAttribute('aria-selected', 'true');
+            } else {
+                cryptoPanel?.classList.add('hidden');
+                cardPanel?.classList.remove('hidden');
+                noticeC?.classList.add('hidden');
+                noticeG?.classList.remove('hidden');
+                tabCrypto?.classList.remove('billing-tab-active');
+                tabCrypto?.setAttribute('aria-selected', 'false');
+                tabCard?.classList.add('billing-tab-active');
+                tabCard?.setAttribute('aria-selected', 'true');
+            }
+        }
+
+        function setupBillingTabs() {
+            document.getElementById('billing-tab-card')?.addEventListener('click', () => setBillingMode('card'));
+            document.getElementById('billing-tab-crypto')?.addEventListener('click', async () => {
+                try {
+                    await loadCryptoConfig();
+                    setBillingMode('crypto');
+                } catch (e) {
+                    console.error(e);
+                    alert(typeof t === 'function' ? t('crypto_config_error') : 'Could not load crypto options');
+                }
+            });
+        }
+
+        function setupCryptoModal() {
+            document.getElementById('crypto-network-select')?.addEventListener('change', updateCryptoModalNetwork);
+            document.getElementById('crypto-modal-close')?.addEventListener('click', closeCryptoModal);
+            document.getElementById('crypto-modal-overlay')?.addEventListener('click', (e) => {
+                if (e.target.id === 'crypto-modal-overlay') closeCryptoModal();
+            });
+            document.getElementById('crypto-copy-address')?.addEventListener('click', async () => {
+                const addr = document.getElementById('crypto-modal-address')?.textContent || '';
+                try {
+                    await navigator.clipboard.writeText(addr);
+                    const msg = typeof t === 'function' ? t('crypto_copied') : 'Copied';
+                    alert(msg);
+                } catch (err) {
+                    console.error(err);
+                }
+            });
+            document.querySelectorAll('.crypto-open-modal').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    try {
+                        await loadCryptoConfig();
+                    } catch (e) {
+                        console.error(e);
+                        alert(typeof t === 'function' ? t('crypto_config_error') : 'Could not load crypto options');
+                        return;
+                    }
+                    const tier = btn.getAttribute('data-tier');
+                    if (tier) openCryptoModal(tier);
+                });
+            });
+            document.getElementById('crypto-submit-report')?.addEventListener('click', async () => {
+                const tierKey = window.__cryptoModalTierKey;
+                const netId = document.getElementById('crypto-network-select')?.value;
+                const txId = document.getElementById('crypto-tx-id')?.value.trim() || '';
+                const note = document.getElementById('crypto-contact-note')?.value.trim() || '';
+                const msgEl = document.getElementById('crypto-submit-msg');
+                const logged = !!(window.__authedUser && window.__authedUser.email);
+                if (!tierKey || !netId) return;
+                if (txId.length < 8) {
+                    msgEl.textContent = t('crypto_tx_invalid');
+                    return;
+                }
+                if (!logged && note.length < 5) {
+                    msgEl.textContent = t('crypto_note_required');
+                    return;
+                }
+                const sub = document.getElementById('crypto-submit-report');
+                sub.disabled = true;
+                msgEl.textContent = '';
+                try {
+                    const resp = await fetch('/api/buy-credits/crypto-submit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({
+                            tier: tierKey,
+                            network_id: netId,
+                            tx_id: txId,
+                            contact_note: note || null,
+                        }),
+                    });
+                    const data = await resp.json().catch(() => ({}));
+                    if (resp.ok) {
+                        msgEl.textContent = t('crypto_submit_ok');
+                        document.getElementById('crypto-tx-id').value = '';
+                        document.getElementById('crypto-contact-note').value = '';
+                    } else {
+                        let detail = data.detail;
+                        if (Array.isArray(detail)) {
+                            detail = detail
+                                .map((x) => (typeof x === 'string' ? x : x.msg || JSON.stringify(x)))
+                                .join('; ');
+                        } else if (detail && typeof detail === 'object') {
+                            detail = JSON.stringify(detail);
+                        }
+                        msgEl.textContent = (typeof detail === 'string' && detail) || t('crypto_submit_fail');
+                    }
+                } catch (e) {
+                    console.error(e);
+                    msgEl.textContent = t('crypto_submit_fail');
+                } finally {
+                    sub.disabled = false;
+                }
+            });
+        }
+
         function setupBuyButtons() {
             const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
             
             const packageInfo = {
-                'autorig-100': { credits: '100', price: '$3' },
-                'autorig-500': { credits: '500', price: '$10' },
+                'autorig-100': { credits: '100', price: '$10' },
+                'autorig-500': { credits: '500', price: '$30' },
                 'autorig-1000': { credits: '1000', price: '$100' }
             };
             
@@ -295,74 +934,24 @@
             document.getElementById('buy-1000')?.addEventListener('click', () => go('autorig-1000'));
         }
 
-        async function loadApiKeys() {
-            const listEl = document.getElementById('api-keys-list');
-            listEl.textContent = t('api_access_loading');
-            const resp = await fetch('/api/user/api-keys');
-            if (!resp.ok) {
-                listEl.textContent = resp.status === 401 ? t('api_access_need_cookie') : t('api_access_login_required');
-                return;
-            }
-            const data = await resp.json();
-            if (!data.keys || data.keys.length === 0) {
-                listEl.textContent = t('api_access_no_keys');
-                return;
-            }
-            listEl.innerHTML = data.keys.map(k => {
-                const revoked = k.revoked_at ? ' (revoked)' : '';
-                return `
-                    <div style="display:flex; align-items:center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
-                        <div>
-                            <div><span style="color: var(--text-secondary);">ar_${k.key_prefix}_…</span>${revoked}</div>
-                            <div style="color: var(--text-muted); font-size: 0.85rem;">${new Date(k.created_at).toLocaleString()}</div>
-                        </div>
-                        ${k.revoked_at ? '' : `<button class="btn btn-ghost" data-key-id="${k.id}">${t('api_access_revoke')}</button>`}
-                    </div>
-                `;
-            }).join('');
-            listEl.querySelectorAll('button[data-key-id]').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const id = btn.getAttribute('data-key-id');
-                    if (!confirm(t('api_access_revoke_confirm'))) return;
-                    await fetch(`/api/user/api-keys/${id}/revoke`, { method: 'POST' });
-                    await loadApiKeys();
-                });
-            });
-        }
-
-        async function generateApiKey() {
-            const resp = await fetch('/api/user/api-keys', { method: 'POST' });
-            if (!resp.ok) {
-                alert(resp.status === 401 ? t('api_access_need_cookie') : t('api_access_login_required'));
-                return;
-            }
-            const data = await resp.json();
-            const box = document.getElementById('api-key-once');
-            const code = document.getElementById('api-key-plain');
-            code.textContent = data.api_key;
-            box.classList.remove('hidden');
-            await loadApiKeys();
-        }
-
         document.addEventListener('DOMContentLoaded', async () => {
             await I18n.init();
             setupThemeToggle();
             setupLangSelector();
             await updateCreditsUI();
+            await loadDonationStats();
+            await loadRoadmap();
             setupBuyButtons();
+            setupBillingTabs();
+            setupCryptoModal();
             setupYouTubeBonus();
             setupFeedbackForm();
             await loadFeedback();
-
-            document.getElementById('btn-refresh-keys')?.addEventListener('click', loadApiKeys);
-            document.getElementById('btn-generate-key')?.addEventListener('click', generateApiKey);
-            document.getElementById('btn-copy-key')?.addEventListener('click', async () => {
-                const v = document.getElementById('api-key-plain').textContent;
-                await navigator.clipboard.writeText(v);
-                alert(t('api_access_copied'));
+            window.addEventListener('languageChanged', () => {
+                loadDonationStats();
+                loadRoadmap();
+                if (window.__cryptoConfig) applyCryptoPricesToCards();
             });
-
-            await loadApiKeys();
         });
     </script>
 </body>

@@ -2,7 +2,7 @@
 Pydantic models (schemas) for API request/response
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field
 
 
@@ -17,6 +17,10 @@ class TaskCreateRequest(BaseModel):
     input_type: Optional[str] = Field(
         None,
         description="Alias for ``type`` if ``type`` is omitted or empty",
+    )
+    pipeline: str = Field(
+        default="rig",
+        description="``rig`` (default Auto Rig) or ``convert`` (GLB-only retopo/format pipeline; ``input_url`` must be ``.glb``)",
     )
     ga_client_id: Optional[str] = Field(None, description="Google Analytics client ID")
 
@@ -51,6 +55,11 @@ class TaskStatusResponse(BaseModel):
     fbx_glb_error: Optional[str] = None
     # Worker progress page URL
     progress_page: Optional[str] = None
+    # Conversion worker endpoint used for dispatch (only when requester is admin)
+    worker_api: Optional[str] = Field(
+        default=None,
+        description="Worker POST endpoint; set only for admin-authenticated requests.",
+    )
     # 3D viewer HTML URL
     viewer_html_url: Optional[str] = None
     # Quick download links for different formats
@@ -63,8 +72,22 @@ class TaskStatusResponse(BaseModel):
     # Server-side poster NSFW classification (see content_moderation.py)
     content_rating: Optional[str] = None  # safe | suggestive | adult | unknown
     content_score: Optional[float] = None
+    content_classified_at: Optional[datetime] = None
+    # e.g. nudenet-320n-3.4, nudenet...+gpt-4o-mini, or ...:openai_error
+    content_classifier_version: Optional[str] = None
+    # OpenAI vision metadata from poster (YouTube + task UI)
+    poster_llm_title: Optional[str] = None
+    poster_llm_description: Optional[str] = None
+    poster_llm_keywords: Optional[List[str]] = None
+    poster_llm_at: Optional[datetime] = None
+    # Semantic search string for Similar 3D models (title + top keywords); server-computed
+    poster_free3d_query: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    pipeline: str = Field(default="rig", description="``rig`` or ``convert``")
+    # YouTube auto-upload (public video id when upload succeeded)
+    youtube_video_id: Optional[str] = None
+    youtube_upload_status: Optional[str] = None  # uploaded | skipped | failed
 
 
 class TaskHistoryItem(BaseModel):
@@ -122,6 +145,31 @@ class AuthStatusResponse(BaseModel):
     anon: Optional[AnonInfo] = None
     credits_remaining: int
     login_required: bool
+
+
+# =============================================================================
+# AI agent (API key, no Google)
+# =============================================================================
+class AgentRegisterRequest(BaseModel):
+    name: Optional[str] = Field(None, max_length=128, description="Public display name for the agent")
+    description: Optional[str] = Field(None, max_length=2000, description="Short description of what the agent does")
+
+
+class AgentRegisterResponse(BaseModel):
+    api_key: str = Field(description="Shown only once; store securely")
+    agent_id: str = Field(description="Stable anonymous id (UUID) tied to this key")
+
+
+class AgentMeResponse(BaseModel):
+    agent_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    registered_as_agent: bool = False
+    free_used: int = 0
+    free_remaining: int = 0
+    account_note: str = Field(
+        description="How credits and purchases relate to this identity",
+    )
 
 
 # =============================================================================
@@ -211,23 +259,94 @@ class AdminStatsResponse(BaseModel):
     total_credits: int
 
 
+class AdminOverlayMetricsResponse(BaseModel):
+    """Сводка для админ-оверлея: live по БД + периодные счётчики (сбрасываются вручную)."""
+
+    tasks_by_status: dict  # created, processing, done, error
+    total_tasks: int
+    rating_percent: Optional[float] = None  # 100 * done / (done + error), если есть terminal
+    session_completed: int = 0
+    session_total_duration_seconds: float = 0.0
+    session_avg_seconds: Optional[float] = None
+
+
 class AdminTaskListItem(BaseModel):
     """Task item for admin all-tasks list"""
     task_id: str
     owner_type: str
     owner_id: str
+    owner_email: Optional[str] = None  # login email when owner_type == user (same as owner_id)
     status: str
     progress: int
     ready_count: int
     total_count: int
     input_url: Optional[str] = None
     worker_api: Optional[str] = None
+    worker_task_id: Optional[str] = None
+    guid: Optional[str] = None
+    restart_count: int = 0
+    pipeline_kind: str = "rig"
+    error_message: Optional[str] = None
     video_ready: bool = False
     content_rating: Optional[str] = None
     content_score: Optional[float] = None
     content_classifier_version: Optional[str] = None
+    input_bytes: Optional[int] = None  # upload size or sum of cached task files when known
+    poster_url: Optional[str] = None  # /api/thumb/{id} when done and poster exists
     created_at: datetime
     updated_at: datetime
+    age_seconds: int = 0  # now(UTC) - created_at; server time
+
+
+class AdminTaskInspectResponse(BaseModel):
+    """Extended task snapshot for admin overlay detail panel"""
+    task_id: str
+    owner_type: str
+    owner_id: str
+    owner_email: Optional[str] = None
+    status: str
+    progress: int
+    ready_count: int
+    total_count: int
+    restart_count: int = 0
+    input_url: Optional[str] = None
+    input_type: Optional[str] = None
+    pipeline_kind: str = "rig"
+    input_bytes: Optional[int] = None
+    poster_url: Optional[str] = None
+    worker_api: Optional[str] = None
+    worker_task_id: Optional[str] = None
+    progress_page: Optional[str] = None
+    guid: Optional[str] = None
+    error_message: Optional[str] = None
+    last_progress_at: Optional[datetime] = None
+    fbx_glb_output_url: Optional[str] = None
+    fbx_glb_model_name: Optional[str] = None
+    fbx_glb_ready: Optional[bool] = None
+    fbx_glb_error: Optional[str] = None
+    video_ready: bool = False
+    video_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    age_seconds: int = 0
+
+
+class AdminTaskCacheMaxUpdate(BaseModel):
+    """Persisted cap for total size of static/tasks (GB)."""
+
+    task_cache_max_gb: float = Field(..., gt=0, le=100000)
+
+
+class AdminBulkTaskIdsRequest(BaseModel):
+    task_ids: List[str]
+
+
+class AdminBulkRestartCountRecentRequest(BaseModel):
+    hours: float = 24.0
+
+
+class AdminBulkAffectedResponse(BaseModel):
+    affected: int
 
 
 class AdminTaskListResponse(BaseModel):
@@ -509,6 +628,7 @@ class SceneLikeResponse(BaseModel):
 class FeedbackCreateRequest(BaseModel):
     """Request to submit feedback"""
     text: str = Field(..., min_length=1, max_length=2000)
+    parent_id: Optional[int] = None
 
 
 class FeedbackItem(BaseModel):
@@ -518,9 +638,107 @@ class FeedbackItem(BaseModel):
     user_name: Optional[str]
     text: str
     created_at: datetime
+    parent_id: Optional[int] = None
+    user_picture: Optional[str] = None
+    parent_user_name: Optional[str] = None
+    parent_preview: Optional[str] = None
 
 
 class FeedbackListResponse(BaseModel):
     """Response for feedback list"""
     items: List[FeedbackItem]
+
+
+class DonationStatsResponse(BaseModel):
+    raised_usd: float
+    goal_usd: int
+    currency: str = "USD"
+    purchase_count: int = 0
+
+
+class CryptoNetworkItem(BaseModel):
+    id: str
+    label: str
+    asset: str
+    address: str
+    warning: str
+
+
+class CryptoTierItem(BaseModel):
+    tier_key: str
+    credits: int
+    usd_standard: float
+    usd_discounted: float
+    usdt_amount: float
+    btc_amount_approx: float
+    usd_per_credit_discounted: float
+
+
+class CryptoBuyConfigResponse(BaseModel):
+    discount_fraction: float
+    btc_usd_rate: float
+    networks: List[CryptoNetworkItem]
+    tiers: List[CryptoTierItem]
+
+
+class CryptoPaymentSubmitRequest(BaseModel):
+    tier: str = Field(..., min_length=1, max_length=64)
+    network_id: str = Field(..., min_length=1, max_length=32)
+    tx_id: str = Field(..., min_length=8, max_length=256)
+    contact_note: Optional[str] = Field(None, max_length=2000)
+
+
+class CryptoPaymentSubmitResponse(BaseModel):
+    ok: bool = True
+    id: int
+
+
+class RoadmapVotesResponse(BaseModel):
+    counts: Dict[str, int]
+    choice_order: List[str]
+    my_choice: Optional[str] = None
+
+
+class RoadmapVoteRequest(BaseModel):
+    choice: str = Field(..., min_length=1, max_length=64)
+
+
+# =============================================================================
+# Support chat widget (website ↔ Telegram forum topics)
+# =============================================================================
+class SupportChatSessionPostRequest(BaseModel):
+    visitor_id_string: str = Field(..., min_length=8, max_length=96)
+    page_url_string: Optional[str] = Field(None, max_length=4096)
+
+
+class SupportChatSessionPostResponse(BaseModel):
+    session_id_int: int
+    visitor_id_string: str
+    topic_ready_bool: bool
+    support_enabled_bool: bool
+    support_configured_bool: bool
+    page_url_string: Optional[str] = None
+    user_email_string: Optional[str] = None
+
+
+class SupportChatMessagePostRequest(BaseModel):
+    visitor_id_string: str = Field(..., min_length=8, max_length=96)
+    session_id_int: int = Field(..., gt=0)
+    message_text_string: str = Field(..., min_length=1, max_length=4000)
+
+
+class SupportChatMessagePostResponse(BaseModel):
+    ok_bool: bool = True
+    telegram_message_id_int: Optional[int] = None
+
+
+class SupportChatMessageItem(BaseModel):
+    id_int: int
+    direction_string: str
+    body_text_string: str
+    created_at_string: str
+
+
+class SupportChatMessagesPollResponse(BaseModel):
+    messages: List[SupportChatMessageItem]
 

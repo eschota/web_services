@@ -4,27 +4,35 @@
 - Broadcast helpers for task events.
 - Server startup notifications with statistics.
 
-Token is read from environment: TELEGRAM_BOT_TOKEN
+Token is read via config.TELEGRAM_BOT_TOKEN (env + optional /etc/autorig-*.env loaded in config.py).
 """
 
 from __future__ import annotations
 
 import os
 import asyncio
+import hashlib
 import html
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, case
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import AsyncSessionLocal, TelegramChat, TelegramNotification, Task
-from config import APP_URL
+from database import AsyncSessionLocal, TelegramChat, TelegramNotification, Task, SupportChatSession, SupportChatMessage
+from config import (
+    APP_URL,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_NOTIFICATION_CHAT_ID,
+)
+from workers import get_worker_base_url
 
 
 def _get_token() -> str | None:
-    tok = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    # Prefer live os.environ (systemd merges EnvironmentFile before exec); fallback to cached config.
+    tok = (os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or (TELEGRAM_BOT_TOKEN or "").strip())
     return tok or None
 
 
@@ -34,6 +42,13 @@ def _task_url(task_id: str) -> str:
     base = (APP_URL or "").rstrip("/")
     ts = int(time.time())
     return f"{base}/task?id={task_id}&t={ts}"
+
+
+def _format_content_rating_line(rating: str | None) -> str:
+    """HTML line for server-side NSFW poster rating (Task.content_rating)."""
+    r = (rating or "unknown").strip().lower()
+    emoji = {"safe": "🟢", "suggestive": "🟡", "adult": "🔴", "unknown": "⚪"}.get(r, "⚪")
+    return f"{emoji} Content rating: <code>{html.escape(r)}</code>"
 
 
 def _task_summary(input_url: str | None, input_type: str | None) -> str:
@@ -81,20 +96,36 @@ def _format_input_url(input_url: str | None) -> str:
         return f'📦 <a href="{html.escape(input_url)}">Source</a>'
 
 
-async def upsert_chat(chat_id: int, chat_type: str | None, title: str | None) -> None:
+def _normalize_telegram_chat_type(raw) -> str | None:
+    """PTB Chat.type may be Enum or str — store stable lowercase for SQL filters."""
+    if raw is None:
+        return None
+    v = getattr(raw, "value", None)
+    if v is None:
+        v = raw
+    s = str(v).strip().lower()
+    if not s:
+        return None
+    if "." in s:
+        s = s.rsplit(".", 1)[-1]
+    return s
+
+
+async def upsert_chat(chat_id: int, chat_type, title: str | None) -> None:
+    ctype = _normalize_telegram_chat_type(chat_type)
     async with AsyncSessionLocal() as db:
         rs = await db.execute(select(TelegramChat).where(TelegramChat.chat_id == chat_id))
         rec = rs.scalar_one_or_none()
         now = datetime.utcnow()
         if rec:
-            rec.chat_type = chat_type
+            rec.chat_type = ctype
             rec.title = title
             rec.is_active = True
             rec.last_seen_at = now
         else:
             rec = TelegramChat(
                 chat_id=chat_id,
-                chat_type=chat_type,
+                chat_type=ctype,
                 title=title,
                 is_active=True,
                 created_at=now,
@@ -107,7 +138,172 @@ async def upsert_chat(chat_id: int, chat_type: str | None, title: str | None) ->
 async def get_active_chat_ids() -> list[int]:
     async with AsyncSessionLocal() as db:
         rs = await db.execute(select(TelegramChat.chat_id).where(TelegramChat.is_active.is_(True)))
-        return [row[0] for row in rs.all()]
+        return [int(row[0]) for row in rs.all()]
+
+
+# =============================================================================
+# Site support chat (forum topic per session)
+# =============================================================================
+async def resolve_support_forum_chat_id(db: AsyncSession) -> int | None:
+    """
+    Target supergroup for support topics:
+    TELEGRAM_NOTIFICATION_CHAT_ID if set,
+    else earliest active subscriber preferring Bot-API-negative ids (forums/groups),
+    then any active chat (matches notification fan-out ordering when only positives exist).
+    """
+    if TELEGRAM_NOTIFICATION_CHAT_ID is not None and int(TELEGRAM_NOTIFICATION_CHAT_ID) != 0:
+        return int(TELEGRAM_NOTIFICATION_CHAT_ID)
+    r = await db.execute(
+        select(TelegramChat.chat_id)
+        .where(TelegramChat.is_active.is_(True))
+        .order_by(
+            case((TelegramChat.chat_id < 0, 0), else_=1),
+            TelegramChat.created_at.asc(),
+        )
+        .limit(1)
+    )
+    row = r.scalar_one_or_none()
+    return int(row) if row is not None else None
+
+
+async def support_forum_readiness_error(db: AsyncSession) -> str | None:
+    """Return None only when the bot can create support forum topics in the target chat."""
+    if not (_get_token() or ""):
+        return "TELEGRAM_BOT_TOKEN is not set"
+    cid = await resolve_support_forum_chat_id(db)
+    if cid is None or int(cid) == 0:
+        return "Support forum chat_id not resolved"
+
+    from telegram import Bot
+
+    bot = Bot(token=_get_token())
+    try:
+        chat = await bot.get_chat(chat_id=int(cid))
+        chat_type = _normalize_telegram_chat_type(getattr(chat, "type", None))
+        if chat_type != "supergroup":
+            return f"resolved support chat must be a supergroup, got {chat_type or 'unknown'}"
+        if not bool(getattr(chat, "is_forum", False)):
+            return "resolved support supergroup does not have forum topics enabled"
+
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=int(cid), user_id=int(me.id))
+        status = _normalize_telegram_chat_type(getattr(member, "status", None))
+        if status not in ("administrator", "creator", "owner"):
+            return f"support bot must be an admin in the forum supergroup, got {status or 'unknown'}"
+        if status not in ("creator", "owner") and getattr(member, "can_manage_topics", None) is not True:
+            return "support bot admin is missing the Telegram right to manage topics"
+    except Exception as exc:
+        return f"Telegram support forum check failed: {type(exc).__name__}: {exc}"
+    return None
+
+
+async def support_forum_configured_bool(db: AsyncSession) -> bool:
+    """True only when token, target forum, and bot topic-management rights are valid."""
+    return await support_forum_readiness_error(db) is None
+
+
+async def telegram_create_support_topic(db: AsyncSession, topic_name: str) -> tuple[int, int]:
+    token = _get_token()
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
+    readiness_error = await support_forum_readiness_error(db)
+    if readiness_error is not None:
+        raise RuntimeError(readiness_error)
+    cid = await resolve_support_forum_chat_id(db)
+    if cid is None:
+        raise RuntimeError(
+            "Support forum chat_id not resolved (set TELEGRAM_NOTIFICATION_CHAT_ID "
+            "or subscribe the target group with /start so a row exists in telegram_chats)"
+        )
+
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    name = (topic_name or "").strip()[:128] or "Support"
+
+    forum_t = await _send_with_retry(lambda: bot.create_forum_topic(chat_id=int(cid), name=name))
+    if not forum_t:
+        raise RuntimeError("create_forum_topic failed")
+    mtid = getattr(forum_t, "message_thread_id", None)
+    if mtid is None:
+        raise RuntimeError("create_forum_topic returned no message_thread_id")
+    return int(cid), int(mtid)
+
+
+async def telegram_send_support_message_html(
+    *,
+    forum_chat_id: int,
+    message_thread_id: int,
+    html: str,
+) -> int:
+    token = _get_token()
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    msg = await _send_with_retry(
+        lambda: bot.send_message(
+            chat_id=int(forum_chat_id),
+            message_thread_id=int(message_thread_id),
+            text=html,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    )
+    if not msg:
+        raise RuntimeError("send_support_message failed")
+    return int(getattr(msg, "message_id"))
+
+
+async def ingest_support_reply_from_forum_message(
+    *,
+    forum_chat_id: int,
+    message_thread_id: int,
+    text: str,
+    telegram_message_id: int | None,
+    from_bot: bool,
+) -> None:
+    if from_bot:
+        return
+    t = (text or "").strip()
+    if not t:
+        return
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(SupportChatSession).where(
+                SupportChatSession.telegram_chat_id == int(forum_chat_id),
+                SupportChatSession.telegram_thread_id == int(message_thread_id),
+                SupportChatSession.status == "open",
+            )
+        )
+        sess = r.scalar_one_or_none()
+        if sess is None:
+            return
+
+        if telegram_message_id is not None:
+            dup_chk = await db.execute(
+                select(SupportChatMessage).where(
+                    SupportChatMessage.session_id == sess.id,
+                    SupportChatMessage.telegram_message_id == int(telegram_message_id),
+                )
+            )
+            if dup_chk.scalar_one_or_none() is not None:
+                return
+
+        db.add(
+            SupportChatMessage(
+                session_id=sess.id,
+                direction="admin",
+                body_text=t,
+                telegram_message_id=(
+                    int(telegram_message_id) if telegram_message_id is not None else None
+                ),
+            )
+        )
+        await db.commit()
 
 
 async def reserve_notification(chat_id: int, event_type: str, event_key: str) -> bool:
@@ -386,6 +582,12 @@ async def broadcast_full_bundle_download(task_id: str, user_email: str | None = 
         f'🔗 <a href="{html.escape(url)}">Task</a> | 👤 {html.escape(actor)}'
     )
 
+    hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
+    # event_key max 128 chars (DB); hash task + user + hour for dedupe
+    event_key = hashlib.sha256(
+        f"{task_id}\0{(user_email or '')}\0{hour_bucket}".encode()
+    ).hexdigest()[:48]
+
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
         return
@@ -394,6 +596,10 @@ async def broadcast_full_bundle_download(task_id: str, user_email: str | None = 
 
     async def _one(chat_id: int):
         async with sem:
+            reserved = await reserve_notification(chat_id, "bundle_download", event_key)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate bundle download notice chat={chat_id} key={event_key}")
+                return
             result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                 chat_id=cid,
                 text=text,
@@ -502,6 +708,64 @@ async def broadcast_youtube_token_refresh_needed(detail: str = "") -> None:
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def broadcast_disk_space_low(
+    *,
+    free_gb: float,
+    target_gb: float,
+    zips_deleted: int,
+    tasks_purged: int,
+) -> None:
+    """
+    Alert admins: root filesystem still below target after new-task cleanup.
+    Throttled: at most once per UTC hour per chat (reserve_notification).
+    """
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping disk space low notice")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
+    tgt = f"{float(target_gb):.1f}".replace(".", "_")
+    event_key = f"below_{tgt}g_{hour_bucket}"
+
+    text = (
+        "🚨 <b>Мало места на диске</b>\n"
+        f"Свободно на <code>/</code>: <b>{free_gb:.2f} GB</b> "
+        f"(цель при создании задачи: <b>{float(target_gb):.1f} GB</b>)\n"
+        f"Очистка при создании задачи: удалено ZIP: <code>{zips_deleted}</code>, "
+        f"задач (done/error): <code>{tasks_purged}</code>"
+    )
+
+    bot = Bot(token=token)
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            reserved = await reserve_notification(chat_id, "disk_low", event_key)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate disk-low notice chat={chat_id} hour={hour_bucket}")
+                return
+            result = await _send_with_retry(
+                lambda cid=chat_id: bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            )
+            if result:
+                print(f"[Telegram] Disk space low notice sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
 async def broadcast_youtube_bonus_click(
     user_email: str
 ) -> None:
@@ -542,6 +806,53 @@ async def broadcast_feedback_submitted(
 
     bot = Bot(token=token)
     text = f"📝 <b>New Feedback Submitted!</b>\n👤 User: {html.escape(user_email)}\n💬 Text: {html.escape(text_content[:500])}"
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    await asyncio.gather(*[
+        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML))
+        for cid in chat_ids
+    ])
+
+
+async def broadcast_crypto_payment_submitted(
+    report_id: int,
+    tier: str,
+    network_id: str,
+    tx_id: str,
+    user_email: str | None,
+    agent_anon_id: str | None,
+    contact_note: str | None,
+) -> None:
+    """Notify admins: crypto payment report pending manual credit."""
+    print(
+        f"[Telegram] broadcast_crypto_payment_submitted id={report_id} tier={tier} net={network_id} tx={tx_id[:32]}..."
+    )
+    token = _get_token()
+    if not token:
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    who_parts: list[str] = []
+    if user_email:
+        who_parts.append(f"👤 User: {html.escape(user_email)}")
+    if agent_anon_id:
+        who_parts.append(f"🤖 Agent id: <code>{html.escape(agent_anon_id)}</code>")
+    who = "\n".join(who_parts) if who_parts else "👤 Anonymous (see note)"
+    note_line = ""
+    if contact_note:
+        note_line = f"\n📝 Note: {html.escape(contact_note[:500])}"
+    text = (
+        f"₿ <b>Crypto payment report</b> #{report_id} <i>pending</i>\n"
+        f"📦 Tier: <code>{html.escape(tier)}</code> | 🌐 Network: <code>{html.escape(network_id)}</code>\n"
+        f"🔗 Tx: <code>{html.escape(tx_id[:200])}</code>\n"
+        f"{who}{note_line}"
+    )
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
@@ -729,12 +1040,15 @@ async def broadcast_worker_stalled(
     if not chat_ids:
         return
 
-    safe_url = html.escape(worker_url or "unknown")
+    from worker_labels import format_worker_stalled_telegram_html
+
+    worker_block = format_worker_stalled_telegram_html(worker_url)
     sample = ", ".join((sample_task_ids or [])[:3])
     sample_line = f"\n🧩 Tasks: <code>{html.escape(sample)}</code>" if sample else ""
     text = (
         f"🚨 <b>Worker stalled</b>\n"
-        f"🔧 {safe_url} | 📌 stalled: {int(stalled_tasks)} | ⏱ oldest: {int(oldest_stalled_minutes)}m"
+        f"{worker_block}\n"
+        f"📌 stalled: {int(stalled_tasks)} | ⏱ oldest: {int(oldest_stalled_minutes)}m"
         f"{sample_line}"
     )
 
@@ -785,6 +1099,44 @@ async def broadcast_bulk_restart_summary(total: int, restarted: int, errors: lis
     ])
 
 
+async def reserve_and_broadcast_task_done(task_id: str) -> None:
+    """
+    Atomically reserve telegram_done_notified_at and enqueue the Telegram "task completed"
+    message. Call only after Task.content_rating / content_classified_at are committed so
+    the notification always reflects server-side classification.
+    """
+    async with AsyncSessionLocal() as db:
+        now = datetime.utcnow()
+        stmt = (
+            update(Task)
+            .where(Task.id == task_id)
+            .where(Task.telegram_done_notified_at.is_(None))
+            .values(telegram_done_notified_at=now)
+        )
+        res = await db.execute(stmt)
+        await db.commit()
+
+        if res.rowcount != 1:
+            return
+
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task:
+            return
+
+        duration = None
+        if task.created_at:
+            duration = int((datetime.utcnow() - task.created_at).total_seconds())
+        progress_url = None
+        if task.guid and task.worker_api:
+            worker_base = get_worker_base_url(task.worker_api)
+            progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+
+        print(f"[Telegram] Scheduling done notification for task {task_id} (after content rating)")
+        asyncio.create_task(
+            broadcast_task_done(task_id, duration_seconds=duration, progress_page=progress_url)
+        )
+
+
 async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:
     print(f"[Telegram] broadcast_task_done called for task {task_id}")
     token = _get_token()
@@ -799,37 +1151,27 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     url = _task_url(task_id)
     metrics_line = _format_task_metrics(await _task_telegram_metrics(task_id))
 
-    # Get task details including owner for author line
     owner_email = None
-    if not progress_page:
-        try:
-            async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
-                result = await db.execute(select(Task).where(Task.id == task_id))
-                task = result.scalar_one_or_none()
-                if task:
-                    # Get author email if owner is a user
-                    if task.owner_type == "user":
-                        owner_email = task.owner_id
-                    # Construct progress_page URL from worker_api and guid
-                    if task.guid and task.worker_api:
-                        from urllib.parse import urlparse
-                        parsed = urlparse(task.worker_api)
-                        worker_base = f"{parsed.scheme}://{parsed.netloc}"
-                        progress_page = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
-        except Exception as e:
-            print(f"[Telegram] Failed to get task details: {e}")
-    else:
-        # Still need to fetch owner_email even if progress_page is passed
-        try:
-            async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
-                result = await db.execute(select(Task).where(Task.id == task_id))
-                task = result.scalar_one_or_none()
-                if task and task.owner_type == "user":
+    content_rating = "unknown"
+    resolved_progress = progress_page
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Task).where(Task.id == task_id))
+            task = result.scalar_one_or_none()
+            if task:
+                if task.owner_type == "user":
                     owner_email = task.owner_id
-        except Exception as e:
-            print(f"[Telegram] Failed to get owner_email: {e}")
+                cr = getattr(task, "content_rating", None)
+                if cr:
+                    content_rating = str(cr).strip().lower()
+                if not resolved_progress and task.guid and task.worker_api:
+                    parsed = urlparse(task.worker_api)
+                    worker_base = f"{parsed.scheme}://{parsed.netloc}"
+                    resolved_progress = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+    except Exception as e:
+        print(f"[Telegram] Failed to get task details for done notification: {e}")
+
+    rating_line = _format_content_rating_line(content_rating)
 
     dur = _format_duration(duration_seconds)
     done_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
@@ -839,10 +1181,9 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
         done_parts.append(f"⏱ {html.escape(dur)}")
     done_parts.append(html.escape(metrics_line))
 
-    # Table-like formatting in 2 lines using HTML
-    text = f"✅ <b>Task completed</b>\n" + " | ".join(done_parts)
-    if progress_page:
-        text += f'\n🔧 <a href="{html.escape(progress_page)}">Worker Logs</a>'
+    text = f"✅ <b>Task completed</b>\n{rating_line}\n" + " | ".join(done_parts)
+    if resolved_progress:
+        text += f'\n🔧 <a href="{html.escape(resolved_progress)}">Worker Logs</a>'
 
     # Try to find cached video
     mp4_path = f"/var/autorig/videos/{task_id}.mp4"
@@ -999,9 +1340,42 @@ async def broadcast_server_startup() -> None:
 # =============================================================================
 # Bot runner (polling)
 # =============================================================================
+async def _support_forum_message_handler(update, context):
+    msg = update.effective_message
+    if not msg:
+        return
+    async with AsyncSessionLocal() as db:
+        forum_cid = await resolve_support_forum_chat_id(db)
+    if forum_cid is None:
+        return
+    if int(msg.chat_id) != int(forum_cid):
+        return
+    mtid = getattr(msg, "message_thread_id", None)
+    if mtid is None:
+        return
+    user = msg.from_user
+    from_bot = bool(user is not None and getattr(user, "is_bot", False))
+    txt = getattr(msg, "text", None) or ""
+    await ingest_support_reply_from_forum_message(
+        forum_chat_id=int(msg.chat_id),
+        message_thread_id=int(mtid),
+        text=str(txt),
+        telegram_message_id=getattr(msg, "message_id", None),
+        from_bot=from_bot,
+    )
+
+
 async def _start_cmd(update, context):
     chat = update.effective_chat
     if not chat:
+        return
+    async with AsyncSessionLocal() as db:
+        forum_cid = await resolve_support_forum_chat_id(db)
+    if forum_cid is not None and int(chat.id) == int(forum_cid):
+        if update.message:
+            await update.message.reply_text(
+                "This forum is for support threads. Task notifications cannot be subscribed via /start here; use the site chat bubble."
+            )
         return
     title = getattr(chat, "title", None) or getattr(chat, "username", None) or getattr(chat, "full_name", None)
     print(f"[Telegram] /start command from chat_id={chat.id}, type={getattr(chat, 'type', None)}, title={title}")
@@ -1017,10 +1391,19 @@ async def run_polling() -> None:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    from telegram.ext import ApplicationBuilder, CommandHandler
+    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", _start_cmd))
+
+    group_filter = filters.ChatType.GROUP | filters.ChatType.SUPERGROUP
+    print("[Telegram] Support forum reply handler (resolved chat_id from env or telegram_chats)")
+    app.add_handler(
+        MessageHandler(
+            group_filter & filters.TEXT & (~filters.COMMAND),
+            _support_forum_message_handler,
+        )
+    )
 
     await app.initialize()
     await app.start()

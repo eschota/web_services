@@ -177,29 +177,24 @@ sudo apt install python3.11 python3.11-venv python3-pip nginx certbot python3-ce
 ### ⚙️ Настройка приложения
 
 ```bash
-# Создание директорий
-sudo mkdir -p /opt/autorig-online
+# Канонический путь проекта
+cd /root/autorig-online
 sudo mkdir -p /var/autorig/uploads
-
-# Копирование файлов
-sudo cp -r /root/autorig-online/* /opt/autorig-online/
 
 # Обновление уже установленного продакшена после git pull (backend + /developers + i18n)
 # sudo /root/autorig-online/deploy/sync-prod-from-repo.sh
 
 # Создание виртуального окружения
-cd /opt/autorig-online
 sudo python3.11 -m venv venv
 sudo ./venv/bin/pip install -r backend/requirements.txt
 
 # Настройка прав доступа
-sudo chown -R www-data:www-data /opt/autorig-online
 sudo chown -R www-data:www-data /var/autorig
 ```
 
 ### 🔧 Конфигурация окружения
 
-Создайте `/opt/autorig-online/backend/.env`:
+Создайте `/root/autorig-online/backend/.env`:
 
 ```env
 # Настройки приложения
@@ -228,7 +223,7 @@ MAX_UPLOAD_SIZE_MB=100
 
 ```bash
 # Копирование конфигурации сервиса
-sudo cp /opt/autorig-online/deploy/autorig.service /etc/systemd/system/
+sudo cp /root/autorig-online/deploy/autorig.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable autorig
 sudo systemctl start autorig
@@ -238,7 +233,7 @@ sudo systemctl start autorig
 
 ```bash
 # Копирование конфигурации
-sudo cp /opt/autorig-online/deploy/nginx.conf /etc/nginx/sites-available/autorig.online
+sudo cp /root/autorig-online/deploy/nginx.conf /etc/nginx/sites-available/autorig.online
 sudo ln -s /etc/nginx/sites-available/autorig.online /etc/nginx/sites-enabled/
 
 # Получение SSL сертификата
@@ -259,6 +254,35 @@ sudo crontab -e
 0 */6 * * * find /var/autorig/uploads -type f -mmin +1440 -delete
 0 */6 * * * find /var/autorig/uploads -type d -empty -delete
 ```
+
+### 📇 Ежедневный дамп задач для SEO (JSON snapshot)
+
+Скрипт [`backend/scripts/dump_sitemap_tasks.py`](backend/scripts/dump_sitemap_tasks.py) выгружает в JSON все задачи с условиями публичной галереи (как у страниц `/m/{id}`): поля `poster_llm_*`, даты, `pipeline_kind`. Не подменяет живую генерацию sitemap по HTTP.
+
+```bash
+0 3 * * * cd /root/autorig-online/backend && /root/autorig-online/venv/bin/python scripts/dump_sitemap_tasks.py --output /root/autorig-online/backend/data/sitemap_tasks_snapshot.json
+```
+
+По умолчанию `--output` — `backend/data/sitemap_tasks_snapshot.json` (файл в `.gitignore`).
+
+### 🗺️ Ежедневное обновление sitemap (зеркало + отчёт SEO)
+
+Индекс [`/sitemap.xml`](https://autorig.online/sitemap.xml) собирается **на каждый запрос** из БД: статические страницы + чанки `/sitemap/gallery/part/{n}.xml` для полного публичного набора страниц задач (`status=done`, `video_ready`, poster-условия, `content_rating != adult`, см. `gallery_seo_task_conditions` в [`seo_gallery.py`](backend/seo_gallery.py)). Для совместимости сохранён legacy-гейт: `/sitemap/gallery/indexing/part/{n}.xml` (фильтр `gallery_seo_indexing_sql_conditions` + `seo_passes_indexing_gate`).
+
+Скрипт [`backend/scripts/daily_sitemap_refresh.py`](backend/scripts/daily_sitemap_refresh.py) раз в сутки записывает копию `sitemap.xml`, `gallery-part-*.xml` (полный пул), `gallery-indexing-part-*.xml` (SEO-гейт) и `seo_indexing_report.json` в `backend/data/sitemap_generated/` (аудит, бэкап XML, сравнение полного и SEO-гейт пулинга). HTTP по-прежнему отдаёт актуальные XML из БД.
+
+```bash
+15 3 * * * cd /root/autorig-online/backend && /root/autorig-online/venv/bin/python scripts/daily_sitemap_refresh.py
+```
+
+Каталог `data/sitemap_generated/` в `.gitignore`.
+
+## 🔎 Проверка индексации `/task?id=<id>`
+
+1) Откройте Google Search Console и выполните URL Inspection для `https://autorig.online/task?id=<task-id>`.
+2) Нажмите **Test live URL**.
+3) Если `Indexing allowed` = `index`, подавайте **Request indexing** для этой ссылки.
+4) После запроса проверьте, что причина `noindex` больше не показывается в отчёте проверки.
 
 ## 🔧 Переменные окружения
 
@@ -283,7 +307,13 @@ sudo crontab -e
 | Метод | Эндпоинт | Описание |
 |-------|----------|----------|
 | `GET` | `/` | 🏠 Главная страница |
-| `GET` | `/task?id=X` | 📊 Страница прогресса задачи |
+| `GET` | `/m/{task_id}` | 🧩 Публичная SEO-страница задачи (без viewer, с canonical на задачу) |
+| `GET` | `/sitemap.xml` | 🗺 Индекс sitemap |
+| `GET` | `/sitemap-mirror.xml` | 🗺 Зеркальный индекс sitemap (из `backend/data/sitemap_generated/sitemap.xml`) |
+| `GET` | `/sitemap/pages.xml` | 🗺 Статические страницы сайта для sitemap |
+| `GET` | `/sitemap/gallery/part/{n}.xml` | 🗺 Публичные URL задач (`/m/{id}`), полный список |
+| `GET` | `/sitemap/gallery/indexing/part/{n}.xml` | 🗺 Только SEO-гейт список URL задач (`/m/{id}`) |
+| `GET` | `/task?id=X` | 📊 Страница прогресса задачи (индексируется как самостоятельная, если задача существует; `/task` без `id` и несуществующие `task` остаются `noindex`) |
 | `GET` | `/auth/login` | 🔐 Вход через Google OAuth |
 | `GET` | `/auth/callback` | 🔄 Обратный вызов OAuth |
 | `GET` | `/auth/logout` | 🚪 Выход из системы |
@@ -445,3 +475,20 @@ curl https://autorig.online/api/admin/stats
 ### Deep links
 - Open specific task: `https://t.me/YourBotName/app?startapp=task_TASKID`
 - Main page: `https://t.me/YourBotName/app`
+
+### Site support chat (forum topics)
+
+The floating 💬 bubble uses FastAPI `POST /api/support-chat/session`, `POST /api/support-chat/message`, and `GET /api/support-chat/messages` backed by SQLite tables `support_chat_sessions` / `support_chat_messages`, with **python-telegram-bot** `createForumTopic` + threaded `send_message` toward your **forum-enabled Telegram supergroup**.
+
+1. Create or use a Telegram **forum** supergroup with topics enabled; add your bot as **admin** with rights to manage topics/post.
+2. Set env (numeric `chat_id` is usually negative for supergroups). **Task notifications and support use the same group** — set `TELEGRAM_NOTIFICATION_CHAT_ID` to pin that id on the API host, or leave it unset: the backend then uses the earliest **active subscriber with a negative group id** in `telegram_chats` (the same pool used for broadcast notifications).
+
+   ```
+   TELEGRAM_BOT_TOKEN=...
+   TELEGRAM_NOTIFICATION_CHAT_ID=-100xxxxxxxxxx
+   ```
+
+3. Run the FastAPI app (tables are created via `init_db()`).
+4. Run the Telegram polling process continuously (same codebase `backend/telegram_bot.py`) so moderator replies copied from forum threads are ingested via `MessageHandler`.
+
+To hide the widget on a specific page only: `<body data-support-chat-off="1">` or `window.__siteLayoutSupportChat = false`.

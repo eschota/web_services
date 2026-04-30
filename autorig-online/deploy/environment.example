@@ -1,6 +1,18 @@
 # Copy to /etc/autorig-online/environment on the server (chmod 600).
 # Used by systemd for autorig.service — not committed with real secrets.
 
+# Disk (optional): free-space targets and purge caps — see backend/config.py
+# NEW_TASK_MIN_FREE_GB=2.1
+# NEW_TASK_PURGE_TASKS_MAX_FREED_GB=8
+# MIN_FREE_SPACE_GB=10
+# AUTOMATIC_TASK_DB_DELETION=0
+
 RESEND_API_KEY=
 # Must be a verified sender/domain in Resend
 EMAIL_FROM=noreply@autorig.online
+
+# Telegram: token + optional fixed group id (backend/config.py also loads /etc/autorig-telegram.env and /etc/autorig-backend.env when present).
+# TELEGRAM_BOT_TOKEN=...
+# TELEGRAM_NOTIFICATION_CHAT_ID=-1001234567890
+
+# Site support uses the same group (forum topics): resolved from TELEGRAM_NOTIFICATION_CHAT_ID if set, else earliest active telegram_chats row with negative chat_id.

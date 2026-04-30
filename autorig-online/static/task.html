@@ -4,12 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
+    <!-- TASK_SEO_PLACEHOLDER -->
     <title>Task Progress | AutoRig.online</title>
-    
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=tc-6">
@@ -41,7 +37,10 @@
         body.webapp-mode #task-share-btn { display: inline-flex !important; }
         /* Hide downloads and video player in webapp mode - only 3D viewer */
         body.webapp-mode #downloads-card { display: none !important; }
+        body.webapp-mode #retopo-convert-card { display: none !important; }
+        body.webapp-mode #sprite-sheet-card { display: none !important; }
         body.webapp-mode #video-player { display: none !important; }
+        body.webapp-mode #video-youtube-bar { display: none !important; }
         body.webapp-mode #hdrp-renders { display: none !important; }
         body.webapp-mode #video-pending { display: none !important; }
         
@@ -119,6 +118,17 @@
             display: block;
             background: #111;
         }
+
+        /* Poster LLM keywords → Free3D public search */
+        a.task-meta-keyword-link {
+            color: inherit;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        a.task-meta-keyword-link:hover {
+            text-decoration: underline;
+            opacity: 0.92;
+        }
         .texture-tile .label {
             padding: 0.5rem;
             text-align: center;
@@ -171,12 +181,19 @@
             display: flex;
             justify-content: flex-end;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 0.45rem;
             width: 100%;
             margin-bottom: 0.5rem;
             min-height: 0;
         }
-        #downloads-card .task-downloads-card-header .task-share-open-btn {
+        #downloads-card .task-downloads-card-header .task-share-open-btn,
+        #downloads-card .task-downloads-card-header #video-youtube-bar {
             flex: 0 0 auto;
+        }
+        #downloads-card .task-downloads-card-header #video-youtube-bar:not(.hidden) {
+            display: flex !important;
+            align-items: center;
         }
 
         .task-share-open-btn {
@@ -1192,6 +1209,15 @@
             margin-top: 1rem;
         }
 
+        /* Retopo + sprite: separate cards in the right column (not inside #task-sidebar-bundle) */
+        #task-columns-secondary #retopo-convert-card.card,
+        #task-columns-secondary #sprite-sheet-card.card {
+            width: 540px;
+            max-width: 100%;
+            box-sizing: border-box;
+            padding: 1rem 1.25rem 1.25rem;
+        }
+
         main.task-page-main.container-sm {
             max-width: 1680px;
         }
@@ -1244,6 +1270,30 @@
             display: block;
             border-radius: 12px;
             background: #000;
+        }
+
+        #video-youtube-bar .video-youtube-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.85rem;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            font-family: inherit;
+            line-height: 1.2;
+            text-decoration: none;
+            background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
+            color: #fff;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 2px 10px rgba(255, 0, 0, 0.28);
+            transition: filter 0.2s, transform 0.15s, box-shadow 0.2s;
+        }
+
+        #video-youtube-bar .video-youtube-link:hover {
+            color: #fff;
+            filter: brightness(1.08);
+            transform: translateY(-1px);
         }
 
         /* Overlay must not participate in intrinsic min-width (flex/grid) or widen narrow aspect-ratio box */
@@ -2119,35 +2169,6 @@
         #download-all-btn.hidden {
             display: none !important;
         }
-        .download-all-archive-progress {
-            width: 100%;
-            padding: 0.55rem 0;
-        }
-        .download-all-archive-progress.hidden {
-            display: none !important;
-        }
-        .download-all-archive-track {
-            width: 100%;
-            height: 10px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.1);
-            overflow: hidden;
-            border: 1px solid rgba(99, 102, 241, 0.35);
-        }
-        .download-all-archive-fill {
-            height: 100%;
-            border-radius: inherit;
-            background: linear-gradient(90deg, #6366f1, #22c55e);
-            width: 0%;
-            transition: width 0.2s ease-out;
-        }
-        .download-all-archive-label {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-align: center;
-            margin-top: 0.35rem;
-        }
     </style>
 </head>
 <body data-layout-free3d-ribbon="1" data-layout-free3d-init="task">
@@ -2173,6 +2194,8 @@
                             <span id="status-text">Processing...</span>
                         </span>
                     </div>
+                    <div id="task-server-queue-hint" class="hidden"
+                         style="font-size: 0.78rem; color: var(--text-muted); margin: 0.4rem 0 0; max-width: 560px; line-height: 1.4;"></div>
                 </div>
             </div>
             <div id="page-boot-status" class="page-boot-status">
@@ -2214,6 +2237,10 @@
                        style="color: #f59e0b; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: 0.9rem;">
                         -
                     </a>
+                </div>
+                <div id="admin-worker-api-row" class="hidden" style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.08);">
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;" data-i18n="admin_worker_api">Worker API (admin)</div>
+                    <span id="admin-worker-api-text" style="font-size: 0.85rem; word-break: break-all; color: var(--text);">-</span>
                 </div>
             </div>
 
@@ -2439,6 +2466,8 @@
                                     <button id="view-mode-tpose" class="active" title="T-Pose Mode">T-Pose</button>
                                     <button id="view-mode-rig" title="RIG Mode (show spheres)">RIG</button>
                                     <button id="view-mode-anim" title="Animation Mode">Anim</button>
+                                    <button id="view-mode-play" title="Play Mode (WASD + Space + Shift, Alt ragdoll)">Play</button>
+                                    <button id="view-mode-ragdoll" title="Ragdoll Mode (R reset, Space impulse)">Ragdoll</button>
                                 </div>
                                 <!-- Hidden rig type select (moved to settings) -->
                                 <select id="viewer-rigtype-select" class="form-select hidden" style="
@@ -3329,59 +3358,39 @@
                 </div>
             </div>
 
-            <!-- Sprite sheet MVP: auto-renders 5 standard views -->
-            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="sprite-sheet-card">
-                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-                    <h3 class="card-title" style="margin:0; font-size:1rem;">2D Sprite sheet</h3>
-                    <div style="font-size:0.72rem; color:var(--text-muted);">Five views · PNG atlas · Three.js</div>
+            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-free3d-similar-section">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                    <h3 class="card-title" style="margin:0;" data-i18n="task_free3d_similar_title">Similar 3D models</h3>
+                    <div style="font-size:0.78rem; color:var(--text-muted);" data-i18n="task_free3d_similar_subtitle">Semantic search from poster title + keywords (Free3D)</div>
                 </div>
-                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.55rem;">
-                    Same custom animations as in 3D preview. Renders automatically when you pick an animation (or change options).
-                </div>
-                <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap; margin-bottom:0.45rem;">
-                    <label for="sprite-sheet-anim-type" style="font-size:0.72rem; color:var(--text-muted);">Type:</label>
-                    <select id="sprite-sheet-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
-                        <option value="walk" selected>Walk</option>
-                    </select>
-                    <div id="sprite-sheet-anim-stats" style="font-size:0.72rem; color:var(--text-muted);"></div>
-                </div>
-                <div id="sprite-sheet-anim-grid" class="custom-anim-grid">
-                    <div style="grid-column:1/-1; color:var(--text-muted);">Loading…</div>
-                </div>
-                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.65rem; padding-top:0.55rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
-                    <label for="sprite-sheet-resolution" style="font-size:0.72rem; color:var(--text-muted);">Cell size</label>
-                    <select id="sprite-sheet-resolution" class="form-input" style="max-width:120px; padding:0.35rem 0.45rem; font-size:0.75rem;">
-                        <option value="64">64 px</option>
-                        <option value="128">128 px</option>
-                        <option value="256" selected>256 px</option>
-                        <option value="512">512 px</option>
-                        <option value="1024">1024 px</option>
-                    </select>
-                    <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
-                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="30" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
-                    <span style="font-size:0.68rem; color:var(--text-muted);">Views: front, back, left, top, top-right 45°</span>
-                </div>
-                <div id="sprite-sheet-progress" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem; min-height:1.2em;"></div>
-                <div id="sprite-sheet-views-grid" class="sprite-sheet-views-grid"></div>
-                <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.62rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:160px;"></pre>
-                <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
-                    <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download pack JSON</button>
-                    <button type="button" id="sprite-sheet-download-all-png-btn" class="btn btn-primary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download all PNGs</button>
-                </div>
+                <div id="task-free3d-similar-results" class="free3d-results" style="padding-top:0;"></div>
             </div>
 
-            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-free3d-popular-section">
-                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-                    <h3 class="card-title" style="margin:0;">🔥 Popular Free3D Characters - Download for free!</h3>
-                    <div style="font-size:0.78rem; color:var(--text-muted);">6 random picks from top popular characters</div>
+            <div class="card mt-3 hidden boot-deferred-section boot-reveal-surface" id="task-poster-meta-section">
+                <div class="card-header">
+                    <h3 class="card-title" style="margin:0;" data-i18n="task_meta_section_title">Poster classification &amp; metadata</h3>
                 </div>
-                <div id="task-free3d-popular-results" class="free3d-results" style="padding-top:0;"></div>
+                <div id="task-poster-meta-body" class="task-poster-meta-body" style="padding: 0 0 0.5rem 0; font-size: 0.88rem; line-height: 1.5; color: var(--text-primary);">
+                    <p class="task-meta-wait hidden" id="task-meta-wait" data-i18n="task_meta_classifying">Classifying poster…</p>
+                    <p class="task-meta-wait hidden" id="task-meta-wait-stale" style="margin:0.35rem 0 0 0; font-size:0.8rem; color:var(--text-muted);" data-i18n="task_meta_classify_stale">This is taking longer than usual. Refresh the page in a moment.</p>
+                    <div id="task-meta-content" class="hidden">
+                        <div id="task-meta-error-block" class="hidden" style="margin:0 0 0.75rem 0; padding:0.55rem 0.75rem; border-radius:8px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.28); font-size:0.82rem; color:var(--text-secondary); line-height:1.45;">
+                            <p id="task-meta-error-text" style="margin:0;"></p>
+                        </div>
+                        <p style="margin:0 0 0.6rem 0;"><strong data-i18n="task_meta_rating_label">Content rating</strong>: <span id="task-meta-rating-value"></span><span id="task-meta-score-wrap" class="hidden"> · <span data-i18n="task_meta_score_label">score</span> <span id="task-meta-score-value"></span></span></p>
+                        <div id="task-meta-llm-block" class="hidden">
+                            <p id="task-meta-llm-title" class="task-meta-llm-title-line" style="margin:0 0 0.75rem 0; white-space: pre-wrap; font-weight: 600; font-size: 0.95rem;"></p>
+                            <p style="margin:0.5rem 0 0.35rem 0;"><strong data-i18n="task_meta_keywords">Keywords</strong></p>
+                            <div id="task-meta-keywords" class="task-meta-keyword-chips" style="display:flex; flex-wrap:wrap; gap:0.35rem;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Actions removed (buttons moved into header) -->
         </div>
 
-        <!-- Video + model params + downloads: single 540px sidebar card (column via ensureTaskDesktopColumns) -->
+        <!-- Video + model params + downloads (right column). Retopo + sprite are separate .card siblings below. -->
         <div id="task-sidebar-bundle" class="card mt-3 boot-deferred-section">
             <div class="alert alert-info hidden" id="video-pending">
                 <span data-i18n="task_video_pending">Video is being generated...</span>
@@ -3420,6 +3429,9 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                     Share
                 </button>
+                <div id="video-youtube-bar" class="hidden">
+                    <a id="video-youtube-link" class="video-youtube-link" href="#" target="_blank" rel="noopener noreferrer" data-i18n="task_youtube_open">Open on YouTube</a>
+                </div>
             </div>
             <ul class="file-list" id="file-list"
                 style="max-height: none; overflow: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem;">
@@ -3432,6 +3444,66 @@
                 </li>
             </ul>
             </div>
+        </div>
+
+        <div id="retopo-convert-card" class="card mt-3 boot-deferred-section boot-reveal-surface hidden">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.45rem;">
+                    <h3 class="card-title" style="margin:0; font-size:1rem;" data-i18n="retopo_convert_title">Retopology and Convert Formats</h3>
+                </div>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin:0 0 0.55rem 0;" data-i18n="retopo_convert_lead">
+                    Need retopology or a new format? We convert to 12 formats for free, professional quad retopology, and free LODs. Click the button below.
+                </p>
+                <p style="font-size:0.72rem; color:var(--text-muted); margin:0 0 0.65rem 0;" data-i18n="retopo_convert_time">
+                    Conversion can take up to 30 minutes depending on model complexity.
+                </p>
+                <button type="button" id="retopo-convert-start-btn" class="btn btn-primary" style="width:100%; display:inline-flex; align-items:center; justify-content:center; gap:0.45rem; padding:0.56rem 0.8rem; font-size:0.78rem;"
+                    data-i18n-title="retopo_convert_tooltip"
+                    title="1. Conversion to 3ds Max, Maya, Unity, Unreal, Blender, Marmoset, Cinema 4D, STL, OBJ, GLB, FBX. 2. Quad retopology at 100k, 10k, and 1k polygons while preserving rig, skin, and animations."
+                    data-i18n="retopo_convert_cta">
+                    Start Retopology and Convert Formats
+                </button>
+        </div>
+
+            <!-- Sprite sheet MVP: separate card below Retopo -->
+            <div id="sprite-sheet-card" class="card mt-3 hidden boot-deferred-section boot-reveal-surface">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                    <h3 class="card-title" style="margin:0; font-size:1rem;">2D Sprite sheet</h3>
+                    <div style="font-size:0.72rem; color:var(--text-muted);">Five views · PNG atlas · Three.js</div>
+                </div>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.55rem;">
+                    Same custom animations as in 3D preview. Renders automatically when you pick an animation (or change options).
+                </div>
+                <div id="sprite-sheet-mode-hint" class="hidden" style="font-size:0.78rem; color:var(--accent); margin-bottom:0.5rem; line-height:1.35;"></div>
+                <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap; margin-bottom:0.45rem;">
+                    <label for="sprite-sheet-anim-type" style="font-size:0.72rem; color:var(--text-muted);">Type:</label>
+                    <select id="sprite-sheet-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
+                        <option value="walk" selected>Walk</option>
+                    </select>
+                    <div id="sprite-sheet-anim-stats" style="font-size:0.72rem; color:var(--text-muted);"></div>
+                </div>
+                <div id="sprite-sheet-anim-grid" class="custom-anim-grid">
+                    <div style="grid-column:1/-1; color:var(--text-muted);">Loading…</div>
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.65rem; padding-top:0.55rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
+                    <label for="sprite-sheet-resolution" style="font-size:0.72rem; color:var(--text-muted);">Cell size</label>
+                    <select id="sprite-sheet-resolution" class="form-input" style="max-width:120px; padding:0.35rem 0.45rem; font-size:0.75rem;">
+                        <option value="64">64 px</option>
+                        <option value="128">128 px</option>
+                        <option value="256" selected>256 px</option>
+                        <option value="512">512 px</option>
+                        <option value="1024">1024 px</option>
+                    </select>
+                    <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
+                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="30" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
+                    <span style="font-size:0.68rem; color:var(--text-muted);">Views: front, back, left, top, top-right 45°</span>
+                </div>
+                <div id="sprite-sheet-progress" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem; min-height:1.2em;"></div>
+                <div id="sprite-sheet-views-grid" class="sprite-sheet-views-grid"></div>
+                <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.62rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:160px;"></pre>
+                <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
+                    <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download pack JSON</button>
+                    <button type="button" id="sprite-sheet-download-all-png-btn" class="btn btn-primary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download all PNGs</button>
+                </div>
         </div>
         
         <!-- Additional Content (Textures) -->
@@ -3702,7 +3774,10 @@
                     if (authResp.ok) {
                         const authData = await authResp.json();
                         const email = authData?.user?.email;
-                        return email && ALLOWED_ADMIN_EMAILS.includes(email);
+                        return (
+                            email &&
+                            ALLOWED_ADMIN_EMAILS.includes(String(email).toLowerCase())
+                        );
                     }
                 } catch (e) {
                     // ignore
@@ -3940,8 +4015,8 @@
             spriteSheetDebounceTimer: null,
             spriteSheetLastPack: null,
             animationTypeFilter: 'walk',
-            free3dPopularPool: [],
-            free3dPopularLoaded: false,
+            free3dSimilarPool: [],
+            free3dSimilarCacheKey: '',
             videoPreviewObserver: null,
             videoPreviewVisible: true,
             videoPreviewBound: false,
@@ -4043,7 +4118,7 @@
 
                     this.scheduleDeferredWork(async () => {
                         await this.loadAnimationCatalog().catch(() => {});
-                        await this.loadPopularFree3DCharacters().catch(() => {});
+                        await this.loadSimilarFree3DCharacters(false).catch(() => {});
                         window.dispatchEvent(new CustomEvent('taskPageDeferredReady'));
                         window.__taskPageBoot?.markExtrasReady('Additional blocks ready');
                     }, 250);
@@ -4139,10 +4214,24 @@
                 const container = document.getElementById('video-container');
                 const pending = document.getElementById('video-pending');
                 const video = document.getElementById('video-player');
+                const videoWrap = document.getElementById('video-player-wrap');
+                const youtubeBar = document.getElementById('video-youtube-bar');
+                const youtubeLink = document.getElementById('video-youtube-link');
                 if (!container || !pending || !video) return;
 
                 this.ensureVideoPreviewController();
                 window.__taskPageBoot?.beginVideo('Preparing video preview...');
+
+                const ytOk = task.youtube_upload_status === 'uploaded' && task.youtube_video_id;
+                if (ytOk && youtubeLink && youtubeBar) {
+                    youtubeLink.href = `https://www.youtube.com/watch?v=${encodeURIComponent(task.youtube_video_id)}`;
+                    youtubeBar.classList.remove('hidden');
+                    if (window.I18n && typeof window.I18n.applyTranslations === 'function') {
+                        window.I18n.applyTranslations();
+                    }
+                } else if (youtubeBar) {
+                    youtubeBar.classList.add('hidden');
+                }
 
                 if (task.video_ready) {
                     container.classList.remove('hidden');
@@ -4156,7 +4245,6 @@
                         if (typeof this.pauseVideoPreview === 'function') {
                             this.pauseVideoPreview('source-update');
                         }
-                        const videoWrap = document.getElementById('video-player-wrap');
                         if (videoWrap) {
                             videoWrap.style.removeProperty('--vp-w');
                             videoWrap.style.removeProperty('--vp-h');
@@ -4228,8 +4316,8 @@
                 });
             },
 
-            ensurePopularFree3DSection() {
-                return document.getElementById('task-free3d-popular-section');
+            ensureSimilarFree3DSection() {
+                return document.getElementById('task-free3d-similar-section');
             },
 
             normalizeFree3DItem(model) {
@@ -4258,24 +4346,30 @@
                     title: (title && String(title).trim()) || 'Untitled',
                     preview: preview || '/static/images/placeholder-thumb.svg',
                     pageUrl: String(pageUrl).trim(),
+                    assetType: model.type,
+                    category: model.category,
                 };
             },
 
-            pickRandomFree3DItems(count = 5) {
-                const pool = Array.isArray(this.free3dPopularPool) ? [...this.free3dPopularPool] : [];
-                for (let i = pool.length - 1; i > 0; i -= 1) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [pool[i], pool[j]] = [pool[j], pool[i]];
-                }
-                return pool.slice(0, Math.min(count, pool.length));
+            pickTopSimilarFree3DItems(pool, count = 6) {
+                const list = Array.isArray(pool) ? pool : [];
+                const isCharacterLike = (m) => {
+                    const t = m?.assetType;
+                    if (t === 1 || t === '1') return true;
+                    const c = String(m?.category || '').toLowerCase();
+                    return c.includes('character');
+                };
+                const charFiltered = list.filter(isCharacterLike);
+                const ordered = charFiltered.length >= 3 ? charFiltered : list;
+                return ordered.slice(0, Math.min(count, ordered.length));
             },
 
-            renderPopularFree3DCharacters() {
-                const section = this.ensurePopularFree3DSection();
-                const container = document.getElementById('task-free3d-popular-results');
+            renderSimilarFree3DCharacters() {
+                const section = this.ensureSimilarFree3DSection();
+                const container = document.getElementById('task-free3d-similar-results');
                 if (!section || !container) return;
 
-                const picks = this.pickRandomFree3DItems(6);
+                const picks = this.pickTopSimilarFree3DItems(this.free3dSimilarPool, 6);
                 if (!picks.length) {
                     section.classList.add('hidden');
                     return;
@@ -4301,24 +4395,50 @@
                 window.__taskPageBoot?.revealElement(section, 0);
             },
 
-            async loadPopularFree3DCharacters(force = false) {
-                const section = this.ensurePopularFree3DSection();
-                const container = document.getElementById('task-free3d-popular-results');
+            /**
+             * Semantic Free3D search using at most 3 keywords from server-only poster_llm_keywords.
+             */
+            async loadSimilarFree3DCharacters(force = false) {
+                const section = this.ensureSimilarFree3DSection();
+                const container = document.getElementById('task-free3d-similar-results');
                 if (!section || !container) return;
 
-                if (this.free3dPopularLoaded && !force) {
-                    this.renderPopularFree3DCharacters();
+                const task = this.task;
+                let q = '';
+                const serverQ = task?.poster_free3d_query && String(task.poster_free3d_query).trim();
+                if (serverQ) {
+                    q = serverQ;
+                } else {
+                    const kw = Array.isArray(task?.poster_llm_keywords) ? task.poster_llm_keywords : [];
+                    const parts = [];
+                    for (const k of kw) {
+                        const t = String(k || '').trim();
+                        if (!t) continue;
+                        const low = t.toLowerCase();
+                        if (!parts.some((p) => p.toLowerCase() === low)) parts.push(t);
+                        if (parts.length >= 3) break;
+                    }
+                    q = parts.join(' ').trim();
+                }
+                if (!q) {
+                    section.classList.add('hidden');
                     return;
                 }
 
-                container.innerHTML = '<div style="padding: 1rem; color: var(--text-muted);">Loading popular characters...</div>';
+                if (!force && this.free3dSimilarCacheKey === q && Array.isArray(this.free3dSimilarPool) && this.free3dSimilarPool.length) {
+                    this.renderSimilarFree3DCharacters();
+                    return;
+                }
+
+                const tLoad = (window.t && window.t('task_free3d_loading')) || 'Loading similar models…';
+                container.innerHTML = `<div style="padding: 1rem; color: var(--text-muted);">${tLoad}</div>`;
 
                 try {
                     const params = new URLSearchParams({
-                        mode: 'browse',
-                        sort: 'popular',
-                        category: 'characters',
-                        topK: '24',
+                        mode: 'semantic',
+                        q,
+                        topK: '18',
+                        sort: 'relevance',
                         type: '1',
                         _: String(Date.now()),
                     });
@@ -4335,13 +4455,146 @@
                         return;
                     }
 
-                    this.free3dPopularPool = normalized;
-                    this.free3dPopularLoaded = true;
-                    this.renderPopularFree3DCharacters();
+                    this.free3dSimilarPool = normalized;
+                    this.free3dSimilarCacheKey = q;
+                    this.renderSimilarFree3DCharacters();
                 } catch (error) {
-                    console.warn('[TaskPage] Failed to load popular Free3D characters:', error);
+                    console.warn('[TaskPage] Failed to load similar Free3D models:', error);
                     section.classList.add('hidden');
                 }
+            },
+
+            renderPosterMetadataSection() {
+                const section = document.getElementById('task-poster-meta-section');
+                const waitEl = document.getElementById('task-meta-wait');
+                const staleEl = document.getElementById('task-meta-wait-stale');
+                const contentEl = document.getElementById('task-meta-content');
+                const llmBlock = document.getElementById('task-meta-llm-block');
+                const errBlock = document.getElementById('task-meta-error-block');
+                const errText = document.getElementById('task-meta-error-text');
+                if (!section || !waitEl || !contentEl) return;
+
+                const task = this.task;
+                if (!task) {
+                    section.classList.add('hidden');
+                    return;
+                }
+
+                const classified = !!task.content_classified_at;
+                const done = task.status === 'done';
+
+                if (!done && !classified) {
+                    section.classList.add('hidden');
+                    if (this._posterClassifyPollInterval) {
+                        clearInterval(this._posterClassifyPollInterval);
+                        this._posterClassifyPollInterval = null;
+                    }
+                    this._posterClassifyWaitStarted = null;
+                    return;
+                }
+
+                section.classList.remove('hidden');
+                try {
+                    window.__taskPageBoot?.revealElement(section, 0);
+                } catch (_) { /* noop */ }
+
+                if (!classified) {
+                    waitEl.classList.remove('hidden');
+                    if (staleEl) staleEl.classList.add('hidden');
+                    contentEl.classList.add('hidden');
+                    if (this._posterClassifyWaitStarted == null) this._posterClassifyWaitStarted = Date.now();
+                    if (staleEl && this._posterClassifyWaitStarted && Date.now() - this._posterClassifyWaitStarted > 90000) {
+                        staleEl.classList.remove('hidden');
+                    }
+                    if (!this._posterClassifyPollInterval) {
+                        this._posterClassifyPollInterval = setInterval(() => {
+                            if (document.hidden || !this.taskId) return;
+                            if (this.task && this.task.content_classified_at) {
+                                clearInterval(this._posterClassifyPollInterval);
+                                this._posterClassifyPollInterval = null;
+                                return;
+                            }
+                            this.fetchTask();
+                        }, 5000);
+                    }
+                    return;
+                }
+
+                if (this._posterClassifyPollInterval) {
+                    clearInterval(this._posterClassifyPollInterval);
+                    this._posterClassifyPollInterval = null;
+                }
+                this._posterClassifyWaitStarted = null;
+                waitEl.classList.add('hidden');
+                if (staleEl) staleEl.classList.add('hidden');
+                contentEl.classList.remove('hidden');
+
+                const cv = String(task.content_classifier_version || '');
+                const classifyFailed = /:fetch_error|:classify_error|:openai_error|:pipeline_error/.test(cv);
+                const tFn = (k, fb) => (window.t ? window.t(k) : fb);
+                if (errBlock && errText) {
+                    if (classifyFailed) {
+                        errBlock.classList.remove('hidden');
+                        let msg = tFn('task_meta_poster_err_generic', 'Poster check did not complete successfully.');
+                        if (cv.includes(':fetch_error')) {
+                            msg = tFn('task_meta_poster_err_fetch', 'Could not load the poster image for analysis.');
+                        } else if (cv.includes(':classify_error')) {
+                            msg = tFn('task_meta_poster_err_classify', 'Safety analysis failed for this poster.');
+                        } else if (cv.includes(':openai_error')) {
+                            msg = tFn('task_meta_poster_err_openai', 'Title and keywords could not be generated (AI step failed).');
+                        } else if (cv.includes(':pipeline_error')) {
+                            msg = tFn('task_meta_poster_err_pipeline', 'Poster pipeline failed unexpectedly. Try refreshing the page.');
+                        }
+                        errText.textContent = msg;
+                    } else {
+                        errBlock.classList.add('hidden');
+                        errText.textContent = '';
+                    }
+                }
+
+                const rating = (task.content_rating || 'unknown').toLowerCase();
+                const ratingEl = document.getElementById('task-meta-rating-value');
+                if (ratingEl) {
+                    const labels = { safe: '🟢 safe', suggestive: '🟡 suggestive', adult: '🔴 adult', unknown: '⚪ unknown' };
+                    ratingEl.textContent = labels[rating] || rating;
+                }
+                const scoreWrap = document.getElementById('task-meta-score-wrap');
+                const scoreVal = document.getElementById('task-meta-score-value');
+                const sc = task.content_score;
+                if (scoreWrap && scoreVal && typeof sc === 'number' && !Number.isNaN(sc)) {
+                    scoreWrap.classList.remove('hidden');
+                    scoreVal.textContent = sc.toFixed(3);
+                } else if (scoreWrap) {
+                    scoreWrap.classList.add('hidden');
+                }
+
+                const hasLlm = !!(task.poster_llm_title && String(task.poster_llm_title).trim());
+                if (llmBlock) {
+                    if (hasLlm && !classifyFailed) {
+                        llmBlock.classList.remove('hidden');
+                        const titleEl = document.getElementById('task-meta-llm-title');
+                        const kwEl = document.getElementById('task-meta-keywords');
+                        if (titleEl) titleEl.textContent = String(task.poster_llm_title);
+                        if (kwEl) {
+                            const kws = Array.isArray(task.poster_llm_keywords) ? task.poster_llm_keywords : [];
+                            const esc = (t) => String(t)
+                                .replace(/&/g, '&amp;')
+                                .replace(/</g, '&lt;')
+                                .replace(/>/g, '&gt;')
+                                .replace(/"/g, '&quot;');
+                            kwEl.innerHTML = kws.map((k) => {
+                                const s = String(k || '').trim();
+                                if (!s) return '';
+                                const href = `https://free3d.online/search?q=${encodeURIComponent(s)}`;
+                                return `<a href="${esc(href)}" class="task-meta-keyword-link" target="_blank" rel="noopener noreferrer" style="display:inline-block; padding:0.15rem 0.45rem; border-radius:6px; background:rgba(99,102,241,0.15); font-size:0.78rem;">${esc(s)}</a>`;
+                            }).filter(Boolean).join('');
+                        }
+                    } else {
+                        llmBlock.classList.add('hidden');
+                    }
+                }
+
+                if (window.I18n) window.I18n.applyTranslations();
             },
             
             startTaskPolling() {
@@ -4370,11 +4623,11 @@
                     this.task = await response.json();
                     this.taskFetchedAt = Date.now();
                     window.dispatchEvent(new CustomEvent('taskDataUpdated', { detail: this.task }));
-                    await this.updateUI();
-                    window.__taskPageBoot?.markTaskReady('Task data loaded');
                     if (window.I18n) {
                         I18n.applyTranslations();
                     }
+                    await this.updateUI();
+                    window.__taskPageBoot?.markTaskReady('Task data loaded');
                     window.__taskPerf?.measureEnd('TaskPage', 'fetchTask', {
                         status: this.task?.status || 'unknown',
                         preparedGlbReady: !!this.task?.prepared_glb_ready
@@ -4448,20 +4701,104 @@
                 const statusText = document.getElementById('status-text');
                 
                 statusBadge.className = 'task-status-pill';
+                const queueHint = document.getElementById('task-server-queue-hint');
                 if (task.status === 'done') {
                     statusBadge.classList.add('task-status-pill--done');
                     statusText.textContent = t('task_status_done');
                     const shareBtn = document.getElementById('task-share-btn');
                     if (shareBtn) shareBtn.style.display = 'flex';
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
                 } else if (task.status === 'error') {
                     statusBadge.classList.add('task-status-pill--error');
                     statusText.textContent = t('task_status_error');
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
                 } else if (task.status === 'processing') {
                     statusBadge.classList.add('task-status-pill--processing');
                     statusText.textContent = t('task_status_processing');
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
+                } else if (task.status === 'created' && !task.guid) {
+                    statusBadge.classList.add('task-status-pill--queued');
+                    statusText.textContent = t('task_status_queue_server');
+                    if (queueHint) {
+                        queueHint.classList.remove('hidden');
+                        queueHint.textContent = t('task_server_queue_hint');
+                        queueHint.title = t('task_server_queue_hint_title');
+                    }
                 } else {
                     statusBadge.classList.add('task-status-pill--queued');
                     statusText.textContent = t('task_status_created');
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
+                }
+
+                const titleEl = document.querySelector('.task-status-header-title');
+                if (titleEl) {
+                    const pl = task.pipeline || 'rig';
+                    titleEl.textContent = pl === 'convert' ? t('task_title_convert') : t('task_title');
+                }
+
+                const retopoCard = document.getElementById('retopo-convert-card');
+                if (retopoCard) {
+                    const pl = task.pipeline || 'rig';
+                    if (task.status === 'done' && pl === 'rig') {
+                        retopoCard.classList.remove('hidden');
+                        try {
+                            window.__taskPageBoot?.revealElement('retopo-convert-card', 0);
+                        } catch (_) { /* noop */ }
+                    } else {
+                        retopoCard.classList.add('hidden');
+                    }
+                }
+
+                const retopoBtn = document.getElementById('retopo-convert-start-btn');
+                if (retopoBtn && !retopoBtn.__retopoWired) {
+                    retopoBtn.__retopoWired = true;
+                    retopoBtn.addEventListener('click', async () => {
+                        const tid = this.taskId;
+                        if (!tid) return;
+                        retopoBtn.disabled = true;
+                        try {
+                            const r = await fetch(`/api/task/${encodeURIComponent(tid)}/create-convert`, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { Accept: 'application/json' },
+                            });
+                            let errDetail = '';
+                            try {
+                                const data = await r.json();
+                                if (r.ok && data.task_id) {
+                                    window.location.href = `/task?id=${encodeURIComponent(data.task_id)}`;
+                                    return;
+                                }
+                                errDetail = data.detail || data.message || '';
+                                if (typeof errDetail !== 'string') {
+                                    errDetail = Array.isArray(errDetail)
+                                        ? errDetail.map((x) => (x && x.msg) || x).join(' ')
+                                        : String(errDetail);
+                                }
+                            } catch (_) {
+                                errDetail = `HTTP ${r.status}`;
+                            }
+                            alert(errDetail || `HTTP ${r.status}`);
+                        } finally {
+                            retopoBtn.disabled = false;
+                        }
+                    });
                 }
                 
                 // Hide progress blocks when task is done
@@ -4476,6 +4813,8 @@
                 const adminCopy = document.getElementById('admin-input-url-copy');
                 const adminWorkerRow = document.getElementById('admin-worker-progress-row');
                 const adminWorkerLink = document.getElementById('admin-worker-progress-link');
+                const adminWorkerApiRow = document.getElementById('admin-worker-api-row');
+                const adminWorkerApiText = document.getElementById('admin-worker-api-text');
                 if (adminRow && adminLink && adminCopy) {
                     const inputUrl = task && task.input_url ? String(task.input_url) : '';
                     const canSeeAdminLinks = await isAllowedAdmin();
@@ -4494,6 +4833,14 @@
                             adminWorkerLink.title = progressPage;
                         } else if (adminWorkerRow) {
                             adminWorkerRow.classList.add('hidden');
+                        }
+
+                        const wapi = task && task.worker_api ? String(task.worker_api) : '';
+                        if (wapi && adminWorkerApiRow && adminWorkerApiText) {
+                            adminWorkerApiRow.classList.remove('hidden');
+                            adminWorkerApiText.textContent = wapi;
+                        } else if (adminWorkerApiRow) {
+                            adminWorkerApiRow.classList.add('hidden');
                         }
                         
                         if (!adminCopy.__wired) {
@@ -4524,6 +4871,8 @@
                         adminLink.href = '#';
                         adminLink.textContent = '-';
                         adminLink.title = '';
+                        if (adminWorkerRow) adminWorkerRow.classList.add('hidden');
+                        if (adminWorkerApiRow) adminWorkerApiRow.classList.add('hidden');
                     }
                 }
                 
@@ -4584,17 +4933,15 @@
                 }
                 // Use output_urls for Downloads (all expected files), fallback to ready_urls
                 const downloadUrls = (task.output_urls && task.output_urls.length > 0) ? task.output_urls : task.ready_urls;
-                if (task.status === 'done') {
-                    await this.fetchArchiveEstimate();
-                } else {
-                    this.archiveEstimate = null;
-                }
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
 
                 // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
                 // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
                 void this.loadAnimationCatalog().catch(() => {});
+
+                this.renderPosterMetadataSection();
+                void this.loadSimilarFree3DCharacters(false).catch(() => {});
 
             },
 
@@ -5063,47 +5410,17 @@
 
             // Cached files for download (replaces ZIP)
             cachedFilesData: null,
-            /** From GET /downloads/archive/estimate — real bundle file count + approx size */
-            archiveEstimate: null,
             isDownloadingAll: false,
-
-            formatApproxBytes(bytes) {
-                if (bytes == null || bytes < 0 || Number.isNaN(bytes)) return '';
-                const n = Number(bytes);
-                if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-                if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
-                return `${n} B`;
-            },
+            /** Count for "Download All N files" — cached file list, else task.total_count, else manifest items */
+            downloadBundleLabelCount: 0,
 
             buildDownloadAllButtonLabel() {
-                const est = this.archiveEstimate;
-                const fileCount = est?.file_count != null ? est.file_count : (this.downloadItems || []).length;
-                const approxBytes = est?.approx_bytes;
-                const approxComplete = est?.approx_bytes_complete !== false;
-                let sizePart = '';
-                if (approxBytes != null && approxBytes >= 0) {
-                    const base = this.formatApproxBytes(approxBytes);
-                    const s = approxComplete ? base : `${base}+`;
-                    sizePart = ` (~${s})`;
-                }
-                if (est?.file_count != null) {
-                    return `📦 ${this.tSafe('btn_download_all', 'Download All')} ${fileCount} ${this.tSafe('download_all_files_word', 'files')}${sizePart}`;
-                }
-                if (this.task?.status === 'done') {
-                    return this.tSafe('preparing_downloads', 'Preparing downloads…');
+                const fileCount = Number(this.downloadBundleLabelCount || 0);
+                const word = this.tSafe('download_all_files_word', 'files');
+                if (this.task?.status === 'done' && fileCount > 0) {
+                    return `📦 ${this.tSafe('btn_download_all', 'Download All')} ${fileCount} ${word}`;
                 }
                 return this.tSafe('preparing_downloads', 'Preparing downloads…');
-            },
-
-            async fetchArchiveEstimate() {
-                if (!this.taskId) return;
-                try {
-                    const r = await fetch(`/api/task/${this.taskId}/downloads/archive/estimate`, { cache: 'no-store' });
-                    this.archiveEstimate = r.ok ? await r.json() : null;
-                } catch (e) {
-                    console.warn('archive estimate failed:', e);
-                    this.archiveEstimate = null;
-                }
             },
 
             async checkCachedFiles() {
@@ -5119,125 +5436,87 @@
             },
 
             async downloadAllFiles() {
-                const files = this.downloadItems || [];
-                if (this.isDownloadingAll || files.length === 0) return;
+                const total = Number(this.task?.total_count || 0);
+                const readyN = (this.downloadItems || []).length;
+                if (this.isDownloadingAll || (readyN === 0 && total === 0)) return;
 
                 const tPrep = (k, fb) => (window.t ? window.t(k) : fb);
-                const labelFmt = (pct) => `${tPrep('archive_preparing', 'Preparing files')} — ${pct}%`;
-
-                this.isDownloadingAll = true;
                 const downloadBtn = document.getElementById('download-all-btn');
-                const progressWrap = document.getElementById('download-all-archive-progress');
-                const progressFill = document.getElementById('download-all-archive-fill');
-                const progressLabel = document.getElementById('download-all-archive-label');
+                const labelSpan = downloadBtn?.querySelector('span');
+                const startedAt = Date.now();
+                const MIN_PREPARE_MS = 5000;
 
-                if (downloadBtn) {
-                    downloadBtn.disabled = true;
-                    downloadBtn.classList.add('hidden');
-                }
-                if (progressWrap) {
-                    progressWrap.classList.remove('hidden');
-                }
-                if (progressFill) {
-                    progressFill.style.width = '0%';
-                }
-                if (progressLabel) {
-                    progressLabel.textContent = labelFmt(0);
-                }
-
-                const showButtonAgain = () => {
-                    if (downloadBtn) {
-                        downloadBtn.disabled = false;
-                        downloadBtn.classList.remove('hidden');
-                        downloadBtn.innerHTML = `<img src="/static/images/icons/download.svg" alt="" width="18" height="18" style="filter: brightness(10);"><span style="font-weight: 700;">${this.buildDownloadAllButtonLabel()}</span>`;
-                    }
-                    if (progressWrap) {
-                        progressWrap.classList.add('hidden');
+                const waitUntilMinPrepareElapsed = async () => {
+                    const remaining = MIN_PREPARE_MS - (Date.now() - startedAt);
+                    if (remaining > 0) {
+                        await new Promise((resolve) => setTimeout(resolve, remaining));
                     }
                 };
 
+                const releaseDownloadAllUi = async (afterFullWait) => {
+                    if (afterFullWait) {
+                        await waitUntilMinPrepareElapsed();
+                    }
+                    this.isDownloadingAll = false;
+                    if (downloadBtn) {
+                        downloadBtn.disabled = false;
+                        if (labelSpan) {
+                            labelSpan.textContent = this.buildDownloadAllButtonLabel();
+                        }
+                    }
+                };
+
+                this.isDownloadingAll = true;
+                if (downloadBtn) {
+                    downloadBtn.disabled = true;
+                    if (labelSpan) {
+                        labelSpan.textContent = tPrep('prepare_files', 'Prepare Files');
+                    }
+                }
+
                 try {
-                    const prep = await fetch(`/api/task/${this.taskId}/downloads/archive/prepare`, {
-                        method: 'POST',
+                    const resp = await fetch(`/api/task/${this.taskId}/downloads/bundle-url`, {
                         credentials: 'same-origin',
                         headers: { Accept: 'application/json' },
                     });
-                    if (prep.status === 401) {
+                    if (resp.status === 401) {
+                        await releaseDownloadAllUi(false);
                         window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
                         return;
                     }
-                    if (!prep.ok) {
-                        let detail = tPrep('archive_failed', 'Could not prepare archive');
+                    if (!resp.ok) {
+                        let detail = tPrep('archive_failed', 'Download failed');
                         try {
-                            const err = await prep.json();
+                            const err = await resp.json();
                             if (err.detail) detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
                         } catch (e) {
                             /* ignore */
                         }
                         alert(detail);
-                        showButtonAgain();
+                        await releaseDownloadAllUi(false);
                         return;
                     }
-                    const { job_id: jobId } = await prep.json();
-                    if (!jobId) {
-                        alert(tPrep('archive_failed', 'Could not prepare archive'));
-                        showButtonAgain();
+                    const data = await resp.json();
+                    if (!data || !data.task_id) {
+                        alert(tPrep('archive_failed', 'Download failed'));
+                        await releaseDownloadAllUi(false);
                         return;
                     }
-
-                    const pollIntervalMs = 400;
-                    for (;;) {
-                        const stResp = await fetch(
-                            `/api/task/${this.taskId}/downloads/archive/status/${encodeURIComponent(jobId)}`,
-                            { credentials: 'same-origin', headers: { Accept: 'application/json' } }
-                        );
-                        if (stResp.status === 401) {
-                            window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
-                            return;
-                        }
-                        if (!stResp.ok) {
-                            break;
-                        }
-                        const st = await stResp.json();
-                        const pct = Math.max(0, Math.min(100, Number(st.percent) || 0));
-                        if (progressFill) {
-                            progressFill.style.width = `${pct}%`;
-                        }
-                        if (progressLabel) {
-                            progressLabel.textContent = labelFmt(pct);
-                        }
-                        if (st.error && !st.done) {
-                            alert(st.error || tPrep('archive_failed', 'Could not prepare archive'));
-                            showButtonAgain();
-                            return;
-                        }
-                        if (st.done) {
-                            const url = `/api/task/${this.taskId}/downloads/archive/file/${encodeURIComponent(jobId)}`;
-                            window.location.href = url;
-                            if (progressLabel) {
-                                progressLabel.textContent = tPrep('archive_download_started', 'Download started');
-                            }
-                            setTimeout(() => {
-                                showButtonAgain();
-                            }, 1500);
-                            return;
-                        }
-                        await new Promise((r) => setTimeout(r, pollIntervalMs));
-                    }
-                    alert(tPrep('archive_failed', 'Could not prepare archive'));
-                    showButtonAgain();
+                    // Same-origin HTTPS: /bundle.zip aligns with model.glb-style routes; /downloads/bundle kept as alias
+                    window.location.href = `/api/task/${this.taskId}/bundle.zip`;
+                    await releaseDownloadAllUi(true);
                 } catch (e) {
-                    console.error('Archive download error:', e);
-                    alert(tPrep('archive_failed', 'Could not prepare archive'));
-                    showButtonAgain();
-                } finally {
-                    this.isDownloadingAll = false;
+                    console.error('Bundle download error:', e);
+                    alert(tPrep('archive_failed', 'Download failed'));
+                    await releaseDownloadAllUi(false);
                 }
             },
 
             async downloadAllOrPurchase() {
                 if (this.isDownloadingAll) return;
-                if (!this.downloadItems || this.downloadItems.length === 0) {
+                const total = Number(this.task?.total_count || 0);
+                const readyN = (this.downloadItems || []).length;
+                if (this.task?.status !== 'done' || (readyN === 0 && total === 0)) {
                     alert(t('error_generic'));
                     return;
                 }
@@ -5414,13 +5693,16 @@
 
             updateSpriteSheetControlsState() {
                 const card = document.getElementById('sprite-sheet-card');
+                const hint = document.getElementById('sprite-sheet-mode-hint');
                 const getCtx = window.__getViewerSpriteSheetContext;
                 const selected = this.getSelectedAnimationItem();
-                let ok = false;
-                if (getCtx && selected?.ready && selected?.preview_url) {
+                const hasSelection = Boolean(selected?.ready && selected?.preview_url);
+
+                let viewerReadyForSprite = false;
+                if (getCtx && hasSelection) {
                     try {
                         const ctx = getCtx();
-                        ok = Boolean(
+                        viewerReadyForSprite = Boolean(
                             ctx?.currentModelType === 'animations' &&
                             ctx?.currentModel &&
                             ctx?.mixer &&
@@ -5428,23 +5710,41 @@
                             ctx?.renderer
                         );
                     } catch (_) {
-                        ok = false;
+                        viewerReadyForSprite = false;
                     }
                 }
-                if (card) {
-                    if (ok) {
-                        card.classList.remove('hidden');
-                        window.__taskPageBoot?.revealElement('sprite-sheet-card', 0);
-                    } else {
-                        card.classList.add('hidden');
-                        this._stopSpriteSheetPreviews();
-                        const pr = document.getElementById('sprite-sheet-progress');
-                        if (pr) pr.textContent = '';
-                    }
+
+                const pr = document.getElementById('sprite-sheet-progress');
+                if (!card || !hint) {
+                    return;
                 }
-                if (ok) {
-                    this.scheduleSpriteSheetAutoRender();
+
+                if (!getCtx || !hasSelection) {
+                    card.classList.add('hidden');
+                    hint.classList.add('hidden');
+                    hint.textContent = '';
+                    this._stopSpriteSheetPreviews();
+                    if (pr) pr.textContent = '';
+                    return;
                 }
+
+                card.classList.remove('hidden');
+                window.__taskPageBoot?.revealElement('sprite-sheet-card', 0);
+
+                if (!viewerReadyForSprite) {
+                    hint.classList.remove('hidden');
+                    hint.textContent = this.tSafe(
+                        'sprite_sheet_switch_animation_mode',
+                        'Switch the 3D viewer to Animation mode (top toolbar) to render sprite sheets.'
+                    );
+                    this._stopSpriteSheetPreviews();
+                    if (pr) pr.textContent = '';
+                    return;
+                }
+
+                hint.classList.add('hidden');
+                hint.textContent = '';
+                this.scheduleSpriteSheetAutoRender();
             },
 
             scheduleSpriteSheetAutoRender() {
@@ -5704,6 +6004,8 @@
                 };
 
                 moveToSecondary(taskSidebarBundle);
+                moveToSecondary(document.getElementById('retopo-convert-card'));
+                moveToSecondary(document.getElementById('sprite-sheet-card'));
                 moveToSecondary(additionalSection);
             },
 
@@ -6094,7 +6396,7 @@
                     }
                 }
 
-                this.downloadSelectedAnimation(selectedId);
+                await this.downloadSelectedAnimation(selectedId);
             },
 
             async purchaseSelectedAnimation() {
@@ -6180,11 +6482,158 @@
                 }
             },
 
-            downloadSelectedAnimation(animationId = null) {
+            customAnimationBaseFbxUrl() {
+                return String(
+                    this.animationCatalog?.pricing?.all_animations_fbx_url
+                    || `/api/task/${this.taskId}/animations.fbx`
+                );
+            },
+
+            customAnimationBaseFbxStorageKey() {
+                const taskPart = encodeURIComponent(String(this.taskId || 'unknown'));
+                return `autorig.customAnimationBaseFbxDownloaded.v2.${taskPart}`;
+            },
+
+            hasDownloadedCustomAnimationBaseFbx() {
+                try {
+                    return localStorage.getItem(this.customAnimationBaseFbxStorageKey()) === '1';
+                } catch (_) {
+                    return false;
+                }
+            },
+
+            markCustomAnimationBaseFbxDownloaded() {
+                try {
+                    localStorage.setItem(this.customAnimationBaseFbxStorageKey(), '1');
+                } catch (_) {}
+            },
+
+            async isCustomAnimationBaseFbxAvailable() {
+                try {
+                    const resp = await fetch(this.customAnimationBaseFbxUrl(), {
+                        method: 'HEAD',
+                        cache: 'no-store',
+                    });
+                    return resp.ok;
+                } catch (_) {
+                    return false;
+                }
+            },
+
+            showCustomAnimationDependencyConfirm() {
+                const title = this.tSafe('custom_anim_dependency_modal_title', 'Download required base FBX');
+                const body = this.tSafe(
+                    'custom_anim_dependency_modal_body',
+                    'Custom animation FBX files contain only skeleton animation. Download the _all_animations.fbx file first and use it as the rigged character file; then apply the selected custom animation clip in your engine.'
+                );
+                const note = this.tSafe(
+                    'custom_anim_dependency_modal_note',
+                    'The first download will contain two files: _all_animations.fbx and the selected custom animation FBX.'
+                );
+                const confirmText = this.tSafe('custom_anim_dependency_modal_confirm', 'Download both files');
+                const cancelText = this.tSafe('custom_anim_dependency_modal_cancel', 'Cancel');
+
+                return new Promise((resolve) => {
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;padding:1rem;';
+                    overlay.setAttribute('role', 'dialog');
+                    overlay.setAttribute('aria-modal', 'true');
+
+                    const box = document.createElement('div');
+                    box.style.cssText = 'width:min(520px,100%);background:var(--surface,#151923);border:1px solid rgba(255,255,255,0.16);border-radius:10px;padding:1rem;box-shadow:0 24px 80px rgba(0,0,0,0.45);color:var(--text-primary,#f5f7fb);';
+
+                    const h = document.createElement('h3');
+                    h.textContent = title;
+                    h.style.cssText = 'margin:0 0 0.65rem;font-size:1rem;line-height:1.25;';
+
+                    const p = document.createElement('p');
+                    p.textContent = body;
+                    p.style.cssText = 'margin:0 0 0.65rem;color:var(--text-secondary,#c8ceda);font-size:0.88rem;line-height:1.45;';
+
+                    const n = document.createElement('p');
+                    n.textContent = note;
+                    n.style.cssText = 'margin:0 0 0.95rem;color:var(--text-muted,#98a2b3);font-size:0.8rem;line-height:1.4;';
+
+                    const actions = document.createElement('div');
+                    actions.style.cssText = 'display:flex;gap:0.55rem;justify-content:flex-end;flex-wrap:wrap;';
+
+                    const cancel = document.createElement('button');
+                    cancel.type = 'button';
+                    cancel.className = 'btn btn-secondary';
+                    cancel.textContent = cancelText;
+
+                    const ok = document.createElement('button');
+                    ok.type = 'button';
+                    ok.className = 'btn btn-primary';
+                    ok.textContent = confirmText;
+
+                    const close = (value) => {
+                        overlay.remove();
+                        resolve(value);
+                    };
+                    cancel.addEventListener('click', () => close(false));
+                    ok.addEventListener('click', () => close(true));
+                    overlay.addEventListener('click', (e) => {
+                        if (e.target === overlay) close(false);
+                    });
+                    overlay.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape') close(false);
+                    });
+
+                    actions.appendChild(cancel);
+                    actions.appendChild(ok);
+                    box.appendChild(h);
+                    box.appendChild(p);
+                    box.appendChild(n);
+                    box.appendChild(actions);
+                    overlay.appendChild(box);
+                    document.body.appendChild(overlay);
+                    ok.focus();
+                });
+            },
+
+            triggerDownloadUrl(url, filename = '') {
+                const a = document.createElement('a');
+                a.href = url;
+                if (filename) a.download = filename;
+                a.rel = 'noopener';
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => a.remove(), 1000);
+            },
+
+            async ensureCustomAnimationBaseFbxBeforeDownload() {
+                if (this.hasDownloadedCustomAnimationBaseFbx()) {
+                    return false;
+                }
+                const available = await this.isCustomAnimationBaseFbxAvailable();
+                if (!available) {
+                    alert(this.tSafe(
+                        'custom_anim_dependency_base_unavailable',
+                        '_all_animations.fbx is not available for this task yet. The selected animation will still be downloaded.'
+                    ));
+                    return false;
+                }
+                const confirmed = await this.showCustomAnimationDependencyConfirm();
+                if (!confirmed) {
+                    return null;
+                }
+                this.markCustomAnimationBaseFbxDownloaded();
+                return true;
+            },
+
+            async downloadSelectedAnimation(animationId = null) {
                 const targetId = this.normalizeAnimationKey(animationId || this.selectedAnimationId);
                 if (!targetId) return;
                 const url = `/api/task/${this.taskId}/animations/download/${encodeURIComponent(targetId)}`;
-                window.location.href = url;
+                const baseStarted = await this.ensureCustomAnimationBaseFbxBeforeDownload();
+                if (baseStarted === null) return;
+                if (baseStarted) {
+                    this.triggerDownloadUrl(`/api/task/${this.taskId}/animations/download-with-base/${encodeURIComponent(targetId)}`);
+                } else {
+                    this.triggerDownloadUrl(url);
+                }
             },
 
             updateFileList(urls, task, readyUrls = []) {
@@ -6278,7 +6727,7 @@
                     const filename = cleanFilename(rawFilename);
 
                     // Hide video artifacts (video is already shown on page)
-                    if (/_video\.(mp4|mov)$/i.test(filename)) return;
+                    if (/_video(_small)?\.(mp4|mov)$/i.test(filename)) return;
                     if (/_video_poster\.jpe?g$/i.test(filename)) return;
                     if (/video\.(mp4|mov)$/i.test(filename)) return;
                     if (/video_poster\.jpe?g$/i.test(filename)) return;
@@ -6328,6 +6777,14 @@
                 const readyItems = items.filter(item => item.isReady);
                 this.downloadItems = readyItems;
 
+                const totalFromTask = Number(task?.total_count || 0);
+                const cachedFc =
+                    this.cachedFilesData?.cached && typeof this.cachedFilesData.file_count === 'number'
+                        ? this.cachedFilesData.file_count
+                        : 0;
+                this.downloadBundleLabelCount =
+                    cachedFc > 0 ? cachedFc : totalFromTask > 0 ? totalFromTask : items.length;
+
                 const filesHtml = items.map((item) => {
                     const iconHtml = item.icon
                         ? `<img src="${item.icon}" alt="" aria-hidden="true" style="height: 2.5em; width: auto; object-fit: contain; display: block;" onerror="this.style.display='none'">`
@@ -6359,11 +6816,10 @@
                 // Single "Download All" button (purchase if needed)
                 let downloadAllHtml = '';
                 if (items.length > 0) {
-                    const fileCount = this.archiveEstimate?.file_count != null
-                        ? this.archiveEstimate.file_count
-                        : this.downloadItems.length;
                     const buttonLabel = this.buildDownloadAllButtonLabel();
-                    const buttonDisabled = fileCount === 0;
+                    const buttonDisabled =
+                        task?.status !== 'done' ||
+                        !(items.length > 0 || totalFromTask > 0 || readyItems.length > 0);
 
                     const archiveDesc = `<div style="margin-top: 0.75rem; font-size: 0.95rem; color: var(--text-primary); line-height: 1.4; text-align: center; font-weight: 500;" data-i18n="download_archive_desc">
                         ${t('download_archive_desc')}
@@ -6377,12 +6833,6 @@
                                     <img src="/static/images/icons/download.svg" alt="" aria-hidden="true" width="18" height="18" style="filter: brightness(10);">
                                     <span style="font-weight: 700;">${buttonLabel}</span>
                                 </button>
-                                <div id="download-all-archive-progress" class="download-all-archive-progress hidden" aria-live="polite">
-                                    <div class="download-all-archive-track">
-                                        <div id="download-all-archive-fill" class="download-all-archive-fill" style="width:0%"></div>
-                                    </div>
-                                    <div id="download-all-archive-label" class="download-all-archive-label">${this.tSafe('archive_preparing', 'Preparing files')} — 0%</div>
-                                </div>
                             </div>
                             ${archiveDesc}
                         </li>
@@ -6707,6 +7157,7 @@
         import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
         import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
         import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
+        import { Sky } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/objects/Sky.js';
 
         import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
         import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -6726,6 +7177,7 @@
             STANDARD_SPRITE_VIEWS,
             SPRITE_SHEET_LIMITS,
         } from '/static/js/sprite-sheet-mvp.js?v=6';
+        import { PlayModeController } from '/static/js/task-play-mode.js?v=24';
 
         window.captureSpriteSheetAtlas = captureSpriteSheetAtlas;
         window.captureStandardSpriteSheetPack = captureStandardSpriteSheetPack;
@@ -6777,8 +7229,12 @@
                 hemiGroundColor: 0x222233,
                 hemiIntensity: 0.25,
 
-                // Background
-                bgColor: 0x1a1a2e,           // scene background color
+                // Sky / background
+                bgColor: 0x6f8fb3,
+                skyTurbidity: 3.2,
+                skyRayleigh: 1.25,
+                skyMieCoefficient: 0.012,
+                skyMieDirectionalG: 0.78,
             };
             // ============================================================
 
@@ -6820,13 +7276,34 @@
 
             function setStatus(s) { statusEl.textContent = s; }
 
-            function play(name) {
+            function play(name, options = {}) {
                 if (!mixer || !animations.length) return;
                 const clip = animations.find(c => c.name === name) || animations[0];
                 if (!clip) return;
                 const next = mixer.clipAction(clip);
-                next.reset().fadeIn(0.2).play();
-                if (currentAction && currentAction !== next) currentAction.fadeOut(0.2);
+                const fade = Number.isFinite(options.fade) ? options.fade : 0.2;
+                const restart = options.restart !== false;
+                const loopOnce = !!options.loopOnce;
+                const clampWhenFinished = !!options.clampWhenFinished;
+
+                next.enabled = true;
+                next.paused = false;
+                next.timeScale = Number.isFinite(options.timeScale) ? options.timeScale : 1;
+                next.clampWhenFinished = clampWhenFinished;
+                next.setLoop(loopOnce ? THREE.LoopOnce : THREE.LoopRepeat, loopOnce ? 1 : Infinity);
+
+                if (restart) {
+                    next.reset();
+                }
+
+                if (currentAction === next) {
+                    next.play();
+                } else if (currentAction) {
+                    currentAction.crossFadeTo(next, fade, false);
+                } else {
+                    next.fadeIn(fade);
+                }
+                next.play();
                 currentAction = next;
                 mixer.timeScale = 1;
             }
@@ -6909,6 +7386,9 @@
                 if (mixer) {
                     try {
                         mixer.stopAllAction();
+                        if (typeof mixer.uncacheRoot === 'function') {
+                            mixer.uncacheRoot(currentModel);
+                        }
                     } catch (_) {
                         // ignore stop errors
                     }
@@ -6924,8 +7404,50 @@
             }
 
             const customAnimationClipCache = new Map();
+            const playModeClipSetCache = new Map();
             const FBX_CLIP_POSITION_SCALE_FACTOR = 0.01;
             const FBX_CLIP_SCALE_TRIGGER_ABS = 20;
+            const PLAY_MODE_LOCOMOTION_ROLES = [
+                {
+                    role: 'idle',
+                    clipName: 'idle',
+                    ids: ['idle'],
+                    type: 'idle',
+                },
+                {
+                    role: 'walk',
+                    clipName: 'walking',
+                    ids: ['walking'],
+                    type: 'walk',
+                    avoidTags: ['directional', 'stance_crouched', 'style_', 'mood_', 'injured'],
+                },
+                {
+                    role: 'walkBack',
+                    clipName: 'walking_backwards',
+                    ids: ['walking_backwards', 'walking_backwards_happy'],
+                    type: 'walk',
+                },
+                {
+                    role: 'run',
+                    clipName: 'running',
+                    ids: ['running'],
+                    type: 'run',
+                    avoidTags: ['directional', 'style_', 'mood_', 'injured'],
+                },
+                {
+                    role: 'jump',
+                    clipName: 'jump_forward',
+                    ids: ['jump_forward', 'jump_forward_run', 'jump'],
+                    type: 'jump',
+                    avoidTags: ['mood_', 'scared', 'hunched'],
+                },
+                {
+                    role: 'recover',
+                    clipName: 'getting_up',
+                    ids: ['getting_up'],
+                    type: 'die',
+                },
+            ];
 
             function normalizeFbxClipUnits(clips) {
                 if (!Array.isArray(clips) || !clips.length) return [];
@@ -7034,6 +7556,220 @@
                 return clips;
             }
 
+            async function ensureViewerAnimationCatalogLoaded() {
+                const taskUi = window.TaskUI;
+                if (taskUi && typeof taskUi.loadAnimationCatalog === 'function') {
+                    await taskUi.loadAnimationCatalog().catch((error) => {
+                        console.warn('[Viewer] TaskUI animation catalog load failed:', error);
+                    });
+                    if (taskUi.animationCatalog) {
+                        return taskUi.animationCatalog;
+                    }
+                }
+
+                const response = await fetch(`/api/task/${taskId}/animations/catalog`, { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error(`Catalog HTTP ${response.status}`);
+                }
+                return await response.json();
+            }
+
+            function catalogEntriesFromPayload(catalog) {
+                return Array.isArray(catalog?.animations)
+                    ? catalog.animations.filter((entry) => entry?.available && entry?.ready)
+                    : [];
+            }
+
+            function entryTags(entry) {
+                return Array.isArray(entry?.tags)
+                    ? entry.tags.map((tag) => String(tag || '').toLowerCase())
+                    : [];
+            }
+
+            function pickCatalogEntryForPlayRole(entries, roleConfig) {
+                const wantedIds = (roleConfig.ids || []).map(normalizeClipKey).filter(Boolean);
+                for (const wantedId of wantedIds) {
+                    const exact = entries.find((entry) => normalizeClipKey(entry?.id) === wantedId);
+                    if (exact) return exact;
+                }
+
+                const typed = entries.filter((entry) => {
+                    return normalizeClipKey(entry?.type) === normalizeClipKey(roleConfig.type);
+                });
+                if (!typed.length) return null;
+
+                const avoidTags = roleConfig.avoidTags || [];
+                const clean = typed.find((entry) => {
+                    const tags = entryTags(entry);
+                    return !avoidTags.some((avoid) => {
+                        const probe = String(avoid || '').toLowerCase();
+                        return tags.some((tag) => tag === probe || tag.startsWith(probe));
+                    });
+                });
+                return clean || typed[0] || null;
+            }
+
+            function resolveCatalogAnimationUrl(entry) {
+                const raw = String(entry?.preview_url || '').trim();
+                if (raw) return raw;
+                const id = encodeURIComponent(String(entry?.id || ''));
+                return `/api/task/${taskId}/animations/preview/${id}`;
+            }
+
+            function horizontalDisplacementForTrack(track) {
+                if (!track?.values || track.values.length < 3) return 0;
+                const baseX = Number(track.values[0]) || 0;
+                const baseZ = Number(track.values[2]) || 0;
+                let max = 0;
+                for (let index = 0; index < track.values.length; index += 3) {
+                    const dx = (Number(track.values[index]) || 0) - baseX;
+                    const dz = (Number(track.values[index + 2]) || 0) - baseZ;
+                    max = Math.max(max, Math.sqrt(dx * dx + dz * dz));
+                }
+                return max;
+            }
+
+            function isLikelyRootPositionTrack(track) {
+                const name = normalizeClipKey(String(track?.name || '').replace(/\.position$/i, ''));
+                if (!String(track?.name || '').endsWith('.position')) return false;
+                if (!name) return false;
+                if (name.includes('left') || name.includes('right') || name.includes('hand') || name.includes('foot')) {
+                    return false;
+                }
+                return name.includes('hips') ||
+                    name.includes('pelvis') ||
+                    name === 'root' ||
+                    name === 'armature' ||
+                    name.includes('mixamorig_hips') ||
+                    name.includes('mixamorighips');
+            }
+
+            function makeControllerInPlaceClip(sourceClip, clipName) {
+                if (!sourceClip) return null;
+                const clip = sourceClip.clone();
+                clip.name = clipName || sourceClip.name;
+
+                const positionTracks = clip.tracks.filter((track) => {
+                    return String(track?.name || '').endsWith('.position') && track?.values?.length >= 3;
+                });
+                let tracksToFlatten = positionTracks.filter(isLikelyRootPositionTrack);
+                if (!tracksToFlatten.length && positionTracks.length) {
+                    const sorted = [...positionTracks].sort((a, b) => {
+                        return horizontalDisplacementForTrack(b) - horizontalDisplacementForTrack(a);
+                    });
+                    if (horizontalDisplacementForTrack(sorted[0]) > 0.08) {
+                        tracksToFlatten = [sorted[0]];
+                    }
+                }
+                const flattenNames = new Set(tracksToFlatten.map((track) => track.name));
+
+                clip.tracks = clip.tracks.map((track) => {
+                    if (!flattenNames.has(track?.name) || !track?.values || track.values.length < 3) {
+                        return track;
+                    }
+
+                    const next = track.clone();
+                    const baseX = Number(next.values[0]) || 0;
+                    const baseZ = Number(next.values[2]) || 0;
+                    for (let index = 0; index < next.values.length; index += 3) {
+                        next.values[index] = baseX;
+                        next.values[index + 2] = baseZ;
+                    }
+                    return next;
+                });
+
+                try {
+                    clip.optimize();
+                } catch (_) {
+                    // keep unoptimized clip
+                }
+                return clip;
+            }
+
+            async function buildPlayModeClipSetFromCatalog() {
+                const catalog = await ensureViewerAnimationCatalogLoaded();
+                const readyEntries = catalogEntriesFromPayload(catalog);
+                if (!readyEntries.length) {
+                    throw new Error('No ready catalog animations');
+                }
+
+                const cacheKey = `${taskId}:${readyEntries.map((entry) => `${entry.id}:${entry.ready ? 1 : 0}`).join('|')}`;
+                const cached = playModeClipSetCache.get(cacheKey);
+                if (cached?.length) return cached;
+
+                const clips = [];
+                const diagnostics = [];
+                loadingManager?.setQueue?.(PLAY_MODE_LOCOMOTION_ROLES.map((roleConfig) => ({
+                    name: `Play ${roleConfig.role}`,
+                    status: 'pending',
+                })));
+                for (const roleConfig of PLAY_MODE_LOCOMOTION_ROLES) {
+                    loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'active');
+                    loadingManager?.updateProgress?.(
+                        25 + (clips.length / PLAY_MODE_LOCOMOTION_ROLES.length) * 55,
+                        `Loading Play ${roleConfig.role}...`
+                    );
+                    const entry = pickCatalogEntryForPlayRole(readyEntries, roleConfig);
+                    if (!entry) {
+                        diagnostics.push(`${roleConfig.role}: missing`);
+                        loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'error');
+                        continue;
+                    }
+
+                    const rawClips = await loadAnimationClipsFromFbxUrl(
+                        resolveCatalogAnimationUrl(entry),
+                        `Play ${roleConfig.role}: ${entry.name || entry.id}`
+                    );
+                    const sourceClip = rawClips[0];
+                    if (!sourceClip) {
+                        diagnostics.push(`${roleConfig.role}: empty ${entry.id}`);
+                        loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'error');
+                        continue;
+                    }
+
+                    const controllerClip = makeControllerInPlaceClip(sourceClip, roleConfig.clipName);
+                    if (controllerClip) {
+                        clips.push(controllerClip);
+                        diagnostics.push(`${roleConfig.role}: ${entry.id} -> ${controllerClip.name}`);
+                        loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'done');
+                    }
+                }
+
+                if (!clips.length) {
+                    throw new Error('No playable controller clips');
+                }
+
+                playModeClipSetCache.set(cacheKey, clips);
+                window.taskDbg('[PlayMode] Catalog controller clips:', diagnostics);
+                return clips;
+            }
+
+            async function ensurePlayModeAnimationSet() {
+                if (currentModelType !== 'animations') {
+                    await setActiveMode('animation');
+                }
+                if (currentModelType !== 'animations' || !currentModel) {
+                    return false;
+                }
+
+                loadingManager?.show?.('Loading Play Mode');
+                loadingManager?.updateProgress?.(15, 'Preparing Play controller...');
+                setStatus('Loading Play controller clips...');
+                const clips = await buildPlayModeClipSetFromCatalog();
+                loadingManager?.updateProgress?.(85, 'Binding Play animations...');
+                const ok = applyAnimationClipsToCurrentModel(
+                    clips,
+                    PLAY_MODE_LOCOMOTION_ROLES.flatMap((role) => [role.clipName, ...(role.ids || [])])
+                );
+                if (ok) {
+                    modelCache.animations = currentModel;
+                    modelCache.animationsData = [...animations];
+                    setStatus(`Play controller ready (${animations.length} clips)`);
+                    loadingManager?.updateProgress?.(100, 'Play mode ready');
+                }
+                return ok;
+            }
+
             async function playAnimationByBestMatch(query) {
                 if (!mixer || !animations.length) return false;
                 const clip = pickBestAnimationClipByHints([query]);
@@ -7082,18 +7818,56 @@
                 if (!renderer) return false;
                 setStatus('Loading IBL...');
                 try {
-                    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-                    const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-                    scene.environment = envTexture;
-                    pmremGenerator.dispose();
+                    if (!skyObject) {
+                        skyObject = new Sky();
+                        skyObject.scale.setScalar(450000);
+                        scene.add(skyObject);
+                    }
+                    if (!skyPmremGenerator) {
+                        skyPmremGenerator = new THREE.PMREMGenerator(renderer);
+                    }
+                    updateSkyEnvironment(true);
                     if ('environmentIntensity' in scene) {
                         scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
                     }
-                    window.taskDbg('[Viewer] IBL ready (RoomEnvironment PMREM)');
+                    window.taskDbg('[Viewer] Sky environment ready (procedural Sky PMREM)');
                     return true;
                 } catch (e) {
-                    console.error('[Viewer] IBL setup failed:', e);
-                    return false;
+                    console.error('[Viewer] Sky environment setup failed, falling back to RoomEnvironment:', e);
+                    try {
+                        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+                        const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+                        scene.environment = envTexture;
+                        pmremGenerator.dispose();
+                        return true;
+                    } catch (_) {
+                        return false;
+                    }
+                }
+            }
+
+            function updateSkyEnvironment(forcePmrem = false) {
+                if (!scene || !renderer || !skyObject) return;
+                const uniforms = skyObject.material.uniforms;
+                uniforms.turbidity.value = LIGHTING_CONFIG.skyTurbidity;
+                uniforms.rayleigh.value = LIGHTING_CONFIG.skyRayleigh;
+                uniforms.mieCoefficient.value = LIGHTING_CONFIG.skyMieCoefficient;
+                uniforms.mieDirectionalG.value = LIGHTING_CONFIG.skyMieDirectionalG;
+
+                const phi = THREE.MathUtils.degToRad(90 - viewerState.sunInclination);
+                const theta = THREE.MathUtils.degToRad(viewerState.sunRotation);
+                const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
+                uniforms.sunPosition.value.copy(sunPosition);
+
+                scene.background = skyObject;
+
+                if (forcePmrem || !skyEnvironmentTexture) {
+                    if (!skyPmremGenerator) skyPmremGenerator = new THREE.PMREMGenerator(renderer);
+                    if (skyEnvironmentTexture) skyEnvironmentTexture.dispose?.();
+                    const skyScene = new THREE.Scene();
+                    skyScene.add(skyObject.clone());
+                    skyEnvironmentTexture = skyPmremGenerator.fromScene(skyScene).texture;
+                    scene.environment = skyEnvironmentTexture;
                 }
             }
 
@@ -7139,7 +7913,7 @@
                     pixelRatioCap: 0.8,
                     useComposer: false,
                     bloom: false,
-                    shadows: false,
+                    shadows: true,
                     shadowMapSize: 512,
                 }
             };
@@ -7147,6 +7921,7 @@
             // Rig Editor and Viewer Controls instances
             let rigEditor = null;
             let viewerControls = null;
+            let playModeController = null;
             let setActiveMode = null; // Defined in setupViewModeSelector but exposed here
             
             // Transform System instances
@@ -7159,6 +7934,9 @@
             let sunLight = null;
             let ambientLight = null;
             let hemiLight = null;
+            let skyObject = null;
+            let skyPmremGenerator = null;
+            let skyEnvironmentTexture = null;
             let composer = null;
             let bloomPass = null;
 
@@ -7595,6 +8373,8 @@
                         r * Math.sin(phi) * Math.cos(theta)
                     );
                 }
+                updateSkyEnvironment(false);
+                updateSunShadowFocus(true);
 
                 if (ambientLight) {
                     ambientLight.color.set(viewerState.ambientColor);
@@ -7609,9 +8389,9 @@
                     scene.environmentIntensity = envVal;
                 }
                 
-                // Background color
+                // Background color fallback / picker sync. The procedural sky owns the visible background.
                 if (scene) {
-                    scene.background = new THREE.Color(viewerState.bgColor);
+                    if (!skyObject) scene.background = new THREE.Color(viewerState.bgColor);
                     const preview = document.getElementById('bg-color-preview');
                     if (preview) preview.style.backgroundColor = viewerState.bgColor;
                     const picker = document.getElementById('bg-color-picker');
@@ -7851,6 +8631,36 @@
                 if (adjEmMultVal) adjEmMultVal.textContent = Number(currentAdj.emissiveMult || 2.0).toFixed(3);
             }
 
+            function snapCurrentModelToGround(options = {}) {
+                if (!currentModel || !THREE) return;
+                if (playModeController?.active) return;
+                const centerXZ = !!options.centerXZ;
+                const force = options.force !== false;
+                try {
+                    currentModel.updateMatrixWorld(true);
+                    const box = new THREE.Box3().setFromObject(currentModel);
+                    if (!Number.isFinite(box.min.y) || !Number.isFinite(box.max.y)) return;
+                    const deltaY = -box.min.y;
+                    if (force || Math.abs(deltaY) > 0.002) {
+                        currentModel.position.y += deltaY;
+                    }
+                    if (centerXZ) {
+                        currentModel.updateMatrixWorld(true);
+                        const centeredBox = new THREE.Box3().setFromObject(currentModel);
+                        const center = centeredBox.getCenter(new THREE.Vector3());
+                        currentModel.position.x -= center.x;
+                        currentModel.position.z -= center.z;
+                    }
+                    if (groundPlaneMesh) groundPlaneMesh.position.y = 0;
+                    currentModel.updateMatrixWorld(true);
+                } catch (error) {
+                    if (!window.__snapGroundWarningShown) {
+                        window.__snapGroundWarningShown = true;
+                        console.warn('[Viewer] snapCurrentModelToGround failed:', error);
+                    }
+                }
+            }
+
             // Fullscreen functionality
             function toggleFullscreen() {
                 window.taskDbg('[Viewer] toggleFullscreen called, current state:', isFullscreen);
@@ -8050,6 +8860,96 @@
                     }
                     sunLight.shadow.needsUpdate = shadowsEnabled;
                 }
+            }
+
+            function updateSunShadowFocus(force = false) {
+                if (!sunLight || !sunLight.target || !THREE) return;
+                const focus = new THREE.Vector3();
+                let hasFocus = false;
+
+                if (playModeController?.active && playModeController.model) {
+                    focus.copy(playModeController.model.position);
+                    hasFocus = true;
+                } else if (currentModel) {
+                    try {
+                        new THREE.Box3().setFromObject(currentModel).getCenter(focus);
+                        hasFocus = true;
+                    } catch (error) {
+                        hasFocus = false;
+                    }
+                }
+                if (!hasFocus) return;
+
+                const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
+                const theta = viewerState.sunRotation * (Math.PI / 180);
+                const r = Math.max(12, Number(viewerState.groundSize || 10) * 0.5);
+                const sunOffset = new THREE.Vector3(
+                    r * Math.sin(phi) * Math.sin(theta),
+                    Math.max(3, r * Math.cos(phi)),
+                    r * Math.sin(phi) * Math.cos(theta)
+                );
+
+                sunLight.target.position.copy(focus);
+                sunLight.position.copy(focus).add(sunOffset);
+                sunLight.target.updateMatrixWorld();
+                sunLight.updateMatrixWorld();
+
+                if (sunLight.shadow) {
+                    const size = Math.max(8, Math.min(60, Number(viewerState.groundSize || 10)));
+                    sunLight.shadow.camera.left = -size;
+                    sunLight.shadow.camera.right = size;
+                    sunLight.shadow.camera.top = size;
+                    sunLight.shadow.camera.bottom = -size;
+                    sunLight.shadow.camera.far = Math.max(80, size * 3);
+                    sunLight.shadow.camera.updateProjectionMatrix();
+                    if (force || playModeController?.active) {
+                        sunLight.shadow.needsUpdate = true;
+                    }
+                }
+            }
+
+            function publishMainViewerDebugState() {
+                let modelBox = null;
+                if (currentModel) {
+                    try {
+                        const box = new THREE.Box3().setFromObject(currentModel);
+                        modelBox = {
+                            minY: box.min.y,
+                            maxY: box.max.y,
+                            height: box.max.y - box.min.y,
+                            modelY: currentModel.position.y,
+                        };
+                    } catch (_) {
+                        modelBox = null;
+                    }
+                }
+                window.__mainViewerDebug = {
+                    quality: mainViewerQualityMode,
+                    modelBox,
+                    hasSky: !!skyObject,
+                    backgroundType: scene?.background?.type || scene?.background?.constructor?.name || null,
+                    hasEnvironment: !!scene?.environment,
+                    rendererShadowEnabled: !!renderer?.shadowMap?.enabled,
+                    sunCastShadow: !!sunLight?.castShadow,
+                    sunIntensity: Number(sunLight?.intensity || 0),
+                    shadowMapSize: sunLight?.shadow ? {
+                        width: sunLight.shadow.mapSize.width,
+                        height: sunLight.shadow.mapSize.height,
+                    } : null,
+                    shadowCamera: sunLight?.shadow?.camera ? {
+                        left: sunLight.shadow.camera.left,
+                        right: sunLight.shadow.camera.right,
+                        top: sunLight.shadow.camera.top,
+                        bottom: sunLight.shadow.camera.bottom,
+                        far: sunLight.shadow.camera.far,
+                    } : null,
+                    sunTarget: sunLight?.target?.position ? {
+                        x: sunLight.target.position.x,
+                        y: sunLight.target.position.y,
+                        z: sunLight.target.position.z,
+                    } : null,
+                    groundReceiveShadow: !!groundPlaneMesh?.receiveShadow,
+                };
             }
 
             function applyMainViewerQuality(mode = mainViewerQualityMode, reason = 'manual') {
@@ -8500,6 +9400,7 @@
 
                 // Global keyboard shortcuts (only when viewer is focused)
                 document.addEventListener('keydown', (e) => {
+                    if (playModeController?.active) return;
                     // Space key for fullscreen toggle - only if viewer focused
                     if (e.key === ' ' && !e.repeat && viewerFocused && !e.target.matches('input, textarea, select')) {
                         e.preventDefault();
@@ -8747,7 +9648,7 @@
                     renderer,
                     controls,
                     transform,
-                    groundPlaneMesh, // Pass the ground plane mesh
+                    groundPlane: groundPlaneMesh, // Pass the ground plane mesh
                     bloomPass, // Pass the bloom pass
                     t,
                     onSaveDefaultSettings: () => saveDefaultViewerSettings('hotkey'),
@@ -8882,6 +9783,13 @@
                 document.addEventListener('keydown', (e) => {
                     // Don't capture if user is typing in an input
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+                    if (playModeController?.active && playModeController.handleKeyDown(e, true)) {
+                        viewerFocused = true;
+                        wrap.classList.add('viewer-focused');
+                        e.preventDefault();
+                        return;
+                    }
                     
                     // Don't capture if viewer is not focused
                     if (!viewerFocused) return;
@@ -8926,6 +9834,10 @@
                     }
                 });
                 document.addEventListener('keyup', (e) => {
+                    if (playModeController?.active && playModeController.handleKeyUp(e, true)) {
+                        e.preventDefault();
+                        return;
+                    }
                     if (!viewerFocused) return;
                     if (viewerControls) viewerControls.handleKeyUp(e.key);
                 });
@@ -8982,9 +9894,15 @@
                         if (!mainViewerEnabled || document.hidden) {
                             return;
                         }
-                        if (mixer) mixer.update(dt);
+                        if (mixer) {
+                            mixer.update(dt);
+                            snapCurrentModelToGround({ force: false });
+                        }
                         if (viewerControls) viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
+                        if (playModeController?.active) playModeController.update(dt);
+                        updateSunShadowFocus(false);
+                        publishMainViewerDebugState();
                         if (window.updateZoomInertia) window.updateZoomInertia();
                         controls.update();
                         
@@ -9308,9 +10226,11 @@
                     const tposeBtn = document.getElementById('view-mode-tpose');
                     const rigBtn = document.getElementById('view-mode-rig');
                     const animBtn = document.getElementById('view-mode-anim');
+                    const playModeBtn = document.getElementById('view-mode-play');
+                    const ragdollModeBtn = document.getElementById('view-mode-ragdoll');
                     const rotationButtonsWrap = document.getElementById('rotation-buttons');
                     const saveRigWrap = document.getElementById('save-rig-wrap');
-                    const allBtns = [tposeBtn, rigBtn, animBtn];
+                    const allBtns = [tposeBtn, rigBtn, animBtn, playModeBtn, ragdollModeBtn];
 
                     const setEditControlsVisible = (visible) => {
                         if (rotationButtonsWrap) {
@@ -9321,12 +10241,62 @@
                         }
                     };
                     
+                    const ensurePlayController = () => {
+                        if (playModeController) return playModeController;
+                        playModeController = new PlayModeController({
+                            THREE,
+                            scene,
+                            renderer,
+                            camera,
+                            controls,
+                            viewerControls,
+                            getCurrentModel: () => currentModel,
+                            getAnimations: () => animations,
+                            getMixer: () => mixer,
+                            playClipByName: (name, options) => play(name, options),
+                            setStatus: (msg) => setStatus(msg),
+                        });
+                        window.__playModeController = playModeController;
+                        return playModeController;
+                    };
+
+                    const stopPlayModeIfNeeded = async (nextMode) => {
+                        if ((nextMode === 'play' || nextMode === 'ragdoll') || !playModeController?.active) return;
+                        await playModeController.exit();
+                    };
+
+                    const showRagdollHelpOnce = () => {
+                        const key = 'autorig.ragdollHelp.v1';
+                        if (localStorage.getItem(key) === '1') return;
+                        localStorage.setItem(key, '1');
+                        const modal = document.createElement('div');
+                        modal.style.cssText = 'position:fixed; inset:0; z-index:10020; display:flex; align-items:center; justify-content:center; background:rgba(3,6,18,0.58); backdrop-filter:blur(6px);';
+                        modal.innerHTML = `
+                            <div style="width:min(460px, calc(100vw - 32px)); border:1px solid rgba(255,255,255,0.14); border-radius:14px; background:linear-gradient(180deg, rgba(18,24,42,0.98), rgba(9,13,26,0.98)); color:#fff; box-shadow:0 24px 70px rgba(0,0,0,0.45); padding:20px;">
+                                <h3 style="margin:0 0 12px; font-size:1.05rem;">Ragdoll controls</h3>
+                                <div style="display:grid; gap:10px; font-size:0.9rem; line-height:1.45; color:rgba(255,255,255,0.82);">
+                                    <div><b style="color:#fff;">R</b> resets the character to the base position.</div>
+                                    <div><b style="color:#fff;">Left mouse drag</b> grabs the body part under the cursor. Drag up/down to lift or lower it like a puppet.</div>
+                                    <div><b style="color:#fff;">Space</b> applies a small impulse.</div>
+                                </div>
+                                <button type="button" data-close-ragdoll-help style="margin-top:18px; width:100%; padding:0.72rem 1rem; border:0; border-radius:10px; color:#fff; background:linear-gradient(135deg,#4f46e5,#7c3aed); font-weight:700; cursor:pointer;">Got it</button>
+                            </div>
+                        `;
+                        modal.addEventListener('click', (event) => {
+                            if (event.target === modal || event.target?.matches?.('[data-close-ragdoll-help]')) {
+                                modal.remove();
+                            }
+                        });
+                        document.body.appendChild(modal);
+                    };
+
                     setActiveMode = async (mode) => {
                         window.taskDbg('[Viewer] setActiveMode:', mode, 
                             'currentType:', currentModelType, 
                             'cacheHasPrepared:', !!modelCache.prepared,
                             'cacheHasAnimations:', !!modelCache.animations);
                         allBtns.forEach(b => b?.classList.remove('active'));
+                        await stopPlayModeIfNeeded(mode);
                         
                         switch (mode) {
                             case 'tpose':
@@ -9464,16 +10434,153 @@
                                     }
                                 }
                                 break;
+
+                            case 'play':
+                                setEditControlsVisible(false);
+                                if (tPoseReference) {
+                                    tPoseReference.setVisible(false);
+                                    const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
+                                    if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
+                                }
+
+                                if (currentModelType !== 'animations') {
+                                    await setActiveMode('animation');
+                                }
+
+                                if (currentModelType !== 'animations') {
+                                    setStatus('Play mode requires animations.glb');
+                                    playModeBtn?.classList.remove('active');
+                                    return;
+                                }
+
+                                if (modelCache.animations && modelCache.animationsData?.length) {
+                                    swapToCache('animations');
+                                    currentModelType = 'animations';
+                                }
+
+                                let playClipsReady = false;
+                                try {
+                                    playClipsReady = await ensurePlayModeAnimationSet();
+                                } catch (error) {
+                                    console.error('[Viewer] Play mode animation load failed:', error);
+                                    setStatus(`Play mode animation load failed: ${error?.message || error}`);
+                                }
+                                if (!playClipsReady) {
+                                    playModeBtn?.classList.remove('active');
+                                    animBtn?.classList.add('active');
+                                    loadingManager?.hide?.();
+                                    return;
+                                }
+
+                                animBtn?.classList.remove('active');
+                                playModeBtn?.classList.add('active');
+                                viewerFocused = true;
+                                wrap.classList.add('viewer-focused');
+
+                                if (sel) sel.classList.add('hidden');
+                                if (playBtn) playBtn.classList.add('hidden');
+                                if (pauseBtn) pauseBtn.classList.add('hidden');
+
+                                const playController = ensurePlayController();
+                                playController.refreshModel();
+                                try {
+                                    await playController.enter();
+                                    loadingManager?.hide?.();
+                                } catch (error) {
+                                    console.error('[Viewer] Play mode init failed:', error);
+                                    setStatus(`Play mode init failed: ${error?.message || error}`);
+                                    playModeBtn?.classList.remove('active');
+                                    loadingManager?.hide?.();
+                                    return;
+                                }
+                                break;
+
+                            case 'ragdoll':
+                                setEditControlsVisible(false);
+                                if (tPoseReference) {
+                                    tPoseReference.setVisible(false);
+                                    const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
+                                    if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
+                                }
+
+                                if (modelCache.animations && modelCache.animationsData?.length) {
+                                    swapToCache('animations');
+                                    currentModelType = 'animations';
+                                }
+
+                                if (currentModelType !== 'animations') {
+                                    window.taskDbg('[Viewer] Loading animations.glb for ragdoll mode...');
+                                    setLoadingUIState(true);
+                                    loadingManager.show('Loading Ragdoll');
+                                    loadingManager.setQueue([{ name: 'Skinned Animations GLB', status: 'pending' }]);
+                                    const ok = await loadModel(
+                                        `/api/task/${taskId}/animations.glb`,
+                                        'Skinned Animations GLB',
+                                        0,
+                                        120000
+                                    );
+                                    setLoadingUIState(false);
+                                    if (ok) {
+                                        currentModelType = 'animations';
+                                        modelCache.animations = currentModel;
+                                        modelCache.animationsData = [...animations];
+                                    } else {
+                                        setStatus('Ragdoll mode requires animations.glb');
+                                        ragdollModeBtn?.classList.remove('active');
+                                        loadingManager?.hide?.();
+                                        return;
+                                    }
+                                }
+
+                                animBtn?.classList.remove('active');
+                                playModeBtn?.classList.remove('active');
+                                ragdollModeBtn?.classList.add('active');
+                                viewerFocused = true;
+                                wrap.classList.add('viewer-focused');
+
+                                if (sel) sel.classList.add('hidden');
+                                if (playBtn) playBtn.classList.add('hidden');
+                                if (pauseBtn) pauseBtn.classList.add('hidden');
+
+                                const ragdollController = ensurePlayController();
+                                ragdollController.refreshModel();
+                                try {
+                                    await ragdollController.enterRagdollMode();
+                                    showRagdollHelpOnce();
+                                    setStatus('Ragdoll mode active · R reset · Space impulse');
+                                    setTimeout(() => {
+                                        if (ragdollController?.mode === 'ragdoll' && ragdollController?.ragdollActive) {
+                                            setStatus('Ragdoll mode active · R reset · Space impulse');
+                                        }
+                                    }, 500);
+                                    loadingManager?.hide?.();
+                                } catch (error) {
+                                    console.error('[Viewer] Ragdoll mode init failed:', error);
+                                    setStatus(`Ragdoll mode init failed: ${error?.message || error}`);
+                                    ragdollModeBtn?.classList.remove('active');
+                                    loadingManager?.hide?.();
+                                    return;
+                                }
+                                break;
                         }
                         
                         if (viewerControls) {
-                            viewerControls.setViewMode(mode);
+                            viewerControls.setViewMode(mode === 'ragdoll' ? 'animation' : mode);
+                        }
+                        if (mode === 'ragdoll') {
+                            allBtns.forEach(b => b?.classList.remove('active'));
+                            ragdollModeBtn?.classList.add('active');
+                            if (playModeController?.ragdollActive) {
+                                setStatus('Ragdoll mode active · R reset · Space impulse');
+                            }
                         }
                     };
                     
-                    tposeBtn?.addEventListener('click', () => setActiveMode('tpose'));
-                    rigBtn?.addEventListener('click', () => setActiveMode('rig'));
-                    animBtn?.addEventListener('click', () => setActiveMode('animation'));
+                    tposeBtn?.addEventListener('click', () => { tposeBtn.blur(); setActiveMode('tpose'); });
+                    rigBtn?.addEventListener('click', () => { rigBtn.blur(); setActiveMode('rig'); });
+                    animBtn?.addEventListener('click', () => { animBtn.blur(); setActiveMode('animation'); });
+                    playModeBtn?.addEventListener('click', () => { playModeBtn.blur(); setActiveMode('play'); });
+                    ragdollModeBtn?.addEventListener('click', () => { ragdollModeBtn.blur(); setActiveMode('ragdoll'); });
                     
                     // Expose for external use
                     window.setViewMode = setActiveMode;
@@ -10733,6 +11840,7 @@
                     viewerControls.setAOSettings(viewerState.aoSettings);
                     viewerControls.setModel(model);
                 }
+                snapCurrentModelToGround({ centerXZ: true, force: true });
                 
                 // Apply improved materials for models without textures (darker, reflective)
                 applyImprovedMaterials(model);
@@ -11123,6 +12231,8 @@
             
             // Prevent race condition between preparedModelReady event and waitAndInitViewer
             let preparedLoadingInProgress = false;
+            /** True after prepared.glb load returned false (so poll can stop without a loaded preview). */
+            let preparedPreviewFailed = false;
 
             function getSharedModelCache() {
                 if (!window.modelCache) {
@@ -11148,7 +12258,9 @@
                 }
                 
                 animationsLoadingInBackground = true;
-                window.taskDbg('[Viewer] 🔄 Starting background load of animations...');
+                window.taskDbg(
+                    '[Viewer] Starting background load of animations.glb — if clips stay empty until you click Animation, check Network for this URL and errors.'
+                );
                 
                 try {
                     // Load animations GLB silently (no loading overlay)
@@ -11189,7 +12301,10 @@
                     }
                     
                 } catch (err) {
-                    console.warn('[Viewer] Background animations load failed, will try FBX later:', err.message);
+                    console.warn(
+                        '[Viewer] Background animations.glb load failed (Diagnose: Network tab /api/task/.../animations.glb). Animation mode will retry on click:',
+                        err.message
+                    );
                 } finally {
                     animationsLoadingInBackground = false;
                     animationsBackgroundFinished = true;
@@ -13336,6 +14451,17 @@
                     
                     window.taskDbg('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
 
+                    if (t && t.status === 'error') {
+                        try {
+                            if (typeof loadingManager !== 'undefined' && loadingManager && typeof loadingManager.hide === 'function') {
+                                loadingManager.hide();
+                            }
+                        } catch (_) {}
+                        window.taskDbg('[Viewer] Task error — skip model loads and loading overlay.');
+                        if (rigEditor && t) rigEditor.setTaskStatus(t.status);
+                        return;
+                    }
+
                     const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
                     window.currentTaskIsFree3D = isFree3DTask; // Global flag for loadModel to use
 
@@ -13391,14 +14517,22 @@
                                 if ((t.status === 'done' || animationsReady) && !modelCache.animations) {
                                     loadAnimationsInBackground();
                                 }
+                            } else {
+                                preparedPreviewFailed = true;
+                                window.taskDbg(
+                                    '[Viewer] Prepared model load failed; animations.glb will still load in background when task is ready (see Network tab).'
+                                );
                             }
                         } finally {
                             preparedLoadingInProgress = false;
                         }
                     }
                     
-                    // 3. If task is done or animations ready and we haven't started background load yet, start it
-                    if (t && (t.status === 'done' || animationsReady) && preparedLoaded && !modelCache.animations && !animationsLoadingInBackground) {
+                    // 3. Background animations: do not wait for prepared preview (prepared may fail while animations.glb is fine)
+                    if (t && (t.status === 'done' || animationsReady) && !modelCache.animations && !animationsLoadingInBackground) {
+                        window.taskDbg(
+                            '[Viewer] Starting background animations.glb load (independent of prepared preview; verify in Network if clips stay empty).'
+                        );
                         loadAnimationsInBackground();
                     }
                     
@@ -13419,15 +14553,19 @@
 
                     // Update RigEditor status
                     if (rigEditor && t) rigEditor.setTaskStatus(t.status);
-                    
-                    if (t && t.status === 'error') {
-                        window.taskDbg('[Viewer] Task error. Stopping poll.');
-                        return;
-                    }
-                    // Stop when task is done, preview is up, and animations load finished (ok or failed)
-                    if (t && t.status === 'done' && preparedLoaded && (modelCache.animations || animationsBackgroundFinished)) {
-                        window.taskDbg('[Viewer] Task done, viewer settled. Stopping poll.');
-                        return;
+
+                    // Stop when task is done, preview settled (or unavailable), and animations load finished (ok or failed)
+                    if (t && t.status === 'done') {
+                        const previewSettled =
+                            preparedLoaded ||
+                            free3dModelLoaded ||
+                            !t.prepared_glb_ready ||
+                            preparedPreviewFailed;
+                        const animSettled = modelCache.animations || animationsBackgroundFinished;
+                        if (previewSettled && animSettled) {
+                            window.taskDbg('[Viewer] Task done, viewer settled. Stopping poll.');
+                            return;
+                        }
                     }
                     
                 } catch (e) {
@@ -13453,6 +14591,20 @@
                     window.taskDbg('[Viewer] preparedModelReady event: already loaded/loading, skipping');
                     return;
                 }
+                try {
+                    const ts = await getLatestTaskState();
+                    if (ts && ts.status === 'error') {
+                        try {
+                            if (typeof loadingManager !== 'undefined' && loadingManager && typeof loadingManager.hide === 'function') {
+                                loadingManager.hide();
+                            }
+                        } catch (_) {}
+                        window.taskDbg('[Viewer] preparedModelReady: task failed, skip early load');
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('[Viewer] preparedModelReady: status check failed', e);
+                }
                 preparedLoadingInProgress = true;
                 window.taskDbg('[Viewer] preparedModelReady event: attempting early load...');
                 
@@ -13469,9 +14621,11 @@
                         // Start background animations load
                         loadAnimationsInBackground();
                     } else {
+                        preparedPreviewFailed = true;
                         console.warn('[Viewer] preparedModelReady: loadModel returned false');
                     }
                 } catch (err) {
+                    preparedPreviewFailed = true;
                     console.error('[Viewer] preparedModelReady: load error:', err);
                 } finally {
                     preparedLoadingInProgress = false;
@@ -13662,4 +14816,3 @@
 
 </body>
 </html>
-

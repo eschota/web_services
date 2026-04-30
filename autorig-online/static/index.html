@@ -3,27 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto Rig GLB/FBX/OBJ Characters Online | AutoRig.online</title>
-    <meta name="description" content="Automatically rig your 3D characters online. Upload GLB, FBX, or OBJ models and get them rigged with 50+ animations in minutes. Free to try!">
+    <title>AI Auto Rigging Online for GLB, FBX & OBJ Characters | AutoRig.online</title>
+    <meta name="description" content="AI-powered auto rigging for 3D characters. Upload GLB, FBX, or OBJ models and get rigged characters with animations for Unity, Unreal Engine, Blender, and games.">
+    <meta name="keywords" content="AI auto rigging, AI character rigging, auto rig online, automatic 3D rigging, AI rigged 3D models, rig FBX online, rig GLB online, OBJ auto rigging, 3D character rigging AI, AI animation rigging, online character rigger, Mixamo alternative, Unity character rigging, Unreal Engine character rigging, Blender auto rigging, humanoid rigging, game character rigging, rigged FBX, rigged GLB, auto skinning 3D model">
+    <link rel="canonical" href="https://autorig.online/">
     
     <!-- Open Graph -->
-    <meta property="og:title" content="AutoRig Online - Automatic 3D Character Rigging">
-    <meta property="og:description" content="Upload your 3D model and get it rigged with animations in minutes">
+    <meta property="og:title" content="AI Auto Rigging Online for 3D Characters">
+    <meta property="og:description" content="Upload GLB, FBX, or OBJ characters and get AI-assisted rigs with animations for games, Unity, Unreal Engine, and Blender.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online">
     <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:site_name" content="AutoRig.online">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AI Auto Rigging Online for GLB, FBX & OBJ">
+    <meta name="twitter:description" content="AI-powered automatic character rigging for 3D models, games, Unity, Unreal Engine, and Blender.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og-image.png">
     
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
     <link rel="alternate icon" href="/static/images/logo/favicon.svg">
     
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=free3d-glass">
+    <link rel="stylesheet" href="/static/css/styles.css?v=upload-busy-tips-1">
     
     <!-- Schema.org SoftwareApplication markup -->
     <script type="application/ld+json">
@@ -35,6 +39,14 @@
         "url": "https://autorig.online",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Web Browser",
+        "keywords": "AI auto rigging, AI character rigging, automatic 3D rigging, rig FBX online, rig GLB online, OBJ auto rigging, AI rigged 3D models, game character rigging, Unity character rigging, Unreal Engine character rigging, Blender auto rigging, Mixamo alternative",
+        "about": [
+            "AI character rigging",
+            "automatic 3D model rigging",
+            "online FBX rigging",
+            "GLB character animation",
+            "game-ready humanoid rigs"
+        ],
         "offers": {
             "@type": "Offer",
             "price": "0",
@@ -44,10 +56,13 @@
         "featureList": [
             "Automatic 3D character rigging",
             "AI-powered bone generation",
+            "AI-assisted humanoid rigging",
+            "AI skin weighting for game characters",
             "Professional T-pose setup",
             "50+ built-in animations",
             "GLB, FBX, OBJ support",
             "Unity and Unreal Engine compatible",
+            "Blender-compatible rigged exports",
             "Web-based interface",
             "Fast processing (5-15 minutes)",
             "High-quality skinning",
@@ -68,6 +83,40 @@
     }
     </script>
 
+    <!-- FAQ markup for AI rigging search intents -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "Can I auto rig a 3D character with AI online?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. AutoRig.online uses AI-assisted automatic rigging to generate a humanoid skeleton, skin weights, and animation-ready output from uploaded GLB, FBX, or OBJ character models."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Which 3D formats can I rig with AutoRig.online?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "You can upload GLB, FBX, or OBJ character models and download rigged results for common 3D and game development workflows."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is AutoRig.online an AI alternative to Mixamo?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "AutoRig.online is a web-based auto rigging tool for creators who need fast AI-assisted character rigging, skinning, and animation-ready models for engines such as Unity and Unreal Engine."
+                }
+            }
+        ]
+    }
+    </script>
+
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
     <script>
@@ -83,7 +132,7 @@
     <main>
         <!-- Conversion Form -->
         <section class="container-sm">
-            <div class="card">
+            <div class="card convert-form-card">
                 <h1 style="text-align: center; margin: 0 0 1.5rem 0; font-size: 1.75rem;">
                     <span class="text-gradient" data-i18n="hero_title">Automatic 3D Model Rigging</span>
                 </h1>
@@ -145,6 +194,26 @@
                         <span data-i18n="btn_start">Start Rigging</span>
                     </button>
                 </form>
+                <div id="convert-form-busy" class="form-busy-overlay hidden" role="status" aria-live="polite" aria-busy="false">
+                    <div class="form-busy-inner">
+                        <p class="form-busy-text" id="convert-form-busy-text" data-i18n="upload_progress_uploading">Uploading your model…</p>
+                        <div class="form-busy-progress-wrap" id="convert-form-busy-progress-wrap">
+                            <div class="form-busy-progress-track" id="convert-form-busy-progress-track">
+                                <div class="form-busy-progress-fill" id="convert-form-busy-progress-fill"></div>
+                            </div>
+                            <span class="form-busy-progress-pct" id="convert-form-busy-progress-pct" aria-hidden="true">0%</span>
+                        </div>
+                        <div class="form-busy-tips">
+                            <p class="form-busy-tips-title" data-i18n="upload_busy_tips_title">While you wait</p>
+                            <ul class="form-busy-tips-list">
+                                <li data-i18n="upload_busy_tip_1">Characters should have arms at shoulder height, extended to the sides (T-pose).</li>
+                                <li data-i18n="upload_busy_tip_2">Legs should stand about shoulder-width apart.</li>
+                                <li data-i18n="upload_busy_tip_3">Mesh topology should be sufficient for bending at animation hotspots: elbows, knees, fingers, and similar areas.</li>
+                                <li data-i18n="upload_busy_tip_4">Rigging usually takes from about 5 minutes depending on model complexity. Please be patient and relax—the rest runs automatically.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -205,6 +274,30 @@
                 </div>
             </div>
         </section>
+
+        <!-- SEO Content -->
+        <section class="container mt-4" aria-labelledby="ai-rigging-title">
+            <div class="card" style="padding: 2rem;">
+                <h2 id="ai-rigging-title" style="margin: 0 0 1rem 0;">AI Auto Rigging for Game-Ready 3D Characters</h2>
+                <p style="color: var(--text-secondary); margin: 0 0 1rem 0;">
+                    AutoRig.online is an AI-assisted character rigging tool for creators who need fast online auto rigging for GLB, FBX, and OBJ models. Upload a humanoid 3D character and generate a rigged, animated model for game engines, animation previews, and production pipelines.
+                </p>
+                <div class="features" style="margin-top: 1rem;">
+                    <div class="feature">
+                        <h3>AI Character Rigging</h3>
+                        <p>Generate humanoid skeletons, skin weights, and animation-ready rigs without manual bone placement.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>FBX, GLB, and OBJ Auto Rig</h3>
+                        <p>Rig common 3D formats online and export characters for Unity, Unreal Engine, Blender, and web viewers.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>Mixamo Alternative</h3>
+                        <p>Use a browser-based AI rigging workflow when you need automatic character rigging, built-in animations, and fast iteration.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
     </main>
     <div id="site-footer"></div>
     
@@ -214,7 +307,6 @@
     <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/task-card.js"></script>
-    <script src="/static/js/app.js?v=likes-2"></script>
+    <script src="/static/js/app.js?v=upload-busy-tips-1"></script>
 </body>
 </html>
-

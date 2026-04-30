@@ -25,7 +25,7 @@ def generate_nginx_locations():
     # Base pages (English)
     for page in base_pages:
         locations.append(f"""    location = /{page} {{
-        alias /opt/autorig-online/static/{page}.html;
+        alias /root/autorig-online/static/{page}.html;
         add_header Content-Type "text/html";
     }}""")
 
@@ -33,7 +33,7 @@ def generate_nginx_locations():
     for page in base_pages:
         for lang in languages:
             locations.append(f"""    location = /{page}-{lang} {{
-        alias /opt/autorig-online/static/{page}-{lang}.html;
+        alias /root/autorig-online/static/{page}-{lang}.html;
         add_header Content-Type "text/html";
     }}""")
 

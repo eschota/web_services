@@ -304,47 +304,6 @@ export async function captureSpriteSheetAtlas(opts) {
 
   const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
 
-  const prevGroundVis = groundObject ? groundObject.visible : null;
-  if (groundObject) groundObject.visible = false;
-
-  const prevBg = scene.background;
-  const prevEnv = scene.environment;
-  const prevEnvIntensity = 'environmentIntensity' in scene ? scene.environmentIntensity : undefined;
-  if (transparentBackground) {
-    scene.background = null;
-    scene.environment = null;
-    if (prevEnvIntensity !== undefined) {
-      scene.environmentIntensity = 0;
-    }
-  }
-
-  const prevClearAlpha = renderer.getClearAlpha();
-  const prevClearColor = new THREE.Color();
-  renderer.getClearColor(prevClearColor);
-  renderer.setClearColor(0x000000, transparentBackground ? 0 : 1);
-
-  const rt = new THREE.WebGLRenderTarget(frameWidth, frameHeight, {
-    type: THREE.UnsignedByteType,
-    format: THREE.RGBAFormat,
-    depthBuffer: true,
-    stencilBuffer: false,
-  });
-
-  const prevTarget = renderer.getRenderTarget();
-  const prevAutoClear = renderer.autoClear;
-
-  mixer.stopAllAction();
-  const action = mixer.clipAction(clip);
-  action.reset();
-  action.clampWhenFinished = true;
-  action.loop = THREE.LoopOnce;
-  action.paused = true;
-  action.enabled = true;
-  action.play();
-
-  const rawPixels = new Uint8Array(frameWidth * frameHeight * 4);
-  const flipped = new Uint8Array(frameWidth * frameHeight * 4);
-
   const atlasCanvas = document.createElement('canvas');
   atlasCanvas.width = atlasW;
   atlasCanvas.height = atlasH;
@@ -353,20 +312,63 @@ export async function captureSpriteSheetAtlas(opts) {
     throw new Error('Sprite sheet: 2D canvas unsupported');
   }
 
+  const prevGroundVis = groundObject ? groundObject.visible : null;
+  const prevBg = scene.background;
+  const prevEnv = scene.environment;
+  const prevEnvIntensity = 'environmentIntensity' in scene ? scene.environmentIntensity : undefined;
+  const prevClearAlpha = renderer.getClearAlpha();
+  const prevClearColor = new THREE.Color();
+  renderer.getClearColor(prevClearColor);
+
+  let prevTarget = null;
+  let prevAutoClear = true;
+  let rt = null;
+
+  const rawPixels = new Uint8Array(frameWidth * frameHeight * 4);
+  const flipped = new Uint8Array(frameWidth * frameHeight * 4);
   const duration = Math.max(clip.duration || 0, 1e-6);
   const totalSteps = frameCount;
 
-  const { box: stableBox, center: stableCenter } = computeStableCaptureBoundsForClip(
-    THREE,
-    rootObject,
-    mixer,
-    action,
-    clip,
-    frameCount
-  );
-  fitOrthoCameraToBox(THREE, orthoCam, stableBox, stableCenter, viewPreset, frameAspect);
-
   try {
+    prevTarget = renderer.getRenderTarget();
+    prevAutoClear = renderer.autoClear;
+
+    if (groundObject) groundObject.visible = false;
+    if (transparentBackground) {
+      scene.background = null;
+      scene.environment = null;
+      if (prevEnvIntensity !== undefined) {
+        scene.environmentIntensity = 0;
+      }
+    }
+    renderer.setClearColor(0x000000, transparentBackground ? 0 : 1);
+
+    rt = new THREE.WebGLRenderTarget(frameWidth, frameHeight, {
+      type: THREE.UnsignedByteType,
+      format: THREE.RGBAFormat,
+      depthBuffer: true,
+      stencilBuffer: false,
+    });
+
+    mixer.stopAllAction();
+    const action = mixer.clipAction(clip);
+    action.reset();
+    action.clampWhenFinished = true;
+    action.loop = THREE.LoopOnce;
+    action.paused = true;
+    action.enabled = true;
+    action.play();
+
+    const { box: stableBox, center: stableCenter } = computeStableCaptureBoundsForClip(
+      THREE,
+      rootObject,
+      mixer,
+      action,
+      clip,
+      frameCount
+    );
+    fitOrthoCameraToBox(THREE, orthoCam, stableBox, stableCenter, viewPreset, frameAspect);
+
     for (let i = 0; i < frameCount; i++) {
       const t = frameCount <= 1 ? 0 : (i / (frameCount - 1)) * duration;
       action.time = t;
@@ -389,9 +391,31 @@ export async function captureSpriteSheetAtlas(opts) {
       if (onProgress) onProgress((i + 1) / totalSteps);
       await new Promise((r) => requestAnimationFrame(r));
     }
+
+    const durSec = clip.duration || 0;
+    const effectiveFps = durSec > 1e-6 ? frameCount / durSec : frameCount;
+
+    const meta = {
+      version: 1,
+      frameWidth,
+      frameHeight,
+      frameCount,
+      columns: cols,
+      rows,
+      durationSeconds: durSec,
+      fps: Math.round(effectiveFps * 1000) / 1000,
+      view: viewPreset,
+    };
+
+    const pngBlob = await new Promise((resolve, reject) => {
+      atlasCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))), 'image/png');
+    });
+
+    return { pngBlob, meta };
   } finally {
     renderer.setRenderTarget(prevTarget);
     renderer.autoClear = prevAutoClear;
+    if (rt) rt.dispose();
     renderer.setClearColor(prevClearColor, prevClearAlpha);
     scene.background = prevBg;
     scene.environment = prevEnv;
@@ -399,30 +423,8 @@ export async function captureSpriteSheetAtlas(opts) {
       scene.environmentIntensity = prevEnvIntensity;
     }
     if (groundObject && prevGroundVis !== null) groundObject.visible = prevGroundVis;
-    rt.dispose();
     orthoCam.removeFromParent();
   }
-
-  const durSec = clip.duration || 0;
-  const effectiveFps = durSec > 1e-6 ? frameCount / durSec : frameCount;
-
-  const meta = {
-    version: 1,
-    frameWidth,
-    frameHeight,
-    frameCount,
-    columns: cols,
-    rows,
-    durationSeconds: durSec,
-    fps: Math.round(effectiveFps * 1000) / 1000,
-    view: viewPreset,
-  };
-
-  const pngBlob = await new Promise((resolve, reject) => {
-    atlasCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))), 'image/png');
-  });
-
-  return { pngBlob, meta };
 }
 
 /**

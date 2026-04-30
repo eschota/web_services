@@ -13,11 +13,6 @@
     <meta property="og:url" content="https://autorig.online/gallery">
     <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=gallery-dyn-1">
 
@@ -125,15 +120,15 @@
                     }
 
                     grid.innerHTML = items.map(it => {
-                        const taskUrl = `/task?id=${it.task_id}`;
-                        const thumbUrl = it.thumbnail_url || `/api/thumb/${it.task_id}`;
+                        const modelUrl = `/m/${it.task_id}`;
+                        const thumbUrl = it.thumbnail_url || `/thumb/${it.task_id}`;
                         const videoUrl = it.video_url || `/api/video/${it.task_id}`;
                         const timeAgo = it.time_ago || '';
                         const likeCount = (typeof it.like_count === 'number') ? it.like_count : 0;
                         const liked = !!it.liked_by_me;
                         const openLabel = (typeof window.t === 'function') ? t('gallery_open') : 'Open';
                         return `
-                            <a href="${taskUrl}" class="gallery-card" data-task-id="${it.task_id}" data-video-url="${videoUrl}" style="text-decoration:none;">
+                            <a href="${modelUrl}" class="gallery-card" data-task-id="${it.task_id}" data-video-url="${videoUrl}" style="text-decoration:none;">
                                 <div class="gallery-card-media">
                                     <img src="${thumbUrl}" loading="lazy" alt="">
                                     <button class="like-btn ${liked ? 'liked' : ''}" type="button" data-like-task="${it.task_id}">

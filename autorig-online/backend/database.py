@@ -7,7 +7,7 @@ import json
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
-    UniqueConstraint, create_engine, event
+    UniqueConstraint, ForeignKey, create_engine, event, Index,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -63,8 +63,8 @@ class User(Base):
     
     @property
     def is_admin(self) -> bool:
-        from config import ADMIN_EMAILS
-        return self.email in ADMIN_EMAILS
+        from config import is_admin_email
+        return is_admin_email(self.email)
 
 
 class AnonSession(Base):
@@ -75,6 +75,9 @@ class AnonSession(Base):
     free_used = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen_at = Column(DateTime, default=datetime.utcnow)
+    agent_name = Column(String(255), nullable=True)
+    agent_description = Column(Text, nullable=True)
+    registered_as_agent = Column(Boolean, default=False)
 
 
 class TaskLike(Base):
@@ -163,6 +166,8 @@ class Task(Base):
     
     # Auto-restart tracking for stale tasks
     restart_count = Column(Integer, default=0)  # Number of times task was auto-restarted
+    # Stuck-hour policy: auto requeues (admin-style) before full delete; not cleared by admin_requeue
+    stuck_hour_requeue_count = Column(Integer, default=0)
     last_progress_at = Column(DateTime, nullable=True)  # Last time progress changed
     
     # Video
@@ -186,17 +191,31 @@ class Task(Base):
     ga_client_id = Column(String(100), nullable=True)
     created_via_api = Column(Boolean, default=False)  # True if POST /api/task/create used API key auth
 
+    # rig: Auto Rig worker payload with mode=only_rig; convert: minimal {input_url, type} only
+    pipeline_kind = Column(String(20), nullable=False, default="rig")
+
+    # Source size (bytes) when known from upload; optional for link-only tasks
+    input_bytes = Column(BigInteger, nullable=True)
+
     # Server-side NSFW classification from task poster URL (ready_urls); not client-controlled.
     content_rating = Column(String(20), nullable=False, default="unknown")  # safe | suggestive | adult | unknown
     content_score = Column(Float, nullable=True)  # 0..1 composite from detector
     content_classified_at = Column(DateTime, nullable=True)
     content_classifier_version = Column(String(64), nullable=True)
 
+    # OpenAI vision metadata from poster (same image as NudeNet); JSON array in poster_llm_keywords
+    poster_llm_title = Column(String(256), nullable=True)
+    poster_llm_description = Column(Text, nullable=True)
+    poster_llm_keywords = Column(Text, nullable=True)
+    poster_llm_at = Column(DateTime, nullable=True)
+
     # YouTube auto-upload (server uses OAuth refresh token; see youtube_upload.py)
     youtube_video_id = Column(String(64), nullable=True)
     youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
     youtube_upload_error = Column(Text, nullable=True)
     youtube_uploaded_at = Column(DateTime, nullable=True)
+    # SHA-256 hex of uploaded video bytes (dedupe + audit)
+    youtube_source_sha256 = Column(String(64), nullable=True)
 
     @property
     def output_urls(self) -> list:
@@ -221,6 +240,19 @@ class Task(Base):
         return int((self.ready_count / self.total_count) * 100)
 
 
+class AdminOverlayCounters(Base):
+    """Singleton (id=1): периодные счётчики для админ-оверлея; сброс вручную."""
+
+    __tablename__ = "admin_overlay_counters"
+
+    id = Column(Integer, primary_key=True, default=1)
+    completed_count = Column(Integer, nullable=False, default=0)
+    total_duration_seconds = Column(Float, nullable=False, default=0.0)
+    # Upper bound for total size of static/tasks (GB); evict oldest cache dirs when exceeded
+    task_cache_max_gb = Column(Float, nullable=False, default=10.0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class YoutubeCredentials(Base):
     """Single-row store for YouTube channel OAuth (refresh token for uploads)."""
     __tablename__ = "youtube_credentials"
@@ -228,6 +260,16 @@ class YoutubeCredentials(Base):
     id = Column(Integer, primary_key=True)  # always 1
     refresh_token = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class YoutubeUploadedHash(Base):
+    """SHA-256 of video file bytes already uploaded to YouTube (dedupe by content)."""
+    __tablename__ = "youtube_uploaded_hashes"
+
+    sha256_hex = Column(String(64), primary_key=True)
+    youtube_video_id = Column(String(64), nullable=False)
+    first_task_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class WorkerEndpoint(Base):
@@ -334,6 +376,39 @@ class TelegramNotification(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SupportChatSession(Base):
+    """Site support chat session; maps to one Telegram forum topic after first outbound message."""
+
+    __tablename__ = "support_chat_sessions"
+    __table_args__ = (
+        Index("ix_support_sessions_forum_thread", "telegram_chat_id", "telegram_thread_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    visitor_id = Column(String(96), nullable=False, index=True)
+    user_email = Column(String(255), nullable=True, index=True)
+    page_url = Column(Text, nullable=True)
+    telegram_chat_id = Column(BigInteger, nullable=True)
+    telegram_thread_id = Column(Integer, nullable=True)
+    topic_name = Column(String(512), nullable=True)
+    status = Column(String(32), nullable=False, default="open", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SupportChatMessage(Base):
+    """Single support chat line (website user / Telegram admin / system)."""
+
+    __tablename__ = "support_chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("support_chat_sessions.id"), nullable=False, index=True)
+    direction = Column(String(16), nullable=False, index=True)  # user | admin | system
+    body_text = Column(Text, nullable=False)
+    telegram_message_id = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Feedback(Base):
     """User feedback/comments"""
     __tablename__ = "feedback"
@@ -343,6 +418,33 @@ class Feedback(Base):
     user_name = Column(String(255), nullable=True)
     text = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    parent_id = Column(Integer, ForeignKey("feedback.id"), nullable=True, index=True)
+
+
+class RoadmapVote(Base):
+    """One roadmap priority vote per registered user (choice can be updated)."""
+    __tablename__ = "roadmap_votes"
+    __table_args__ = ()
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    choice = Column(String(64), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CryptoPaymentReport(Base):
+    """User/agent-reported crypto payment pending manual credit."""
+
+    __tablename__ = "crypto_payment_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    tier = Column(String(64), nullable=False)
+    network_id = Column(String(32), nullable=False)
+    tx_id = Column(String(256), nullable=False)
+    contact_note = Column(Text, nullable=True)
+    user_email = Column(String(255), nullable=True, index=True)
+    agent_anon_id = Column(String(36), nullable=True, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
 
 
 class Scene(Base):
@@ -462,6 +564,66 @@ def _migrate_api_keys_sqlite_for_anon(sync_conn):
     sync_conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
+_ADMIN_OVERLAY_ROW_ID = 1
+
+
+async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlayCounters:
+    from sqlalchemy import select
+    from config import TASK_CACHE_MAX_GB
+
+    result = await db.execute(
+        select(AdminOverlayCounters).where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = AdminOverlayCounters(
+            id=_ADMIN_OVERLAY_ROW_ID,
+            completed_count=0,
+            total_duration_seconds=0.0,
+            task_cache_max_gb=float(TASK_CACHE_MAX_GB),
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    return row
+
+
+async def bump_admin_overlay_task_completed(db: AsyncSession, task: Task) -> None:
+    """Счётчик периода: +1 done и сумма длительностей (created→updated)."""
+    from sqlalchemy import update
+
+    await get_or_create_admin_overlay_counters(db)
+    dur = 0.0
+    if task.created_at and task.updated_at:
+        dur = max(0.0, (task.updated_at - task.created_at).total_seconds())
+    await db.execute(
+        update(AdminOverlayCounters)
+        .where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
+        .values(
+            completed_count=AdminOverlayCounters.completed_count + 1,
+            total_duration_seconds=AdminOverlayCounters.total_duration_seconds + dur,
+            updated_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+
+
+async def reset_admin_overlay_counters(db: AsyncSession) -> None:
+    from sqlalchemy import update
+
+    await get_or_create_admin_overlay_counters(db)
+    await db.execute(
+        update(AdminOverlayCounters)
+        .where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
+        .values(
+            completed_count=0,
+            total_duration_seconds=0.0,
+            updated_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+
+
 async def init_db():
     """Create all tables"""
     async with engine.begin() as conn:
@@ -481,6 +643,11 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
+            await _try_add_column("ALTER TABLE feedback ADD COLUMN parent_id INTEGER")
+
+            await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_name VARCHAR(255)")
+            await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_description TEXT")
+            await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN registered_as_agent BOOLEAN DEFAULT 0")
 
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_output_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
@@ -501,6 +668,30 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_upload_status VARCHAR(32)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_upload_error TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_uploaded_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN youtube_source_sha256 VARCHAR(64)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN pipeline_kind VARCHAR(20) DEFAULT 'rig'")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN input_bytes BIGINT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_title VARCHAR(256)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_description TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_keywords TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN stuck_hour_requeue_count INTEGER DEFAULT 0")
+            await _try_add_column(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 10"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS youtube_uploaded_hashes (
+                        sha256_hex VARCHAR(64) PRIMARY KEY,
+                        youtube_video_id VARCHAR(64) NOT NULL,
+                        first_task_id VARCHAR(36),
+                        created_at DATETIME
+                    )
+                    """
+                )
+            except Exception:
+                pass
             
             # Scene table migrations
             await _try_add_column("ALTER TABLE scenes ADD COLUMN is_public BOOLEAN DEFAULT 0")
@@ -612,6 +803,45 @@ async def init_db():
             except Exception:
                 pass
 
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS roadmap_votes (
+                        user_id INTEGER NOT NULL PRIMARY KEY,
+                        choice VARCHAR(64) NOT NULL,
+                        updated_at DATETIME,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    )
+                    """
+                )
+            except Exception:
+                pass
+
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS crypto_payment_reports (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        created_at DATETIME,
+                        tier VARCHAR(64) NOT NULL,
+                        network_id VARCHAR(32) NOT NULL,
+                        tx_id VARCHAR(256) NOT NULL,
+                        contact_note TEXT,
+                        user_email VARCHAR(255),
+                        agent_anon_id VARCHAR(36),
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending'
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_created ON crypto_payment_reports (created_at)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_status ON crypto_payment_reports (status)"
+                )
+            except Exception:
+                pass
+
             # Custom animation purchase tables/indexes (safe to run repeatedly)
             try:
                 await conn.exec_driver_sql(
@@ -687,6 +917,94 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_uploaded_at TIMESTAMP"
             )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS youtube_source_sha256 VARCHAR(64)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pipeline_kind VARCHAR(20) NOT NULL DEFAULT 'rig'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS input_bytes BIGINT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_title VARCHAR(256)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_description TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_keywords TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stuck_hour_requeue_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 10"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS parent_id INTEGER"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE anon_sessions ADD COLUMN IF NOT EXISTS agent_name VARCHAR(255)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE anon_sessions ADD COLUMN IF NOT EXISTS agent_description TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE anon_sessions ADD COLUMN IF NOT EXISTS registered_as_agent BOOLEAN DEFAULT FALSE"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS roadmap_votes (
+                        user_id INTEGER NOT NULL PRIMARY KEY,
+                        choice VARCHAR(64) NOT NULL,
+                        updated_at TIMESTAMP
+                    )
+                    """
+                )
+            except Exception:
+                pass
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS youtube_uploaded_hashes (
+                        sha256_hex VARCHAR(64) PRIMARY KEY,
+                        youtube_video_id VARCHAR(64) NOT NULL,
+                        first_task_id VARCHAR(36),
+                        created_at TIMESTAMP
+                    )
+                    """
+                )
+            except Exception:
+                pass
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS crypto_payment_reports (
+                        id SERIAL PRIMARY KEY,
+                        created_at TIMESTAMP,
+                        tier VARCHAR(64) NOT NULL,
+                        network_id VARCHAR(32) NOT NULL,
+                        tx_id VARCHAR(256) NOT NULL,
+                        contact_note TEXT,
+                        user_email VARCHAR(255),
+                        agent_anon_id VARCHAR(36),
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending'
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_created ON crypto_payment_reports (created_at)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_crypto_reports_status ON crypto_payment_reports (status)"
+                )
+            except Exception:
+                pass
 
 
 async def get_db():

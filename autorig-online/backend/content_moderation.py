@@ -2,25 +2,88 @@
 Server-side NSFW classification for task posters (images referenced in ready_urls).
 
 Uses NudeNet ONNX detector on poster bytes downloaded from the worker URL.
+Optional: OpenAI vision for YouTube title/description/keywords (same image bytes).
 Policy: single pipeline — no alternate client-only source of truth for DB fields.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import threading
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
 import httpx
 from sqlalchemy import select
 from database import AsyncSessionLocal, Task
 from youtube_upload import schedule_youtube_upload_if_eligible
+from telegram_bot import reserve_and_broadcast_task_done
 
-# Matches worker poster naming used by task.html filters (video_poster*.jpeg / jpg).
 _POSTER_SUBSTR = "video_poster"
+_CLASSIFIER_VERSION_MAX_LEN = 64
 
 CONTENT_CLASSIFIER_VERSION = "nudenet-320n-3.4"
+OPENAI_POSTER_MODEL = "gpt-4o-mini"
+
+_classifier_locks: Dict[str, asyncio.Lock] = {}
+_classifier_locks_guard = asyncio.Lock()
+
+
+async def _classifier_lock_for(task_id: str) -> asyncio.Lock:
+    async with _classifier_locks_guard:
+        if task_id not in _classifier_locks:
+            if len(_classifier_locks) > 400:
+                for k in list(_classifier_locks.keys())[:200]:
+                    del _classifier_locks[k]
+            _classifier_locks[task_id] = asyncio.Lock()
+        return _classifier_locks[task_id]
+
+
+def _clip_classifier_version(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value)
+    if len(s) <= _CLASSIFIER_VERSION_MAX_LEN:
+        return s
+    return s[:_CLASSIFIER_VERSION_MAX_LEN]
+
+
+async def _commit_poster_pipeline_crash(task_id: str, exc: BaseException) -> None:
+    print(f"[ContentModeration] Pipeline crash task {task_id}: {exc!r}")
+    async with AsyncSessionLocal() as db:
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task or task.status != "done":
+            return
+        if task.content_classified_at is not None:
+            cv = task.content_classifier_version or ""
+            if ":pipeline_error" not in cv:
+                return
+            # Retry crashed again (e.g. corrupt JSON on task.ready_urls) — refresh row so hooks can run
+            now = datetime.utcnow()
+            task.updated_at = now
+            await db.commit()
+            await _safe_post_classify_hooks(task_id)
+            return
+        now = datetime.utcnow()
+        task.content_rating = "unknown"
+        task.content_score = None
+        task.content_classified_at = now
+        task.content_classifier_version = _clip_classifier_version(
+            f"{CONTENT_CLASSIFIER_VERSION}:pipeline_error"
+        )
+        task.updated_at = now
+        await db.commit()
+    try:
+        schedule_youtube_upload_if_eligible(task_id)
+    except Exception as e:
+        print(f"[ContentModeration] YouTube schedule after pipeline_error: {e}")
+    try:
+        await reserve_and_broadcast_task_done(task_id)
+    except Exception as e:
+        print(f"[ContentModeration] reserve_and_broadcast after pipeline_error: {e}")
+
 
 _EXPLICIT_LABELS = frozenset(
     {
@@ -44,21 +107,93 @@ _SUGGESTIVE_LABELS = frozenset(
 _detector: Any = None
 _detector_lock = threading.Lock()
 
+_POSTER_IMAGE_EXTS = (".jpeg", ".jpg", ".png", ".webp")
 
-def find_poster_url(ready_urls: Optional[List[str]]) -> Optional[str]:
-    """Return first ready URL that looks like the task video poster image."""
-    if not ready_urls:
-        return None
-    for raw in ready_urls:
-        url = (raw or "").strip()
-        if not url:
-            continue
-        path = unquote(url.split("?", 1)[0]).lower()
-        if _POSTER_SUBSTR not in path:
-            continue
-        if path.endswith(".jpeg") or path.endswith(".jpg"):
-            return url
+
+def _path_looks_like_poster_image(path_lower: str) -> bool:
+    if not any(path_lower.endswith(ext) for ext in _POSTER_IMAGE_EXTS):
+        return False
+    if _POSTER_SUBSTR in path_lower:
+        return True
+    if "_poster." in path_lower:
+        return True
+    return False
+
+
+def find_poster_url(
+    ready_urls: Optional[List[str]],
+    output_urls: Optional[List[str]] = None,
+) -> Optional[str]:
+    sequences: List[List[str]] = []
+    if ready_urls:
+        sequences.append(ready_urls)
+    if output_urls:
+        sequences.append(output_urls)
+    for urls in sequences:
+        for raw in urls:
+            url = (raw or "").strip()
+            if not url:
+                continue
+            path = unquote(url.split("?", 1)[0]).lower()
+            if _path_looks_like_poster_image(path):
+                return url
     return None
+
+
+def _safe_url_column_to_list(raw: Optional[str], task_id: str, column_label: str) -> List[str]:
+    """Corrupt ready_urls/output_urls JSON must not take down the whole pipeline."""
+    if not raw or not str(raw).strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        print(f"[ContentModeration] Invalid {column_label} JSON task={task_id}: {e}")
+        return []
+    if not isinstance(data, list):
+        return []
+    out: List[str] = []
+    for x in data:
+        if x is None:
+            continue
+        s = str(x).strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def _task_ready_and_output_lists(task: Task) -> Tuple[List[str], List[str]]:
+    tid = getattr(task, "id", "") or "?"
+    ready = _safe_url_column_to_list(getattr(task, "_ready_urls", None), tid, "ready_urls")
+    output = _safe_url_column_to_list(getattr(task, "_output_urls", None), tid, "output_urls")
+    return ready, output
+
+
+def find_poster_url_loose(ready_urls: List[str], output_urls: List[str]) -> Optional[str]:
+    """Gallery/thumb-style filenames if strict find_poster_url misses (e.g. only _video_poster.jpg)."""
+    for urls in (ready_urls, output_urls):
+        for raw in urls:
+            url = (raw or "").strip()
+            if not url:
+                continue
+            path = unquote(url.split("?", 1)[0]).lower()
+            if not any(path.endswith(ext) for ext in _POSTER_IMAGE_EXTS):
+                continue
+            if "video_poster" in path or "_poster." in path:
+                return url
+            if path.endswith("icon.png") or "render_1_view" in path:
+                return url
+    return None
+
+
+async def _safe_post_classify_hooks(task_id: str) -> None:
+    try:
+        schedule_youtube_upload_if_eligible(task_id)
+    except Exception as e:
+        print(f"[ContentModeration] schedule_youtube after classify {task_id}: {e}")
+    try:
+        await reserve_and_broadcast_task_done(task_id)
+    except Exception as e:
+        print(f"[ContentModeration] reserve_and_broadcast after classify {task_id}: {e}")
 
 
 def _get_detector():
@@ -72,7 +207,6 @@ def _get_detector():
 
 
 def detections_to_rating(detections: List[dict]) -> Tuple[str, float]:
-    """Map NudeNet detection dicts to content_rating and a 0..1 score."""
     if not detections:
         return "safe", 0.0
 
@@ -99,21 +233,187 @@ def classify_image_bytes(image_bytes: bytes) -> Tuple[str, float]:
     return detections_to_rating(raw)
 
 
-async def run_task_poster_classification(task_id: str) -> None:
-    """
-    Download poster from ready_urls, classify, persist Task fields.
-    Idempotent: skips if content_classified_at is already set.
-    """
+def _normalize_keyword_list(keywords: List[Any]) -> List[str]:
+    cleaned: List[str] = []
+    for x in keywords:
+        t = str(x).strip()
+        if t and t not in cleaned:
+            cleaned.append(t)
+        if len(cleaned) >= 25:
+            return cleaned[:25]
+    pool = [
+        "3d character",
+        "character rig",
+        "game ready",
+        "glb",
+        "fbx",
+        "unity",
+        "unreal",
+        "animation",
+        "t pose",
+        "skeletal mesh",
+        "rigging",
+        "3d model",
+        "low poly",
+        "pbr",
+        "download",
+    ]
+    pi = 0
+    while len(cleaned) < 25:
+        p = pool[pi % len(pool)]
+        pi += 1
+        if p not in cleaned:
+            cleaned.append(p)
+        else:
+            cleaned.append(f"{p}-{pi}")
+    return cleaned[:25]
+
+
+def analyze_poster_llm_metadata(image_bytes: bytes) -> Optional[dict]:
+    from config import OPENAI_API_KEY
+
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        print(f"[ContentModeration] openai package missing: {e}")
+        return None
+
+    b64 = base64.standard_b64encode(image_bytes).decode("ascii")
+    data_url = f"data:image/jpeg;base64,{b64}"
+
+    prompt = """You look at a preview render of a 3D character (AutoRig Online task poster). The viewer already knows it is a 3D model — do NOT waste the title on that.
+Return a single JSON object with exactly these keys:
+- "title": string, English, max 95 characters. Describe ONLY what is visible about the subject: role or archetype (soldier, knight, robot, …), clothing or uniform, notable gear (gas mask, sword, grenades, helmet, …), faction or style if clear. No marketing phrases, no "rigged for Unity/Unreal", no "3D character", no "perfect for games", no engine names.
+- "description": string, English, 2-4 short paragraphs for a YouTube video description: what appears in the render, tone/style, suitable for games/Blender; mention rig/animations only if relevant. Plain text, no HTML.
+- "keywords": JSON array of exactly 25 short English strings for YouTube tags. Order matters: put the MOST SPECIFIC tags first (role, outfit, weapons, props, art style). Put generic tags last (3d, character, rigging, game asset, unity, unreal, blender, animation, glb, fbx). No hashtags. No NSFW or policy-evading content.
+
+Output only valid JSON, no markdown."""
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    resp = client.chat.completions.create(
+        model=OPENAI_POSTER_MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ],
+        response_format={"type": "json_object"},
+        max_tokens=2500,
+        temperature=0.4,
+    )
+    choice = resp.choices[0].message.content
+    if not choice:
+        return None
+    data = json.loads(choice)
+    title = (data.get("title") or "").strip()
+    desc = (data.get("description") or "").strip()
+    kw_raw = data.get("keywords")
+    if not title or not desc or not isinstance(kw_raw, list):
+        print("[ContentModeration] OpenAI JSON missing title/description/keywords array")
+        return None
+    keywords = _normalize_keyword_list(kw_raw)
+    if len(keywords) != 25:
+        return None
+    return {
+        "title": title[:256],
+        "description": desc[:5000],
+        "keywords": keywords,
+    }
+
+
+def build_free3d_query_from_keywords(keywords: Optional[List[str]]) -> Optional[str]:
+    if not keywords:
+        return None
+    parts: List[str] = []
+    for k in keywords:
+        t = (k or "").strip()
+        if not t:
+            continue
+        if t.lower() not in {p.lower() for p in parts}:
+            parts.append(t)
+        if len(parts) >= 3:
+            break
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
+def build_free3d_similar_query(
+    title: Optional[str],
+    keywords: Optional[List[str]],
+    *,
+    max_len: int = 280,
+) -> Optional[str]:
+    t = (title or "").strip()
+    kw_parts: List[str] = []
+    if keywords:
+        for k in keywords:
+            s = (k or "").strip()
+            if not s:
+                continue
+            if s.lower() not in {p.lower() for p in kw_parts}:
+                kw_parts.append(s)
+            if len(kw_parts) >= 3:
+                break
+
+    if not t and not kw_parts:
+        return None
+
+    if not t:
+        return build_free3d_query_from_keywords(kw_parts)
+
+    title_lower = t.lower()
+    title_tokens = set()
+    for w in t.replace(",", " ").split():
+        w = w.strip().lower()
+        if len(w) > 1:
+            title_tokens.add(w)
+
+    parts: List[str] = [t]
+    for k in kw_parts:
+        kl = k.lower()
+        if kl and kl in title_lower:
+            continue
+        if all((len(w) <= 2) or (w.lower() in title_tokens) for w in k.split()):
+            continue
+        parts.append(k)
+
+    q = " ".join(parts).strip()
+    if not q:
+        return None
+    if len(q) <= max_len:
+        return q
+    q = q[:max_len].rstrip()
+    last_space = q.rfind(" ")
+    if last_space > max_len // 2:
+        q = q[:last_space]
+    return q
+
+
+async def _run_task_poster_classification_impl(task_id: str) -> None:
+    from config import OPENAI_API_KEY
+
     async with AsyncSessionLocal() as db:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task:
             return
         if task.status != "done":
             return
-        if task.content_classified_at is not None:
+        cv_prev = task.content_classifier_version or ""
+        if task.content_classified_at is not None and ":pipeline_error" not in cv_prev:
+            await _safe_post_classify_hooks(task_id)
             return
 
-        poster_url = find_poster_url(task.ready_urls or [])
+        ready_list, output_list = _task_ready_and_output_lists(task)
+        poster_url = find_poster_url(ready_list, output_list) or find_poster_url_loose(
+            ready_list, output_list
+        )
         now = datetime.utcnow()
         version = CONTENT_CLASSIFIER_VERSION
 
@@ -121,10 +421,10 @@ async def run_task_poster_classification(task_id: str) -> None:
             task.content_rating = "unknown"
             task.content_score = None
             task.content_classified_at = now
-            task.content_classifier_version = version
+            task.content_classifier_version = _clip_classifier_version(version)
             task.updated_at = now
             await db.commit()
-            schedule_youtube_upload_if_eligible(task_id)
+            await _safe_post_classify_hooks(task_id)
             return
 
         try:
@@ -137,10 +437,10 @@ async def run_task_poster_classification(task_id: str) -> None:
             task.content_rating = "unknown"
             task.content_score = None
             task.content_classified_at = now
-            task.content_classifier_version = f"{version}:fetch_error"
+            task.content_classifier_version = _clip_classifier_version(f"{version}:fetch_error")
             task.updated_at = now
             await db.commit()
-            schedule_youtube_upload_if_eligible(task_id)
+            await _safe_post_classify_hooks(task_id)
             return
 
         try:
@@ -150,21 +450,63 @@ async def run_task_poster_classification(task_id: str) -> None:
             task.content_rating = "unknown"
             task.content_score = None
             task.content_classified_at = now
-            task.content_classifier_version = f"{version}:classify_error"
+            task.content_classifier_version = _clip_classifier_version(f"{version}:classify_error")
             task.updated_at = now
             await db.commit()
-            schedule_youtube_upload_if_eligible(task_id)
+            await _safe_post_classify_hooks(task_id)
             return
+
+        llm_title: Optional[str] = None
+        llm_desc: Optional[str] = None
+        llm_keywords_json: Optional[str] = None
+        llm_at: Optional[datetime] = None
+        cv = version
+
+        if OPENAI_API_KEY:
+            try:
+                llm = await asyncio.to_thread(analyze_poster_llm_metadata, image_bytes)
+            except Exception as e:
+                print(f"[ContentModeration] OpenAI poster metadata failed for task {task_id}: {e}")
+                llm = None
+            if llm:
+                try:
+                    llm_title = str(llm.get("title", "")).strip() or None
+                    llm_desc = str(llm.get("description", "")).strip() or None
+                    kws = llm.get("keywords")
+                    if llm_title and llm_desc and isinstance(kws, list):
+                        llm_keywords_json = json.dumps(_normalize_keyword_list(kws))
+                        llm_at = datetime.utcnow()
+                        clipped = _clip_classifier_version(f"{version}+{OPENAI_POSTER_MODEL}")
+                        cv = clipped if clipped else f"{version}+llm"
+                    else:
+                        cv = _clip_classifier_version(f"{version}:openai_error")
+                except (TypeError, ValueError) as e:
+                    print(f"[ContentModeration] OpenAI result shape error task {task_id}: {e}")
+                    cv = _clip_classifier_version(f"{version}:openai_error")
+            else:
+                cv = _clip_classifier_version(f"{version}:openai_error")
 
         task.content_rating = rating
         task.content_score = score
         task.content_classified_at = now
-        task.content_classifier_version = version
+        task.content_classifier_version = _clip_classifier_version(cv)
+        task.poster_llm_title = llm_title
+        task.poster_llm_description = llm_desc
+        task.poster_llm_keywords = llm_keywords_json
+        task.poster_llm_at = llm_at
         task.updated_at = now
         await db.commit()
-        schedule_youtube_upload_if_eligible(task_id)
+        await _safe_post_classify_hooks(task_id)
+
+
+async def run_task_poster_classification(task_id: str) -> None:
+    lock = await _classifier_lock_for(task_id)
+    async with lock:
+        try:
+            await _run_task_poster_classification_impl(task_id)
+        except Exception as e:
+            await _commit_poster_pipeline_crash(task_id, e)
 
 
 def schedule_task_poster_classification(task_id: str) -> None:
-    """Fire-and-forget background classification (call after task is committed)."""
     asyncio.create_task(run_task_poster_classification(task_id))

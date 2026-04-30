@@ -505,37 +505,43 @@ export class AOBaker {
             }
         });
         
-        // Render to AO target
-        this.renderer.setRenderTarget(aoTarget);
-        this.renderer.setClearColor(0xffffff, 1); // White = no occlusion
-        this.renderer.clear();
-        this.renderer.render(bakeScene, bakeCamera);
-        
-        // Read pixels
-        const pixels = new Uint8Array(resolution * resolution * 4);
-        this.renderer.readRenderTargetPixels(aoTarget, 0, 0, resolution, resolution, pixels);
-        
-        // Apply blur to smooth AO
-        this.blurAO(pixels, resolution);
-        
-        // Create final texture
-        const aoTexture = new THREE.DataTexture(
-            pixels,
-            resolution,
-            resolution,
-            THREE.RGBAFormat,
-            THREE.UnsignedByteType
-        );
-        aoTexture.needsUpdate = true;
-        aoTexture.flipY = false;
-        aoTexture.wrapS = THREE.ClampToEdgeWrapping;
-        aoTexture.wrapT = THREE.ClampToEdgeWrapping;
-        
-        // Cleanup
-        this.renderer.setRenderTarget(null);
-        aoTarget.dispose();
-        cavityMaterial.dispose();
-        
+        const prevTarget = this.renderer.getRenderTarget();
+        const prevClearColor = new THREE.Color();
+        this.renderer.getClearColor(prevClearColor);
+        const prevClearAlpha = this.renderer.getClearAlpha();
+        const prevAutoClear = this.renderer.autoClear;
+
+        let aoTexture;
+        try {
+            this.renderer.setRenderTarget(aoTarget);
+            this.renderer.setClearColor(0xffffff, 1); // White = no occlusion
+            this.renderer.clear();
+            this.renderer.render(bakeScene, bakeCamera);
+
+            const pixels = new Uint8Array(resolution * resolution * 4);
+            this.renderer.readRenderTargetPixels(aoTarget, 0, 0, resolution, resolution, pixels);
+
+            this.blurAO(pixels, resolution);
+
+            aoTexture = new THREE.DataTexture(
+                pixels,
+                resolution,
+                resolution,
+                THREE.RGBAFormat,
+                THREE.UnsignedByteType
+            );
+            aoTexture.needsUpdate = true;
+            aoTexture.flipY = false;
+            aoTexture.wrapS = THREE.ClampToEdgeWrapping;
+            aoTexture.wrapT = THREE.ClampToEdgeWrapping;
+        } finally {
+            this.renderer.setRenderTarget(prevTarget);
+            this.renderer.setClearColor(prevClearColor, prevClearAlpha);
+            this.renderer.autoClear = prevAutoClear;
+            aoTarget.dispose();
+            cavityMaterial.dispose();
+        }
+
         console.log('[AOBaker] Cavity AO texture created:', resolution + 'x' + resolution);
         return aoTexture;
     }
@@ -887,7 +893,7 @@ export class ViewerControls {
     }
 
     /**
-     * Set view mode: 'tpose', 'rig', 'animation'
+     * Set view mode: 'tpose', 'rig', 'animation', 'play'
      * Controls which elements are visible and active
      */
     setViewMode(mode) {
@@ -907,6 +913,11 @@ export class ViewerControls {
             case 'animation':
                 // Animation mode: hide rig spheres, enable animation playback
                 this.hideRigSpheres();
+                break;
+            case 'play':
+                // Play mode: gameplay only, hide edit helpers and rig controls
+                this.hideRigSpheres();
+                this.setGizmosVisibility(false);
                 break;
             default:
                 console.warn('[ViewerControls] Unknown view mode:', mode);

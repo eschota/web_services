@@ -7,14 +7,17 @@ import os
 import uuid
 import shutil
 import asyncio
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Optional, List, Dict, Any, Tuple
 import hashlib
 import hmac
 import secrets
 import json
 import tempfile
 import zipfile
+import re
+import html
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, quote, unquote, parse_qsl
@@ -22,10 +25,10 @@ from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, or_
+from sqlalchemy import select, func, delete, or_, update
 from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -33,24 +36,48 @@ from slowapi.errors import RateLimitExceeded
 
 from config import (
     APP_NAME, APP_URL, DEBUG, SECRET_KEY,
+    DATABASE_URL,
     UPLOAD_DIR, MAX_UPLOAD_SIZE_MB,
-    RATE_LIMIT_TASKS_PER_MINUTE, ADMIN_EMAILS,
+    RATE_LIMIT_TASKS_PER_MINUTE, RATE_LIMIT_AGENT_REGISTER, is_admin_email,
     ANON_FREE_LIMIT,
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
+    NEW_TASK_MIN_FREE_GB, NEW_TASK_PURGE_TASKS_MAX_FREED_GB,
     AUTOMATIC_TASK_DB_DELETION,
+    STUCK_HOUR_MINUTES,
+    STUCK_HOUR_MAX_REQUEUES,
     GALLERY_DB_PURGE_INTERVAL_CYCLES,
     GALLERY_UPSTREAM_PURGE_BATCH,
     GALLERY_UPSTREAM_PURGE_ROUNDS,
+    TASK_CACHE_MAX_GB,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
+    AUTORIG_DONATION_PRODUCT_KEYS,
+    DONATION_GOAL_USD,
+    DONATION_BASELINE_USD,
+    AUTORIG_CRYPTO_TIERS,
+    CRYPTO_RECEIVE_NETWORKS,
+    CRYPTO_ALLOWED_TIER_KEYS,
+    CRYPTO_ALLOWED_NETWORK_IDS,
+    CRYPTO_DISCOUNT_FRACTION,
+    CRYPTO_BTC_USD_RATE,
+    RATE_LIMIT_CRYPTO_SUBMIT,
     YOUTUBE_REFRESH_TOKEN,
+    SUPPORT_CHAT_MESSAGE_MAX_CHARS,
+    RATE_LIMIT_SUPPORT_CHAT_SESSION,
+    RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
+    RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
 )
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
-    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase
+    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
+    CryptoPaymentReport,
+    SupportChatSession,
+    SupportChatMessage,
+    reset_admin_overlay_counters,
+    get_or_create_admin_overlay_counters,
 )
 from models import (
     TaskCreateResponse, TaskStatusResponse,
@@ -60,8 +87,11 @@ from models import (
     AdminUserListItem, AdminUserListResponse,
     AdminBalanceUpdate, AdminBalanceResponse,
     AdminUserTaskItem, AdminUserTasksResponse,
-    AdminStatsResponse, AdminTaskListItem, AdminTaskListResponse,
+    AdminStatsResponse, AdminOverlayMetricsResponse, AdminTaskListItem, AdminTaskListResponse,
+    AdminTaskInspectResponse, AdminBulkTaskIdsRequest, AdminBulkRestartCountRecentRequest,
+    AdminBulkAffectedResponse,
     AdminWorkerItem, AdminWorkerListResponse, AdminWorkerCreate, AdminWorkerUpdate,
+    AdminTaskCacheMaxUpdate,
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse, LikeResponse, TaskCardInfo,
     PurchaseStateResponse, PurchaseRequest, PurchaseResponse,
@@ -72,8 +102,18 @@ from models import (
     SceneResponse, SceneModelInfo, TransformData,
     # Feedback models
     FeedbackCreateRequest, FeedbackItem, FeedbackListResponse,
+    DonationStatsResponse, RoadmapVotesResponse, RoadmapVoteRequest,
+    CryptoBuyConfigResponse, CryptoNetworkItem, CryptoTierItem,
+    CryptoPaymentSubmitRequest, CryptoPaymentSubmitResponse,
     # Scene list models
-    SceneListItem, SceneListResponse, SceneLikeResponse
+    SceneListItem, SceneListResponse, SceneLikeResponse,
+    AgentRegisterRequest, AgentRegisterResponse, AgentMeResponse,
+    SupportChatSessionPostRequest,
+    SupportChatSessionPostResponse,
+    SupportChatMessagePostRequest,
+    SupportChatMessagePostResponse,
+    SupportChatMessageItem,
+    SupportChatMessagesPollResponse,
 )
 from workers import (
     get_global_queue_status,
@@ -82,6 +122,7 @@ from workers import (
     is_worker_quarantined,
     normalize_task_type,
 )
+from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -98,11 +139,52 @@ from tasks import (
     find_file_by_pattern,
     get_stalled_processing_tasks_by_worker,
     get_task_no_progress_minutes,
+    resolve_prepared_glb_source_url,
+    admin_requeue_task_to_created,
 )
 
 
 import re
 import httpx
+
+from namecheap_remote_api import router as namecheap_remote_router
+
+# Throttle poster-classification recovery triggers from GET /api/task (per task_id).
+_poster_recovery_throttle: Dict[str, float] = {}
+POSTER_RECOVERY_THROTTLE_SEC = 20.0
+
+
+def _task_needs_poster_classification(task) -> bool:
+    if getattr(task, "status", None) != "done":
+        return False
+    if getattr(task, "content_classified_at", None) is None:
+        return True
+    cv = getattr(task, "content_classifier_version", None) or ""
+    return ":pipeline_error" in cv
+
+
+def _schedule_poster_recovery_throttled(task_id: str) -> None:
+    now = time.monotonic()
+    last = _poster_recovery_throttle.get(task_id, 0.0)
+    if now - last < POSTER_RECOVERY_THROTTLE_SEC:
+        return
+    _poster_recovery_throttle[task_id] = now
+    if len(_poster_recovery_throttle) > 5000:
+        for k in list(_poster_recovery_throttle.keys())[:2500]:
+            del _poster_recovery_throttle[k]
+    schedule_task_poster_classification(task_id)
+
+
+def _url_path_endswith_glb(url: str) -> bool:
+    """True if URL path ends with .glb (query/fragment ignored)."""
+    from urllib.parse import urlparse
+
+    try:
+        path = urlparse(url or "").path or ""
+    except Exception:
+        path = url or ""
+    return path.lower().endswith(".glb")
+
 
 FACE_RIG_ANALYZE_HEAD_PROXY_URL = os.getenv(
     "FACE_RIG_ANALYZE_HEAD_PROXY_URL",
@@ -311,7 +393,7 @@ def _release_gallery_purge_lock(lock_file) -> None:
 
 
 STALLED_ALERT_REPEAT_SECONDS = int(os.getenv("STALLED_ALERT_REPEAT_SECONDS", "3600"))
-STALLED_TASK_THRESHOLD = int(os.getenv("STALLED_TASK_THRESHOLD", "2"))
+STALLED_TASK_THRESHOLD = int(os.getenv("STALLED_TASK_THRESHOLD", "1"))
 STALLED_RECOVERY_HEALTHY_CYCLES = int(os.getenv("STALLED_RECOVERY_HEALTHY_CYCLES", "3"))
 _stalled_worker_state: dict[str, dict] = {}
 
@@ -327,7 +409,8 @@ async def _monitor_stalled_workers(db: AsyncSession, queue_status=None) -> bool:
     now = datetime.utcnow()
     stalled_grouped = await get_stalled_processing_tasks_by_worker(
         db,
-        min_stalled_minutes=STALE_TASK_TIMEOUT_MINUTES
+        min_stalled_minutes=STALE_TASK_TIMEOUT_MINUTES,
+        queue_status=queue_status,
     )
     active_stalled_workers: set[str] = set()
     queue_by_url = {w.url: w for w in (queue_status.workers if queue_status else [])}
@@ -410,7 +493,8 @@ async def background_task_updater():
                 queue_status = None
                 force_stale_reset = False
                 # =============================================================
-                # 1. Dispatch queued tasks (status=created) to free workers
+                # 1. Queue snapshot + stall monitor, then stale reset, then dispatch
+                #    (reset must run before dispatch so tasks moved to "created" post in the same tick)
                 # =============================================================
                 try:
                     queue_status = await get_global_queue_status(db=db)
@@ -420,6 +504,22 @@ async def background_task_updater():
                             force_stale_reset = True
                     except Exception as e:
                         print(f"[Background Worker] Stalled monitor error: {e}")
+
+                    if force_stale_reset or (background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0):
+                        try:
+                            reset_count = await find_and_reset_stale_tasks(db, queue_status=queue_status)
+                            if reset_count > 0:
+                                reason = "forced" if force_stale_reset else "periodic"
+                                print(f"[Background Worker] Auto-reset {reset_count} stale task(s) [{reason}]")
+                        except Exception as e:
+                            print(f"[Background Worker] Stale task check error: {e}")
+
+                        try:
+                            sh = await process_stuck_hour_tasks(db)
+                            if sh > 0:
+                                print(f"[Background Worker] Stuck-hour policy: {sh} action(s)")
+                        except Exception as e:
+                            print(f"[Background Worker] Stuck-hour policy error: {e}")
 
                     free_workers = [
                         w for w in queue_status.workers
@@ -454,20 +554,25 @@ async def background_task_updater():
                                 await start_task_on_worker(db, task, worker.url)
                             except Exception as e:
                                 print(f"[Background Worker] Error dispatching task {task.id}: {e}")
+                    else:
+                        c_q = await db.execute(
+                            select(func.count()).select_from(Task).where(Task.status == "created")
+                        )
+                        n_created = int(c_q.scalar() or 0)
+                        if n_created > 0:
+                            for w in queue_status.workers:
+                                print(
+                                    f"[Background Worker] No free worker: url={w.url} "
+                                    f"available={w.available} err={w.error!r} "
+                                    f"active={w.total_active} max={w.max_concurrent} "
+                                    f"queue_size={w.queue_size} quarantined={is_worker_quarantined(w.url)}"
+                                )
+                            print(
+                                f"[Background Worker] {n_created} task(s) in status=created but "
+                                f"no worker passed filters (available, capacity, queue_size<=0)"
+                            )
                 except Exception as e:
                     print(f"[Background Worker] Queue dispatch error: {e}")
-
-                # =============================================================
-                # 2. Check for stale tasks periodically (or immediately on stall)
-                # =============================================================
-                if force_stale_reset or (background_worker_cycle_count % STALE_CHECK_INTERVAL_CYCLES == 0):
-                    try:
-                        reset_count = await find_and_reset_stale_tasks(db)
-                        if reset_count > 0:
-                            reason = "forced" if force_stale_reset else "periodic"
-                            print(f"[Background Worker] Auto-reset {reset_count} stale task(s) [{reason}]")
-                    except Exception as e:
-                        print(f"[Background Worker] Stale task check error: {e}")
 
                 # =============================================================
                 # 2.5. Disk space cleanup (every CLEANUP_CHECK_INTERVAL_CYCLES cycles)
@@ -558,6 +663,26 @@ async def background_task_updater():
                     # Pass task IDs, not task objects (to get fresh data in each session)
                     task_ids = [t.id for t in processing_tasks]
                     await asyncio.gather(*[_update_one(tid) for tid in task_ids])
+
+                # =============================================================
+                # 4. Poster classification recovery (done but content_classified_at never set)
+                # =============================================================
+                try:
+                    async with AsyncSessionLocal() as db:
+                        r2 = await db.execute(
+                            select(Task.id).where(
+                                Task.status == "done",
+                                Task.content_classified_at.is_(None),
+                            ).limit(25)
+                        )
+                        pending_poster = list(r2.scalars().all())
+                    for tid in pending_poster:
+                        try:
+                            schedule_task_poster_classification(tid)
+                        except Exception as e:
+                            print(f"[Background Worker] Poster recovery schedule failed {tid}: {e}")
+                except Exception as e:
+                    print(f"[Background Worker] Poster recovery query error: {e}")
                 
         except Exception as e:
             print(f"[Background Worker] Error: {e}")
@@ -609,7 +734,15 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(broadcast_server_startup())
     except Exception as e:
         print(f"[Telegram] Failed to send startup notification: {e}")
-    
+
+    # Namecheap: facerig.autorig.online A record (if registrar API env set)
+    try:
+        from namecheap_remote_api import ensure_facerig_on_startup
+
+        await asyncio.to_thread(ensure_facerig_on_startup)
+    except Exception as e:
+        print(f"[Namecheap DNS] Startup: {e}")
+
     yield
     
     # Shutdown
@@ -633,11 +766,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add GZip compression for responses > 500 bytes
-# GLB files compress very well (50-70% size reduction)
+# Add GZip compression for responses > 500 bytes.
+# GLB task artifact responses set Content-Encoding: identity to avoid streaming gzip + HTTP/2 issues.
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
+
+app.include_router(namecheap_remote_router)
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -654,6 +789,75 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 ANON_COOKIE = "anon_id"
 SESSION_COOKIE = "session"
 
+_API_KEY_IDENTITY_SENTINEL = object()
+
+
+async def resolve_api_key_identity(
+    request: Request, db: AsyncSession
+) -> Tuple[Optional[User], Optional[str]]:
+    """
+    Parse X-Api-Key / Authorization Bearer, validate against ApiKey rows.
+    Cached per request. Updates last_used_at and commits on success.
+    Returns (user, anon_id) where at most one of anon_id / user is set for a valid key.
+    """
+    cached = getattr(request.state, "_api_key_identity_result", _API_KEY_IDENTITY_SENTINEL)
+    if cached is not _API_KEY_IDENTITY_SENTINEL:
+        return cached  # type: ignore[return-value]
+
+    api_key = request.headers.get("x-api-key")
+    auth = request.headers.get("authorization") or ""
+    if not api_key and auth.lower().startswith("bearer "):
+        api_key = auth.split(" ", 1)[1].strip()
+
+    if not api_key:
+        out: Tuple[Optional[User], Optional[str]] = (None, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    prefix = None
+    if api_key.startswith("ar_") and api_key.count("_") >= 2:
+        try:
+            prefix = api_key.split("_", 2)[1]
+        except Exception:
+            prefix = None
+    if not prefix:
+        out = (None, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    krs = await db.execute(
+        select(ApiKey).where(
+            ApiKey.key_prefix == prefix,
+            ApiKey.revoked_at.is_(None),
+        )
+    )
+    key_rec = krs.scalar_one_or_none()
+    if not key_rec or not hmac.compare_digest(key_rec.key_hash, key_hash):
+        out = (None, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    key_rec.last_used_at = datetime.utcnow()
+    if key_rec.user_id is not None:
+        urs = await db.execute(select(User).where(User.id == key_rec.user_id))
+        user = urs.scalar_one_or_none()
+        await db.commit()
+        out = (user, None)
+        request.state._api_key_identity_result = out
+        return out
+
+    if key_rec.anon_id:
+        await db.commit()
+        out = (None, key_rec.anon_id)
+        request.state._api_key_identity_result = out
+        return out
+
+    await db.commit()
+    out = (None, None)
+    request.state._api_key_identity_result = out
+    return out
+
 
 def _effective_anon_id(request: Request) -> Optional[str]:
     """Cookie anon session and/or API key bound to anon (Bearer without browser cookie)."""
@@ -669,55 +873,14 @@ async def get_current_user(
     request.state.auth_via_api_key = False
     session_token = request.cookies.get(SESSION_COOKIE)
     if session_token:
-        return await get_user_by_session(db, session_token)
-
-    api_key = request.headers.get("x-api-key")
-    auth = request.headers.get("authorization") or ""
-    if not api_key and auth.lower().startswith("bearer "):
-        api_key = auth.split(" ", 1)[1].strip()
-
-    if not api_key:
-        return None
-
-    prefix = None
-    if api_key.startswith("ar_") and api_key.count("_") >= 2:
-        try:
-            prefix = api_key.split("_", 2)[1]
-        except Exception:
-            prefix = None
-    if not prefix:
-        return None
-
-    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-    krs = await db.execute(
-        select(ApiKey).where(
-            ApiKey.key_prefix == prefix,
-            ApiKey.revoked_at.is_(None)
-        )
-    )
-    key_rec = krs.scalar_one_or_none()
-    if not key_rec:
-        return None
-    if not hmac.compare_digest(key_rec.key_hash, key_hash):
-        return None
-
-    key_rec.last_used_at = datetime.utcnow()
-    if key_rec.user_id is not None:
-        urs = await db.execute(select(User).where(User.id == key_rec.user_id))
-        user = urs.scalar_one_or_none()
+        user = await get_user_by_session(db, session_token)
         if user:
-            request.state.auth_via_api_key = True
-            await db.commit()
-        return user
+            return user
 
-    if key_rec.anon_id:
-        request.state.api_key_anon_id = key_rec.anon_id
-        request.state.auth_via_api_key = True
-        await db.commit()
-        return None
-
-    await db.commit()
-    return None
+    user, anon_id = await resolve_api_key_identity(request, db)
+    request.state.api_key_anon_id = anon_id
+    request.state.auth_via_api_key = bool(user is not None or anon_id is not None)
+    return user
 
 
 async def get_anon_session(
@@ -725,19 +888,23 @@ async def get_anon_session(
     response: Response,
     db: AsyncSession = Depends(get_db)
 ) -> AnonSession:
-    """Get or create anonymous session"""
+    """Browser cookie session, or anon id from API key (same identity as task owner for Bearer agents)."""
+    _user_k, anon_from_key = await resolve_api_key_identity(request, db)
+    if anon_from_key:
+        return await get_or_create_anon_session(db, anon_from_key)
+
     anon_id = request.cookies.get(ANON_COOKIE)
-    
+
     if not anon_id:
         anon_id = str(uuid.uuid4())
         response.set_cookie(
-            ANON_COOKIE, 
-            anon_id, 
-            max_age=365*24*60*60,  # 1 year
+            ANON_COOKIE,
+            anon_id,
+            max_age=365 * 24 * 60 * 60,  # 1 year
             httponly=True,
-            samesite="lax"
+            samesite="lax",
         )
-    
+
     return await get_or_create_anon_session(db, anon_id)
 
 
@@ -747,9 +914,24 @@ async def require_admin(
     """Require admin access"""
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user.email not in ADMIN_EMAILS:
+    if not is_admin_email(user.email):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+async def require_login_user(
+    user: Optional[User] = Depends(get_current_user),
+) -> User:
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+ROADMAP_CHOICE_KEYS: Tuple[str, ...] = (
+    "face_rig_animation",
+    "animals_rig_animation",
+    "avatar_speech_lipsync",
+)
 
 
 def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
@@ -767,7 +949,7 @@ def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
 
 
 def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optional[AnonSession]) -> bool:
-    if user and user.email in ADMIN_EMAILS:
+    if user and is_admin_email(user.email):
         return True
     if user and task.owner_type == "user" and task.owner_id == user.email:
         return True
@@ -858,6 +1040,11 @@ def _infer_worker_root_and_guid(task) -> tuple[Optional[str], Optional[str]]:
     progress_page = (task.progress_page or "").strip()
     if progress_page:
         m = re.search(r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})/', progress_page)
+        if not m:
+            m = re.search(
+                r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})\.zip',
+                progress_page,
+            )
         if m:
             if not worker_root:
                 worker_root = f"{m.group(1)}/converter/glb"
@@ -874,6 +1061,11 @@ def _infer_worker_root_and_guid(task) -> tuple[Optional[str], Optional[str]]:
             if not url:
                 continue
             m = re.search(r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})/', url)
+            if not m:
+                m = re.search(
+                    r'^(https?://[^/]+)/converter/glb/([0-9a-fA-F\-]{36})\.zip',
+                    url,
+                )
             if m:
                 if not worker_root:
                     worker_root = f"{m.group(1)}/converter/glb"
@@ -914,6 +1106,67 @@ def _task_urls_suggest_100k_animation_layout(combined_urls: List[str]) -> bool:
         if "_100k" in u.lower():
             return True
     return False
+
+
+def _resolve_all_animations_fbx_url(task) -> tuple[Optional[str], Optional[str]]:
+    """
+    Return the package-level FBX animation file for a task.
+    Prefer real ready_urls, then synthesize the standard worker path used by current workers.
+    """
+    ready_urls = task.ready_urls or []
+
+    animations_url = _find_file_in_ready_urls(ready_urls, "_all_animations_unity.fbx")
+    if animations_url:
+        return animations_url, unquote(animations_url.split("/")[-1]) or f"{task.id}_all_animations.fbx"
+
+    animations_url = _find_file_in_ready_urls(ready_urls, "_all_animations.fbx")
+    if animations_url:
+        return animations_url, unquote(animations_url.split("/")[-1]) or f"{task.id}_all_animations.fbx"
+
+    if not task.guid or not task.worker_api:
+        return None, None
+
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    filename = f"{task.guid}_all_animations_unity.fbx"
+    return (
+        f"{worker_base}/converter/glb/{task.guid}/{task.guid}_100k/{filename}",
+        filename,
+    )
+
+
+async def _worker_file_available(url: str) -> bool:
+    """Lightweight existence probe for worker-hosted files."""
+    if not url:
+        return False
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.head(url, timeout=15.0)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code not in (405, 403):
+                return False
+            resp = await client.get(url, headers={"Range": "bytes=0-0"}, timeout=20.0)
+            return resp.status_code in (200, 206)
+    except Exception:
+        return False
+
+
+async def _download_worker_file_bytes(url: str, label: str, *, max_bytes: int = 80 * 1024 * 1024) -> bytes:
+    """Download a worker file into memory for small on-demand bundles."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.get(url, timeout=120.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=404, detail=f"{label} is unavailable")
+            data = resp.content
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{label} source unavailable: {e}")
+    if len(data) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"{label} is too large for this bundle")
+    return data
 
 
 def _upsert_animation_file_map(result: Dict[str, dict], key: str, rec: dict) -> None:
@@ -1253,333 +1506,16 @@ async def _has_full_task_download_purchase(db: AsyncSession, user: Optional[User
     return row.scalar_one_or_none() is not None
 
 
-def _expand_download_urls_for_archive(urls: Optional[List[str]]) -> List[str]:
-    """Match task.html expandedUrls: split concatenated GUID filenames into separate URLs."""
-    if not urls:
-        return []
-    guid_pattern = re.compile(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_", re.I
-    )
-    expanded: List[str] = []
-    for url in urls:
-        url_clean = (url or "").strip()
-        if not url_clean:
-            continue
-        raw_filename = url_clean.split("/")[-1] or ""
-        matches = list(guid_pattern.finditer(raw_filename))
-        if len(matches) > 1:
-            parts = [p for p in guid_pattern.split(raw_filename) if p]
-            base_url = url_clean[: url_clean.rindex("/") + 1]
-            for i, m in enumerate(matches):
-                if i < len(parts):
-                    expanded.append(base_url + m.group(0) + parts[i])
-        else:
-            expanded.append(url_clean)
-    return expanded
-
-
-def _should_skip_archive_base_filename(clean_name: str) -> bool:
-    """Same filters as task.html updateFileList (cleaned filename, no GUID)."""
-    fn = (clean_name or "").lower()
-    if re.search(r"_video\.(mp4|mov)$", fn):
-        return True
-    if re.search(r"_video_poster\.jpe?g$", fn):
-        return True
-    if re.search(r"^video\.(mp4|mov)$", fn):
-        return True
-    if re.search(r"^video_poster\.jpe?g$", fn):
-        return True
-    if re.search(r"_unity_hdrp_render_[1-3]_view\.jpe?g$", fn):
-        return True
-    if re.search(r"^unity_hdrp_render_[1-3]_view\.jpe?g$", fn):
-        return True
-    if re.search(r"model_prepared\.glb$", fn):
-        return True
-    return False
-
-
-async def _collect_archive_bundle_entries(
-    task: Task,
-    db: AsyncSession,
-    user_email: str,
-    *,
-    include_all_ready_animations: bool = False,
-) -> List[Dict[str, Any]]:
+def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
     """
-    Build ordered list of {arcname, source_url, cache_path} for ZIP (ZIP_STORED).
-    Includes base task outputs (same rules as Downloads UI) + permitted custom animation FBX.
-    If include_all_ready_animations=True, every ready custom animation is included (for public estimate).
+    Absolute URL to the worker-built full bundle: {worker_root}/{guid}.zip
+    (worker_root is http://host/converter/glb — same inference as gallery / artifacts).
     """
-    task_id = task.id
-    guid = getattr(task, "guid", None)
-
-    out_urls = task.output_urls or []
-    download_urls: List[str] = list(out_urls) if len(out_urls) > 0 else list(task.ready_urls or [])
-    expanded = _expand_download_urls_for_archive(download_urls)
-
-    purchased_ids: set = set()
-    purchased_all_anim = False
-    if not include_all_ready_animations:
-        user_row = await db.execute(select(User).where(User.email == user_email))
-        user_obj = user_row.scalar_one_or_none()
-        if user_obj:
-            purchased_ids, purchased_all_anim = await _get_animation_purchase_state(db, user_obj, task_id)
-    entries: List[Dict[str, Any]] = []
-    seen_urls: set = set()
-    used_arcnames: set = set()
-
-    cache_root = TASK_CACHE_DIR / task_id
-
-    for url in expanded:
-        url_clean = (url or "").strip()
-        raw_filename = url_clean.split("/")[-1] or ""
-        clean_name = _clean_filename_for_cache(url_clean, guid)
-        if _should_skip_archive_base_filename(clean_name):
-            continue
-        if url_clean in seen_urls:
-            continue
-        seen_urls.add(url_clean)
-
-        arcname = clean_name
-        if arcname in used_arcnames:
-            stem, ext = os.path.splitext(clean_name)
-            n = 2
-            while f"{stem}_{n}{ext}" in used_arcnames:
-                n += 1
-            arcname = f"{stem}_{n}{ext}"
-        used_arcnames.add(arcname)
-
-        cache_path = cache_root / clean_name
-        entries.append(
-            {
-                "arcname": arcname,
-                "source_url": url_clean,
-                "cache_path": cache_path,
-            }
-        )
-
-    manifest = _load_animation_manifest()
-    raw_items = manifest.get("animations") or []
-    file_map = await _build_task_animation_file_map(task, raw_items)
-
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        if item.get("enabled", True) is False:
-            continue
-        anim_key = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
-        if not anim_key:
-            continue
-        resolved = _resolve_animation_file(item, file_map)
-        if not resolved or not resolved.get("ready"):
-            continue
-        if not include_all_ready_animations:
-            if not purchased_all_anim and anim_key not in purchased_ids:
-                continue
-        anim_url = (resolved.get("url") or "").strip()
-        if not anim_url:
-            continue
-        if anim_url in seen_urls:
-            continue
-        seen_urls.add(anim_url)
-        clean_fn = resolved.get("clean_filename") or resolved.get("raw_filename") or "animation.fbx"
-        clean_fn = clean_fn.replace("\\", "/").split("/")[-1]
-        arcname = f"custom_animations/{clean_fn}"
-        if arcname in used_arcnames:
-            stem, ext = os.path.splitext(clean_fn)
-            n = 2
-            while f"custom_animations/{stem}_{n}{ext}" in used_arcnames:
-                n += 1
-            arcname = f"custom_animations/{stem}_{n}{ext}"
-        used_arcnames.add(arcname)
-        cache_name = _clean_filename_for_cache(anim_url, guid)
-        cache_path = cache_root / cache_name
-        entries.append(
-            {
-                "arcname": arcname,
-                "source_url": anim_url,
-                "cache_path": cache_path,
-            }
-        )
-
-    return entries
-
-
-async def _estimate_archive_total_bytes(entries: List[Dict[str, Any]]) -> tuple[int, bool]:
-    """Sum bytes from local cache or HTTP Content-Length; False if any entry size unknown."""
-    if not entries:
-        return 0, True
-    sem = asyncio.Semaphore(24)
-
-    async def _size_one(client: httpx.AsyncClient, ent: dict) -> tuple[int, bool]:
-        p = ent["cache_path"]
-        try:
-            if p.exists() and p.is_file():
-                return (p.stat().st_size, True)
-            async with sem:
-                r = await client.head(ent["source_url"], follow_redirects=True)
-            if r.status_code >= 400:
-                return (0, False)
-            cl = r.headers.get("content-length")
-            if cl and str(cl).isdigit():
-                return (int(cl), True)
-            return (0, False)
-        except Exception:
-            return (0, False)
-
-    async with httpx.AsyncClient(timeout=25.0) as client:
-        parts = await asyncio.gather(*[_size_one(client, e) for e in entries])
-    total = sum(p[0] for p in parts)
-    complete = all(p[1] for p in parts)
-    return total, complete
-
-
-def _archive_job_paths(task_id: str, job_id: str) -> tuple[Path, Path]:
-    job_dir = TASK_CACHE_DIR / task_id / "archive_jobs"
-    return job_dir / f"{job_id}.json", job_dir / f"{job_id}.zip"
-
-
-def _write_archive_job_state(task_id: str, job_id: str, **fields: Any) -> None:
-    json_path, _ = _archive_job_paths(task_id, job_id)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    data: Dict[str, Any] = {}
-    if json_path.exists():
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data.update(fields)
-    json_path.write_text(json.dumps(data, ensure_ascii=False, indent=0), encoding="utf-8")
-
-
-def _read_archive_job_state(task_id: str, job_id: str) -> Optional[Dict[str, Any]]:
-    json_path, _ = _archive_job_paths(task_id, job_id)
-    if not json_path.exists():
+    worker_root, inferred_guid = _infer_worker_root_and_guid(task)
+    guid = ((getattr(task, "guid", None) or "") or "").strip() or inferred_guid
+    if not worker_root or not guid:
         return None
-    try:
-        return json.loads(json_path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def _build_zip_bundle_sync(
-    task_id: str,
-    job_id: str,
-    entries: List[Dict[str, Any]],
-    zip_path: Path,
-    total: int,
-) -> None:
-    """Sync: stream files into stored-only ZIP; update job JSON progress."""
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
-        with httpx.Client(timeout=600.0) as client:
-            for i, ent in enumerate(entries):
-                arcname = ent["arcname"]
-                url = ent["source_url"]
-                cache_path: Path = ent["cache_path"]
-                pct = int(((i + 1) / max(total, 1)) * 100)
-                pct = min(99, pct) if i + 1 < total else 100
-                _write_archive_job_state(
-                    task_id,
-                    job_id,
-                    percent=pct,
-                    phase="packing",
-                    done=False,
-                    error=None,
-                )
-
-                zinfo = zipfile.ZipInfo(arcname)
-                zinfo.compress_type = zipfile.ZIP_STORED
-
-                if cache_path.exists() and cache_path.is_file():
-                    with open(cache_path, "rb") as src, zf.open(zinfo, "w") as dest:
-                        shutil.copyfileobj(src, dest, 1024 * 1024)
-                else:
-                    with client.stream("GET", url, follow_redirects=True) as r:
-                        if r.status_code != 200:
-                            raise RuntimeError(f"HTTP {r.status_code} for {arcname}")
-                        with zf.open(zinfo, "w") as dest:
-                            for chunk in r.iter_bytes(1024 * 1024):
-                                if chunk:
-                                    dest.write(chunk)
-
-
-async def _run_archive_bundle_job(task_id: str, job_id: str, user_email: str) -> None:
-    json_path, zip_path = _archive_job_paths(task_id, job_id)
-    try:
-        async with AsyncSessionLocal() as db:
-            task = await get_task_by_id(db, task_id)
-            if not task:
-                _write_archive_job_state(
-                    task_id, job_id, done=False, error="Task not found", phase="error", percent=0
-                )
-                return
-            if task.status != "done":
-                _write_archive_job_state(
-                    task_id,
-                    job_id,
-                    done=False,
-                    error="Task is not completed yet",
-                    phase="error",
-                    percent=0,
-                )
-                return
-            entries = await _collect_archive_bundle_entries(task, db, user_email)
-
-        if not entries:
-            _write_archive_job_state(
-                task_id,
-                job_id,
-                done=False,
-                error="No files to archive",
-                phase="error",
-                percent=0,
-            )
-            return
-
-        _write_archive_job_state(
-            task_id,
-            job_id,
-            percent=0,
-            phase="collecting",
-            done=False,
-            error=None,
-            total_files=len(entries),
-        )
-
-        try:
-            if zip_path.exists():
-                zip_path.unlink()
-        except OSError:
-            pass
-
-        await asyncio.to_thread(
-            _build_zip_bundle_sync, task_id, job_id, entries, zip_path, len(entries)
-        )
-
-        _write_archive_job_state(
-            task_id,
-            job_id,
-            percent=100,
-            phase="done",
-            done=True,
-            error=None,
-            zip_path=str(zip_path),
-        )
-    except Exception as e:
-        print(f"[Archive] Job {job_id} failed: {e}", flush=True)
-        try:
-            if zip_path.exists():
-                zip_path.unlink()
-        except OSError:
-            pass
-        _write_archive_job_state(
-            task_id,
-            job_id,
-            done=False,
-            error=str(e) or "Archive failed",
-            phase="error",
-            percent=0,
-        )
+    return f"{worker_root.rstrip('/')}/{guid}.zip"
 
 
 async def _credit_task_owner_for_sale(db: AsyncSession, task, buyer_user: User, amount: int) -> None:
@@ -1715,7 +1651,7 @@ async def admin_youtube_oauth_callback(
 
     if error:
         return RedirectResponse(url=f"/?youtube_error={quote(error)}")
-    if not user or user.email not in ADMIN_EMAILS:
+    if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/?youtube_error=not_admin")
     cookie_state = request.cookies.get("yt_oauth_state")
     if not state or not cookie_state or state != cookie_state:
@@ -1998,6 +1934,258 @@ async def api_revoke_api_key(
 
 
 # =============================================================================
+# AI agents (register without Google; Bearer API key)
+# =============================================================================
+def _skill_md_candidate_paths() -> List[Path]:
+    """Primary: autorig-online/skill.md next to backend/; fallback: parent of repo root."""
+    here = Path(__file__).resolve().parent
+    return [here.parent.parent / "skill.md", here.parent.parent.parent / "skill.md"]
+
+
+@app.post("/api/agents/register", response_model=AgentRegisterResponse)
+@limiter.limit(RATE_LIMIT_AGENT_REGISTER)
+async def api_agents_register(
+    request: Request,
+    body: AgentRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    anon_id = str(uuid.uuid4())
+    name = (body.name or "").strip() or None
+    desc = (body.description or "").strip() or None
+    sess = AnonSession(
+        anon_id=anon_id,
+        agent_name=name,
+        agent_description=desc,
+        registered_as_agent=True,
+    )
+    db.add(sess)
+    api_key, prefix, key_hash = _make_api_key()
+    db.add(ApiKey(user_id=None, anon_id=anon_id, key_prefix=prefix, key_hash=key_hash))
+    await db.commit()
+    return AgentRegisterResponse(api_key=api_key, agent_id=anon_id)
+
+
+@app.get("/api/agents/me", response_model=AgentMeResponse)
+async def api_agents_me(
+    request: Request,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user:
+        raise HTTPException(
+            status_code=400,
+            detail="Use GET /auth/me for Google accounts; this endpoint is for agent API keys only.",
+        )
+    anon_id = getattr(request.state, "api_key_anon_id", None)
+    if not anon_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required (Bearer agent API key or X-Api-Key)",
+        )
+    rs = await db.execute(select(AnonSession).where(AnonSession.anon_id == anon_id))
+    sess = rs.scalar_one_or_none()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+    remaining = get_remaining_credits_anon(sess)
+    note = (
+        "Credit balance and paid file purchases are tied to Google sign-in on the website. "
+        "This agent id uses the anonymous free tier only (see free_remaining)."
+    )
+    return AgentMeResponse(
+        agent_id=anon_id,
+        name=sess.agent_name,
+        description=sess.agent_description,
+        registered_as_agent=bool(sess.registered_as_agent),
+        free_used=int(sess.free_used or 0),
+        free_remaining=remaining,
+        account_note=note,
+    )
+
+
+# =============================================================================
+# Buy-credits: donations (Gumroad) & roadmap votes
+# =============================================================================
+@app.get("/api/buy-credits/donation-stats", response_model=DonationStatsResponse)
+async def api_buy_credits_donation_stats(db: AsyncSession = Depends(get_db)):
+    """Sum successful AutoRig credit-pack sales (gumroad_purchases) in USD + optional baseline."""
+    lowered = [k.lower() for k in AUTORIG_DONATION_PRODUCT_KEYS]
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(GumroadPurchase.price), 0),
+                func.count(),
+            ).where(
+                GumroadPurchase.refunded.is_(False),
+                GumroadPurchase.test.is_(False),
+                func.lower(GumroadPurchase.product_permalink).in_(lowered),
+            )
+        )
+    ).one()
+    sum_cents = int(row[0] or 0)
+    purchase_count = int(row[1] or 0)
+    raised = DONATION_BASELINE_USD + (sum_cents / 100.0)
+    return DonationStatsResponse(
+        raised_usd=round(raised, 2),
+        goal_usd=DONATION_GOAL_USD,
+        currency="USD",
+        purchase_count=purchase_count,
+    )
+
+
+def _build_crypto_buy_config_response() -> CryptoBuyConfigResponse:
+    disc = CRYPTO_DISCOUNT_FRACTION
+    rate = CRYPTO_BTC_USD_RATE
+    if rate <= 0:
+        rate = 95000.0
+    tiers_out: List[CryptoTierItem] = []
+    for key, credits, usd_std in AUTORIG_CRYPTO_TIERS:
+        usd_disc = round(usd_std * (1.0 - disc), 2)
+        usdt_amt = usd_disc
+        btc_approx = round(usd_disc / rate, 8)
+        per = round(usd_disc / max(credits, 1), 4)
+        tiers_out.append(
+            CryptoTierItem(
+                tier_key=key,
+                credits=credits,
+                usd_standard=usd_std,
+                usd_discounted=usd_disc,
+                usdt_amount=usdt_amt,
+                btc_amount_approx=btc_approx,
+                usd_per_credit_discounted=per,
+            )
+        )
+    nets = [
+        CryptoNetworkItem(
+            id=n["id"],
+            label=n["label"],
+            asset=n["asset"],
+            address=n["address"],
+            warning=n["warning"],
+        )
+        for n in CRYPTO_RECEIVE_NETWORKS
+    ]
+    return CryptoBuyConfigResponse(
+        discount_fraction=disc,
+        btc_usd_rate=rate,
+        networks=nets,
+        tiers=tiers_out,
+    )
+
+
+@app.get("/api/buy-credits/crypto-config", response_model=CryptoBuyConfigResponse)
+async def api_buy_credits_crypto_config():
+    """Public tiers, discount math, and receive addresses for UI and AI agents."""
+    return _build_crypto_buy_config_response()
+
+
+@app.post("/api/buy-credits/crypto-submit", response_model=CryptoPaymentSubmitResponse)
+@limiter.limit(RATE_LIMIT_CRYPTO_SUBMIT)
+async def api_buy_credits_crypto_submit(
+    request: Request,
+    body: CryptoPaymentSubmitRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Report a crypto payment tx for manual verification and crediting."""
+    t = body.tier.strip().lower()
+    if t not in CRYPTO_ALLOWED_TIER_KEYS:
+        raise HTTPException(status_code=400, detail="Invalid tier")
+    nid = body.network_id.strip().lower()
+    if nid not in CRYPTO_ALLOWED_NETWORK_IDS:
+        raise HTTPException(status_code=400, detail="Invalid network_id")
+    tx = body.tx_id.strip()
+    if len(tx) < 8 or len(tx) > 256:
+        raise HTTPException(status_code=400, detail="Invalid tx_id")
+
+    agent_anon = getattr(request.state, "api_key_anon_id", None)
+    uemail = user.email if user else None
+    if not uemail and not agent_anon:
+        note = (body.contact_note or "").strip()
+        if len(note) < 5:
+            raise HTTPException(
+                status_code=400,
+                detail="contact_note required when not authenticated (include email or agent id for crediting)",
+            )
+
+    row = CryptoPaymentReport(
+        tier=t,
+        network_id=nid,
+        tx_id=tx[:256],
+        contact_note=(body.contact_note or "").strip() or None,
+        user_email=uemail,
+        agent_anon_id=agent_anon,
+        status="pending",
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    from telegram_bot import broadcast_crypto_payment_submitted
+
+    asyncio.create_task(
+        broadcast_crypto_payment_submitted(
+            report_id=row.id,
+            tier=t,
+            network_id=nid,
+            tx_id=tx,
+            user_email=uemail,
+            agent_anon_id=agent_anon,
+            contact_note=row.contact_note,
+        )
+    )
+
+    return CryptoPaymentSubmitResponse(id=row.id)
+
+
+@app.get("/api/roadmap/votes", response_model=RoadmapVotesResponse)
+async def api_roadmap_votes_get(
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    counts = {k: 0 for k in ROADMAP_CHOICE_KEYS}
+    agg = await db.execute(
+        select(RoadmapVote.choice, func.count())
+        .where(RoadmapVote.choice.in_(ROADMAP_CHOICE_KEYS))
+        .group_by(RoadmapVote.choice)
+    )
+    for choice, n in agg.all():
+        if choice in counts:
+            counts[choice] = int(n)
+    my_choice: Optional[str] = None
+    if user:
+        rv = await db.execute(select(RoadmapVote).where(RoadmapVote.user_id == user.id))
+        rec = rv.scalar_one_or_none()
+        if rec and rec.choice in counts:
+            my_choice = rec.choice
+    return RoadmapVotesResponse(
+        counts=counts,
+        choice_order=list(ROADMAP_CHOICE_KEYS),
+        my_choice=my_choice,
+    )
+
+
+@app.post("/api/roadmap/vote", response_model=RoadmapVotesResponse)
+async def api_roadmap_vote_post(
+    body: RoadmapVoteRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_login_user),
+):
+    choice = body.choice.strip().lower()
+    if choice not in ROADMAP_CHOICE_KEYS:
+        raise HTTPException(status_code=400, detail="Invalid choice")
+    rs = await db.execute(select(RoadmapVote).where(RoadmapVote.user_id == user.id))
+    rec = rs.scalar_one_or_none()
+    now = datetime.utcnow()
+    if rec:
+        rec.choice = choice
+        rec.updated_at = now
+    else:
+        db.add(RoadmapVote(user_id=user.id, choice=choice, updated_at=now))
+    await db.commit()
+    return await api_roadmap_votes_get(db=db, user=user)
+
+
+# =============================================================================
 # YouTube Bonus & Feedback
 # =============================================================================
 @app.post("/api/user/grant-youtube-bonus")
@@ -2008,55 +2196,99 @@ async def grant_youtube_bonus(
     """Grant 10 credits for YouTube link click (once per user)"""
     if user.youtube_bonus_received:
         return {"ok": False, "already_received": True}
-    
+
     user.balance_credits += 10
     user.youtube_bonus_received = True
     await db.commit()
-    
+
     from telegram_bot import broadcast_youtube_bonus_click
     asyncio.create_task(broadcast_youtube_bonus_click(user.email))
-    
+
     return {"ok": True, "new_balance": user.balance_credits}
 
 
 @app.post("/api/user/feedback")
 async def submit_feedback(
     req: FeedbackCreateRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_login_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Submit user feedback"""
+    parent_id = req.parent_id
+    if parent_id is not None:
+        chk = await db.execute(select(Feedback).where(Feedback.id == parent_id))
+        if chk.scalar_one_or_none() is None:
+            raise HTTPException(status_code=400, detail="Invalid parent_id")
     fb = Feedback(
         user_email=user.email,
         user_name=user.name or user.email,
-        text=req.text
+        text=req.text,
+        parent_id=parent_id,
     )
     db.add(fb)
     await db.commit()
-    
+
     from telegram_bot import broadcast_feedback_submitted
     asyncio.create_task(broadcast_feedback_submitted(user.email, req.text))
-    
+
     return {"ok": True}
+
+
+def _feedback_avatar_url(email: str, oauth_picture: Optional[str]) -> str:
+    if oauth_picture and str(oauth_picture).strip():
+        return str(oauth_picture).strip()
+    h = hashlib.md5((email or "").strip().lower().encode("utf-8")).hexdigest()
+    return f"https://www.gravatar.com/avatar/{h}?d=identicon&s=96"
+
+
+def _feedback_parent_preview(text: str, max_len: int = 100) -> str:
+    t = (text or "").strip().replace("\n", " ")
+    if len(t) <= max_len:
+        return t
+    return t[: max_len - 1] + "…"
 
 
 @app.get("/api/feedback", response_model=FeedbackListResponse)
 async def get_feedback_list(
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all feedback items"""
-    from sqlalchemy import select
-    result = await db.execute(select(Feedback).order_by(Feedback.created_at.desc()))
-    items = result.scalars().all()
-    return FeedbackListResponse(items=[
-        FeedbackItem(
-            id=i.id,
-            user_email=i.user_email,
-            user_name=i.user_name,
-            text=i.text,
-            created_at=i.created_at
-        ) for i in items
-    ])
+    """Get all feedback items (with user avatars when linked to a Google OAuth user)."""
+    stmt = (
+        select(Feedback, User.picture)
+        .outerjoin(User, func.lower(User.email) == func.lower(Feedback.user_email))
+        .order_by(Feedback.created_at.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+    parent_ids = {fb.parent_id for fb, _pic in rows if getattr(fb, "parent_id", None)}
+    parent_map: Dict[int, Feedback] = {}
+    if parent_ids:
+        pr = await db.execute(select(Feedback).where(Feedback.id.in_(parent_ids)))
+        for p in pr.scalars().all():
+            parent_map[p.id] = p
+
+    out: List[FeedbackItem] = []
+    for fb, user_picture in rows:
+        parent_user_name = None
+        parent_preview = None
+        pid = getattr(fb, "parent_id", None)
+        if pid and pid in parent_map:
+            par = parent_map[pid]
+            parent_user_name = par.user_name or par.user_email
+            parent_preview = _feedback_parent_preview(par.text)
+        out.append(
+            FeedbackItem(
+                id=fb.id,
+                user_email=fb.user_email,
+                user_name=fb.user_name,
+                text=fb.text,
+                created_at=fb.created_at,
+                parent_id=pid,
+                user_picture=_feedback_avatar_url(fb.user_email, user_picture),
+                parent_user_name=parent_user_name,
+                parent_preview=parent_preview,
+            )
+        )
+    return FeedbackListResponse(items=out)
 
 
 @app.delete("/api/feedback/{feedback_id}")
@@ -2065,19 +2297,331 @@ async def delete_feedback(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete feedback (admin only)"""
-    if not user.is_admin:
+    """Delete feedback (admin only); replies referencing this row are removed first."""
+    if not user or not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-    
-    from sqlalchemy import select
+
     result = await db.execute(select(Feedback).where(Feedback.id == feedback_id))
     fb = result.scalar_one_or_none()
     if not fb:
         raise HTTPException(status_code=404, detail="Feedback not found")
-    
+
+    await db.execute(delete(Feedback).where(Feedback.parent_id == feedback_id))
     await db.delete(fb)
     await db.commit()
     return {"ok": True}
+
+
+# =============================================================================
+# Support chat (website widget ↔ Telegram forum topic)
+# =============================================================================
+_SUPPORT_VISITOR_RE = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
+
+
+def _support_validate_visitor_id_string(visitor_id_string: str) -> str:
+    v = (visitor_id_string or "").strip()
+    if not _SUPPORT_VISITOR_RE.fullmatch(v):
+        raise HTTPException(status_code=400, detail="Invalid visitor_id_string")
+    return v
+
+
+def _support_sanitize_page_url_string(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if len(s) > 4096:
+        s = s[:4096]
+    return s
+
+
+@app.get("/api/support-chat/health")
+async def api_support_chat_health():
+    """Cheap GET to verify reverse-proxy routes /api/support-chat/* to FastAPI."""
+    return {"support_api_ok_bool": True}
+
+
+@app.get("/api/support-chat/session")
+async def api_support_chat_session_get(db: AsyncSession = Depends(get_db)):
+    """Mirror GET: usage for ``POST /api/support-chat/session``."""
+    from telegram_bot import support_forum_configured_bool
+
+    configured = bool(await support_forum_configured_bool(db))
+    return {
+        "purpose_string": "Describe how to obtain or reuse an active support-chat session.",
+        "support_enabled_bool": True,
+        "support_configured_bool": configured,
+        "post_endpoint_string": "/api/support-chat/session",
+        "required_fields_json": {
+            "visitor_id_string": "string — browser-held id (8–96 [A-Za-z0-9_-])",
+            "page_url_string": "optional string — current page URL for operator context",
+        },
+        "optional_auth_string": "If the visitor is logged in, include session cookie; server may persist user_email_string on the row.",
+        "example_request_json": {
+            "visitor_id_string": "a1b2c3d4-e5f6-7890-abcd-ef0123456789",
+            "page_url_string": "https://example.com/task?id=demo_task",
+        },
+        "answer_example_json": {
+            "session_id_int": 101,
+            "visitor_id_string": "a1b2c3d4-e5f6-7890-abcd-ef0123456789",
+            "topic_ready_bool": False,
+            "support_enabled_bool": True,
+            "support_configured_bool": True,
+            "page_url_string": "https://example.com/task?id=demo_task",
+            "user_email_string": "user@example.com",
+        },
+    }
+
+
+@app.post("/api/support-chat/session", response_model=SupportChatSessionPostResponse)
+@limiter.limit(RATE_LIMIT_SUPPORT_CHAT_SESSION)
+async def api_support_chat_session_post(
+    request: Request,
+    body: SupportChatSessionPostRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from telegram_bot import support_forum_configured_bool
+
+    visitor = _support_validate_visitor_id_string(body.visitor_id_string)
+    page = _support_sanitize_page_url_string(body.page_url_string)
+    email = getattr(user, "email", None) if user else None
+
+    stmt = (
+        select(SupportChatSession)
+        .where(
+            SupportChatSession.visitor_id == visitor,
+            SupportChatSession.status == "open",
+        )
+        .order_by(SupportChatSession.id.desc())
+        .limit(1)
+    )
+    row = (await db.execute(stmt)).scalar_one_or_none()
+
+    topic_ready_bool = False
+    if row is None:
+        row = SupportChatSession(
+            visitor_id=visitor,
+            user_email=email,
+            page_url=page,
+            status="open",
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    else:
+        if email:
+            row.user_email = email
+        if page:
+            row.page_url = page
+        await db.commit()
+        await db.refresh(row)
+
+    topic_ready_bool = row.telegram_thread_id is not None
+    configured = bool(await support_forum_configured_bool(db))
+    return SupportChatSessionPostResponse(
+        session_id_int=int(row.id),
+        visitor_id_string=visitor,
+        topic_ready_bool=topic_ready_bool,
+        support_enabled_bool=True,
+        support_configured_bool=configured,
+        page_url_string=row.page_url,
+        user_email_string=row.user_email,
+    )
+
+
+@app.get("/api/support-chat/message")
+async def api_support_chat_message_get():
+    """Mirror GET: usage for ``POST /api/support-chat/message``."""
+    return {
+        "purpose_string": "Append a plaintext user message; first message allocates a Telegram forum topic when support is configured.",
+        "rate_limit_hint_string": RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
+        "max_chars_int": SUPPORT_CHAT_MESSAGE_MAX_CHARS,
+        "required_fields_json": {
+            "visitor_id_string": "string — must match the session visitor",
+            "session_id_int": "int — SupportChatSession id from POST /session",
+            "message_text_string": "string — plaintext only",
+        },
+        "example_request_json": {
+            "visitor_id_string": "a1b2c3d4-e5f6-7890-abcd-ef0123456789",
+            "session_id_int": 101,
+            "message_text_string": "Hello — I cannot download my GLB.",
+        },
+        "answer_example_json": {
+            "ok_bool": True,
+            "telegram_message_id_int": 555,
+        },
+    }
+
+
+@app.post("/api/support-chat/message", response_model=SupportChatMessagePostResponse)
+@limiter.limit(RATE_LIMIT_SUPPORT_CHAT_MESSAGE)
+async def api_support_chat_message_post(
+    request: Request,
+    body: SupportChatMessagePostRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from telegram_bot import (
+        support_forum_configured_bool,
+        telegram_create_support_topic,
+        telegram_send_support_message_html,
+    )
+
+    visitor = _support_validate_visitor_id_string(body.visitor_id_string)
+
+    sess = (
+        (
+            await db.execute(
+                select(SupportChatSession).where(SupportChatSession.id == body.session_id_int)
+            )
+        ).scalar_one_or_none()
+    )
+    if sess is None or sess.visitor_id != visitor:
+        raise HTTPException(status_code=404, detail="support session not found")
+    if sess.status != "open":
+        raise HTTPException(status_code=400, detail="session is not open")
+
+    email = getattr(user, "email", None) if user else None
+    if email:
+        sess.user_email = email
+
+    txt = body.message_text_string.strip()
+    if not txt:
+        raise HTTPException(status_code=400, detail="Empty message_text_string")
+    if len(txt) > SUPPORT_CHAT_MESSAGE_MAX_CHARS:
+        raise HTTPException(status_code=400, detail="message_text_string too long")
+
+    if not await support_forum_configured_bool(db):
+        raise HTTPException(
+            status_code=503,
+            detail="Support chat is temporarily unavailable. Please try again later.",
+        )
+
+    if sess.telegram_thread_id is None or sess.telegram_chat_id is None:
+        label = sess.user_email or sess.visitor_id[:12]
+        topic = (f"Support #{sess.id} · {label}")[:128]
+        try:
+            fcid, mtid = await telegram_create_support_topic(db, topic)
+        except Exception as exc:
+            print(f"[SupportChat] telegram topic error: {type(exc).__name__}: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="Support chat is temporarily unavailable. Please try again later.",
+            ) from exc
+        sess.telegram_chat_id = int(fcid)
+        sess.telegram_thread_id = int(mtid)
+        sess.topic_name = topic
+        await db.commit()
+        await db.refresh(sess)
+
+    who = html.escape(sess.user_email or sess.visitor_id)
+    escaped_text = html.escape(txt)
+    page_snip = ""
+    if sess.page_url:
+        p = html.escape((sess.page_url or "")[:500])
+        page_snip = f"\n🌐 {p}"
+
+    tg_html = (
+        f"💬 <b>Support session</b> <code>{int(sess.id)}</code>\n"
+        f"👤 <b>Visitor</b> {who}{page_snip}\n\n{escaped_text}"
+    )
+
+    try:
+        telegram_message_id_int = await telegram_send_support_message_html(
+            forum_chat_id=int(sess.telegram_chat_id),
+            message_thread_id=int(sess.telegram_thread_id),
+            html=tg_html,
+        )
+    except Exception as exc:
+        print(f"[SupportChat] telegram send failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail="Support chat is temporarily unavailable. Please try again later.",
+        ) from exc
+
+    msg_row = SupportChatMessage(
+        session_id=sess.id,
+        direction="user",
+        body_text=txt,
+        telegram_message_id=int(telegram_message_id_int),
+    )
+    db.add(msg_row)
+    await db.commit()
+
+    return SupportChatMessagePostResponse(
+        ok_bool=True,
+        telegram_message_id_int=int(telegram_message_id_int),
+    )
+
+
+@app.get("/api/support-chat/messages")
+@limiter.limit(RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL)
+async def api_support_chat_messages_poll(
+    request: Request,
+    visitor_id_string: Optional[str] = Query(None),
+    session_id_int: Optional[int] = Query(None),
+    after_id_int: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll support messages; omit query params to receive GET usage instructions."""
+
+    instr = {
+        "purpose_string": "Return chronological messages newer than ``after_id_int`` for a session.",
+        "post_mirror_string": "(none) polling only; authenticated by visitor id + numeric session.",
+        "query_params_json": {
+            "visitor_id_string": "required query string — same as session creation",
+            "session_id_int": "required query int — session id",
+            "after_id_int": "optional query int — return rows with id > after_id_int",
+        },
+        "example_answer_json": {
+            "messages": [
+                {
+                    "id_int": 1,
+                    "direction_string": "user",
+                    "body_text_string": "hello",
+                    "created_at_string": "2026-04-30T12:34:56.000000",
+                }
+            ]
+        },
+        "mirrors_related_string": "POST /api/support-chat/message mirrors usage is documented at GET /api/support-chat/message",
+    }
+
+    if not visitor_id_string or session_id_int is None:
+        return JSONResponse(content=instr)
+
+    visitor = _support_validate_visitor_id_string(visitor_id_string)
+    sess = (
+        (
+            await db.execute(
+                select(SupportChatSession).where(SupportChatSession.id == int(session_id_int))
+            )
+        ).scalar_one_or_none()
+    )
+    if sess is None or sess.visitor_id != visitor:
+        raise HTTPException(status_code=404, detail="support session not found")
+
+    mq = (
+        await db.execute(
+            select(SupportChatMessage)
+            .where(SupportChatMessage.session_id == sess.id, SupportChatMessage.id > int(after_id_int))
+            .order_by(SupportChatMessage.id.asc())
+        )
+    ).scalars().all()
+
+    items: List[SupportChatMessageItem] = []
+    for m in mq:
+        created = m.created_at.isoformat()
+        items.append(
+            SupportChatMessageItem(
+                id_int=int(m.id),
+                direction_string=str(m.direction),
+                body_text_string=str(m.body_text),
+                created_at_string=created,
+            )
+        )
+    return SupportChatMessagesPollResponse(messages=items)
 
 
 # =============================================================================
@@ -2118,6 +2662,8 @@ async def api_create_task(
     input_type = "t_pose"
     ga_client_id: Optional[str] = None
     file: Optional[UploadFile] = None
+    pipeline = "rig"
+    uploaded_bytes: Optional[int] = None
 
     if "application/json" in content_type:
         try:
@@ -2139,6 +2685,9 @@ async def api_create_task(
         raw_ga = data.get("ga_client_id")
         if raw_ga is not None:
             ga_client_id = str(raw_ga)
+        raw_pipeline = data.get("pipeline")
+        if raw_pipeline is not None and str(raw_pipeline).strip():
+            pipeline = str(raw_pipeline).strip().lower()
     else:
         form = await request.form()
         raw_source = form.get("source")
@@ -2154,6 +2703,9 @@ async def api_create_task(
         raw_ga = form.get("ga_client_id")
         if raw_ga is not None:
             ga_client_id = str(raw_ga)
+        raw_pipeline = form.get("pipeline")
+        if raw_pipeline is not None and str(raw_pipeline).strip():
+            pipeline = str(raw_pipeline).strip().lower()
         fu = form.get("file")
         # Accept any Starlette/FastAPI upload object (isinstance can fail across re-exports).
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
@@ -2202,11 +2754,27 @@ async def api_create_task(
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
+    if pipeline not in ("rig", "convert"):
+        pipeline = "rig"
+
+    if pipeline == "convert" and not _url_path_endswith_glb(final_url):
+        raise HTTPException(
+            status_code=400,
+            detail="pipeline=convert requires a .glb input URL or .glb upload filename.",
+        )
+
     input_type = normalize_task_type(input_type)
 
     # Create task
     task, error = await create_conversion_task(
-        db, final_url, input_type, owner_type, owner_id, created_via_api=via_api
+        db,
+        final_url,
+        input_type,
+        owner_type,
+        owner_id,
+        created_via_api=via_api,
+        pipeline_kind=pipeline,
+        input_bytes=uploaded_bytes,
     )
     
     if error and not task:
@@ -2219,9 +2787,9 @@ async def api_create_task(
         
         # Send GA4 event
         asyncio.create_task(send_ga4_event(
-            ga_client_id, 
-            "task_created", 
-            {"source": source, "type": input_type}
+            ga_client_id,
+            "task_created",
+            {"source": source, "type": input_type, "pipeline": pipeline},
         ))
     
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
@@ -2241,6 +2809,108 @@ async def api_create_task(
     except Exception as e:
         # Don't fail task creation if immediate dispatch fails - background worker will pick it up
         print(f"[Immediate Dispatch] Failed for task {task.id}: {e}")
+
+    await db.refresh(task)
+
+    return TaskCreateResponse(
+        task_id=task.id,
+        status=task.status,
+        message=error,
+    )
+
+
+@app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
+@limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
+async def api_create_convert_from_rig_task(
+    parent_task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Start an Auto Convert task from a **completed** rig task.
+    The server resolves the prepared GLB URL; clients must not pass arbitrary URLs.
+    """
+    via_api = bool(getattr(request.state, "auth_via_api_key", False))
+    api_key_anon = getattr(request.state, "api_key_anon_id", None)
+    if user:
+        owner_type = "user"
+        owner_id = user.email
+    elif api_key_anon:
+        owner_type = "anon"
+        owner_id = api_key_anon
+    else:
+        anon_session = await get_anon_session(request, response, db)
+        owner_type = "anon"
+        owner_id = anon_session.anon_id
+
+    parent = await get_task_by_id(db, parent_task_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anon_session = await get_anon_session(request, response, db)
+    is_admin = bool(user and is_admin_email(user.email))
+    is_owner = (
+        (user and parent.owner_type == "user" and parent.owner_id == user.email)
+        or (parent.owner_type == "anon" and parent.owner_id == anon_session.anon_id)
+    )
+    if not (is_owner or is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to use this task")
+
+    pk_parent = getattr(parent, "pipeline_kind", None) or "rig"
+    if pk_parent == "convert":
+        raise HTTPException(
+            status_code=400,
+            detail="Auto Convert can only be started from a rig task",
+        )
+
+    if parent.status != "done":
+        raise HTTPException(
+            status_code=400,
+            detail="Rig task must be completed before starting Auto Convert",
+        )
+
+    prepared_url = resolve_prepared_glb_source_url(parent)
+    if not prepared_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Prepared GLB is not available for this task",
+        )
+
+    task, error = await create_conversion_task(
+        db,
+        prepared_url,
+        "t_pose",
+        owner_type,
+        owner_id,
+        created_via_api=via_api,
+        pipeline_kind="convert",
+        input_bytes=getattr(parent, "input_bytes", None),
+    )
+
+    if error and not task:
+        raise HTTPException(status_code=500, detail=error)
+
+    try:
+        queue_status = await get_global_queue_status(db=db)
+        free_worker = next(
+            (
+                w
+                for w in queue_status.workers
+                if w.available
+                and (w.total_active < w.max_concurrent)
+                and (w.queue_size <= 0)
+            ),
+            None,
+        )
+        if free_worker:
+            await db.refresh(task)
+            if task.status == "created":
+                await start_task_on_worker(db, task, free_worker.url)
+                print(f"[Immediate Dispatch] Convert task {task.id} sent to {free_worker.url}")
+    except Exception as e:
+        print(f"[Immediate Dispatch] Failed for convert task {task.id}: {e}")
 
     await db.refresh(task)
 
@@ -2421,6 +3091,9 @@ async def api_get_task(
     elif task.status == "done" and not task.video_ready:
         # Check video availability for completed tasks
         task = await update_task_progress(db, task)
+
+    if _task_needs_poster_classification(task):
+        _schedule_poster_recovery_throttled(task.id)
     
     # Find viewer HTML file (_100k .html)
     viewer_html_url = None
@@ -2470,6 +3143,29 @@ async def api_get_task(
         task.fbx_glb_ready
     )
     
+    def _poster_llm_keywords_list() -> Optional[list]:
+        raw = getattr(task, "poster_llm_keywords", None)
+        if not raw:
+            return None
+        try:
+            import json
+            data = json.loads(raw)
+            if isinstance(data, list):
+                out = [str(x).strip() for x in data if str(x).strip()]
+                return out or None
+        except Exception:
+            pass
+        return None
+
+    kw_list = _poster_llm_keywords_list()
+    poster_free3d_query = build_free3d_similar_query(
+        getattr(task, "poster_llm_title", None),
+        kw_list,
+    )
+
+    is_admin_viewer = bool(user and is_admin_email(user.email))
+    worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
+
     return TaskStatusResponse(
         task_id=task.id,
         status=task.status,
@@ -2486,6 +3182,7 @@ async def api_get_task(
         fbx_glb_ready=task.fbx_glb_ready,
         fbx_glb_error=task.fbx_glb_error,
         progress_page=task.progress_page,
+        worker_api=worker_api_for_response,
         viewer_html_url=viewer_html_url,
         quick_downloads=quick_downloads if quick_downloads else None,
         prepared_glb_ready=prepared_glb_ready,
@@ -2493,8 +3190,18 @@ async def api_get_task(
         guid=task.guid,
         content_rating=getattr(task, "content_rating", None),
         content_score=getattr(task, "content_score", None),
+        content_classified_at=getattr(task, "content_classified_at", None),
+        content_classifier_version=getattr(task, "content_classifier_version", None),
+        poster_llm_title=getattr(task, "poster_llm_title", None),
+        poster_llm_description=getattr(task, "poster_llm_description", None),
+        poster_llm_keywords=kw_list,
+        poster_llm_at=getattr(task, "poster_llm_at", None),
+        poster_free3d_query=poster_free3d_query,
         created_at=task.created_at,
-        updated_at=task.updated_at
+        updated_at=task.updated_at,
+        pipeline=getattr(task, "pipeline_kind", None) or "rig",
+        youtube_video_id=getattr(task, "youtube_video_id", None),
+        youtube_upload_status=getattr(task, "youtube_upload_status", None),
     )
 
 
@@ -2646,8 +3353,13 @@ async def api_retry_task(
     
     # Create new task (don't deduct credits - it's a retry)
     new_task, error = await create_conversion_task(
-        db, task.input_url, task.input_type or "t_pose", 
-        task.owner_type, task.owner_id
+        db,
+        task.input_url,
+        task.input_type or "t_pose",
+        task.owner_type,
+        task.owner_id,
+        pipeline_kind=getattr(task, "pipeline_kind", None) or "rig",
+        input_bytes=getattr(task, "input_bytes", None),
     )
     
     if error and not new_task:
@@ -2683,7 +3395,7 @@ async def api_restart_task(
 
     # Check ownership
     anon_session = await get_anon_session(request, response, db)
-    is_admin = bool(user and user.email in ADMIN_EMAILS)
+    is_admin = bool(user and is_admin_email(user.email))
     is_owner = (
         (user and task.owner_type == "user" and task.owner_id == user.email) or
         (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
@@ -2760,61 +3472,67 @@ async def api_restart_task(
     task.worker_api = worker_url
     task.status = "processing"
 
-    # Parse transform params from request body (if any)
-    transform_params = None
-    try:
-        body = await request.body()
-        if body:
-            import json as json_module
-            body_data = json_module.loads(body)
-            if isinstance(body_data, dict):
-                # Extract transform params if present
-                if any(k in body_data for k in ("local_position", "local_rotation", "local_scale")):
-                    transform_params = {
-                        "local_position": body_data.get("local_position"),
-                        "local_rotation": body_data.get("local_rotation"),
-                        "local_scale": body_data.get("local_scale")
-                    }
-                    print(f"[Restart] Transform params from request: {transform_params}")
-    except Exception as e:
-        print(f"[Restart] Could not parse body: {e}")
+    pk_restart = getattr(task, "pipeline_kind", None) or "rig"
+    if pk_restart not in ("rig", "convert"):
+        pk_restart = "rig"
 
-    # Fallback: read from saved viewer_settings if no transforms in request
-    if not transform_params and task.viewer_settings:
+    # Parse transform params from request body (rig pipeline only)
+    transform_params = None
+    if pk_restart == "rig":
         try:
-            settings = json.loads(task.viewer_settings)
-            mt = settings.get("modelTransform")
-            if mt and isinstance(mt, dict):
-                pos = mt.get("position", {})
-                rot = mt.get("rotation", {})
-                scale = mt.get("scale", {})
-                # Only use if any value is non-default
-                has_transform = (
-                    any(v != 0 for v in [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)]) or
-                    any(v != 0 for v in [rot.get("x", 0), rot.get("y", 0), rot.get("z", 0)]) or
-                    any(v != 1 for v in [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)])
-                )
-                if has_transform:
-                    rad_to_deg = 180 / 3.14159265359
-                    transform_params = {
-                        "local_position": [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)],
-                        "local_rotation": [
-                            rot.get("x", 0) * rad_to_deg,
-                            rot.get("y", 0) * rad_to_deg,
-                            rot.get("z", 0) * rad_to_deg
-                        ],
-                        "local_scale": [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)]
-                    }
-                    print(f"[Restart] Transform params from viewer_settings: {transform_params}")
+            body = await request.body()
+            if body:
+                import json as json_module
+                body_data = json_module.loads(body)
+                if isinstance(body_data, dict):
+                    # Extract transform params if present
+                    if any(k in body_data for k in ("local_position", "local_rotation", "local_scale")):
+                        transform_params = {
+                            "local_position": body_data.get("local_position"),
+                            "local_rotation": body_data.get("local_rotation"),
+                            "local_scale": body_data.get("local_scale")
+                        }
+                        print(f"[Restart] Transform params from request: {transform_params}")
         except Exception as e:
-            print(f"[Restart] Could not read viewer_settings: {e}")
+            print(f"[Restart] Could not parse body: {e}")
+
+        # Fallback: read from saved viewer_settings if no transforms in request
+        if not transform_params and task.viewer_settings:
+            try:
+                settings = json.loads(task.viewer_settings)
+                mt = settings.get("modelTransform")
+                if mt and isinstance(mt, dict):
+                    pos = mt.get("position", {})
+                    rot = mt.get("rotation", {})
+                    scale = mt.get("scale", {})
+                    # Only use if any value is non-default
+                    has_transform = (
+                        any(v != 0 for v in [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)]) or
+                        any(v != 0 for v in [rot.get("x", 0), rot.get("y", 0), rot.get("z", 0)]) or
+                        any(v != 1 for v in [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)])
+                    )
+                    if has_transform:
+                        rad_to_deg = 180 / 3.14159265359
+                        transform_params = {
+                            "local_position": [pos.get("x", 0), pos.get("y", 0), pos.get("z", 0)],
+                            "local_rotation": [
+                                rot.get("x", 0) * rad_to_deg,
+                                rot.get("y", 0) * rad_to_deg,
+                                rot.get("z", 0) * rad_to_deg
+                            ],
+                            "local_scale": [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)]
+                        }
+                        print(f"[Restart] Transform params from viewer_settings: {transform_params}")
+            except Exception as e:
+                print(f"[Restart] Could not read viewer_settings: {e}")
 
     # Send directly to worker - workers handle GLB/FBX/OBJ natively
     result = await send_task_to_worker(
-        worker_url, 
-        task.input_url, 
+        worker_url,
+        task.input_url,
         task.input_type or "t_pose",
-        transform_params=transform_params
+        transform_params=transform_params,
+        pipeline_kind=pk_restart,
     )
     if not result.success:
         task.status = "error"
@@ -3090,7 +3808,8 @@ async def api_get_animation_catalog(
         pricing={
             "single_animation_credits": ANIMATION_SINGLE_CREDITS,
             "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
-            "download_format": "fbx"
+            "download_format": "fbx",
+            "all_animations_fbx_url": f"/api/task/{task_id}/animations.fbx",
         }
     )
 
@@ -3364,6 +4083,92 @@ async def api_download_animation(
     )
 
 
+@app.get("/api/task/{task_id}/animations/download-with-base/{animation_id}")
+async def api_download_animation_with_base(
+    task_id: str,
+    animation_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Download a ZIP containing the package-level _all_animations FBX and the selected custom animation FBX.
+    This avoids browser blocking of multiple automatic downloads from one click.
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anim_id = _normalize_animation_key(animation_id)
+    manifest = _load_animation_manifest()
+    raw_items = manifest.get("animations") or []
+    catalog_by_id: Dict[str, dict] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("enabled", True) is False:
+            continue
+        key = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
+        if key:
+            catalog_by_id[key] = item
+
+    if anim_id not in catalog_by_id:
+        raise HTTPException(status_code=404, detail="Animation not found")
+
+    file_map = await _build_task_animation_file_map(task, raw_items)
+    resolved = _resolve_animation_file(catalog_by_id[anim_id], file_map)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Animation file not ready")
+
+    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+    if not (purchased_all or anim_id in purchased_ids):
+        raise HTTPException(status_code=402, detail="Payment required to download this animation")
+
+    base_url, base_filename = _resolve_all_animations_fbx_url(task)
+    if not base_url or not base_filename:
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+
+    custom_url = resolved["url"]
+    custom_filename = resolved["clean_filename"]
+    base_bytes, custom_bytes = await asyncio.gather(
+        _download_worker_file_bytes(base_url, "_all_animations.fbx"),
+        _download_worker_file_bytes(custom_url, "Custom animation FBX"),
+    )
+
+    safe_anim = re.sub(r"[^a-zA-Z0-9_.-]+", "_", anim_id).strip("_") or "custom_animation"
+    zip_path = Path(tempfile.gettempdir()) / f"autorig_{task_id}_{safe_anim}_with_base_{uuid.uuid4().hex}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(base_filename, base_bytes)
+        zf.writestr(custom_filename, custom_bytes)
+        zf.writestr(
+            "README.txt",
+            (
+                "This bundle contains two FBX files.\n\n"
+                "1. Use the _all_animations FBX as the rigged character/base animation file.\n"
+                "2. The custom animation FBX contains the selected skeleton animation clip only.\n"
+                "3. Apply the selected custom clip to the rigged character in Unity, Unreal Engine, Blender, or another DCC/engine.\n"
+            ),
+        )
+
+    if task.ga_client_id:
+        asyncio.create_task(send_ga4_event(
+            task.ga_client_id,
+            "custom_animation_bundle_downloaded",
+            {"animation_id": anim_id, "task_id": task_id, "filename": custom_filename}
+        ))
+
+    bundle_name = f"{task_id}_{safe_anim}_with_all_animations.zip"
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=bundle_name,
+        headers={"Cache-Control": "private, max-age=0"},
+        background=BackgroundTask(lambda: zip_path.unlink(missing_ok=True)),
+    )
+
+
 @app.get("/api/history", response_model=TaskHistoryResponse)
 async def api_get_history(
     request: Request,
@@ -3393,7 +4198,7 @@ async def api_get_history(
                 created_at=t.created_at,
                 input_url=t.input_url,
                 video_ready=t.video_ready,
-                thumbnail_url=f"/api/thumb/{t.id}" if t.status == "done" and t.video_ready else None,
+                thumbnail_url=f"/thumb/{t.id}" if t.status == "done" and t.video_ready else None,
                 content_rating=getattr(t, "content_rating", None),
             )
             for t in tasks
@@ -3525,7 +4330,7 @@ async def api_get_gallery(
         GalleryItem(
             task_id=t.id,
             video_url=f"/api/video/{t.id}",
-            thumbnail_url=f"/api/thumb/{t.id}",
+            thumbnail_url=f"/thumb/{t.id}",
             created_at=t.created_at,
             time_ago=format_time_ago(t.created_at),
             like_count=like_count,
@@ -3646,7 +4451,7 @@ async def api_get_owner_tasks(
                 "status": t.status,
                 "progress": t.progress,
                 "created_at": t.created_at,
-                "thumbnail_url": f"/api/thumb/{t.id}" if t.status == "done" else None,
+                "thumbnail_url": f"/thumb/{t.id}" if t.status == "done" else None,
                 "content_rating": getattr(t, "content_rating", None),
                 "owner_type": t.owner_type,
                 "owner_id": t.owner_id if t.owner_type == "user" else "anon"
@@ -3940,6 +4745,52 @@ async def api_admin_stats(
     )
 
 
+@app.get("/api/admin/overlay-metrics", response_model=AdminOverlayMetricsResponse)
+async def api_admin_overlay_metrics(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Статистика для панели оверлея: текущие статусы по БД + периодные счётчики завершений."""
+    tasks_by_status: dict = {}
+    for status in ["created", "processing", "done", "error"]:
+        count_result = await db.execute(
+            select(func.count(Task.id)).where(Task.status == status)
+        )
+        tasks_by_status[status] = count_result.scalar() or 0
+    total_tasks = sum(tasks_by_status.values())
+    done_n = tasks_by_status.get("done", 0) or 0
+    err_n = tasks_by_status.get("error", 0) or 0
+    rating_percent = None
+    if done_n + err_n > 0:
+        rating_percent = round(100.0 * float(done_n) / float(done_n + err_n), 1)
+
+    row = await get_or_create_admin_overlay_counters(db)
+    sc = int(row.completed_count or 0)
+    st = float(row.total_duration_seconds or 0.0)
+    session_avg = None
+    if sc > 0:
+        session_avg = round(st / float(sc), 1)
+
+    return AdminOverlayMetricsResponse(
+        tasks_by_status=tasks_by_status,
+        total_tasks=total_tasks,
+        rating_percent=rating_percent,
+        session_completed=sc,
+        session_total_duration_seconds=st,
+        session_avg_seconds=session_avg,
+    )
+
+
+@app.post("/api/admin/overlay-metrics/reset", response_model=AdminBulkAffectedResponse)
+async def api_admin_overlay_metrics_reset(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Обнулить периодные счётчики (завершения и сумму длительностей) в БД."""
+    await reset_admin_overlay_counters(db)
+    return AdminBulkAffectedResponse(affected=1)
+
+
 @app.get("/api/admin/users", response_model=AdminUserListResponse)
 async def api_admin_users(
     query: Optional[str] = None,
@@ -4045,6 +4896,7 @@ async def api_admin_user_tasks(
 @app.get("/api/admin/tasks", response_model=AdminTaskListResponse)
 async def api_admin_all_tasks(
     status: Optional[str] = None,
+    pipeline_kind: Optional[str] = None,
     query: Optional[str] = None,
     sort_by: str = "created_at",
     sort_desc: bool = True,
@@ -4056,13 +4908,27 @@ async def api_admin_all_tasks(
     """Get all tasks with filtering, sorting, and pagination (admin only)"""
     from sqlalchemy import func, or_, desc
     from database import Task
-    
+
+    page = max(1, page)
+    per_page = min(max(1, per_page), 200)
+
+    _VALID_STATUS = frozenset({"created", "processing", "done", "error"})
+    _ALLOWED_SORT = frozenset({"created_at", "updated_at", "pipeline_kind", "status", "progress", "id"})
+
     # Base query
     base_query = select(Task)
-    
-    # Filter by status
-    if status and status in ["created", "processing", "done", "error"]:
-        base_query = base_query.where(Task.status == status)
+
+    # Filter by status: omit / "all" = any; one value; or comma-separated (e.g. created,processing)
+    if status and status.strip() and status.strip().lower() != "all":
+        parts = [s.strip().lower() for s in status.split(",") if s.strip()]
+        parts = [p for p in parts if p in _VALID_STATUS]
+        if len(parts) == 1:
+            base_query = base_query.where(Task.status == parts[0])
+        elif len(parts) > 1:
+            base_query = base_query.where(Task.status.in_(parts))
+
+    if pipeline_kind and pipeline_kind in ("rig", "convert"):
+        base_query = base_query.where(Task.pipeline_kind == pipeline_kind)
     
     # Search by task_id or owner_id
     if query:
@@ -4078,8 +4944,10 @@ async def api_admin_all_tasks(
     count_query = select(func.count()).select_from(base_query.subquery())
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
-    
-    # Sort
+
+    # Sort (whitelist column names)
+    if sort_by not in _ALLOWED_SORT:
+        sort_by = "created_at"
     sort_column = getattr(Task, sort_by, Task.created_at)
     if sort_desc:
         base_query = base_query.order_by(desc(sort_column))
@@ -4091,24 +4959,54 @@ async def api_admin_all_tasks(
     result = await db.execute(base_query.offset(offset).limit(per_page))
     tasks = result.scalars().all()
     
+    def _err_preview(msg: Optional[str]) -> Optional[str]:
+        if not msg:
+            return None
+        s = msg.strip()
+        if len(s) <= 280:
+            return s
+        return s[:279] + "…"
+
+    def _admin_input_bytes(t) -> Optional[int]:
+        ib = getattr(t, "input_bytes", None)
+        if ib is not None:
+            return int(ib)
+        return _task_cache_dir_size_bytes(t.id)
+
+    def _admin_poster_url(t) -> Optional[str]:
+        if t.status != "done":
+            return None
+        if not _task_has_poster(t):
+            return None
+        return f"/thumb/{t.id}"
+
     return AdminTaskListResponse(
         tasks=[
             AdminTaskListItem(
                 task_id=t.id,
                 owner_type=t.owner_type,
                 owner_id=t.owner_id,
+                owner_email=(t.owner_id if t.owner_type == "user" else None),
                 status=t.status,
                 progress=t.progress,
                 ready_count=t.ready_count,
                 total_count=t.total_count,
                 input_url=t.input_url,
                 worker_api=t.worker_api,
+                worker_task_id=t.worker_task_id,
+                guid=t.guid,
+                restart_count=t.restart_count or 0,
+                pipeline_kind=(getattr(t, "pipeline_kind", None) or "rig"),
+                error_message=_err_preview(t.error_message),
                 video_ready=t.video_ready,
                 content_rating=getattr(t, "content_rating", None),
                 content_score=getattr(t, "content_score", None),
                 content_classifier_version=getattr(t, "content_classifier_version", None),
+                input_bytes=_admin_input_bytes(t),
+                poster_url=_admin_poster_url(t),
                 created_at=t.created_at,
-                updated_at=t.updated_at
+                updated_at=t.updated_at,
+                age_seconds=_task_age_seconds(t.created_at),
             )
             for t in tasks
         ],
@@ -4118,19 +5016,150 @@ async def api_admin_all_tasks(
     )
 
 
+@app.get("/api/admin/task/{task_id}/inspect", response_model=AdminTaskInspectResponse)
+async def api_admin_task_inspect(
+    task_id: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extended task fields for admin overlay (admin only)."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _ib = getattr(task, "input_bytes", None)
+    if _ib is not None:
+        _ib = int(_ib)
+    else:
+        _ib = _task_cache_dir_size_bytes(task.id)
+
+    _poster = None
+    if task.status == "done" and _task_has_poster(task):
+        _poster = f"/thumb/{task.id}"
+
+    return AdminTaskInspectResponse(
+        task_id=task.id,
+        owner_type=task.owner_type,
+        owner_id=task.owner_id,
+        owner_email=(task.owner_id if task.owner_type == "user" else None),
+        status=task.status,
+        progress=task.progress,
+        ready_count=task.ready_count,
+        total_count=task.total_count,
+        restart_count=task.restart_count or 0,
+        input_url=task.input_url,
+        input_type=task.input_type,
+        pipeline_kind=(getattr(task, "pipeline_kind", None) or "rig"),
+        input_bytes=_ib,
+        poster_url=_poster,
+        worker_api=task.worker_api,
+        worker_task_id=task.worker_task_id,
+        progress_page=task.progress_page,
+        guid=task.guid,
+        error_message=task.error_message,
+        last_progress_at=task.last_progress_at,
+        fbx_glb_output_url=task.fbx_glb_output_url,
+        fbx_glb_model_name=task.fbx_glb_model_name,
+        fbx_glb_ready=task.fbx_glb_ready,
+        fbx_glb_error=task.fbx_glb_error,
+        video_ready=task.video_ready,
+        video_url=task.video_url,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+        age_seconds=_task_age_seconds(task.created_at),
+    )
+
+
+@app.post("/api/admin/tasks/bulk-restart-count", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_restart_count(
+    body: AdminBulkTaskIdsRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Admin only. Для задач в status=error — полный requeue в created (как в карточке).
+    Для остальных — только restart_count=0.
+    """
+    ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
+    if not ids:
+        return AdminBulkAffectedResponse(affected=0)
+    n = 0
+    for tid in ids:
+        task = await get_task_by_id(db, tid)
+        if not task:
+            continue
+        if task.status == "error":
+            await admin_requeue_task_to_created(db, task)
+        else:
+            task.restart_count = 0
+            task.updated_at = datetime.utcnow()
+        n += 1
+    if n:
+        await db.commit()
+    return AdminBulkAffectedResponse(affected=n)
+
+
+@app.post("/api/admin/tasks/bulk-restart-count-recent", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_restart_count_recent(
+    body: AdminBulkRestartCountRecentRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set restart_count=0 for all tasks created within the last `hours` (admin only)."""
+    hours = max(0.01, float(body.hours))
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    r = await db.execute(
+        update(Task)
+        .where(Task.created_at >= cutoff)
+        .values(restart_count=0, updated_at=datetime.utcnow())
+    )
+    await db.commit()
+    return AdminBulkAffectedResponse(affected=int(r.rowcount or 0))
+
+
+@app.post("/api/admin/tasks/bulk-requeue", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_requeue(
+    body: AdminBulkTaskIdsRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Requeue tasks to status=created with cleared worker state (admin only)."""
+    ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
+    n = 0
+    for tid in ids:
+        task = await get_task_by_id(db, tid)
+        if task:
+            await admin_requeue_task_to_created(db, task)
+            n += 1
+    if n:
+        await db.commit()
+    return AdminBulkAffectedResponse(affected=n)
+
+
+@app.post("/api/admin/tasks/bulk-delete", response_model=AdminBulkAffectedResponse)
+async def api_admin_bulk_delete_tasks(
+    body: AdminBulkTaskIdsRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete tasks and on-disk artifacts (admin only)."""
+    ids = list(dict.fromkeys([x for x in (body.task_ids or []) if x]))
+    n = 0
+    for tid in ids:
+        if await admin_delete_task_full(db, tid):
+            n += 1
+    return AdminBulkAffectedResponse(affected=n)
+
+
 @app.delete("/api/admin/task/{task_id}")
 async def api_admin_delete_task(
     task_id: str,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a task by id (admin only)."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
+    """Delete a task by id including artifacts (admin only)."""
+    ok = await admin_delete_task_full(db, task_id)
+    if not ok:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    await db.delete(task)
-    await db.commit()
     return {"ok": True, "task_id": task_id}
 
 
@@ -4283,50 +5312,141 @@ async def api_admin_cleanup(
     }
 
 
+def _dir_size_bytes(path: Path) -> int:
+    """Sum file sizes under path (file or directory)."""
+    if not path.exists():
+        return 0
+    total = 0
+    try:
+        if path.is_file():
+            return path.stat().st_size
+        for root, _dirs, files in os.walk(str(path)):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                try:
+                    total += os.path.getsize(fp)
+                except OSError:
+                    pass
+    except OSError:
+        return 0
+    return total
+
+
+def _sqlite_db_path_and_bytes() -> Tuple[Optional[str], int]:
+    """If DATABASE_URL is SQLite, return (path string, file size) or (None, 0)."""
+    try:
+        from sqlalchemy.engine.url import make_url
+
+        u = make_url(DATABASE_URL)
+    except Exception:
+        return None, 0
+    if not u.drivername.startswith("sqlite") or not u.database:
+        return None, 0
+    p = Path(u.database)
+    if not p.is_absolute():
+        p = (BASE_DIR / p).resolve()
+    if not p.is_file():
+        return str(p), 0
+    try:
+        return str(p), p.stat().st_size
+    except OSError:
+        return str(p), 0
+
+
 @app.get("/api/admin/disk-stats")
 async def api_admin_disk_stats(
     request: Request,
     admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get disk usage statistics (admin only).
+    Includes per-directory size breakdown (GB) for main data categories.
     """
     import shutil
-    
+
     disk_usage = shutil.disk_usage("/")
-    
+
     # Count items in each cleanable directory
     task_cache_count = len(list(TASK_CACHE_DIR.iterdir())) if TASK_CACHE_DIR.exists() else 0
     glb_cache_count = len(list(GLB_CACHE_DIR.iterdir())) if GLB_CACHE_DIR.exists() else 0
-    
+
     upload_dir = pathlib.Path(UPLOAD_DIR)
     upload_count = len(list(upload_dir.iterdir())) if upload_dir.exists() else 0
-    
+
     videos_dir = pathlib.Path("/var/autorig/videos")
     videos_count = len(list(videos_dir.iterdir())) if videos_dir.exists() else 0
-    
+
+    task_b = _dir_size_bytes(TASK_CACHE_DIR)
+    task_cache_max_gb = await get_effective_task_cache_max_gb(db)
+    glb_b = _dir_size_bytes(GLB_CACHE_DIR)
+    upload_b = _dir_size_bytes(upload_dir)
+    videos_b = _dir_size_bytes(videos_dir)
+    static_total_b = _dir_size_bytes(STATIC_DIR)
+    static_assets_b = max(0, static_total_b - task_b - glb_b)
+    db_path, db_b = _sqlite_db_path_and_bytes()
+
+    used_b = disk_usage.used
+    tracked_b = static_total_b + upload_b + videos_b + db_b
+    other_b = max(0, used_b - tracked_b)
+
+    def _gb(x: int) -> float:
+        return round(x / (1024**3), 2)
+
+    breakdown_gb = {
+        "task_cache": _gb(task_b),
+        "glb_cache": _gb(glb_b),
+        "static_assets": _gb(static_assets_b),
+        "uploads": _gb(upload_b),
+        "videos": _gb(videos_b),
+        "database_sqlite": _gb(db_b) if db_b > 0 else None,
+        "other_on_disk": _gb(other_b),
+    }
+
     return {
         "ok": True,
         "disk": {
             "total_gb": round(disk_usage.total / (1024**3), 2),
             "used_gb": round(disk_usage.used / (1024**3), 2),
             "free_gb": round(disk_usage.free / (1024**3), 2),
-            "percent_used": round(disk_usage.used / disk_usage.total * 100, 1)
+            "percent_used": round(disk_usage.used / disk_usage.total * 100, 1),
         },
+        "breakdown_gb": breakdown_gb,
+        "database_path": db_path,
         "cleanable_items": {
             "task_cache": task_cache_count,
             "glb_cache": glb_cache_count,
             "uploads": upload_count,
-            "videos": videos_count
+            "videos": videos_count,
         },
+        "task_cache_bytes": task_b,
+        "task_cache_max_gb": round(float(task_cache_max_gb), 4),
+        "task_cache_max_gb_default": round(float(TASK_CACHE_MAX_GB), 4),
         "settings": {
-            "min_free_space_gb": MIN_FREE_SPACE_GB,
+            "min_free_space_gb": round(float(MIN_FREE_SPACE_GB), 2),
+            "new_task_min_free_gb": round(float(NEW_TASK_MIN_FREE_GB), 2),
+            "new_task_purge_max_freed_gb": round(float(NEW_TASK_PURGE_TASKS_MAX_FREED_GB), 2),
             "cleanup_interval_cycles": CLEANUP_CHECK_INTERVAL_CYCLES,
             "min_age_hours": CLEANUP_MIN_AGE_HOURS,
             "gallery_db_purge_interval_cycles": GALLERY_DB_PURGE_INTERVAL_CYCLES,
             "automatic_task_db_deletion": AUTOMATIC_TASK_DB_DELETION,
-        }
+            "task_cache_max_gb": round(float(task_cache_max_gb), 4),
+            "task_cache_max_gb_default": round(float(TASK_CACHE_MAX_GB), 4),
+        },
     }
+
+
+@app.patch("/api/admin/settings/task-cache-max")
+async def api_admin_settings_task_cache_max(
+    body: AdminTaskCacheMaxUpdate,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await get_or_create_admin_overlay_counters(db)
+    row.task_cache_max_gb = float(body.task_cache_max_gb)
+    await db.commit()
+    await db.refresh(row)
+    return {"ok": True, "task_cache_max_gb": float(row.task_cache_max_gb)}
 
 
 @app.post("/api/admin/tasks/restart-incomplete")
@@ -4407,7 +5527,15 @@ async def api_admin_restart_incomplete_tasks(
                     task.worker_api = worker_url
                     task.status = "processing"
                     
-                    send_result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+                    pk_ad = getattr(task, "pipeline_kind", None) or "rig"
+                    if pk_ad not in ("rig", "convert"):
+                        pk_ad = "rig"
+                    send_result = await send_task_to_worker(
+                        worker_url,
+                        task.input_url,
+                        task.input_type or "t_pose",
+                        pipeline_kind=pk_ad,
+                    )
                     if not send_result.success:
                         task.status = "error"
                         task.error_message = send_result.error
@@ -4517,8 +5645,13 @@ async def proxy_video(
         finally:
             await client.aclose()
 
+    _vname = (
+        f"{task_id}_video_small.mp4"
+        if "_video_small.mp4" in (task.video_url or "")
+        else f"{task_id}_video.mp4"
+    )
     response_headers: Dict[str, str] = {
-        "Content-Disposition": f"inline; filename={task_id}_video.mp4",
+        "Content-Disposition": f'inline; filename="{_vname}"',
         "Cache-Control": "public, max-age=86400",
         # Prevent GZip middleware from wrapping video stream and breaking ranges.
         "Content-Encoding": "identity",
@@ -4634,11 +5767,14 @@ async def proxy_file(
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename
     if cached_path.exists():
+        file_headers: Dict[str, str] = {"Cache-Control": "public, max-age=86400"}
+        if content_type == "model/gltf-binary":
+            file_headers["Content-Encoding"] = "identity"
         return FileResponse(
             cached_path,
             media_type=content_type,
             filename=clean_filename,
-            headers={"Cache-Control": "public, max-age=86400"}
+            headers=file_headers,
         )
     
     async def stream_file():
@@ -4649,13 +5785,16 @@ async def proxy_file(
                 async for chunk in response.aiter_bytes(chunk_size=65536):
                     yield chunk
     
+    stream_headers: Dict[str, str] = {
+        "Content-Disposition": f"attachment; filename={clean_filename}",
+        "Cache-Control": "public, max-age=86400",
+    }
+    if content_type == "model/gltf-binary":
+        stream_headers["Content-Encoding"] = "identity"
     return StreamingResponse(
         stream_file(),
         media_type=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename={clean_filename}",
-            "Cache-Control": "public, max-age=86400"
-        }
+        headers=stream_headers,
     )
 
 
@@ -4736,11 +5875,14 @@ async def proxy_file_by_name(
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename
     if cached_path.exists():
+        file_headers_dn: Dict[str, str] = {"Cache-Control": "public, max-age=86400"}
+        if content_type == "model/gltf-binary":
+            file_headers_dn["Content-Encoding"] = "identity"
         return FileResponse(
             cached_path,
             media_type=content_type,
             filename=clean_filename,
-            headers={"Cache-Control": "public, max-age=86400"}
+            headers=file_headers_dn,
         )
     
     async def stream_file():
@@ -4751,13 +5893,16 @@ async def proxy_file_by_name(
                 async for chunk in response.aiter_bytes(chunk_size=65536):
                     yield chunk
     
+    stream_headers_dn: Dict[str, str] = {
+        "Content-Disposition": f"attachment; filename={clean_filename}",
+        "Cache-Control": "public, max-age=86400",
+    }
+    if content_type == "model/gltf-binary":
+        stream_headers_dn["Content-Encoding"] = "identity"
     return StreamingResponse(
         stream_file(),
         media_type=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename={clean_filename}",
-            "Cache-Control": "public, max-age=86400"
-        }
+        headers=stream_headers_dn,
     )
 
 
@@ -4832,139 +5977,105 @@ async def api_task_cached_files(
     }
 
 
-@app.get("/api/task/{task_id}/downloads/archive/estimate")
-async def api_task_archive_estimate(
+async def _ensure_purchased_worker_bundle_zip_url(
+    db: AsyncSession,
+    user: Optional[User],
     task_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Approximate file count and total size for the full bundle ZIP (same rules as the archive:
-    all downloadable outputs + all ready custom animation FBX). Sizes use cache stat() or
-    HTTP HEAD Content-Length when available.
-    """
+    *,
+    verify_worker_byte: bool,
+) -> Tuple[Task, str]:
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status != "done":
-        return {
-            "task_id": task_id,
-            "file_count": 0,
-            "approx_bytes": None,
-            "approx_bytes_complete": False,
-        }
-    entries = await _collect_archive_bundle_entries(
-        task, db, "", include_all_ready_animations=True
-    )
-    approx, complete = await _estimate_archive_total_bytes(entries)
-    return {
-        "task_id": task_id,
-        "file_count": len(entries),
-        "approx_bytes": approx,
-        "approx_bytes_complete": complete,
-    }
+        raise HTTPException(status_code=400, detail="Task is not completed yet")
+    if not await _has_full_task_download_purchase(db, user, task_id):
+        raise HTTPException(status_code=402, detail="Full download purchase required")
+
+    zip_url = resolve_worker_full_bundle_zip_url(task)
+    if not zip_url:
+        raise HTTPException(status_code=404, detail="Worker bundle URL could not be resolved")
+
+    if verify_worker_byte:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream(
+                    "GET",
+                    zip_url,
+                    follow_redirects=True,
+                    headers={"Range": "bytes=0-0"},
+                ) as r:
+                    if r.status_code not in (200, 206):
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Worker bundle not available (HTTP {r.status_code})",
+                        )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Worker bundle check failed: {e}") from e
+
+    return task, zip_url
 
 
-@app.post("/api/task/{task_id}/downloads/archive/prepare")
-async def api_prepare_task_archive(
+@app.get("/api/task/{task_id}/downloads/bundle-url")
+async def api_task_worker_bundle_url(
     task_id: str,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Start building a single ZIP (no compression) of all downloadable task files
-    plus permitted custom animation FBX. Requires full-task download purchase.
+    Return absolute URL to the worker-hosted full bundle ZIP under /converter/glb/.
+    Requires full-task download purchase. Verifies presence via GET + Range (HEAD often 404s on static).
+    Browsers should download via GET /downloads/bundle (same-origin HTTPS) to avoid mixed-content warnings.
     """
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if not await _has_full_task_download_purchase(db, user, task_id):
-        raise HTTPException(status_code=402, detail="Full download purchase required")
-
-    job_id = str(uuid.uuid4())
-    _write_archive_job_state(
-        task_id,
-        job_id,
-        user_email=user.email,
-        percent=0,
-        phase="pending",
-        done=False,
-        error=None,
+    _, zip_url = await _ensure_purchased_worker_bundle_zip_url(
+        db, user, task_id, verify_worker_byte=True
     )
-    asyncio.create_task(_run_archive_bundle_job(task_id, job_id, user.email))
-    return {"job_id": job_id, "task_id": task_id}
+
+    return {"task_id": task_id, "url": zip_url}
 
 
-@app.get("/api/task/{task_id}/downloads/archive/status/{job_id}")
-async def api_task_archive_status(
+async def _stream_purchased_task_bundle_zip(
     task_id: str,
-    job_id: str,
-    user: Optional[User] = Depends(get_current_user),
-):
-    st = _read_archive_job_state(task_id, job_id)
-    if not st:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    if st.get("user_email") != user.email:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return {
-        "percent": int(st.get("percent", 0)),
-        "phase": st.get("phase", "pending"),
-        "done": bool(st.get("done", False)),
-        "error": st.get("error"),
-    }
-
-
-@app.get("/api/task/{task_id}/downloads/archive/file/{job_id}")
-async def api_task_archive_download(
-    task_id: str,
-    job_id: str,
-    user: Optional[User] = Depends(get_current_user),
-):
-    st = _read_archive_job_state(task_id, job_id)
-    if not st:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    if st.get("user_email") != user.email:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if st.get("error") and not st.get("done"):
-        raise HTTPException(status_code=400, detail=st.get("error") or "Archive failed")
-    if not st.get("done"):
-        raise HTTPException(status_code=400, detail="Archive not ready yet")
-    zip_str = st.get("zip_path")
-    if not zip_str:
-        raise HTTPException(status_code=404, detail="Archive path missing")
-    zip_path = Path(zip_str)
-    if not zip_path.is_file():
-        raise HTTPException(status_code=404, detail="Archive file not found")
-
-    json_path, _zp = _archive_job_paths(task_id, job_id)
-
-    def _cleanup_archive_files() -> None:
-        try:
-            if json_path.exists():
-                json_path.unlink()
-        except OSError:
-            pass
-        try:
-            if zip_path.exists():
-                zip_path.unlink()
-        except OSError:
-            pass
-
+    user: Optional[User],
+    db: AsyncSession,
+) -> StreamingResponse:
+    """Stream full-task ZIP from worker over HTTPS (same checks as bundle-url except byte probe)."""
+    task, zip_url = await _ensure_purchased_worker_bundle_zip_url(
+        db, user, task_id, verify_worker_byte=False
+    )
     from telegram_bot import broadcast_full_bundle_download
 
     asyncio.create_task(broadcast_full_bundle_download(task_id, user.email))
 
-    return FileResponse(
-        zip_path,
-        media_type="application/zip",
-        filename=f"{task_id}_autorig_bundle.zip",
-        background=BackgroundTask(_cleanup_archive_files),
-    )
+    safe_guid = (task.guid or task_id).strip()
+    filename = f"{safe_guid}.zip"
+    return await _proxy_model_file(zip_url, filename, as_attachment=True)
+
+
+@app.get("/api/task/{task_id}/downloads/bundle")
+async def api_task_download_bundle(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Stream worker ZIP over HTTPS (proxied). Same purchase checks as bundle-url; avoids http:// worker in the browser.
+    """
+    return await _stream_purchased_task_bundle_zip(task_id, user, db)
+
+
+@app.get("/api/task/{task_id}/bundle.zip")
+async def api_task_download_bundle_zip(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same as /downloads/bundle — stable path next to model.glb / prepared.glb (avoids missing route on some deploys)."""
+    return await _stream_purchased_task_bundle_zip(task_id, user, db)
 
 
 @app.get("/api/task/{task_id}/viewer")
@@ -5257,22 +6368,37 @@ def _resolve_worker_base_from_task(task) -> Optional[str]:
     return None
 
 
-async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
+# Skip GZipMiddleware for GLB: browsers send Accept-Encoding: gzip; streaming gzip
+# over HTTP/2 has caused ERR_HTTP2_PROTOCOL_ERROR in the wild (same idea as video proxy).
+_GLB_FILE_HTTP_HEADERS: Dict[str, str] = {
+    "Cache-Control": "public, max-age=86400",
+    "Access-Control-Allow-Origin": "*",
+    "Content-Encoding": "identity",
+}
+
+
+async def _proxy_model_file(
+    url: str,
+    filename: str,
+    *,
+    as_attachment: bool = False,
+) -> StreamingResponse:
     """Proxy a model file from worker with streaming.
-    
+
     Uses streaming to avoid timeout on slow workers.
-    GZip middleware will compress responses automatically.
+    Content-Encoding identity skips app-level gzip on binary streams.
     """
     # Determine content type
     ext = filename.split(".")[-1].lower()
     content_types = {
         "glb": "model/gltf-binary",
         "fbx": "application/octet-stream",
+        "zip": "application/zip",
     }
     content_type = content_types.get(ext, "application/octet-stream")
     
-    # Create client that lives through the response
-    client = httpx.AsyncClient(timeout=300.0, follow_redirects=True)
+    # Large ZIP bundles: allow long reads from worker (nginx should use long proxy_read_timeout too).
+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0), follow_redirects=True)
     try:
         req = client.build_request("GET", url)
         upstream = await client.send(req, stream=True)
@@ -5294,11 +6420,13 @@ async def _proxy_model_file(url: str, filename: str) -> StreamingResponse:
         finally:
             await client.aclose()
 
+    disp = "attachment" if as_attachment else "inline"
     headers = {
-        "Content-Disposition": f"inline; filename={filename}",
-        "Cache-Control": "public, max-age=86400",  # 24 hours cache
+        "Content-Disposition": f'{disp}; filename="{filename}"',
+        "Cache-Control": "private, max-age=0" if as_attachment else "public, max-age=86400",
         "Access-Control-Allow-Origin": "*",
-        "X-Content-Type-Options": "nosniff"
+        "X-Content-Type-Options": "nosniff",
+        "Content-Encoding": "identity",
     }
     content_length = upstream.headers.get("content-length")
     last_modified = upstream.headers.get("last-modified")
@@ -5471,6 +6599,320 @@ async def _delete_task_record_and_related(db: AsyncSession, task_id: str) -> Non
     await db.commit()
 
 
+async def admin_delete_task_full(db: AsyncSession, task_id: str) -> bool:
+    """Remove task files on disk and DB row + related rows. Returns True if the task existed."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        return False
+    _delete_task_artifacts(task)
+    await _delete_task_record_and_related(db, task_id)
+    return True
+
+
+async def process_stuck_hour_tasks(db: AsyncSession) -> int:
+    """
+    processing + 0 ready, no real progress for >= STUCK_HOUR_MINUTES:
+    requeue (admin-style) up to STUCK_HOUR_MAX_REQUEUES times, then delete task + artifacts.
+    """
+    now = datetime.utcnow()
+    r = await db.execute(select(Task).where(Task.status == "processing"))
+    processing = list(r.scalars().all())
+    to_requeue: List[Task] = []
+    to_delete_ids: List[str] = []
+    for task in processing:
+        if (task.ready_count or 0) != 0:
+            continue
+        if get_task_no_progress_minutes(task, now=now) < STUCK_HOUR_MINUTES:
+            continue
+        cnt = task.stuck_hour_requeue_count or 0
+        if cnt >= STUCK_HOUR_MAX_REQUEUES:
+            to_delete_ids.append(task.id)
+        else:
+            to_requeue.append(task)
+    actions = 0
+    for task in to_requeue:
+        try:
+            await admin_requeue_task_to_created(db, task)
+            task.stuck_hour_requeue_count = (task.stuck_hour_requeue_count or 0) + 1
+            actions += 1
+            print(
+                f"[StuckHour] Requeued {task.id} (stuck_hour_requeue_count={task.stuck_hour_requeue_count})"
+            )
+        except Exception as e:
+            print(f"[StuckHour] Requeue failed {task.id}: {e}")
+    if to_requeue:
+        await db.commit()
+    for tid in to_delete_ids:
+        try:
+            t = await get_task_by_id(db, tid)
+            if not t:
+                continue
+            _delete_task_artifacts(t)
+            await _delete_task_record_and_related(db, tid)
+            actions += 1
+            print(f"[StuckHour] Deleted {tid} (stuck_hour requeues exhausted)")
+        except Exception as e:
+            print(f"[StuckHour] Delete failed {tid}: {e}")
+    return actions
+
+
+def purge_task_cache_bundle_zips(
+    record_items: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[int, int]:
+    """
+    Remove regenerable **/*.zip under TASK_CACHE_DIR (full-task download bundles).
+    If record_items is a list, append the same entries cleanup_disk_space uses for admin summaries.
+    Returns (deleted_file_count, freed_bytes).
+    """
+    deleted = 0
+    freed = 0
+    if not TASK_CACHE_DIR.exists():
+        return deleted, freed
+    for zp in TASK_CACHE_DIR.rglob("*.zip"):
+        if not zp.is_file():
+            continue
+        try:
+            sz = zp.stat().st_size
+            zp.unlink()
+            deleted += 1
+            freed += sz
+            print(f"[Disk] Removed bundle zip {zp} ({sz / (1024**2):.1f} MB)")
+            if record_items is not None:
+                try:
+                    rel = str(zp.relative_to(TASK_CACHE_DIR))
+                except ValueError:
+                    rel = zp.name
+                record_items.append(
+                    {"path": rel, "type": "bundle_zip", "size_mb": sz / (1024**2)}
+                )
+        except Exception as e:
+            print(f"[Disk] Failed to remove zip {zp}: {e}")
+    return deleted, freed
+
+
+async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
+    """
+    Run when creating a new task: if free space on / is below NEW_TASK_MIN_FREE_GB,
+    first delete bundle ZIPs; if still low, delete oldest done/error tasks (DB + artifacts)
+    until free space target is met or NEW_TASK_PURGE_TASKS_MAX_FREED_GB of data was removed
+    in that second phase (whichever comes first).
+    """
+    target_bytes = NEW_TASK_MIN_FREE_GB * 1024 * 1024 * 1024
+    max_task_phase_bytes = NEW_TASK_PURGE_TASKS_MAX_FREED_GB * 1024 * 1024 * 1024
+
+    free_bytes = shutil.disk_usage("/").free
+    summary: Dict[str, Any] = {
+        "initial_free_gb": free_bytes / (1024**3),
+        "zips_deleted": 0,
+        "zip_freed_bytes": 0,
+        "tasks_purged": 0,
+        "task_phase_freed_bytes": 0,
+        "final_free_gb": free_bytes / (1024**3),
+    }
+
+    if free_bytes >= target_bytes:
+        return summary
+
+    zd, zb = purge_task_cache_bundle_zips()
+    summary["zips_deleted"] = zd
+    summary["zip_freed_bytes"] = zb
+
+    free_bytes = shutil.disk_usage("/").free
+    summary["final_free_gb"] = free_bytes / (1024**3)
+    if free_bytes >= target_bytes:
+        if zd:
+            print(
+                f"[NewTask Disk] ZIP purge: removed {zd} file(s), "
+                f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB)"
+            )
+        return summary
+
+    task_phase_freed = 0
+    res = await db.execute(
+        select(Task)
+        .where(Task.status.in_(["done", "error"]))
+        .order_by(Task.created_at.asc().nulls_last())
+    )
+    candidates: List[Task] = list(res.scalars().all())
+
+    for task in candidates:
+        free_bytes = shutil.disk_usage("/").free
+        if free_bytes >= target_bytes:
+            break
+        if task_phase_freed >= max_task_phase_bytes:
+            print(
+                f"[NewTask Disk] Task purge cap reached "
+                f"({task_phase_freed / (1024**3):.2f} / {NEW_TASK_PURGE_TASKS_MAX_FREED_GB} GB); "
+                f"free {free_bytes / (1024**3):.2f} GB"
+            )
+            break
+
+        _del_n, f_bytes = _delete_task_artifacts(task)
+        try:
+            await _delete_task_record_and_related(db, task.id)
+            summary["tasks_purged"] += 1
+            task_phase_freed += f_bytes
+            summary["task_phase_freed_bytes"] = task_phase_freed
+            print(
+                f"[NewTask Disk] Purged oldest terminal task {task.id} ({task.status}), "
+                f"~{f_bytes / (1024**2):.1f} MB artifacts"
+            )
+        except Exception as e:
+            await db.rollback()
+            print(f"[NewTask Disk] Failed to purge task {task.id}: {e}")
+
+    free_bytes = shutil.disk_usage("/").free
+    summary["final_free_gb"] = free_bytes / (1024**3)
+    if summary["zips_deleted"] or summary["tasks_purged"]:
+        print(
+            f"[NewTask Disk] Headroom pass done: zips={summary['zips_deleted']}, "
+            f"tasks={summary['tasks_purged']}, free now {summary['final_free_gb']:.2f} GB "
+            f"(target {NEW_TASK_MIN_FREE_GB} GB)"
+        )
+    if free_bytes < target_bytes:
+        try:
+            from telegram_bot import broadcast_disk_space_low
+
+            await broadcast_disk_space_low(
+                free_gb=summary["final_free_gb"],
+                target_gb=NEW_TASK_MIN_FREE_GB,
+                zips_deleted=summary["zips_deleted"],
+                tasks_purged=summary["tasks_purged"],
+            )
+        except Exception as e:
+            print(f"[NewTask Disk] Telegram disk-low notify failed: {e}")
+    return summary
+
+
+def _parse_uuid_dirname(name: str) -> Optional[uuid.UUID]:
+    try:
+        return uuid.UUID(name)
+    except ValueError:
+        return None
+
+
+async def get_effective_task_cache_max_gb(db: AsyncSession) -> float:
+    row = await get_or_create_admin_overlay_counters(db)
+    v = getattr(row, "task_cache_max_gb", None)
+    if v is None or (isinstance(v, (int, float)) and float(v) <= 0):
+        return float(TASK_CACHE_MAX_GB)
+    return float(v)
+
+
+async def _task_cache_eviction_candidates(
+    db: AsyncSession,
+) -> List[Tuple[float, str]]:
+    """
+    Directories under TASK_CACHE_DIR that may be removed for cache cap enforcement.
+    Skips created/processing. Oldest-first sort key (unix timestamp).
+    """
+    if not TASK_CACHE_DIR.exists():
+        return []
+    subs = [p for p in TASK_CACHE_DIR.iterdir() if p.is_dir()]
+    uuid_names: List[str] = []
+    for p in subs:
+        u = _parse_uuid_dirname(p.name)
+        if u is not None:
+            uuid_names.append(p.name)
+    task_map: Dict[str, Task] = {}
+    if uuid_names:
+        res = await db.execute(select(Task).where(Task.id.in_(uuid_names)))
+        for t in res.scalars().all():
+            task_map[t.id] = t
+
+    out: List[Tuple[float, str]] = []
+    for p in subs:
+        u = _parse_uuid_dirname(p.name)
+        if u is None:
+            try:
+                out.append((p.stat().st_mtime, p.name))
+            except OSError:
+                pass
+            continue
+        tid = p.name
+        task = task_map.get(tid)
+        if task is None:
+            try:
+                out.append((p.stat().st_mtime, p.name))
+            except OSError:
+                pass
+            continue
+        if task.status in ("created", "processing"):
+            continue
+        tdt = task.updated_at or task.created_at
+        if tdt is None:
+            try:
+                out.append((p.stat().st_mtime, p.name))
+            except OSError:
+                pass
+        else:
+            ca = tdt
+            if ca.tzinfo is not None:
+                ca = ca.astimezone(timezone.utc).replace(tzinfo=None)
+            out.append((ca.timestamp(), p.name))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+async def enforce_task_cache_max_size(db: AsyncSession) -> Dict[str, Any]:
+    """
+    Before a new task: if static/tasks total exceeds the configured cap, remove whole
+    task directories oldest-first. Never deletes cache for tasks in created/processing.
+    If still over cap after dirs, strips regenerable bundle zips (same as headroom pass).
+    """
+    max_gb = await get_effective_task_cache_max_gb(db)
+    if max_gb <= 0:
+        return {"skipped": True, "reason": "cap_disabled"}
+    cap_bytes = int(max_gb * 1024 * 1024 * 1024)
+    total = _dir_size_bytes(TASK_CACHE_DIR)
+    summary: Dict[str, Any] = {
+        "cap_gb": round(max_gb, 4),
+        "initial_bytes": total,
+        "dirs_removed": 0,
+        "bytes_freed_dirs": 0,
+        "zips_deleted": 0,
+        "zip_freed_bytes": 0,
+        "final_bytes": total,
+    }
+    if total <= cap_bytes:
+        return summary
+
+    safety = 0
+    while _dir_size_bytes(TASK_CACHE_DIR) > cap_bytes:
+        safety += 1
+        if safety > 50000:
+            print("[TaskCacheCap] Safety stop: too many iterations")
+            break
+        candidates = await _task_cache_eviction_candidates(db)
+        if not candidates:
+            break
+        _ts, dirname = candidates[0]
+        target = TASK_CACHE_DIR / dirname
+        if not target.is_dir():
+            continue
+        try:
+            before = _dir_size_bytes(target)
+            shutil.rmtree(target)
+            summary["dirs_removed"] += 1
+            summary["bytes_freed_dirs"] += before
+            print(
+                f"[TaskCacheCap] Removed {dirname} (~{before / (1024**2):.1f} MB), "
+                f"task_cache now ~{_dir_size_bytes(TASK_CACHE_DIR) / (1024**3):.2f} GB (cap {max_gb} GB)"
+            )
+        except OSError as e:
+            print(f"[TaskCacheCap] Failed to remove {target}: {e}")
+            break
+
+    total = _dir_size_bytes(TASK_CACHE_DIR)
+    summary["final_bytes"] = total
+    if total > cap_bytes:
+        zd, zb = purge_task_cache_bundle_zips()
+        summary["zips_deleted"] = zd
+        summary["zip_freed_bytes"] = zb
+        summary["final_bytes"] = _dir_size_bytes(TASK_CACHE_DIR)
+    return summary
+
+
 async def purge_tasks_without_poster_and_video(db: AsyncSession) -> dict:
     """
     Delete terminal tasks (done/error) with no poster-like URL in ready_urls/output_urls.
@@ -5604,10 +7046,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
                     path=str(cache_path),
                     media_type="model/gltf-binary",
                     filename=f"{task_id}_{cache_name}.glb",
-                    headers={
-                        "Cache-Control": "public, max-age=86400",
-                        "Access-Control-Allow-Origin": "*",
-                    }
+                    headers=dict(_GLB_FILE_HTTP_HEADERS),
                 )
         except Exception as e:
             print(f"[GLB Cache] Error validating cached file: {e}")
@@ -5640,10 +7079,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
                 path=str(cache_path),
                 media_type="model/gltf-binary",
                 filename=f"{task_id}_{cache_name}.glb",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "Access-Control-Allow-Origin": "*",
-                }
+                headers=dict(_GLB_FILE_HTTP_HEADERS),
             )
     except Exception as e:
         print(f"[GLB Cache] Failed to cache {cache_name} for {task_id}: {e}")
@@ -5690,10 +7126,7 @@ async def api_proxy_animations_glb(
             path=str(cache_path),
             media_type="model/gltf-binary",
             filename=f"{task_id}_animations.glb",
-            headers={
-                "Cache-Control": "public, max-age=86400",
-                "Access-Control-Allow-Origin": "*",
-            }
+            headers=dict(_GLB_FILE_HTTP_HEADERS),
         )
     
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
@@ -5714,6 +7147,33 @@ async def api_proxy_animations_glb(
     raise HTTPException(status_code=404, detail="Animations GLB not available yet")
 
 
+@app.head("/api/task/{task_id}/animations.fbx")
+async def api_head_animations_fbx(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Check whether the package-level FBX animation file is available."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    animations_url, filename = _resolve_all_animations_fbx_url(task)
+    if not animations_url or not filename:
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+    if not await _worker_file_available(animations_url):
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+
+    return Response(
+        status_code=200,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @app.get("/api/task/{task_id}/animations.fbx")
 async def api_proxy_animations_fbx(
     task_id: str,
@@ -5724,25 +7184,10 @@ async def api_proxy_animations_fbx(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.guid or not task.worker_api:
-        raise HTTPException(status_code=404, detail="Model not available yet")
-    
-    from workers import get_worker_base_url
-    worker_base = get_worker_base_url(task.worker_api)
-    
-    # Try to find animations FBX in ready_urls (_all_animations_unity.fbx)
-    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations_unity.fbx")
-    if animations_url:
-        return await _proxy_model_file(animations_url, f"{task_id}_animations.fbx")
-    
-    # Try alternative pattern (_all_animations.fbx)
-    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations.fbx")
-    if animations_url:
-        return await _proxy_model_file(animations_url, f"{task_id}_animations.fbx")
-    
-    # Try to construct URL based on GUID pattern
-    fbx_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_100k/{task.guid}_all_animations_unity.fbx"
-    return await _proxy_model_file(fbx_url, f"{task_id}_animations.fbx")
+    animations_url, filename = _resolve_all_animations_fbx_url(task)
+    if not animations_url or not filename:
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+    return await _proxy_model_file(animations_url, filename, as_attachment=True)
 
 
 @app.get("/api/task/{task_id}/prepared.glb")
@@ -5764,10 +7209,7 @@ async def api_proxy_prepared_glb(
             path=str(cache_path),
             media_type="model/gltf-binary",
             filename=f"{task_id}_prepared.glb",
-            headers={
-                "Cache-Control": "public, max-age=86400",
-                "Access-Control-Allow-Origin": "*",
-            }
+            headers=dict(_GLB_FILE_HTTP_HEADERS),
         )
     
     # 1. Try to find _model_prepared.glb in ready_urls (best option for preview)
@@ -5797,6 +7239,9 @@ async def api_proxy_prepared_glb(
     raise HTTPException(status_code=404, detail="Prepared model not available yet")
 
 
+@app.head("/thumb/{task_id}")
+@app.get("/thumb/{task_id}")
+@app.head("/api/thumb/{task_id}")
 @app.get("/api/thumb/{task_id}")
 async def api_proxy_thumb(
     task_id: str,
@@ -6030,7 +7475,8 @@ async def api_free3d_glb(guid: str, filename: str):
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "public, max-age=86400",
-            "Access-Control-Allow-Origin": "*"
+            "Access-Control-Allow-Origin": "*",
+            "Content-Encoding": "identity",
         }
     )
 
@@ -6410,6 +7856,37 @@ TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:
+    """Sum of file sizes under static/tasks/{task_id}/ when cache exists."""
+    d = TASK_CACHE_DIR / task_id
+    if not d.is_dir():
+        return None
+    total = 0
+    try:
+        for p in d.rglob("*"):
+            if p.is_file():
+                total += p.stat().st_size
+    except OSError:
+        return None
+    return total if total > 0 else None
+
+
+def _task_age_seconds(created_at: Optional[datetime]) -> int:
+    """Elapsed whole seconds from task creation to current UTC time (server clock)."""
+    if created_at is None:
+        return 0
+    try:
+        now = datetime.now(timezone.utc)
+        ca = created_at
+        if ca.tzinfo is None:
+            ca = ca.replace(tzinfo=timezone.utc)
+        else:
+            ca = ca.astimezone(timezone.utc)
+        return max(0, int((now - ca).total_seconds()))
+    except Exception:
+        return 0
+
+
 # =============================================================================
 # Task File Caching (replaces ZIP downloads)
 # =============================================================================
@@ -6569,6 +8046,24 @@ async def cleanup_disk_space(
         return result
 
     print(f"[Disk Cleanup] Free space {free_bytes / (1024**3):.2f} GB < {min_free_gb} GB target. Starting cleanup...")
+
+    # Step 0: "Download all" bundle ZIPs under task cache are regenerable and can accumulate
+    # to many GB; remove them before orphan/task DB cleanup.
+    zd, zb = purge_task_cache_bundle_zips(record_items=result["deleted_items"])
+    result["deleted_count"] += zd
+    result["freed_bytes"] += zb
+
+    disk_usage = shutil.disk_usage("/")
+    free_bytes = disk_usage.free
+    if free_bytes >= min_free_bytes:
+        result["freed_gb"] = result["freed_bytes"] / (1024**3)
+        result["final_free_gb"] = free_bytes / (1024**3)
+        if result["deleted_count"] > 0:
+            print(
+                f"[Disk Cleanup] Target reached after bundle ZIP purge: "
+                f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
+            )
+        return result
 
     age_cutoff = datetime.utcnow() - timedelta(hours=min_age_hours)
     age_cutoff_timestamp = age_cutoff.timestamp()
@@ -6756,6 +8251,23 @@ async def cleanup_disk_space(
     return result
 
 
+@app.get("/skill.md")
+async def serve_skill_md():
+    for p in _skill_md_candidate_paths():
+        if p.is_file():
+            return FileResponse(p, media_type="text/markdown; charset=utf-8")
+    raise HTTPException(status_code=404, detail="skill.md not found")
+
+
+@app.get("/llm.txt")
+async def serve_llm_txt():
+    """Root llm.txt for crawlers and LLM tooling (plain-text site summary + links)."""
+    path = STATIC_DIR / "llm.txt"
+    if path.is_file():
+        return FileResponse(str(path), media_type="text/plain; charset=utf-8")
+    raise HTTPException(status_code=404, detail="llm.txt not found")
+
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -6787,18 +8299,31 @@ async def task_page(
     task_html_path = STATIC_DIR / "task.html"
     html_content = task_html_path.read_text(encoding="utf-8")
     
-    # If no task_id, return default page
+    # If no task_id, return default page (non-indexable)
     if not id:
+        html_content = html_content.replace(
+            "<!-- TASK_SEO_PLACEHOLDER -->",
+            f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
+        )
         return HTMLResponse(content=html_content)
     
-    task_id = id
-    base_url = APP_URL or "https://autorig.online"
+    task_id = id.strip()
+    if not task_id:
+        html_content = html_content.replace(
+            "<!-- TASK_SEO_PLACEHOLDER -->",
+            f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
+        )
+        return HTMLResponse(content=html_content)
+
+    base_url = (APP_URL or "https://autorig.online").rstrip("/")
+    task_url = f"{base_url}/task?id={task_id}"
     
     # Try to get task info for better OG tags
     task_title = "Rigged 3D Model"
     task_description = "View this rigged 3D character with 50+ animations"
     has_video = False
     has_thumb = False
+    task = None
     
     try:
         from database import Task
@@ -6824,12 +8349,19 @@ async def task_page(
             has_thumb = bool(task.ready_urls)
     except Exception as e:
         print(f"[Task Page] Error getting task info: {e}")
+
+    if not task:
+        html_content = html_content.replace(
+            "<!-- TASK_SEO_PLACEHOLDER -->",
+            f'<link rel="canonical" href="{base_url}/task">',
+        )
+        return HTMLResponse(content=html_content)
     
     # Build OG meta tags
     og_tags = f'''
     <!-- Open Graph / Telegram / Social -->
     <meta property="og:type" content="{'video.other' if has_video else 'website'}">
-    <meta property="og:url" content="{base_url}/task?id={task_id}">
+    <meta property="og:url" content="{task_url}">
     <meta property="og:title" content="{task_title} | AutoRig.online">
     <meta property="og:description" content="{task_description}">
     <meta property="og:site_name" content="AutoRig.online">'''
@@ -6869,10 +8401,14 @@ async def task_page(
     <meta name="twitter:description" content="{task_description}">
     '''
     
-    # Inject OG tags after <meta name="robots">
+    # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
     html_content = html_content.replace(
         '<meta name="robots" content="noindex, nofollow">',
-        f'<meta name="robots" content="noindex, nofollow">{og_tags}'
+        '<meta name="robots" content="index, follow">',
+    )
+    html_content = html_content.replace(
+        "<!-- TASK_SEO_PLACEHOLDER -->",
+        f'<link rel="canonical" href="{task_url}">\n    {og_tags}',
     )
     
     # Update <title> tag to be dynamic
@@ -6957,7 +8493,7 @@ async def api_purchase_intent(
 @app.get("/admin")
 async def admin_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin page"""
-    if not user or user.email not in ADMIN_EMAILS:
+    if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
     return FileResponse(str(STATIC_DIR / "admin.html"))
 
@@ -6965,7 +8501,7 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
 @app.get("/admin/workers")
 async def admin_workers_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin workers page (dedicated)."""
-    if not user or user.email not in ADMIN_EMAILS:
+    if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
     return FileResponse(str(STATIC_DIR / "admin-workers.html"))
 
@@ -7040,6 +8576,18 @@ async def how_it_works_page():
 async def faq_page():
     """FAQ page"""
     return FileResponse(str(STATIC_DIR / "faq.html"))
+
+
+@app.get("/terms")
+async def terms_of_use_page():
+    """Terms of Use (website)."""
+    return FileResponse(str(STATIC_DIR / "terms-of-use.html"))
+
+
+@app.get("/user-agreement")
+async def user_agreement_page():
+    """User Agreement (content license, previews, promotional use)."""
+    return FileResponse(str(STATIC_DIR / "user-agreement.html"))
 
 
 @app.get("/guides")
@@ -7222,13 +8770,137 @@ async def auto_rig_obj_hi_page():
 
 
 # Sitemap and robots.txt
+@app.head("/sitemap.xml")
 @app.get("/sitemap.xml")
-async def sitemap():
-    """Serve sitemap.xml for SEO"""
-    return FileResponse(
-        str(STATIC_DIR / "sitemap.xml"),
-        media_type="application/xml"
+async def sitemap_index(db: AsyncSession = Depends(get_db)):
+    """
+    Sitemap index: static marketing pages + public /m/{id} urlsets by part.
+    """
+    from seo_gallery import (
+        build_sitemap_index_xml,
+        gallery_sitemap_all_index_part_count,
+        video_sitemap_entry_count,
     )
+
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    child_locs: List[Tuple[str, Optional[datetime]]] = [(f"{base}/sitemap/pages.xml", None)]
+    n_parts = await gallery_sitemap_all_index_part_count(db)
+    for p in range(n_parts):
+        child_locs.append((f"{base}/sitemap/gallery/part/{p}.xml", None))
+    n_video_entries = await video_sitemap_entry_count(db)
+    if n_video_entries > 0:
+        child_locs.append((f"{base}/sitemap/videos.xml", None))
+    xml = build_sitemap_index_xml(base, child_locs)
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/sitemap/pages.xml")
+@app.get("/sitemap/pages.xml")
+async def sitemap_pages():
+    """Marketing / guide urlset (was static/sitemap.xml)."""
+    path = STATIC_DIR / "sitemap-pages.xml"
+    if not path.is_file():
+        return FileResponse(
+            str(STATIC_DIR / "sitemap.xml"),
+            media_type="application/xml",
+        )
+    return FileResponse(str(path), media_type="application/xml")
+
+
+@app.head("/sitemap-mirror.xml")
+@app.get("/sitemap-mirror.xml")
+async def sitemap_mirror(db: AsyncSession = Depends(get_db)):
+    """
+    Mirror sitemap index from the latest daily refresh (`backend/scripts/daily_sitemap_refresh.py`).
+    Falls back to live /sitemap.xml when mirror file is absent.
+    """
+    mirror_path = BASE_DIR / "backend" / "data" / "sitemap_generated" / "sitemap.xml"
+    if mirror_path.is_file():
+        return FileResponse(str(mirror_path), media_type="application/xml; charset=utf-8")
+    return await sitemap_index(db)
+
+
+@app.head("/sitemap/gallery/part/{part}.xml")
+@app.get("/sitemap/gallery/part/{part}.xml")
+async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(get_db)):
+    """Chunk (max 50) of public /m/{task_id} URLs (no SEO gate)."""
+    from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_all_part
+
+    if part < 0:
+        raise HTTPException(status_code=404, detail="Invalid sitemap chunk")
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    urls = await gallery_sitemap_urls_for_all_part(db, part)
+    if not urls:
+        raise HTTPException(status_code=404, detail="Empty sitemap chunk")
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/sitemap/gallery/indexing/part/{part}.xml")
+@app.get("/sitemap/gallery/indexing/part/{part}.xml")
+async def sitemap_gallery_indexing_part_only(part: int, db: AsyncSession = Depends(get_db)):
+    """SEO-gated chunk (max 50) of /m/{task_id} URLs."""
+    from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_indexing_part
+
+    if part < 0:
+        raise HTTPException(status_code=404, detail="Invalid sitemap chunk")
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    urls = await gallery_sitemap_urls_for_indexing_part(db, part)
+    if not urls:
+        raise HTTPException(status_code=404, detail="Empty sitemap chunk")
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/sitemap/videos.xml")
+@app.get("/sitemap/videos.xml")
+async def sitemap_videos(db: AsyncSession = Depends(get_db)):
+    """Google Video sitemap for public model pages with uploaded YouTube previews."""
+    from seo_gallery import build_video_sitemap_xml, video_sitemap_entries
+
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    entries = await video_sitemap_entries(db)
+    if not entries:
+        raise HTTPException(status_code=404, detail="Empty video sitemap")
+    xml = build_video_sitemap_xml(base, entries)
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/m/{task_id}", response_class=HTMLResponse)
+@app.get("/m/{task_id}", response_class=HTMLResponse)
+async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Lightweight indexable landing: poster + LLM metadata + link to full /task viewer.
+    Gallery-eligible tasks only; adult-rated tasks excluded (same as sitemap).
+    """
+    from seo_gallery import (
+        build_public_model_page_html,
+        enrich_seo_metadata,
+        load_task_for_public_model_page,
+    )
+
+    task = await load_task_for_public_model_page(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Not found")
+    base = APP_URL or "https://autorig.online"
+    title, desc, keywords, semantic = enrich_seo_metadata(task)
+    youtube_video_id = (getattr(task, "youtube_video_id", None) or "").strip()
+    youtube_uploaded = (
+        str(getattr(task, "youtube_upload_status", "") or "").strip().lower() == "uploaded"
+        and bool(youtube_video_id)
+    )
+    html_page = build_public_model_page_html(
+        base,
+        task_id,
+        title,
+        desc,
+        keywords,
+        semantic_section=semantic,
+        youtube_video_id=youtube_video_id,
+        youtube_video_uploaded=youtube_uploaded,
+        last_modified=task.updated_at,
+    )
+    return HTMLResponse(content=html_page)
 
 
 @app.get("/robots.txt")
@@ -7528,261 +9200,3 @@ async def add_model_to_scene(
     scene.task_ids = task_ids
     
     # Add transform
-    transforms = scene.transforms
-    if request.transform:
-        transforms[request.task_id] = {
-            "position": request.transform.position,
-            "rotation": request.transform.rotation,
-            "scale": request.transform.scale
-        }
-    else:
-        # Default position offset based on number of models
-        offset_x = len(task_ids) * 2
-        transforms[request.task_id] = {"position": [offset_x, 0, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1]}
-    scene.transforms = transforms
-    
-    scene.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(scene)
-    
-    # Build model info
-    models = []
-    for tid in scene.task_ids:
-        t = await db.execute(select(Task).where(Task.id == tid))
-        t = t.scalar_one_or_none()
-        if t:
-            models.append(SceneModelInfo(
-                task_id=tid,
-                input_url=t.input_url,
-                glb_url=f"/api/task/{tid}/prepared.glb" if t.status == "done" else None,
-                transform=TransformData(**transforms.get(tid, {}))
-            ))
-    
-    return SceneResponse(
-        scene_id=scene.id,
-        name=scene.name,
-        task_ids=scene.task_ids,
-        transforms=scene.transforms,
-        hierarchy=scene.hierarchy,
-        models=models,
-        is_public=scene.is_public,
-        like_count=scene.like_count,
-        liked_by_me=False,
-        owner_type=scene.owner_type,
-        owner_id=scene.owner_id,
-        created_at=scene.created_at,
-        updated_at=scene.updated_at
-    )
-
-
-@app.delete("/api/scene/{scene_id}/model/{task_id}")
-async def remove_model_from_scene(
-    scene_id: str,
-    task_id: str,
-    req: Request,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Remove a model from a scene"""
-    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
-    scene = scene.scalar_one_or_none()
-    if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
-    
-    # Check ownership
-    anon_id = _effective_anon_id(req)
-    
-    is_owner = False
-    if scene.owner_type == "user" and user and user.email == scene.owner_id:
-        is_owner = True
-    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
-        is_owner = True
-    
-    if not is_owner:
-        raise HTTPException(status_code=403, detail="Only scene owner can remove models")
-    
-    task_ids = scene.task_ids
-    if task_id not in task_ids:
-        raise HTTPException(status_code=404, detail="Task not in scene")
-    
-    if len(task_ids) <= 1:
-        raise HTTPException(status_code=400, detail="Scene must have at least one model")
-    
-    task_ids.remove(task_id)
-    scene.task_ids = task_ids
-    
-    # Remove transform
-    transforms = scene.transforms
-    transforms.pop(task_id, None)
-    scene.transforms = transforms
-    
-    scene.updated_at = datetime.utcnow()
-    await db.commit()
-    
-    return {"status": "ok", "removed_task_id": task_id}
-
-
-@app.post("/api/scene/{scene_id}/like", response_model=SceneLikeResponse)
-async def like_scene(
-    scene_id: str,
-    req: Request,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Like/unlike a scene"""
-    if not user:
-        raise HTTPException(status_code=401, detail="Login required to like scenes")
-    
-    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
-    scene = scene.scalar_one_or_none()
-    if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
-    
-    # Check existing like
-    existing = await db.execute(
-        select(SceneLike).where(
-            SceneLike.scene_id == scene_id,
-            SceneLike.user_email == user.email
-        )
-    )
-    existing = existing.scalar_one_or_none()
-    
-    if existing:
-        # Unlike
-        await db.delete(existing)
-        scene.like_count = max(0, scene.like_count - 1)
-        liked_by_me = False
-    else:
-        # Like
-        like = SceneLike(scene_id=scene_id, user_email=user.email)
-        db.add(like)
-        scene.like_count += 1
-        liked_by_me = True
-    
-    await db.commit()
-    await db.refresh(scene)
-    
-    return SceneLikeResponse(
-        scene_id=scene.id,
-        like_count=scene.like_count,
-        liked_by_me=liked_by_me
-    )
-
-
-@app.get("/api/scenes", response_model=SceneListResponse)
-async def list_scenes(
-    req: Request,
-    page: int = 1,
-    per_page: int = 20,
-    public_only: bool = False,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """List user's scenes or public scenes"""
-    anon_id = _effective_anon_id(req)
-    
-    from sqlalchemy import func, desc
-    
-    query = select(Scene)
-    
-    if public_only:
-        query = query.where(Scene.is_public == True)
-    else:
-        # User's own scenes
-        if user:
-            query = query.where(Scene.owner_type == "user", Scene.owner_id == user.email)
-        elif anon_id:
-            query = query.where(Scene.owner_type == "anon", Scene.owner_id == anon_id)
-        else:
-            return SceneListResponse(scenes=[], total=0, page=page, per_page=per_page)
-    
-    # Count total
-    count_query = select(func.count()).select_from(query.subquery())
-    total = (await db.execute(count_query)).scalar()
-    
-    # Paginate
-    query = query.order_by(desc(Scene.updated_at)).offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(query)
-    scenes = result.scalars().all()
-    
-    items = [
-        SceneListItem(
-            scene_id=s.id,
-            name=s.name,
-            task_count=len(s.task_ids),
-            is_public=s.is_public,
-            like_count=s.like_count,
-            created_at=s.created_at
-        )
-        for s in scenes
-    ]
-    
-    return SceneListResponse(
-        scenes=items,
-        total=total,
-        page=page,
-        per_page=per_page
-    )
-
-
-@app.delete("/api/scene/{scene_id}")
-async def delete_scene(
-    scene_id: str,
-    req: Request,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Delete a scene"""
-    scene = await db.execute(select(Scene).where(Scene.id == scene_id))
-    scene = scene.scalar_one_or_none()
-    if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
-    
-    # Check ownership
-    anon_id = _effective_anon_id(req)
-    
-    is_owner = False
-    if scene.owner_type == "user" and user and user.email == scene.owner_id:
-        is_owner = True
-    elif scene.owner_type == "anon" and anon_id == scene.owner_id:
-        is_owner = True
-    
-    # Admins can delete any scene
-    if user and user.is_admin:
-        is_owner = True
-    
-    if not is_owner:
-        raise HTTPException(status_code=403, detail="Only scene owner can delete")
-    
-    # Delete likes
-    await db.execute(
-        SceneLike.__table__.delete().where(SceneLike.scene_id == scene_id)
-    )
-    
-    await db.delete(scene)
-    await db.commit()
-    
-    return {"status": "ok", "deleted_scene_id": scene_id}
-
-
-# =============================================================================
-# Health Check
-# =============================================================================
-@app.get("/health")
-async def health():
-    """Health check endpoint"""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
-
-
-# =============================================================================
-# Run
-# =============================================================================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=DEBUG
-    )
-

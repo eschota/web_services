@@ -3,7 +3,7 @@ Task management for AutoRig Online
 """
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple, List
 from urllib.parse import urlparse
 
@@ -20,6 +20,11 @@ from workers import (
     get_worker_base_url,
     get_configured_workers,
     normalize_task_type,
+    GlobalQueueStatus,
+    get_worker_active_lookup,
+    lookup_worker_queue_entry,
+    task_visible_on_worker_refs,
+    find_worker_queue_status_for_task,
 )
 
 
@@ -70,6 +75,22 @@ def find_file_by_pattern(ready_urls: List[str], pattern: str, quality: str = "10
                 if fallback_folder in url and pattern in url:
                     return url
     
+    return None
+
+
+def resolve_prepared_glb_source_url(task: Task) -> Optional[str]:
+    """
+    Best URL for Auto Convert input: rigged prepared GLB (same sources as /api/task/.../prepared.glb).
+    """
+    for url in task.ready_urls or []:
+        u = (url or "").strip()
+        if "_model_prepared.glb" in u.lower():
+            return u
+    if task.guid and task.worker_api:
+        wb = get_worker_base_url(task.worker_api)
+        return f"{wb}/converter/glb/{task.guid}/{task.guid}_model_prepared.glb"
+    if task.fbx_glb_output_url and task.fbx_glb_ready:
+        return (task.fbx_glb_output_url or "").strip() or None
     return None
 
 
@@ -133,7 +154,8 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
                     result = await send_task_to_worker(
                         task.worker_api,
                         task.fbx_glb_output_url,
-                        task.input_type or "t_pose"
+                        task.input_type or "t_pose",
+                        pipeline_kind="rig",
                     )
                     if not result.success:
                         task.status = "error"
@@ -181,12 +203,23 @@ async def create_conversion_task(
     owner_id: str,
     *,
     created_via_api: bool = False,
+    pipeline_kind: str = "rig",
+    input_bytes: Optional[int] = None,
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
     Returns: (task, error_message)
     """
     task_type = normalize_task_type(task_type)
+    pk = (pipeline_kind or "rig").strip().lower()
+    if pk not in ("rig", "convert"):
+        pk = "rig"
+
+    from main import ensure_disk_headroom_for_new_task, enforce_task_cache_max_size
+
+    await enforce_task_cache_max_size(db)
+    await ensure_disk_headroom_for_new_task(db)
+
     # Create task record
     task_id = str(uuid.uuid4())
     task = Task(
@@ -197,6 +230,8 @@ async def create_conversion_task(
         input_type=task_type,
         status="created",
         created_via_api=created_via_api,
+        pipeline_kind=pk,
+        input_bytes=input_bytes,
     )
 
     db.add(task)
@@ -220,8 +255,13 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     await db.commit()
     await db.refresh(task)
 
+    pk = getattr(task, "pipeline_kind", None) or "rig"
+    if pk not in ("rig", "convert"):
+        pk = "rig"
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
-    result = await send_task_to_worker(worker_url, task.input_url, task.input_type or "t_pose")
+    result = await send_task_to_worker(
+        worker_url, task.input_url, task.input_type or "t_pose", pipeline_kind=pk
+    )
     if not result.success:
         task.status = "error"
         task.error_message = result.error
@@ -323,14 +363,22 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         if task.total_count > 0 and task.ready_count >= task.total_count:
             task.status = "done"
     
-    # Check video availability (for both processing and done tasks)
-    if task.guid and not task.video_ready:
+    # Video: prefer _video_small.mp4 for site proxy; upgrade from large when small appears later.
+    if task.guid and task.worker_api:
         worker_base = get_worker_base_url(task.worker_api)
-        video_ready, video_url = await check_video_availability(task.guid, worker_base)
-        if video_ready:
-            task.video_ready = True
-            task.video_url = video_url
-            task.updated_at = datetime.utcnow()
+        if worker_base:
+            if task.video_url and "_video_small.mp4" in task.video_url:
+                if not task.video_ready:
+                    task.video_ready = True
+                    task.updated_at = datetime.utcnow()
+            else:
+                video_ready, video_url = await check_video_availability(task.guid, worker_base)
+                if video_ready and video_url:
+                    changed = (not task.video_ready) or (task.video_url != video_url)
+                    if changed:
+                        task.video_ready = True
+                        task.video_url = video_url
+                        task.updated_at = datetime.utcnow()
     
     await db.commit()
     await db.refresh(task)
@@ -377,64 +425,73 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             asyncio.create_task(cache_task_files(task.id, task.ready_urls, task.guid))
         except Exception as e:
             print(f"[Tasks] Failed to cache files for task {task.id}: {e}")
+    if was_processing and task.status == "done":
         try:
             from content_moderation import schedule_task_poster_classification
 
             schedule_task_poster_classification(task.id)
         except Exception as e:
             print(f"[Tasks] Failed to schedule poster classification for task {task.id}: {e}")
-    
-    # Telegram notification if task just completed
+
+    # GA4 rig_completed (fires when task reaches done; Telegram done waits on poster classification)
     if was_processing and task.status == "done":
         try:
-            from telegram_bot import broadcast_task_done
-            from sqlalchemy import update
-            
-            # Atomic check-and-set to prevent duplicate notifications
-            now = datetime.utcnow()
-            stmt = (
-                update(Task)
-                .where(Task.id == task.id)
-                .where(Task.telegram_done_notified_at.is_(None))
-                .values(telegram_done_notified_at=now)
-            )
-            res = await db.execute(stmt)
-            await db.commit()
-            
-            if res.rowcount == 1:
-                duration = None
-                if task.created_at:
-                    duration = int((datetime.utcnow() - task.created_at).total_seconds())
-                # Construct progress_page URL
-                progress_url = None
-                if task.guid and task.worker_api:
-                    worker_base = get_worker_base_url(task.worker_api)
-                    progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
-                print(f"[Tasks] Scheduling Telegram done notification for task {task.id}")
-                asyncio.create_task(broadcast_task_done(task.id, duration_seconds=duration, progress_page=progress_url))
-                
-                # GA4 rig_completed event
-                if task.ga_client_id:
-                    from main import send_ga4_event
-                    asyncio.create_task(send_ga4_event(
-                        task.ga_client_id, 
-                        "rig_completed", 
-                        {"duration": duration, "task_id": task.id}
-                    ))
-            else:
-                print(f"[Tasks] Done notification already sent for {task.id}, skipping")
-                
+            duration = None
+            if task.created_at:
+                duration = int((datetime.utcnow() - task.created_at).total_seconds())
+            if task.ga_client_id:
+                from main import send_ga4_event
+
+                asyncio.create_task(
+                    send_ga4_event(
+                        task.ga_client_id,
+                        "rig_completed",
+                        {"duration": duration, "task_id": task.id},
+                    )
+                )
         except Exception as e:
-            print(f"[Telegram] Failed to notify done: {e}")
-            import traceback
-            traceback.print_exc()
-    
+            print(f"[Tasks] Failed to send GA4 rig_completed for task {task.id}: {e}")
+
+    if was_processing and task.status == "done":
+        try:
+            from database import bump_admin_overlay_task_completed
+
+            await bump_admin_overlay_task_completed(db, task)
+        except Exception as e:
+            print(f"[Tasks] Admin overlay metrics bump: {e}")
+
     return task
 
 
 # =============================================================================
 # Stale Task Detection & Auto-Restart
 # =============================================================================
+async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
+    """
+    Operator recovery: move task back to queue like stale reset but restart_count := 0
+    (does not increment). Caller should commit.
+    """
+    task.status = "created"
+    task.ready_count = 0
+    task.ready_urls = []
+    task.output_urls = []
+    task.total_count = 0
+    task.worker_api = None
+    task.worker_task_id = None
+    task.progress_page = None
+    task.guid = None
+    task.video_ready = False
+    task.video_url = None
+    task.error_message = None
+    task.restart_count = 0
+    task.last_progress_at = None
+    task.updated_at = datetime.utcnow()
+    task.fbx_glb_output_url = None
+    task.fbx_glb_model_name = None
+    task.fbx_glb_ready = False
+    task.fbx_glb_error = None
+
+
 async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     """
     Reset a stale task for re-processing.
@@ -475,18 +532,36 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     return True
 
 
-async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
+async def find_and_reset_stale_tasks(
+    db: AsyncSession,
+    queue_status: Optional[GlobalQueueStatus] = None,
+) -> int:
     """
     Find all stale processing tasks and reset them or mark as error.
     Returns number of tasks reset/marked as error.
+
+    When queue_status is provided, GET responses include optional active_tasks JSON; if our
+    worker_task_id/guid/output URLs do not appear while the worker lists active jobs (or lists
+    none), we requeue after STALE_TASK_TIMEOUT_MINUTES with no real progress.
+
+    Prod diagnostics for one stuck task_id (adjust table name for your DB):
+    SELECT id, status, worker_api, worker_task_id, guid, output_urls, total_count, ready_count,
+           last_progress_at, restart_count, created_at, updated_at FROM tasks WHERE id = ?;
     """
-    from config import STALE_TASK_TIMEOUT_MINUTES, GLOBAL_TASK_TIMEOUT_MINUTES
-    from datetime import timedelta
-    
+    from config import (
+        STALE_TASK_TIMEOUT_MINUTES,
+        GLOBAL_TASK_TIMEOUT_MINUTES,
+        PARTIAL_PROGRESS_STALE_MINUTES,
+        WORKER_IDLE_STALE_MINUTES,
+    )
+
     now = datetime.utcnow()
     stale_cutoff = now - timedelta(minutes=STALE_TASK_TIMEOUT_MINUTES)
+    worker_idle_cutoff = now - timedelta(minutes=WORKER_IDLE_STALE_MINUTES)
     global_cutoff = now - timedelta(minutes=GLOBAL_TASK_TIMEOUT_MINUTES)
-    
+    partial_cutoff = now - timedelta(minutes=PARTIAL_PROGRESS_STALE_MINUTES)
+    lookup = get_worker_active_lookup(queue_status)
+
     # Find all non-terminal tasks
     result = await db.execute(
         select(Task).where(
@@ -494,10 +569,10 @@ async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
         )
     )
     active_tasks = result.scalars().all()
-    
+
     action_count = 0
     for task in active_tasks:
-        # 1. Check for global hard timeout (3 hours)
+        # 1. Global hard timeout (default aligned with ~2h worker job cap via env)
         if task.created_at and task.created_at < global_cutoff:
             task.status = "error"
             task.error_message = f"Task timed out after {GLOBAL_TASK_TIMEOUT_MINUTES} minutes."
@@ -506,42 +581,87 @@ async def find_and_reset_stale_tasks(db: AsyncSession) -> int:
             action_count += 1
             continue
 
-        # 2. Check for staleness (no progress for 10 minutes)
-        # Only for tasks that are actually in 'processing'
-        if task.status == "processing":
-            reference_time = get_task_progress_reference_time(task)
+        if task.status != "processing":
+            continue
 
-            if reference_time and reference_time < stale_cutoff:
-                # Additional check: if it has URLs but no progress, or just no progress at all
-                if task.ready_count == 0:
-                    no_progress_min = get_task_no_progress_minutes(task, now=now)
-                    print(
-                        f"[Stale Task] Detected stale task {task.id}: "
-                        f"worker={task.worker_api}, no_progress={no_progress_min:.1f}m, "
-                        f"since={reference_time}"
-                    )
-                    if await reset_stale_task(db, task):
-                        action_count += 1
-    
+        reference_time = get_task_progress_reference_time(task)
+        if not reference_time:
+            continue
+
+        entry = lookup_worker_queue_entry(task.worker_api, lookup)
+        lost_on_worker = False
+        if entry:
+            refs, has_payload = entry
+            if has_payload and not task_visible_on_worker_refs(
+                task.worker_task_id,
+                task.guid,
+                task.output_urls,
+                refs,
+                has_payload,
+            ):
+                lost_on_worker = True
+
+        ws = find_worker_queue_status_for_task(task.worker_api, queue_status)
+        worker_reports_idle = (
+            ws is not None
+            and ws.available
+            and (ws.total_active or 0) == 0
+            and (ws.queue_size or 0) <= 0
+            and (task.ready_count or 0) == 0
+        )
+
+        should_reset = False
+        reason = ""
+        if lost_on_worker and reference_time < stale_cutoff:
+            should_reset = True
+            reason = "lost_on_worker"
+        elif worker_reports_idle and reference_time < worker_idle_cutoff:
+            should_reset = True
+            reason = "worker_reports_idle"
+        elif reference_time < stale_cutoff and (task.ready_count or 0) == 0:
+            should_reset = True
+            reason = "no_ready_yet"
+        elif (
+            (task.total_count or 0) > 0
+            and (task.ready_count or 0) < (task.total_count or 0)
+            and reference_time < partial_cutoff
+        ):
+            should_reset = True
+            reason = "partial_progress_stale"
+
+        if should_reset:
+            no_progress_min = get_task_no_progress_minutes(task, now=now)
+            print(
+                f"[Stale Task] Detected stale task {task.id} ({reason}): "
+                f"worker={task.worker_api}, no_progress={no_progress_min:.1f}m, "
+                f"since={reference_time}"
+            )
+            if await reset_stale_task(db, task):
+                action_count += 1
+
     if action_count > 0:
         await db.commit()
-        
+
     return action_count
 
 
 async def get_stalled_processing_tasks_by_worker(
     db: AsyncSession,
     *,
-    min_stalled_minutes: int
+    min_stalled_minutes: int,
+    queue_status: Optional[GlobalQueueStatus] = None,
 ) -> dict[str, list[Task]]:
     """
-    Return processing tasks that have no real progress for at least N minutes,
-    grouped by worker_api.
+    Return processing tasks that look stalled (no progress, lost on worker per active_tasks JSON,
+    or partial progress beyond PARTIAL_PROGRESS_STALE_MINUTES), grouped by worker_api.
     """
-    from datetime import timedelta
+    from config import PARTIAL_PROGRESS_STALE_MINUTES
 
     now = datetime.utcnow()
-    cutoff = now - timedelta(minutes=min_stalled_minutes)
+    stale_cutoff = now - timedelta(minutes=min_stalled_minutes)
+    partial_cutoff = now - timedelta(minutes=PARTIAL_PROGRESS_STALE_MINUTES)
+    lookup = get_worker_active_lookup(queue_status)
+
     result = await db.execute(
         select(Task).where(Task.status == "processing")
     )
@@ -549,15 +669,40 @@ async def get_stalled_processing_tasks_by_worker(
 
     grouped: dict[str, list[Task]] = {}
     for task in processing_tasks:
-        if task.ready_count != 0:
-            continue
         ref = get_task_progress_reference_time(task)
-        if not ref or ref >= cutoff:
+        if not ref:
             continue
         worker = (task.worker_api or "").strip()
         if not worker:
             continue
-        grouped.setdefault(worker, []).append(task)
+
+        entry = lookup_worker_queue_entry(task.worker_api, lookup)
+        lost_on_worker = False
+        if entry:
+            refs, has_payload = entry
+            if has_payload and not task_visible_on_worker_refs(
+                task.worker_task_id,
+                task.guid,
+                task.output_urls,
+                refs,
+                has_payload,
+            ):
+                lost_on_worker = True
+
+        stalled = False
+        if lost_on_worker and ref < stale_cutoff:
+            stalled = True
+        elif ref < stale_cutoff and (task.ready_count or 0) == 0:
+            stalled = True
+        elif (
+            (task.total_count or 0) > 0
+            and (task.ready_count or 0) < (task.total_count or 0)
+            and ref < partial_cutoff
+        ):
+            stalled = True
+
+        if stalled:
+            grouped.setdefault(worker, []).append(task)
     return grouped
 
 

@@ -57,6 +57,7 @@ function renderSiteHeader(options = {}) {
             <a href="/gallery" class="${navLinkClass('/gallery', activePath)}" data-i18n="nav_gallery">Gallery</a>
             <a href="/buy-credits" class="${navLinkClass('/buy-credits', activePath)}" data-i18n="nav_buy">Buy</a>
             <a href="/developers" class="${navLinkClass('/developers', activePath)}" data-i18n="nav_api">API</a>
+            <a href="#" class="nav-link header-admin-tab hidden" id="header-admin-tab" title="Admin queue monitor">АДМИНКА</a>
         </nav>
     ` : '';
     
@@ -202,9 +203,10 @@ async function initSiteHeader() {
     
     // Fetch and display user/credits info
     try {
-        const resp = await fetch('/auth/me');
+        const resp = await fetch('/auth/me', { credentials: 'same-origin' });
         if (resp.ok) {
             const data = await resp.json();
+            wireAdminTabFromAuth(data);
             const loginBtn = document.getElementById('login-btn');
             const userInfo = document.getElementById('user-info');
             const creditsCount = document.getElementById('credits-count');
@@ -240,6 +242,56 @@ async function initSiteHeader() {
     } catch (e) {
         console.warn('[Header] Failed to fetch user info:', e);
     }
+}
+
+let _adminOverlayLoadPromise = null;
+
+/** Bump ?v= when changing admin-overlay.js / admin-overlay.css so browsers skip stale cache. */
+function ensureAdminOverlayLoaded() {
+    if (typeof window.AdminOverlay !== 'undefined' && window.AdminOverlay) {
+        return Promise.resolve();
+    }
+    if (_adminOverlayLoadPromise) return _adminOverlayLoadPromise;
+    _adminOverlayLoadPromise = new Promise((resolve, reject) => {
+        if (!document.querySelector('link[data-admin-overlay-css]')) {
+            const l = document.createElement('link');
+            l.rel = 'stylesheet';
+            l.href = '/static/css/admin-overlay.css?v=20260327fullscreen';
+            l.setAttribute('data-admin-overlay-css', '1');
+            document.head.appendChild(l);
+        }
+        const s = document.createElement('script');
+            s.src = '/static/js/admin-overlay.js?v=20260402workerlabel';
+        s.onload = () => {
+            _adminOverlayLoadPromise = null;
+            resolve();
+        };
+        s.onerror = () => {
+            _adminOverlayLoadPromise = null;
+            reject(new Error('admin-overlay.js failed to load'));
+        };
+        document.head.appendChild(s);
+    });
+    return _adminOverlayLoadPromise;
+}
+
+function wireAdminTabFromAuth(data) {
+    const tab = document.getElementById('header-admin-tab');
+    if (!tab || !data || !data.user || !data.user.is_admin) return;
+    tab.classList.remove('hidden');
+    if (tab.__adminWired) return;
+    tab.__adminWired = true;
+    tab.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try {
+            await ensureAdminOverlayLoaded();
+            if (window.AdminOverlay && typeof window.AdminOverlay.open === 'function') {
+                window.AdminOverlay.open();
+            }
+        } catch (err) {
+            console.error('[Header] Admin overlay:', err);
+        }
+    });
 }
 
 /**

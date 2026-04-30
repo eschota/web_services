@@ -73,6 +73,35 @@
                 bootstrapTaskSearch();
             }
         }
+
+        (function loadSupportChat() {
+            try {
+                const b = document.body;
+                if (!b || b.getAttribute('data-support-chat-off') === '1') return;
+            } catch (e) {}
+            if (window.__siteLayoutSupportChat === false) return;
+
+            if (window.SupportChat && typeof window.SupportChat.init === 'function') {
+                try {
+                    window.SupportChat.init();
+                } catch (e2) {}
+                return;
+            }
+            if (document.querySelector('script[data-support-chat-js="1"]')) return;
+
+            const s = document.createElement('script');
+            s.src = '/static/js/support-chat.js?v=20260430-sup4';
+            s.async = true;
+            s.setAttribute('data-support-chat-js', '1');
+            s.onload = function () {
+                try {
+                    if (window.SupportChat && typeof window.SupportChat.init === 'function') {
+                        window.SupportChat.init();
+                    }
+                } catch (e3) {}
+            };
+            document.head.appendChild(s);
+        })();
     }
 
     window.SiteLayout = {
