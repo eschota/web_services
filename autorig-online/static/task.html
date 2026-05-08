@@ -9,7 +9,7 @@
     
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=tc-6">
-    <link rel="stylesheet" href="/static/animal_animation_fitter/animal_animation_fitter.css?v=1">
+    <link rel="stylesheet" href="/static/animal_animation_fitter/animal_animation_fitter.css?v=2">
     
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -5016,6 +5016,11 @@
                 if (this.isAnimalTaskMode()) {
                     this.hideAnimalUnsupportedBlocks();
                 } else {
+                    document.body.classList.remove('task-page-animal-idle');
+                    ['animal-idle-ltx-panel', 'animal-animation-fitter-panel'].forEach((pid) => {
+                        document.getElementById(pid)?.classList?.add('hidden');
+                    });
+                    document.getElementById('model-viewer-wrap')?.classList?.remove('animal-viewer-aspect-ltx');
                     // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
                     // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
                     void this.loadAnimationCatalog().catch(() => {});
@@ -5042,6 +5047,13 @@
                 this.animationCatalog = null;
                 this.animationCatalogLoaded = false;
                 this.selectedAnimationId = null;
+                /* Idle LTX + fitter: show as soon as task JSON says animal (do not wait for Three.js viewer). */
+                const wrap = document.getElementById('model-viewer-wrap');
+                wrap?.classList?.add('animal-viewer-aspect-ltx');
+                ['animal-idle-ltx-panel', 'animal-animation-fitter-panel'].forEach((pid) => {
+                    document.getElementById(pid)?.classList?.remove('hidden');
+                });
+                document.body.classList.add('task-page-animal-idle');
             },
 
             renderAnimalDetectionSection() {
@@ -13226,7 +13238,7 @@
                     fitRun.dataset.wired = '1';
                     fitRun.addEventListener('click', async () => {
                         fitProg.textContent = 'Loading fitter module…';
-                        const mod = await import('/static/animal_animation_fitter/animal_animation_fitter.js?v=1');
+                        const mod = await import('/static/animal_animation_fitter/animal_animation_fitter.js?v=2');
                         const { AnimalAnimationFitter } = mod;
                         const videoUrl = (fitUrl?.value || '').trim();
                         if (!videoUrl) {
