@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
+    <!-- TASK_SEO_PLACEHOLDER -->
     <title>Task Progress | AutoRig.online</title>
     
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=tc-6">
+    <link rel="stylesheet" href="/static/animal_animation_fitter/animal_animation_fitter.css?v=1">
     
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -429,6 +431,39 @@
         .param-tile-value.val-green { color: #06d6a0; }
         .param-tile-value.val-yellow { color: #ffd166; }
         .param-tile-value.val-red { color: #ef476f; }
+        .task-animal-detection-card {
+            margin-top: 0.75rem;
+            padding: 0.85rem;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .task-animal-detection-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            margin-bottom: 0.55rem;
+            color: var(--text-primary);
+        }
+        .task-animal-tiles {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+        .task-animal-tile {
+            padding: 0.4rem 0.65rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05);
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .task-animal-tile.is-selected {
+            color: #fff;
+            border-color: rgba(79,70,229,0.8);
+            background: linear-gradient(135deg, rgba(79,70,229,0.85), rgba(14,165,233,0.65));
+        }
         
         /* QWER Transform Toolbar */
         .qwer-toolbar {
@@ -2193,6 +2228,8 @@
                             <span id="status-text">Processing...</span>
                         </span>
                     </div>
+                    <div id="task-server-queue-hint" class="hidden"
+                         style="font-size: 0.78rem; color: var(--text-muted); margin: 0.4rem 0 0; max-width: 560px; line-height: 1.4;"></div>
                 </div>
             </div>
             <div id="page-boot-status" class="page-boot-status">
@@ -2234,6 +2271,10 @@
                        style="color: #f59e0b; text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-size: 0.9rem;">
                         -
                     </a>
+                </div>
+                <div id="admin-worker-api-row" class="hidden" style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.08);">
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;" data-i18n="admin_worker_api">Worker API (admin)</div>
+                    <span id="admin-worker-api-text" style="font-size: 0.85rem; word-break: break-all; color: var(--text);">-</span>
                 </div>
             </div>
 
@@ -2459,6 +2500,8 @@
                                     <button id="view-mode-tpose" class="active" title="T-Pose Mode">T-Pose</button>
                                     <button id="view-mode-rig" title="RIG Mode (show spheres)">RIG</button>
                                     <button id="view-mode-anim" title="Animation Mode">Anim</button>
+                                    <button id="view-mode-play" title="Play Mode (WASD + Space + Shift, Alt ragdoll)">Play</button>
+                                    <button id="view-mode-ragdoll" title="Ragdoll Mode (R reset, Space impulse)">Ragdoll</button>
                                 </div>
                                 <!-- Hidden rig type select (moved to settings) -->
                                 <select id="viewer-rigtype-select" class="form-select hidden" style="
@@ -3143,7 +3186,49 @@
                         </div>
                     </div>
 
+                    <div id="animal-idle-ltx-panel" class="hidden boot-reveal-surface" style="margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-secondary);">
+                        <div style="font-weight:600; margin-bottom:0.35rem;">Idle animation Generator (LTX)</div>
+                        <p style="font-size:0.82rem; color:var(--text-muted); margin:0 0 0.5rem;">768×448 snapshot → Renderfin LTX reference MP4</p>
+                        <button type="button" id="animal-idle-generate-btn" class="btn btn-primary" disabled>Generate</button>
+                        <span id="animal-idle-status" class="animal-fitter-mono" style="margin-left:0.5rem;"></span>
+                        <video id="animal-idle-video" class="hidden" controls playsinline style="width:100%; max-width:768px; margin-top:0.5rem; border-radius:8px; background:#000;"></video>
+                        <div id="animal-idle-error" class="alert alert-error hidden" style="margin-top:0.5rem;"></div>
+                    </div>
+
+                    <div id="animal-animation-fitter-panel" class="hidden boot-reveal-surface" style="margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-secondary);">
+                        <div style="font-weight:600; margin-bottom:0.35rem;">Fit skeletal animation from video (browser MVP)</div>
+                        <label style="display:block; font-size:0.78rem; color:var(--text-muted);">Target MP4 URL (proxy same-origin)</label>
+                        <input type="text" id="animal-fitter-video-url" class="form-input" style="width:100%; margin:0.25rem 0 0.5rem;" placeholder="/api/task/.../idle-animation/proxy-video?url=..." />
+                        <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+                            <label style="font-size:0.78rem;">Convergence % <input type="number" id="animal-fitter-conv" value="85" min="50" max="99" style="width:4rem;"></label>
+                            <label style="font-size:0.78rem;">Max time (s) <input type="number" id="animal-fitter-time" value="45" min="5" max="600" style="width:4rem;"></label>
+                            <label style="font-size:0.78rem;">Quality
+                                <select id="animal-fitter-quality" class="form-input" style="padding:0.25rem 0.5rem;">
+                                    <option value="fast">fast</option>
+                                    <option value="balanced" selected>balanced</option>
+                                    <option value="high">high</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div style="margin-top:0.5rem; display:flex; flex-wrap:wrap; gap:0.45rem;">
+                            <button type="button" id="animal-fitter-run-btn" class="btn btn-primary" disabled>Generate / Fit Animation From Video</button>
+                            <button type="button" id="animal-fitter-stop-btn" class="btn btn-secondary" disabled>Stop</button>
+                            <button type="button" id="animal-fitter-apply-btn" class="btn btn-secondary" disabled>Apply best animation</button>
+                            <button type="button" id="animal-fitter-export-btn" class="btn btn-secondary" disabled>Export JSON</button>
+                        </div>
+                        <div id="animal-fitter-progress" class="animal-fitter-mono" style="margin-top:0.35rem;"></div>
+                        <div id="animal-fitter-preview-row">
+                            <div><div style="font-size:0.72rem; color:var(--text-muted);">Target frame</div><canvas id="animal-fitter-canvas-target" width="160" height="160"></canvas></div>
+                            <div><div style="font-size:0.72rem; color:var(--text-muted);">Render fit</div><canvas id="animal-fitter-canvas-model" width="160" height="160"></canvas></div>
+                        </div>
+                        <div id="animal-fitter-log" class="hidden"></div>
+                    </div>
+
                     <!-- Viewer Controls Row (removed - using SAVE RIG T-POSE button inside viewer) -->
+                    <div id="task-animal-detection-card" class="task-animal-detection-card hidden">
+                        <div class="task-animal-detection-title">Detected model type: <span id="task-animal-detection-label">-</span></div>
+                        <div id="task-animal-tiles" class="task-animal-tiles"></div>
+                    </div>
             </div>
             </div>
 
@@ -3585,7 +3670,7 @@
     <!-- Scripts: layout before i18n so header/footer exist when I18n.init runs -->
     <script src="/static/js/header.js?v=20260324-sitelayout"></script>
     <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
+    <script src="/static/js/site-layout.js?v=20260430-supportfix"></script>
     <script src="/static/js/i18n.js"></script>
     <script>
         (function initTaskPageDebug() {
@@ -3670,6 +3755,7 @@
                 const applyReveal = () => {
                     const el = resolveElement();
                     if (!el) return;
+                    el.classList.remove('hidden');
                     el.classList.add('is-ready');
                 };
                 const frames = Math.max(0, Number(afterFrames || 0));
@@ -4692,20 +4778,49 @@
                 const statusText = document.getElementById('status-text');
                 
                 statusBadge.className = 'task-status-pill';
+                const queueHint = document.getElementById('task-server-queue-hint');
                 if (task.status === 'done') {
                     statusBadge.classList.add('task-status-pill--done');
                     statusText.textContent = t('task_status_done');
                     const shareBtn = document.getElementById('task-share-btn');
                     if (shareBtn) shareBtn.style.display = 'flex';
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
                 } else if (task.status === 'error') {
                     statusBadge.classList.add('task-status-pill--error');
                     statusText.textContent = t('task_status_error');
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
                 } else if (task.status === 'processing') {
                     statusBadge.classList.add('task-status-pill--processing');
                     statusText.textContent = t('task_status_processing');
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
+                } else if (task.status === 'created' && !task.guid) {
+                    statusBadge.classList.add('task-status-pill--queued');
+                    statusText.textContent = t('task_status_queue_server');
+                    if (queueHint) {
+                        queueHint.classList.remove('hidden');
+                        queueHint.textContent = t('task_server_queue_hint');
+                        queueHint.title = t('task_server_queue_hint_title');
+                    }
                 } else {
                     statusBadge.classList.add('task-status-pill--queued');
                     statusText.textContent = t('task_status_created');
+                    if (queueHint) {
+                        queueHint.classList.add('hidden');
+                        queueHint.textContent = '';
+                        queueHint.title = '';
+                    }
                 }
 
                 const titleEl = document.querySelector('.task-status-header-title');
@@ -4775,6 +4890,8 @@
                 const adminCopy = document.getElementById('admin-input-url-copy');
                 const adminWorkerRow = document.getElementById('admin-worker-progress-row');
                 const adminWorkerLink = document.getElementById('admin-worker-progress-link');
+                const adminWorkerApiRow = document.getElementById('admin-worker-api-row');
+                const adminWorkerApiText = document.getElementById('admin-worker-api-text');
                 if (adminRow && adminLink && adminCopy) {
                     const inputUrl = task && task.input_url ? String(task.input_url) : '';
                     const canSeeAdminLinks = await isAllowedAdmin();
@@ -4793,6 +4910,14 @@
                             adminWorkerLink.title = progressPage;
                         } else if (adminWorkerRow) {
                             adminWorkerRow.classList.add('hidden');
+                        }
+
+                        const wapi = task && task.worker_api ? String(task.worker_api) : '';
+                        if (wapi && adminWorkerApiRow && adminWorkerApiText) {
+                            adminWorkerApiRow.classList.remove('hidden');
+                            adminWorkerApiText.textContent = wapi;
+                        } else if (adminWorkerApiRow) {
+                            adminWorkerApiRow.classList.add('hidden');
                         }
                         
                         if (!adminCopy.__wired) {
@@ -4823,6 +4948,8 @@
                         adminLink.href = '#';
                         adminLink.textContent = '-';
                         adminLink.title = '';
+                        if (adminWorkerRow) adminWorkerRow.classList.add('hidden');
+                        if (adminWorkerApiRow) adminWorkerApiRow.classList.add('hidden');
                     }
                 }
                 
@@ -4886,13 +5013,87 @@
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
 
-                // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
-                // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
-                void this.loadAnimationCatalog().catch(() => {});
+                if (this.isAnimalTaskMode()) {
+                    this.hideAnimalUnsupportedBlocks();
+                } else {
+                    // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
+                    // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
+                    void this.loadAnimationCatalog().catch(() => {});
+                }
 
+                this.renderAnimalDetectionSection();
                 this.renderPosterMetadataSection();
                 void this.loadSimilarFree3DCharacters(false).catch(() => {});
 
+            },
+
+            isAnimalTaskMode() {
+                return String(this.task?.input_type || '').toLowerCase() === 'animal';
+            },
+
+            hideAnimalUnsupportedBlocks() {
+                ['custom-animations-wrap', 'sprite-sheet-card'].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        el.classList.add('hidden');
+                        el.classList.remove('is-ready');
+                    }
+                });
+                this.animationCatalog = null;
+                this.animationCatalogLoaded = false;
+                this.selectedAnimationId = null;
+            },
+
+            renderAnimalDetectionSection() {
+                const card = document.getElementById('task-animal-detection-card');
+                const label = document.getElementById('task-animal-detection-label');
+                const tiles = document.getElementById('task-animal-tiles');
+                if (!card || !label || !tiles) return;
+                const detection = this.task?.rig_v2_animal_detection || null;
+                const isAnimalTask = String(this.task?.input_type || '').toLowerCase() === 'animal';
+                if (!isAnimalTask || !detection || detection.type !== 'animal') {
+                    card.classList.add('hidden');
+                    tiles.innerHTML = '';
+                    return;
+                }
+                const animalTypes = ['dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+                const selected = String(detection.animal_type || '').toLowerCase();
+                label.textContent = selected ? `animal / ${selected}` : 'animal';
+                card.classList.remove('hidden');
+                tiles.innerHTML = animalTypes.map((type) => {
+                    const cls = type === selected ? 'task-animal-tile is-selected' : 'task-animal-tile';
+                    return `<button type="button" class="${cls}" data-animal-type="${type}">${type}</button>`;
+                }).join('');
+                tiles.querySelectorAll('[data-animal-type]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const next = String(btn.getAttribute('data-animal-type') || '').toLowerCase();
+                        if (!next) return;
+                        detection.animal_type = next;
+                        label.textContent = `animal / ${next}`;
+                        tiles.querySelectorAll('.task-animal-tile').forEach((el) => {
+                            el.classList.toggle('is-selected', el === btn);
+                        });
+                        try {
+                            const current = await fetch(`/api/task/${this.taskId}/viewer-settings`, { cache: 'no-store' })
+                                .then((resp) => resp.ok ? resp.json() : {});
+                            const settings = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+                            settings.rig_v2_animal_detection = {
+                                ...(settings.rig_v2_animal_detection || detection),
+                                type: 'animal',
+                                animal_type: next,
+                                mode: 'only_rig',
+                                user_selected_bool: true,
+                            };
+                            await fetch(`/api/task/${this.taskId}/viewer-settings`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(settings),
+                            });
+                        } catch (error) {
+                            console.warn('[TaskPage] Failed to persist animal tile selection:', error);
+                        }
+                    });
+                });
             },
 
             progressLogLoaded: false,
@@ -5486,7 +5687,7 @@
                         } catch (e) {
                             console.warn('Purchase intent notify failed:', e);
                         }
-                        window.location.href = '/buy-credits';
+                        window.location.href = '/buy';
                         return;
                     }
                     if (!confirm(`${t('purchase_confirm_all')} 10 credits?`)) return;
@@ -5541,7 +5742,7 @@
                     return;
                 }
                 if (this.purchaseState.user_credits < 1) {
-                    window.location.href = '/buy-credits';
+                    window.location.href = '/buy';
                     return;
                 }
                 if (!confirm(`${t('purchase_confirm_file')} "${displayName}" for 1 credit?`)) return;
@@ -5574,7 +5775,7 @@
                     return;
                 }
                 if (this.purchaseState.user_credits < 10) {
-                    window.location.href = '/buy-credits';
+                    window.location.href = '/buy';
                     return;
                 }
                 if (!confirm(`${t('purchase_confirm_all')} 10 credits?`)) return;
@@ -5644,6 +5845,18 @@
             updateSpriteSheetControlsState() {
                 const card = document.getElementById('sprite-sheet-card');
                 const hint = document.getElementById('sprite-sheet-mode-hint');
+                if (this.isAnimalTaskMode()) {
+                    if (card) {
+                        card.classList.add('hidden');
+                        card.classList.remove('is-ready');
+                    }
+                    if (hint) {
+                        hint.classList.add('hidden');
+                        hint.textContent = '';
+                    }
+                    this._stopSpriteSheetPreviews();
+                    return;
+                }
                 const getCtx = window.__getViewerSpriteSheetContext;
                 const selected = this.getSelectedAnimationItem();
                 const hasSelection = Boolean(selected?.ready && selected?.preview_url);
@@ -6028,6 +6241,10 @@
                     wrap.classList.add('hidden');
                     return;
                 }
+                if (this.isAnimalTaskMode()) {
+                    this.hideAnimalUnsupportedBlocks();
+                    return;
+                }
 
                 const stateHash = this.taskCatalogTaskKey(this.task)
                     + `|${this.purchaseState?.user_credits || 0}`;
@@ -6090,6 +6307,10 @@
                 const grid = document.getElementById('custom-anim-grid');
                 const stats = document.getElementById('custom-anim-stats');
                 if (!wrap || !typeSelect || !grid || !this.animationCatalog) return;
+                if (this.isAnimalTaskMode()) {
+                    this.hideAnimalUnsupportedBlocks();
+                    return;
+                }
 
                 const esc = (s) => String(s || '')
                     .replaceAll('&', '&amp;')
@@ -6322,7 +6543,7 @@
 
                 if (!hasAccess) {
                     if (credits < singleCost) {
-                        window.location.href = '/buy-credits';
+                        window.location.href = '/buy';
                         return;
                     }
 
@@ -6346,7 +6567,7 @@
                     }
                 }
 
-                this.downloadSelectedAnimation(selectedId);
+                await this.downloadSelectedAnimation(selectedId);
             },
 
             async purchaseSelectedAnimation() {
@@ -6372,7 +6593,7 @@
                 const singleCost = Number(this.animationCatalog?.pricing?.single_animation_credits || 1);
                 const credits = Number(this.animationCatalog?.user_credits || 0);
                 if (credits < singleCost) {
-                    window.location.href = '/buy-credits';
+                    window.location.href = '/buy';
                     return;
                 }
 
@@ -6408,7 +6629,7 @@
                 const allCost = Number(this.animationCatalog?.pricing?.all_animations_credits || 10);
                 const credits = Number(this.animationCatalog?.user_credits || 0);
                 if (credits < allCost) {
-                    window.location.href = '/buy-credits';
+                    window.location.href = '/buy';
                     return;
                 }
                 if (!confirm(`Unlock all animations for ${allCost} credits?`)) return;
@@ -6432,11 +6653,158 @@
                 }
             },
 
-            downloadSelectedAnimation(animationId = null) {
+            customAnimationBaseFbxUrl() {
+                return String(
+                    this.animationCatalog?.pricing?.all_animations_fbx_url
+                    || `/api/task/${this.taskId}/animations.fbx`
+                );
+            },
+
+            customAnimationBaseFbxStorageKey() {
+                const taskPart = encodeURIComponent(String(this.taskId || 'unknown'));
+                return `autorig.customAnimationBaseFbxDownloaded.v2.${taskPart}`;
+            },
+
+            hasDownloadedCustomAnimationBaseFbx() {
+                try {
+                    return localStorage.getItem(this.customAnimationBaseFbxStorageKey()) === '1';
+                } catch (_) {
+                    return false;
+                }
+            },
+
+            markCustomAnimationBaseFbxDownloaded() {
+                try {
+                    localStorage.setItem(this.customAnimationBaseFbxStorageKey(), '1');
+                } catch (_) {}
+            },
+
+            async isCustomAnimationBaseFbxAvailable() {
+                try {
+                    const resp = await fetch(this.customAnimationBaseFbxUrl(), {
+                        method: 'HEAD',
+                        cache: 'no-store',
+                    });
+                    return resp.ok;
+                } catch (_) {
+                    return false;
+                }
+            },
+
+            showCustomAnimationDependencyConfirm() {
+                const title = this.tSafe('custom_anim_dependency_modal_title', 'Download required base FBX');
+                const body = this.tSafe(
+                    'custom_anim_dependency_modal_body',
+                    'Custom animation FBX files contain only skeleton animation. Download the _all_animations.fbx file first and use it as the rigged character file; then apply the selected custom animation clip in your engine.'
+                );
+                const note = this.tSafe(
+                    'custom_anim_dependency_modal_note',
+                    'The first download will contain two files: _all_animations.fbx and the selected custom animation FBX.'
+                );
+                const confirmText = this.tSafe('custom_anim_dependency_modal_confirm', 'Download both files');
+                const cancelText = this.tSafe('custom_anim_dependency_modal_cancel', 'Cancel');
+
+                return new Promise((resolve) => {
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;padding:1rem;';
+                    overlay.setAttribute('role', 'dialog');
+                    overlay.setAttribute('aria-modal', 'true');
+
+                    const box = document.createElement('div');
+                    box.style.cssText = 'width:min(520px,100%);background:var(--surface,#151923);border:1px solid rgba(255,255,255,0.16);border-radius:10px;padding:1rem;box-shadow:0 24px 80px rgba(0,0,0,0.45);color:var(--text-primary,#f5f7fb);';
+
+                    const h = document.createElement('h3');
+                    h.textContent = title;
+                    h.style.cssText = 'margin:0 0 0.65rem;font-size:1rem;line-height:1.25;';
+
+                    const p = document.createElement('p');
+                    p.textContent = body;
+                    p.style.cssText = 'margin:0 0 0.65rem;color:var(--text-secondary,#c8ceda);font-size:0.88rem;line-height:1.45;';
+
+                    const n = document.createElement('p');
+                    n.textContent = note;
+                    n.style.cssText = 'margin:0 0 0.95rem;color:var(--text-muted,#98a2b3);font-size:0.8rem;line-height:1.4;';
+
+                    const actions = document.createElement('div');
+                    actions.style.cssText = 'display:flex;gap:0.55rem;justify-content:flex-end;flex-wrap:wrap;';
+
+                    const cancel = document.createElement('button');
+                    cancel.type = 'button';
+                    cancel.className = 'btn btn-secondary';
+                    cancel.textContent = cancelText;
+
+                    const ok = document.createElement('button');
+                    ok.type = 'button';
+                    ok.className = 'btn btn-primary';
+                    ok.textContent = confirmText;
+
+                    const close = (value) => {
+                        overlay.remove();
+                        resolve(value);
+                    };
+                    cancel.addEventListener('click', () => close(false));
+                    ok.addEventListener('click', () => close(true));
+                    overlay.addEventListener('click', (e) => {
+                        if (e.target === overlay) close(false);
+                    });
+                    overlay.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape') close(false);
+                    });
+
+                    actions.appendChild(cancel);
+                    actions.appendChild(ok);
+                    box.appendChild(h);
+                    box.appendChild(p);
+                    box.appendChild(n);
+                    box.appendChild(actions);
+                    overlay.appendChild(box);
+                    document.body.appendChild(overlay);
+                    ok.focus();
+                });
+            },
+
+            triggerDownloadUrl(url, filename = '') {
+                const a = document.createElement('a');
+                a.href = url;
+                if (filename) a.download = filename;
+                a.rel = 'noopener';
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => a.remove(), 1000);
+            },
+
+            async ensureCustomAnimationBaseFbxBeforeDownload() {
+                if (this.hasDownloadedCustomAnimationBaseFbx()) {
+                    return false;
+                }
+                const available = await this.isCustomAnimationBaseFbxAvailable();
+                if (!available) {
+                    alert(this.tSafe(
+                        'custom_anim_dependency_base_unavailable',
+                        '_all_animations.fbx is not available for this task yet. The selected animation will still be downloaded.'
+                    ));
+                    return false;
+                }
+                const confirmed = await this.showCustomAnimationDependencyConfirm();
+                if (!confirmed) {
+                    return null;
+                }
+                this.markCustomAnimationBaseFbxDownloaded();
+                return true;
+            },
+
+            async downloadSelectedAnimation(animationId = null) {
                 const targetId = this.normalizeAnimationKey(animationId || this.selectedAnimationId);
                 if (!targetId) return;
                 const url = `/api/task/${this.taskId}/animations/download/${encodeURIComponent(targetId)}`;
-                window.location.href = url;
+                const baseStarted = await this.ensureCustomAnimationBaseFbxBeforeDownload();
+                if (baseStarted === null) return;
+                if (baseStarted) {
+                    this.triggerDownloadUrl(`/api/task/${this.taskId}/animations/download-with-base/${encodeURIComponent(targetId)}`);
+                } else {
+                    this.triggerDownloadUrl(url);
+                }
             },
 
             updateFileList(urls, task, readyUrls = []) {
@@ -6958,8 +7326,10 @@
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
         import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
+        import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
         import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
         import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
+        import { Sky } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/objects/Sky.js';
 
         import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
         import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -6979,6 +7349,7 @@
             STANDARD_SPRITE_VIEWS,
             SPRITE_SHEET_LIMITS,
         } from '/static/js/sprite-sheet-mvp.js?v=6';
+        import { PlayModeController } from '/static/js/task-play-mode.js?v=24';
 
         window.captureSpriteSheetAtlas = captureSpriteSheetAtlas;
         window.captureStandardSpriteSheetPack = captureStandardSpriteSheetPack;
@@ -7030,8 +7401,12 @@
                 hemiGroundColor: 0x222233,
                 hemiIntensity: 0.25,
 
-                // Background
-                bgColor: 0x1a1a2e,           // scene background color
+                // Sky / background
+                bgColor: 0x6f8fb3,
+                skyTurbidity: 3.2,
+                skyRayleigh: 1.25,
+                skyMieCoefficient: 0.012,
+                skyMieDirectionalG: 0.78,
             };
             // ============================================================
 
@@ -7073,13 +7448,34 @@
 
             function setStatus(s) { statusEl.textContent = s; }
 
-            function play(name) {
+            function play(name, options = {}) {
                 if (!mixer || !animations.length) return;
                 const clip = animations.find(c => c.name === name) || animations[0];
                 if (!clip) return;
                 const next = mixer.clipAction(clip);
-                next.reset().fadeIn(0.2).play();
-                if (currentAction && currentAction !== next) currentAction.fadeOut(0.2);
+                const fade = Number.isFinite(options.fade) ? options.fade : 0.2;
+                const restart = options.restart !== false;
+                const loopOnce = !!options.loopOnce;
+                const clampWhenFinished = !!options.clampWhenFinished;
+
+                next.enabled = true;
+                next.paused = false;
+                next.timeScale = Number.isFinite(options.timeScale) ? options.timeScale : 1;
+                next.clampWhenFinished = clampWhenFinished;
+                next.setLoop(loopOnce ? THREE.LoopOnce : THREE.LoopRepeat, loopOnce ? 1 : Infinity);
+
+                if (restart) {
+                    next.reset();
+                }
+
+                if (currentAction === next) {
+                    next.play();
+                } else if (currentAction) {
+                    currentAction.crossFadeTo(next, fade, false);
+                } else {
+                    next.fadeIn(fade);
+                }
+                next.play();
                 currentAction = next;
                 mixer.timeScale = 1;
             }
@@ -7180,8 +7576,50 @@
             }
 
             const customAnimationClipCache = new Map();
+            const playModeClipSetCache = new Map();
             const FBX_CLIP_POSITION_SCALE_FACTOR = 0.01;
             const FBX_CLIP_SCALE_TRIGGER_ABS = 20;
+            const PLAY_MODE_LOCOMOTION_ROLES = [
+                {
+                    role: 'idle',
+                    clipName: 'idle',
+                    ids: ['idle'],
+                    type: 'idle',
+                },
+                {
+                    role: 'walk',
+                    clipName: 'walking',
+                    ids: ['walking'],
+                    type: 'walk',
+                    avoidTags: ['directional', 'stance_crouched', 'style_', 'mood_', 'injured'],
+                },
+                {
+                    role: 'walkBack',
+                    clipName: 'walking_backwards',
+                    ids: ['walking_backwards', 'walking_backwards_happy'],
+                    type: 'walk',
+                },
+                {
+                    role: 'run',
+                    clipName: 'running',
+                    ids: ['running'],
+                    type: 'run',
+                    avoidTags: ['directional', 'style_', 'mood_', 'injured'],
+                },
+                {
+                    role: 'jump',
+                    clipName: 'jump_forward',
+                    ids: ['jump_forward', 'jump_forward_run', 'jump'],
+                    type: 'jump',
+                    avoidTags: ['mood_', 'scared', 'hunched'],
+                },
+                {
+                    role: 'recover',
+                    clipName: 'getting_up',
+                    ids: ['getting_up'],
+                    type: 'die',
+                },
+            ];
 
             function normalizeFbxClipUnits(clips) {
                 if (!Array.isArray(clips) || !clips.length) return [];
@@ -7290,6 +7728,220 @@
                 return clips;
             }
 
+            async function ensureViewerAnimationCatalogLoaded() {
+                const taskUi = window.TaskUI;
+                if (taskUi && typeof taskUi.loadAnimationCatalog === 'function') {
+                    await taskUi.loadAnimationCatalog().catch((error) => {
+                        console.warn('[Viewer] TaskUI animation catalog load failed:', error);
+                    });
+                    if (taskUi.animationCatalog) {
+                        return taskUi.animationCatalog;
+                    }
+                }
+
+                const response = await fetch(`/api/task/${taskId}/animations/catalog`, { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error(`Catalog HTTP ${response.status}`);
+                }
+                return await response.json();
+            }
+
+            function catalogEntriesFromPayload(catalog) {
+                return Array.isArray(catalog?.animations)
+                    ? catalog.animations.filter((entry) => entry?.available && entry?.ready)
+                    : [];
+            }
+
+            function entryTags(entry) {
+                return Array.isArray(entry?.tags)
+                    ? entry.tags.map((tag) => String(tag || '').toLowerCase())
+                    : [];
+            }
+
+            function pickCatalogEntryForPlayRole(entries, roleConfig) {
+                const wantedIds = (roleConfig.ids || []).map(normalizeClipKey).filter(Boolean);
+                for (const wantedId of wantedIds) {
+                    const exact = entries.find((entry) => normalizeClipKey(entry?.id) === wantedId);
+                    if (exact) return exact;
+                }
+
+                const typed = entries.filter((entry) => {
+                    return normalizeClipKey(entry?.type) === normalizeClipKey(roleConfig.type);
+                });
+                if (!typed.length) return null;
+
+                const avoidTags = roleConfig.avoidTags || [];
+                const clean = typed.find((entry) => {
+                    const tags = entryTags(entry);
+                    return !avoidTags.some((avoid) => {
+                        const probe = String(avoid || '').toLowerCase();
+                        return tags.some((tag) => tag === probe || tag.startsWith(probe));
+                    });
+                });
+                return clean || typed[0] || null;
+            }
+
+            function resolveCatalogAnimationUrl(entry) {
+                const raw = String(entry?.preview_url || '').trim();
+                if (raw) return raw;
+                const id = encodeURIComponent(String(entry?.id || ''));
+                return `/api/task/${taskId}/animations/preview/${id}`;
+            }
+
+            function horizontalDisplacementForTrack(track) {
+                if (!track?.values || track.values.length < 3) return 0;
+                const baseX = Number(track.values[0]) || 0;
+                const baseZ = Number(track.values[2]) || 0;
+                let max = 0;
+                for (let index = 0; index < track.values.length; index += 3) {
+                    const dx = (Number(track.values[index]) || 0) - baseX;
+                    const dz = (Number(track.values[index + 2]) || 0) - baseZ;
+                    max = Math.max(max, Math.sqrt(dx * dx + dz * dz));
+                }
+                return max;
+            }
+
+            function isLikelyRootPositionTrack(track) {
+                const name = normalizeClipKey(String(track?.name || '').replace(/\.position$/i, ''));
+                if (!String(track?.name || '').endsWith('.position')) return false;
+                if (!name) return false;
+                if (name.includes('left') || name.includes('right') || name.includes('hand') || name.includes('foot')) {
+                    return false;
+                }
+                return name.includes('hips') ||
+                    name.includes('pelvis') ||
+                    name === 'root' ||
+                    name === 'armature' ||
+                    name.includes('mixamorig_hips') ||
+                    name.includes('mixamorighips');
+            }
+
+            function makeControllerInPlaceClip(sourceClip, clipName) {
+                if (!sourceClip) return null;
+                const clip = sourceClip.clone();
+                clip.name = clipName || sourceClip.name;
+
+                const positionTracks = clip.tracks.filter((track) => {
+                    return String(track?.name || '').endsWith('.position') && track?.values?.length >= 3;
+                });
+                let tracksToFlatten = positionTracks.filter(isLikelyRootPositionTrack);
+                if (!tracksToFlatten.length && positionTracks.length) {
+                    const sorted = [...positionTracks].sort((a, b) => {
+                        return horizontalDisplacementForTrack(b) - horizontalDisplacementForTrack(a);
+                    });
+                    if (horizontalDisplacementForTrack(sorted[0]) > 0.08) {
+                        tracksToFlatten = [sorted[0]];
+                    }
+                }
+                const flattenNames = new Set(tracksToFlatten.map((track) => track.name));
+
+                clip.tracks = clip.tracks.map((track) => {
+                    if (!flattenNames.has(track?.name) || !track?.values || track.values.length < 3) {
+                        return track;
+                    }
+
+                    const next = track.clone();
+                    const baseX = Number(next.values[0]) || 0;
+                    const baseZ = Number(next.values[2]) || 0;
+                    for (let index = 0; index < next.values.length; index += 3) {
+                        next.values[index] = baseX;
+                        next.values[index + 2] = baseZ;
+                    }
+                    return next;
+                });
+
+                try {
+                    clip.optimize();
+                } catch (_) {
+                    // keep unoptimized clip
+                }
+                return clip;
+            }
+
+            async function buildPlayModeClipSetFromCatalog() {
+                const catalog = await ensureViewerAnimationCatalogLoaded();
+                const readyEntries = catalogEntriesFromPayload(catalog);
+                if (!readyEntries.length) {
+                    throw new Error('No ready catalog animations');
+                }
+
+                const cacheKey = `${taskId}:${readyEntries.map((entry) => `${entry.id}:${entry.ready ? 1 : 0}`).join('|')}`;
+                const cached = playModeClipSetCache.get(cacheKey);
+                if (cached?.length) return cached;
+
+                const clips = [];
+                const diagnostics = [];
+                loadingManager?.setQueue?.(PLAY_MODE_LOCOMOTION_ROLES.map((roleConfig) => ({
+                    name: `Play ${roleConfig.role}`,
+                    status: 'pending',
+                })));
+                for (const roleConfig of PLAY_MODE_LOCOMOTION_ROLES) {
+                    loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'active');
+                    loadingManager?.updateProgress?.(
+                        25 + (clips.length / PLAY_MODE_LOCOMOTION_ROLES.length) * 55,
+                        `Loading Play ${roleConfig.role}...`
+                    );
+                    const entry = pickCatalogEntryForPlayRole(readyEntries, roleConfig);
+                    if (!entry) {
+                        diagnostics.push(`${roleConfig.role}: missing`);
+                        loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'error');
+                        continue;
+                    }
+
+                    const rawClips = await loadAnimationClipsFromFbxUrl(
+                        resolveCatalogAnimationUrl(entry),
+                        `Play ${roleConfig.role}: ${entry.name || entry.id}`
+                    );
+                    const sourceClip = rawClips[0];
+                    if (!sourceClip) {
+                        diagnostics.push(`${roleConfig.role}: empty ${entry.id}`);
+                        loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'error');
+                        continue;
+                    }
+
+                    const controllerClip = makeControllerInPlaceClip(sourceClip, roleConfig.clipName);
+                    if (controllerClip) {
+                        clips.push(controllerClip);
+                        diagnostics.push(`${roleConfig.role}: ${entry.id} -> ${controllerClip.name}`);
+                        loadingManager?.setItemStatus?.(`Play ${roleConfig.role}`, 'done');
+                    }
+                }
+
+                if (!clips.length) {
+                    throw new Error('No playable controller clips');
+                }
+
+                playModeClipSetCache.set(cacheKey, clips);
+                window.taskDbg('[PlayMode] Catalog controller clips:', diagnostics);
+                return clips;
+            }
+
+            async function ensurePlayModeAnimationSet() {
+                if (currentModelType !== 'animations') {
+                    await setActiveMode('animation');
+                }
+                if (currentModelType !== 'animations' || !currentModel) {
+                    return false;
+                }
+
+                loadingManager?.show?.('Loading Play Mode');
+                loadingManager?.updateProgress?.(15, 'Preparing Play controller...');
+                setStatus('Loading Play controller clips...');
+                const clips = await buildPlayModeClipSetFromCatalog();
+                loadingManager?.updateProgress?.(85, 'Binding Play animations...');
+                const ok = applyAnimationClipsToCurrentModel(
+                    clips,
+                    PLAY_MODE_LOCOMOTION_ROLES.flatMap((role) => [role.clipName, ...(role.ids || [])])
+                );
+                if (ok) {
+                    modelCache.animations = currentModel;
+                    modelCache.animationsData = [...animations];
+                    setStatus(`Play controller ready (${animations.length} clips)`);
+                    loadingManager?.updateProgress?.(100, 'Play mode ready');
+                }
+                return ok;
+            }
+
             async function playAnimationByBestMatch(query) {
                 if (!mixer || !animations.length) return false;
                 const clip = pickBestAnimationClipByHints([query]);
@@ -7338,18 +7990,56 @@
                 if (!renderer) return false;
                 setStatus('Loading IBL...');
                 try {
-                    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-                    const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-                    scene.environment = envTexture;
-                    pmremGenerator.dispose();
+                    if (!skyObject) {
+                        skyObject = new Sky();
+                        skyObject.scale.setScalar(450000);
+                        scene.add(skyObject);
+                    }
+                    if (!skyPmremGenerator) {
+                        skyPmremGenerator = new THREE.PMREMGenerator(renderer);
+                    }
+                    updateSkyEnvironment(true);
                     if ('environmentIntensity' in scene) {
                         scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
                     }
-                    window.taskDbg('[Viewer] IBL ready (RoomEnvironment PMREM)');
+                    window.taskDbg('[Viewer] Sky environment ready (procedural Sky PMREM)');
                     return true;
                 } catch (e) {
-                    console.error('[Viewer] IBL setup failed:', e);
-                    return false;
+                    console.error('[Viewer] Sky environment setup failed, falling back to RoomEnvironment:', e);
+                    try {
+                        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+                        const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+                        scene.environment = envTexture;
+                        pmremGenerator.dispose();
+                        return true;
+                    } catch (_) {
+                        return false;
+                    }
+                }
+            }
+
+            function updateSkyEnvironment(forcePmrem = false) {
+                if (!scene || !renderer || !skyObject) return;
+                const uniforms = skyObject.material.uniforms;
+                uniforms.turbidity.value = LIGHTING_CONFIG.skyTurbidity;
+                uniforms.rayleigh.value = LIGHTING_CONFIG.skyRayleigh;
+                uniforms.mieCoefficient.value = LIGHTING_CONFIG.skyMieCoefficient;
+                uniforms.mieDirectionalG.value = LIGHTING_CONFIG.skyMieDirectionalG;
+
+                const phi = THREE.MathUtils.degToRad(90 - viewerState.sunInclination);
+                const theta = THREE.MathUtils.degToRad(viewerState.sunRotation);
+                const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
+                uniforms.sunPosition.value.copy(sunPosition);
+
+                scene.background = skyObject;
+
+                if (forcePmrem || !skyEnvironmentTexture) {
+                    if (!skyPmremGenerator) skyPmremGenerator = new THREE.PMREMGenerator(renderer);
+                    if (skyEnvironmentTexture) skyEnvironmentTexture.dispose?.();
+                    const skyScene = new THREE.Scene();
+                    skyScene.add(skyObject.clone());
+                    skyEnvironmentTexture = skyPmremGenerator.fromScene(skyScene).texture;
+                    scene.environment = skyEnvironmentTexture;
                 }
             }
 
@@ -7395,7 +8085,7 @@
                     pixelRatioCap: 0.8,
                     useComposer: false,
                     bloom: false,
-                    shadows: false,
+                    shadows: true,
                     shadowMapSize: 512,
                 }
             };
@@ -7403,6 +8093,7 @@
             // Rig Editor and Viewer Controls instances
             let rigEditor = null;
             let viewerControls = null;
+            let playModeController = null;
             let setActiveMode = null; // Defined in setupViewModeSelector but exposed here
             
             // Transform System instances
@@ -7415,6 +8106,9 @@
             let sunLight = null;
             let ambientLight = null;
             let hemiLight = null;
+            let skyObject = null;
+            let skyPmremGenerator = null;
+            let skyEnvironmentTexture = null;
             let composer = null;
             let bloomPass = null;
 
@@ -7851,6 +8545,8 @@
                         r * Math.sin(phi) * Math.cos(theta)
                     );
                 }
+                updateSkyEnvironment(false);
+                updateSunShadowFocus(true);
 
                 if (ambientLight) {
                     ambientLight.color.set(viewerState.ambientColor);
@@ -7865,9 +8561,9 @@
                     scene.environmentIntensity = envVal;
                 }
                 
-                // Background color
+                // Background color fallback / picker sync. The procedural sky owns the visible background.
                 if (scene) {
-                    scene.background = new THREE.Color(viewerState.bgColor);
+                    if (!skyObject) scene.background = new THREE.Color(viewerState.bgColor);
                     const preview = document.getElementById('bg-color-preview');
                     if (preview) preview.style.backgroundColor = viewerState.bgColor;
                     const picker = document.getElementById('bg-color-picker');
@@ -8107,6 +8803,36 @@
                 if (adjEmMultVal) adjEmMultVal.textContent = Number(currentAdj.emissiveMult || 2.0).toFixed(3);
             }
 
+            function snapCurrentModelToGround(options = {}) {
+                if (!currentModel || !THREE) return;
+                if (playModeController?.active) return;
+                const centerXZ = !!options.centerXZ;
+                const force = options.force !== false;
+                try {
+                    currentModel.updateMatrixWorld(true);
+                    const box = new THREE.Box3().setFromObject(currentModel);
+                    if (!Number.isFinite(box.min.y) || !Number.isFinite(box.max.y)) return;
+                    const deltaY = -box.min.y;
+                    if (force || Math.abs(deltaY) > 0.002) {
+                        currentModel.position.y += deltaY;
+                    }
+                    if (centerXZ) {
+                        currentModel.updateMatrixWorld(true);
+                        const centeredBox = new THREE.Box3().setFromObject(currentModel);
+                        const center = centeredBox.getCenter(new THREE.Vector3());
+                        currentModel.position.x -= center.x;
+                        currentModel.position.z -= center.z;
+                    }
+                    if (groundPlaneMesh) groundPlaneMesh.position.y = 0;
+                    currentModel.updateMatrixWorld(true);
+                } catch (error) {
+                    if (!window.__snapGroundWarningShown) {
+                        window.__snapGroundWarningShown = true;
+                        console.warn('[Viewer] snapCurrentModelToGround failed:', error);
+                    }
+                }
+            }
+
             // Fullscreen functionality
             function toggleFullscreen() {
                 window.taskDbg('[Viewer] toggleFullscreen called, current state:', isFullscreen);
@@ -8306,6 +9032,96 @@
                     }
                     sunLight.shadow.needsUpdate = shadowsEnabled;
                 }
+            }
+
+            function updateSunShadowFocus(force = false) {
+                if (!sunLight || !sunLight.target || !THREE) return;
+                const focus = new THREE.Vector3();
+                let hasFocus = false;
+
+                if (playModeController?.active && playModeController.model) {
+                    focus.copy(playModeController.model.position);
+                    hasFocus = true;
+                } else if (currentModel) {
+                    try {
+                        new THREE.Box3().setFromObject(currentModel).getCenter(focus);
+                        hasFocus = true;
+                    } catch (error) {
+                        hasFocus = false;
+                    }
+                }
+                if (!hasFocus) return;
+
+                const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
+                const theta = viewerState.sunRotation * (Math.PI / 180);
+                const r = Math.max(12, Number(viewerState.groundSize || 10) * 0.5);
+                const sunOffset = new THREE.Vector3(
+                    r * Math.sin(phi) * Math.sin(theta),
+                    Math.max(3, r * Math.cos(phi)),
+                    r * Math.sin(phi) * Math.cos(theta)
+                );
+
+                sunLight.target.position.copy(focus);
+                sunLight.position.copy(focus).add(sunOffset);
+                sunLight.target.updateMatrixWorld();
+                sunLight.updateMatrixWorld();
+
+                if (sunLight.shadow) {
+                    const size = Math.max(8, Math.min(60, Number(viewerState.groundSize || 10)));
+                    sunLight.shadow.camera.left = -size;
+                    sunLight.shadow.camera.right = size;
+                    sunLight.shadow.camera.top = size;
+                    sunLight.shadow.camera.bottom = -size;
+                    sunLight.shadow.camera.far = Math.max(80, size * 3);
+                    sunLight.shadow.camera.updateProjectionMatrix();
+                    if (force || playModeController?.active) {
+                        sunLight.shadow.needsUpdate = true;
+                    }
+                }
+            }
+
+            function publishMainViewerDebugState() {
+                let modelBox = null;
+                if (currentModel) {
+                    try {
+                        const box = new THREE.Box3().setFromObject(currentModel);
+                        modelBox = {
+                            minY: box.min.y,
+                            maxY: box.max.y,
+                            height: box.max.y - box.min.y,
+                            modelY: currentModel.position.y,
+                        };
+                    } catch (_) {
+                        modelBox = null;
+                    }
+                }
+                window.__mainViewerDebug = {
+                    quality: mainViewerQualityMode,
+                    modelBox,
+                    hasSky: !!skyObject,
+                    backgroundType: scene?.background?.type || scene?.background?.constructor?.name || null,
+                    hasEnvironment: !!scene?.environment,
+                    rendererShadowEnabled: !!renderer?.shadowMap?.enabled,
+                    sunCastShadow: !!sunLight?.castShadow,
+                    sunIntensity: Number(sunLight?.intensity || 0),
+                    shadowMapSize: sunLight?.shadow ? {
+                        width: sunLight.shadow.mapSize.width,
+                        height: sunLight.shadow.mapSize.height,
+                    } : null,
+                    shadowCamera: sunLight?.shadow?.camera ? {
+                        left: sunLight.shadow.camera.left,
+                        right: sunLight.shadow.camera.right,
+                        top: sunLight.shadow.camera.top,
+                        bottom: sunLight.shadow.camera.bottom,
+                        far: sunLight.shadow.camera.far,
+                    } : null,
+                    sunTarget: sunLight?.target?.position ? {
+                        x: sunLight.target.position.x,
+                        y: sunLight.target.position.y,
+                        z: sunLight.target.position.z,
+                    } : null,
+                    groundReceiveShadow: !!groundPlaneMesh?.receiveShadow,
+                };
             }
 
             function applyMainViewerQuality(mode = mainViewerQualityMode, reason = 'manual') {
@@ -8756,6 +9572,7 @@
 
                 // Global keyboard shortcuts (only when viewer is focused)
                 document.addEventListener('keydown', (e) => {
+                    if (playModeController?.active) return;
                     // Space key for fullscreen toggle - only if viewer focused
                     if (e.key === ' ' && !e.repeat && viewerFocused && !e.target.matches('input, textarea, select')) {
                         e.preventDefault();
@@ -9003,7 +9820,7 @@
                     renderer,
                     controls,
                     transform,
-                    groundPlaneMesh, // Pass the ground plane mesh
+                    groundPlane: groundPlaneMesh, // Pass the ground plane mesh
                     bloomPass, // Pass the bloom pass
                     t,
                     onSaveDefaultSettings: () => saveDefaultViewerSettings('hotkey'),
@@ -9138,6 +9955,13 @@
                 document.addEventListener('keydown', (e) => {
                     // Don't capture if user is typing in an input
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+                    if (playModeController?.active && playModeController.handleKeyDown(e, true)) {
+                        viewerFocused = true;
+                        wrap.classList.add('viewer-focused');
+                        e.preventDefault();
+                        return;
+                    }
                     
                     // Don't capture if viewer is not focused
                     if (!viewerFocused) return;
@@ -9182,6 +10006,10 @@
                     }
                 });
                 document.addEventListener('keyup', (e) => {
+                    if (playModeController?.active && playModeController.handleKeyUp(e, true)) {
+                        e.preventDefault();
+                        return;
+                    }
                     if (!viewerFocused) return;
                     if (viewerControls) viewerControls.handleKeyUp(e.key);
                 });
@@ -9238,9 +10066,15 @@
                         if (!mainViewerEnabled || document.hidden) {
                             return;
                         }
-                        if (mixer) mixer.update(dt);
+                        if (mixer) {
+                            mixer.update(dt);
+                            snapCurrentModelToGround({ force: false });
+                        }
                         if (viewerControls) viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
+                        if (playModeController?.active) playModeController.update(dt);
+                        updateSunShadowFocus(false);
+                        publishMainViewerDebugState();
                         if (window.updateZoomInertia) window.updateZoomInertia();
                         controls.update();
                         
@@ -9564,9 +10398,11 @@
                     const tposeBtn = document.getElementById('view-mode-tpose');
                     const rigBtn = document.getElementById('view-mode-rig');
                     const animBtn = document.getElementById('view-mode-anim');
+                    const playModeBtn = document.getElementById('view-mode-play');
+                    const ragdollModeBtn = document.getElementById('view-mode-ragdoll');
                     const rotationButtonsWrap = document.getElementById('rotation-buttons');
                     const saveRigWrap = document.getElementById('save-rig-wrap');
-                    const allBtns = [tposeBtn, rigBtn, animBtn];
+                    const allBtns = [tposeBtn, rigBtn, animBtn, playModeBtn, ragdollModeBtn];
 
                     const setEditControlsVisible = (visible) => {
                         if (rotationButtonsWrap) {
@@ -9577,12 +10413,62 @@
                         }
                     };
                     
+                    const ensurePlayController = () => {
+                        if (playModeController) return playModeController;
+                        playModeController = new PlayModeController({
+                            THREE,
+                            scene,
+                            renderer,
+                            camera,
+                            controls,
+                            viewerControls,
+                            getCurrentModel: () => currentModel,
+                            getAnimations: () => animations,
+                            getMixer: () => mixer,
+                            playClipByName: (name, options) => play(name, options),
+                            setStatus: (msg) => setStatus(msg),
+                        });
+                        window.__playModeController = playModeController;
+                        return playModeController;
+                    };
+
+                    const stopPlayModeIfNeeded = async (nextMode) => {
+                        if ((nextMode === 'play' || nextMode === 'ragdoll') || !playModeController?.active) return;
+                        await playModeController.exit();
+                    };
+
+                    const showRagdollHelpOnce = () => {
+                        const key = 'autorig.ragdollHelp.v1';
+                        if (localStorage.getItem(key) === '1') return;
+                        localStorage.setItem(key, '1');
+                        const modal = document.createElement('div');
+                        modal.style.cssText = 'position:fixed; inset:0; z-index:10020; display:flex; align-items:center; justify-content:center; background:rgba(3,6,18,0.58); backdrop-filter:blur(6px);';
+                        modal.innerHTML = `
+                            <div style="width:min(460px, calc(100vw - 32px)); border:1px solid rgba(255,255,255,0.14); border-radius:14px; background:linear-gradient(180deg, rgba(18,24,42,0.98), rgba(9,13,26,0.98)); color:#fff; box-shadow:0 24px 70px rgba(0,0,0,0.45); padding:20px;">
+                                <h3 style="margin:0 0 12px; font-size:1.05rem;">Ragdoll controls</h3>
+                                <div style="display:grid; gap:10px; font-size:0.9rem; line-height:1.45; color:rgba(255,255,255,0.82);">
+                                    <div><b style="color:#fff;">R</b> resets the character to the base position.</div>
+                                    <div><b style="color:#fff;">Left mouse drag</b> grabs the body part under the cursor. Drag up/down to lift or lower it like a puppet.</div>
+                                    <div><b style="color:#fff;">Space</b> applies a small impulse.</div>
+                                </div>
+                                <button type="button" data-close-ragdoll-help style="margin-top:18px; width:100%; padding:0.72rem 1rem; border:0; border-radius:10px; color:#fff; background:linear-gradient(135deg,#4f46e5,#7c3aed); font-weight:700; cursor:pointer;">Got it</button>
+                            </div>
+                        `;
+                        modal.addEventListener('click', (event) => {
+                            if (event.target === modal || event.target?.matches?.('[data-close-ragdoll-help]')) {
+                                modal.remove();
+                            }
+                        });
+                        document.body.appendChild(modal);
+                    };
+
                     setActiveMode = async (mode) => {
                         window.taskDbg('[Viewer] setActiveMode:', mode, 
                             'currentType:', currentModelType, 
                             'cacheHasPrepared:', !!modelCache.prepared,
                             'cacheHasAnimations:', !!modelCache.animations);
                         allBtns.forEach(b => b?.classList.remove('active'));
+                        await stopPlayModeIfNeeded(mode);
                         
                         switch (mode) {
                             case 'tpose':
@@ -9720,16 +10606,153 @@
                                     }
                                 }
                                 break;
+
+                            case 'play':
+                                setEditControlsVisible(false);
+                                if (tPoseReference) {
+                                    tPoseReference.setVisible(false);
+                                    const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
+                                    if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
+                                }
+
+                                if (currentModelType !== 'animations') {
+                                    await setActiveMode('animation');
+                                }
+
+                                if (currentModelType !== 'animations') {
+                                    setStatus('Play mode requires animations.glb');
+                                    playModeBtn?.classList.remove('active');
+                                    return;
+                                }
+
+                                if (modelCache.animations && modelCache.animationsData?.length) {
+                                    swapToCache('animations');
+                                    currentModelType = 'animations';
+                                }
+
+                                let playClipsReady = false;
+                                try {
+                                    playClipsReady = await ensurePlayModeAnimationSet();
+                                } catch (error) {
+                                    console.error('[Viewer] Play mode animation load failed:', error);
+                                    setStatus(`Play mode animation load failed: ${error?.message || error}`);
+                                }
+                                if (!playClipsReady) {
+                                    playModeBtn?.classList.remove('active');
+                                    animBtn?.classList.add('active');
+                                    loadingManager?.hide?.();
+                                    return;
+                                }
+
+                                animBtn?.classList.remove('active');
+                                playModeBtn?.classList.add('active');
+                                viewerFocused = true;
+                                wrap.classList.add('viewer-focused');
+
+                                if (sel) sel.classList.add('hidden');
+                                if (playBtn) playBtn.classList.add('hidden');
+                                if (pauseBtn) pauseBtn.classList.add('hidden');
+
+                                const playController = ensurePlayController();
+                                playController.refreshModel();
+                                try {
+                                    await playController.enter();
+                                    loadingManager?.hide?.();
+                                } catch (error) {
+                                    console.error('[Viewer] Play mode init failed:', error);
+                                    setStatus(`Play mode init failed: ${error?.message || error}`);
+                                    playModeBtn?.classList.remove('active');
+                                    loadingManager?.hide?.();
+                                    return;
+                                }
+                                break;
+
+                            case 'ragdoll':
+                                setEditControlsVisible(false);
+                                if (tPoseReference) {
+                                    tPoseReference.setVisible(false);
+                                    const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
+                                    if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
+                                }
+
+                                if (modelCache.animations && modelCache.animationsData?.length) {
+                                    swapToCache('animations');
+                                    currentModelType = 'animations';
+                                }
+
+                                if (currentModelType !== 'animations') {
+                                    window.taskDbg('[Viewer] Loading animations.glb for ragdoll mode...');
+                                    setLoadingUIState(true);
+                                    loadingManager.show('Loading Ragdoll');
+                                    loadingManager.setQueue([{ name: 'Skinned Animations GLB', status: 'pending' }]);
+                                    const ok = await loadModel(
+                                        `/api/task/${taskId}/animations.glb`,
+                                        'Skinned Animations GLB',
+                                        0,
+                                        120000
+                                    );
+                                    setLoadingUIState(false);
+                                    if (ok) {
+                                        currentModelType = 'animations';
+                                        modelCache.animations = currentModel;
+                                        modelCache.animationsData = [...animations];
+                                    } else {
+                                        setStatus('Ragdoll mode requires animations.glb');
+                                        ragdollModeBtn?.classList.remove('active');
+                                        loadingManager?.hide?.();
+                                        return;
+                                    }
+                                }
+
+                                animBtn?.classList.remove('active');
+                                playModeBtn?.classList.remove('active');
+                                ragdollModeBtn?.classList.add('active');
+                                viewerFocused = true;
+                                wrap.classList.add('viewer-focused');
+
+                                if (sel) sel.classList.add('hidden');
+                                if (playBtn) playBtn.classList.add('hidden');
+                                if (pauseBtn) pauseBtn.classList.add('hidden');
+
+                                const ragdollController = ensurePlayController();
+                                ragdollController.refreshModel();
+                                try {
+                                    await ragdollController.enterRagdollMode();
+                                    showRagdollHelpOnce();
+                                    setStatus('Ragdoll mode active · R reset · Space impulse');
+                                    setTimeout(() => {
+                                        if (ragdollController?.mode === 'ragdoll' && ragdollController?.ragdollActive) {
+                                            setStatus('Ragdoll mode active · R reset · Space impulse');
+                                        }
+                                    }, 500);
+                                    loadingManager?.hide?.();
+                                } catch (error) {
+                                    console.error('[Viewer] Ragdoll mode init failed:', error);
+                                    setStatus(`Ragdoll mode init failed: ${error?.message || error}`);
+                                    ragdollModeBtn?.classList.remove('active');
+                                    loadingManager?.hide?.();
+                                    return;
+                                }
+                                break;
                         }
                         
                         if (viewerControls) {
-                            viewerControls.setViewMode(mode);
+                            viewerControls.setViewMode(mode === 'ragdoll' ? 'animation' : mode);
+                        }
+                        if (mode === 'ragdoll') {
+                            allBtns.forEach(b => b?.classList.remove('active'));
+                            ragdollModeBtn?.classList.add('active');
+                            if (playModeController?.ragdollActive) {
+                                setStatus('Ragdoll mode active · R reset · Space impulse');
+                            }
                         }
                     };
                     
-                    tposeBtn?.addEventListener('click', () => setActiveMode('tpose'));
-                    rigBtn?.addEventListener('click', () => setActiveMode('rig'));
-                    animBtn?.addEventListener('click', () => setActiveMode('animation'));
+                    tposeBtn?.addEventListener('click', () => { tposeBtn.blur(); setActiveMode('tpose'); });
+                    rigBtn?.addEventListener('click', () => { rigBtn.blur(); setActiveMode('rig'); });
+                    animBtn?.addEventListener('click', () => { animBtn.blur(); setActiveMode('animation'); });
+                    playModeBtn?.addEventListener('click', () => { playModeBtn.blur(); setActiveMode('play'); });
+                    ragdollModeBtn?.addEventListener('click', () => { ragdollModeBtn.blur(); setActiveMode('ragdoll'); });
                     
                     // Expose for external use
                     window.setViewMode = setActiveMode;
@@ -10791,7 +11814,14 @@
                 
                 model.traverse((child) => {
                     if (child.isMesh && child.material) {
-                        const mat = child.material;
+                        const mats = Array.isArray(child.material) ? child.material : [child.material];
+                        mats.forEach((m) => {
+                            if (m) {
+                                m.side = THREE.DoubleSide;
+                                m.needsUpdate = true;
+                            }
+                        });
+                        const mat = mats[0];
                         
                         // Check if material has no albedo/diffuse texture
                         const hasTexture = mat.map || mat.diffuseMap || mat.albedoMap;
@@ -10989,6 +12019,7 @@
                     viewerControls.setAOSettings(viewerState.aoSettings);
                     viewerControls.setModel(model);
                 }
+                snapCurrentModelToGround({ centerXZ: true, force: true });
                 
                 // Apply improved materials for models without textures (darker, reflective)
                 applyImprovedMaterials(model);
@@ -11369,9 +12400,89 @@
                 return true;
             }
 
+            async function loadOBJ(objUrl, label = 'OBJ', retryCount = 0) {
+                if (!sceneInited) await initScene();
+                setStatus(`Loading ${label}...`);
+                loadingManager.show('Loading Source Model');
+                loadingManager.setQueue([{ name: label, status: 'pending' }]);
+                loadingManager.setItemStatus(label, 'active');
+                const loader = new OBJLoader();
+                let model;
+                try {
+                    model = await new Promise((resolve, reject) => {
+                        loader.load(objUrl, resolve, undefined, (err) => {
+                            if (retryCount < 1) resolve(null);
+                            else reject(err);
+                        });
+                    });
+                    if (model === null) {
+                        await new Promise(r => setTimeout(r, 700));
+                        return await loadOBJ(objUrl, label, retryCount + 1);
+                    }
+                } catch (e) {
+                    console.warn(`[Viewer] Failed to load ${label}:`, e);
+                    loadingManager.setItemStatus(label, 'error');
+                    loadingManager.hide();
+                    return false;
+                }
+                if (currentModel) scene.remove(currentModel);
+                scene.add(model);
+                currentModel = model;
+                syncMainViewerShadowQuality();
+                if (transformManager) {
+                    transformManager.setRootModel(currentModel);
+                    transformManager.setModel(model);
+                }
+                applyImprovedMaterials(model);
+                if (viewerControls) {
+                    viewerControls.setAOSettings(viewerState.aoSettings);
+                    viewerControls.setModel(model);
+                }
+                if (hierarchyNavigator) {
+                    hierarchyNavigator.setModel(model);
+                    updateHierarchyUI();
+                }
+                try {
+                    const box = new THREE.Box3().setFromObject(model);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z, 1);
+                    const distance = maxDim * 2;
+                    controls.target.copy(center);
+                    camera.position.set(center.x + distance * 0.7, center.y + distance * 0.5, center.z + distance * 0.7);
+                    camera.lookAt(center);
+                    controls.update();
+                    cameraInitialized = true;
+                } catch (err) {
+                    console.warn('[Viewer] OBJ camera setup failed:', err);
+                }
+                animations = [];
+                mixer = null;
+                sel?.classList.add('hidden');
+                playBtn?.classList.add('hidden');
+                pauseBtn?.classList.add('hidden');
+                loadingManager.updateProgress(100, `${label} loaded!`);
+                loadingManager.setItemStatus(label, 'done');
+                setTimeout(() => hideLoadingOverlay(), 300);
+                setStatus('Ready (source model)');
+                window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
+                window.__taskPageBoot?.markViewerReady(`${label} ready`);
+                return true;
+            }
+
+            async function loadInputSourceModel(inputUrl) {
+                const clean = String(inputUrl || '').split('?')[0].split('#')[0].toLowerCase();
+                if (clean.endsWith('.fbx')) return await loadFBX(inputUrl, 'Source FBX');
+                if (clean.endsWith('.obj')) return await loadOBJ(inputUrl, 'Source OBJ');
+                if (clean.endsWith('.glb') || clean.endsWith('.gltf')) return await loadModel(inputUrl, 'Source GLB', 0, 45000);
+                return false;
+            }
+
             // Track which models are loaded
             let animationsLoaded = false;
             let free3dModelLoaded = false;
+            let sourceModelLoaded = false;
+            let sourceModelAttempted = false;
             
             // Track which model type is currently loaded (outer scope for access by waitAndInitViewer)
             let currentModelType = 'unknown'; // 'prepared', 'animations', 'unknown'
@@ -11489,6 +12600,704 @@
                     window.TaskUI.taskFetchedAt = Date.now();
                 }
                 return t;
+            }
+
+            function isAnimalStandaloneTask(taskState) {
+                return String(taskState?.input_type || '').toLowerCase() === 'animal';
+            }
+
+            function animalStandaloneHasFbxBundle(taskState) {
+                const urls = []
+                    .concat(Array.isArray(taskState?.ready_urls) ? taskState.ready_urls : [])
+                    .concat(Array.isArray(taskState?.output_urls) ? taskState.output_urls : []);
+                return urls.some((url) => {
+                    const lower = String(url || '').toLowerCase();
+                    return lower.includes('_all_animations') && lower.includes('.fbx');
+                });
+            }
+
+            function animalStandaloneShouldProbeFbxBundle(taskState) {
+                if (!isAnimalStandaloneTask(taskState)) return false;
+                if (animalStandaloneHasFbxBundle(taskState)) return true;
+                return Boolean(taskState?.guid || taskState?.worker_api || taskState?.progress_page);
+            }
+
+            const animalStandaloneViewer = {
+                started: false,
+                clipsLoaded: false,
+                loadingClips: false,
+                renderer: null,
+                scene: null,
+                camera: null,
+                controls: null,
+                model: null,
+                frameId: 0,
+                lastFbxProbeAt: 0,
+                sourceMaterialPalette: null,
+                fitterMixer: null,
+            };
+
+            function hideOldViewerControlsForAnimalStandalone() {
+                [
+                    '#viewer-overlay',
+                    '#viewer-rigtype-wrap',
+                    '#viewer-hierarchy-wrap',
+                    '.tpose-toggle',
+                    '#viewer-default-toggle',
+                ].forEach((selector) => {
+                    document.querySelector(selector)?.classList.add('hidden');
+                });
+            }
+
+            function forceStandaloneDoubleSided(model) {
+                model?.traverse?.((node) => {
+                    const mats = Array.isArray(node.material) ? node.material : (node.material ? [node.material] : []);
+                    mats.forEach((mat) => {
+                        if (!mat) return;
+                        mat.side = THREE.DoubleSide;
+                        mat.needsUpdate = true;
+                    });
+                });
+            }
+
+            function normalizeStandaloneMaterialKey(value) {
+                return String(value || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/\.[0-9]{3}$/g, '')
+                    .replace(/[^a-z0-9]+/g, '_')
+                    .replace(/_+/g, '_')
+                    .replace(/^_+|_+$/g, '');
+            }
+
+            function prepareStandaloneMaterialForAnimal(material) {
+                if (!material) return material;
+                material.side = THREE.DoubleSide;
+                material.skinning = true;
+                if (material.map) material.map.colorSpace = THREE.SRGBColorSpace;
+                if (material.emissiveMap) material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+                if ('envMapIntensity' in material) {
+                    material.envMapIntensity = Math.max(Number(material.envMapIntensity || 0), 1.15);
+                }
+                material.needsUpdate = true;
+                return material;
+            }
+
+            function cloneStandaloneAnimalMaterial(material) {
+                if (!material) return null;
+                try {
+                    return prepareStandaloneMaterialForAnimal(material.clone());
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            function collectStandaloneAnimalSourceMaterials(model) {
+                const all = [];
+                const byName = new Map();
+                const addMaterial = (mat, meshName = '') => {
+                    if (!mat) return;
+                    const idx = all.length;
+                    all.push(mat);
+                    [
+                        mat.name,
+                        meshName,
+                        `${meshName}_${mat.name || ''}`,
+                    ].forEach((key) => {
+                        const normalized = normalizeStandaloneMaterialKey(key);
+                        if (normalized && !byName.has(normalized)) {
+                            byName.set(normalized, mat);
+                        }
+                    });
+                    const indexed = normalizeStandaloneMaterialKey(`slot_${idx}`);
+                    if (indexed && !byName.has(indexed)) {
+                        byName.set(indexed, mat);
+                    }
+                };
+
+                model?.traverse?.((node) => {
+                    if (!node?.isMesh || !node.material) return;
+                    const mats = Array.isArray(node.material) ? node.material : [node.material];
+                    mats.forEach((mat) => addMaterial(mat, node.name || ''));
+                });
+
+                return { all, byName };
+            }
+
+            function applyStandaloneAnimalSourceMaterials(targetModel) {
+                const palette = animalStandaloneViewer.sourceMaterialPalette;
+                if (!palette?.all?.length || !targetModel) {
+                    return false;
+                }
+
+                targetModel.traverse?.((node) => {
+                    if (!node?.isMesh || !node.material) return;
+                    const targetMats = Array.isArray(node.material) ? node.material : [node.material];
+                    const mapped = targetMats.map((mat, idx) => {
+                        const keys = [
+                            mat?.name,
+                            node.name,
+                            `${node.name || ''}_${mat?.name || ''}`,
+                            `slot_${idx}`,
+                        ].map(normalizeStandaloneMaterialKey).filter(Boolean);
+                        let source = null;
+                        for (const key of keys) {
+                            source = palette.byName.get(key);
+                            if (source) break;
+                        }
+                        source = source || palette.all[idx] || palette.all[0];
+                        return cloneStandaloneAnimalMaterial(source) || prepareStandaloneMaterialForAnimal(mat);
+                    });
+                    node.material = Array.isArray(node.material) ? mapped : mapped[0];
+                    node.castShadow = true;
+                    node.receiveShadow = true;
+                });
+                return true;
+            }
+
+            function brightenStandaloneFallbackMaterials(model) {
+                model?.traverse?.((node) => {
+                    if (!node?.isMesh || !node.material) return;
+                    const mats = Array.isArray(node.material) ? node.material : [node.material];
+                    mats.forEach((mat) => {
+                        if (!mat) return;
+                        prepareStandaloneMaterialForAnimal(mat);
+                        const hasTexture = Boolean(mat.map || mat.normalMap || mat.roughnessMap || mat.metalnessMap);
+                        const color = mat.color;
+                        const luminance = color ? (color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722) : 1;
+                        if (!hasTexture && color && luminance < 0.18) {
+                            color.lerp(new THREE.Color(0xb98a55), 0.55);
+                            mat.roughness = Math.min(Number(mat.roughness ?? 0.85), 0.82);
+                            mat.metalness = Math.min(Number(mat.metalness ?? 0), 0.08);
+                            mat.needsUpdate = true;
+                        }
+                    });
+                });
+            }
+
+            function fitStandaloneAnimalCamera(model) {
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z, 1);
+                const dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(animalStandaloneViewer.camera.fov) / 2))) * 1.55;
+                animalStandaloneViewer.camera.near = Math.max(0.001, dist / 1000);
+                animalStandaloneViewer.camera.far = Math.max(1000, dist * 10);
+                animalStandaloneViewer.camera.updateProjectionMatrix();
+                animalStandaloneViewer.controls.target.copy(center);
+                animalStandaloneViewer.camera.position.set(
+                    center.x + dist * 0.72,
+                    center.y + dist * 0.42,
+                    center.z + dist * 0.72
+                );
+                animalStandaloneViewer.camera.lookAt(center);
+                animalStandaloneViewer.controls.update();
+            }
+
+            function resizeStandaloneAnimalRenderer() {
+                const renderer = animalStandaloneViewer.renderer;
+                const camera = animalStandaloneViewer.camera;
+                if (!renderer || !camera || !host) return;
+                const width = Math.max(320, Math.floor(host.clientWidth || 512));
+                const height = Math.max(320, Math.floor(host.clientHeight || 512));
+                const canvas = renderer.domElement;
+                if (canvas.width !== width || canvas.height !== height) {
+                    renderer.setSize(width, height, false);
+                    camera.aspect = width / height;
+                    camera.updateProjectionMatrix();
+                }
+            }
+
+            function startStandaloneAnimalLoop() {
+                if (animalStandaloneViewer.frameId) return;
+                const tick = () => {
+                    animalStandaloneViewer.frameId = requestAnimationFrame(tick);
+                    resizeStandaloneAnimalRenderer();
+                    const delta = clock.getDelta();
+                    if (mixer) mixer.update(delta);
+                    if (animalStandaloneViewer.fitterMixer) animalStandaloneViewer.fitterMixer.update(delta);
+                    animalStandaloneViewer.controls?.update?.();
+                    if (animalStandaloneViewer.renderer && animalStandaloneViewer.scene && animalStandaloneViewer.camera) {
+                        animalStandaloneViewer.renderer.render(animalStandaloneViewer.scene, animalStandaloneViewer.camera);
+                    }
+                };
+                tick();
+            }
+
+            async function loadStandaloneAnimalObject(inputUrl) {
+                const clean = String(inputUrl || '').split('?')[0].split('#')[0].toLowerCase();
+                const loadWithLoader = (loader, url) => new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
+                if (clean.endsWith('.fbx')) {
+                    return await loadWithLoader(new FBXLoader(), inputUrl);
+                }
+                if (clean.endsWith('.obj')) {
+                    return await loadWithLoader(new OBJLoader(), inputUrl);
+                }
+                const gltf = await loadWithLoader(new GLTFLoader(), inputUrl);
+                return gltf.scene;
+            }
+
+            async function loadStandaloneAnimalFbxBundle(fbxUrl, retryCount = 0) {
+                const loader = new FBXLoader();
+                setStatus('Loading rigged animal animation...');
+
+                try {
+                    const model = await new Promise((resolve, reject) => {
+                        loader.load(
+                            fbxUrl,
+                            resolve,
+                            undefined,
+                            (error) => {
+                                if (retryCount < 1) {
+                                    resolve(null);
+                                } else {
+                                    reject(error);
+                                }
+                            }
+                        );
+                    });
+                    if (model === null) {
+                        await new Promise(r => setTimeout(r, 600));
+                        return await loadStandaloneAnimalFbxBundle(fbxUrl, retryCount + 1);
+                    }
+                    return model;
+                } catch (error) {
+                    console.warn('[AnimalStandaloneViewer] Failed to load rigged FBX bundle:', error);
+                    return null;
+                }
+            }
+
+            function filterStandaloneAnimalClipsForModel(clips, model) {
+                if (!Array.isArray(clips) || !clips.length || !model) return [];
+
+                const targetNames = new Set();
+                model.traverse?.((node) => {
+                    if (node?.name) targetNames.add(String(node.name));
+                });
+                if (model.name) targetNames.add(String(model.name));
+
+                return clips.map((clip) => {
+                    if (!clip || !Array.isArray(clip.tracks)) return clip;
+                    const tracks = clip.tracks.filter((track) => {
+                        const trackName = String(track?.name || '');
+                        const target = trackName.split('.')[0];
+                        return target && targetNames.has(target);
+                    });
+                    if (!tracks.length) return null;
+                    try {
+                        return new THREE.AnimationClip(clip.name, clip.duration, tracks, clip.blendMode);
+                    } catch (_) {
+                        return null;
+                    }
+                }).filter(Boolean);
+            }
+
+            async function probeStandaloneAnimalAnimationsReady(taskState) {
+                if (!animalStandaloneShouldProbeFbxBundle(taskState)) return false;
+                if (animalStandaloneHasFbxBundle(taskState)) return true;
+
+                const now = Date.now();
+                if (now - Number(animalStandaloneViewer.lastFbxProbeAt || 0) < 3500) {
+                    return false;
+                }
+                animalStandaloneViewer.lastFbxProbeAt = now;
+
+                try {
+                    const response = await fetch(`/api/task/${taskId}/animations.fbx`, {
+                        method: 'HEAD',
+                        cache: 'no-store',
+                    });
+                    return response.ok;
+                } catch (_) {
+                    return false;
+                }
+            }
+
+            async function loadStandaloneAnimalAnimationsIfReady(taskState) {
+                if (animalStandaloneViewer.clipsLoaded) return true;
+                if (animalStandaloneViewer.loadingClips) return false;
+
+                const ready = await probeStandaloneAnimalAnimationsReady(taskState);
+                if (!ready) {
+                    setStatus('Static animal preview. Waiting for animations...');
+                    return false;
+                }
+
+                animalStandaloneViewer.loadingClips = true;
+                try {
+                    const fbxUrl = `/api/task/${taskId}/animations.fbx?animal_anim=${Date.now()}`;
+                    const animatedModel = await loadStandaloneAnimalFbxBundle(fbxUrl);
+                    const clips = filterStandaloneAnimalClipsForModel(animatedModel?.animations || [], animatedModel);
+                    if (!clips.length) {
+                        setStatus('Rigged animal FBX has no bindable animations');
+                        return false;
+                    }
+
+                    if (mixer) {
+                        try { mixer.stopAllAction(); } catch (_) {}
+                    }
+                    if (animalStandaloneViewer.scene && animalStandaloneViewer.model && animatedModel !== animalStandaloneViewer.model) {
+                        animalStandaloneViewer.scene.remove(animalStandaloneViewer.model);
+                    }
+                    if (!applyStandaloneAnimalSourceMaterials(animatedModel)) {
+                        brightenStandaloneFallbackMaterials(animatedModel);
+                    }
+                    forceStandaloneDoubleSided(animatedModel);
+                    animalStandaloneViewer.scene?.add(animatedModel);
+                    animalStandaloneViewer.model = animatedModel;
+                    currentModel = animatedModel;
+                    currentModelType = 'animal_fbx_bundle';
+                    fitStandaloneAnimalCamera(animatedModel);
+
+                    animations = clips;
+                    mixer = new THREE.AnimationMixer(animatedModel);
+                    currentAction = null;
+
+                    const preferredClipName = animations[0]?.name || null;
+                    rebuildAnimationControls(preferredClipName);
+                    if (preferredClipName) {
+                        play(preferredClipName, { restart: true, fade: 0.15 });
+                    }
+
+                    animalStandaloneViewer.clipsLoaded = true;
+                    animationsLoaded = true;
+                    showAnimationsReadyNotification();
+                    setStatus(`Playing (${animations.length} animal animations)`);
+                    return true;
+                } catch (error) {
+                    console.warn('[AnimalStandaloneViewer] Animation FBX load failed:', error);
+                    setStatus('Static animal preview. Waiting for animations...');
+                    return false;
+                } finally {
+                    animalStandaloneViewer.loadingClips = false;
+                }
+            }
+
+            async function ensureAnimalStandaloneViewer(taskState) {
+                if (!taskState?.input_url) {
+                    setStatus('Animal viewer waiting for source model...');
+                    return false;
+                }
+
+                hideOldViewerControlsForAnimalStandalone();
+                if (!animalStandaloneViewer.started) {
+                    animalStandaloneViewer.started = true;
+                    setStatus('Loading animal preview...');
+                    if (sel) sel.classList.add('hidden');
+                    if (playBtn) playBtn.classList.add('hidden');
+                    if (pauseBtn) pauseBtn.classList.add('hidden');
+                    host.innerHTML = '';
+                    host.classList.add('animal-standalone-viewer');
+
+                    const scene = new THREE.Scene();
+                    scene.background = new THREE.Color(0xd9e3ee);
+                    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
+                    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+                    renderer.outputColorSpace = THREE.SRGBColorSpace;
+                    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+                    renderer.setSize(Math.max(320, host.clientWidth || 512), Math.max(320, host.clientHeight || 512), false);
+                    host.appendChild(renderer.domElement);
+
+                    const controls = new OrbitControls(camera, renderer.domElement);
+                    controls.enableDamping = true;
+                    scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.45));
+                    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+                    key.position.set(-3, 5, -4);
+                    scene.add(key);
+                    const fill = new THREE.DirectionalLight(0xffffff, 0.85);
+                    fill.position.set(4, 3, 4);
+                    scene.add(fill);
+                    const pmrem = new THREE.PMREMGenerator(renderer);
+                    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+                    const model = await loadStandaloneAnimalObject(taskState.input_url);
+                    forceStandaloneDoubleSided(model);
+                    animalStandaloneViewer.sourceMaterialPalette = collectStandaloneAnimalSourceMaterials(model);
+                    scene.add(model);
+
+                    animalStandaloneViewer.scene = scene;
+                    animalStandaloneViewer.camera = camera;
+                    animalStandaloneViewer.renderer = renderer;
+                    animalStandaloneViewer.controls = controls;
+                    animalStandaloneViewer.model = model;
+                    currentModel = model;
+                    currentModelType = 'animal_standalone';
+                    fitStandaloneAnimalCamera(model);
+                    startStandaloneAnimalLoop();
+                    sourceModelLoaded = true;
+                    sourceModelAttempted = true;
+                    setStatus('Animal preview ready');
+                    window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
+                    window.__taskPageBoot?.markViewerReady('Animal preview ready');
+                }
+
+                await loadStandaloneAnimalAnimationsIfReady(taskState);
+
+                if (isAnimalStandaloneTask(taskState)) {
+                    initAnimalIdlePanels(taskState);
+                }
+
+                return true;
+            }
+
+            function captureAnimalStandaloneSnapshot768() {
+                const renderer = animalStandaloneViewer.renderer;
+                const scene = animalStandaloneViewer.scene;
+                const camera = animalStandaloneViewer.camera;
+                const host = document.getElementById('model-viewer');
+                if (!renderer || !scene || !camera || !host) return '';
+                const W = 768;
+                const H = 448;
+                const prevSize = new THREE.Vector2();
+                renderer.getSize(prevSize);
+                const prevPR = renderer.getPixelRatio();
+                renderer.setPixelRatio(1);
+                renderer.setSize(W, H, false);
+                camera.aspect = W / H;
+                camera.updateProjectionMatrix();
+                renderer.render(scene, camera);
+                const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.92);
+                const hw = Math.max(320, Math.floor(host.clientWidth || 512));
+                const hh = Math.max(320, Math.floor(host.clientHeight || 512));
+                renderer.setSize(hw, hh, false);
+                renderer.setPixelRatio(prevPR);
+                camera.aspect = hw / hh;
+                camera.updateProjectionMatrix();
+                return dataUrl;
+            }
+
+            let animalIdlePollTimer = null;
+            let animalFitterInstance = null;
+
+            function initAnimalIdlePanels(taskState) {
+                if (!isAnimalStandaloneTask(taskState)) return;
+                const ltxPanelCheck = document.getElementById('animal-idle-ltx-panel');
+                if (ltxPanelCheck?.dataset?.panelsWired === '1') {
+                    return;
+                }
+                wrap?.classList?.add?.('animal-viewer-aspect-ltx');
+                const ltxPanel = document.getElementById('animal-idle-ltx-panel');
+                const fitPanel = document.getElementById('animal-animation-fitter-panel');
+                if (ltxPanel) ltxPanel.classList.remove('hidden');
+                if (fitPanel) fitPanel.classList.remove('hidden');
+                const genBtn = document.getElementById('animal-idle-generate-btn');
+                const idleStatus = document.getElementById('animal-idle-status');
+                const idleVid = document.getElementById('animal-idle-video');
+                const idleErr = document.getElementById('animal-idle-error');
+                const fitUrl = document.getElementById('animal-fitter-video-url');
+                const fitRun = document.getElementById('animal-fitter-run-btn');
+                const fitStop = document.getElementById('animal-fitter-stop-btn');
+                const fitApply = document.getElementById('animal-fitter-apply-btn');
+                const fitExport = document.getElementById('animal-fitter-export-btn');
+                const fitProg = document.getElementById('animal-fitter-progress');
+                if (genBtn) genBtn.disabled = false;
+                if (fitRun) fitRun.disabled = false;
+
+                const lsKey = `idleAnimGen:${taskId}`;
+                const readLs = () => {
+                    try {
+                        const raw = localStorage.getItem(lsKey);
+                        if (!raw) return null;
+                        const o = JSON.parse(raw);
+                        if (Date.now() - (o.savedAt || 0) > 30000) {
+                            localStorage.removeItem(lsKey);
+                            return null;
+                        }
+                        return o;
+                    } catch (_) {
+                        return null;
+                    }
+                };
+                const writeLs = (jobId) => {
+                    try {
+                        localStorage.setItem(lsKey, JSON.stringify({ jobId, savedAt: Date.now() }));
+                    } catch (_) {}
+                };
+                const touchLs = () => {
+                    const cur = readLs();
+                    if (cur?.jobId) writeLs(cur.jobId);
+                };
+
+                const pollIdleJob = async (jobId) => {
+                    const url = `/api/task/${encodeURIComponent(taskId)}/idle-animation/status?job_id=${encodeURIComponent(jobId)}`;
+                    const r = await fetch(url, { credentials: 'same-origin' });
+                    if (!r.ok) throw new Error(await r.text());
+                    return r.json();
+                };
+
+                if (genBtn && !genBtn.dataset.wired) {
+                    genBtn.dataset.wired = '1';
+                    genBtn.addEventListener('click', async () => {
+                        idleErr?.classList?.add?.('hidden');
+                        genBtn.disabled = true;
+                        if (idleStatus) idleStatus.textContent = 'Capturing snapshot…';
+                        const snap = captureAnimalStandaloneSnapshot768();
+                        if (!snap) {
+                            if (idleStatus) idleStatus.textContent = 'Snapshot failed';
+                            genBtn.disabled = false;
+                            return;
+                        }
+                        if (idleStatus) idleStatus.textContent = 'Starting LTX job…';
+                        try {
+                            const res = await fetch(`/api/task/${encodeURIComponent(taskId)}/idle-animation/start`, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ snapshot_jpg_base64_string: snap }),
+                            });
+                            if (!res.ok) throw new Error(await res.text());
+                            const data = await res.json();
+                            const jobId = data.job_id_string;
+                            writeLs(jobId);
+                            if (animalIdlePollTimer) clearInterval(animalIdlePollTimer);
+                            animalIdlePollTimer = setInterval(async () => {
+                                touchLs();
+                                try {
+                                    const st = await pollIdleJob(jobId);
+                                    const si = st.status_int;
+                                    if (idleStatus) {
+                                        idleStatus.textContent = `${st.status_label_string || 'status'} (${si})`;
+                                    }
+                                    if (si >= 3) {
+                                        clearInterval(animalIdlePollTimer);
+                                        animalIdlePollTimer = null;
+                                        genBtn.disabled = false;
+                                        localStorage.removeItem(lsKey);
+                                        const vurl = st.video_url_string;
+                                        if (si === 3 && vurl && idleVid) {
+                                            idleVid.classList.remove('hidden');
+                                            idleVid.src = vurl;
+                                            idleVid.play?.().catch(() => {});
+                                            const prox = `/api/task/${encodeURIComponent(taskId)}/idle-animation/proxy-video?url=${encodeURIComponent(vurl)}`;
+                                            if (fitUrl) fitUrl.value = prox;
+                                        }
+                                        if (si === 4 && idleErr) {
+                                            idleErr.textContent = st.error_string || 'Render failed';
+                                            idleErr.classList.remove('hidden');
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.warn('[IdleLTX] poll', e);
+                                    if (idleStatus) idleStatus.textContent = 'Poll error';
+                                }
+                            }, 2000);
+                        } catch (e) {
+                            console.error(e);
+                            if (idleErr) {
+                                idleErr.textContent = String(e?.message || e);
+                                idleErr.classList.remove('hidden');
+                            }
+                            if (idleStatus) idleStatus.textContent = 'Error';
+                            genBtn.disabled = false;
+                        }
+                    });
+                }
+
+                const resume = readLs();
+                if (resume?.jobId && idleStatus) {
+                    idleStatus.textContent = 'Resuming LTX job…';
+                    genBtn.disabled = true;
+                    if (animalIdlePollTimer) clearInterval(animalIdlePollTimer);
+                    animalIdlePollTimer = setInterval(async () => {
+                        touchLs();
+                        try {
+                            const st = await pollIdleJob(resume.jobId);
+                            const si = st.status_int;
+                            idleStatus.textContent = `${st.status_label_string || 'status'} (${si})`;
+                            if (si >= 3) {
+                                clearInterval(animalIdlePollTimer);
+                                animalIdlePollTimer = null;
+                                genBtn.disabled = false;
+                                localStorage.removeItem(lsKey);
+                                const vurl = st.video_url_string;
+                                if (si === 3 && vurl && idleVid) {
+                                    idleVid.classList.remove('hidden');
+                                    idleVid.src = vurl;
+                                    const prox = `/api/task/${encodeURIComponent(taskId)}/idle-animation/proxy-video?url=${encodeURIComponent(vurl)}`;
+                                    if (fitUrl) fitUrl.value = prox;
+                                }
+                            }
+                        } catch (_) {}
+                    }, 2000);
+                }
+
+                if (fitRun && !fitRun.dataset.wired) {
+                    fitRun.dataset.wired = '1';
+                    fitRun.addEventListener('click', async () => {
+                        fitProg.textContent = 'Loading fitter module…';
+                        const mod = await import('/static/animal_animation_fitter/animal_animation_fitter.js?v=1');
+                        const { AnimalAnimationFitter } = mod;
+                        const videoUrl = (fitUrl?.value || '').trim();
+                        if (!videoUrl) {
+                            fitProg.textContent = 'Set video URL first';
+                            return;
+                        }
+                        fitRun.disabled = true;
+                        fitStop.disabled = false;
+                        const conv = Number(document.getElementById('animal-fitter-conv')?.value || 85);
+                        const maxt = Number(document.getElementById('animal-fitter-time')?.value || 45);
+                        const qual = document.getElementById('animal-fitter-quality')?.value || 'balanced';
+                        animalFitterInstance = new AnimalAnimationFitter(
+                            {
+                                THREE,
+                                scene: animalStandaloneViewer.scene,
+                                camera: animalStandaloneViewer.camera,
+                                renderer: animalStandaloneViewer.renderer,
+                                model: animalStandaloneViewer.model,
+                                animalStandaloneViewer,
+                            },
+                            null,
+                            {
+                                target_convergence_percent_float: conv,
+                                max_compute_time_seconds_float: maxt,
+                                quality_level_string: qual,
+                                frame_sample_count_int: qual === 'fast' ? 16 : qual === 'high' ? 48 : 32,
+                                output_fps_int: 24,
+                            }
+                        );
+                        await animalFitterInstance.loadTargetVideo(videoUrl);
+                        try {
+                            await animalFitterInstance.runFitting((ev) => {
+                                fitProg.textContent = `stage=${ev.stage_string || ''} conv=${(ev.convergence_percent_float || 0).toFixed(1)}% iter=${ev.iterations_int || ''}`;
+                            });
+                            fitApply.disabled = false;
+                            fitExport.disabled = false;
+                            fitProg.textContent = `Done. convergence=${animalFitterInstance._best?.convergence_percent_float?.toFixed?.(1)}%`;
+                        } catch (err) {
+                            console.error(err);
+                            fitProg.textContent = String(err?.message || err);
+                        }
+                        fitRun.disabled = false;
+                        fitStop.disabled = true;
+                    });
+                }
+                if (fitStop && !fitStop.dataset.wired) {
+                    fitStop.dataset.wired = '1';
+                    fitStop.addEventListener('click', () => {
+                        animalFitterInstance?.stop?.();
+                    });
+                }
+                if (fitApply && !fitApply.dataset.wired) {
+                    fitApply.dataset.wired = '1';
+                    fitApply.addEventListener('click', () => {
+                        animalFitterInstance?.applyBestAnimationToViewer?.();
+                    });
+                }
+                if (fitExport && !fitExport.dataset.wired) {
+                    fitExport.dataset.wired = '1';
+                    fitExport.addEventListener('click', () => {
+                        const json = animalFitterInstance?.exportAnimationJson?.();
+                        if (!json) return;
+                        const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `animal_idle_fit_${taskId.slice(0, 8)}.json`;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                    });
+                }
+                if (ltxPanel) ltxPanel.dataset.panelsWired = '1';
             }
 
             const FACE_RIG_UI_DISABLED = true;
@@ -13567,6 +15376,13 @@
 
             async function startMainViewerAfterVideoPhase() {
                 try {
+                    await window.__taskPageBoot?.waitFor('task');
+                    const taskState = await getLatestTaskState();
+                    if (taskState && isAnimalStandaloneTask(taskState)) {
+                        window.__taskPageBoot?.beginViewer('Loading animal 3D preview...');
+                        await waitAndInitViewer();
+                        return;
+                    }
                     await window.__taskPageBoot?.waitFor('video');
                     window.__taskPageBoot?.beginViewer('Loading 3D preview...');
                     await waitAndInitViewer();
@@ -13599,8 +15415,47 @@
                     
                     window.taskDbg('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
 
+                    if (t && t.status === 'error') {
+                        try {
+                            if (typeof loadingManager !== 'undefined' && loadingManager && typeof loadingManager.hide === 'function') {
+                                loadingManager.hide();
+                            }
+                        } catch (_) {}
+                        window.taskDbg('[Viewer] Task error — skip model loads and loading overlay.');
+                        if (rigEditor && t) rigEditor.setTaskStatus(t.status);
+                        return;
+                    }
+
+                    if (t && isAnimalStandaloneTask(t)) {
+                        await ensureAnimalStandaloneViewer(t);
+                        if (rigEditor && t) rigEditor.setTaskStatus(t.status);
+                        if (animalStandaloneViewer.clipsLoaded) {
+                            window.taskDbg('[Viewer] Animal standalone viewer settled. Old viewer path skipped.');
+                            return;
+                        }
+                        setTimeout(waitAndInitViewer, 5000);
+                        return;
+                    }
+
                     const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
                     window.currentTaskIsFree3D = isFree3DTask; // Global flag for loadModel to use
+
+                    // For normal uploads/links, show the original model immediately instead of waiting for prepared.glb.
+                    if (!isFree3DTask && t?.input_url && !sourceModelAttempted && !sourceModelLoaded && !preparedLoaded && !preparedLoadingInProgress) {
+                        sourceModelAttempted = true;
+                        preparedLoadingInProgress = true;
+                        window.taskDbg('[Viewer] Loading source model immediately:', t.input_url);
+                        try {
+                            const ok = await loadInputSourceModel(t.input_url);
+                            if (ok) {
+                                sourceModelLoaded = true;
+                                currentModelType = 'source';
+                                window.taskDbg('[Viewer] ✓ Source model loaded before prepared output');
+                            }
+                        } finally {
+                            preparedLoadingInProgress = false;
+                        }
+                    }
 
                     // 1. FREE3D: Load immediately from free3d.online (no waiting for worker)
                     if (isFree3DTask && !free3dModelLoaded) {
@@ -13618,16 +15473,20 @@
                         }
 
                         const urlMatch = t.input_url.match(/\/data\/([a-f0-9-]+)\//i);
+                        let ok = false;
                         if (urlMatch) {
                             const guid = urlMatch[1];
                             const proxyUrl = `/api/free3d/glb/${guid}/${guid}.glb`;
-                            const ok = await loadModel(proxyUrl, 'Free3D Model');
-                            if (ok) {
-                                free3dModelLoaded = true;
-                                preparedLoaded = true;
-                                // Transform already applied in loadModel based on window.currentTaskIsFree3D
-                                window.taskDbg('[Viewer] ✓ Free3D model loaded immediately');
-                            }
+                            ok = await loadModel(proxyUrl, 'Free3D Model');
+                        } else {
+                            window.taskDbg('[Viewer] Free3D viewer-asset URL detected; loading input_url directly');
+                            ok = await loadModel(t.input_url, 'Free3D Model');
+                        }
+                        if (ok) {
+                            free3dModelLoaded = true;
+                            preparedLoaded = true;
+                            // Transform already applied in loadModel based on window.currentTaskIsFree3D
+                            window.taskDbg('[Viewer] ✓ Free3D model loaded immediately');
                         }
                     }
 
@@ -13690,11 +15549,7 @@
 
                     // Update RigEditor status
                     if (rigEditor && t) rigEditor.setTaskStatus(t.status);
-                    
-                    if (t && t.status === 'error') {
-                        window.taskDbg('[Viewer] Task error. Stopping poll.');
-                        return;
-                    }
+
                     // Stop when task is done, preview settled (or unavailable), and animations load finished (ok or failed)
                     if (t && t.status === 'done') {
                         const previewSettled =
@@ -13731,6 +15586,25 @@
                 if (preparedLoaded || finalLoaded || preparedLoadingInProgress) {
                     window.taskDbg('[Viewer] preparedModelReady event: already loaded/loading, skipping');
                     return;
+                }
+                try {
+                    const ts = await getLatestTaskState();
+                    if (ts && ts.status === 'error') {
+                        try {
+                            if (typeof loadingManager !== 'undefined' && loadingManager && typeof loadingManager.hide === 'function') {
+                                loadingManager.hide();
+                            }
+                        } catch (_) {}
+                        window.taskDbg('[Viewer] preparedModelReady: task failed, skip early load');
+                        return;
+                    }
+                    if (ts && isAnimalStandaloneTask(ts)) {
+                        await ensureAnimalStandaloneViewer(ts);
+                        window.taskDbg('[Viewer] preparedModelReady: animal task uses standalone viewer, skip prepared.glb');
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('[Viewer] preparedModelReady: status check failed', e);
                 }
                 preparedLoadingInProgress = true;
                 window.taskDbg('[Viewer] preparedModelReady event: attempting early load...');
@@ -13943,4 +15817,3 @@
 
 </body>
 </html>
-

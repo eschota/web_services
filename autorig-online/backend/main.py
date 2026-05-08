@@ -14,7 +14,12 @@ import hashlib
 import hmac
 import secrets
 import json
+import base64
+import random
 import tempfile
+import zipfile
+import re
+import html
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, quote, unquote, parse_qsl
@@ -50,6 +55,8 @@ from config import (
     TASK_CACHE_MAX_GB,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
+    FREESTOCK_GUMROAD_PROXY_TARGET,
+    is_freestock_gumroad_product,
     AUTORIG_DONATION_PRODUCT_KEYS,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
@@ -61,12 +68,18 @@ from config import (
     CRYPTO_BTC_USD_RATE,
     RATE_LIMIT_CRYPTO_SUBMIT,
     YOUTUBE_REFRESH_TOKEN,
+    SUPPORT_CHAT_MESSAGE_MAX_CHARS,
+    RATE_LIMIT_SUPPORT_CHAT_SESSION,
+    RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
+    RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
 )
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
     TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
     CryptoPaymentReport,
+    SupportChatSession,
+    SupportChatMessage,
     reset_admin_overlay_counters,
     get_or_create_admin_overlay_counters,
 )
@@ -99,6 +112,15 @@ from models import (
     # Scene list models
     SceneListItem, SceneListResponse, SceneLikeResponse,
     AgentRegisterRequest, AgentRegisterResponse, AgentMeResponse,
+    SupportChatSessionPostRequest,
+    SupportChatSessionPostResponse,
+    SupportChatMessagePostRequest,
+    SupportChatMessagePostResponse,
+    SupportChatMessageItem,
+    SupportChatMessagesPollResponse,
+    IdleAnimationStartRequest,
+    IdleAnimationStartResponse,
+    IdleAnimationStatusResponse,
 )
 from workers import (
     get_global_queue_status,
@@ -132,9 +154,56 @@ from tasks import (
 import re
 import httpx
 
+from namecheap_remote_api import router as namecheap_remote_router
+
 # Throttle poster-classification recovery triggers from GET /api/task (per task_id).
 _poster_recovery_throttle: Dict[str, float] = {}
 POSTER_RECOVERY_THROTTLE_SEC = 20.0
+PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
+PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
+
+
+def _pop_preflight_render_image_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(meta, dict):
+        return None
+    for key in (
+        "preflight_render_jpg_base64_string",
+        "preflight_render_image_jpg_base64_string",
+        "preview_image_jpg_base64_string",
+    ):
+        value = meta.pop(key, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _decode_preflight_render_image(data_url_or_b64: str) -> bytes:
+    raw = (data_url_or_b64 or "").strip()
+    if "," in raw and raw.lower().startswith("data:image/"):
+        raw = raw.split(",", 1)[1]
+    raw = re.sub(r"\s+", "", raw)
+    if not raw:
+        raise ValueError("empty preflight render image")
+    data = base64.b64decode(raw, validate=True)
+    if len(data) > PREFLIGHT_RENDER_MAX_BYTES:
+        raise ValueError("preflight render image too large")
+    if not (data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"RIFF")):
+        raise ValueError("unsupported preflight render image")
+    return data
+
+
+def _save_preflight_render_image(task_id: str, data_url_or_b64: Optional[str]) -> None:
+    if not data_url_or_b64:
+        return
+    try:
+        image_bytes = _decode_preflight_render_image(data_url_or_b64)
+        PREFLIGHT_RENDER_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_path = PREFLIGHT_RENDER_DIR / f"{task_id}.tmp"
+        final_path = PREFLIGHT_RENDER_DIR / f"{task_id}.jpg"
+        tmp_path.write_bytes(image_bytes)
+        tmp_path.replace(final_path)
+    except Exception as e:
+        print(f"[PreflightRender] Failed to save render image for task {task_id}: {e}")
 
 
 def _task_needs_poster_classification(task) -> bool:
@@ -143,7 +212,7 @@ def _task_needs_poster_classification(task) -> bool:
     if getattr(task, "content_classified_at", None) is None:
         return True
     cv = getattr(task, "content_classifier_version", None) or ""
-    return ":pipeline_error" in cv
+    return ":pipeline_error" in cv or ":fetch_error" in cv
 
 
 def _schedule_poster_recovery_throttled(task_id: str) -> None:
@@ -414,6 +483,7 @@ async def _monitor_stalled_workers(db: AsyncSession, queue_status=None) -> bool:
             or (now - last_alert_at).total_seconds() >= STALLED_ALERT_REPEAT_SECONDS
         )
         if should_alert:
+            tasks.sort(key=lambda t: get_task_no_progress_minutes(t, now=now), reverse=True)
             sample_ids = [t.id for t in tasks[:3]]
             asyncio.create_task(
                 broadcast_worker_stalled(
@@ -717,7 +787,15 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(broadcast_server_startup())
     except Exception as e:
         print(f"[Telegram] Failed to send startup notification: {e}")
-    
+
+    # Namecheap: facerig.autorig.online A record (if registrar API env set)
+    try:
+        from namecheap_remote_api import ensure_facerig_on_startup
+
+        await asyncio.to_thread(ensure_facerig_on_startup)
+    except Exception as e:
+        print(f"[Namecheap DNS] Startup: {e}")
+
     yield
     
     # Shutdown
@@ -746,6 +824,8 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.state.limiter = limiter
+
+app.include_router(namecheap_remote_router)
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -1079,6 +1159,91 @@ def _task_urls_suggest_100k_animation_layout(combined_urls: List[str]) -> bool:
         if "_100k" in u.lower():
             return True
     return False
+
+
+def _resolve_all_animations_fbx_candidates(task) -> list[tuple[str, str]]:
+    """
+    Candidate package-level FBX animation files for a task.
+
+    Workers have emitted the animal bundle in both layouts:
+    - /converter/glb/{guid}/{guid}_all_animations_unity.fbx
+    - /converter/glb/{guid}/{guid}_100k/{guid}_all_animations_unity.fbx
+    """
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(url: Optional[str], filename: Optional[str] = None) -> None:
+        clean_url = (url or "").strip()
+        if not clean_url or clean_url in seen:
+            return
+        seen.add(clean_url)
+        clean_filename = filename or unquote(clean_url.split("/")[-1]) or f"{task.id}_all_animations.fbx"
+        candidates.append((clean_url, clean_filename))
+
+    known_urls = list(task.ready_urls or []) + list(task.output_urls or [])
+    for pattern in ("_all_animations_unity.fbx", "_all_animations.fbx"):
+        animations_url = _find_file_in_ready_urls(known_urls, pattern)
+        if animations_url:
+            add(animations_url)
+
+    worker_root, guid = _infer_worker_root_and_guid(task)
+    if worker_root and guid:
+        filename = f"{guid}_all_animations_unity.fbx"
+        add(f"{worker_root}/{guid}/{filename}", filename)
+        add(f"{worker_root}/{guid}/{guid}_100k/{filename}", filename)
+
+    return candidates
+
+
+def _resolve_all_animations_fbx_url(task) -> tuple[Optional[str], Optional[str]]:
+    """
+    Return the first package-level FBX animation candidate for a task.
+    Callers that need existence checks should use _resolve_available_all_animations_fbx_url.
+    """
+    candidates = _resolve_all_animations_fbx_candidates(task)
+    return candidates[0] if candidates else (None, None)
+
+
+async def _resolve_available_all_animations_fbx_url(task) -> tuple[Optional[str], Optional[str]]:
+    """Return the first package-level FBX animation candidate that is currently reachable."""
+    for url, filename in _resolve_all_animations_fbx_candidates(task):
+        if await _worker_file_available(url):
+            return url, filename
+    return None, None
+
+
+async def _worker_file_available(url: str) -> bool:
+    """Lightweight existence probe for worker-hosted files."""
+    if not url:
+        return False
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.head(url, timeout=15.0)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code not in (405, 403):
+                return False
+            resp = await client.get(url, headers={"Range": "bytes=0-0"}, timeout=20.0)
+            return resp.status_code in (200, 206)
+    except Exception:
+        return False
+
+
+async def _download_worker_file_bytes(url: str, label: str, *, max_bytes: int = 80 * 1024 * 1024) -> bytes:
+    """Download a worker file into memory for small on-demand bundles."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.get(url, timeout=120.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=404, detail=f"{label} is unavailable")
+            data = resp.content
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{label} source unavailable: {e}")
+    if len(data) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"{label} is too large for this bundle")
+    return data
 
 
 def _upsert_animation_file_map(result: Dict[str, dict], key: str, rec: dict) -> None:
@@ -2098,25 +2263,13 @@ async def api_roadmap_vote_post(
 
 
 # =============================================================================
-# YouTube Bonus & Feedback
+# Feedback
 # =============================================================================
 @app.post("/api/user/grant-youtube-bonus")
-async def grant_youtube_bonus(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+async def deprecated_youtube_bonus_removed(
 ):
-    """Grant 10 credits for YouTube link click (once per user)"""
-    if user.youtube_bonus_received:
-        return {"ok": False, "already_received": True}
-    
-    user.balance_credits += 10
-    user.youtube_bonus_received = True
-    await db.commit()
-    
-    from telegram_bot import broadcast_youtube_bonus_click
-    asyncio.create_task(broadcast_youtube_bonus_click(user.email))
-    
-    return {"ok": True, "new_balance": user.balance_credits}
+    """Deprecated route kept only to prevent old clients from silently granting credits."""
+    raise HTTPException(status_code=410, detail="Free credit grants have been removed.")
 
 
 @app.post("/api/user/feedback")
@@ -2225,6 +2378,341 @@ async def delete_feedback(
 
 
 # =============================================================================
+# Support chat (website widget ↔ Telegram forum topic)
+# =============================================================================
+_SUPPORT_VISITOR_RE = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
+
+
+def _support_validate_visitor_id_string(visitor_id_string: str) -> str:
+    v = (visitor_id_string or "").strip()
+    if not _SUPPORT_VISITOR_RE.fullmatch(v):
+        raise HTTPException(status_code=400, detail="Invalid visitor_id_string")
+    return v
+
+
+def _support_sanitize_page_url_string(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if len(s) > 4096:
+        s = s[:4096]
+    return s
+
+
+@app.get("/api/support-chat/health")
+async def api_support_chat_health():
+    """Cheap GET to verify reverse-proxy routes /api/support-chat/* to FastAPI."""
+    return {"support_api_ok_bool": True}
+
+
+@app.get("/api/support-chat/session")
+async def api_support_chat_session_get(db: AsyncSession = Depends(get_db)):
+    """Mirror GET: usage for ``POST /api/support-chat/session``."""
+    from telegram_bot import support_forum_configured_bool
+
+    configured = bool(await support_forum_configured_bool(db))
+    return {
+        "purpose_string": "Describe how to obtain or reuse an active support-chat session.",
+        "support_enabled_bool": True,
+        "support_configured_bool": configured,
+        "post_endpoint_string": "/api/support-chat/session",
+        "required_fields_json": {
+            "visitor_id_string": "string — browser-held id (8–96 [A-Za-z0-9_-])",
+            "page_url_string": "optional string — current page URL for operator context",
+        },
+        "optional_auth_string": "If the visitor is logged in, include session cookie; server may persist user_email_string on the row.",
+        "example_request_json": {
+            "visitor_id_string": "a1b2c3d4-e5f6-7890-abcd-ef0123456789",
+            "page_url_string": "https://example.com/task?id=demo_task",
+        },
+        "answer_example_json": {
+            "session_id_int": 101,
+            "visitor_id_string": "a1b2c3d4-e5f6-7890-abcd-ef0123456789",
+            "topic_ready_bool": False,
+            "support_enabled_bool": True,
+            "support_configured_bool": True,
+            "page_url_string": "https://example.com/task?id=demo_task",
+            "user_email_string": "user@example.com",
+        },
+    }
+
+
+@app.post("/api/support-chat/session", response_model=SupportChatSessionPostResponse)
+@limiter.limit(RATE_LIMIT_SUPPORT_CHAT_SESSION)
+async def api_support_chat_session_post(
+    request: Request,
+    body: SupportChatSessionPostRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from telegram_bot import support_forum_configured_bool
+
+    visitor = _support_validate_visitor_id_string(body.visitor_id_string)
+    page = _support_sanitize_page_url_string(body.page_url_string)
+    email = getattr(user, "email", None) if user else None
+
+    stmt = (
+        select(SupportChatSession)
+        .where(
+            SupportChatSession.visitor_id == visitor,
+            SupportChatSession.status == "open",
+        )
+        .order_by(SupportChatSession.id.desc())
+        .limit(1)
+    )
+    row = (await db.execute(stmt)).scalar_one_or_none()
+
+    topic_ready_bool = False
+    if row is None:
+        row = SupportChatSession(
+            visitor_id=visitor,
+            user_email=email,
+            page_url=page,
+            status="open",
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    else:
+        if email:
+            row.user_email = email
+        if page:
+            row.page_url = page
+        await db.commit()
+        await db.refresh(row)
+
+    topic_ready_bool = row.telegram_thread_id is not None
+    configured = bool(await support_forum_configured_bool(db))
+    return SupportChatSessionPostResponse(
+        session_id_int=int(row.id),
+        visitor_id_string=visitor,
+        topic_ready_bool=topic_ready_bool,
+        support_enabled_bool=True,
+        support_configured_bool=configured,
+        page_url_string=row.page_url,
+        user_email_string=row.user_email,
+    )
+
+
+@app.get("/api/support-chat/message")
+async def api_support_chat_message_get():
+    """Mirror GET: usage for ``POST /api/support-chat/message``."""
+    return {
+        "purpose_string": "Append a plaintext user message; first message allocates a Telegram forum topic when support is configured.",
+        "rate_limit_hint_string": RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
+        "max_chars_int": SUPPORT_CHAT_MESSAGE_MAX_CHARS,
+        "required_fields_json": {
+            "visitor_id_string": "string — must match the session visitor",
+            "session_id_int": "int — SupportChatSession id from POST /session",
+            "message_text_string": "string — plaintext only",
+        },
+        "example_request_json": {
+            "visitor_id_string": "a1b2c3d4-e5f6-7890-abcd-ef0123456789",
+            "session_id_int": 101,
+            "message_text_string": "Hello — I cannot download my GLB.",
+        },
+        "answer_example_json": {
+            "ok_bool": True,
+            "telegram_message_id_int": 555,
+        },
+    }
+
+
+@app.post("/api/support-chat/message", response_model=SupportChatMessagePostResponse)
+@limiter.limit(RATE_LIMIT_SUPPORT_CHAT_MESSAGE)
+async def api_support_chat_message_post(
+    request: Request,
+    body: SupportChatMessagePostRequest,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from telegram_bot import (
+        support_forum_configured_bool,
+        telegram_create_support_topic,
+        telegram_send_support_message_html,
+    )
+
+    visitor = _support_validate_visitor_id_string(body.visitor_id_string)
+
+    sess = (
+        (
+            await db.execute(
+                select(SupportChatSession).where(SupportChatSession.id == body.session_id_int)
+            )
+        ).scalar_one_or_none()
+    )
+    if sess is None or sess.visitor_id != visitor:
+        raise HTTPException(status_code=404, detail="support session not found")
+    if sess.status != "open":
+        raise HTTPException(status_code=400, detail="session is not open")
+
+    email = getattr(user, "email", None) if user else None
+    if email:
+        sess.user_email = email
+
+    txt = body.message_text_string.strip()
+    if not txt:
+        raise HTTPException(status_code=400, detail="Empty message_text_string")
+    if len(txt) > SUPPORT_CHAT_MESSAGE_MAX_CHARS:
+        raise HTTPException(status_code=400, detail="message_text_string too long")
+
+    if not await support_forum_configured_bool(db):
+        raise HTTPException(
+            status_code=503,
+            detail="Support chat is temporarily unavailable. Please try again later.",
+        )
+
+    if sess.telegram_thread_id is None or sess.telegram_chat_id is None:
+        label = sess.user_email or sess.visitor_id[:12]
+        topic = (f"Support #{sess.id} · {label}")[:128]
+        try:
+            fcid, mtid = await telegram_create_support_topic(db, topic)
+        except Exception as exc:
+            print(f"[SupportChat] telegram topic error: {type(exc).__name__}: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="Support chat is temporarily unavailable. Please try again later.",
+            ) from exc
+        sess.telegram_chat_id = int(fcid)
+        sess.telegram_thread_id = int(mtid)
+        sess.topic_name = topic
+        await db.commit()
+        await db.refresh(sess)
+
+    who = html.escape(sess.user_email or sess.visitor_id)
+    escaped_text = html.escape(txt)
+    page_snip = ""
+    if sess.page_url:
+        p = html.escape((sess.page_url or "")[:500])
+        page_snip = f"\n🌐 {p}"
+
+    tg_html = (
+        f"💬 <b>Support session</b> <code>{int(sess.id)}</code>\n"
+        f"👤 <b>Visitor</b> {who}{page_snip}\n\n{escaped_text}"
+    )
+
+    try:
+        telegram_message_id_int = await telegram_send_support_message_html(
+            forum_chat_id=int(sess.telegram_chat_id),
+            message_thread_id=int(sess.telegram_thread_id),
+            html=tg_html,
+        )
+    except Exception as exc:
+        if "message thread not found" not in str(exc).lower():
+            print(f"[SupportChat] telegram send failed: {type(exc).__name__}: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="Support chat is temporarily unavailable. Please try again later.",
+            ) from exc
+
+        print(f"[SupportChat] stale telegram thread, recreating topic: {type(exc).__name__}: {exc}")
+        label = sess.user_email or sess.visitor_id[:12]
+        topic = (f"Support #{sess.id} · {label}")[:128]
+        try:
+            fcid, mtid = await telegram_create_support_topic(db, topic)
+            sess.telegram_chat_id = int(fcid)
+            sess.telegram_thread_id = int(mtid)
+            sess.topic_name = topic
+            await db.commit()
+            await db.refresh(sess)
+            telegram_message_id_int = await telegram_send_support_message_html(
+                forum_chat_id=int(sess.telegram_chat_id),
+                message_thread_id=int(sess.telegram_thread_id),
+                html=tg_html,
+            )
+        except Exception as retry_exc:
+            print(f"[SupportChat] telegram send retry failed: {type(retry_exc).__name__}: {retry_exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="Support chat is temporarily unavailable. Please try again later.",
+            ) from retry_exc
+
+    msg_row = SupportChatMessage(
+        session_id=sess.id,
+        direction="user",
+        body_text=txt,
+        telegram_message_id=int(telegram_message_id_int),
+    )
+    db.add(msg_row)
+    await db.commit()
+
+    return SupportChatMessagePostResponse(
+        ok_bool=True,
+        telegram_message_id_int=int(telegram_message_id_int),
+    )
+
+
+@app.get("/api/support-chat/messages")
+@limiter.limit(RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL)
+async def api_support_chat_messages_poll(
+    request: Request,
+    visitor_id_string: Optional[str] = Query(None),
+    session_id_int: Optional[int] = Query(None),
+    after_id_int: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll support messages; omit query params to receive GET usage instructions."""
+
+    instr = {
+        "purpose_string": "Return chronological messages newer than ``after_id_int`` for a session.",
+        "post_mirror_string": "(none) polling only; authenticated by visitor id + numeric session.",
+        "query_params_json": {
+            "visitor_id_string": "required query string — same as session creation",
+            "session_id_int": "required query int — session id",
+            "after_id_int": "optional query int — return rows with id > after_id_int",
+        },
+        "example_answer_json": {
+            "messages": [
+                {
+                    "id_int": 1,
+                    "direction_string": "user",
+                    "body_text_string": "hello",
+                    "created_at_string": "2026-04-30T12:34:56.000000",
+                }
+            ]
+        },
+        "mirrors_related_string": "POST /api/support-chat/message mirrors usage is documented at GET /api/support-chat/message",
+    }
+
+    if not visitor_id_string or session_id_int is None:
+        return JSONResponse(content=instr)
+
+    visitor = _support_validate_visitor_id_string(visitor_id_string)
+    sess = (
+        (
+            await db.execute(
+                select(SupportChatSession).where(SupportChatSession.id == int(session_id_int))
+            )
+        ).scalar_one_or_none()
+    )
+    if sess is None or sess.visitor_id != visitor:
+        raise HTTPException(status_code=404, detail="support session not found")
+
+    mq = (
+        await db.execute(
+            select(SupportChatMessage)
+            .where(SupportChatMessage.session_id == sess.id, SupportChatMessage.id > int(after_id_int))
+            .order_by(SupportChatMessage.id.asc())
+        )
+    ).scalars().all()
+
+    items: List[SupportChatMessageItem] = []
+    for m in mq:
+        created = m.created_at.isoformat()
+        items.append(
+            SupportChatMessageItem(
+                id_int=int(m.id),
+                direction_string=str(m.direction),
+                body_text_string=str(m.body_text),
+                created_at_string=created,
+            )
+        )
+    return SupportChatMessagesPollResponse(messages=items)
+
+
+# =============================================================================
 # Task Endpoints
 # =============================================================================
 @app.post("/api/task/create", response_model=TaskCreateResponse)
@@ -2264,6 +2752,10 @@ async def api_create_task(
     file: Optional[UploadFile] = None
     pipeline = "rig"
     uploaded_bytes: Optional[int] = None
+    animal_type: Optional[str] = None
+    rig_mode: Optional[str] = None
+    rig_v2_detection_meta: Optional[Dict[str, Any]] = None
+    preflight_render_image_data_url: Optional[str] = None
 
     if "application/json" in content_type:
         try:
@@ -2288,6 +2780,25 @@ async def api_create_task(
         raw_pipeline = data.get("pipeline")
         if raw_pipeline is not None and str(raw_pipeline).strip():
             pipeline = str(raw_pipeline).strip().lower()
+        raw_animal_type = data.get("animal_type")
+        if raw_animal_type is not None and str(raw_animal_type).strip():
+            animal_type = str(raw_animal_type).strip().lower()
+        raw_mode = data.get("mode")
+        if raw_mode is not None and str(raw_mode).strip():
+            rig_mode = str(raw_mode).strip()
+        raw_detection = data.get("rig_v2_animal_detection")
+        if isinstance(raw_detection, dict):
+            rig_v2_detection_meta = raw_detection
+        elif data.get("rig_v2_animal_detection_json"):
+            try:
+                parsed_detection = json.loads(str(data.get("rig_v2_animal_detection_json") or "{}"))
+                if isinstance(parsed_detection, dict):
+                    rig_v2_detection_meta = parsed_detection
+            except Exception:
+                rig_v2_detection_meta = None
+        raw_preflight_render = data.get("preflight_render_jpg_base64_string")
+        if isinstance(raw_preflight_render, str) and raw_preflight_render.strip():
+            preflight_render_image_data_url = raw_preflight_render.strip()
     else:
         form = await request.form()
         raw_source = form.get("source")
@@ -2306,6 +2817,23 @@ async def api_create_task(
         raw_pipeline = form.get("pipeline")
         if raw_pipeline is not None and str(raw_pipeline).strip():
             pipeline = str(raw_pipeline).strip().lower()
+        raw_animal_type = form.get("animal_type")
+        if raw_animal_type is not None and str(raw_animal_type).strip():
+            animal_type = str(raw_animal_type).strip().lower()
+        raw_mode = form.get("mode")
+        if raw_mode is not None and str(raw_mode).strip():
+            rig_mode = str(raw_mode).strip()
+        raw_detection = form.get("rig_v2_animal_detection_json")
+        if raw_detection is not None and str(raw_detection).strip():
+            try:
+                parsed_detection = json.loads(str(raw_detection))
+                if isinstance(parsed_detection, dict):
+                    rig_v2_detection_meta = parsed_detection
+            except Exception:
+                rig_v2_detection_meta = None
+        raw_preflight_render = form.get("preflight_render_jpg_base64_string")
+        if raw_preflight_render is not None and str(raw_preflight_render).strip():
+            preflight_render_image_data_url = str(raw_preflight_render).strip()
         fu = form.get("file")
         # Accept any Starlette/FastAPI upload object (isinstance can fail across re-exports).
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
@@ -2354,6 +2882,11 @@ async def api_create_task(
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
+    preflight_render_image_data_url = (
+        preflight_render_image_data_url
+        or _pop_preflight_render_image_from_meta(rig_v2_detection_meta)
+    )
+
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
 
@@ -2364,6 +2897,19 @@ async def api_create_task(
         )
 
     input_type = normalize_task_type(input_type)
+    animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
+    if input_type == "animal":
+        if animal_type not in animal_allowed:
+            animal_type = random.choice(animal_allowed)
+        rig_mode = rig_mode or "only_rig"
+        if rig_v2_detection_meta is None:
+            rig_v2_detection_meta = {}
+        rig_v2_detection_meta = {
+            **rig_v2_detection_meta,
+            "type": "animal",
+            "animal_type": animal_type,
+            "mode": rig_mode,
+        }
 
     # Create task
     task, error = await create_conversion_task(
@@ -2379,6 +2925,19 @@ async def api_create_task(
     
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
+
+    _save_preflight_render_image(task.id, preflight_render_image_data_url)
+
+    if rig_v2_detection_meta:
+        try:
+            settings = json.loads(task.viewer_settings or "{}")
+            if not isinstance(settings, dict):
+                settings = {}
+        except Exception:
+            settings = {}
+        settings["rig_v2_animal_detection"] = rig_v2_detection_meta
+        task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+        await db.commit()
     
     # Store GA client ID if provided
     if ga_client_id:
@@ -2417,6 +2976,689 @@ async def api_create_task(
         status=task.status,
         message=error,
     )
+
+
+RIG_V2_ALLOWED_EXTS = {".fbx", ".glb", ".obj"}
+RIG_V2_ALLOWED_SUPPORT_EXTS = {".mtl"}
+RIG_V2_PREVIEW_STATUS = "rig_v2_preview"
+RIG_V2_VISION_CONFIG_PATH = Path("/root/autorig/ai_vision_animal_type_detect.json")
+RIG_V2_ALLOWED_ANIMAL_TYPES = [
+    "humanoid",
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+]
+RIG_V2_DISCOVERED_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
+RIG_V2_OPENAI_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
+
+
+def _rig_v2_server_time() -> int:
+    return int(time.time())
+
+
+def _rig_v2_load_vision_config() -> Dict[str, Any]:
+    try:
+        raw = RIG_V2_VISION_CONFIG_PATH.read_text(encoding="utf-8")
+        cfg = json.loads(raw)
+        if not isinstance(cfg, dict):
+            cfg = {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rig V2 vision config error: {e}")
+
+    cfg.setdefault("open_router_api_url_string", "https://openrouter.ai/api/v1/chat/completions")
+    cfg.setdefault("open_router_models_url_string", "https://openrouter.ai/api/v1/models")
+    cfg.setdefault("open_ai_api_url_string", "https://api.openai.com/v1/chat/completions")
+    cfg.setdefault("open_ai_vision_model_string", "gpt-4o-mini")
+    cfg.setdefault("open_ai_strong_vision_model_string", "gpt-5.4-nano")
+    cfg.setdefault("image_size_int", 512)
+    cfg.setdefault("allowed_animal_types_array", RIG_V2_ALLOWED_ANIMAL_TYPES)
+    cfg.setdefault(
+        "prompt",
+        (
+            "Analyze this 3D model render. Choose exactly one animal_type from: "
+            + ", ".join(RIG_V2_ALLOWED_ANIMAL_TYPES)
+            + '. Return only valid JSON: {"animal_type":"<one_allowed_value>","confidence_float":0.0}. '
+            "confidence_float must be between 0 and 1 and should reflect visual certainty for this single view. "
+            "Choose humanoid only for a clearly upright human-like biped with a head, torso, two arms, and two legs. "
+            "Do not choose humanoid for robots, spider/mech robots, vehicles, drones, or low multi-legged bodies. "
+            "For spider-like or multi-legged mechanical models, choose the closest non-humanoid quadruped/low-body animal type, often turtle, dog, cat, or mouse depending on silhouette. "
+            "If uncertain, choose the closest visual body type and lower confidence."
+        ),
+    )
+    cfg.setdefault(
+        "open_router_free_vision_models_array",
+        [
+            "qwen/qwen2.5-vl-72b-instruct:free",
+            "qwen/qwen2.5-vl-32b-instruct:free",
+            "google/gemini-2.0-flash-exp:free",
+            "meta-llama/llama-3.2-11b-vision-instruct:free",
+        ],
+    )
+    return cfg
+
+
+def _rig_v2_normalize_image_data_url(image_value: str) -> str:
+    value = (image_value or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="image_jpg_base64_string is required")
+    if value.startswith("data:image/"):
+        header, _, b64 = value.partition(",")
+        if not b64:
+            raise HTTPException(status_code=400, detail="Invalid image data URL")
+        mime = "image/jpeg" if "jpeg" in header or "jpg" in header else "image/png"
+    else:
+        b64 = value
+        mime = "image/jpeg"
+    try:
+        decoded = base64.b64decode(b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="image_jpg_base64_string must be valid base64")
+    if not decoded:
+        raise HTTPException(status_code=400, detail="image_jpg_base64_string is empty")
+    if len(decoded) > 2_500_000:
+        raise HTTPException(status_code=413, detail="Vision image is too large")
+    return f"data:{mime};base64,{base64.b64encode(decoded).decode('ascii')}"
+
+
+def _rig_v2_prompt_from_config(cfg: Dict[str, Any], prompt_override: str = "") -> str:
+    prompt = (prompt_override or "").strip()
+    if not prompt:
+        prompt = str(cfg.get("prompt") or "").strip()
+    if len(prompt) > 6000:
+        raise HTTPException(status_code=400, detail="prompt_override_string is too long")
+    return prompt
+
+
+def _rig_v2_is_openai_vision_model_id(model_id: str) -> bool:
+    model = (model_id or "").strip().lower()
+    if not model:
+        return False
+    non_vision_markers = (
+        "audio",
+        "codex",
+        "dall-e",
+        "embedding",
+        "image",
+        "moderation",
+        "realtime",
+        "search",
+        "speech",
+        "transcribe",
+        "tts",
+        "whisper",
+    )
+    if any(marker in model for marker in non_vision_markers):
+        return False
+    return model.startswith(("gpt-5", "gpt-4.1", "gpt-4o", "o3", "o4"))
+
+
+def _rig_v2_sort_openai_model_ids(model_ids: List[str], preferred_model: str = "") -> List[str]:
+    preferred = (preferred_model or "").strip()
+
+    def score(model_id: str) -> Tuple[int, str]:
+        if preferred and model_id == preferred:
+            return (0, model_id)
+        if model_id.startswith("gpt-5.5"):
+            return (1, model_id)
+        if model_id.startswith("gpt-5.4"):
+            return (2, model_id)
+        if model_id.startswith("gpt-5"):
+            return (3, model_id)
+        if model_id.startswith("gpt-4.1"):
+            return (4, model_id)
+        if model_id.startswith("gpt-4o"):
+            return (5, model_id)
+        if model_id.startswith(("o4", "o3")):
+            return (6, model_id)
+        return (20, model_id)
+
+    return sorted(model_ids, key=score)
+
+
+async def _rig_v2_list_openai_models(cfg: Dict[str, Any]) -> List[str]:
+    now = time.time()
+    cached_until = float(RIG_V2_OPENAI_MODELS_CACHE.get("expires_at") or 0.0)
+    cached_models = RIG_V2_OPENAI_MODELS_CACHE.get("models") or []
+    if now < cached_until and isinstance(cached_models, list):
+        return [str(model) for model in cached_models if str(model).strip()]
+
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    if not api_key:
+        return []
+    models_url = str(cfg.get("open_ai_models_url_string") or "https://api.openai.com/v1/models").strip()
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(models_url, headers={"Authorization": f"Bearer {api_key}"})
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    except Exception:
+        return []
+    model_ids = [
+        str(item.get("id") or "").strip()
+        for item in data.get("data", []) if isinstance(item, dict)
+        if _rig_v2_is_openai_vision_model_id(str(item.get("id") or ""))
+    ]
+    model_ids = _rig_v2_sort_openai_model_ids(
+        list(dict.fromkeys(model_ids)),
+        str(cfg.get("open_ai_strong_vision_model_string") or ""),
+    )
+    RIG_V2_OPENAI_MODELS_CACHE["models"] = model_ids
+    RIG_V2_OPENAI_MODELS_CACHE["expires_at"] = now + 300
+    return model_ids
+
+
+def _rig_v2_extract_vision_result(text: str, allowed: List[str]) -> Tuple[Optional[str], float]:
+    raw = (text or "").strip()
+    candidates = [raw]
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if m:
+        candidates.insert(0, m.group(0))
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            animal = str(data.get("animal_type") or data.get("animal_type_string") or "").strip().lower()
+            if animal in allowed:
+                confidence_value = data.get("confidence_float")
+                if confidence_value is None:
+                    confidence_value = data.get("confidence")
+                if confidence_value is None:
+                    confidence_value = data.get("weight_float")
+                if confidence_value is None:
+                    confidence_value = 1.0
+                try:
+                    confidence = float(confidence_value)
+                except Exception:
+                    confidence = 1.0
+                return animal, max(0.0, min(1.0, confidence))
+    lowered = raw.lower()
+    for animal in allowed:
+        if re.search(rf"\b{re.escape(animal)}\b", lowered):
+            return animal, 1.0
+    return None, 0.0
+
+
+async def _rig_v2_discover_free_vision_models(cfg: Dict[str, Any], api_key: str) -> List[str]:
+    now = time.time()
+    cached_until = float(RIG_V2_DISCOVERED_MODELS_CACHE.get("expires_at") or 0.0)
+    cached_models = RIG_V2_DISCOVERED_MODELS_CACHE.get("models") or []
+    if now < cached_until and isinstance(cached_models, list):
+        return [str(model) for model in cached_models if str(model).strip()]
+
+    models_url = str(cfg.get("open_router_models_url_string") or "").strip()
+    if not models_url:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(
+                models_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": (APP_URL or "https://autorig.online").rstrip("/"),
+                    "X-Title": "AutoRig Rig V2",
+                },
+            )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    except Exception:
+        return []
+    out: List[str] = []
+    for item in data.get("data", []) if isinstance(data, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if not model_id or not model_id.endswith(":free"):
+            continue
+        haystack = json.dumps(item, ensure_ascii=False).lower()
+        if "image" not in haystack and "vision" not in haystack:
+            continue
+        out.append(model_id)
+    out = out[:24]
+    RIG_V2_DISCOVERED_MODELS_CACHE["models"] = out
+    RIG_V2_DISCOVERED_MODELS_CACHE["expires_at"] = now + 300
+    return out
+
+
+async def _rig_v2_call_openrouter_vision(
+    *,
+    cfg: Dict[str, Any],
+    image_data_url: str,
+    prompt_override: str = "",
+) -> Dict[str, Any]:
+    api_key = str(cfg.get("open_router_api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OpenRouter API key is not configured")
+    api_url = str(cfg.get("open_router_api_url_string") or "").strip()
+    if not api_url:
+        raise HTTPException(status_code=500, detail="OpenRouter API URL is not configured")
+
+    allowed = [
+        str(x).strip().lower()
+        for x in (cfg.get("allowed_animal_types_array") or RIG_V2_ALLOWED_ANIMAL_TYPES)
+        if str(x).strip()
+    ]
+    prompt = _rig_v2_prompt_from_config(cfg, prompt_override)
+    configured_models = [
+        str(x).strip()
+        for x in (cfg.get("open_router_free_vision_models_array") or [])
+        if str(x).strip()
+    ]
+    discovered_models = await _rig_v2_discover_free_vision_models(cfg, api_key)
+    models: List[str] = []
+    for model in configured_models + discovered_models:
+        if model not in models:
+            models.append(model)
+    if not models:
+        raise HTTPException(status_code=500, detail="No OpenRouter vision models configured or discovered")
+
+    last_error = ""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": (APP_URL or "https://autorig.online").rstrip("/"),
+        "X-Title": "AutoRig Rig V2",
+    }
+    for model in models:
+        payload = {
+            "model": model,
+            "temperature": 0,
+            "max_tokens": 64,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
+                    ],
+                }
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+                resp = await client.post(api_url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                last_error = f"{model}: HTTP {resp.status_code} {resp.text[:240]}"
+                if resp.status_code == 429:
+                    return {
+                        "success_bool": False,
+                        "status_string": "vision_rate_limited",
+                        "animal_type_string": "",
+                        "model_used_string": model,
+                        "error_string": last_error[:500],
+                        "server_time_unix_int": _rig_v2_server_time(),
+                    }
+                continue
+            data = resp.json()
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            if isinstance(content, list):
+                content = " ".join(
+                    str(part.get("text") or part) if isinstance(part, dict) else str(part)
+                    for part in content
+                )
+            animal_type, confidence_float = _rig_v2_extract_vision_result(str(content), allowed)
+            if animal_type:
+                return {
+                    "success_bool": True,
+                    "status_string": "ok",
+                    "animal_type_string": animal_type,
+                    "confidence_float": confidence_float,
+                    "model_used_string": model,
+                    "server_time_unix_int": _rig_v2_server_time(),
+                }
+            last_error = f"{model}: response did not contain allowed animal_type"
+        except Exception as e:
+            last_error = f"{model}: {e}"
+            continue
+    return {
+        "success_bool": False,
+        "status_string": "vision_failed",
+        "animal_type_string": "",
+        "model_used_string": "",
+        "error_string": last_error[:500],
+        "server_time_unix_int": _rig_v2_server_time(),
+    }
+
+
+async def _rig_v2_call_openai_vision(
+    *,
+    cfg: Dict[str, Any],
+    image_data_url: str,
+    fallback_reason: str,
+    view_id: str = "",
+    prompt_override: str = "",
+    model_override: str = "",
+) -> Dict[str, Any]:
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    if not api_key:
+        return {
+            "success_bool": False,
+            "status_string": "openai_fallback_not_configured",
+            "animal_type_string": "",
+            "model_used_string": "",
+            "error_string": fallback_reason[:500],
+            "server_time_unix_int": _rig_v2_server_time(),
+        }
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    default_model = str(cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    strong_model = str(cfg.get("open_ai_strong_vision_model_string") or default_model).strip()
+    model = (model_override or "").strip() or (strong_model if view_id == "top_side_45" else default_model)
+    if len(model) > 160 or not re.match(r"^[A-Za-z0-9._:/-]+$", model):
+        raise HTTPException(status_code=400, detail="Invalid open_ai_model_override_string")
+    allowed = [
+        str(x).strip().lower()
+        for x in (cfg.get("allowed_animal_types_array") or RIG_V2_ALLOWED_ANIMAL_TYPES)
+        if str(x).strip()
+    ]
+    prompt = _rig_v2_prompt_from_config(cfg, prompt_override)
+    payload = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_data_url, "detail": "low"}},
+                ],
+            }
+        ],
+    }
+    if model.startswith(("gpt-5", "o3", "o4")):
+        payload["max_completion_tokens"] = 256
+    else:
+        payload["temperature"] = 0
+        payload["max_tokens"] = 80
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            resp = await client.post(api_url, headers=headers, json=payload)
+        if resp.status_code != 200:
+            return {
+                "success_bool": False,
+                "status_string": "openai_fallback_failed",
+                "animal_type_string": "",
+                "model_used_string": model,
+                "error_string": f"OpenRouter fallback reason: {fallback_reason[:220]}; OpenAI HTTP {resp.status_code} {resp.text[:220]}",
+                "server_time_unix_int": _rig_v2_server_time(),
+            }
+        data = resp.json()
+        content = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if isinstance(content, list):
+            content = " ".join(
+                str(part.get("text") or part) if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        animal_type, confidence_float = _rig_v2_extract_vision_result(str(content), allowed)
+        if animal_type:
+            return {
+                "success_bool": True,
+                "status_string": "ok_openai_fallback",
+                "animal_type_string": animal_type,
+                "confidence_float": confidence_float,
+                "model_used_string": f"openai/{model}",
+                "view_id_string": view_id,
+                "fallback_reason_string": fallback_reason[:500],
+                "server_time_unix_int": _rig_v2_server_time(),
+            }
+        return {
+            "success_bool": False,
+            "status_string": "openai_fallback_invalid_response",
+            "animal_type_string": "",
+            "model_used_string": model,
+            "error_string": f"OpenAI response did not contain allowed animal_type. OpenRouter fallback reason: {fallback_reason[:300]}",
+            "server_time_unix_int": _rig_v2_server_time(),
+        }
+    except Exception as e:
+        return {
+            "success_bool": False,
+            "status_string": "openai_fallback_failed",
+            "animal_type_string": "",
+            "model_used_string": model,
+            "error_string": f"OpenRouter fallback reason: {fallback_reason[:220]}; OpenAI error: {e}",
+            "server_time_unix_int": _rig_v2_server_time(),
+        }
+
+
+@app.post("/api/rig-v2/task/create")
+@limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
+async def api_rig_v2_create_preview_task(
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Prototype upload endpoint: create a non-dispatched preview task for rig-v2.html."""
+    if user:
+        owner_type = "user"
+        owner_id = user.email
+    else:
+        anon_session = await get_anon_session(request, response, db)
+        owner_type = "anon"
+        owner_id = anon_session.anon_id
+
+    form = await request.form()
+    incoming_files: List[UploadFile] = []
+    for field_name in ("files", "file"):
+        for upload in form.getlist(field_name):
+            if getattr(upload, "filename", None) and hasattr(upload, "read"):
+                incoming_files.append(upload)
+    if not incoming_files:
+        raise HTTPException(status_code=400, detail="Upload at least one .fbx, .glb, or .obj file")
+
+    model_file: Optional[UploadFile] = None
+    model_filename = ""
+    model_ext = ""
+    for upload in incoming_files:
+        candidate_name = os.path.basename(upload.filename or "").strip()
+        candidate_ext = os.path.splitext(candidate_name)[1].lower()
+        if candidate_ext in RIG_V2_ALLOWED_EXTS:
+            model_file = upload
+            model_filename = candidate_name or f"model{candidate_ext}"
+            model_ext = candidate_ext
+            break
+    if model_file is None:
+        raise HTTPException(status_code=400, detail="Only .fbx, .glb, and .obj model uploads are supported in rig-v2 prototype")
+
+    for upload in incoming_files:
+        filename_check = os.path.basename(upload.filename or "").strip()
+        ext_check = os.path.splitext(filename_check)[1].lower()
+        if ext_check not in RIG_V2_ALLOWED_EXTS and ext_check not in RIG_V2_ALLOWED_SUPPORT_EXTS:
+            raise HTTPException(status_code=400, detail="Only .fbx, .glb, .obj, and .mtl uploads are supported in rig-v2 prototype")
+
+    upload_token = str(uuid.uuid4())
+    upload_dir = os.path.join(UPLOAD_DIR, upload_token)
+    os.makedirs(upload_dir, exist_ok=True)
+
+    max_upload_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    uploaded_bytes = 0
+    saved_filenames: List[str] = []
+    try:
+        for upload in incoming_files:
+            filename = os.path.basename(upload.filename or "").strip()
+            if not filename:
+                continue
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, "wb") as f:
+                while True:
+                    chunk = await upload.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    uploaded_bytes += len(chunk)
+                    if uploaded_bytes > max_upload_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"Files are too large. Maximum total size is {MAX_UPLOAD_SIZE_MB}MB.",
+                        )
+                    f.write(chunk)
+            saved_filenames.append(filename)
+    except Exception:
+        for filename in saved_filenames:
+            try:
+                os.unlink(os.path.join(upload_dir, filename))
+            except OSError:
+                pass
+        raise
+
+    app_url = (APP_URL or "https://autorig.online").rstrip("/")
+    input_url = f"{app_url}/u/{upload_token}/{quote(model_filename)}"
+    support_file_urls = {
+        filename: f"{app_url}/u/{upload_token}/{quote(filename)}"
+        for filename in saved_filenames
+        if filename != model_filename
+    }
+    model_stem = os.path.splitext(model_filename)[0].lower()
+    material_url = ""
+    for filename, url in support_file_urls.items():
+        if os.path.splitext(filename)[1].lower() == ".mtl" and os.path.splitext(filename)[0].lower() == model_stem:
+            material_url = url
+            break
+    task = Task(
+        id=str(uuid.uuid4()),
+        owner_type=owner_type,
+        owner_id=owner_id,
+        input_url=input_url,
+        input_type="rig_v2_preview",
+        status=RIG_V2_PREVIEW_STATUS,
+        ready_count=0,
+        total_count=0,
+        created_via_api=False,
+        pipeline_kind="rig_v2",
+        input_bytes=uploaded_bytes,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    return {
+        "success_bool": True,
+        "status_string": RIG_V2_PREVIEW_STATUS,
+        "task_id_string": task.id,
+        "input_url_string": input_url,
+        "file_ext_string": model_ext.lstrip("."),
+        "material_url_string": material_url,
+        "support_file_urls_object": support_file_urls,
+        "uploaded_bytes_int": int(uploaded_bytes),
+        "server_time_unix_int": _rig_v2_server_time(),
+    }
+
+
+@app.get("/api/rig-v2/vision/animal-type")
+async def api_rig_v2_vision_animal_type_docs():
+    """GET mirror documenting the POST vision endpoint."""
+    return {
+        "status_string": "ok",
+        "method_string": "POST",
+        "url_string": "/api/rig-v2/vision/animal-type",
+        "required_fields_array": ["image_jpg_base64_string"],
+        "optional_fields_array": [
+            "task_id_string",
+            "view_id_string",
+            "prompt_override_string",
+            "force_openai_bool",
+            "open_ai_model_override_string",
+        ],
+        "allowed_animal_types_array": RIG_V2_ALLOWED_ANIMAL_TYPES,
+        "example_request_object": {
+            "image_jpg_base64_string": "data:image/jpeg;base64,/9j/...",
+            "task_id_string": "optional-task-id",
+        },
+        "example_response_object": {
+            "success_bool": True,
+            "status_string": "ok",
+            "animal_type_string": "rabbit",
+            "confidence_float": 0.86,
+            "model_used_string": "provider/model:free or openai/model",
+            "server_time_unix_int": 0,
+        },
+        "server_time_unix_int": _rig_v2_server_time(),
+    }
+
+
+@app.get("/api/rig-v2/vision/config")
+async def api_rig_v2_vision_config():
+    """Expose editable prototype prompt and available OpenAI model IDs without exposing API keys."""
+    cfg = _rig_v2_load_vision_config()
+    models = await _rig_v2_list_openai_models(cfg)
+    strong_model = str(cfg.get("open_ai_strong_vision_model_string") or "").strip()
+    default_model = str(cfg.get("open_ai_vision_model_string") or "").strip()
+    return {
+        "success_bool": True,
+        "status_string": "ok",
+        "prompt_string": _rig_v2_prompt_from_config(cfg),
+        "open_ai_models_array": models,
+        "open_ai_default_model_string": default_model,
+        "open_ai_strong_model_string": strong_model,
+        "server_time_unix_int": _rig_v2_server_time(),
+    }
+
+
+@app.post("/api/rig-v2/vision/animal-type")
+@limiter.limit("30/minute")
+async def api_rig_v2_vision_animal_type(request: Request):
+    """Classify a 512x512 JPEG render via OpenRouter, with OpenAI only as rate-limit fallback."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    image_data_url = _rig_v2_normalize_image_data_url(
+        str(body.get("image_jpg_base64_string") or "")
+    )
+    view_id = str(body.get("view_id_string") or "").strip()
+    prompt_override = str(body.get("prompt_override_string") or "").strip()
+    model_override = str(body.get("open_ai_model_override_string") or "").strip()
+    force_openai = bool(body.get("force_openai_bool"))
+    cfg = _rig_v2_load_vision_config()
+    if force_openai:
+        return await _rig_v2_call_openai_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            fallback_reason="forced_openai_retry",
+            view_id=view_id,
+            prompt_override=prompt_override,
+            model_override=model_override,
+        )
+    openrouter_result = await _rig_v2_call_openrouter_vision(
+        cfg=cfg,
+        image_data_url=image_data_url,
+        prompt_override=prompt_override,
+    )
+    if openrouter_result.get("status_string") == "vision_rate_limited":
+        fallback_reason = str(openrouter_result.get("error_string") or openrouter_result.get("status_string") or "")
+        return await _rig_v2_call_openai_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            fallback_reason=fallback_reason,
+            view_id=view_id,
+            prompt_override=prompt_override,
+            model_override=model_override,
+        )
+    return openrouter_result
 
 
 @app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
@@ -2559,9 +3801,10 @@ async def api_gumroad_ping(
     request: Request
 ):
     """
-    Proxy-tunnel for Gumroad webhook.
-    Accepts payload from Gumroad and forwards it AS-IS to free3d.online.
-    Always returns 200 "ok" (fallback mode) to avoid Gumroad retries.
+    Gumroad webhook hub.
+    Local crediting only for ``autorig-*`` (see GUMROAD_PRODUCT_CREDITS).
+    Forwards raw body AS-IS: ``freestock-*`` products → FREESTOCK_GUMROAD_PROXY_TARGET;
+    all other sales → free3d.online. Always responds 200 "ok" so Gumroad does not spam retries.
     """
     raw_body = await request.body()
     content_type = request.headers.get("content-type", "application/x-www-form-urlencoded")
@@ -2587,7 +3830,9 @@ async def api_gumroad_ping(
 
     product_key = _normalize_gumroad_product_key(product)
     local_credits_added = 0
-    known_product = product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
+    known_product = product_key in {
+        str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()
+    } or is_freestock_gumroad_product(product_key)
     should_notify_purchase = False
 
     if product_key.startswith("autorig-") and email and email != "unknown":
@@ -2656,17 +3901,28 @@ async def api_gumroad_ping(
             )
         )
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            upstream = await client.post(
-                GUMROAD_PROXY_TARGET,
-                content=raw_body,
-                headers={"Content-Type": content_type},
-            )
-        if upstream.status_code != 200:
-            print(f"[GumroadProxy] Upstream non-200: {upstream.status_code}", flush=True)
-    except Exception as e:
-        print(f"[GumroadProxy] Upstream request failed: {e}", flush=True)
+    if is_freestock_gumroad_product(product_key):
+        proxy_targets: List[str] = (
+            [FREESTOCK_GUMROAD_PROXY_TARGET] if FREESTOCK_GUMROAD_PROXY_TARGET else []
+        )
+    else:
+        proxy_targets = [GUMROAD_PROXY_TARGET]
+
+    for proxy_target in proxy_targets:
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                upstream = await client.post(
+                    proxy_target,
+                    content=raw_body,
+                    headers={"Content-Type": content_type},
+                )
+            if upstream.status_code != 200:
+                print(
+                    f"[GumroadProxy] {proxy_target} non-200: {upstream.status_code}",
+                    flush=True,
+                )
+        except Exception as e:
+            print(f"[GumroadProxy] {proxy_target} request failed: {e}", flush=True)
 
     return Response(content="ok", media_type="text/plain")
 
@@ -2762,6 +4018,16 @@ async def api_get_task(
         getattr(task, "poster_llm_title", None),
         kw_list,
     )
+    rig_v2_animal_detection = None
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        if isinstance(settings, dict) and isinstance(settings.get("rig_v2_animal_detection"), dict):
+            rig_v2_animal_detection = settings.get("rig_v2_animal_detection")
+    except Exception:
+        rig_v2_animal_detection = None
+
+    is_admin_viewer = bool(user and is_admin_email(user.email))
+    worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
 
     return TaskStatusResponse(
         task_id=task.id,
@@ -2774,11 +4040,13 @@ async def api_get_task(
         video_ready=task.video_ready,
         video_url=task.video_url,
         input_url=task.input_url,
+        input_type=getattr(task, "input_type", None),
         fbx_glb_output_url=task.fbx_glb_output_url,
         fbx_glb_model_name=task.fbx_glb_model_name,
         fbx_glb_ready=task.fbx_glb_ready,
         fbx_glb_error=task.fbx_glb_error,
         progress_page=task.progress_page,
+        worker_api=worker_api_for_response,
         viewer_html_url=viewer_html_url,
         quick_downloads=quick_downloads if quick_downloads else None,
         prepared_glb_ready=prepared_glb_ready,
@@ -2798,6 +4066,7 @@ async def api_get_task(
         pipeline=getattr(task, "pipeline_kind", None) or "rig",
         youtube_video_id=getattr(task, "youtube_video_id", None),
         youtube_upload_status=getattr(task, "youtube_upload_status", None),
+        rig_v2_animal_detection=rig_v2_animal_detection,
     )
 
 
@@ -3329,6 +4598,340 @@ async def api_purchase_files(
     raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
 
 
+# -----------------------------------------------------------------------------
+# Animal idle — LTX reference video (Renderfin image-to-video)
+# -----------------------------------------------------------------------------
+RENF_ANIM_UPLOAD_URL = "https://free3d.online/renderfin/api/animation/upload_image"
+RENF_ANIM_VIDEO_URL = "https://free3d.online/renderfin/api/generate_video"
+RENF_ANIM_STATUS_URL = "https://free3d.online/renderfin/api/animation/task_status"
+
+IDLE_LTX_USER_PROMPT = """Refine the following requirements into ONE concise English positive prompt for LTX image-to-video (max 450 characters, single paragraph, no quotes).
+The prompt must describe motion and cinematography only.
+
+Base requirements:
+Animate the provided animal character preview while preserving the exact species, body shape, colors, materials, and silhouette.
+The animal performs a subtle idle loop, slowly turning its head toward the camera.
+Camera: stable camera, full-body framing, no shake.
+Lighting: soft studio lighting, clean shadows.
+Motion: gentle breathing, small head movement, subtle tail or ear movement.
+Quality: stable anatomy, no extra legs, no distorted face, no morphing, no text, no watermark.
+
+Output ONLY the final prompt text."""
+
+
+def _idle_animation_require_animal_task(task: Any) -> None:
+    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
+        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
+
+
+def _idle_animation_decode_jpeg_b64(snapshot_jpg_base64_string: str) -> bytes:
+    raw = (snapshot_jpg_base64_string or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="snapshot_jpg_base64_string is required")
+    if "," in raw and raw.lower().startswith("data:image/"):
+        raw = raw.split(",", 1)[1]
+    raw = re.sub(r"\s+", "", raw)
+    try:
+        data = base64.b64decode(raw, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 image")
+    if not data or len(data) < 64:
+        raise HTTPException(status_code=400, detail="Image data is empty")
+    if len(data) > 2_500_000:
+        raise HTTPException(status_code=413, detail="Snapshot image is too large")
+    if not data.startswith(b"\xff\xd8\xff"):
+        raise HTTPException(status_code=400, detail="Snapshot must be JPEG")
+    return data
+
+
+async def _idle_animation_llm_finalize_prompt(cfg: Dict[str, Any]) -> str:
+    """Return a single-line-ish English prompt using OpenRouter or OpenAI (text-only)."""
+    or_key = str(cfg.get("open_router_api_key") or "").strip()
+    oa_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    or_url = str(cfg.get("open_router_api_url_string") or "https://openrouter.ai/api/v1/chat/completions").strip()
+    oa_url = str(cfg.get("open_ai_api_url_string") or "https://api.openai.com/v1/chat/completions").strip()
+
+    sys_msg = (
+        "You write prompts for short AI video generation. "
+        "Follow instructions exactly. Output only the prompt text, no preamble."
+    )
+
+    async def _post_chat(api_url: str, api_key: str, model: str, provider: str) -> str:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": (APP_URL or "https://autorig.online").rstrip("/"),
+            "X-Title": "AutoRig Idle LTX",
+        }
+        payload = {
+            "model": model,
+            "temperature": 0.35,
+            "max_tokens": 512,
+            "messages": [
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": IDLE_LTX_USER_PROMPT},
+            ],
+        }
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            resp = await client.post(api_url, headers=headers, json=payload)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{provider} HTTP {resp.status_code}: {resp.text[:400]}",
+            )
+        data = resp.json()
+        content = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if isinstance(content, list):
+            content = " ".join(
+                str(part.get("text") or part) if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        text = str(content or "").strip()
+        if not text:
+            raise HTTPException(status_code=502, detail=f"{provider} returned empty prompt")
+        if len(text) > 1200:
+            text = text[:1200]
+        return text
+
+    if or_key:
+        try:
+            return await _post_chat(or_url, or_key, "openai/gpt-4o-mini", "OpenRouter")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"OpenRouter prompt error: {e}") from e
+
+    if oa_key:
+        try:
+            return await _post_chat(oa_url, oa_key, "gpt-4o-mini", "OpenAI")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"OpenAI prompt error: {e}") from e
+
+    raise HTTPException(
+        status_code=503,
+        detail="LLM not configured (need open_router_api_key or open_ai_api_key in vision config)",
+    )
+
+
+async def _renderfin_upload_jpeg_snapshot(image_bytes: bytes, user_name: str) -> str:
+    safe_user = re.sub(r"[^a-zA-Z0-9_.-]", "_", user_name)[:64]
+    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        resp = await client.post(
+            RENF_ANIM_UPLOAD_URL,
+            data={"user_name_string": safe_user},
+            files={"file": ("snapshot.jpg", image_bytes, "image/jpeg")},
+        )
+    if resp.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Renderfin upload failed HTTP {resp.status_code}: {resp.text[:400]}",
+        )
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Renderfin upload returned non-JSON")
+    url = str(
+        data.get("image_url_string")
+        or data.get("image_url")
+        or data.get("url")
+        or ""
+    ).strip()
+    if not url:
+        raise HTTPException(status_code=502, detail="Renderfin upload missing image URL")
+    return url
+
+
+async def _renderfin_enqueue_ltx_video(
+    *,
+    prompt: str,
+    image_url: str,
+    user_name: str,
+    frame_count: int = 120,
+    width: int = 768,
+    height: int = 448,
+) -> Tuple[str, str]:
+    safe_user = re.sub(r"[^a-zA-Z0-9_.-]", "_", user_name)[:64]
+    fc = max(24, min(int(frame_count), 280))
+    body = {
+        "prompt": prompt[:4000],
+        "image_url": image_url,
+        "frame_count": fc,
+        "main_size_width": width,
+        "main_size_height": height,
+        "user_name": safe_user,
+    }
+    async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+        body_fast = dict(body)
+        body_fast["preset"] = "draft_fast"
+        resp = await client.post(RENF_ANIM_VIDEO_URL, json=body_fast)
+        if resp.status_code >= 400:
+            resp = await client.post(RENF_ANIM_VIDEO_URL, json=body)
+        if resp.status_code >= 400:
+            detail = resp.text[:500]
+            raise HTTPException(status_code=502, detail=f"Renderfin generate_video failed: {detail}")
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Renderfin generate_video returned non-JSON")
+    tid = str(data.get("task_id") or data.get("task_id_string") or "").strip()
+    out = str(data.get("output_url") or data.get("output_url_string") or "").strip()
+    if not tid:
+        raise HTTPException(status_code=502, detail="Renderfin generate_video missing task_id")
+    return tid, out
+
+
+def _idle_pick_renderfin_record(payload: Any, job_id: str) -> Optional[Dict[str, Any]]:
+    if payload is None:
+        return None
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            rid = str(item.get("task_id") or item.get("id") or item.get("task_id_string") or "")
+            if rid == job_id:
+                return item
+        for item in payload:
+            if isinstance(item, dict):
+                return item
+        return None
+    if isinstance(payload, dict):
+        inner = payload.get("tasks") or payload.get("data") or payload.get("results")
+        if inner is not None:
+            return _idle_pick_renderfin_record(inner, job_id)
+        return payload
+    return None
+
+
+def _idle_normalize_animation_status(raw: Dict[str, Any]) -> Tuple[int, Optional[str], Optional[str]]:
+    """Return (status_int 0-4, video_url, error)."""
+    st = raw.get("status_int")
+    if st is None:
+        st = raw.get("status")
+    try:
+        status_int = int(st) if st is not None else 0
+    except (TypeError, ValueError):
+        status_int = 0
+    vid = raw.get("output_url") or raw.get("output_url_string") or raw.get("video_url")
+    video_url = str(vid).strip() if vid else None
+    err = raw.get("error") or raw.get("error_string") or raw.get("message")
+    err_s = str(err).strip() if err else None
+    return status_int, video_url or None, err_s
+
+
+@app.post("/api/task/{task_id}/idle-animation/start", response_model=IdleAnimationStartResponse)
+async def api_idle_animation_start(
+    task_id: str,
+    body: IdleAnimationStartRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload snapshot to Renderfin, finalize prompt via LLM, enqueue LTX mp4 job."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _idle_animation_require_animal_task(task)
+
+    image_bytes = _idle_animation_decode_jpeg_b64(body.snapshot_jpg_base64_string)
+    cfg = _rig_v2_load_vision_config()
+    prompt_used = await _idle_animation_llm_finalize_prompt(cfg)
+
+    short_id = (task_id.replace("-", "")[:12]) if task_id else "task"
+    user_name = f"autorig_anim_{short_id}"
+
+    image_url = await _renderfin_upload_jpeg_snapshot(image_bytes, user_name)
+    job_id, output_url = await _renderfin_enqueue_ltx_video(
+        prompt=prompt_used,
+        image_url=image_url,
+        user_name=user_name,
+        frame_count=120,
+        width=768,
+        height=448,
+    )
+
+    return IdleAnimationStartResponse(
+        ok_bool=True,
+        job_id_string=job_id,
+        prompt_used_string=prompt_used,
+        output_url_string=output_url or None,
+        message_string="queued",
+    )
+
+
+@app.get("/api/task/{task_id}/idle-animation/status", response_model=IdleAnimationStatusResponse)
+async def api_idle_animation_status(
+    task_id: str,
+    job_id: str = Query(..., alias="job_id", min_length=8),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _idle_animation_require_animal_task(task)
+
+    url = f"{RENF_ANIM_STATUS_URL}?task_ids_string={quote(job_id)}"
+    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        resp = await client.get(url)
+    if resp.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Renderfin status HTTP {resp.status_code}: {resp.text[:400]}",
+        )
+    try:
+        payload = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Renderfin status returned non-JSON")
+
+    rec = _idle_pick_renderfin_record(payload, job_id)
+    if not isinstance(rec, dict):
+        rec = {}
+
+    status_int, video_url, err_s = _idle_normalize_animation_status(rec)
+    labels = ("accepting", "pending", "in_progress", "completed", "failed")
+    label = labels[status_int] if 0 <= status_int < len(labels) else "unknown"
+
+    return IdleAnimationStatusResponse(
+        ok_bool=True,
+        status_int=status_int,
+        status_label_string=label,
+        video_url_string=video_url,
+        error_string=err_s,
+        raw_payload=rec if rec else None,
+    )
+
+
+@app.get("/api/task/{task_id}/idle-animation/proxy-video")
+async def api_idle_animation_proxy_video(
+    task_id: str,
+    video_url: str = Query(..., alias="url", min_length=12, max_length=2048),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same-origin proxy for mp4 frame extraction (avoids canvas taint from cross-origin)."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _idle_animation_require_animal_task(task)
+
+    parsed = urlparse(video_url)
+    host = (parsed.hostname or "").lower()
+    if host not in ("free3d.online", "www.free3d.online", "autorig.online", "www.autorig.online"):
+        raise HTTPException(status_code=400, detail="URL host not allowed for proxy")
+    path_lower = (parsed.path or "").lower()
+    if not (path_lower.endswith(".mp4") or "/render/" in path_lower or "video" in path_lower):
+        pass  # allow render paths without .mp4 suffix in query — still restrict host
+
+    async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+        upstream = await client.get(video_url)
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Upstream video HTTP {upstream.status_code}")
+    ctype = upstream.headers.get("content-type", "video/mp4")
+    return Response(content=upstream.content, media_type=ctype)
+
+
 @app.get("/api/task/{task_id}/animations/catalog", response_model=AnimationCatalogResponse)
 async def api_get_animation_catalog(
     task_id: str,
@@ -3347,6 +4950,44 @@ async def api_get_animation_catalog(
 
     file_map = await _build_task_animation_file_map(task, raw_items)
     purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+
+    is_animal_task = str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+    if is_animal_task:
+        bundle_url, bundle_filename = await _resolve_available_all_animations_fbx_url(task)
+        if not bundle_filename:
+            _, bundle_filename = _resolve_all_animations_fbx_url(task)
+        bundle_ready = bool(bundle_url)
+        bundle_item = AnimationCatalogItem(
+            id="animal_animation_bundle",
+            name="Animal animation bundle",
+            type="animal_bundle",
+            type_label="Animal Bundle",
+            tags=["animal", "bundle"],
+            credits=ANIMATION_BUNDLE_CREDITS,
+            format="fbx",
+            available=bundle_ready,
+            ready=bundle_ready,
+            purchased=purchased_all,
+            file_name=bundle_filename if bundle_ready else None,
+            preview_url=f"/api/task/{task_id}/animations.fbx" if bundle_ready else None,
+        )
+        return AnimationCatalogResponse(
+            types=[{"id": "animal_bundle", "label": "Animal bundle", "count": 1}],
+            animations=[bundle_item],
+            purchased_all=purchased_all,
+            purchased_ids=sorted(purchased_ids),
+            login_required=(user is None),
+            user_credits=(user.balance_credits if user else 0),
+            pricing={
+                "single_animation_credits": ANIMATION_SINGLE_CREDITS,
+                "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+                "download_format": "fbx",
+                "all_animations_fbx_url": f"/api/task/{task_id}/animations.fbx",
+                "bundle_only": True,
+                "bundle_ready": bundle_ready,
+                "bundle_label": "Animal animation bundle",
+            },
+        )
 
     items: List[AnimationCatalogItem] = []
     for item in raw_items:
@@ -3404,7 +5045,8 @@ async def api_get_animation_catalog(
         pricing={
             "single_animation_credits": ANIMATION_SINGLE_CREDITS,
             "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
-            "download_format": "fbx"
+            "download_format": "fbx",
+            "all_animations_fbx_url": f"/api/task/{task_id}/animations.fbx",
         }
     )
 
@@ -3678,6 +5320,92 @@ async def api_download_animation(
     )
 
 
+@app.get("/api/task/{task_id}/animations/download-with-base/{animation_id}")
+async def api_download_animation_with_base(
+    task_id: str,
+    animation_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Download a ZIP containing the package-level _all_animations FBX and the selected custom animation FBX.
+    This avoids browser blocking of multiple automatic downloads from one click.
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    anim_id = _normalize_animation_key(animation_id)
+    manifest = _load_animation_manifest()
+    raw_items = manifest.get("animations") or []
+    catalog_by_id: Dict[str, dict] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("enabled", True) is False:
+            continue
+        key = _normalize_animation_key(str(item.get("id") or item.get("name") or ""))
+        if key:
+            catalog_by_id[key] = item
+
+    if anim_id not in catalog_by_id:
+        raise HTTPException(status_code=404, detail="Animation not found")
+
+    file_map = await _build_task_animation_file_map(task, raw_items)
+    resolved = _resolve_animation_file(catalog_by_id[anim_id], file_map)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Animation file not ready")
+
+    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
+    if not (purchased_all or anim_id in purchased_ids):
+        raise HTTPException(status_code=402, detail="Payment required to download this animation")
+
+    base_url, base_filename = await _resolve_available_all_animations_fbx_url(task)
+    if not base_url or not base_filename:
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+
+    custom_url = resolved["url"]
+    custom_filename = resolved["clean_filename"]
+    base_bytes, custom_bytes = await asyncio.gather(
+        _download_worker_file_bytes(base_url, "_all_animations.fbx"),
+        _download_worker_file_bytes(custom_url, "Custom animation FBX"),
+    )
+
+    safe_anim = re.sub(r"[^a-zA-Z0-9_.-]+", "_", anim_id).strip("_") or "custom_animation"
+    zip_path = Path(tempfile.gettempdir()) / f"autorig_{task_id}_{safe_anim}_with_base_{uuid.uuid4().hex}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(base_filename, base_bytes)
+        zf.writestr(custom_filename, custom_bytes)
+        zf.writestr(
+            "README.txt",
+            (
+                "This bundle contains two FBX files.\n\n"
+                "1. Use the _all_animations FBX as the rigged character/base animation file.\n"
+                "2. The custom animation FBX contains the selected skeleton animation clip only.\n"
+                "3. Apply the selected custom clip to the rigged character in Unity, Unreal Engine, Blender, or another DCC/engine.\n"
+            ),
+        )
+
+    if task.ga_client_id:
+        asyncio.create_task(send_ga4_event(
+            task.ga_client_id,
+            "custom_animation_bundle_downloaded",
+            {"animation_id": anim_id, "task_id": task_id, "filename": custom_filename}
+        ))
+
+    bundle_name = f"{task_id}_{safe_anim}_with_all_animations.zip"
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=bundle_name,
+        headers={"Cache-Control": "private, max-age=0"},
+        background=BackgroundTask(lambda: zip_path.unlink(missing_ok=True)),
+    )
+
+
 @app.get("/api/history", response_model=TaskHistoryResponse)
 async def api_get_history(
     request: Request,
@@ -3707,7 +5435,7 @@ async def api_get_history(
                 created_at=t.created_at,
                 input_url=t.input_url,
                 video_ready=t.video_ready,
-                thumbnail_url=f"/api/thumb/{t.id}" if t.status == "done" and t.video_ready else None,
+                thumbnail_url=f"/thumb/{t.id}" if t.status == "done" and t.video_ready else None,
                 content_rating=getattr(t, "content_rating", None),
             )
             for t in tasks
@@ -3839,7 +5567,7 @@ async def api_get_gallery(
         GalleryItem(
             task_id=t.id,
             video_url=f"/api/video/{t.id}",
-            thumbnail_url=f"/api/thumb/{t.id}",
+            thumbnail_url=f"/thumb/{t.id}",
             created_at=t.created_at,
             time_ago=format_time_ago(t.created_at),
             like_count=like_count,
@@ -3960,7 +5688,7 @@ async def api_get_owner_tasks(
                 "status": t.status,
                 "progress": t.progress,
                 "created_at": t.created_at,
-                "thumbnail_url": f"/api/thumb/{t.id}" if t.status == "done" else None,
+                "thumbnail_url": f"/thumb/{t.id}" if t.status == "done" else None,
                 "content_rating": getattr(t, "content_rating", None),
                 "owner_type": t.owner_type,
                 "owner_id": t.owner_id if t.owner_type == "user" else "anon"
@@ -4487,7 +6215,7 @@ async def api_admin_all_tasks(
             return None
         if not _task_has_poster(t):
             return None
-        return f"/api/thumb/{t.id}"
+        return f"/thumb/{t.id}"
 
     return AdminTaskListResponse(
         tasks=[
@@ -4543,7 +6271,7 @@ async def api_admin_task_inspect(
 
     _poster = None
     if task.status == "done" and _task_has_poster(task):
-        _poster = f"/api/thumb/{task.id}"
+        _poster = f"/thumb/{task.id}"
 
     return AdminTaskInspectResponse(
         task_id=task.id,
@@ -6656,6 +8384,31 @@ async def api_proxy_animations_glb(
     raise HTTPException(status_code=404, detail="Animations GLB not available yet")
 
 
+@app.head("/api/task/{task_id}/animations.fbx")
+async def api_head_animations_fbx(
+    task_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Check whether the package-level FBX animation file is available."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    animations_url, filename = await _resolve_available_all_animations_fbx_url(task)
+    if not animations_url or not filename:
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+
+    return Response(
+        status_code=200,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @app.get("/api/task/{task_id}/animations.fbx")
 async def api_proxy_animations_fbx(
     task_id: str,
@@ -6666,25 +8419,10 @@ async def api_proxy_animations_fbx(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.guid or not task.worker_api:
-        raise HTTPException(status_code=404, detail="Model not available yet")
-    
-    from workers import get_worker_base_url
-    worker_base = get_worker_base_url(task.worker_api)
-    
-    # Try to find animations FBX in ready_urls (_all_animations_unity.fbx)
-    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations_unity.fbx")
-    if animations_url:
-        return await _proxy_model_file(animations_url, f"{task_id}_animations.fbx")
-    
-    # Try alternative pattern (_all_animations.fbx)
-    animations_url = _find_file_in_ready_urls(task.ready_urls, "_all_animations.fbx")
-    if animations_url:
-        return await _proxy_model_file(animations_url, f"{task_id}_animations.fbx")
-    
-    # Try to construct URL based on GUID pattern
-    fbx_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_100k/{task.guid}_all_animations_unity.fbx"
-    return await _proxy_model_file(fbx_url, f"{task_id}_animations.fbx")
+    animations_url, filename = await _resolve_available_all_animations_fbx_url(task)
+    if not animations_url or not filename:
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+    return await _proxy_model_file(animations_url, filename, as_attachment=True)
 
 
 @app.get("/api/task/{task_id}/prepared.glb")
@@ -6736,6 +8474,9 @@ async def api_proxy_prepared_glb(
     raise HTTPException(status_code=404, detail="Prepared model not available yet")
 
 
+@app.head("/thumb/{task_id}")
+@app.get("/thumb/{task_id}")
+@app.head("/api/thumb/{task_id}")
 @app.get("/api/thumb/{task_id}")
 async def api_proxy_thumb(
     task_id: str,
@@ -7214,6 +8955,16 @@ async def api_set_task_viewer_settings(
 
     body = await request.body()
     settings = _validate_viewer_settings_payload(body)
+    try:
+        existing = json.loads(task.viewer_settings or "{}")
+    except Exception:
+        existing = {}
+    if (
+        isinstance(existing, dict)
+        and isinstance(existing.get("rig_v2_animal_detection"), dict)
+        and "rig_v2_animal_detection" not in settings
+    ):
+        settings["rig_v2_animal_detection"] = existing["rig_v2_animal_detection"]
     task.viewer_settings = json.dumps(settings, ensure_ascii=False)
     await db.commit()
     return {"ok": True}
@@ -7782,6 +9533,12 @@ async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/rig-v2.html")
+async def rig_v2_page():
+    """Prototype upload + local preview + animal-type vision page."""
+    return FileResponse(str(STATIC_DIR / "rig-v2.html"))
+
+
 @app.get("/task")
 async def task_page(
     id: Optional[str] = None,
@@ -7793,18 +9550,31 @@ async def task_page(
     task_html_path = STATIC_DIR / "task.html"
     html_content = task_html_path.read_text(encoding="utf-8")
     
-    # If no task_id, return default page
+    # If no task_id, return default page (non-indexable)
     if not id:
+        html_content = html_content.replace(
+            "<!-- TASK_SEO_PLACEHOLDER -->",
+            f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
+        )
         return HTMLResponse(content=html_content)
     
-    task_id = id
-    base_url = APP_URL or "https://autorig.online"
+    task_id = id.strip()
+    if not task_id:
+        html_content = html_content.replace(
+            "<!-- TASK_SEO_PLACEHOLDER -->",
+            f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
+        )
+        return HTMLResponse(content=html_content)
+
+    base_url = (APP_URL or "https://autorig.online").rstrip("/")
+    task_url = f"{base_url}/task?id={task_id}"
     
     # Try to get task info for better OG tags
     task_title = "Rigged 3D Model"
     task_description = "View this rigged 3D character with 50+ animations"
     has_video = False
     has_thumb = False
+    task = None
     
     try:
         from database import Task
@@ -7830,12 +9600,19 @@ async def task_page(
             has_thumb = bool(task.ready_urls)
     except Exception as e:
         print(f"[Task Page] Error getting task info: {e}")
+
+    if not task:
+        html_content = html_content.replace(
+            "<!-- TASK_SEO_PLACEHOLDER -->",
+            f'<link rel="canonical" href="{base_url}/task">',
+        )
+        return HTMLResponse(content=html_content)
     
     # Build OG meta tags
     og_tags = f'''
     <!-- Open Graph / Telegram / Social -->
     <meta property="og:type" content="{'video.other' if has_video else 'website'}">
-    <meta property="og:url" content="{base_url}/task?id={task_id}">
+    <meta property="og:url" content="{task_url}">
     <meta property="og:title" content="{task_title} | AutoRig.online">
     <meta property="og:description" content="{task_description}">
     <meta property="og:site_name" content="AutoRig.online">'''
@@ -7875,10 +9652,14 @@ async def task_page(
     <meta name="twitter:description" content="{task_description}">
     '''
     
-    # Inject OG tags after <meta name="robots">
+    # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
     html_content = html_content.replace(
         '<meta name="robots" content="noindex, nofollow">',
-        f'<meta name="robots" content="noindex, nofollow">{og_tags}'
+        '<meta name="robots" content="index, follow">',
+    )
+    html_content = html_content.replace(
+        "<!-- TASK_SEO_PLACEHOLDER -->",
+        f'<link rel="canonical" href="{task_url}">\n    {og_tags}',
     )
     
     # Update <title> tag to be dynamic
@@ -7995,6 +9776,7 @@ async def guides_page():
 
 
 @app.get("/buy-credits")
+@app.get("/buy")
 async def buy_credits_page():
     """Serve Buy Credits page"""
     return FileResponse(str(STATIC_DIR / "buy-credits.html"))
@@ -8033,6 +9815,19 @@ async def fbx_auto_rig_page():
 async def obj_auto_rig_page():
     """OBJ auto-rigging landing page"""
     return FileResponse(str(STATIC_DIR / "obj-auto-rig.html"))
+
+
+@app.get("/animal-rig")
+async def animal_rig_page():
+    """AI animal rigging and animation landing page."""
+    return FileResponse(str(STATIC_DIR / "animal-rig.html"))
+
+
+@app.get("/rig-animals")
+@app.get("/animal-rig-animation")
+async def animal_rig_alias_page():
+    """SEO aliases for AI animal rigging."""
+    return RedirectResponse(url="/animal-rig", status_code=301)
 
 
 # Info pages
@@ -8240,23 +10035,31 @@ async def auto_rig_obj_hi_page():
 
 
 # Sitemap and robots.txt
+@app.head("/sitemap.xml")
 @app.get("/sitemap.xml")
 async def sitemap_index(db: AsyncSession = Depends(get_db)):
     """
-    Sitemap index: static marketing pages + gallery /m/{id} urlsets by day (max 50 URLs per part).
-    Regenerated on each request so lastmod stays current without a separate cron.
+    Sitemap index: static marketing pages + public /m/{id} urlsets by part.
     """
-    from seo_gallery import build_sitemap_index_xml, gallery_sitemap_day_parts
+    from seo_gallery import (
+        build_sitemap_index_xml,
+        gallery_sitemap_all_index_part_count,
+        video_sitemap_entry_count,
+    )
 
     base = (APP_URL or "https://autorig.online").rstrip("/")
     child_locs: List[Tuple[str, Optional[datetime]]] = [(f"{base}/sitemap/pages.xml", None)]
-    for day_str, parts in await gallery_sitemap_day_parts(db):
-        for p in range(parts):
-            child_locs.append((f"{base}/sitemap/gallery/{day_str}/{p}.xml", None))
+    n_parts = await gallery_sitemap_all_index_part_count(db)
+    for p in range(n_parts):
+        child_locs.append((f"{base}/sitemap/gallery/part/{p}.xml", None))
+    n_video_entries = await video_sitemap_entry_count(db)
+    if n_video_entries > 0:
+        child_locs.append((f"{base}/sitemap/videos.xml", None))
     xml = build_sitemap_index_xml(base, child_locs)
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
+@app.head("/sitemap/pages.xml")
 @app.get("/sitemap/pages.xml")
 async def sitemap_pages():
     """Marketing / guide urlset (was static/sitemap.xml)."""
@@ -8269,21 +10072,66 @@ async def sitemap_pages():
     return FileResponse(str(path), media_type="application/xml")
 
 
-@app.get("/sitemap/gallery/{day}/{part}.xml")
-async def sitemap_gallery_chunk(day: str, part: int, db: AsyncSession = Depends(get_db)):
-    """One chunk (max 50) of /m/{task_id} URLs for tasks created on ``day`` (UTC date)."""
-    from seo_gallery import GALLERY_SEO_URLS_PER_SITEMAP, build_urlset_xml, gallery_sitemap_urls_for_chunk
+@app.head("/sitemap-mirror.xml")
+@app.get("/sitemap-mirror.xml")
+async def sitemap_mirror(db: AsyncSession = Depends(get_db)):
+    """
+    Mirror sitemap index from the latest daily refresh (`backend/scripts/daily_sitemap_refresh.py`).
+    Falls back to live /sitemap.xml when mirror file is absent.
+    """
+    mirror_path = BASE_DIR / "backend" / "data" / "sitemap_generated" / "sitemap.xml"
+    if mirror_path.is_file():
+        return FileResponse(str(mirror_path), media_type="application/xml; charset=utf-8")
+    return await sitemap_index(db)
 
-    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day) or part < 0:
+
+@app.head("/sitemap/gallery/part/{part}.xml")
+@app.get("/sitemap/gallery/part/{part}.xml")
+async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(get_db)):
+    """Chunk (max 50) of public /m/{task_id} URLs (no SEO gate)."""
+    from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_all_part
+
+    if part < 0:
         raise HTTPException(status_code=404, detail="Invalid sitemap chunk")
     base = (APP_URL or "https://autorig.online").rstrip("/")
-    urls = await gallery_sitemap_urls_for_chunk(db, day, part)
+    urls = await gallery_sitemap_urls_for_all_part(db, part)
     if not urls:
         raise HTTPException(status_code=404, detail="Empty sitemap chunk")
     xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
+@app.head("/sitemap/gallery/indexing/part/{part}.xml")
+@app.get("/sitemap/gallery/indexing/part/{part}.xml")
+async def sitemap_gallery_indexing_part_only(part: int, db: AsyncSession = Depends(get_db)):
+    """SEO-gated chunk (max 50) of /m/{task_id} URLs."""
+    from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_indexing_part
+
+    if part < 0:
+        raise HTTPException(status_code=404, detail="Invalid sitemap chunk")
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    urls = await gallery_sitemap_urls_for_indexing_part(db, part)
+    if not urls:
+        raise HTTPException(status_code=404, detail="Empty sitemap chunk")
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/sitemap/videos.xml")
+@app.get("/sitemap/videos.xml")
+async def sitemap_videos(db: AsyncSession = Depends(get_db)):
+    """Google Video sitemap for public model pages with uploaded YouTube previews."""
+    from seo_gallery import build_video_sitemap_xml, video_sitemap_entries
+
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    entries = await video_sitemap_entries(db)
+    if not entries:
+        raise HTTPException(status_code=404, detail="Empty video sitemap")
+    xml = build_video_sitemap_xml(base, entries)
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/m/{task_id}", response_class=HTMLResponse)
 @app.get("/m/{task_id}", response_class=HTMLResponse)
 async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)):
     """
@@ -8301,8 +10149,21 @@ async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="Not found")
     base = APP_URL or "https://autorig.online"
     title, desc, keywords, semantic = enrich_seo_metadata(task)
+    youtube_video_id = (getattr(task, "youtube_video_id", None) or "").strip()
+    youtube_uploaded = (
+        str(getattr(task, "youtube_upload_status", "") or "").strip().lower() == "uploaded"
+        and bool(youtube_video_id)
+    )
     html_page = build_public_model_page_html(
-        base, task_id, title, desc, keywords, semantic_section=semantic
+        base,
+        task_id,
+        title,
+        desc,
+        keywords,
+        semantic_section=semantic,
+        youtube_video_id=youtube_video_id,
+        youtube_video_uploaded=youtube_uploaded,
+        last_modified=task.updated_at,
     )
     return HTMLResponse(content=html_page)
 
