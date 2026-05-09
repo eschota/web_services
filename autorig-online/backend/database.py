@@ -7,7 +7,7 @@ import json
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
-    UniqueConstraint, ForeignKey, create_engine, event
+    UniqueConstraint, ForeignKey, create_engine, event, Index,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -373,6 +373,39 @@ class TelegramNotification(Base):
     event_key = Column(String(128), nullable=False, index=True)
     message_id = Column(BigInteger, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SupportChatSession(Base):
+    """Site support chat session; maps to one Telegram forum topic after first outbound message."""
+
+    __tablename__ = "support_chat_sessions"
+    __table_args__ = (
+        Index("ix_support_sessions_forum_thread", "telegram_chat_id", "telegram_thread_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    visitor_id = Column(String(96), nullable=False, index=True)
+    user_email = Column(String(255), nullable=True, index=True)
+    page_url = Column(Text, nullable=True)
+    telegram_chat_id = Column(BigInteger, nullable=True)
+    telegram_thread_id = Column(Integer, nullable=True)
+    topic_name = Column(String(512), nullable=True)
+    status = Column(String(32), nullable=False, default="open", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SupportChatMessage(Base):
+    """Single support chat line (website user / Telegram admin / system)."""
+
+    __tablename__ = "support_chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("support_chat_sessions.id"), nullable=False, index=True)
+    direction = Column(String(16), nullable=False, index=True)  # user | admin | system
+    body_text = Column(Text, nullable=False)
+    telegram_message_id = Column(BigInteger, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

@@ -7,6 +7,20 @@ from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
+# Split production env files: systemd may list only one EnvironmentFile; merge optional fragments
+# without overriding vars already set (e.g. by systemd).
+_AUTORIG_EXTRA_DOTENV_FILES = (
+    "/etc/autorig-online/environment",
+    "/etc/autorig-backend.env",
+    "/etc/autorig-telegram.env",
+)
+for _env_path in _AUTORIG_EXTRA_DOTENV_FILES:
+    if os.path.isfile(_env_path):
+        try:
+            load_dotenv(_env_path, override=False)
+        except OSError:
+            # Service user (e.g. www-data) may lack read-bit on optional split env files.
+            pass
 
 # =============================================================================
 # Application Settings
@@ -114,7 +128,8 @@ PROGRESS_CHECK_TIMEOUT = 5  # Timeout for HEAD requests in seconds
 # =============================================================================
 # Stale Task Detection & Auto-Restart
 # =============================================================================
-STALE_TASK_TIMEOUT_MINUTES = int(os.getenv("STALE_TASK_TIMEOUT_MINUTES", "10"))
+# No progress this long → stalled-worker Telegram alert + included in stale-task heuristics (see tasks.py)
+STALE_TASK_TIMEOUT_MINUTES = int(os.getenv("STALE_TASK_TIMEOUT_MINUTES", "30"))
 # GET says total_active=0 and queue_size=0 but DB still has processing+0 ready — requeue after this (faster than JSON-only lost)
 WORKER_IDLE_STALE_MINUTES = int(os.getenv("WORKER_IDLE_STALE_MINUTES", "2"))
 # Align with typical worker single-job timeout (~2h); non-terminal tasks older than this -> error
@@ -159,6 +174,38 @@ GUMROAD_PRODUCT_CREDITS = {
 AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
     k.strip().lower() for k in GUMROAD_PRODUCT_CREDITS if str(k).strip().lower().startswith("autorig-")
 )
+
+# Second-site Gumroad webhook consumer (Freestock). Same ping contract as free3d.online/gumroad/ping.
+_FREESTOCK_GUMROAD_PROXY_RAW = (
+    os.getenv(
+        "FREESTOCK_GUMROAD_PROXY_TARGET",
+        "https://freestock.online/gumroad/ping",
+    )
+    .strip()
+    .rstrip("/")
+)
+FREESTOCK_GUMROAD_PROXY_TARGET = (
+    _FREESTOCK_GUMROAD_PROXY_RAW or "https://freestock.online/gumroad/ping"
+)
+FREESTOCK_GUMROAD_PRODUCT_KEYS = frozenset(
+    {
+        "freestock-starter",
+        "freestock-creator",
+        "freestock-pro",
+        "freestock-studio",
+    }
+)
+
+
+def is_freestock_gumroad_product(product_key: str) -> bool:
+    """Freestock store slugs — prefix match catches future Gumroad tiers on same subdomain."""
+    k = (product_key or "").strip().lower()
+    if not k:
+        return False
+    if k in FREESTOCK_GUMROAD_PRODUCT_KEYS:
+        return True
+    return k.startswith("freestock-")
+
 
 # Public donation thermometer on buy-credits (USD)
 DONATION_GOAL_USD = int(os.getenv("DONATION_GOAL_USD", "1000"))
@@ -224,6 +271,19 @@ RATE_LIMIT_CRYPTO_SUBMIT = os.getenv("RATE_LIMIT_CRYPTO_SUBMIT", "20/hour")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "AutoRigOnlineBot")
 
+# Telegram supergroup for task notifications and support forum topics (same chat; bot must be admin for topics).
+# Resolved at runtime: TELEGRAM_NOTIFICATION_CHAT_ID if set, else earliest group/supergroup row in telegram_chats.
+_try_notif_raw = os.getenv("TELEGRAM_NOTIFICATION_CHAT_ID", "").strip()
+try:
+    TELEGRAM_NOTIFICATION_CHAT_ID: int | None = int(_try_notif_raw) if _try_notif_raw else None
+except ValueError:
+    TELEGRAM_NOTIFICATION_CHAT_ID = None
+
+RATE_LIMIT_SUPPORT_CHAT_SESSION = os.getenv("RATE_LIMIT_SUPPORT_CHAT_SESSION", "60/minute")
+RATE_LIMIT_SUPPORT_CHAT_MESSAGE = os.getenv("RATE_LIMIT_SUPPORT_CHAT_MESSAGE", "30/minute")
+RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL = os.getenv("RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL", "120/minute")
+SUPPORT_CHAT_MESSAGE_MAX_CHARS = int(os.getenv("SUPPORT_CHAT_MESSAGE_MAX_CHARS", "3800"))
+
 # =============================================================================
 # Disk Cleanup Settings
 # =============================================================================
@@ -275,3 +335,22 @@ GALLERY_UPSTREAM_PURGE_ROUNDS = int(os.getenv("GALLERY_UPSTREAM_PURGE_ROUNDS", "
 # =============================================================================
 GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "G-T4E781EHE4")
 GA_API_SECRET = os.getenv("GA_API_SECRET", "")
+
+# =============================================================================
+# Remote Namecheap DNS API (/api-name-cheap) — X-API-Key must match this value
+# =============================================================================
+NAMECHEAP_REMOTE_API_KEY = os.getenv(
+    "NAMECHEAP_REMOTE_API_KEY",
+    "ar_nc_remote_v1_k8m2n9p4q7r1s5t0u3w6x8y2z",
+)
+# Registrar (Namecheap) — same names as qwerty_vpn/scripts/namecheap_set_vpn_dns.py
+NAMECHEAP_API_USER = os.getenv("NAMECHEAP_API_USER", "").strip()
+NAMECHEAP_REGISTRAR_API_KEY = os.getenv("NAMECHEAP_API_KEY", "").strip()
+NAMECHEAP_USERNAME = os.getenv("NAMECHEAP_USERNAME", NAMECHEAP_API_USER).strip()
+NAMECHEAP_CLIENT_IP = os.getenv("NAMECHEAP_CLIENT_IP", "185.171.83.65").strip()
+FACERIG_DNS_IP = os.getenv("FACERIG_DNS_IP", "185.171.83.65").strip()
+# Comma-separated IPs allowed to call POST /api-name-cheap (in addition to X-API-Key). Empty = no IP check.
+_nc_allow = os.getenv("NAMECHEAP_REMOTE_IP_ALLOWLIST", "").strip()
+NAMECHEAP_REMOTE_IP_ALLOWLIST: frozenset[str] = frozenset(
+    x.strip() for x in _nc_allow.split(",") if x.strip()
+)

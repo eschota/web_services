@@ -10,3 +10,13 @@
 RESEND_API_KEY=
 # Must be a verified sender/domain in Resend
 EMAIL_FROM=noreply@autorig.online
+
+# Telegram: token + optional fixed group id (backend/config.py also loads /etc/autorig-telegram.env and /etc/autorig-backend.env when present).
+# TELEGRAM_BOT_TOKEN=...
+# TELEGRAM_NOTIFICATION_CHAT_ID=-1001234567890
+
+# Site support uses the same group (forum topics): resolved from TELEGRAM_NOTIFICATION_CHAT_ID if set, else earliest active telegram_chats row with negative chat_id.
+
+# Gumroad: Freestock product webhooks proxy to Freestock (default https://freestock.online/gumroad/ping).
+# Uncomment to override staging or alternate path:
+# FREESTOCK_GUMROAD_PROXY_TARGET=https://freestock.online/gumroad/ping

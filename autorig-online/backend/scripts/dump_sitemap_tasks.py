@@ -2,7 +2,7 @@
 """
 Daily JSON snapshot of tasks eligible for /sitemap/gallery and /m/{id} (same SQL filters).
 
-Run via cron, e.g. 0 3 * * * /path/to/venv/bin/python /opt/autorig-online/backend/scripts/dump_sitemap_tasks.py
+Run via cron, e.g. 0 3 * * * /root/autorig-online/venv/bin/python /root/autorig-online/backend/scripts/dump_sitemap_tasks.py
 
 Output default: backend/data/sitemap_tasks_snapshot.json (override with --output).
 Does not replace live sitemap generation (still from DB on each HTTP request).

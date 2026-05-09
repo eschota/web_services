@@ -764,8 +764,8 @@ export class ViewerControls {
             this.groundPlane.material.color.set(params.color);
         }
         if (params.size !== undefined) {
-            // Plane is 2x2 by default (1m radius). Scale it.
-            const s = params.size;
+            const base = (this.groundPlane.userData && this.groundPlane.userData.shadowPlaneBaseSize) || 200;
+            const s = Math.max(0.01, parseFloat(params.size)) / base;
             this.groundPlane.scale.set(s, s, 1);
         }
     }
@@ -893,7 +893,7 @@ export class ViewerControls {
     }
 
     /**
-     * Set view mode: 'tpose', 'rig', 'animation'
+     * Set view mode: 'tpose', 'rig', 'animation', 'play'
      * Controls which elements are visible and active
      */
     setViewMode(mode) {
@@ -913,6 +913,11 @@ export class ViewerControls {
             case 'animation':
                 // Animation mode: hide rig spheres, enable animation playback
                 this.hideRigSpheres();
+                break;
+            case 'play':
+                // Play mode: gameplay only, hide edit helpers and rig controls
+                this.hideRigSpheres();
+                this.setGizmosVisibility(false);
                 break;
             default:
                 console.warn('[ViewerControls] Unknown view mode:', mode);

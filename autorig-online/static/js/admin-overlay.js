@@ -87,6 +87,7 @@
 
     /**
      * Метка конвертера по порту (маппинг api-converter-glb: f1…f13).
+     * Дублируется на сервере: backend/worker_labels.py CONVERTER_BY_PORT — менять в двух местах.
      */
     var CONVERTER_BY_PORT = {
         5132: { short: 'F1', hint: 'конвертер F1, порт 5132' },

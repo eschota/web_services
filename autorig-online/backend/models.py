@@ -2,7 +2,7 @@
 Pydantic models (schemas) for API request/response
 """
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field
 
 
@@ -743,28 +743,4 @@ class SupportChatMessageItem(BaseModel):
 
 class SupportChatMessagesPollResponse(BaseModel):
     messages: List[SupportChatMessageItem]
-
-
-# =============================================================================
-# Idle LTX (animal reference video via Renderfin)
-# =============================================================================
-class IdleAnimationStartRequest(BaseModel):
-    snapshot_jpg_base64_string: str = Field(..., min_length=16, description="JPEG data URL or raw base64")
-
-
-class IdleAnimationStartResponse(BaseModel):
-    ok_bool: bool = True
-    job_id_string: str = Field(..., description="Renderfin animation task id")
-    prompt_used_string: str = ""
-    output_url_string: Optional[str] = Field(None, description="Expected mp4 URL when completed")
-    message_string: Optional[str] = None
-
-
-class IdleAnimationStatusResponse(BaseModel):
-    ok_bool: bool = True
-    status_int: int = Field(0, description="0–4 per Renderfin queue model")
-    status_label_string: str = "unknown"
-    video_url_string: Optional[str] = None
-    error_string: Optional[str] = None
-    raw_payload: Optional[Dict[str, Any]] = None
 

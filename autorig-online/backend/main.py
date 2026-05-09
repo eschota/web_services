@@ -118,9 +118,6 @@ from models import (
     SupportChatMessagePostResponse,
     SupportChatMessageItem,
     SupportChatMessagesPollResponse,
-    IdleAnimationStartRequest,
-    IdleAnimationStartResponse,
-    IdleAnimationStatusResponse,
 )
 from workers import (
     get_global_queue_status,
@@ -130,6 +127,13 @@ from workers import (
     normalize_task_type,
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
+from idle_ltx_vision import (
+    VisionPromptAnalyzer,
+    IDLE_LTX_DEFAULT_NEGATIVE_PROMPT,
+    IDLE_LTX_FRAME_COUNT_DEFAULT,
+    IDLE_LTX_USER_PROMPT_DEFAULT,
+    IDLE_LTX_VARIANT_COUNT,
+)
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -795,6 +799,11 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(ensure_facerig_on_startup)
     except Exception as e:
         print(f"[Namecheap DNS] Startup: {e}")
+
+    try:
+        await asyncio.to_thread(_convert_backdrop_png_files_to_jpg)
+    except Exception as e:
+        print(f"[ViewerBackdrops] startup PNG→JPG: {e}")
 
     yield
     
@@ -3043,6 +3052,10 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
             "meta-llama/llama-3.2-11b-vision-instruct:free",
         ],
     )
+    cfg.setdefault("open_router_idle_ltx_model_string", "openai/gpt-4o-mini")
+    cfg.setdefault("open_ai_idle_ltx_model_string", "gpt-4o-mini")
+    cfg.setdefault("open_ai_idle_ltx_vision_model_string", "gpt-4o-mini")
+    cfg.setdefault("open_router_idle_ltx_vision_model_string", "openai/gpt-4o-mini")
     return cfg
 
 
@@ -3659,6 +3672,687 @@ async def api_rig_v2_vision_animal_type(request: Request):
             model_override=model_override,
         )
     return openrouter_result
+
+
+# =============================================================================
+# Idle LTX — Renderfin image-to-video (reference clip for animal viewer)
+# =============================================================================
+RENDERFIN_ANIMATION_UPLOAD_URL = "https://free3d.online/renderfin/api/animation/upload_image"
+RENDERFIN_GENERATE_VIDEO_URL = "https://free3d.online/renderfin/api/generate_video"
+RENDERFIN_ANIMATION_TASK_STATUS_URL = "https://free3d.online/renderfin/api/animation/task_status"
+RENDERFIN_API_RENDER_GET_TASK_BY_URL = "https://free3d.online/api-render-get-task-by-url"
+
+
+def _idle_ltx_status_word_to_int(word: Optional[str]) -> int:
+    x = str(word or "").strip().lower()
+    if x in ("completed", "complete", "done", "success", "succeeded"):
+        return 3
+    if x in ("failed", "error", "cancelled", "canceled"):
+        return 4
+    if x in ("pending", "queued", "accepting", "waiting"):
+        return 1
+    if x in ("inprogress", "in_progress", "processing", "running", "working"):
+        return 2
+    return 2
+
+
+def _idle_ltx_normalize_url_task_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    st = entry.get("status_int")
+    if st is None:
+        st = entry.get("status")
+    try:
+        status_int = int(st)
+    except Exception:
+        status_int = _idle_ltx_status_word_to_int(
+            str(entry.get("status_string") or entry.get("status") or entry.get("phase_string") or "")
+        )
+    out = str(entry.get("output_url_string") or entry.get("output_url") or "").strip()
+    playback = str(entry.get("playback_url_string") or entry.get("playback_url") or "").strip()
+    err = str(entry.get("error_string") or entry.get("error") or entry.get("message") or "").strip()
+    rsn = str(entry.get("render_server_name_string") or entry.get("render_server_name") or "").strip()
+    pid = str(entry.get("prompt_id_string") or entry.get("prompt_id") or "").strip()
+    phase = "pending_or_processing"
+    if status_int == 3:
+        phase = "completed"
+    elif status_int == 4:
+        phase = "failed"
+    play_url = playback or out
+    return {
+        "status_int": status_int,
+        "phase_string": phase,
+        "output_url_string": out or None,
+        "playback_url_string": playback or None,
+        "video_url_string": play_url or None,
+        "error_string": err or None,
+        "render_server_name_string": rsn or None,
+        "prompt_id_string": pid or None,
+        "raw_object": entry,
+    }
+
+
+async def _idle_ltx_fetch_task_by_output_url(client: httpx.AsyncClient, output_url: str) -> Optional[List[Any]]:
+    if not output_url.startswith("https://"):
+        return None
+    url = f"{RENDERFIN_API_RENDER_GET_TASK_BY_URL}?url={quote(output_url, safe='')}"
+    resp = await client.get(url, timeout=45.0, follow_redirects=True)
+    if resp.status_code != 200:
+        return None
+    try:
+        data = resp.json()
+    except Exception:
+        return None
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return [data]
+    return None
+
+
+async def _idle_ltx_clip_status_resolve(
+    client: httpx.AsyncClient,
+    *,
+    output_url_string: Optional[str],
+    renderfin_task_id: Optional[str],
+) -> Dict[str, Any]:
+    """Prefer api-render-get-task-by-url when output_url is known; fall back to animation/task_status."""
+    parsed_url: Optional[Dict[str, Any]] = None
+    ou = (output_url_string or "").strip()
+    if ou.startswith("https://"):
+        rows = await _idle_ltx_fetch_task_by_output_url(client, ou)
+        if rows and isinstance(rows[0], dict):
+            parsed_url = _idle_ltx_normalize_url_task_entry(rows[0])
+        elif rows == []:
+            parsed_url = {
+                "status_int": 2,
+                "phase_string": "pending_or_processing",
+                "output_url_string": ou,
+                "playback_url_string": None,
+                "video_url_string": None,
+                "error_string": None,
+                "render_server_name_string": None,
+                "prompt_id_string": None,
+                "raw_object": [],
+            }
+
+    if parsed_url and int(parsed_url.get("status_int") or 0) in (3, 4):
+        return {"success_bool": True, "source_string": "output_url", **parsed_url}
+
+    tid = (renderfin_task_id or "").strip()
+    if tid and re.match(r"^[0-9a-fA-F-]{32,36}$", tid):
+        status_url = f"{RENDERFIN_ANIMATION_TASK_STATUS_URL}?task_ids_string={quote(tid)}"
+        resp = await client.get(status_url, timeout=45.0, follow_redirects=True)
+        if resp.status_code == 200:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+            items = data.get("items_array") or data.get("items") or []
+            entry: Dict[str, Any] = (
+                items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
+            )
+            status_int = entry.get("status_int")
+            if status_int is None:
+                status_int = entry.get("status")
+            try:
+                status_int = int(status_int)
+            except Exception:
+                status_int = -1
+            out = str(entry.get("output_url_string") or entry.get("output_url") or "").strip()
+            playback = str(entry.get("playback_url_string") or entry.get("playback_url") or "").strip()
+            err = str(entry.get("error_string") or entry.get("error") or "").strip()
+            phase = "unknown"
+            if status_int in (0, 1, 2):
+                phase = "pending_or_processing"
+            elif status_int == 3:
+                phase = "completed"
+            elif status_int == 4:
+                phase = "failed"
+            play_url = playback or out
+            return {
+                "success_bool": True,
+                "source_string": "task_id",
+                "status_int": status_int,
+                "phase_string": phase,
+                "output_url_string": out or None,
+                "playback_url_string": playback or None,
+                "video_url_string": play_url or None,
+                "error_string": err or None,
+                "render_server_name_string": None,
+                "prompt_id_string": None,
+                "renderfin_raw_object": data,
+            }
+
+    if parsed_url:
+        return {"success_bool": True, "source_string": "output_url", **parsed_url}
+
+    raise HTTPException(status_code=502, detail="Unable to resolve clip status (no valid output_url or task_id)")
+
+
+def _idle_ltx_normalize_jpeg_base64(value: str) -> bytes:
+    raw = (value or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="frame_jpeg_base64_string is required")
+    if raw.startswith("data:image/"):
+        _, _, b64 = raw.partition(",")
+        if not b64:
+            raise HTTPException(status_code=400, detail="Invalid image data URL")
+    else:
+        b64 = raw
+    try:
+        decoded = base64.b64decode(b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="frame_jpeg_base64_string must be valid base64")
+    if not decoded:
+        raise HTTPException(status_code=400, detail="frame_jpeg_base64_string is empty")
+    if len(decoded) > 3_500_000:
+        raise HTTPException(status_code=413, detail="Idle LTX frame image is too large")
+    if not decoded.startswith(b"\xff\xd8"):
+        raise HTTPException(status_code=400, detail="Idle LTX frame must be JPEG")
+    return decoded
+
+
+async def _idle_ltx_renderfin_upload_jpeg(*, user_name: str, image_bytes: bytes) -> Dict[str, Any]:
+    safe_user = re.sub(r"[^a-zA-Z0-9_\-]", "_", (user_name or "autorig_user").strip())[:64] or "autorig_user"
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            resp = await client.post(
+                RENDERFIN_ANIMATION_UPLOAD_URL,
+                data={"user_name_string": safe_user},
+                files={"file": ("idle_frame.jpg", image_bytes, "image/jpeg")},
+            )
+        body_text = resp.text
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw_string": body_text[:2000]}
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Renderfin upload_image failed: HTTP {resp.status_code} {body_text[:500]}",
+            )
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=502, detail="Renderfin upload_image returned non-JSON object")
+        return {"ok_bool": True, "data_object": data, "http_status_int": resp.status_code}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Renderfin upload_image error: {e}") from e
+
+
+async def _idle_ltx_post_one_generate_video(
+    client: httpx.AsyncClient,
+    generate_body: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
+    """POST generate_video; returns (request_body_copy, response_json, http_status)."""
+    gb = dict(generate_body)
+    resp = await client.post(
+        RENDERFIN_GENERATE_VIDEO_URL,
+        headers={"Content-Type": "application/json"},
+        json=gb,
+    )
+    gen_http_status = resp.status_code
+    try:
+        gen_obj = resp.json()
+    except Exception:
+        gen_obj = {"raw_string": resp.text[:2500]}
+    return gb, gen_obj, gen_http_status
+
+
+def _idle_ltx_user_slug_for_task(task_id: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_\-]", "_", f"autorig_{task_id}")[:56] or "autorig"
+
+
+async def _idle_ltx_vision_upload_and_analyze(
+    task_id: str,
+    db: AsyncSession,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Upload frame → Renderfin URL → Vision JSON. Used by vision-start and monolithic start."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
+        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
+
+    image_bytes = _idle_ltx_normalize_jpeg_base64(str(body.get("frame_jpeg_base64_string") or ""))
+    user_prompt = str(body.get("user_prompt_string") or body.get("base_prompt_string") or "").strip()
+    if not user_prompt:
+        user_prompt = IDLE_LTX_USER_PROMPT_DEFAULT
+
+    user_slug = _idle_ltx_user_slug_for_task(task_id)
+
+    upload_wrap = await _idle_ltx_renderfin_upload_jpeg(user_name=user_slug, image_bytes=image_bytes)
+    upload_obj = upload_wrap.get("data_object") or {}
+    image_url = str(
+        upload_obj.get("image_url_string")
+        or upload_obj.get("image_url")
+        or ""
+    ).strip()
+    if not image_url or not image_url.startswith("https://"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Renderfin upload did not return image_url_string: {upload_obj!r}"[:500],
+        )
+
+    cfg = _rig_v2_load_vision_config()
+    try:
+        vision_json, vision_provider = await VisionPromptAnalyzer.analyze(
+            cfg=cfg,
+            app_url=APP_URL or "https://autorig.online",
+            image_url_string=image_url,
+            user_prompt_string=user_prompt,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"Vision analysis failed: {e}") from e
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Vision analysis error: {e}") from e
+
+    variants = vision_json.get("ltx_variants_array")
+    if not isinstance(variants, list) or len(variants) < 1:
+        raise HTTPException(status_code=502, detail="Vision JSON missing ltx_variants_array")
+
+    fc = int(body.get("frame_count_int") or IDLE_LTX_FRAME_COUNT_DEFAULT)
+    if fc < 1:
+        fc = IDLE_LTX_FRAME_COUNT_DEFAULT
+    if fc > 375:
+        fc = 375
+
+    neg_base = str(vision_json.get("ltx_negative_prompt_string") or "").strip() or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
+    extra_neg = str(body.get("negative_prompt_string") or "").strip()
+    if extra_neg:
+        neg_base = f"{neg_base}, {extra_neg}"
+    neg_base = neg_base[:2000]
+
+    return {
+        "user_prompt_string": user_prompt,
+        "user_name_string": user_slug,
+        "upload_response_object": upload_obj,
+        "vision_analysis_object": vision_json,
+        "vision_provider_string": vision_provider,
+        "image_url_string": image_url,
+        "negative_prompt_string": neg_base,
+        "frame_count_int": fc,
+    }
+
+
+@app.get("/api/task/{task_id}/idle-ltx/clip-status")
+@limiter.limit("120/minute")
+async def api_task_idle_ltx_clip_status(
+    request: Request,
+    task_id: str,
+    renderfin_task_id: Optional[str] = Query(None, description="Renderfin task UUID"),
+    output_url_string: Optional[str] = Query(None, description="Output URL from generate_video"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resolve clip status via api-render-get-task-by-url when possible, else animation/task_status."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
+        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
+    if not (renderfin_task_id or "").strip() and not (output_url_string or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Provide renderfin_task_id and/or output_url_string",
+        )
+    try:
+        async with httpx.AsyncClient(timeout=50.0, follow_redirects=True) as client:
+            return await _idle_ltx_clip_status_resolve(
+                client,
+                output_url_string=output_url_string,
+                renderfin_task_id=renderfin_task_id,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Idle LTX clip-status error: {e}") from e
+
+
+@app.get("/api/task/{task_id}/idle-ltx/verify-mp4")
+@limiter.limit("120/minute")
+async def api_task_idle_ltx_verify_mp4(
+    request: Request,
+    task_id: str,
+    video_url_string: str = Query(..., description="Final mp4 or playback URL"),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
+        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
+    u = (video_url_string or "").strip()
+    if not (u.startswith("https://") or u.startswith("http://")):
+        raise HTTPException(status_code=400, detail="video_url_string must be http(s)")
+    try:
+        async with httpx.AsyncClient(timeout=35.0, follow_redirects=True) as client:
+            head = await client.head(u)
+            resp = head
+            if head.status_code >= 400:
+                resp = await client.get(u, headers={"Range": "bytes=0-1023"})
+        ct = (resp.headers.get("content-type") or "").lower()
+        ok = resp.status_code in (200, 206) and (
+            "video" in ct or "octet-stream" in ct or u.lower().split("?", 1)[0].endswith(".mp4")
+        )
+        return {
+            "success_bool": True,
+            "ok_bool": ok,
+            "http_status_int": resp.status_code,
+            "content_type_string": ct,
+        }
+    except Exception as e:
+        return {
+            "success_bool": True,
+            "ok_bool": False,
+            "http_status_int": 0,
+            "content_type_string": "",
+            "error_string": str(e)[:500],
+        }
+
+
+@app.post("/api/task/{task_id}/idle-ltx/vision-start")
+@limiter.limit("20/minute")
+async def api_task_idle_ltx_vision_start(
+    task_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload frame → Vision only. UI then calls /idle-ltx/render-variant four times (smaller responses)."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    phase = await _idle_ltx_vision_upload_and_analyze(task_id, db, body)
+    return {"success_bool": True, **phase}
+
+
+@app.post("/api/task/{task_id}/idle-ltx/render-variant")
+@limiter.limit("40/minute")
+async def api_task_idle_ltx_render_variant(
+    task_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """One Renderfin generate_video call for a single variant index (0..3)."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
+        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
+
+    try:
+        idx = int(body.get("index_int"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="index_int is required (0..3)")
+    if idx < 0 or idx >= IDLE_LTX_VARIANT_COUNT:
+        raise HTTPException(status_code=400, detail="index_int must be 0..3")
+
+    image_url = str(body.get("image_url_string") or "").strip()
+    if not image_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="image_url_string must be https")
+    if task_id not in image_url:
+        raise HTTPException(status_code=400, detail="image_url_string must contain this task_id")
+
+    expected_slug = _idle_ltx_user_slug_for_task(task_id)
+    user_slug = str(body.get("user_name_string") or "").strip()
+    if user_slug != expected_slug:
+        raise HTTPException(status_code=400, detail="user_name_string does not match this task")
+
+    prompt_clip = str(body.get("prompt_string") or "").strip()
+    if not prompt_clip:
+        raise HTTPException(status_code=400, detail="prompt_string is required")
+
+    neg_base = str(body.get("negative_prompt_string") or "").strip() or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
+    neg_base = neg_base[:2000]
+
+    vn = str(body.get("variant_name_string") or f"variant_{idx}").strip()
+    fc = int(body.get("frame_count_int") or IDLE_LTX_FRAME_COUNT_DEFAULT)
+    if fc < 1:
+        fc = IDLE_LTX_FRAME_COUNT_DEFAULT
+    if fc > 375:
+        fc = 375
+
+    species = body.get("detected_species_string")
+    conf = body.get("species_confidence_float")
+
+    gb: Dict[str, Any] = {
+        "prompt": prompt_clip,
+        "image_url": image_url,
+        "main_size_width": 768,
+        "main_size_height": 448,
+        "frame_count": fc,
+        "user_name": user_slug,
+        "negative_prompt": neg_base,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            gbo, gen_obj, gen_http_status = await _idle_ltx_post_one_generate_video(client, gb)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Renderfin generate_video error: {e}") from e
+
+    if gen_http_status != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Renderfin generate_video failed: HTTP {gen_http_status} {str(gen_obj)[:600]}",
+        )
+    rf_task = str(gen_obj.get("task_id") or gen_obj.get("task_id_string") or "").strip()
+    out_url = str(gen_obj.get("output_url") or gen_obj.get("output_url_string") or "").strip()
+    if not rf_task:
+        raise HTTPException(status_code=502, detail="Renderfin did not return task_id")
+
+    clip: Dict[str, Any] = {
+        "index_int": idx,
+        "variant_name_string": vn,
+        "detected_species_string": species,
+        "species_confidence_float": conf,
+        "prompt_string": prompt_clip,
+        "negative_prompt_string": neg_base,
+        "renderfin_task_id_string": rf_task,
+        "output_url_string": out_url or None,
+        "generate_video_request_object": gbo,
+        "generate_video_response_object": gen_obj,
+        "generate_video_http_status_int": gen_http_status,
+    }
+    return {"success_bool": True, "clip_object": clip, "index_int": idx}
+
+
+@app.post("/api/task/{task_id}/idle-ltx/start")
+@limiter.limit("20/minute")
+async def api_task_idle_ltx_start(
+    task_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload frame → Renderfin image URL → Vision JSON (species-specific LTX prompts) →
+    4× generate_video (variants). See idle_ltx_vision.py and Renderfin skill.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+
+    phase = await _idle_ltx_vision_upload_and_analyze(task_id, db, body)
+    vision_json = phase["vision_analysis_object"]
+    vision_provider = phase["vision_provider_string"]
+    user_prompt = phase["user_prompt_string"]
+    user_slug = phase["user_name_string"]
+    upload_obj = phase["upload_response_object"]
+    image_url = phase["image_url_string"]
+    neg_base = phase["negative_prompt_string"]
+    fc = int(phase["frame_count_int"])
+
+    variants = vision_json.get("ltx_variants_array")
+    if not isinstance(variants, list) or len(variants) < 1:
+        raise HTTPException(status_code=502, detail="Vision JSON missing ltx_variants_array")
+
+    clip_n = min(IDLE_LTX_VARIANT_COUNT, len(variants))
+    if clip_n < 1:
+        raise HTTPException(status_code=502, detail="Idle LTX: no variants to render (clip_n=0)")
+
+    clips_out: List[Dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+
+            async def run_variant(idx: int) -> Dict[str, Any]:
+                var = variants[idx] if isinstance(variants[idx], dict) else {}
+                vn = str(var.get("variant_name_string") or f"variant_{idx}").strip()
+                prompt_clip = str(var.get("prompt_string") or vision_json.get("ltx_base_prompt_string") or "").strip()
+                if not prompt_clip:
+                    raise HTTPException(status_code=502, detail=f"Vision variant {idx} has empty prompt_string")
+                gb: Dict[str, Any] = {
+                    "prompt": prompt_clip,
+                    "image_url": image_url,
+                    "main_size_width": 768,
+                    "main_size_height": 448,
+                    "frame_count": fc,
+                    "user_name": user_slug,
+                    "negative_prompt": neg_base,
+                }
+                gbo, gen_obj, gen_http_status = await _idle_ltx_post_one_generate_video(client, gb)
+                if gen_http_status != 200:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Renderfin generate_video variant {idx + 1}/{clip_n} failed: HTTP {gen_http_status} {str(gen_obj)[:600]}",
+                    )
+                rf_task = str(gen_obj.get("task_id") or gen_obj.get("task_id_string") or "").strip()
+                out_url = str(gen_obj.get("output_url") or gen_obj.get("output_url_string") or "").strip()
+                return {
+                    "index_int": idx,
+                    "variant_name_string": vn,
+                    "detected_species_string": vision_json.get("detected_species_string"),
+                    "species_confidence_float": vision_json.get("species_confidence_float"),
+                    "prompt_string": prompt_clip,
+                    "negative_prompt_string": neg_base,
+                    "renderfin_task_id_string": rf_task,
+                    "output_url_string": out_url or None,
+                    "generate_video_request_object": gbo,
+                    "generate_video_response_object": gen_obj,
+                    "generate_video_http_status_int": gen_http_status,
+                }
+
+            clips_out = await asyncio.gather(*[run_variant(i) for i in range(clip_n)])
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Renderfin generate_video error: {e}") from e
+
+    if len(clips_out) != clip_n:
+        raise HTTPException(status_code=502, detail="Idle LTX internal error: clips_out size mismatch")
+    task_ids = [str(c.get("renderfin_task_id_string") or "").strip() for c in clips_out]
+    if not task_ids or not all(task_ids):
+        raise HTTPException(status_code=502, detail="Renderfin did not return task_id for one or more clips")
+
+    return {
+        "success_bool": True,
+        "clip_count_int": clip_n,
+        "renderfin_task_ids_array": task_ids,
+        "renderfin_task_id_string": task_ids[0],
+        "clips_array": clips_out,
+        "user_prompt_string": user_prompt,
+        "image_url_string": image_url,
+        "vision_provider_string": vision_provider,
+        "vision_analysis_object": vision_json,
+        "user_name_string": user_slug,
+        "upload_response_object": upload_obj,
+        "generate_video_request_object": clips_out[0]["generate_video_request_object"],
+        "generate_video_request_objects_array": [c["generate_video_request_object"] for c in clips_out],
+        "generate_video_response_object": clips_out[0]["generate_video_response_object"],
+        "generate_video_http_status_int": clips_out[0]["generate_video_http_status_int"],
+    }
+
+
+@app.get("/api/task/{task_id}/idle-ltx/status")
+@limiter.limit("120/minute")
+async def api_task_idle_ltx_status(
+    request: Request,
+    task_id: str,
+    renderfin_task_id: str = Query(..., description="Renderfin task UUID"),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
+        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
+
+    tid = (renderfin_task_id or "").strip()
+    if not re.match(r"^[0-9a-fA-F-]{32,36}$", tid):
+        raise HTTPException(status_code=400, detail="Invalid renderfin_task_id")
+
+    status_url = f"{RENDERFIN_ANIMATION_TASK_STATUS_URL}?task_ids_string={quote(tid)}"
+    try:
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            resp = await client.get(status_url)
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw_string": resp.text[:2500]}
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Renderfin task_status failed: HTTP {resp.status_code}",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Renderfin task_status error: {e}") from e
+
+    items = data.get("items_array") or data.get("items") or []
+    entry: Dict[str, Any] = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
+    status_int = entry.get("status_int")
+    if status_int is None:
+        status_int = entry.get("status")
+    try:
+        status_int = int(status_int)
+    except Exception:
+        status_int = -1
+
+    out = str(
+        entry.get("output_url_string") or entry.get("output_url") or ""
+    ).strip()
+    playback = str(entry.get("playback_url_string") or entry.get("playback_url") or "").strip()
+    err = str(entry.get("error_string") or entry.get("error") or "").strip()
+    rsv = str(entry.get("render_server_name_string") or entry.get("render_server_name") or "").strip()
+    pid = str(entry.get("prompt_id_string") or entry.get("prompt_id") or "").strip()
+
+    phase = "unknown"
+    if status_int in (0, 1, 2):
+        phase = "pending_or_processing"
+    elif status_int == 3:
+        phase = "completed"
+    elif status_int == 4:
+        phase = "failed"
+
+    # Для <video> предпочитаем playback_url_string (удобный URL просмотра); иначе канонический MP4.
+    play_url = playback or out
+
+    return {
+        "success_bool": True,
+        "renderfin_task_id_string": tid,
+        "status_int": status_int,
+        "phase_string": phase,
+        "output_url_string": out or None,
+        "playback_url_string": playback or None,
+        "video_url_string": play_url,
+        "error_string": err or None,
+        "render_server_name_string": rsv or None,
+        "prompt_id_string": pid or None,
+        "renderfin_raw_object": data,
+    }
 
 
 @app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
@@ -4596,340 +5290,6 @@ async def api_purchase_files(
         )
     
     raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
-
-
-# -----------------------------------------------------------------------------
-# Animal idle — LTX reference video (Renderfin image-to-video)
-# -----------------------------------------------------------------------------
-RENF_ANIM_UPLOAD_URL = "https://free3d.online/renderfin/api/animation/upload_image"
-RENF_ANIM_VIDEO_URL = "https://free3d.online/renderfin/api/generate_video"
-RENF_ANIM_STATUS_URL = "https://free3d.online/renderfin/api/animation/task_status"
-
-IDLE_LTX_USER_PROMPT = """Refine the following requirements into ONE concise English positive prompt for LTX image-to-video (max 450 characters, single paragraph, no quotes).
-The prompt must describe motion and cinematography only.
-
-Base requirements:
-Animate the provided animal character preview while preserving the exact species, body shape, colors, materials, and silhouette.
-The animal performs a subtle idle loop, slowly turning its head toward the camera.
-Camera: stable camera, full-body framing, no shake.
-Lighting: soft studio lighting, clean shadows.
-Motion: gentle breathing, small head movement, subtle tail or ear movement.
-Quality: stable anatomy, no extra legs, no distorted face, no morphing, no text, no watermark.
-
-Output ONLY the final prompt text."""
-
-
-def _idle_animation_require_animal_task(task: Any) -> None:
-    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
-        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
-
-
-def _idle_animation_decode_jpeg_b64(snapshot_jpg_base64_string: str) -> bytes:
-    raw = (snapshot_jpg_base64_string or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail="snapshot_jpg_base64_string is required")
-    if "," in raw and raw.lower().startswith("data:image/"):
-        raw = raw.split(",", 1)[1]
-    raw = re.sub(r"\s+", "", raw)
-    try:
-        data = base64.b64decode(raw, validate=True)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid base64 image")
-    if not data or len(data) < 64:
-        raise HTTPException(status_code=400, detail="Image data is empty")
-    if len(data) > 2_500_000:
-        raise HTTPException(status_code=413, detail="Snapshot image is too large")
-    if not data.startswith(b"\xff\xd8\xff"):
-        raise HTTPException(status_code=400, detail="Snapshot must be JPEG")
-    return data
-
-
-async def _idle_animation_llm_finalize_prompt(cfg: Dict[str, Any]) -> str:
-    """Return a single-line-ish English prompt using OpenRouter or OpenAI (text-only)."""
-    or_key = str(cfg.get("open_router_api_key") or "").strip()
-    oa_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
-    or_url = str(cfg.get("open_router_api_url_string") or "https://openrouter.ai/api/v1/chat/completions").strip()
-    oa_url = str(cfg.get("open_ai_api_url_string") or "https://api.openai.com/v1/chat/completions").strip()
-
-    sys_msg = (
-        "You write prompts for short AI video generation. "
-        "Follow instructions exactly. Output only the prompt text, no preamble."
-    )
-
-    async def _post_chat(api_url: str, api_key: str, model: str, provider: str) -> str:
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": (APP_URL or "https://autorig.online").rstrip("/"),
-            "X-Title": "AutoRig Idle LTX",
-        }
-        payload = {
-            "model": model,
-            "temperature": 0.35,
-            "max_tokens": 512,
-            "messages": [
-                {"role": "system", "content": sys_msg},
-                {"role": "user", "content": IDLE_LTX_USER_PROMPT},
-            ],
-        }
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-            resp = await client.post(api_url, headers=headers, json=payload)
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"{provider} HTTP {resp.status_code}: {resp.text[:400]}",
-            )
-        data = resp.json()
-        content = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
-        if isinstance(content, list):
-            content = " ".join(
-                str(part.get("text") or part) if isinstance(part, dict) else str(part)
-                for part in content
-            )
-        text = str(content or "").strip()
-        if not text:
-            raise HTTPException(status_code=502, detail=f"{provider} returned empty prompt")
-        if len(text) > 1200:
-            text = text[:1200]
-        return text
-
-    if or_key:
-        try:
-            return await _post_chat(or_url, or_key, "openai/gpt-4o-mini", "OpenRouter")
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"OpenRouter prompt error: {e}") from e
-
-    if oa_key:
-        try:
-            return await _post_chat(oa_url, oa_key, "gpt-4o-mini", "OpenAI")
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"OpenAI prompt error: {e}") from e
-
-    raise HTTPException(
-        status_code=503,
-        detail="LLM not configured (need open_router_api_key or open_ai_api_key in vision config)",
-    )
-
-
-async def _renderfin_upload_jpeg_snapshot(image_bytes: bytes, user_name: str) -> str:
-    safe_user = re.sub(r"[^a-zA-Z0-9_.-]", "_", user_name)[:64]
-    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-        resp = await client.post(
-            RENF_ANIM_UPLOAD_URL,
-            data={"user_name_string": safe_user},
-            files={"file": ("snapshot.jpg", image_bytes, "image/jpeg")},
-        )
-    if resp.status_code >= 400:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Renderfin upload failed HTTP {resp.status_code}: {resp.text[:400]}",
-        )
-    try:
-        data = resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Renderfin upload returned non-JSON")
-    url = str(
-        data.get("image_url_string")
-        or data.get("image_url")
-        or data.get("url")
-        or ""
-    ).strip()
-    if not url:
-        raise HTTPException(status_code=502, detail="Renderfin upload missing image URL")
-    return url
-
-
-async def _renderfin_enqueue_ltx_video(
-    *,
-    prompt: str,
-    image_url: str,
-    user_name: str,
-    frame_count: int = 120,
-    width: int = 768,
-    height: int = 448,
-) -> Tuple[str, str]:
-    safe_user = re.sub(r"[^a-zA-Z0-9_.-]", "_", user_name)[:64]
-    fc = max(24, min(int(frame_count), 280))
-    body = {
-        "prompt": prompt[:4000],
-        "image_url": image_url,
-        "frame_count": fc,
-        "main_size_width": width,
-        "main_size_height": height,
-        "user_name": safe_user,
-    }
-    async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
-        body_fast = dict(body)
-        body_fast["preset"] = "draft_fast"
-        resp = await client.post(RENF_ANIM_VIDEO_URL, json=body_fast)
-        if resp.status_code >= 400:
-            resp = await client.post(RENF_ANIM_VIDEO_URL, json=body)
-        if resp.status_code >= 400:
-            detail = resp.text[:500]
-            raise HTTPException(status_code=502, detail=f"Renderfin generate_video failed: {detail}")
-    try:
-        data = resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Renderfin generate_video returned non-JSON")
-    tid = str(data.get("task_id") or data.get("task_id_string") or "").strip()
-    out = str(data.get("output_url") or data.get("output_url_string") or "").strip()
-    if not tid:
-        raise HTTPException(status_code=502, detail="Renderfin generate_video missing task_id")
-    return tid, out
-
-
-def _idle_pick_renderfin_record(payload: Any, job_id: str) -> Optional[Dict[str, Any]]:
-    if payload is None:
-        return None
-    if isinstance(payload, list):
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            rid = str(item.get("task_id") or item.get("id") or item.get("task_id_string") or "")
-            if rid == job_id:
-                return item
-        for item in payload:
-            if isinstance(item, dict):
-                return item
-        return None
-    if isinstance(payload, dict):
-        inner = payload.get("tasks") or payload.get("data") or payload.get("results")
-        if inner is not None:
-            return _idle_pick_renderfin_record(inner, job_id)
-        return payload
-    return None
-
-
-def _idle_normalize_animation_status(raw: Dict[str, Any]) -> Tuple[int, Optional[str], Optional[str]]:
-    """Return (status_int 0-4, video_url, error)."""
-    st = raw.get("status_int")
-    if st is None:
-        st = raw.get("status")
-    try:
-        status_int = int(st) if st is not None else 0
-    except (TypeError, ValueError):
-        status_int = 0
-    vid = raw.get("output_url") or raw.get("output_url_string") or raw.get("video_url")
-    video_url = str(vid).strip() if vid else None
-    err = raw.get("error") or raw.get("error_string") or raw.get("message")
-    err_s = str(err).strip() if err else None
-    return status_int, video_url or None, err_s
-
-
-@app.post("/api/task/{task_id}/idle-animation/start", response_model=IdleAnimationStartResponse)
-async def api_idle_animation_start(
-    task_id: str,
-    body: IdleAnimationStartRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """Upload snapshot to Renderfin, finalize prompt via LLM, enqueue LTX mp4 job."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    _idle_animation_require_animal_task(task)
-
-    image_bytes = _idle_animation_decode_jpeg_b64(body.snapshot_jpg_base64_string)
-    cfg = _rig_v2_load_vision_config()
-    prompt_used = await _idle_animation_llm_finalize_prompt(cfg)
-
-    short_id = (task_id.replace("-", "")[:12]) if task_id else "task"
-    user_name = f"autorig_anim_{short_id}"
-
-    image_url = await _renderfin_upload_jpeg_snapshot(image_bytes, user_name)
-    job_id, output_url = await _renderfin_enqueue_ltx_video(
-        prompt=prompt_used,
-        image_url=image_url,
-        user_name=user_name,
-        frame_count=120,
-        width=768,
-        height=448,
-    )
-
-    return IdleAnimationStartResponse(
-        ok_bool=True,
-        job_id_string=job_id,
-        prompt_used_string=prompt_used,
-        output_url_string=output_url or None,
-        message_string="queued",
-    )
-
-
-@app.get("/api/task/{task_id}/idle-animation/status", response_model=IdleAnimationStatusResponse)
-async def api_idle_animation_status(
-    task_id: str,
-    job_id: str = Query(..., alias="job_id", min_length=8),
-    db: AsyncSession = Depends(get_db),
-):
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    _idle_animation_require_animal_task(task)
-
-    url = f"{RENF_ANIM_STATUS_URL}?task_ids_string={quote(job_id)}"
-    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-        resp = await client.get(url)
-    if resp.status_code >= 400:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Renderfin status HTTP {resp.status_code}: {resp.text[:400]}",
-        )
-    try:
-        payload = resp.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Renderfin status returned non-JSON")
-
-    rec = _idle_pick_renderfin_record(payload, job_id)
-    if not isinstance(rec, dict):
-        rec = {}
-
-    status_int, video_url, err_s = _idle_normalize_animation_status(rec)
-    labels = ("accepting", "pending", "in_progress", "completed", "failed")
-    label = labels[status_int] if 0 <= status_int < len(labels) else "unknown"
-
-    return IdleAnimationStatusResponse(
-        ok_bool=True,
-        status_int=status_int,
-        status_label_string=label,
-        video_url_string=video_url,
-        error_string=err_s,
-        raw_payload=rec if rec else None,
-    )
-
-
-@app.get("/api/task/{task_id}/idle-animation/proxy-video")
-async def api_idle_animation_proxy_video(
-    task_id: str,
-    video_url: str = Query(..., alias="url", min_length=12, max_length=2048),
-    db: AsyncSession = Depends(get_db),
-):
-    """Same-origin proxy for mp4 frame extraction (avoids canvas taint from cross-origin)."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    _idle_animation_require_animal_task(task)
-
-    parsed = urlparse(video_url)
-    host = (parsed.hostname or "").lower()
-    if host not in ("free3d.online", "www.free3d.online", "autorig.online", "www.autorig.online"):
-        raise HTTPException(status_code=400, detail="URL host not allowed for proxy")
-    path_lower = (parsed.path or "").lower()
-    if not (path_lower.endswith(".mp4") or "/render/" in path_lower or "video" in path_lower):
-        pass  # allow render paths without .mp4 suffix in query — still restrict host
-
-    async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
-        upstream = await client.get(video_url)
-    if upstream.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Upstream video HTTP {upstream.status_code}")
-    ctype = upstream.headers.get("content-type", "video/mp4")
-    return Response(content=upstream.content, media_type=ctype)
 
 
 @app.get("/api/task/{task_id}/animations/catalog", response_model=AnimationCatalogResponse)
@@ -9099,6 +9459,87 @@ GLB_CACHE_DIR = STATIC_DIR / "glb_cache"  # Cached GLB files for fast loading
 # Ensure cache directories exist
 TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+(STATIC_DIR / "env" / "backdrops").mkdir(parents=True, exist_ok=True)
+
+VIEWER_BACKDROP_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".avif"})
+
+
+def _convert_backdrop_png_files_to_jpg() -> None:
+    """Convert *.png in static/env/backdrops to JPEG (white behind alpha), then delete the PNG."""
+    d = STATIC_DIR / "env" / "backdrops"
+    if not d.is_dir():
+        return
+    pngs = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() == ".png"]
+    if not pngs:
+        return
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        print("[ViewerBackdrops] PNG→JPG skipped: cv2/numpy not available")
+        return
+    for p in sorted(pngs, key=lambda x: x.name.lower()):
+        jpg_path = p.with_suffix(".jpg")
+        try:
+            img = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+            if img is None:
+                print(f"[ViewerBackdrops] PNG→JPG: cannot read {p.name}")
+                continue
+            if img.ndim == 2:
+                out = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            elif img.ndim == 3 and img.shape[2] == 4:
+                bgr = img[:, :, :3].astype(np.float32)
+                a = img[:, :, 3].astype(np.float32) / 255.0
+                a3 = np.stack([a, a, a], axis=2)
+                white = np.full_like(bgr, 255.0)
+                out = np.clip(bgr * a3 + white * (1.0 - a3), 0, 255).astype(np.uint8)
+            elif img.ndim == 3 and img.shape[2] == 3:
+                out = img
+            else:
+                print(f"[ViewerBackdrops] PNG→JPG: unsupported shape {img.shape} ({p.name})")
+                continue
+            if not cv2.imwrite(str(jpg_path), out, [int(cv2.IMWRITE_JPEG_QUALITY), 92]):
+                print(f"[ViewerBackdrops] PNG→JPG: write failed {jpg_path.name}")
+                continue
+            try:
+                p.unlink(missing_ok=True)
+            except OSError as ue:
+                print(f"[ViewerBackdrops] PNG→JPG: remove failed {p.name}: {ue}")
+        except OSError as e:
+            print(f"[ViewerBackdrops] PNG→JPG: {p.name} → {e}")
+
+
+def _list_viewer_backdrop_items() -> List[Dict[str, str]]:
+    """Plate images in static/env/backdrops for the 3D viewer strip; sorted by filename (case-insensitive)."""
+    d = STATIC_DIR / "env" / "backdrops"
+    if not d.is_dir():
+        return []
+    _convert_backdrop_png_files_to_jpg()
+    files = [
+        p
+        for p in d.iterdir()
+        if p.is_file() and p.suffix.lower() in VIEWER_BACKDROP_SUFFIXES
+    ]
+    files.sort(key=lambda p: p.name.lower())
+    seen: set[str] = set()
+    out: List[Dict[str, str]] = []
+    for p in files:
+        stem = p.stem
+        bid = stem
+        if bid in seen:
+            n = 2
+            while f"{stem}_{n}" in seen:
+                n += 1
+            bid = f"{stem}_{n}"
+        seen.add(bid)
+        out.append({"id": bid, "src": f"/static/env/backdrops/{quote(p.name)}"})
+    return out
+
+
+@app.get("/api/viewer-backdrops")
+async def api_viewer_backdrops():
+    """Auto-discovered 3D viewer backgrounds (files in static/env/backdrops, name order)."""
+    return _list_viewer_backdrop_items()
 
 
 def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:

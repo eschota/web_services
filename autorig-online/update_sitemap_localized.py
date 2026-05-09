@@ -48,7 +48,7 @@ def generate_sitemap_entries():
 def update_sitemap():
     """Update the sitemap.xml file"""
 
-    sitemap_path = Path('/opt/autorig-online/static/sitemap.xml')
+    sitemap_path = Path('/root/autorig-online/static/sitemap.xml')
 
     # Read current sitemap
     with open(sitemap_path, 'r', encoding='utf-8') as f:

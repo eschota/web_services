@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Rig V2 Prototype | AutoRig.online</title>
+  <link rel="stylesheet" href="/static/css/styles.css?v=rig-v2-1">
+  <style>
+    body { min-height: 100vh; background: #0b0d14; color: #eef2ff; }
+    .rig-v2-page { max-width: 1180px; margin: 0 auto; padding: 2rem 1rem 3rem; }
+    .rig-v2-grid { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 1rem; align-items: start; }
+    @media (max-width: 900px) { .rig-v2-grid { grid-template-columns: 1fr; } }
+    .rig-v2-card { background: rgba(20, 24, 36, 0.88); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; padding: 1.2rem; box-shadow: 0 18px 60px rgba(0,0,0,0.32); }
+    .rig-v2-drop { border: 2px dashed rgba(129,140,248,0.55); border-radius: 16px; padding: 1.5rem; text-align: center; cursor: pointer; background: rgba(99,102,241,0.08); transition: border-color .2s, background .2s; }
+    .rig-v2-drop:hover, .rig-v2-drop.dragover { border-color: #a5b4fc; background: rgba(99,102,241,0.16); }
+    .rig-v2-muted { color: #aab2c8; font-size: .92rem; line-height: 1.45; }
+    .version-badge { display: inline-flex; align-items: center; margin-left: .65rem; padding: .25rem .5rem; border-radius: 999px; border: 1px solid rgba(34,211,238,0.35); background: rgba(34,211,238,0.1); color: #bae6fd; font-size: .78rem; vertical-align: middle; }
+    .rig-v2-progress { height: 10px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; margin-top: .85rem; }
+    .rig-v2-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #6366f1, #22d3ee); transition: width .25s ease; }
+    .rig-v2-status { margin-top: .75rem; font-size: .92rem; color: #c7d2fe; min-height: 1.35rem; }
+    .rig-v2-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+    .vision-controls { display: grid; gap: .55rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
+    .rig-v2-textarea { width: 100%; min-height: 170px; resize: vertical; border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: .7rem .8rem; background: rgba(5,7,14,0.8); color: #fff; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .rig-v2-viewer { position: relative; height: 620px; min-height: 420px; border-radius: 18px; overflow: hidden; background: #0b0d14; border: 1px solid rgba(255,255,255,0.1); }
+    .rig-v2-env-plate { position: absolute; inset: 0; z-index: 0; pointer-events: none; background: #1a2332 center center / cover no-repeat; border-radius: 18px; }
+    .rig-v2-viewer canvas { display: block; width: 100% !important; height: 100% !important; position: relative; z-index: 1; }
+    .rig-v2-backdrop-strip-wrap { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5; pointer-events: auto; display: flex; flex-direction: column; gap: 4px; }
+    .rig-v2-backdrop-strip { display: flex; flex-direction: row; gap: 6px; overflow-x: auto; padding: 4px 0; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+    .rig-v2-backdrop-strip button.rig-v2-backdrop-thumb { flex: 0 0 auto; scroll-snap-align: start; width: 64px; height: 40px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.12); padding: 0; cursor: pointer; pointer-events: auto; background-size: cover; background-position: center; background-color: #2a2e3d; box-shadow: 0 1px 3px rgba(0,0,0,0.35); }
+    .rig-v2-backdrop-strip button.rig-v2-backdrop-thumb[aria-pressed='true'] { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35); }
+    .rig-v2-viewer-label { position: absolute; top: .8rem; left: .8rem; z-index: 6; padding: .35rem .55rem; border-radius: 999px; background: rgba(0,0,0,0.48); color: #dbeafe; font-size: .8rem; pointer-events: none; }
+    .rig-v2-result { display: grid; gap: .55rem; margin-top: 1rem; }
+    .rig-v2-select, .rig-v2-input { width: 100%; border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: .7rem .8rem; background: rgba(5,7,14,0.8); color: #fff; }
+    .animal-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin-top: .3rem; }
+    .animal-tiles.hidden { display: none; }
+    .animal-tile { border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: .65rem .75rem; background: rgba(5,7,14,0.72); color: #dbeafe; cursor: pointer; text-align: left; transition: transform .12s, border-color .12s, background .12s; }
+    .animal-tile:hover { transform: translateY(-1px); border-color: rgba(165,180,252,0.8); }
+    .animal-tile.ai-selected { border-color: #22d3ee; background: rgba(34,211,238,0.16); box-shadow: 0 0 0 1px rgba(34,211,238,0.16); }
+    .animal-tile.user-selected { border-color: #a78bfa; background: rgba(167,139,250,0.2); }
+    .animal-tile-score { display: block; margin-top: .22rem; color: #9ca3af; font-size: .76rem; }
+    .result-summary { color: #bfdbfe; background: rgba(0,0,0,0.22); border-radius: 12px; padding: .65rem .75rem; font-size: .86rem; }
+  </style>
+</head>
+<body>
+  <main class="rig-v2-page">
+    <section style="margin-bottom: 1rem;">
+      <p class="rig-v2-muted" style="margin:0 0 .35rem;">AutoRig.online prototype</p>
+      <h1 style="margin:.1rem 0 .4rem;">Rig V2 Animal Type Prototype <span class="version-badge" id="build-badge">loading build...</span></h1>
+      <p class="rig-v2-muted" style="margin:0;">Upload FBX, GLB, or OBJ, preview locally, render 7 x 512x512 views (front/back/left/right/top/bottom/top-side 45), then classify animal type with OpenRouter. For OBJ, select the matching MTL file together with the OBJ when available.</p>
+    </section>
+
+    <section class="rig-v2-grid">
+      <div class="rig-v2-card">
+        <h2 style="margin-top:0;">1. Upload model</h2>
+        <div id="drop-zone" class="rig-v2-drop">
+          <strong>Drop .fbx, .glb, or .obj here</strong>
+          <p class="rig-v2-muted">or click to browse. The file is uploaded to AutoRig, but this preview task is not sent to rig workers.</p>
+          <input id="file-input" type="file" accept=".fbx,.glb,.obj,.mtl" multiple hidden>
+        </div>
+        <div class="rig-v2-status" id="file-status">No file selected.</div>
+        <div class="rig-v2-progress"><div class="rig-v2-progress-fill" id="progress-fill"></div></div>
+        <div class="rig-v2-status" id="progress-status">Idle.</div>
+        <div class="rig-v2-actions">
+          <button class="btn btn-primary" id="upload-btn" disabled>Upload and preview</button>
+          <button class="btn btn-secondary" id="capture-btn" disabled>Render 512 and analyze</button>
+        </div>
+
+        <div class="vision-controls">
+          <label for="vision-model-select">OpenAI model for top-side 45 retry</label>
+          <select class="rig-v2-select" id="vision-model-select">
+            <option value="">Loading models...</option>
+          </select>
+          <button class="btn btn-secondary" id="retry-side45-btn" disabled>Retry vision only top-side 45</button>
+          <div class="rig-v2-status" id="retry-side45-status">Retry is available after the first full vision run.</div>
+          <label for="vision-prompt">Vision prompt override</label>
+          <textarea class="rig-v2-textarea" id="vision-prompt" spellcheck="false">Loading prompt...</textarea>
+        </div>
+
+        <div class="rig-v2-result">
+          <div class="rig-v2-status" id="ai-status">AI vision idle.</div>
+          <div id="result-summary" class="result-summary">Animal type tiles will appear after OpenRouter finishes multi-view detection.</div>
+          <div id="animal-tiles" class="animal-tiles hidden" aria-label="Animal type choices"></div>
+        </div>
+      </div>
+
+      <div class="rig-v2-card">
+        <h2 style="margin-top:0;">2. Local viewer</h2>
+        <div class="rig-v2-viewer" id="viewer">
+          <div id="rig-v2-env-plate" class="rig-v2-env-plate" aria-hidden="true"></div>
+          <div id="rig-v2-backdrop-strip-wrap" class="rig-v2-backdrop-strip-wrap" role="toolbar" aria-label="Environment backdrop">
+            <div id="rig-v2-backdrop-strip" class="rig-v2-backdrop-strip"></div>
+          </div>
+          <div class="rig-v2-viewer-label" id="viewer-label">Waiting for model</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+    import { FBXLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js';
+    import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+    import { MTLLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/MTLLoader.js';
+    import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+    import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
+
+    const rigV2Build = 'rig-v2.2026-05-08.0060-env-plate';
+    const allowedAnimals = ['humanoid', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+    const viewSpecs = [
+      { id: 'front', label: 'front', forward: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0) },
+      { id: 'back', label: 'back', forward: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) },
+      { id: 'left', label: 'left', forward: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+      { id: 'right', label: 'right', forward: new THREE.Vector3(-1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+      { id: 'top', label: 'top', forward: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, -1) },
+      { id: 'bottom', label: 'bottom', forward: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 0, 1) },
+      { id: 'top_side_45', label: 'top-side 45', forward: new THREE.Vector3(-1, -1, -1), up: new THREE.Vector3(0, 1, 0) }
+    ];
+    const state = {
+      file: null,
+      task: null,
+      model: null,
+      files: [],
+      currentExt: '',
+      uploading: false,
+      viewDistance: 8,
+      aiAnimal: '',
+      userAnimal: '',
+      animalScores: {},
+      viewResults: [],
+      latestCaptures: {},
+      visionConfigLoaded: false
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const dropZone = $('drop-zone');
+    const fileInput = $('file-input');
+    const uploadBtn = $('upload-btn');
+    const captureBtn = $('capture-btn');
+    const progressFill = $('progress-fill');
+    const progressStatus = $('progress-status');
+    const fileStatus = $('file-status');
+    const viewerLabel = $('viewer-label');
+    const aiStatus = $('ai-status');
+    const resultSummary = $('result-summary');
+    const animalTiles = $('animal-tiles');
+    const visionModelSelect = $('vision-model-select');
+    const visionPrompt = $('vision-prompt');
+    const retrySide45Btn = $('retry-side45-btn');
+    const retrySide45Status = $('retry-side45-status');
+    $('build-badge').textContent = rigV2Build;
+    document.title = `Rig V2 Prototype | ${rigV2Build}`;
+    loadVisionConfig();
+
+    function setProgress(percent, text) {
+      progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      progressStatus.textContent = text;
+    }
+
+    async function loadVisionConfig() {
+      try {
+        const resp = await fetch('/api/rig-v2/vision/config');
+        const data = await resp.json();
+        visionPrompt.value = data.prompt_string || '';
+        const models = Array.isArray(data.open_ai_models_array) ? data.open_ai_models_array : [];
+        const preferred = data.open_ai_strong_model_string || 'gpt-5.5';
+        visionModelSelect.innerHTML = '';
+        if (!models.length) {
+          const opt = document.createElement('option');
+          opt.value = preferred;
+          opt.textContent = `${preferred} (configured)`;
+          visionModelSelect.appendChild(opt);
+        } else {
+          for (const model of models) {
+            const opt = document.createElement('option');
+            opt.value = model;
+            opt.textContent = model;
+            visionModelSelect.appendChild(opt);
+          }
+          if (models.includes(preferred)) visionModelSelect.value = preferred;
+        }
+        state.visionConfigLoaded = true;
+        retrySide45Status.textContent = `Loaded ${models.length || 1} OpenAI model options.`;
+      } catch (err) {
+        visionPrompt.value = '';
+        visionModelSelect.innerHTML = '<option value="gpt-5.5">gpt-5.5</option>';
+        retrySide45Status.textContent = `Vision config failed to load: ${err.message || err}`;
+      }
+      updateRetrySide45State();
+    }
+
+    function updateRetrySide45State() {
+      retrySide45Btn.disabled = !state.model || !state.viewResults.length || !visionModelSelect.value;
+    }
+
+    function resetAnimalTiles() {
+      state.aiAnimal = '';
+      state.userAnimal = '';
+      state.animalScores = {};
+      state.viewResults = [];
+      state.latestCaptures = {};
+      animalTiles.classList.add('hidden');
+      animalTiles.innerHTML = '';
+      resultSummary.textContent = 'Animal type tiles will appear after OpenRouter finishes multi-view detection.';
+      retrySide45Status.textContent = state.visionConfigLoaded
+        ? 'Retry is available after the first full vision run.'
+        : 'Loading vision config...';
+      updateRetrySide45State();
+    }
+    function renderAnimalTiles(scores, aiAnimal) {
+      animalTiles.innerHTML = '';
+      for (const animal of allowedAnimals) {
+        const score = Number(scores[animal] || 0);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'animal-tile';
+        if (animal === aiAnimal) button.classList.add('ai-selected');
+        if (animal === state.userAnimal) button.classList.add('user-selected');
+        button.innerHTML = `<strong>${animal}</strong><span class="animal-tile-score">weight ${score.toFixed(2)}</span>`;
+        button.addEventListener('click', () => {
+          state.userAnimal = animal;
+          renderAnimalTiles(state.animalScores, state.aiAnimal);
+          resultSummary.textContent = `User selected: ${animal}. AI suggested: ${state.aiAnimal || 'none'}.`;
+        });
+        animalTiles.appendChild(button);
+      }
+      animalTiles.classList.remove('hidden');
+    }
+    function selectFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      const modelFile = files.find((file) => ['fbx', 'glb', 'obj'].includes(file.name.split('.').pop().toLowerCase()));
+      if (!modelFile) {
+        fileStatus.textContent = 'Select a .fbx, .glb, or .obj model file. .mtl can be selected only together with .obj.';
+        uploadBtn.disabled = true;
+        state.file = null;
+        state.files = [];
+        resetAnimalTiles();
+        return;
+      }
+      const ext = modelFile.name.split('.').pop().toLowerCase();
+      const invalidFile = files.find((file) => !['fbx', 'glb', 'obj', 'mtl'].includes(file.name.split('.').pop().toLowerCase()));
+      if (invalidFile) {
+        fileStatus.textContent = `Unsupported file: ${invalidFile.name}. Use .fbx, .glb, .obj, or .mtl.`;
+        uploadBtn.disabled = true;
+        state.file = null;
+        state.files = [];
+        resetAnimalTiles();
+        return;
+      }
+      state.file = modelFile;
+      state.files = files;
+      state.currentExt = ext;
+      resetAnimalTiles();
+      const totalKb = files.reduce((sum, file) => sum + file.size, 0) / 1024;
+      const fileNames = files.map((file) => file.name).join(', ');
+      fileStatus.textContent = `${modelFile.name} selected (${Math.round(totalKb)} KB total${files.length > 1 ? `, ${files.length} files: ${fileNames}` : ''})`;
+      uploadBtn.disabled = false;
+      setProgress(5, 'File selected. Starting upload...');
+      window.setTimeout(() => uploadAndPreview(), 50);
+    }
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => selectFiles(fileInput.files));
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      selectFiles(e.dataTransfer.files);
+    });
+
+    const host = $('viewer');
+    const envPlateEl = $('rig-v2-env-plate');
+    const backdropStrip = $('rig-v2-backdrop-strip');
+    const backdropStripWrap = $('rig-v2-backdrop-strip-wrap');
+
+    let backdropSceneTexture = null;
+    let backdropLoadSerial = 0;
+    let shadowReceiverPlane = null;
+
+    const scene = new THREE.Scene();
+    scene.background = null;
+
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.physicallyCorrectLights = true;
+    host.appendChild(renderer.domElement);
+
+    function applyRigV2BackdropUrl(path, logTag = '') {
+      const p = String(path || '').trim();
+      if (!p) return;
+      if (envPlateEl) {
+        envPlateEl.style.backgroundImage = `url(${JSON.stringify(p)})`;
+      }
+      backdropLoadSerial += 1;
+      const serial = backdropLoadSerial;
+      const loader = new THREE.TextureLoader();
+      loader.setCrossOrigin('anonymous');
+      loader.load(
+        p,
+        (tex) => {
+          if (serial !== backdropLoadSerial) {
+            tex.dispose();
+            return;
+          }
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.minFilter = THREE.LinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+          try {
+            tex.generateMipmaps = false;
+          } catch (_) {}
+          if (backdropSceneTexture) {
+            backdropSceneTexture.dispose();
+            backdropSceneTexture = null;
+          }
+          backdropSceneTexture = tex;
+          scene.background = tex;
+          if (logTag) console.log('[RigV2] backdrop → scene.background', p, logTag);
+        },
+        undefined,
+        (err) => console.warn('[RigV2] backdrop texture failed', p, err)
+      );
+    }
+
+    function ensureShadowGround() {
+      if (shadowReceiverPlane) return;
+      const geo = new THREE.PlaneGeometry(200, 200);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.ShadowMaterial({
+        color: 0x000000,
+        opacity: 0.28,
+        transparent: true,
+        depthWrite: false
+      });
+      shadowReceiverPlane = new THREE.Mesh(geo, mat);
+      shadowReceiverPlane.name = 'RigV2ShadowCatcher';
+      shadowReceiverPlane.receiveShadow = true;
+      shadowReceiverPlane.castShadow = false;
+      shadowReceiverPlane.renderOrder = -1;
+      scene.add(shadowReceiverPlane);
+    }
+
+    function updateShadowGroundForModel(model) {
+      ensureShadowGround();
+      if (!model) return;
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      if (!Number.isFinite(box.min.y)) return;
+      shadowReceiverPlane.position.set(0, box.min.y - 0.005, 0);
+    }
+
+    function applyModelShadowFlags(root) {
+      if (!root) return;
+      root.traverse((node) => {
+        if (!node.isMesh) return;
+        const n = String(node.name || '').toLowerCase();
+        if (n.includes('helper') || n.includes('rigv2shadowcatcher')) {
+          node.castShadow = false;
+          node.receiveShadow = false;
+          return;
+        }
+        node.castShadow = true;
+        node.receiveShadow = false;
+        node.frustumCulled = false;
+      });
+    }
+
+    async function loadRigV2BackdropManifest() {
+      try {
+        const r = await fetch('/api/viewer-backdrops', { cache: 'no-store' });
+        if (r.ok) {
+          const data = await r.json();
+          if (Array.isArray(data) && data.length) return data;
+        } else {
+          console.warn('[RigV2] /api/viewer-backdrops HTTP', r.status);
+        }
+      } catch (err) {
+        console.warn('[RigV2] backdrop API', err);
+      }
+      try {
+        const r = await fetch('/static/env/viewer_backdrops.json', { cache: 'no-store' });
+        if (r.ok) {
+          const data = await r.json();
+          if (Array.isArray(data) && data.length) {
+            console.warn('[RigV2] using static viewer_backdrops.json — enable /api/viewer-backdrops on server');
+            return data;
+          }
+        }
+      } catch (err) {
+        console.warn('[RigV2] backdrop JSON fallback', err);
+      }
+      return null;
+    }
+
+    async function initRigV2BackdropStrip() {
+      if (!backdropStrip || !backdropStripWrap || backdropStrip.dataset.wired === '1') return;
+      let manifest = await loadRigV2BackdropManifest();
+      if (!Array.isArray(manifest) || !manifest.length) {
+        applyRigV2BackdropUrl('/static/env/backdrops/meadow.jpg', 'manifest-empty-fallback');
+        return;
+      }
+      const first = manifest.find((m) => m && m.id != null && m.src) || manifest[0];
+      applyRigV2BackdropUrl(first.src, 'default-first');
+
+      let current = first;
+      backdropStrip.replaceChildren();
+      for (const item of manifest) {
+        if (item.id == null || !item.src) continue;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'rig-v2-backdrop-thumb';
+        btn.dataset.backdropId = String(item.id);
+        btn.style.backgroundImage = `url(${JSON.stringify(item.src)})`;
+        btn.title = String(item.id);
+        btn.setAttribute('aria-label', String(item.id));
+        btn.setAttribute('aria-pressed', String(item.id) === String(current.id) ? 'true' : 'false');
+        backdropStrip.appendChild(btn);
+      }
+
+      backdropStripWrap.addEventListener(
+        'click',
+        (ev) => {
+          const btn = ev.target && ev.target.closest && ev.target.closest('button.rig-v2-backdrop-thumb');
+          if (!btn || !backdropStrip.contains(btn)) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          const id = btn.dataset.backdropId;
+          const item = manifest.find((m) => m != null && String(m.id) === String(id));
+          if (!item || !item.src) return;
+          current = item;
+          applyRigV2BackdropUrl(item.src, 'user-pick');
+          backdropStrip.querySelectorAll('button.rig-v2-backdrop-thumb').forEach((b) => {
+            b.setAttribute('aria-pressed', String(b.dataset.backdropId) === String(id) ? 'true' : 'false');
+          });
+          console.log('[RigV2] backdrop pick', { id: item.id, src: item.src });
+        },
+        true
+      );
+
+      backdropStrip.dataset.wired = '1';
+    }
+    void initRigV2BackdropStrip();
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x334155, 0.45);
+    scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    key.position.set(-3, 6, 4);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.near = 0.1;
+    key.shadow.camera.far = 100;
+    key.shadow.bias = -0.0001;
+    key.shadow.normalBias = 0.02;
+    scene.add(key);
+    scene.add(key.target);
+    key.target.position.set(0, 0, 0);
+
+    function fitShadowCameraToModel(model) {
+      if (!key.shadow || !model) return;
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      const c = box.getCenter(new THREE.Vector3());
+      key.target.position.copy(c);
+      const size = box.getSize(new THREE.Vector3());
+      const ext = Math.max(8, Math.min(50, Math.max(size.x, size.z, 2) * 0.85 + 4));
+      key.shadow.camera.near = 0.1;
+      key.shadow.camera.far = 100;
+      key.shadow.camera.left = -ext;
+      key.shadow.camera.right = ext;
+      key.shadow.camera.top = ext;
+      key.shadow.camera.bottom = -ext;
+      key.shadow.camera.updateProjectionMatrix();
+      key.shadow.needsUpdate = true;
+    }
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+
+    function resize() {
+      const rect = host.getBoundingClientRect();
+      const w = Math.max(1, Math.floor(rect.width));
+      const h = Math.max(1, Math.floor(rect.height));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(w, h, true);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function frameModel(model) {
+      const box = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.sub(center);
+      const centeredBox = new THREE.Box3().setFromObject(model);
+      const centeredSize = centeredBox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(centeredSize.x, centeredSize.y, centeredSize.z, 1);
+      const fov = THREE.MathUtils.degToRad(camera.fov);
+      const zoomFactor = (maxDim / (2 * Math.tan(fov / 2))) * 1.45;
+      state.viewDistance = zoomFactor;
+      setCameraView(viewSpecs[0]);
+      camera.near = Math.max(0.001, zoomFactor / 1000);
+      camera.far = Math.max(1000, zoomFactor * 10);
+      camera.updateProjectionMatrix();
+      fitShadowCameraToModel(model);
+      updateShadowGroundForModel(model);
+    }
+
+    function setCameraView(viewSpec) {
+      const target = new THREE.Vector3(0, 0, 0);
+      const forward = viewSpec.forward.clone().normalize();
+      camera.up.copy(viewSpec.up);
+      camera.position.copy(target).sub(forward.multiplyScalar(state.viewDistance));
+      controls.target.copy(target);
+      camera.lookAt(target);
+      controls.update();
+    }
+
+    function loadWithLoader(loader, url) {
+      return new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+      });
+    }
+
+    function inferSiblingMtlUrl(url) {
+      try {
+        const parsed = new URL(url, window.location.href);
+        parsed.pathname = parsed.pathname.replace(/\.obj$/i, '.mtl');
+        return parsed.toString();
+      } catch {
+        return String(url || '').replace(/\.obj(\?.*)?$/i, '.mtl$1');
+      }
+    }
+
+    async function loadObjModel(url, materialUrl) {
+      const loader = new OBJLoader();
+      if (materialUrl) {
+        try {
+          const materials = await loadWithLoader(new MTLLoader(), materialUrl);
+          materials.preload();
+          for (const material of Object.values(materials.materials || {})) {
+            material.side = THREE.DoubleSide;
+            material.needsUpdate = true;
+          }
+          loader.setMaterials(materials);
+        } catch (err) {
+          console.warn('OBJ MTL failed to load, falling back to default material', err);
+        }
+      }
+      return loadWithLoader(loader, url);
+    }
+
+    function forceDoubleSidedMaterials(model) {
+      model.traverse?.((node) => {
+        const materials = Array.isArray(node.material)
+          ? node.material
+          : node.material
+            ? [node.material]
+            : [];
+        for (const material of materials) {
+          material.side = THREE.DoubleSide;
+          material.needsUpdate = true;
+        }
+      });
+    }
+
+    async function loadModel(url, ext, materialUrl = '') {
+      viewerLabel.textContent = `Loading ${ext.toUpperCase()}...`;
+      setProgress(55, 'Loading model into local viewer...');
+      if (state.model) {
+        scene.remove(state.model);
+        state.model.traverse?.((node) => {
+          node.geometry?.dispose?.();
+          if (Array.isArray(node.material)) node.material.forEach((m) => m.dispose?.());
+          else node.material?.dispose?.();
+        });
+      }
+      let object;
+      if (ext === 'glb') {
+        const loader = new GLTFLoader();
+        const gltf = await loadWithLoader(loader, url);
+        object = gltf.scene;
+      } else if (ext === 'fbx') {
+        const loader = new FBXLoader();
+        object = await loadWithLoader(loader, url);
+      } else if (ext === 'obj') {
+        object = await loadObjModel(url, materialUrl || inferSiblingMtlUrl(url));
+      } else {
+        throw new Error('Unsupported extension');
+      }
+      forceDoubleSidedMaterials(object);
+      scene.add(object);
+      state.model = object;
+      applyModelShadowFlags(object);
+      frameModel(object);
+      captureBtn.disabled = false;
+      viewerLabel.textContent = `${ext.toUpperCase()} loaded`;
+      setProgress(70, 'Model loaded and framed.');
+      return object;
+    }
+
+    uploadBtn.addEventListener('click', uploadAndPreview);
+
+    async function uploadAndPreview() {
+      if (!state.file || state.uploading) return;
+      state.uploading = true;
+      uploadBtn.disabled = true;
+      captureBtn.disabled = true;
+      aiStatus.textContent = 'AI vision idle.';
+      resetAnimalTiles();
+      setProgress(10, 'Uploading model...');
+      const formData = new FormData();
+      for (const selectedFile of state.files.length ? state.files : [state.file]) {
+        formData.append('files', selectedFile);
+      }
+      try {
+        const data = await uploadWithProgress(formData);
+        state.task = data;
+        setProgress(45, `Preview task created: ${data.task_id_string}`);
+        await loadModel(data.input_url_string, data.file_ext_string, data.material_url_string || '');
+        await captureAndAnalyze();
+      } catch (err) {
+        console.error(err);
+        setProgress(0, `Error: ${err.message || err}`);
+        uploadBtn.disabled = false;
+      } finally {
+        state.uploading = false;
+      }
+    }
+
+    function uploadWithProgress(formData) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/rig-v2/task/create');
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const pct = 10 + (event.loaded / event.total) * 35;
+            setProgress(pct, `Uploading... ${Math.round(event.loaded / 1024)} KB`);
+          }
+        };
+        xhr.onload = () => {
+          let data = {};
+          try { data = JSON.parse(xhr.responseText || '{}'); } catch {}
+          if (xhr.status >= 200 && xhr.status < 300 && data.success_bool) resolve(data);
+          else reject(new Error(data.detail || data.status_string || `HTTP ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error(`Upload failed before server response (status ${xhr.status || 0})`));
+        xhr.ontimeout = () => reject(new Error('Upload timed out'));
+        xhr.timeout = 10 * 60 * 1000;
+        xhr.send(formData);
+      });
+    }
+
+    captureBtn.addEventListener('click', captureAndAnalyze);
+    async function captureAndAnalyze() {
+      if (!state.model) return;
+      resetAnimalTiles();
+      uploadBtn.disabled = true;
+      captureBtn.disabled = true;
+      setProgress(78, `Rendering ${viewSpecs.length} x 512x512 JPEG views...`);
+      aiStatus.textContent = `AI vision analyzing ${viewSpecs.length} views. Tiles will unlock after OpenRouter finishes.`;
+      const captures = viewSpecs.map((viewSpec) => ({
+        viewSpec,
+        image: captureJpeg512(viewSpec)
+      }));
+      state.latestCaptures = Object.fromEntries(captures.map(({ viewSpec, image }) => [viewSpec.id, image]));
+      setProgress(84, `Sending ${viewSpecs.length} render views to OpenRouter vision...`);
+      let completed = 0;
+      try {
+        const results = await Promise.all(captures.map(async ({ viewSpec, image }) => {
+          const result = await analyzeSingleView(viewSpec, image);
+          completed += 1;
+          setProgress(84 + (completed / viewSpecs.length) * 12, `OpenRouter vision ${completed}/${viewSpecs.length} complete...`);
+          return result;
+        }));
+        state.viewResults = results;
+        applyAggregateResults(results);
+        setProgress(100, 'Prototype flow complete.');
+      } catch (err) {
+        aiStatus.textContent = `AI request failed: ${err.message || err}`;
+      } finally {
+        uploadBtn.disabled = false;
+        captureBtn.disabled = false;
+        updateRetrySide45State();
+      }
+    }
+
+    function applyAggregateResults(results, summaryPrefix = '') {
+      const aggregate = aggregateVisionResults(results);
+      state.aiAnimal = aggregate.animal;
+      state.animalScores = aggregate.scores;
+      if (aggregate.animal) {
+        renderAnimalTiles(aggregate.scores, aggregate.animal);
+        const winningScore = aggregate.scores[aggregate.animal] || 0;
+        aiStatus.textContent = `AI result: ${aggregate.animal} (weighted score ${winningScore.toFixed(2)} from ${aggregate.successCount}/${viewSpecs.length} views)`;
+        resultSummary.textContent = `${summaryPrefix}AI suggested: ${aggregate.animal}. You can override by selecting another tile.`;
+      } else {
+        resultSummary.textContent = `${summaryPrefix}AI did not return a usable animal type from any of the ${viewSpecs.length} views.`;
+        aiStatus.textContent = `AI failed: ${aggregate.error || 'no successful view classifications'}`;
+      }
+      updateRetrySide45State();
+    }
+
+    retrySide45Btn.addEventListener('click', retryTopSide45Vision);
+
+    async function retryTopSide45Vision() {
+      if (!state.model || !state.viewResults.length) return;
+      const viewSpec = viewSpecs.find((view) => view.id === 'top_side_45');
+      if (!viewSpec) return;
+      const model = visionModelSelect.value;
+      retrySide45Btn.disabled = true;
+      captureBtn.disabled = true;
+      retrySide45Status.textContent = `Retrying ${viewSpec.label} with ${model}...`;
+      setProgress(92, `Retrying vision only ${viewSpec.label}...`);
+      try {
+        const image = captureJpeg512(viewSpec);
+        state.latestCaptures[viewSpec.id] = image;
+        const result = await analyzeSingleView(viewSpec, image, {
+          forceOpenAI: true,
+          modelOverride: model
+        });
+        if (!result.success_bool || !allowedAnimals.includes(result.animal_type_string)) {
+          retrySide45Status.textContent = `Retry failed: ${result.error_string || result.status_string || 'invalid result'}`;
+          return;
+        }
+        const nextResults = state.viewResults.filter((item) => item.view_id_string !== viewSpec.id);
+        nextResults.push(result);
+        state.viewResults = nextResults;
+        applyAggregateResults(nextResults, `${viewSpec.label} retried with ${result.model_used_string || model}. `);
+        retrySide45Status.textContent = `Retried ${viewSpec.label}: ${result.animal_type_string} (${result.model_used_string || model}, confidence ${Number(result.confidence_float || 0).toFixed(2)})`;
+        setProgress(100, 'Top-side 45 retry complete.');
+      } catch (err) {
+        retrySide45Status.textContent = `Retry request failed: ${err.message || err}`;
+      } finally {
+        captureBtn.disabled = false;
+        updateRetrySide45State();
+      }
+    }
+
+    async function analyzeSingleView(viewSpec, image, options = {}) {
+      try {
+        const body = {
+          image_jpg_base64_string: image,
+          task_id_string: state.task?.task_id_string || '',
+          view_id_string: viewSpec.id,
+          prompt_override_string: visionPrompt.value || ''
+        };
+        if (options.forceOpenAI) body.force_openai_bool = true;
+        if (options.modelOverride) body.open_ai_model_override_string = options.modelOverride;
+        const resp = await fetch('/api/rig-v2/vision/animal-type', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        return { view_id_string: viewSpec.id, view_label_string: viewSpec.label, ...data };
+      } catch (err) {
+        return {
+          success_bool: false,
+          status_string: 'client_vision_request_failed',
+          view_id_string: viewSpec.id,
+          view_label_string: viewSpec.label,
+          error_string: String(err.message || err)
+        };
+      }
+    }
+
+    function aggregateVisionResults(results) {
+      const scores = Object.fromEntries(allowedAnimals.map((animal) => [animal, 0]));
+      let successCount = 0;
+      let error = '';
+      for (const result of results) {
+        if (!result?.success_bool || !allowedAnimals.includes(result.animal_type_string)) {
+          error = result?.error_string || result?.status_string || error;
+          continue;
+        }
+        successCount += 1;
+        const confidence = Number.isFinite(Number(result.confidence_float))
+          ? Math.max(0.05, Math.min(1, Number(result.confidence_float)))
+          : 1;
+        scores[result.animal_type_string] += confidence;
+      }
+      let animal = '';
+      let bestScore = 0;
+      for (const [candidate, score] of Object.entries(scores)) {
+        if (score > bestScore) {
+          animal = candidate;
+          bestScore = score;
+        }
+      }
+      return { animal, scores, successCount, error };
+    }
+
+    function captureJpeg512(viewSpec) {
+      const prevSize = new THREE.Vector2();
+      renderer.getSize(prevSize);
+      const prevRatio = renderer.getPixelRatio();
+      const prevAspect = camera.aspect;
+      const prevPosition = camera.position.clone();
+      const prevQuaternion = camera.quaternion.clone();
+      const prevUp = camera.up.clone();
+      const prevTarget = controls.target.clone();
+      viewerLabel.textContent = `Rendering ${viewSpec.label} view`;
+      setCameraView(viewSpec);
+      renderer.setPixelRatio(1);
+      renderer.setSize(512, 512, false);
+      camera.aspect = 1;
+      camera.updateProjectionMatrix();
+      renderer.render(scene, camera);
+      const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.9);
+      renderer.setPixelRatio(prevRatio);
+      renderer.setSize(prevSize.x, prevSize.y, false);
+      camera.aspect = prevAspect;
+      camera.updateProjectionMatrix();
+      camera.position.copy(prevPosition);
+      camera.quaternion.copy(prevQuaternion);
+      camera.up.copy(prevUp);
+      controls.target.copy(prevTarget);
+      controls.update();
+      viewerLabel.textContent = `${state.currentExt.toUpperCase()} loaded`;
+      return dataUrl;
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

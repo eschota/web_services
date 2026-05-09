@@ -9,7 +9,6 @@
     
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=tc-6">
-    <link rel="stylesheet" href="/static/animal_animation_fitter/animal_animation_fitter.css?v=3">
     
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -44,6 +43,7 @@
         body.webapp-mode #video-youtube-bar { display: none !important; }
         body.webapp-mode #hdrp-renders { display: none !important; }
         body.webapp-mode #video-pending { display: none !important; }
+        body.webapp-mode #viewer-admin-animal-shadow-row { display: none !important; }
         
         .viewer-loading-overlay {
             position: absolute;
@@ -1401,6 +1401,444 @@
             }
         }
 
+        /* Default humanoid / generic viewer frame (inline styles removed — class wins for animal) */
+        #model-viewer-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 9 / 16;
+            max-height: 70vh;
+        }
+
+        #model-viewer-container #model-viewer {
+            position: relative;
+            z-index: 1;
+            background: transparent !important;
+        }
+
+        #model-viewer-backdrop {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            border-radius: 12px;
+            background: #6f8fb3 center center / cover no-repeat;
+            pointer-events: none;
+        }
+
+        .viewer-backdrop-strip-wrap {
+            position: relative;
+            z-index: 12;
+            margin-bottom: 0.5rem;
+            pointer-events: auto;
+        }
+        .viewer-backdrop-strip-wrap.hidden {
+            display: none !important;
+        }
+        .viewer-backdrop-strip {
+            display: flex;
+            flex-direction: row;
+            gap: 0.45rem;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0.2rem 0 0.35rem;
+            scroll-snap-type: x proximity;
+            -webkit-overflow-scrolling: touch;
+        }
+        .viewer-backdrop-strip .viewer-backdrop-thumb {
+            flex: 0 0 auto;
+            scroll-snap-align: start;
+            width: 72px;
+            height: 44px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.12);
+            padding: 0;
+            cursor: pointer;
+            pointer-events: auto;
+            position: relative;
+            z-index: 1;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-color: #2a2e3d;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+        }
+        .viewer-backdrop-strip .viewer-backdrop-thumb:hover {
+            border-color: rgba(129, 140, 248, 0.55);
+        }
+        .viewer-backdrop-strip .viewer-backdrop-thumb[aria-pressed='true'] {
+            border-color: #818cf8;
+            box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35);
+        }
+
+        /* Animal LTX: same max-height cap for 3D viewer and MP4 slot (shared width = column) */
+        #model-viewer-wrap.animal-ltx-sync #model-viewer-container.animal-ltx-aspect {
+            aspect-ratio: 768 / 448;
+            max-height: min(88vh, 920px);
+        }
+        #model-viewer-wrap.animal-ltx-sync .idle-ltx-below-viewer-inner,
+        #model-viewer-wrap.animal-ltx-sync .idle-ltx-v-shell {
+            max-height: min(88vh, 920px);
+        }
+
+        .viewer-admin-camera-debug {
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 10px;
+            background: rgba(15, 17, 28, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.72rem;
+        }
+        .light .viewer-admin-camera-debug {
+            background: rgba(248, 249, 252, 0.95);
+            border-color: rgba(0, 0, 0, 0.08);
+        }
+        .viewer-admin-camera-debug-title {
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+            color: var(--text-muted);
+        }
+        .viewer-admin-camera-debug-pre {
+            margin: 0;
+            max-height: 12rem;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.68rem;
+            line-height: 1.4;
+            color: var(--text-secondary);
+        }
+
+        /* Isolated block: not clipped/stacked under sibling viewer styles */
+        .idle-ltx-generator-island {
+            position: relative;
+            z-index: 60;
+            isolation: isolate;
+            contain: layout style;
+            margin: 1rem 0 1.25rem;
+            padding: 1rem 1.15rem 1.15rem;
+            border-radius: 14px;
+            border: 1px solid rgba(99, 102, 241, 0.42);
+            background: linear-gradient(165deg, rgba(22, 24, 36, 0.97), rgba(18, 20, 32, 0.99));
+            box-shadow:
+                0 4px 24px rgba(0, 0, 0, 0.35),
+                0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+        }
+        .idle-ltx-generator-island .idle-ltx-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.65rem;
+        }
+        .idle-ltx-generator-island .idle-ltx-title {
+            font-weight: 700;
+            font-size: 1.05rem;
+            margin: 0;
+            letter-spacing: 0.01em;
+        }
+        .idle-ltx-generator-island .idle-ltx-sub {
+            font-size: 0.78rem;
+            color: var(--text-muted, #9ca3af);
+            margin: 0.2rem 0 0;
+            max-width: 52rem;
+            line-height: 1.45;
+        }
+        .idle-ltx-generator-island .idle-ltx-doc-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem 0.85rem;
+            font-size: 0.78rem;
+        }
+        .idle-ltx-generator-island .idle-ltx-doc-links a {
+            color: #a5b4fc;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .idle-ltx-preview-shell {
+            position: relative;
+            width: 100%;
+            max-width: 768px;
+            margin: 0.75rem auto 0;
+            aspect-ratio: 768 / 448;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #0b0d12;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .idle-ltx-preview-shell img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #0b0d12;
+        }
+
+        /* LTX MP4: directly under 3D viewer; frame size matches viewer when .animal-ltx-sync */
+        .idle-ltx-below-viewer {
+            width: 100%;
+            margin-top: 0.65rem;
+        }
+        .idle-ltx-below-viewer.hidden {
+            display: none !important;
+        }
+        .idle-ltx-below-viewer-inner {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 768 / 448;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #0b0d12;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .idle-ltx-below-viewer-inner video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #0b0d12;
+        }
+        .idle-ltx-videos-column {
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+            width: 100%;
+        }
+        .idle-ltx-variant-block {
+            padding: 0.55rem 0.65rem;
+            border-radius: 10px;
+            border: 1px solid rgba(99, 102, 241, 0.28);
+            background: rgba(12, 14, 22, 0.65);
+        }
+        .idle-ltx-variant-title-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.45rem;
+            margin-bottom: 0.35rem;
+        }
+        .idle-ltx-v-name {
+            font-weight: 600;
+            font-size: 0.82rem;
+        }
+        .idle-ltx-v-meta {
+            font-size: 0.72rem;
+            color: var(--text-muted, #9ca3af);
+            line-height: 1.4;
+            margin-bottom: 0.35rem;
+        }
+        .idle-ltx-v-status {
+            font-size: 0.74rem;
+            font-family: ui-monospace, monospace;
+            margin-bottom: 0.35rem;
+        }
+        .idle-ltx-v-err {
+            font-size: 0.74rem;
+            color: #f87171;
+            margin-bottom: 0.35rem;
+            white-space: pre-wrap;
+        }
+        .idle-ltx-v-loading {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.78rem;
+            color: var(--text-muted, #9ca3af);
+            margin: 0.35rem 0;
+        }
+        .idle-ltx-v-loading.hidden {
+            display: none !important;
+        }
+        .idle-ltx-v-shell {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 768 / 448;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #0b0d12;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .idle-ltx-v-shell.hidden {
+            display: none !important;
+        }
+        .idle-ltx-v-shell video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #0b0d12;
+        }
+        .idle-ltx-prompt-panel {
+            margin-top: 0.75rem;
+        }
+        .idle-ltx-prompt-panel label {
+            display: block;
+            font-size: 0.78rem;
+            color: var(--text-muted, #9ca3af);
+            line-height: 1.4;
+            margin-bottom: 0.35rem;
+        }
+        .idle-ltx-base-prompt-ta {
+            width: 100%;
+            min-height: 7.5rem;
+            padding: 0.55rem 0.65rem;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            border-radius: 10px;
+            background: var(--bg-input, rgba(15, 17, 28, 0.95));
+            border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+            color: var(--text-primary, #e5e7eb);
+            resize: vertical;
+        }
+        .idle-ltx-generate-preview {
+            margin-top: 0.75rem;
+            padding: 0.65rem 0.75rem;
+            border-radius: 10px;
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            background: rgba(22, 24, 36, 0.5);
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+        .idle-ltx-generate-preview.hidden {
+            display: none !important;
+        }
+        .idle-ltx-payload-json-pre {
+            margin: 0.4rem 0 0;
+            max-height: 14rem;
+            overflow: auto;
+            padding: 0.5rem 0.6rem;
+            border-radius: 8px;
+            background: #0b0d12;
+            font-family: ui-monospace, monospace;
+            font-size: 0.68rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .idle-ltx-preview-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 0.85rem;
+            text-align: center;
+            padding: 1rem;
+        }
+        .idle-ltx-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem 0.65rem;
+            margin-top: 0.75rem;
+        }
+        .idle-ltx-btn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
+            padding: 0.38rem 0.6rem;
+            font-size: 0.72rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(0, 0, 0, 0.35);
+            color: var(--text-primary, #e5e7eb);
+            cursor: pointer;
+        }
+        .idle-ltx-btn-icon:hover {
+            border-color: rgba(165, 180, 252, 0.5);
+            background: rgba(79, 70, 229, 0.15);
+        }
+        .idle-ltx-btn-icon svg {
+            flex-shrink: 0;
+            opacity: 0.9;
+        }
+        .idle-ltx-status-line {
+            font-size: 0.8rem;
+            color: var(--text-muted, #9ca3af);
+            margin-top: 0.55rem;
+            min-height: 1.2em;
+        }
+        .idle-ltx-status-line.idle-ltx-err {
+            color: #fca5a5;
+        }
+        .idle-ltx-vision-fatal-alert {
+            display: block;
+            margin-bottom: 0.85rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            border: 1px solid #b71c1c;
+            background: rgba(60, 18, 18, 0.95);
+            color: #ffcdd2;
+            font-size: 0.85rem;
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }
+        .idle-ltx-vision-fatal-alert.hidden {
+            display: none;
+        }
+
+        #animal-viewer-ground-row {
+            display: none;
+            align-items: center;
+            gap: 0.55rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.65rem;
+        }
+        #animal-viewer-ground-row.is-visible {
+            display: flex;
+        }
+        #animal-viewer-ground-color {
+            width: 44px;
+            height: 32px;
+            padding: 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            background: transparent;
+        }
+
+        #viewer-admin-animal-shadow-row {
+            display: none;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.65rem 1rem;
+            margin-bottom: 0.65rem;
+            padding: 0.5rem 0.65rem;
+            border-radius: 10px;
+            border: 1px dashed rgba(129, 140, 248, 0.45);
+            background: rgba(79, 70, 229, 0.08);
+        }
+        #viewer-admin-animal-shadow-row.is-visible {
+            display: flex;
+        }
+        #viewer-admin-animal-shadow-row .viewer-admin-shadow-field {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        #viewer-admin-animal-shadow-row label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+        #viewer-admin-animal-shadow-row input[type="range"] {
+            width: min(160px,28vw);
+            height: 4px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+        #viewer-admin-animal-shadow-row .viewer-admin-shadow-val {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            min-width: 2.5rem;
+            font-variant-numeric: tabular-nums;
+        }
+
         @media (max-width: 1360px) {
             .task-columns-layout {
                 grid-template-columns: 1fr;
@@ -2341,14 +2779,15 @@
 
             <!-- Viewer + Custom Animations side-by-side -->
             <div id="viewer-custom-layout" class="viewer-custom-layout">
-                <!-- Left column: 3D viewer + animal tools (single grid cell) -->
-                <div class="viewer-main-column" style="min-width: 0; display: flex; flex-direction: column; gap: 0.75rem;">
                 <!-- Model Viewer (GLB) -->
                 <div id="model-viewer-wrap" class="hidden boot-reveal-surface" style="margin-bottom: 1rem;">
                     <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem;">
                         <div style="font-weight: 600; font-size: 1.1rem;">🎮 3D Preview</div>
                         <div id="model-viewer-status" style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">Loading...</div>
                 </div>
+                    <div id="viewer-backdrop-strip-wrap" class="viewer-backdrop-strip-wrap hidden" role="toolbar">
+                        <div id="viewer-backdrop-strip" class="viewer-backdrop-strip"></div>
+                    </div>
                     <div style="display:flex; gap: 0.5rem; align-items:center; flex-wrap: wrap; margin-bottom: 0.75rem;">
                         <label style="font-size: 0.85rem; color: var(--text-muted);">Animation:</label>
                         <select id="anim-select" class="hidden" style="padding: 0.5rem 0.75rem; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary);">
@@ -2356,11 +2795,37 @@
                         <button id="anim-play-btn" class="btn btn-secondary hidden" style="padding: 0.45rem 0.8rem;">Play</button>
                         <button id="anim-pause-btn" class="btn btn-secondary hidden" style="padding: 0.45rem 0.8rem;">Pause</button>
                 </div>
+                    <div id="animal-viewer-ground-row" aria-hidden="true">
+                        <label for="animal-viewer-ground-color" style="font-size: 0.85rem; color: var(--text-muted);">Ground plane</label>
+                        <input type="color" id="animal-viewer-ground-color" value="#6d7d8c" title="Цвет бесконечной плоскости (под ногами модели)" />
+                        <span style="font-size: 0.72rem; color: var(--text-muted); max-width: 28rem; line-height: 1.35;">
+                            Плоскость под моделью — прозрачная (matte shadow): видны только тени на вашем фоне. Цвет влияет на оттенок тени.
+                        </span>
+                    </div>
+                    <div id="viewer-admin-animal-shadow-row" aria-hidden="true" title="Настройки тени в animal preview — только для администраторов">
+                        <span style="font-size: 0.72rem; color: rgba(129,140,248,0.95); font-weight: 600;">Админ: тень под моделью</span>
+                        <div class="viewer-admin-shadow-field">
+                            <label for="viewer-admin-animal-shadow-opacity">Плотность</label>
+                            <input type="range" id="viewer-admin-animal-shadow-opacity" min="0.08" max="0.95" step="0.01" value="0.5" />
+                            <span id="viewer-admin-animal-shadow-opacity-val" class="viewer-admin-shadow-val">0.50</span>
+                        </div>
+                        <div class="viewer-admin-shadow-field">
+                            <label for="viewer-admin-animal-shadow-soft">Размытие</label>
+                            <input type="range" id="viewer-admin-animal-shadow-soft" min="0" max="10" step="0.05" value="2.2" />
+                            <span id="viewer-admin-animal-shadow-soft-val" class="viewer-admin-shadow-val">2.20</span>
+                        </div>
+                        <div class="viewer-admin-shadow-field">
+                            <label for="viewer-admin-animal-shadow-sun">Солнце ×</label>
+                            <input type="range" id="viewer-admin-animal-shadow-sun" min="0.35" max="3.5" step="0.05" value="1.1" />
+                            <span id="viewer-admin-animal-shadow-sun-val" class="viewer-admin-shadow-val">1.10</span>
+                        </div>
+                    </div>
                     <!-- Viewer Container (relative for overlay positioning) -->
-                    <div id="model-viewer-container" style="position: relative; width: 100%; aspect-ratio: 9/16; max-height: 70vh;">
+                    <div id="model-viewer-container">
+                        <div id="model-viewer-backdrop" class="model-viewer-backdrop" aria-hidden="true"></div>
                         <div class="boot-skeleton-overlay" data-label="Preparing 3D preview..."></div>
                         <!-- Three.js Canvas Target -->
-                        <div id="model-viewer" style="width: 100%; height: 100%; border-radius: 12px; background: #000; border: 1px solid rgba(255,255,255,0.08); overflow: hidden;"></div>
+                        <div id="model-viewer" style="width: 100%; height: 100%; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); overflow: hidden;"></div>
                         
                         <!-- Viewer Overlay UI (above canvas) -->
                         <div id="viewer-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; border-radius: 12px;">
@@ -2687,10 +3152,10 @@
                                                     background: none; border: none; color: rgba(255,255,255,0.6); cursor: pointer; padding: 2px; font-size: 0.8rem;
                                                 ">🧪</button>
                                             </div>
-                                            <input type="range" id="ground-size-slider" min="0.1" max="100" step="0.01" value="100" style="
+                                            <input type="range" id="ground-size-slider" min="20" max="320" step="1" value="200" style="
                                                 flex: 1; height: 4px; cursor: pointer; accent-color: var(--accent);
                                             ">
-                                            <span id="ground-size-val" style="font-size: 0.7rem; color: rgba(255,255,255,0.7); min-width: 20px; text-align: right;">100.000</span>
+                                            <span id="ground-size-val" style="font-size: 0.7rem; color: rgba(255,255,255,0.7); min-width: 20px; text-align: right;">200.000</span>
                                         </div>
                                     </div>
 
@@ -2698,10 +3163,37 @@
                                     <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem;">
                                         <label style="font-size: 0.7rem; color: rgba(255,255,255,0.6); min-width: 55px;">Shadow Soft</label>
                                         <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1;">
-                                            <input type="range" id="shadow-radius-slider" min="0" max="10" step="0.01" value="1" style="
+                                            <input type="range" id="shadow-radius-slider" min="0" max="10" step="0.01" value="2" style="
                                                 flex: 1; height: 4px; cursor: pointer; accent-color: var(--accent);
                                             ">
-                                            <span id="shadow-radius-val" style="font-size: 0.7rem; color: rgba(255,255,255,0.7); min-width: 20px; text-align: right;">1.000</span>
+                                            <span id="shadow-radius-val" style="font-size: 0.7rem; color: rgba(255,255,255,0.7); min-width: 20px; text-align: right;">2.000</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Matte shadow receiver (ShadowMaterial ground) -->
+                                    <div style="margin-top: 0.45rem; padding-top: 0.35rem; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 0.35rem;">
+                                        <div style="display: flex; align-items: center; gap: 0.45rem;">
+                                            <input type="checkbox" id="matte-shadow-enable" checked style="cursor: pointer;" />
+                                            <label for="matte-shadow-enable" style="font-size: 0.68rem; color: rgba(255,255,255,0.75); cursor: pointer;">Matte shadow plane</label>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <label style="font-size: 0.65rem; color: rgba(255,255,255,0.6); min-width: 52px;">Shad.opac</label>
+                                            <input type="range" id="matte-shadow-opacity-slider" min="0.05" max="0.6" step="0.01" value="0.28" style="flex: 1; height: 4px; cursor: pointer; accent-color: var(--accent);" />
+                                            <span id="matte-shadow-opacity-val" style="font-size: 0.65rem; color: rgba(255,255,255,0.75); min-width: 36px; text-align: right;">0.28</span>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <label style="font-size: 0.65rem; color: rgba(255,255,255,0.6); min-width: 52px;">Y offset</label>
+                                            <input type="range" id="matte-shadow-yofs-slider" min="0.001" max="0.05" step="0.001" value="0.005" style="flex: 1; height: 4px; cursor: pointer; accent-color: var(--accent);" />
+                                            <span id="matte-shadow-yofs-val" style="font-size: 0.65rem; color: rgba(255,255,255,0.75); min-width: 36px; text-align: right;">0.005</span>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <label style="font-size: 0.65rem; color: rgba(255,255,255,0.6); min-width: 52px;">Sun ×</label>
+                                            <input type="range" id="matte-shadow-light-slider" min="0.2" max="4" step="0.05" value="2" style="flex: 1; height: 4px; cursor: pointer; accent-color: var(--accent);" />
+                                            <span id="matte-shadow-light-val" style="font-size: 0.65rem; color: rgba(255,255,255,0.75); min-width: 36px; text-align: right;">2.00</span>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 0.45rem;">
+                                            <input type="checkbox" id="matte-shadow-debug" style="cursor: pointer;" />
+                                            <label for="matte-shadow-debug" style="font-size: 0.65rem; color: rgba(255,255,255,0.6); cursor: pointer;">Debug shadow / light helpers</label>
                                         </div>
                                     </div>
 
@@ -3188,6 +3680,61 @@
                         </div>
                     </div>
 
+                    <div id="viewer-admin-camera-debug" class="hidden viewer-admin-camera-debug" aria-live="polite">
+                        <div class="viewer-admin-camera-debug-title">Камера (отладка): position, target, rotation</div>
+                        <pre id="viewer-admin-camera-debug-pre" class="viewer-admin-camera-debug-pre"></pre>
+                        <button type="button" class="btn btn-secondary" id="viewer-admin-camera-debug-copy" style="margin-top:0.35rem;padding:0.25rem 0.55rem;font-size:0.72rem;">Копировать JSON</button>
+                    </div>
+
+                    <div id="idle-ltx-video-below-viewer-wrap" class="idle-ltx-below-viewer hidden" aria-hidden="true">
+                        <div class="idle-ltx-videos-column" id="idle-ltx-videos-column">
+                            <div class="idle-ltx-variant-block" id="idle-ltx-variant-0">
+                                <div class="idle-ltx-variant-title-row">
+                                    <span class="idle-ltx-v-name" id="idle-ltx-v-name-0">—</span>
+                                    <button type="button" class="btn btn-secondary idle-ltx-v-copy" id="idle-ltx-v-copy-0" style="padding:0.28rem 0.5rem;font-size:0.7rem;">Копировать payload</button>
+                                </div>
+                                <div class="idle-ltx-v-meta" id="idle-ltx-v-meta-0"></div>
+                                <div class="idle-ltx-v-status" id="idle-ltx-v-status-0"></div>
+                                <div class="idle-ltx-v-err hidden" id="idle-ltx-v-err-0"></div>
+                                <div class="idle-ltx-v-loading" id="idle-ltx-v-loading-0">Ожидание…</div>
+                                <div class="idle-ltx-v-shell hidden" id="idle-ltx-v-shell-0"><video id="idle-ltx-result-video-below-0" playsinline muted autoplay controls preload="auto"></video></div>
+                            </div>
+                            <div class="idle-ltx-variant-block" id="idle-ltx-variant-1">
+                                <div class="idle-ltx-variant-title-row">
+                                    <span class="idle-ltx-v-name" id="idle-ltx-v-name-1">—</span>
+                                    <button type="button" class="btn btn-secondary idle-ltx-v-copy" id="idle-ltx-v-copy-1" style="padding:0.28rem 0.5rem;font-size:0.7rem;">Копировать payload</button>
+                                </div>
+                                <div class="idle-ltx-v-meta" id="idle-ltx-v-meta-1"></div>
+                                <div class="idle-ltx-v-status" id="idle-ltx-v-status-1"></div>
+                                <div class="idle-ltx-v-err hidden" id="idle-ltx-v-err-1"></div>
+                                <div class="idle-ltx-v-loading" id="idle-ltx-v-loading-1">Ожидание…</div>
+                                <div class="idle-ltx-v-shell hidden" id="idle-ltx-v-shell-1"><video id="idle-ltx-result-video-below-1" playsinline muted autoplay controls preload="auto"></video></div>
+                            </div>
+                            <div class="idle-ltx-variant-block" id="idle-ltx-variant-2">
+                                <div class="idle-ltx-variant-title-row">
+                                    <span class="idle-ltx-v-name" id="idle-ltx-v-name-2">—</span>
+                                    <button type="button" class="btn btn-secondary idle-ltx-v-copy" id="idle-ltx-v-copy-2" style="padding:0.28rem 0.5rem;font-size:0.7rem;">Копировать payload</button>
+                                </div>
+                                <div class="idle-ltx-v-meta" id="idle-ltx-v-meta-2"></div>
+                                <div class="idle-ltx-v-status" id="idle-ltx-v-status-2"></div>
+                                <div class="idle-ltx-v-err hidden" id="idle-ltx-v-err-2"></div>
+                                <div class="idle-ltx-v-loading" id="idle-ltx-v-loading-2">Ожидание…</div>
+                                <div class="idle-ltx-v-shell hidden" id="idle-ltx-v-shell-2"><video id="idle-ltx-result-video-below-2" playsinline muted autoplay controls preload="auto"></video></div>
+                            </div>
+                            <div class="idle-ltx-variant-block" id="idle-ltx-variant-3">
+                                <div class="idle-ltx-variant-title-row">
+                                    <span class="idle-ltx-v-name" id="idle-ltx-v-name-3">—</span>
+                                    <button type="button" class="btn btn-secondary idle-ltx-v-copy" id="idle-ltx-v-copy-3" style="padding:0.28rem 0.5rem;font-size:0.7rem;">Копировать payload</button>
+                                </div>
+                                <div class="idle-ltx-v-meta" id="idle-ltx-v-meta-3"></div>
+                                <div class="idle-ltx-v-status" id="idle-ltx-v-status-3"></div>
+                                <div class="idle-ltx-v-err hidden" id="idle-ltx-v-err-3"></div>
+                                <div class="idle-ltx-v-loading" id="idle-ltx-v-loading-3">Ожидание…</div>
+                                <div class="idle-ltx-v-shell hidden" id="idle-ltx-v-shell-3"><video id="idle-ltx-result-video-below-3" playsinline muted autoplay controls preload="auto"></video></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Viewer Controls Row (removed - using SAVE RIG T-POSE button inside viewer) -->
                     <div id="task-animal-detection-card" class="task-animal-detection-card hidden">
                         <div class="task-animal-detection-title">Detected model type: <span id="task-animal-detection-label">-</span></div>
@@ -3195,46 +3742,59 @@
                     </div>
             </div>
 
-                    <!-- Outside model-viewer-wrap: visible before 3D viewer finishes boot (wrap stays display:none until reveal) -->
-                    <div id="animal-idle-ltx-panel" class="hidden" style="margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-secondary);">
-                        <div style="font-weight:600; margin-bottom:0.35rem;">Idle animation Generator (LTX)</div>
-                        <p style="font-size:0.82rem; color:var(--text-muted); margin:0 0 0.5rem;">768×448 snapshot → Renderfin LTX reference MP4</p>
-                        <button type="button" id="animal-idle-generate-btn" class="btn btn-primary" disabled>Generate</button>
-                        <span id="animal-idle-status" class="animal-fitter-mono" style="margin-left:0.5rem;"></span>
-                        <video id="animal-idle-video" class="hidden" controls playsinline style="width:100%; max-width:768px; margin-top:0.5rem; border-radius:8px; background:#000;"></video>
-                        <div id="animal-idle-error" class="alert alert-error hidden" style="margin-top:0.5rem;"></div>
+            <section id="idle-ltx-generator-island" class="idle-ltx-generator-island hidden" aria-label="Idle LTX video generator">
+                <div id="idle-ltx-vision-fatal-alert" class="idle-ltx-vision-fatal-alert hidden" role="alert" aria-live="assertive"></div>
+                <div class="idle-ltx-head">
+                    <div>
+                        <h2 class="idle-ltx-title">Idle animation generator (LTX / Renderfin)</h2>
+                        <p class="idle-ltx-sub">
+                            Кадр 768×448 из 3D viewer → Renderfin <code>upload_image</code> → <strong>Vision JSON</strong> (без хардкода вида)
+                            → 4 варианта <code>generate_video</code> (разные <code>prompt</code>, <code>frame_count</code> 129, 768×448).
+                            Статус клипа: <code>/idle-ltx/clip-status</code> (приоритет <code>api-render-get-task-by-url</code>).
+                            Подсказка по полям без POST:
+                            <a href="https://free3d.online/renderfin/api/generate_video" target="_blank" rel="noopener noreferrer">GET generate_video</a>.
+                            Legacy тот же JSON:
+                            <a href="https://free3d.online/api-render" target="_blank" rel="noopener noreferrer">POST api-render</a>.
+                        </p>
                     </div>
-
-                    <div id="animal-animation-fitter-panel" class="hidden" style="margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-secondary);">
-                        <div style="font-weight:600; margin-bottom:0.35rem;">Fit skeletal animation from video (browser MVP)</div>
-                        <label style="display:block; font-size:0.78rem; color:var(--text-muted);">Target MP4 URL (proxy same-origin)</label>
-                        <input type="text" id="animal-fitter-video-url" class="form-input" style="width:100%; margin:0.25rem 0 0.5rem;" placeholder="/api/task/.../idle-animation/proxy-video?url=..." />
-                        <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
-                            <label style="font-size:0.78rem;">Convergence % <input type="number" id="animal-fitter-conv" value="85" min="50" max="99" style="width:4rem;"></label>
-                            <label style="font-size:0.78rem;">Max time (s) <input type="number" id="animal-fitter-time" value="45" min="5" max="600" style="width:4rem;"></label>
-                            <label style="font-size:0.78rem;">Quality
-                                <select id="animal-fitter-quality" class="form-input" style="padding:0.25rem 0.5rem;">
-                                    <option value="fast">fast</option>
-                                    <option value="balanced" selected>balanced</option>
-                                    <option value="high">high</option>
-                                </select>
-                            </label>
-                        </div>
-                        <div style="margin-top:0.5rem; display:flex; flex-wrap:wrap; gap:0.45rem;">
-                            <button type="button" id="animal-fitter-run-btn" class="btn btn-primary" disabled>Generate / Fit Animation From Video</button>
-                            <button type="button" id="animal-fitter-stop-btn" class="btn btn-secondary" disabled>Stop</button>
-                            <button type="button" id="animal-fitter-apply-btn" class="btn btn-secondary" disabled>Apply best animation</button>
-                            <button type="button" id="animal-fitter-export-btn" class="btn btn-secondary" disabled>Export JSON</button>
-                        </div>
-                        <div id="animal-fitter-progress" class="animal-fitter-mono" style="margin-top:0.35rem;"></div>
-                        <div id="animal-fitter-preview-row">
-                            <div><div style="font-size:0.72rem; color:var(--text-muted);">Target frame</div><canvas id="animal-fitter-canvas-target" width="160" height="160"></canvas></div>
-                            <div><div style="font-size:0.72rem; color:var(--text-muted);">Render fit</div><canvas id="animal-fitter-canvas-model" width="160" height="160"></canvas></div>
-                        </div>
-                        <div id="animal-fitter-log" class="hidden"></div>
+                    <div class="idle-ltx-doc-links">
+                        <a href="https://free3d.online/renderfin-skill.md" target="_blank" rel="noopener noreferrer">Renderfin API skill</a>
+                        <a href="https://free3d.online/renderfin/api/generate_video" target="_blank" rel="noopener noreferrer">GET/POST generate_video</a>
+                        <a href="https://free3d.online/api-render" target="_blank" rel="noopener noreferrer">api-render (legacy)</a>
+                        <a href="https://free3d.online/renderfin/api/animation/task_status" target="_blank" rel="noopener noreferrer">task_status</a>
                     </div>
-
                 </div>
+                <div class="idle-ltx-preview-shell" id="idle-ltx-preview-shell">
+                    <div class="idle-ltx-preview-placeholder" id="idle-ltx-preview-placeholder">Снимок появится после нажатия «Генерировать»</div>
+                    <img id="idle-ltx-snapshot-img" alt="3D viewer still for LTX" class="hidden" width="768" height="448" decoding="async" />
+                </div>
+                <div class="idle-ltx-prompt-panel">
+                    <label for="idle-ltx-user-prompt">Задача для Vision (EN, без указания вида): снимок анализируется моделью зрения; итоговые LTX-промпты строятся из JSON.</label>
+                    <textarea id="idle-ltx-user-prompt" class="idle-ltx-base-prompt-ta" rows="4" autocomplete="off" spellcheck="false"></textarea>
+                </div>
+                <div id="idle-ltx-generate-preview" class="idle-ltx-generate-preview hidden" aria-live="polite">
+                    <div><strong>Провайдер Vision:</strong> <span id="idle-ltx-vision-provider-display">—</span></div>
+                    <div style="margin-top: 0.5rem;"><strong>Распознанный вид / уверенность:</strong> <span id="idle-ltx-species-display">—</span></div>
+                    <div style="margin-top: 0.5rem;"><strong>JSON Vision → LTX</strong> (coerced):</div>
+                    <pre id="idle-ltx-payload-json-pre" class="idle-ltx-payload-json-pre"></pre>
+                </div>
+                <div class="idle-ltx-actions">
+                    <button type="button" class="btn btn-primary" id="idle-ltx-generate-btn">Генерировать</button>
+                    <button type="button" class="idle-ltx-btn-icon" id="idle-ltx-copy-payload-btn" title="Копировать JSON запроса generate_video">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        Копировать payload
+                    </button>
+                    <button type="button" class="idle-ltx-btn-icon" id="idle-ltx-copy-start-response-btn" title="Копировать полный ответ /api/task/.../idle-ltx/start">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+                        Копировать ответ start
+                    </button>
+                    <button type="button" class="idle-ltx-btn-icon" id="idle-ltx-copy-status-btn" title="Копировать последний ответ task_status">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                        Копировать статус
+                    </button>
+                </div>
+                <div class="idle-ltx-status-line" id="idle-ltx-status-line"></div>
+            </section>
 
             <!-- Custom animations picker -->
             <div id="custom-animations-wrap" class="card hidden viewer-side-panel boot-deferred-section boot-reveal-surface">
@@ -3479,7 +4039,7 @@
                 <!-- Video Player with overlay badges -->
                 <div id="video-player-wrap">
                     <div class="boot-skeleton-overlay" data-label="Preparing video preview..."></div>
-                    <video id="video-player" controls muted playsinline preload="metadata" loop></video>
+                    <video id="video-player" controls muted playsinline preload="auto" loop></video>
                     
                     <!-- Author overlay - top left -->
                     <a href="#" id="task-author-link" class="task-card-author-overlay hidden"></a>
@@ -5019,16 +5579,55 @@
 
                 if (this.isAnimalTaskMode()) {
                     this.hideAnimalUnsupportedBlocks();
+                    const mvWrap = document.getElementById('model-viewer-wrap');
+                    const mvContainer = document.getElementById('model-viewer-container');
+                    mvWrap?.classList.add('animal-ltx-sync');
+                    mvContainer?.classList.add('animal-ltx-aspect');
+                    const idleIsland = document.getElementById('idle-ltx-generator-island');
+                    if (idleIsland) {
+                        idleIsland.classList.toggle('hidden', this.task.status === 'error');
+                    }
+                    if (this.task.status === 'error') {
+                        const belowWrap = document.getElementById('idle-ltx-video-below-viewer-wrap');
+                        belowWrap?.classList.add('hidden');
+                        belowWrap?.setAttribute('aria-hidden', 'true');
+                        document.querySelectorAll('#idle-ltx-videos-column video').forEach((v) => {
+                            v.pause();
+                            v.removeAttribute('src');
+                        });
+                        document.querySelectorAll('.idle-ltx-v-shell').forEach((s) => s.classList.add('hidden'));
+                        document.querySelectorAll('.idle-ltx-v-err').forEach((e) => {
+                            e.textContent = '';
+                            e.classList.add('hidden');
+                        });
+                    }
+                    const gRow = document.getElementById('animal-viewer-ground-row');
+                    if (gRow) {
+                        const showGroundUi = this.task.status !== 'error';
+                        gRow.classList.toggle('is-visible', showGroundUi);
+                        gRow.setAttribute('aria-hidden', showGroundUi ? 'false' : 'true');
+                    }
+                    void window.syncViewerAdminAnimalShadowPanelVisibility?.();
                 } else {
-                    document.body.classList.remove('task-page-animal-idle');
-                    ['animal-idle-ltx-panel', 'animal-animation-fitter-panel'].forEach((pid) => {
-                        const el = document.getElementById(pid);
-                        if (el) {
-                            el.classList.add('hidden');
-                            el.classList.remove('is-ready');
-                        }
+                    document.getElementById('idle-ltx-generator-island')?.classList.add('hidden');
+                    document.getElementById('model-viewer-wrap')?.classList.remove('animal-ltx-sync');
+                    document.getElementById('model-viewer-container')?.classList.remove('animal-ltx-aspect');
+                    const belowWrap = document.getElementById('idle-ltx-video-below-viewer-wrap');
+                    belowWrap?.classList.add('hidden');
+                    belowWrap?.setAttribute('aria-hidden', 'true');
+                    document.querySelectorAll('#idle-ltx-videos-column video').forEach((v) => {
+                        v.pause();
+                        v.removeAttribute('src');
                     });
-                    document.getElementById('model-viewer-wrap')?.classList?.remove('animal-viewer-aspect-ltx');
+                    document.querySelectorAll('.idle-ltx-v-shell').forEach((s) => s.classList.add('hidden'));
+                    document.querySelectorAll('.idle-ltx-v-err').forEach((e) => {
+                        e.textContent = '';
+                        e.classList.add('hidden');
+                    });
+                    document.getElementById('animal-viewer-ground-row')?.classList.remove('is-visible');
+                    document.getElementById('animal-viewer-ground-row')?.setAttribute('aria-hidden', 'true');
+                    document.getElementById('viewer-admin-animal-shadow-row')?.classList.remove('is-visible');
+                    document.getElementById('viewer-admin-animal-shadow-row')?.setAttribute('aria-hidden', 'true');
                     // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
                     // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
                     void this.loadAnimationCatalog().catch(() => {});
@@ -5055,12 +5654,6 @@
                 this.animationCatalog = null;
                 this.animationCatalogLoaded = false;
                 this.selectedAnimationId = null;
-                /* Idle LTX + fitter: show as soon as task JSON says animal (panels live outside #model-viewer-wrap). */
-                const wrap = document.getElementById('model-viewer-wrap');
-                wrap?.classList?.add('animal-viewer-aspect-ltx');
-                window.__taskPageBoot?.revealElement('animal-idle-ltx-panel', 0);
-                window.__taskPageBoot?.revealElement('animal-animation-fitter-panel', 0);
-                document.body.classList.add('task-page-animal-idle');
             },
 
             renderAnimalDetectionSection() {
@@ -7348,7 +7941,6 @@
         import { OBJLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
         import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
         import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js';
-        import { Sky } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/objects/Sky.js';
 
         import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
         import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -7395,11 +7987,17 @@
         if (!taskId || !wrap || !host || !statusEl) {
             // nothing to do
         } else {
+            let scene = null;
+            let backdropSceneTexture = null;
+            let backdropTextureLoadSerial = 0;
+            let usingStaticBackdrop = false;
+
             // ============================================================
             // LIGHTING & RENDERER CONFIG (edit values here)
             // ============================================================
             const LIGHTING_CONFIG = {
-                // IBL: PMREM from RoomEnvironment (no external .hdr/.exr — avoids 404s and large assets)
+                // Фон: статическое изображение (CSS под canvas) + тени на прозрачной плоскости. IBL — RoomEnvironment.
+                backdropImagePath: '/static/env/backdrops/meadow.jpg',
                 envIntensity: 1.0,          // scene.environmentIntensity (Three.js r152+)
 
                 // Tone mapping
@@ -7428,6 +8026,239 @@
                 skyMieDirectionalG: 0.78,
             };
             // ============================================================
+
+            const VIEWER_BACKDROP_LS_KEY = 'autorig:viewerBackdropId:v1';
+
+            /** Animal task viewer uses its own THREE.Scene; sync plate when gallery / LIGHTING_CONFIG changes. */
+            function syncAnimalStandaloneBackdropFromPath(reason = '') {
+                if (!THREE) return;
+                const av = window.animalStandaloneViewer;
+                if (!av || !av.scene || !av.started) return;
+                const path = String(LIGHTING_CONFIG.backdropImagePath || '').trim();
+                if (!path) return;
+                av.backdropLoadSerial = (av.backdropLoadSerial || 0) + 1;
+                const serial = av.backdropLoadSerial;
+                const loader = new THREE.TextureLoader();
+                loader.setCrossOrigin('anonymous');
+                loader.load(
+                    path,
+                    (tex) => {
+                        if (serial !== av.backdropLoadSerial) {
+                            tex.dispose();
+                            return;
+                        }
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.minFilter = THREE.LinearFilter;
+                        tex.magFilter = THREE.LinearFilter;
+                        try {
+                            tex.generateMipmaps = false;
+                        } catch (_) {}
+                        if (av.backdropTexture) {
+                            av.backdropTexture.dispose();
+                            av.backdropTexture = null;
+                        }
+                        av.backdropTexture = tex;
+                        av.scene.background = tex;
+                        window.taskDbg?.('[Viewer] animal standalone scene.background = plate', path, reason);
+                    },
+                    undefined,
+                    (err) => console.warn('[ViewerBackdrop] animal standalone texture failed', path, err)
+                );
+            }
+
+            function applyViewerBackdropUrl(pathOpt, logTag = '') {
+                const next = String(pathOpt || LIGHTING_CONFIG.backdropImagePath || '').trim();
+                if (next) LIGHTING_CONFIG.backdropImagePath = next;
+                const el = document.getElementById('model-viewer-backdrop');
+                const path = String(LIGHTING_CONFIG.backdropImagePath || '').trim();
+                if (el && path) {
+                    el.style.backgroundImage = `url(${JSON.stringify(path)})`;
+                }
+                if (logTag) {
+                    console.log('[ViewerBackdrop]', logTag, { path, hasEl: !!el });
+                }
+                syncSceneBackdropFromPath(logTag || 'applyViewerBackdropUrl');
+                syncAnimalStandaloneBackdropFromPath(logTag || 'applyViewerBackdropUrl');
+            }
+
+            /** Static environment plate: same image as CSS under canvas, also as scene.background (composer-safe). */
+            function syncSceneBackdropFromPath(reason = '') {
+                if (!THREE) return;
+                const path = String(LIGHTING_CONFIG.backdropImagePath || '').trim();
+                if (!path || !scene) return;
+                if (!usingStaticBackdrop) return;
+                backdropTextureLoadSerial += 1;
+                const serial = backdropTextureLoadSerial;
+                const loader = new THREE.TextureLoader();
+                loader.setCrossOrigin('anonymous');
+                loader.load(
+                    path,
+                    (tex) => {
+                        if (serial !== backdropTextureLoadSerial) {
+                            tex.dispose();
+                            return;
+                        }
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.minFilter = THREE.LinearFilter;
+                        tex.magFilter = THREE.LinearFilter;
+                        try {
+                            tex.generateMipmaps = false;
+                        } catch (_) {}
+                        if (backdropSceneTexture) {
+                            backdropSceneTexture.dispose();
+                            backdropSceneTexture = null;
+                        }
+                        backdropSceneTexture = tex;
+                        scene.background = tex;
+                        window.taskDbg?.('[Viewer] scene.background = backdrop texture', path, reason);
+                    },
+                    undefined,
+                    (err) => console.warn('[ViewerBackdrop] backdrop texture load failed', path, err)
+                );
+            }
+
+            applyViewerBackdropUrl();
+
+            function backdropLabel(id) {
+                const k = `viewer_bg_${id}`;
+                return typeof window.t === 'function' ? window.t(k) : id;
+            }
+
+            function refreshBackdropStripLabels() {
+                const wrapEl = document.getElementById('viewer-backdrop-strip-wrap');
+                const strip = document.getElementById('viewer-backdrop-strip');
+                if (wrapEl && typeof window.t === 'function') {
+                    wrapEl.setAttribute('aria-label', window.t('viewer_backdrop_strip_aria'));
+                }
+                if (!strip) return;
+                strip.querySelectorAll('button.viewer-backdrop-thumb').forEach((b) => {
+                    const id = b.dataset.backdropId;
+                    if (!id) return;
+                    const lab = backdropLabel(id);
+                    b.title = lab;
+                    b.setAttribute('aria-label', lab);
+                });
+            }
+
+            window.addEventListener('languageChanged', () => refreshBackdropStripLabels());
+
+            async function loadViewerBackdropManifest() {
+                try {
+                    const r = await fetch('/api/viewer-backdrops', { cache: 'no-store' });
+                    if (r.ok) {
+                        const data = await r.json();
+                        if (Array.isArray(data) && data.length) {
+                            window.taskDbg?.('[ViewerBackdrop] manifest from API', data.length);
+                            return data;
+                        }
+                        console.warn('[ViewerBackdrop] API returned empty list');
+                    } else {
+                        console.warn('[ViewerBackdrop] /api/viewer-backdrops HTTP', r.status, '(using static JSON fallback if available)');
+                    }
+                } catch (err) {
+                    console.warn('[ViewerBackdrop] API manifest failed', err);
+                }
+                try {
+                    const r = await fetch('/static/env/viewer_backdrops.json', { cache: 'no-store' });
+                    if (r.ok) {
+                        const data = await r.json();
+                        if (Array.isArray(data) && data.length) {
+                            console.warn('[ViewerBackdrop] using static viewer_backdrops.json — deploy backend with /api/viewer-backdrops for auto folder scan');
+                            return data;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[ViewerBackdrop] static JSON fallback', err);
+                }
+                return null;
+            }
+
+            async function initViewerBackdropStrip() {
+                const wrapEl = document.getElementById('viewer-backdrop-strip-wrap');
+                const strip = document.getElementById('viewer-backdrop-strip');
+                if (!wrapEl || !strip) {
+                    console.warn('[ViewerBackdrop] init skipped: missing wrap or strip');
+                    return;
+                }
+                if (strip.dataset.backdropWired === '1') {
+                    return;
+                }
+                let manifest = await loadViewerBackdropManifest();
+                if (!Array.isArray(manifest) || !manifest.length) {
+                    manifest = [{ id: 'meadow', src: '/static/env/backdrops/meadow.jpg' }];
+                    console.warn('[ViewerBackdrop] using hardcoded fallback (empty folder / fetch failed)');
+                }
+
+                const first = manifest.find((m) => m && m.id != null && m.src) || manifest[0];
+                let current = first;
+                try {
+                    localStorage.setItem(VIEWER_BACKDROP_LS_KEY, String(first.id));
+                } catch (_) {}
+                applyViewerBackdropUrl(first.src, 'init default (first in manifest)');
+
+                strip.replaceChildren();
+
+                const refreshPressed = (item) => {
+                    const sid = String(item.id);
+                    strip.querySelectorAll('button.viewer-backdrop-thumb').forEach((b) => {
+                        b.setAttribute('aria-pressed', String(b.dataset.backdropId) === sid ? 'true' : 'false');
+                    });
+                };
+
+                for (const item of manifest) {
+                    if (item.id == null || !item.src) continue;
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'viewer-backdrop-thumb';
+                    btn.dataset.backdropId = String(item.id);
+                    btn.style.backgroundImage = `url(${JSON.stringify(item.src)})`;
+                    const lab = backdropLabel(item.id);
+                    btn.title = lab;
+                    btn.setAttribute('aria-label', lab);
+                    btn.setAttribute('aria-pressed', String(item.id) === String(current.id) ? 'true' : 'false');
+                    strip.appendChild(btn);
+                }
+
+                function onPickBackdrop(ev, phase) {
+                    const t = ev.target;
+                    const btn = t && t.closest ? t.closest('button.viewer-backdrop-thumb') : null;
+                    if (!btn || !strip.contains(btn)) {
+                        if (wrapEl.contains(t)) {
+                            console.log('[ViewerBackdrop] click inside strip area (not a thumb)', {
+                                phase,
+                                type: ev.type,
+                                tag: t && t.tagName,
+                                cls: t && t.className
+                            });
+                        }
+                        return;
+                    }
+                    const id = btn.dataset.backdropId;
+                    const item = manifest.find((m) => m != null && String(m.id) === String(id));
+                    console.log('[ViewerBackdrop] thumb picked', { phase, type: ev.type, id, found: !!item, src: item && item.src });
+                    if (!item || !item.src) {
+                        console.warn('[ViewerBackdrop] no item in manifest for id', id);
+                        return;
+                    }
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    current = item;
+                    applyViewerBackdropUrl(item.src, 'user pick');
+                    try {
+                        localStorage.setItem(VIEWER_BACKDROP_LS_KEY, String(item.id));
+                    } catch (_) {}
+                    refreshPressed(item);
+                }
+
+                wrapEl.addEventListener('click', (ev) => onPickBackdrop(ev, 'click-capture'), true);
+
+                strip.dataset.backdropWired = '1';
+                refreshBackdropStripLabels();
+                wrapEl.classList.remove('hidden');
+                console.log('[ViewerBackdrop] strip ready', { count: manifest.length, defaultId: first && first.id });
+            }
+
+            void initViewerBackdropStrip();
 
             let mixer = null;
             let animations = [];
@@ -8008,23 +8839,35 @@
             async function loadEnvironment(scene) {
                 if (!renderer) return false;
                 setStatus('Loading IBL...');
+                scene.background = null;
                 try {
-                    if (!skyObject) {
-                        skyObject = new Sky();
-                        skyObject.scale.setScalar(450000);
-                        scene.add(skyObject);
+                    if (skyObject) {
+                        scene.remove(skyObject);
+                        skyObject = null;
                     }
-                    if (!skyPmremGenerator) {
-                        skyPmremGenerator = new THREE.PMREMGenerator(renderer);
+                    if (skyEnvironmentTexture) {
+                        try {
+                            skyEnvironmentTexture.dispose();
+                        } catch (_) {}
+                        skyEnvironmentTexture = null;
                     }
-                    updateSkyEnvironment(true);
+                    usingStaticBackdrop = true;
+
+                    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+                    const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+                    scene.environment = envTexture;
+                    pmremGenerator.dispose();
+
                     if ('environmentIntensity' in scene) {
                         scene.environmentIntensity = LIGHTING_CONFIG.envIntensity;
                     }
-                    window.taskDbg('[Viewer] Sky environment ready (procedural Sky PMREM)');
+                    window.taskDbg('[Viewer] Static backdrop image + RoomEnvironment IBL (no HDRI, no procedural sky)');
+                    syncSceneBackdropFromPath('loadEnvironment');
+                    setStatus('Environment ready');
                     return true;
                 } catch (e) {
-                    console.error('[Viewer] Sky environment setup failed, falling back to RoomEnvironment:', e);
+                    console.error('[Viewer] Environment setup failed:', e);
+                    usingStaticBackdrop = false;
                     try {
                         const pmremGenerator = new THREE.PMREMGenerator(renderer);
                         const envTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -8038,6 +8881,7 @@
             }
 
             function updateSkyEnvironment(forcePmrem = false) {
+                if (usingStaticBackdrop) return;
                 if (!scene || !renderer || !skyObject) return;
                 const uniforms = skyObject.material.uniforms;
                 uniforms.turbidity.value = LIGHTING_CONFIG.skyTurbidity;
@@ -8064,7 +8908,7 @@
 
             // Scene state (persistent across model loads)
             let sceneInited = false;
-            let scene, renderer, camera, controls, transform;
+            let renderer, camera, controls, transform;
             let zoomState = null;  // Custom zoom with inertia - initialized in initScene
             let currentModel = null;
             let preparedLoaded = false;
@@ -8077,6 +8921,209 @@
             let stopMainViewerLoop = () => {};
             let mainViewerResize = () => {};
             let groundPlaneMesh = null;
+            let matteShadowDirHelper = null;
+            let matteShadowCamHelper = null;
+
+            const MATTE_SHADOW_PLANE_NAME = 'MatteShadowReceiverPlane';
+            const MATTE_SHADOW_PLANE_BASE = 200;
+
+            function shouldSkipMatteShadowCastMesh(mesh) {
+                const n = String(mesh.name || '').toLowerCase();
+                if (!n) return false;
+                if (n === MATTE_SHADOW_PLANE_NAME.toLowerCase()) return true;
+                if (/\bbackground\b|backdrop|envmap/i.test(n)) return false;
+                return /(^|[_\s])(ground|helper|debug|grid|gizmo)([_\s.\d]|$)/i.test(n)
+                    || /\bsky(dome|box)?\b|\binfinite\b|\breceiver\b/i.test(n);
+            }
+
+            function applyModelMatteShadowFlags(root, shadowsEnabled) {
+                if (!root || !THREE) return;
+                const matte = !!viewerState.enable_matte_shadow_receiver_bool;
+                root.traverse((obj) => {
+                    if (!obj.isMesh) return;
+                    if (shouldSkipMatteShadowCastMesh(obj)) {
+                        obj.castShadow = false;
+                        obj.receiveShadow = false;
+                        return;
+                    }
+                    if (matte) {
+                        obj.castShadow = !!shadowsEnabled;
+                        obj.receiveShadow = false;
+                        obj.frustumCulled = false;
+                    } else {
+                        obj.castShadow = !!shadowsEnabled;
+                        obj.receiveShadow = !!shadowsEnabled;
+                    }
+                });
+            }
+
+            function syncMatteShadowPlaneVisibility() {
+                if (!groundPlaneMesh) return;
+                const profile = getMainViewerQualityProfile();
+                const shadowsEnabled = !!profile.shadows;
+                const matteOn = !!viewerState.enable_matte_shadow_receiver_bool;
+                const show = shadowsEnabled && matteOn;
+                groundPlaneMesh.visible = show;
+                groundPlaneMesh.receiveShadow = show;
+            }
+
+            function updateMatteShadowReceiverForModel(model) {
+                if (!model || !THREE || !groundPlaneMesh) return;
+                try {
+                    model.updateMatrixWorld(true);
+                    const box = new THREE.Box3().setFromObject(model);
+                    if (!Number.isFinite(box.min.y)) return;
+                    const off = Math.max(0.0001, Number(viewerState.shadow_y_offset_float) || 0.005);
+                    groundPlaneMesh.position.set(0, box.min.y - off, 0);
+                } catch (err) {
+                    console.warn('[MatteShadowReceiver] updateMatteShadowReceiverForModel:', err);
+                }
+            }
+
+            function syncMatteShadowDebugHelpers() {
+                if (!scene || !sunLight || !THREE) return;
+                const dbg = !!viewerState.matte_shadow_debug_bool;
+                if (dbg) {
+                    if (!matteShadowDirHelper) {
+                        matteShadowDirHelper = new THREE.DirectionalLightHelper(sunLight, 1.5, 0xffee88);
+                        scene.add(matteShadowDirHelper);
+                    } else {
+                        matteShadowDirHelper.update();
+                    }
+                    if (sunLight.shadow && !matteShadowCamHelper) {
+                        matteShadowCamHelper = new THREE.CameraHelper(sunLight.shadow.camera);
+                        scene.add(matteShadowCamHelper);
+                    }
+                    if (matteShadowCamHelper && sunLight.shadow) {
+                        matteShadowCamHelper.update();
+                    }
+                } else {
+                    if (matteShadowDirHelper) {
+                        scene.remove(matteShadowDirHelper);
+                        matteShadowDirHelper.dispose();
+                        matteShadowDirHelper = null;
+                    }
+                    if (matteShadowCamHelper) {
+                        scene.remove(matteShadowCamHelper);
+                        matteShadowCamHelper.dispose();
+                        matteShadowCamHelper = null;
+                    }
+                }
+            }
+
+            function logMatteShadowReceiverDebug(model, shadowPlane, light) {
+                if (!viewerState.matte_shadow_debug_bool || !THREE) return;
+                let modelBox = null;
+                if (model) {
+                    try {
+                        const b = new THREE.Box3().setFromObject(model);
+                        modelBox = { min: b.min.toArray(), max: b.max.toArray() };
+                    } catch (_) {
+                        modelBox = null;
+                    }
+                }
+                const cam = light && light.shadow && light.shadow.camera;
+                console.log('[MatteShadowReceiver] debug', {
+                    modelBox,
+                    shadowPlaneY: shadowPlane ? shadowPlane.position.y : null,
+                    lightPosition: light && light.position ? light.position.toArray() : null,
+                    shadowCamBounds: cam ? {
+                        left: cam.left,
+                        right: cam.right,
+                        top: cam.top,
+                        bottom: cam.bottom,
+                        near: cam.near,
+                        far: cam.far
+                    } : null,
+                    rendererShadowMapEnabled: renderer && !!renderer.shadowMap.enabled
+                });
+            }
+
+            function setupMatteShadowReceiver({
+                scene: sceneArg,
+                renderer: rendererArg,
+                model = null,
+                existingLight = null,
+                options = {}
+            } = {}) {
+                const sc = sceneArg || scene;
+                const rend = rendererArg || renderer;
+                const shadowLight = existingLight || sunLight;
+                if (!sc || !rend || !THREE) {
+                    return { shadowPlane: groundPlaneMesh, shadowLight };
+                }
+
+                rend.shadowMap.type = THREE.PCFSoftShadowMap;
+
+                if (model) {
+                    const profile = getMainViewerQualityProfile();
+                    applyModelMatteShadowFlags(model, !!profile.shadows);
+                }
+
+                if (shadowLight) {
+                    shadowLight.castShadow = true;
+                    shadowLight.shadow.mapSize.width = Math.max(512, Number(options.shadowMapSize) || 2048);
+                    shadowLight.shadow.mapSize.height = Math.max(512, Number(options.shadowMapSize) || 2048);
+                    shadowLight.shadow.camera.near = 0.1;
+                    shadowLight.shadow.camera.far = 50;
+                    shadowLight.shadow.camera.left = -10;
+                    shadowLight.shadow.camera.right = 10;
+                    shadowLight.shadow.camera.top = 10;
+                    shadowLight.shadow.camera.bottom = -10;
+                    shadowLight.shadow.bias = -0.0001;
+                    shadowLight.shadow.normalBias = 0.02;
+                    shadowLight.shadow.camera.updateProjectionMatrix();
+                }
+
+                const opacity = options.opacity !== undefined ? options.opacity : Number(viewerState.shadow_opacity_float) || 0.28;
+                const planeSize = options.size !== undefined ? options.size : Number(viewerState.shadow_plane_size_float) || MATTE_SHADOW_PLANE_BASE;
+
+                let shadowPlane = sc.getObjectByName(MATTE_SHADOW_PLANE_NAME);
+                if (!shadowPlane) {
+                    const geometry = new THREE.PlaneGeometry(MATTE_SHADOW_PLANE_BASE, MATTE_SHADOW_PLANE_BASE);
+                    geometry.rotateX(-Math.PI / 2);
+                    const material = new THREE.ShadowMaterial({
+                        color: 0x000000,
+                        opacity,
+                        transparent: true,
+                        depthWrite: false
+                    });
+                    shadowPlane = new THREE.Mesh(geometry, material);
+                    shadowPlane.name = MATTE_SHADOW_PLANE_NAME;
+                    shadowPlane.receiveShadow = true;
+                    shadowPlane.castShadow = false;
+                    shadowPlane.renderOrder = -1;
+                    shadowPlane.userData.shadowPlaneBaseSize = MATTE_SHADOW_PLANE_BASE;
+                    sc.add(shadowPlane);
+                } else {
+                    const mat = shadowPlane.material;
+                    if (mat && mat.isShadowMaterial) {
+                        mat.opacity = opacity;
+                        mat.transparent = true;
+                        mat.depthWrite = false;
+                    }
+                }
+
+                groundPlaneMesh = shadowPlane;
+
+                const base = shadowPlane.userData.shadowPlaneBaseSize || MATTE_SHADOW_PLANE_BASE;
+                const scPlane = Math.max(0.01, Number(planeSize));
+                const scl = scPlane / base;
+                shadowPlane.scale.set(scl, scl, 1);
+
+                if (model) {
+                    updateMatteShadowReceiverForModel(model);
+                } else if (groundPlaneMesh) {
+                    groundPlaneMesh.position.set(0, 0, 0);
+                }
+
+                syncMatteShadowPlaneVisibility();
+                syncMatteShadowDebugHelpers();
+                logMatteShadowReceiverDebug(model, shadowPlane, shadowLight);
+                return { shadowPlane, shadowLight };
+            }
+            window.setupMatteShadowReceiver = setupMatteShadowReceiver;
+            window.updateMatteShadowReceiverForModel = updateMatteShadowReceiverForModel;
             let mainViewerAdaptiveQualityEnabled = true;
             let mainViewerQualityMode = 'high';
             let mainViewerQualityStableLowCount = 0;
@@ -8144,9 +9191,16 @@
                 modelRotation: 'z180',
                 bgColor: '#000000',
                 groundColor: '#222222',
-                groundSize: 100.0,
+                groundSize: 200.0,
                 shadowIntensity: 0.5,
-                shadowRadius: 1.0,
+                shadowRadius: 2.0,
+                shadow_softness_float: 2.0,
+                shadow_light_intensity_float: 2.0,
+                enable_matte_shadow_receiver_bool: true,
+                shadow_opacity_float: 0.28,
+                shadow_plane_size_float: 200,
+                shadow_y_offset_float: 0.005,
+                matte_shadow_debug_bool: false,
                 sunRotation: 45.0,
                 sunInclination: 45.0,
                 timeOfDay: 12.0,
@@ -8201,6 +9255,11 @@
             // Admin detection (cached)
             let viewerIsAdmin = false;
             let _viewerAdminPromise = null;
+            /** Live camera readout under the viewer — only for this account. */
+            const VIEWER_CAMERA_DEBUG_EMAIL = 'eschota@gmail.com';
+            let viewerCameraDebugAllowed = false;
+            let _viewerCameraDebugPromise = null;
+            let _viewerAdminCameraDbgLastTs = 0;
             async function ensureViewerAdmin() {
                 if (_viewerAdminPromise) return _viewerAdminPromise;
                 _viewerAdminPromise = (async () => {
@@ -8217,6 +9276,46 @@
                 })();
                 return _viewerAdminPromise;
             }
+
+            async function ensureViewerCameraDebugAllowed() {
+                if (_viewerCameraDebugPromise) return _viewerCameraDebugPromise;
+                _viewerCameraDebugPromise = (async () => {
+                    try {
+                        const authResp = await fetch('/auth/me');
+                        if (authResp.ok) {
+                            const authData = await authResp.json();
+                            const em = String(authData?.user?.email || '').trim().toLowerCase();
+                            viewerCameraDebugAllowed = em === VIEWER_CAMERA_DEBUG_EMAIL.toLowerCase();
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                    const el = document.getElementById('viewer-admin-camera-debug');
+                    if (el) el.classList.toggle('hidden', !viewerCameraDebugAllowed);
+                    return viewerCameraDebugAllowed;
+                })();
+                return _viewerCameraDebugPromise;
+            }
+
+            void ensureViewerCameraDebugAllowed();
+
+            (function setupViewerAdminCameraDebugCopy() {
+                const btn = document.getElementById('viewer-admin-camera-debug-copy');
+                if (!btn) return;
+                btn.addEventListener('click', async () => {
+                    const snap = window.__viewerAdminCameraSnapshot;
+                    const text = snap ? JSON.stringify(snap, null, 2) : '';
+                    if (!text) return;
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        const prev = btn.textContent;
+                        btn.textContent = 'Скопировано';
+                        setTimeout(() => {
+                            btn.textContent = prev;
+                        }, 1600);
+                    } catch (_) {}
+                });
+            })();
 
             async function saveDefaultViewerSettings(source = 'unknown') {
                 const isAdmin = await ensureViewerAdmin();
@@ -8257,9 +9356,18 @@
                         viewerState.modelRotation = settings.modelRotation || 'z180';
                         viewerState.bgColor = settings.bgColor || '#000000';
                         viewerState.groundColor = settings.groundColor || '#222222';
-                        viewerState.groundSize = settings.groundSize !== undefined ? settings.groundSize : 100.0;
+                        viewerState.groundSize = settings.groundSize !== undefined ? settings.groundSize : 200.0;
                         viewerState.shadowIntensity = settings.shadowIntensity !== undefined ? settings.shadowIntensity : 0.5;
-                        viewerState.shadowRadius = settings.shadowRadius !== undefined ? settings.shadowRadius : 1.0;
+                        viewerState.shadowRadius = settings.shadowRadius !== undefined ? settings.shadowRadius : 2.0;
+                        viewerState.shadow_softness_float = settings.shadow_softness_float !== undefined ? settings.shadow_softness_float : (settings.shadowRadius !== undefined ? settings.shadowRadius : 2.0);
+                        viewerState.shadow_light_intensity_float = settings.shadow_light_intensity_float !== undefined ? settings.shadow_light_intensity_float : 2.0;
+                        viewerState.enable_matte_shadow_receiver_bool = settings.enable_matte_shadow_receiver_bool !== undefined ? !!settings.enable_matte_shadow_receiver_bool : true;
+                        viewerState.shadow_opacity_float = settings.shadow_opacity_float !== undefined ? settings.shadow_opacity_float : 0.28;
+                        viewerState.shadow_plane_size_float = settings.shadow_plane_size_float !== undefined ? settings.shadow_plane_size_float : (settings.groundSize !== undefined ? settings.groundSize : 200);
+                        viewerState.shadow_y_offset_float = settings.shadow_y_offset_float !== undefined ? settings.shadow_y_offset_float : 0.005;
+                        viewerState.matte_shadow_debug_bool = settings.matte_shadow_debug_bool !== undefined ? !!settings.matte_shadow_debug_bool : false;
+                        viewerState.shadow_plane_size_float = Math.max(5, Number(viewerState.shadow_plane_size_float) || 200);
+                        viewerState.groundSize = viewerState.shadow_plane_size_float;
                         viewerState.sunRotation = settings.sunRotation !== undefined ? settings.sunRotation : 45.0;
                         viewerState.sunInclination = settings.sunInclination !== undefined ? settings.sunInclination : 45.0;
                         viewerState.timeOfDay = settings.timeOfDay !== undefined ? settings.timeOfDay : 12.0;
@@ -8551,7 +9659,8 @@
                 }
 
                 if (sunLight) {
-                    sunLight.intensity = LIGHTING_CONFIG.sunIntensity * mainFactor;
+                    const shadowLightMul = Number(viewerState.shadow_light_intensity_float ?? 2) / 2.0;
+                    sunLight.intensity = LIGHTING_CONFIG.sunIntensity * mainFactor * shadowLightMul;
                     
                     // Calculate sun position from angles
                     const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
@@ -8580,9 +9689,9 @@
                     scene.environmentIntensity = envVal;
                 }
                 
-                // Background color fallback / picker sync. The procedural sky owns the visible background.
+                // Background color fallback / picker sync (картинка под canvas при статичном фоне).
                 if (scene) {
-                    if (!skyObject) scene.background = new THREE.Color(viewerState.bgColor);
+                    if (!skyObject && !usingStaticBackdrop) scene.background = new THREE.Color(viewerState.bgColor);
                     const preview = document.getElementById('bg-color-preview');
                     if (preview) preview.style.backgroundColor = viewerState.bgColor;
                     const picker = document.getElementById('bg-color-picker');
@@ -8608,35 +9717,33 @@
                 }
                 syncMainViewerBloomPass();
 
-                // 1.6 Ground Plane
+                // 1.6 Ground / matte shadow receiver plane (ShadowMaterial)
+                const planeSz = Math.max(5, Number(viewerState.shadow_plane_size_float) || Number(viewerState.groundSize) || 200);
+                viewerState.shadow_plane_size_float = planeSz;
+                viewerState.groundSize = planeSz;
                 if (viewerControls) {
                     viewerControls.setGroundParams({
                         color: viewerState.groundColor,
-                        size: viewerState.groundSize
+                        size: planeSz
                     });
                 }
 
-                // 1.7 Shadows
+                // 1.7 Sun shadow softness + sync mesh shadow flags / shadow maps
                 if (sunLight && sunLight.shadow) {
-                    sunLight.shadow.intensity = viewerState.shadowIntensity; // Wait, shadow doesn't have intensity property in standard Three.js
-                    // For shadow intensity, we usually adjust the shadow darknees via bias or just the light intensity.
-                    // But in Three.js, you usually use a separate "shadow only" light or post-processing.
-                    // Actually, the easiest way to control shadow "strength" is via shadow.radius (blur) and shadow.bias.
-                    // Another way: use THREE.ShadowMaterial on a ground, but we have a PBR ground.
-                    // Let's use shadow.radius for softness.
-                    sunLight.shadow.radius = viewerState.shadowRadius;
+                    const soft = Math.max(0, Number(viewerState.shadow_softness_float ?? viewerState.shadowRadius ?? 2));
+                    sunLight.shadow.radius = soft;
+                    viewerState.shadow_softness_float = soft;
+                    viewerState.shadowRadius = soft;
+                }
+
+                setupMatteShadowReceiver({ scene, renderer, model: currentModel, existingLight: sunLight });
+                syncMainViewerShadowQuality();
+                syncMatteShadowDebugHelpers();
+                if (viewerState.matte_shadow_debug_bool) {
+                    logMatteShadowReceiverDebug(currentModel, groundPlaneMesh, sunLight);
                 }
                 
                 // 2. Post-processing & Model Props
-                if (currentModel) {
-                    // Update shadow properties for all meshes
-                    currentModel.traverse(child => {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                        }
-                    });
-                }
                 if (viewerControls) {
                     viewerControls.setModelRotation(viewerState.modelRotation);
                     // Pass all adjustments to ViewerControls
@@ -8750,11 +9857,30 @@
                 const shadowRadiusVal = document.getElementById('shadow-radius-val');
 
                 if (groundPicker) groundPicker.value = viewerState.groundColor;
-                if (groundSizeSlider) groundSizeSlider.value = viewerState.groundSize;
-                if (groundSizeVal) groundSizeVal.textContent = Number(viewerState.groundSize).toFixed(3);
+                const planeSzUi = Number(viewerState.shadow_plane_size_float) || Number(viewerState.groundSize) || 200;
+                if (groundSizeSlider) groundSizeSlider.value = planeSzUi;
+                if (groundSizeVal) groundSizeVal.textContent = Number(planeSzUi).toFixed(3);
                 
-                if (shadowRadiusSlider) shadowRadiusSlider.value = viewerState.shadowRadius;
-                if (shadowRadiusVal) shadowRadiusVal.textContent = Number(viewerState.shadowRadius).toFixed(3);
+                const soft = Number(viewerState.shadow_softness_float ?? viewerState.shadowRadius ?? 2);
+                if (shadowRadiusSlider) shadowRadiusSlider.value = soft;
+                if (shadowRadiusVal) shadowRadiusVal.textContent = Number(soft).toFixed(3);
+
+                const matteEn = document.getElementById('matte-shadow-enable');
+                const matteOpSl = document.getElementById('matte-shadow-opacity-slider');
+                const matteOpVal = document.getElementById('matte-shadow-opacity-val');
+                const matteYSl = document.getElementById('matte-shadow-yofs-slider');
+                const matteYVal = document.getElementById('matte-shadow-yofs-val');
+                const matteLiSl = document.getElementById('matte-shadow-light-slider');
+                const matteLiVal = document.getElementById('matte-shadow-light-val');
+                const matteDbg = document.getElementById('matte-shadow-debug');
+                if (matteEn) matteEn.checked = !!viewerState.enable_matte_shadow_receiver_bool;
+                if (matteOpSl) matteOpSl.value = viewerState.shadow_opacity_float;
+                if (matteOpVal) matteOpVal.textContent = Number(viewerState.shadow_opacity_float).toFixed(2);
+                if (matteYSl) matteYSl.value = viewerState.shadow_y_offset_float;
+                if (matteYVal) matteYVal.textContent = Number(viewerState.shadow_y_offset_float).toFixed(3);
+                if (matteLiSl) matteLiSl.value = viewerState.shadow_light_intensity_float;
+                if (matteLiVal) matteLiVal.textContent = Number(viewerState.shadow_light_intensity_float).toFixed(2);
+                if (matteDbg) matteDbg.checked = !!viewerState.matte_shadow_debug_bool;
 
                 // Update Day/Night UI
                 const timeSlider = document.getElementById('lighting-time-slider');
@@ -8842,7 +9968,7 @@
                         currentModel.position.x -= center.x;
                         currentModel.position.z -= center.z;
                     }
-                    if (groundPlaneMesh) groundPlaneMesh.position.y = 0;
+                    updateMatteShadowReceiverForModel(currentModel);
                     currentModel.updateMatrixWorld(true);
                 } catch (error) {
                     if (!window.__snapGroundWarningShown) {
@@ -9029,16 +10155,12 @@
                 const shadowsEnabled = !!profile.shadows;
                 renderer.shadowMap.enabled = shadowsEnabled;
                 renderer.shadowMap.autoUpdate = shadowsEnabled;
-                sunLight.castShadow = shadowsEnabled;
-                if (groundPlaneMesh) {
-                    groundPlaneMesh.receiveShadow = shadowsEnabled;
+                if (THREE && THREE.PCFSoftShadowMap) {
+                    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
                 }
+                sunLight.castShadow = shadowsEnabled;
                 if (currentModel) {
-                    currentModel.traverse((child) => {
-                        if (!child.isMesh) return;
-                        child.castShadow = shadowsEnabled;
-                        child.receiveShadow = shadowsEnabled;
-                    });
+                    applyModelMatteShadowFlags(currentModel, shadowsEnabled);
                 }
                 if (sunLight.shadow) {
                     const mapSize = Number(profile.shadowMapSize || 1024);
@@ -9051,6 +10173,7 @@
                     }
                     sunLight.shadow.needsUpdate = shadowsEnabled;
                 }
+                syncMatteShadowPlaneVisibility();
             }
 
             function updateSunShadowFocus(force = false) {
@@ -9086,7 +10209,8 @@
                 sunLight.updateMatrixWorld();
 
                 if (sunLight.shadow) {
-                    const size = Math.max(8, Math.min(60, Number(viewerState.groundSize || 10)));
+                    const planeHint = Math.max(Number(viewerState.shadow_plane_size_float) || 10, Number(viewerState.groundSize) || 10);
+                    const size = Math.max(10, Math.min(120, planeHint * 0.4));
                     sunLight.shadow.camera.left = -size;
                     sunLight.shadow.camera.right = size;
                     sunLight.shadow.camera.top = size;
@@ -9118,6 +10242,7 @@
                     quality: mainViewerQualityMode,
                     modelBox,
                     hasSky: !!skyObject,
+                    usingStaticBackdrop,
                     backgroundType: scene?.background?.type || scene?.background?.constructor?.name || null,
                     hasEnvironment: !!scene?.environment,
                     rendererShadowEnabled: !!renderer?.shadowMap?.enabled,
@@ -9375,17 +10500,50 @@
                 document.getElementById('ground-size-slider')?.addEventListener('input', (e) => {
                     const val = parseFloat(e.target.value);
                     viewerState.groundSize = val;
+                    viewerState.shadow_plane_size_float = val;
                     if (viewerControls) viewerControls.setGroundParams({ size: val });
                     document.getElementById('ground-size-val').textContent = val.toFixed(3);
+                    applyViewerState();
                 });
 
                 document.getElementById('shadow-radius-slider')?.addEventListener('input', (e) => {
                     const val = parseFloat(e.target.value);
                     viewerState.shadowRadius = val;
+                    viewerState.shadow_softness_float = val;
                     if (sunLight && sunLight.shadow) {
                         sunLight.shadow.radius = val;
                     }
                     document.getElementById('shadow-radius-val').textContent = val.toFixed(3);
+                });
+
+                document.getElementById('matte-shadow-enable')?.addEventListener('change', (e) => {
+                    viewerState.enable_matte_shadow_receiver_bool = !!e.target.checked;
+                    applyViewerState();
+                });
+                document.getElementById('matte-shadow-opacity-slider')?.addEventListener('input', (e) => {
+                    const val = parseFloat(e.target.value);
+                    viewerState.shadow_opacity_float = val;
+                    const el = document.getElementById('matte-shadow-opacity-val');
+                    if (el) el.textContent = val.toFixed(2);
+                    applyViewerState();
+                });
+                document.getElementById('matte-shadow-yofs-slider')?.addEventListener('input', (e) => {
+                    const val = parseFloat(e.target.value);
+                    viewerState.shadow_y_offset_float = val;
+                    const el = document.getElementById('matte-shadow-yofs-val');
+                    if (el) el.textContent = val.toFixed(3);
+                    if (currentModel) updateMatteShadowReceiverForModel(currentModel);
+                });
+                document.getElementById('matte-shadow-light-slider')?.addEventListener('input', (e) => {
+                    const val = parseFloat(e.target.value);
+                    viewerState.shadow_light_intensity_float = val;
+                    const el = document.getElementById('matte-shadow-light-val');
+                    if (el) el.textContent = val.toFixed(2);
+                    applyViewerState();
+                });
+                document.getElementById('matte-shadow-debug')?.addEventListener('change', (e) => {
+                    viewerState.matte_shadow_debug_bool = !!e.target.checked;
+                    applyViewerState();
                 });
 
                 document.getElementById('lighting-time-slider')?.addEventListener('input', (e) => {
@@ -9608,10 +10766,11 @@
                 setStatus('Initializing...');
 
                 scene = new THREE.Scene();
-                scene.background = new THREE.Color(LIGHTING_CONFIG.bgColor);
+                scene.background = null;
 
-                // Renderer (PBR critical settings from config)
-                renderer = new THREE.WebGLRenderer({ antialias: true });
+                // Renderer (PBR critical settings from config). alpha: true — фон-картинка под canvas.
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                renderer.setClearColor(0x000000, 0);
                 renderer.setPixelRatio(getMainViewerTargetPixelRatio());
                 renderer.shadowMap.enabled = true;
                 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -9752,63 +10911,8 @@
                 const outputPass = new OutputPass();
                 composer.addPass(outputPass);
 
-                // Ground Plane
-                const groundGeo = new THREE.PlaneGeometry(10, 10); // Much larger to handle gradient fade
-                const groundMat = new THREE.MeshStandardMaterial({ 
-                    color: 0x222222,
-                    roughness: 0.8,
-                    metalness: 0.1,
-                    transparent: true
-                });
-
-                groundMat.onBeforeCompile = (shader) => {
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        '#include <common>',
-                        `
-                        #include <common>
-                        varying vec2 vWorldUv;
-                        `
-                    );
-                    shader.vertexShader = shader.vertexShader.replace(
-                        '#include <common>',
-                        `
-                        #include <common>
-                        varying vec2 vWorldUv;
-                        `
-                    );
-                    shader.vertexShader = shader.vertexShader.replace(
-                        '#include <begin_vertex>',
-                        `
-                        #include <begin_vertex>
-                        vWorldUv = uv;
-                        `
-                    );
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        '#include <output_fragment>',
-                        `
-                        // Radial alpha gradient
-                        // vWorldUv is 0..1 over the 10x10 plane. 
-                        // Center is 0.5, 0.5. 
-                        // 1.5m radius in 10m plane is 1.5/10 = 0.15 normalized units.
-                        float dist = distance(vWorldUv, vec2(0.5));
-                        float radius = 0.45; // Normalized radius for fade (starts at 1.5m, fades to 4.5m)
-                        
-                        // Long entry: stay opaque for 1.5m, then fade out slowly
-                        // 1.5m is 0.15 dist. Let's fade from 0.15 to 0.45.
-                        float alpha = 1.0 - smoothstep(0.15, 0.48, dist);
-                        
-                        // Apply to output
-                        gl_FragColor.a *= alpha;
-                        #include <output_fragment>
-                        `
-                    );
-                };
-
-                groundPlaneMesh = new THREE.Mesh(groundGeo, groundMat);
-                groundPlaneMesh.rotation.x = -Math.PI / 2;
-                groundPlaneMesh.position.set(0, 0, 0);
-                groundPlaneMesh.receiveShadow = true;
-                scene.add(groundPlaneMesh);
+                // Matte shadow receiver: large horizontal plane (ShadowMaterial), positioned from model bbox after load.
+                setupMatteShadowReceiver({ scene, renderer, model: null, existingLight: sunLight });
                 
                 // Setup viewer controls and load saved settings
                 setupViewerControls();
@@ -10105,7 +11209,45 @@
                             viewerState.camera.target.y = controls.target.y;
                             viewerState.camera.target.z = controls.target.z;
                         }
-                        
+
+                        if (viewerCameraDebugAllowed && cameraInitialized && camera && controls) {
+                            const now = performance.now();
+                            if (now - _viewerAdminCameraDbgLastTs >= 200) {
+                                _viewerAdminCameraDbgLastTs = now;
+                                const pos = camera.position;
+                                const tgt = controls.target;
+                                const rot = camera.rotation;
+                                const deg = (r) => (r * 180) / Math.PI;
+                                const round = (v, n = 4) => Number(Number(v).toFixed(n));
+                                const payload = {
+                                    position: { x: round(pos.x), y: round(pos.y), z: round(pos.z) },
+                                    target: { x: round(tgt.x), y: round(tgt.y), z: round(tgt.z) },
+                                    rotation_order: rot.order,
+                                    rotation_rad: {
+                                        x: round(rot.x, 6),
+                                        y: round(rot.y, 6),
+                                        z: round(rot.z, 6),
+                                    },
+                                    rotation_deg: {
+                                        x: round(deg(rot.x), 2),
+                                        y: round(deg(rot.y), 2),
+                                        z: round(deg(rot.z), 2),
+                                    },
+                                    quaternion: {
+                                        x: round(camera.quaternion.x, 6),
+                                        y: round(camera.quaternion.y, 6),
+                                        z: round(camera.quaternion.z, 6),
+                                        w: round(camera.quaternion.w, 6),
+                                    },
+                                    distance_to_target: round(pos.distanceTo(tgt), 4),
+                                    fov: camera.isPerspectiveCamera ? round(camera.fov, 3) : null,
+                                };
+                                window.__viewerAdminCameraSnapshot = payload;
+                                const pre = document.getElementById('viewer-admin-camera-debug-pre');
+                                if (pre) pre.textContent = JSON.stringify(payload, null, 2);
+                            }
+                        }
+
                         if (shouldUseMainViewerComposer()) {
                             composer.render();
                         } else {
@@ -10390,6 +11532,10 @@
                         window.updateHierarchyUI?.();
                     }
                     if (window.recreateWireframe) window.recreateWireframe();
+                    syncMainViewerShadowQuality();
+                    setupMatteShadowReceiver({ scene, renderer, model: currentModel, existingLight: sunLight });
+                    updateMatteShadowReceiverForModel(currentModel);
+                    updateSunShadowFocus(true);
                     
                     return true;
                 }
@@ -11508,7 +12654,7 @@
                                 bgColor: '#000000',
                                 bloom: { strength: 0.0, threshold: 0.8, radius: 0.4 },
                                 groundColor: '#222222',
-                                groundSize: 100.0,
+                                groundSize: 200.0,
                                 fogColor: '#000000',
                                 fogDensity: 0.0,
                                 adjustments: {}
@@ -11524,7 +12670,7 @@
                             if (ambientLight) ambientLight.intensity = LIGHTING_CONFIG.ambientIntensity * defaults.mainLightIntensity;
                             if (hemiLight) hemiLight.intensity = LIGHTING_CONFIG.hemiIntensity * defaults.mainLightIntensity;
                             if (scene && 'environmentIntensity' in scene) scene.environmentIntensity = defaults.envIntensity;
-                            if (scene) scene.background = new THREE.Color(defaults.bgColor);
+                            if (scene && !usingStaticBackdrop) scene.background = new THREE.Color(defaults.bgColor);
                             
                             // 2. Props
                             viewerControls.setBloomSettings(defaults.bloom);
@@ -12039,6 +13185,9 @@
                     viewerControls.setModel(model);
                 }
                 snapCurrentModelToGround({ centerXZ: true, force: true });
+                setupMatteShadowReceiver({ scene, renderer, model: currentModel, existingLight: sunLight });
+                syncMainViewerShadowQuality();
+                updateSunShadowFocus(true);
                 
                 // Apply improved materials for models without textures (darker, reflective)
                 applyImprovedMaterials(model);
@@ -12288,6 +13437,10 @@
                     viewerControls.setAOSettings(viewerState.aoSettings);
                     viewerControls.setModel(model);
                 }
+                snapCurrentModelToGround({ centerXZ: true, force: true });
+                setupMatteShadowReceiver({ scene, renderer, model: currentModel, existingLight: sunLight });
+                syncMainViewerShadowQuality();
+                updateSunShadowFocus(true);
                 
                 // Apply improved materials for models without textures (darker, reflective)
                 applyImprovedMaterials(model);
@@ -12448,6 +13601,9 @@
                 scene.add(model);
                 currentModel = model;
                 syncMainViewerShadowQuality();
+                setupMatteShadowReceiver({ scene, renderer, model: currentModel, existingLight: sunLight });
+                updateMatteShadowReceiverForModel(currentModel);
+                updateSunShadowFocus(true);
                 if (transformManager) {
                     transformManager.setRootModel(currentModel);
                     transformManager.setModel(model);
@@ -12653,8 +13809,386 @@
                 frameId: 0,
                 lastFbxProbeAt: 0,
                 sourceMaterialPalette: null,
-                fitterMixer: null,
+                sky: null,
+                ground: null,
+                sunLight: null,
+                hemiLight: null,
+                sunDir: null,
+                pmremGenerator: null,
+                backdropTexture: null,
+                backdropLoadSerial: 0,
             };
+            window.animalStandaloneViewer = animalStandaloneViewer;
+
+            /** Outdoor lighting presets; plate background replaces procedural sky for animal standalone. */
+            const ANIMAL_SKY_CONFIG = {
+                turbidity: 4.0,
+                rayleigh: 1.55,
+                mieCoefficient: 0.0065,
+                mieDirectionalG: 0.76,
+                sunInclination: 34,
+                sunRotation: -118,
+                fogColor: 0xc8d4e8,
+                hemiSky: 0xdfe9f5,
+                hemiGround: 0x4a5568,
+                hemiIntensity: 0.55,
+                sunIntensity: 2.35,
+                fillIntensity: 0.55,
+                groundRoughness: 0.98,
+                groundMetalness: 0.02,
+                groundColorHex: '#6d7d8c',
+                /** Практический «бесконечный» размер плоскости (масштаб unit plane) */
+                groundExtentMin: 280000,
+                groundExtentMax: 4200000,
+                groundExtentFarMultiplier: 22,
+            };
+
+            function getAnimalStandaloneSunDirection(outVec) {
+                const phi = THREE.MathUtils.degToRad(90 - ANIMAL_SKY_CONFIG.sunInclination);
+                const theta = THREE.MathUtils.degToRad(ANIMAL_SKY_CONFIG.sunRotation);
+                return (outVec || new THREE.Vector3()).setFromSphericalCoords(1, phi, theta);
+            }
+
+            function initAnimalStandaloneBackdropPlate(scene, renderer) {
+                const av = animalStandaloneViewer;
+                if (av.sky) {
+                    scene.remove(av.sky);
+                    av.sky = null;
+                }
+                if (av.backdropTexture) {
+                    av.backdropTexture.dispose();
+                    av.backdropTexture = null;
+                }
+                if (scene.background && scene.background.isTexture) {
+                    scene.background.dispose();
+                }
+                scene.background = null;
+                if (scene.environment) {
+                    scene.environment.dispose();
+                    scene.environment = null;
+                }
+
+                av.sunDir = getAnimalStandaloneSunDirection(new THREE.Vector3());
+
+                const pmrem = new THREE.PMREMGenerator(renderer);
+                const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+                scene.environment = envTexture;
+                pmrem.dispose();
+                if ('environmentIntensity' in scene) {
+                    scene.environmentIntensity = 1.0;
+                }
+
+                const path = String(LIGHTING_CONFIG.backdropImagePath || '/static/env/backdrops/meadow.jpg').trim();
+                av.backdropLoadSerial = (av.backdropLoadSerial || 0) + 1;
+                const serial = av.backdropLoadSerial;
+                const loader = new THREE.TextureLoader();
+                loader.setCrossOrigin('anonymous');
+                loader.load(
+                    path,
+                    (tex) => {
+                        if (serial !== av.backdropLoadSerial) {
+                            tex.dispose();
+                            return;
+                        }
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.minFilter = THREE.LinearFilter;
+                        tex.magFilter = THREE.LinearFilter;
+                        try {
+                            tex.generateMipmaps = false;
+                        } catch (_) {}
+                        av.backdropTexture = tex;
+                        scene.background = tex;
+                        window.taskDbg?.('[Viewer] animal standalone plate', path);
+                    },
+                    undefined,
+                    (err) => console.warn('[AnimalStandalone] backdrop texture failed', path, err)
+                );
+            }
+
+            function positionAnimalStandaloneSunToModel(center, size) {
+                const av = animalStandaloneViewer;
+                const light = av.sunLight;
+                const dir = av.sunDir;
+                if (!light || !dir || !center || !size) return;
+                const extent = Math.max(size.x, size.y, size.z, 0.5);
+                const spanXZ = Math.max(size.x, size.z, 0.5);
+                const r = Math.max(extent * 2.2, 12);
+                light.position.copy(center).addScaledVector(dir, r);
+                light.target.position.copy(center);
+                light.target.updateMatrixWorld();
+
+                const d = light.shadow.camera;
+                const pad = Math.max(spanXZ * 2.45, extent * 2.05, 18);
+                d.near = 0.5;
+                d.far = r + pad * 3.5;
+                d.left = -pad;
+                d.right = pad;
+                d.top = pad;
+                d.bottom = -pad;
+                d.updateProjectionMatrix();
+            }
+
+            function getAnimalGroundStorageKey() {
+                return `autorigAnimalGroundColor:${taskId || 'global'}`;
+            }
+
+            function getAnimalGroundColorHexFromUI() {
+                const inp = document.getElementById('animal-viewer-ground-color');
+                if (inp?.value && /^#[0-9a-fA-F]{6}$/.test(inp.value)) {
+                    return inp.value;
+                }
+                return ANIMAL_SKY_CONFIG.groundColorHex;
+            }
+
+            let animalGroundPickerWired = false;
+            function wireAnimalViewerGroundColorPicker() {
+                if (animalGroundPickerWired) return;
+                const inp = document.getElementById('animal-viewer-ground-color');
+                if (!inp || !taskId) return;
+                animalGroundPickerWired = true;
+                const saved = localStorage.getItem(getAnimalGroundStorageKey());
+                if (saved && /^#[0-9a-fA-F]{6}$/.test(saved)) {
+                    inp.value = saved;
+                }
+                inp.addEventListener('input', () => {
+                    const v = inp.value;
+                    localStorage.setItem(getAnimalGroundStorageKey(), v);
+                    const g = animalStandaloneViewer.ground;
+                    if (g?.material?.color) {
+                        g.material.color.set(v);
+                        g.material.needsUpdate = true;
+                    }
+                });
+            }
+
+            /** Публичная плотность тени (без админ-панели); чуть выще старого 0.32 для читаемости. */
+            const ANIMAL_PUBLIC_SHADOW_PLANE_OPACITY = 0.38;
+            let viewerAdminAnimalShadowPanelWired = false;
+
+            function getViewerAdminAnimalShadowStorageKey() {
+                return `autorigAnimalAdminShadowTune:${taskId || 'global'}`;
+            }
+
+            function loadViewerAdminAnimalShadowTuneFromStorage() {
+                try {
+                    const raw = localStorage.getItem(getViewerAdminAnimalShadowStorageKey());
+                    if (!raw) return null;
+                    const o = JSON.parse(raw);
+                    const opacity = Number(o.opacity);
+                    const soft = Number(o.soft);
+                    const sunMul = Number(o.sunMul);
+                    if (!Number.isFinite(opacity) || !Number.isFinite(soft) || !Number.isFinite(sunMul)) return null;
+                    return {
+                        opacity: THREE.MathUtils.clamp(opacity, 0.08, 0.95),
+                        soft: THREE.MathUtils.clamp(soft, 0, 10),
+                        sunMul: THREE.MathUtils.clamp(sunMul, 0.35, 3.5),
+                    };
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            function saveViewerAdminAnimalShadowTuneToStorage(partial) {
+                try {
+                    const opSl = document.getElementById('viewer-admin-animal-shadow-opacity');
+                    const softSl = document.getElementById('viewer-admin-animal-shadow-soft');
+                    const sunSl = document.getElementById('viewer-admin-animal-shadow-sun');
+                    const payload = {
+                        opacity: partial.opacity !== undefined ? partial.opacity : parseFloat(opSl?.value),
+                        soft: partial.soft !== undefined ? partial.soft : parseFloat(softSl?.value),
+                        sunMul: partial.sunMul !== undefined ? partial.sunMul : parseFloat(sunSl?.value),
+                    };
+                    if (!Number.isFinite(payload.opacity)) payload.opacity = 0.5;
+                    if (!Number.isFinite(payload.soft)) payload.soft = 2.2;
+                    if (!Number.isFinite(payload.sunMul)) payload.sunMul = 1.1;
+                    localStorage.setItem(getViewerAdminAnimalShadowStorageKey(), JSON.stringify(payload));
+                } catch (_) {}
+            }
+
+            function populateViewerAdminAnimalShadowSlidersFromStorage() {
+                const saved = loadViewerAdminAnimalShadowTuneFromStorage();
+                const opSl = document.getElementById('viewer-admin-animal-shadow-opacity');
+                const softSl = document.getElementById('viewer-admin-animal-shadow-soft');
+                const sunSl = document.getElementById('viewer-admin-animal-shadow-sun');
+                const opVal = document.getElementById('viewer-admin-animal-shadow-opacity-val');
+                const softVal = document.getElementById('viewer-admin-animal-shadow-soft-val');
+                const sunV = document.getElementById('viewer-admin-animal-shadow-sun-val');
+                const op = saved ? saved.opacity : 0.5;
+                const soft = saved ? saved.soft : 2.2;
+                const sunMul = saved ? saved.sunMul : 1.1;
+                if (opSl) opSl.value = String(op);
+                if (softSl) softSl.value = String(soft);
+                if (sunSl) sunSl.value = String(sunMul);
+                if (opVal) opVal.textContent = Number(op).toFixed(2);
+                if (softVal) softVal.textContent = Number(soft).toFixed(2);
+                if (sunV) sunV.textContent = Number(sunMul).toFixed(2);
+            }
+
+            function isViewerAdminAnimalShadowPanelVisible() {
+                const row = document.getElementById('viewer-admin-animal-shadow-row');
+                return !!(row && row.classList.contains('is-visible'));
+            }
+
+            function getAnimalShadowPlaneOpacityForStandalone() {
+                if (isViewerAdminAnimalShadowPanelVisible()) {
+                    const sl = document.getElementById('viewer-admin-animal-shadow-opacity');
+                    if (sl) {
+                        return THREE.MathUtils.clamp(parseFloat(sl.value) || ANIMAL_PUBLIC_SHADOW_PLANE_OPACITY, 0.08, 0.95);
+                    }
+                }
+                return ANIMAL_PUBLIC_SHADOW_PLANE_OPACITY;
+            }
+
+            function applyAnimalStandaloneSunShadowFromAdminPanel() {
+                const av = animalStandaloneViewer;
+                const sun = av.sunLight;
+                if (!sun) return;
+                if (isViewerAdminAnimalShadowPanelVisible()) {
+                    const sunSl = document.getElementById('viewer-admin-animal-shadow-sun');
+                    const softSl = document.getElementById('viewer-admin-animal-shadow-soft');
+                    const mul = THREE.MathUtils.clamp(parseFloat(sunSl?.value) || 1.1, 0.35, 3.5);
+                    const rad = THREE.MathUtils.clamp(parseFloat(softSl?.value) || 2.2, 0, 10);
+                    sun.intensity = ANIMAL_SKY_CONFIG.sunIntensity * mul;
+                    if (sun.shadow) sun.shadow.radius = rad;
+                } else {
+                    sun.intensity = ANIMAL_SKY_CONFIG.sunIntensity;
+                    if (sun.shadow) sun.shadow.radius = 3;
+                }
+            }
+
+            function applyAnimalStandaloneShadowCatcherOpacityFromPanel() {
+                const g = animalStandaloneViewer.ground;
+                if (!g?.material?.isShadowMaterial) return;
+                g.material.opacity = getAnimalShadowPlaneOpacityForStandalone();
+                g.material.needsUpdate = true;
+            }
+
+            function viewerAdminAnimalShadowPanelRefreshScene() {
+                applyAnimalStandaloneShadowCatcherOpacityFromPanel();
+                applyAnimalStandaloneSunShadowFromAdminPanel();
+            }
+
+            function wireViewerAdminAnimalShadowPanel() {
+                if (viewerAdminAnimalShadowPanelWired) return;
+                const row = document.getElementById('viewer-admin-animal-shadow-row');
+                if (!row) return;
+                const opSl = document.getElementById('viewer-admin-animal-shadow-opacity');
+                const softSl = document.getElementById('viewer-admin-animal-shadow-soft');
+                const sunSl = document.getElementById('viewer-admin-animal-shadow-sun');
+                const opVal = document.getElementById('viewer-admin-animal-shadow-opacity-val');
+                const softVal = document.getElementById('viewer-admin-animal-shadow-soft-val');
+                const sunV = document.getElementById('viewer-admin-animal-shadow-sun-val');
+                if (!opSl || !softSl || !sunSl) return;
+                viewerAdminAnimalShadowPanelWired = true;
+                const onChange = () => {
+                    if (opVal) opVal.textContent = Number(parseFloat(opSl.value) || 0).toFixed(2);
+                    if (softVal) softVal.textContent = Number(parseFloat(softSl.value) || 0).toFixed(2);
+                    if (sunV) sunV.textContent = Number(parseFloat(sunSl.value) || 0).toFixed(2);
+                    saveViewerAdminAnimalShadowTuneToStorage({});
+                    viewerAdminAnimalShadowPanelRefreshScene();
+                };
+                opSl.addEventListener('input', onChange);
+                softSl.addEventListener('input', onChange);
+                sunSl.addEventListener('input', onChange);
+            }
+
+            async function syncViewerAdminAnimalShadowPanelVisibility() {
+                const adminRow = document.getElementById('viewer-admin-animal-shadow-row');
+                const gRow = document.getElementById('animal-viewer-ground-row');
+                if (!adminRow || !gRow) return;
+                let isAdmin = false;
+                try {
+                    isAdmin = await ensureViewerAdmin();
+                } catch (_) {}
+                const show = !!isAdmin && gRow.classList.contains('is-visible');
+                adminRow.classList.toggle('is-visible', show);
+                adminRow.setAttribute('aria-hidden', show ? 'false' : 'true');
+                if (show) {
+                    wireViewerAdminAnimalShadowPanel();
+                    populateViewerAdminAnimalShadowSlidersFromStorage();
+                    viewerAdminAnimalShadowPanelRefreshScene();
+                }
+            }
+            window.syncViewerAdminAnimalShadowPanelVisibility = syncViewerAdminAnimalShadowPanelVisibility;
+
+            function animalStandaloneGroundExtentFromCamera(camera) {
+                const far = Math.max(camera?.far || 1, 1);
+                return THREE.MathUtils.clamp(
+                    far * ANIMAL_SKY_CONFIG.groundExtentFarMultiplier,
+                    ANIMAL_SKY_CONFIG.groundExtentMin,
+                    ANIMAL_SKY_CONFIG.groundExtentMax,
+                );
+            }
+
+            function updateAnimalStandaloneGroundPlaneAndFog() {
+                const av = animalStandaloneViewer;
+                const model = av.model;
+                const scene = av.scene;
+                const camera = av.camera;
+                const renderer = av.renderer;
+                if (!model || !scene || !camera) return;
+
+                const box = new THREE.Box3().setFromObject(model);
+                if (box.isEmpty()) return;
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const groundY = box.min.y - 0.005;
+                const groundHex = getAnimalGroundColorHexFromUI();
+
+                if (av.ground && !av.ground.material?.isShadowMaterial) {
+                    scene.remove(av.ground);
+                    av.ground.geometry?.dispose?.();
+                    av.ground.material?.dispose?.();
+                    av.ground = null;
+                }
+
+                if (!av.ground) {
+                    const geo = new THREE.PlaneGeometry(200, 200);
+                    geo.rotateX(-Math.PI / 2);
+                    const mat = new THREE.ShadowMaterial({
+                        color: new THREE.Color(groundHex),
+                        opacity: getAnimalShadowPlaneOpacityForStandalone(),
+                        transparent: true,
+                        depthWrite: false,
+                    });
+                    const ground = new THREE.Mesh(geo, mat);
+                    ground.name = 'AnimalStandaloneShadowCatcher';
+                    ground.receiveShadow = true;
+                    ground.castShadow = false;
+                    ground.renderOrder = -1;
+                    scene.add(ground);
+                    av.ground = ground;
+                }
+
+                const span = Math.max(size.x, size.z, 0.01);
+                const vmax = Math.max(size.x, size.y, size.z, 0.01);
+                const targetWorld = Math.max(span * 14, vmax * 7, 44);
+                const scalePlane = targetWorld / 200;
+                av.ground.position.set(center.x, groundY, center.z);
+                av.ground.scale.set(scalePlane, scalePlane, 1);
+                if (av.ground.material?.isShadowMaterial) {
+                    av.ground.material.color.set(groundHex);
+                    av.ground.material.opacity = getAnimalShadowPlaneOpacityForStandalone();
+                    av.ground.material.needsUpdate = true;
+                }
+
+                scene.fog = null;
+                if (renderer) {
+                    renderer.setClearColor(0x000000, 0);
+                }
+
+                positionAnimalStandaloneSunToModel(center, size);
+                applyAnimalStandaloneSunShadowFromAdminPanel();
+            }
+
+            function enableAnimalStandaloneShadowCast(root) {
+                root?.traverse?.((node) => {
+                    if (node.isMesh) {
+                        node.castShadow = true;
+                        node.receiveShadow = false;
+                    }
+                });
+            }
 
             function hideOldViewerControlsForAnimalStandalone() {
                 [
@@ -12769,7 +14303,7 @@
                     });
                     node.material = Array.isArray(node.material) ? mapped : mapped[0];
                     node.castShadow = true;
-                    node.receiveShadow = true;
+                    node.receiveShadow = false;
                 });
                 return true;
             }
@@ -12811,6 +14345,7 @@
                 );
                 animalStandaloneViewer.camera.lookAt(center);
                 animalStandaloneViewer.controls.update();
+                updateAnimalStandaloneGroundPlaneAndFog();
             }
 
             function resizeStandaloneAnimalRenderer() {
@@ -12834,13 +14369,38 @@
                     resizeStandaloneAnimalRenderer();
                     const delta = clock.getDelta();
                     if (mixer) mixer.update(delta);
-                    if (animalStandaloneViewer.fitterMixer) animalStandaloneViewer.fitterMixer.update(delta);
                     animalStandaloneViewer.controls?.update?.();
                     if (animalStandaloneViewer.renderer && animalStandaloneViewer.scene && animalStandaloneViewer.camera) {
                         animalStandaloneViewer.renderer.render(animalStandaloneViewer.scene, animalStandaloneViewer.camera);
                     }
                 };
                 tick();
+            }
+
+            function captureAnimalStandaloneLtxSnapshotDataUrl() {
+                const av = animalStandaloneViewer;
+                if (!av.renderer || !av.scene || !av.camera) {
+                    console.warn('[IdleLTX] capture skipped: viewer not ready');
+                    return null;
+                }
+                const W = 768;
+                const H = 448;
+                const r = av.renderer;
+                const cam = av.camera;
+                try {
+                    resizeStandaloneAnimalRenderer();
+                    r.setSize(W, H, false);
+                    cam.aspect = W / H;
+                    cam.updateProjectionMatrix();
+                    av.controls?.update?.();
+                    r.render(av.scene, cam);
+                    return r.domElement.toDataURL('image/jpeg', 0.92);
+                } catch (e) {
+                    console.warn('[IdleLTX] capture failed', e);
+                    return null;
+                } finally {
+                    resizeStandaloneAnimalRenderer();
+                }
             }
 
             async function loadStandaloneAnimalObject(inputUrl) {
@@ -12962,6 +14522,7 @@
                         brightenStandaloneFallbackMaterials(animatedModel);
                     }
                     forceStandaloneDoubleSided(animatedModel);
+                    enableAnimalStandaloneShadowCast(animatedModel);
                     animalStandaloneViewer.scene?.add(animatedModel);
                     animalStandaloneViewer.model = animatedModel;
                     currentModel = animatedModel;
@@ -12998,7 +14559,11 @@
                     return false;
                 }
 
+                document.getElementById('model-viewer-wrap')?.classList.add('animal-ltx-sync');
+                document.getElementById('model-viewer-container')?.classList.add('animal-ltx-aspect');
+
                 hideOldViewerControlsForAnimalStandalone();
+                wireAnimalViewerGroundColorPicker();
                 if (!animalStandaloneViewer.started) {
                     animalStandaloneViewer.started = true;
                     setStatus('Loading animal preview...');
@@ -13009,29 +14574,55 @@
                     host.classList.add('animal-standalone-viewer');
 
                     const scene = new THREE.Scene();
-                    scene.background = new THREE.Color(0xd9e3ee);
                     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
-                    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+                    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                    renderer.setClearColor(0x000000, 0);
                     renderer.outputColorSpace = THREE.SRGBColorSpace;
                     renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                    renderer.toneMappingExposure = 1.02;
+                    renderer.shadowMap.enabled = true;
+                    // PCFSoftShadowMap ignores shadow.radius in r160 shader; PCFShadowMap uses radius for penumbra.
+                    renderer.shadowMap.type = THREE.PCFShadowMap;
                     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
                     renderer.setSize(Math.max(320, host.clientWidth || 512), Math.max(320, host.clientHeight || 512), false);
                     host.appendChild(renderer.domElement);
 
+                    initAnimalStandaloneBackdropPlate(scene, renderer);
+
+                    const hemi = new THREE.HemisphereLight(
+                        ANIMAL_SKY_CONFIG.hemiSky,
+                        ANIMAL_SKY_CONFIG.hemiGround,
+                        ANIMAL_SKY_CONFIG.hemiIntensity,
+                    );
+                    scene.add(hemi);
+                    animalStandaloneViewer.hemiLight = hemi;
+
+                    const sunLight = new THREE.DirectionalLight(0xffffff, ANIMAL_SKY_CONFIG.sunIntensity);
+                    sunLight.castShadow = true;
+                    sunLight.shadow.bias = -0.00025;
+                    sunLight.shadow.normalBias = 0.04;
+                    sunLight.shadow.radius = 3;
+                    sunLight.shadow.mapSize.set(3072, 3072);
+                    scene.add(sunLight);
+                    scene.add(sunLight.target);
+                    animalStandaloneViewer.sunLight = sunLight;
+                    applyAnimalStandaloneSunShadowFromAdminPanel();
+
+                    const fill = new THREE.DirectionalLight(0xe8f0ff, ANIMAL_SKY_CONFIG.fillIntensity);
+                    fill.position.set(2.5, 3.5, 4.2);
+                    scene.add(fill);
+
                     const controls = new OrbitControls(camera, renderer.domElement);
                     controls.enableDamping = true;
-                    scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.45));
-                    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-                    key.position.set(-3, 5, -4);
-                    scene.add(key);
-                    const fill = new THREE.DirectionalLight(0xffffff, 0.85);
-                    fill.position.set(4, 3, 4);
-                    scene.add(fill);
-                    const pmrem = new THREE.PMREMGenerator(renderer);
-                    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+                    controls.addEventListener('change', () => {
+                        if (animalStandaloneViewer.model) {
+                            updateAnimalStandaloneGroundPlaneAndFog();
+                        }
+                    });
 
                     const model = await loadStandaloneAnimalObject(taskState.input_url);
                     forceStandaloneDoubleSided(model);
+                    enableAnimalStandaloneShadowCast(model);
                     animalStandaloneViewer.sourceMaterialPalette = collectStandaloneAnimalSourceMaterials(model);
                     scene.add(model);
 
@@ -13049,274 +14640,12 @@
                     setStatus('Animal preview ready');
                     window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                     window.__taskPageBoot?.markViewerReady('Animal preview ready');
+                    syncAnimalStandaloneBackdropFromPath('animal-preview-ready');
                 }
 
                 await loadStandaloneAnimalAnimationsIfReady(taskState);
 
-                if (isAnimalStandaloneTask(taskState)) {
-                    initAnimalIdlePanels(taskState);
-                }
-
                 return true;
-            }
-
-            function captureAnimalStandaloneSnapshot768() {
-                const renderer = animalStandaloneViewer.renderer;
-                const scene = animalStandaloneViewer.scene;
-                const camera = animalStandaloneViewer.camera;
-                const host = document.getElementById('model-viewer');
-                if (!renderer || !scene || !camera || !host) return '';
-                const W = 768;
-                const H = 448;
-                const prevSize = new THREE.Vector2();
-                renderer.getSize(prevSize);
-                const prevPR = renderer.getPixelRatio();
-                renderer.setPixelRatio(1);
-                renderer.setSize(W, H, false);
-                camera.aspect = W / H;
-                camera.updateProjectionMatrix();
-                renderer.render(scene, camera);
-                const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.92);
-                const hw = Math.max(320, Math.floor(host.clientWidth || 512));
-                const hh = Math.max(320, Math.floor(host.clientHeight || 512));
-                renderer.setSize(hw, hh, false);
-                renderer.setPixelRatio(prevPR);
-                camera.aspect = hw / hh;
-                camera.updateProjectionMatrix();
-                return dataUrl;
-            }
-
-            let animalIdlePollTimer = null;
-            let animalFitterInstance = null;
-
-            function initAnimalIdlePanels(taskState) {
-                if (!isAnimalStandaloneTask(taskState)) return;
-                const ltxPanelCheck = document.getElementById('animal-idle-ltx-panel');
-                if (ltxPanelCheck?.dataset?.panelsWired === '1') {
-                    return;
-                }
-                wrap?.classList?.add?.('animal-viewer-aspect-ltx');
-                const ltxPanel = document.getElementById('animal-idle-ltx-panel');
-                const fitPanel = document.getElementById('animal-animation-fitter-panel');
-                if (ltxPanel) ltxPanel.classList.remove('hidden');
-                if (fitPanel) fitPanel.classList.remove('hidden');
-                const genBtn = document.getElementById('animal-idle-generate-btn');
-                const idleStatus = document.getElementById('animal-idle-status');
-                const idleVid = document.getElementById('animal-idle-video');
-                const idleErr = document.getElementById('animal-idle-error');
-                const fitUrl = document.getElementById('animal-fitter-video-url');
-                const fitRun = document.getElementById('animal-fitter-run-btn');
-                const fitStop = document.getElementById('animal-fitter-stop-btn');
-                const fitApply = document.getElementById('animal-fitter-apply-btn');
-                const fitExport = document.getElementById('animal-fitter-export-btn');
-                const fitProg = document.getElementById('animal-fitter-progress');
-                if (genBtn) genBtn.disabled = false;
-                if (fitRun) fitRun.disabled = false;
-
-                const lsKey = `idleAnimGen:${taskId}`;
-                const readLs = () => {
-                    try {
-                        const raw = localStorage.getItem(lsKey);
-                        if (!raw) return null;
-                        const o = JSON.parse(raw);
-                        if (Date.now() - (o.savedAt || 0) > 30000) {
-                            localStorage.removeItem(lsKey);
-                            return null;
-                        }
-                        return o;
-                    } catch (_) {
-                        return null;
-                    }
-                };
-                const writeLs = (jobId) => {
-                    try {
-                        localStorage.setItem(lsKey, JSON.stringify({ jobId, savedAt: Date.now() }));
-                    } catch (_) {}
-                };
-                const touchLs = () => {
-                    const cur = readLs();
-                    if (cur?.jobId) writeLs(cur.jobId);
-                };
-
-                const pollIdleJob = async (jobId) => {
-                    const url = `/api/task/${encodeURIComponent(taskId)}/idle-animation/status?job_id=${encodeURIComponent(jobId)}`;
-                    const r = await fetch(url, { credentials: 'same-origin' });
-                    if (!r.ok) throw new Error(await r.text());
-                    return r.json();
-                };
-
-                if (genBtn && !genBtn.dataset.wired) {
-                    genBtn.dataset.wired = '1';
-                    genBtn.addEventListener('click', async () => {
-                        idleErr?.classList?.add?.('hidden');
-                        genBtn.disabled = true;
-                        if (idleStatus) idleStatus.textContent = 'Capturing snapshot…';
-                        const snap = captureAnimalStandaloneSnapshot768();
-                        if (!snap) {
-                            if (idleStatus) idleStatus.textContent = 'Snapshot failed';
-                            genBtn.disabled = false;
-                            return;
-                        }
-                        if (idleStatus) idleStatus.textContent = 'Starting LTX job…';
-                        try {
-                            const res = await fetch(`/api/task/${encodeURIComponent(taskId)}/idle-animation/start`, {
-                                method: 'POST',
-                                credentials: 'same-origin',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ snapshot_jpg_base64_string: snap }),
-                            });
-                            if (!res.ok) throw new Error(await res.text());
-                            const data = await res.json();
-                            const jobId = data.job_id_string;
-                            writeLs(jobId);
-                            if (animalIdlePollTimer) clearInterval(animalIdlePollTimer);
-                            animalIdlePollTimer = setInterval(async () => {
-                                touchLs();
-                                try {
-                                    const st = await pollIdleJob(jobId);
-                                    const si = st.status_int;
-                                    if (idleStatus) {
-                                        idleStatus.textContent = `${st.status_label_string || 'status'} (${si})`;
-                                    }
-                                    if (si >= 3) {
-                                        clearInterval(animalIdlePollTimer);
-                                        animalIdlePollTimer = null;
-                                        genBtn.disabled = false;
-                                        localStorage.removeItem(lsKey);
-                                        const vurl = st.video_url_string;
-                                        if (si === 3 && vurl && idleVid) {
-                                            idleVid.classList.remove('hidden');
-                                            idleVid.src = vurl;
-                                            idleVid.play?.().catch(() => {});
-                                            const prox = `/api/task/${encodeURIComponent(taskId)}/idle-animation/proxy-video?url=${encodeURIComponent(vurl)}`;
-                                            if (fitUrl) fitUrl.value = prox;
-                                        }
-                                        if (si === 4 && idleErr) {
-                                            idleErr.textContent = st.error_string || 'Render failed';
-                                            idleErr.classList.remove('hidden');
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.warn('[IdleLTX] poll', e);
-                                    if (idleStatus) idleStatus.textContent = 'Poll error';
-                                }
-                            }, 2000);
-                        } catch (e) {
-                            console.error(e);
-                            if (idleErr) {
-                                idleErr.textContent = String(e?.message || e);
-                                idleErr.classList.remove('hidden');
-                            }
-                            if (idleStatus) idleStatus.textContent = 'Error';
-                            genBtn.disabled = false;
-                        }
-                    });
-                }
-
-                const resume = readLs();
-                if (resume?.jobId && idleStatus) {
-                    idleStatus.textContent = 'Resuming LTX job…';
-                    genBtn.disabled = true;
-                    if (animalIdlePollTimer) clearInterval(animalIdlePollTimer);
-                    animalIdlePollTimer = setInterval(async () => {
-                        touchLs();
-                        try {
-                            const st = await pollIdleJob(resume.jobId);
-                            const si = st.status_int;
-                            idleStatus.textContent = `${st.status_label_string || 'status'} (${si})`;
-                            if (si >= 3) {
-                                clearInterval(animalIdlePollTimer);
-                                animalIdlePollTimer = null;
-                                genBtn.disabled = false;
-                                localStorage.removeItem(lsKey);
-                                const vurl = st.video_url_string;
-                                if (si === 3 && vurl && idleVid) {
-                                    idleVid.classList.remove('hidden');
-                                    idleVid.src = vurl;
-                                    const prox = `/api/task/${encodeURIComponent(taskId)}/idle-animation/proxy-video?url=${encodeURIComponent(vurl)}`;
-                                    if (fitUrl) fitUrl.value = prox;
-                                }
-                            }
-                        } catch (_) {}
-                    }, 2000);
-                }
-
-                if (fitRun && !fitRun.dataset.wired) {
-                    fitRun.dataset.wired = '1';
-                    fitRun.addEventListener('click', async () => {
-                        fitProg.textContent = 'Loading fitter module…';
-                        const mod = await import('/static/animal_animation_fitter/animal_animation_fitter.js?v=3');
-                        const { AnimalAnimationFitter } = mod;
-                        const videoUrl = (fitUrl?.value || '').trim();
-                        if (!videoUrl) {
-                            fitProg.textContent = 'Set video URL first';
-                            return;
-                        }
-                        fitRun.disabled = true;
-                        fitStop.disabled = false;
-                        const conv = Number(document.getElementById('animal-fitter-conv')?.value || 85);
-                        const maxt = Number(document.getElementById('animal-fitter-time')?.value || 45);
-                        const qual = document.getElementById('animal-fitter-quality')?.value || 'balanced';
-                        animalFitterInstance = new AnimalAnimationFitter(
-                            {
-                                THREE,
-                                scene: animalStandaloneViewer.scene,
-                                camera: animalStandaloneViewer.camera,
-                                renderer: animalStandaloneViewer.renderer,
-                                model: animalStandaloneViewer.model,
-                                animalStandaloneViewer,
-                            },
-                            null,
-                            {
-                                target_convergence_percent_float: conv,
-                                max_compute_time_seconds_float: maxt,
-                                quality_level_string: qual,
-                                frame_sample_count_int: qual === 'fast' ? 16 : qual === 'high' ? 48 : 32,
-                                output_fps_int: 24,
-                            }
-                        );
-                        await animalFitterInstance.loadTargetVideo(videoUrl);
-                        try {
-                            await animalFitterInstance.runFitting((ev) => {
-                                fitProg.textContent = `stage=${ev.stage_string || ''} conv=${(ev.convergence_percent_float || 0).toFixed(1)}% iter=${ev.iterations_int || ''}`;
-                            });
-                            fitApply.disabled = false;
-                            fitExport.disabled = false;
-                            fitProg.textContent = `Done. convergence=${animalFitterInstance._best?.convergence_percent_float?.toFixed?.(1)}%`;
-                        } catch (err) {
-                            console.error(err);
-                            fitProg.textContent = String(err?.message || err);
-                        }
-                        fitRun.disabled = false;
-                        fitStop.disabled = true;
-                    });
-                }
-                if (fitStop && !fitStop.dataset.wired) {
-                    fitStop.dataset.wired = '1';
-                    fitStop.addEventListener('click', () => {
-                        animalFitterInstance?.stop?.();
-                    });
-                }
-                if (fitApply && !fitApply.dataset.wired) {
-                    fitApply.dataset.wired = '1';
-                    fitApply.addEventListener('click', () => {
-                        animalFitterInstance?.applyBestAnimationToViewer?.();
-                    });
-                }
-                if (fitExport && !fitExport.dataset.wired) {
-                    fitExport.dataset.wired = '1';
-                    fitExport.addEventListener('click', () => {
-                        const json = animalFitterInstance?.exportAnimationJson?.();
-                        if (!json) return;
-                        const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = `animal_idle_fit_${taskId.slice(0, 8)}.json`;
-                        a.click();
-                        URL.revokeObjectURL(a.href);
-                    });
-                }
-                if (ltxPanel) ltxPanel.dataset.panelsWired = '1';
             }
 
             const FACE_RIG_UI_DISABLED = true;
@@ -15592,6 +16921,17 @@
 
             window.taskDbg('[Viewer] Starting viewer initialization...');
             startPerfSummaryLogger();
+            void (async () => {
+                try {
+                    const { createIdleLtxGenerator } = await import('/static/js/idle_ltx_generator.js?v=20260508idle19');
+                    createIdleLtxGenerator({
+                        taskId,
+                        captureFrame768: () => captureAnimalStandaloneLtxSnapshotDataUrl(),
+                    });
+                } catch (e) {
+                    console.warn('[IdleLTX] failed to load', e);
+                }
+            })();
             window.addEventListener('taskPageDeferredReady', () => {
                 faceRigViewer?.init();
             }, { once: true });

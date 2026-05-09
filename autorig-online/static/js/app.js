@@ -11,7 +11,8 @@ const App = {
         selectedFile: null,
         activeTab: 'upload',
         free3dCreateInFlight: false,
-        taskSubmitInProgress: false
+        taskSubmitInProgress: false,
+        rigV2VisionDeps: null
     },
 
     scheduleNonCriticalWork(callback, timeout = 1200) {
@@ -172,6 +173,13 @@ const App = {
         textEl.textContent = typeof t === 'function' ? t(i18nKey) : '';
     },
 
+    setConvertFormBusyText(text) {
+        const textEl = document.getElementById('convert-form-busy-text');
+        if (!textEl) return;
+        textEl.removeAttribute('data-i18n');
+        textEl.textContent = text || '';
+    },
+
     setConvertFormUploadProgress(pct) {
         const wrap = document.getElementById('convert-form-busy-progress-wrap');
         const track = document.getElementById('convert-form-busy-progress-track');
@@ -267,6 +275,154 @@ const App = {
             xhr.onerror = () => reject(new Error('network'));
             xhr.send(formData);
         });
+    },
+
+    async loadRigV2VisionDeps() {
+        if (this.state.rigV2VisionDeps) return this.state.rigV2VisionDeps;
+        const [
+            THREE,
+            { GLTFLoader },
+            { FBXLoader },
+            { OBJLoader },
+            { OrbitControls },
+            { RoomEnvironment },
+        ] = await Promise.all([
+            import('three'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/FBXLoader.js'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/OBJLoader.js'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js'),
+            import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js'),
+        ]);
+        this.state.rigV2VisionDeps = { THREE, GLTFLoader, FBXLoader, OBJLoader, OrbitControls, RoomEnvironment };
+        return this.state.rigV2VisionDeps;
+    },
+
+    async runHiddenAnimalDetection(source) {
+        const animalTypes = ['dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+        const model = 'gpt-5.4-nano';
+        let objectUrl = '';
+        let host = null;
+        try {
+            const deps = await this.loadRigV2VisionDeps();
+            const { THREE, GLTFLoader, FBXLoader, OBJLoader, OrbitControls, RoomEnvironment } = deps;
+            const url = source.file ? URL.createObjectURL(source.file) : source.url;
+            objectUrl = source.file ? url : '';
+            const ext = (source.ext || '').replace(/^\./, '').toLowerCase();
+            host = document.createElement('div');
+            host.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:512px;height:512px;pointer-events:none;';
+            document.body.appendChild(host);
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+            const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.setPixelRatio(1);
+            renderer.setSize(512, 512, false);
+            host.appendChild(renderer.domElement);
+            const controls = new OrbitControls(camera, renderer.domElement);
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.5));
+            const key = new THREE.DirectionalLight(0xffffff, 2.2);
+            key.position.set(-3, 5, -4);
+            scene.add(key);
+            const pmrem = new THREE.PMREMGenerator(renderer);
+            scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+            const loadWithLoader = (loader, loadUrl) => new Promise((resolve, reject) => loader.load(loadUrl, resolve, undefined, reject));
+            let object;
+            if (ext === 'glb' || ext === 'gltf') {
+                object = (await loadWithLoader(new GLTFLoader(), url)).scene;
+            } else if (ext === 'fbx') {
+                object = await loadWithLoader(new FBXLoader(), url);
+            } else if (ext === 'obj') {
+                object = await loadWithLoader(new OBJLoader(), url);
+            } else {
+                return null;
+            }
+            object.traverse?.((node) => {
+                const mats = Array.isArray(node.material) ? node.material : (node.material ? [node.material] : []);
+                mats.forEach((mat) => { mat.side = THREE.DoubleSide; mat.needsUpdate = true; });
+            });
+            scene.add(object);
+            const box = new THREE.Box3().setFromObject(object);
+            object.position.sub(box.getCenter(new THREE.Vector3()));
+            const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z, 1);
+            const dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * 1.45;
+            camera.near = Math.max(0.001, dist / 1000);
+            camera.far = Math.max(1000, dist * 10);
+            camera.updateProjectionMatrix();
+            const views = [
+                { id: 'top_side_45', label: 'top-side 45', forward: new THREE.Vector3(-1, -1, -1), up: new THREE.Vector3(0, 1, 0) },
+                { id: 'front', label: 'front', forward: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0) },
+                { id: 'back', label: 'back', forward: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) },
+                { id: 'left', label: 'left', forward: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+                { id: 'right', label: 'right', forward: new THREE.Vector3(-1, 0, 0), up: new THREE.Vector3(0, 1, 0) },
+                { id: 'top', label: 'top', forward: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, -1) },
+                { id: 'bottom', label: 'bottom', forward: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 0, 1) },
+            ];
+            const capture = (view) => {
+                const target = new THREE.Vector3(0, 0, 0);
+                camera.up.copy(view.up);
+                camera.position.copy(target).sub(view.forward.clone().normalize().multiplyScalar(dist));
+                controls.target.copy(target);
+                camera.lookAt(target);
+                controls.update();
+                renderer.render(scene, camera);
+                return renderer.domElement.toDataURL('image/jpeg', 0.9);
+            };
+            const analyze = async (view, capturedImage = null) => {
+                const image = capturedImage || capture(view);
+                const resp = await fetch('/api/rig-v2/vision/animal-type', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_jpg_base64_string: image,
+                        view_id_string: view.id,
+                        force_openai_bool: true,
+                        open_ai_model_override_string: model
+                    })
+                });
+                const data = await resp.json();
+                return { view_id_string: view.id, ...data };
+            };
+            const preflightRender = capture(views[0]);
+            const first = await analyze(views[0], preflightRender);
+            const rest = await Promise.all(views.slice(1).map(analyze));
+            const results = [first].concat(rest);
+            const scores = {};
+            for (const result of results) {
+                const type = String(result.animal_type_string || '').toLowerCase();
+                if (!type) continue;
+                scores[type] = (scores[type] || 0) + Math.max(0.05, Math.min(1, Number(result.confidence_float || 0.5)));
+            }
+            let best = '';
+            let bestScore = 0;
+            Object.entries(scores).forEach(([type, score]) => {
+                if (score > bestScore) { best = type; bestScore = score; }
+            });
+            const isAnimal = best && best !== 'humanoid';
+            let animalType = isAnimal && animalTypes.includes(best) ? best : '';
+            if (isAnimal && !animalType) animalType = animalTypes[Math.floor(Math.random() * animalTypes.length)];
+            return {
+                type: isAnimal ? 'animal' : 'humanoid',
+                animal_type: animalType,
+                mode: 'only_rig',
+                model_used: model,
+                first_result: first,
+                results,
+                scores,
+                selected_score: bestScore,
+                preflight_render_jpg_base64_string: preflightRender,
+            };
+        } catch (err) {
+            console.warn('[RigV2Preflight] animal detection skipped:', err);
+            return null;
+        } finally {
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            if (host) host.remove();
+        }
     },
 
     showFree3DCreateOverlay(title) {
@@ -546,6 +702,29 @@ const App = {
         }
 
         try {
+            this.setConvertFormBusyText('Detecting model type...');
+            this.setConvertFormUploadProgress(null);
+            const sourceInfo = isUpload
+                ? {
+                    file: this.state.selectedFile,
+                    ext: '.' + String(this.state.selectedFile?.name || '').split('.').pop().toLowerCase()
+                }
+                : {
+                    url: linkVal,
+                    ext: '.' + String(linkVal || '').split('?')[0].split('#')[0].split('.').pop().toLowerCase()
+                };
+            const detection = await this.runHiddenAnimalDetection(sourceInfo);
+            if (detection) {
+                formData.set('rig_v2_animal_detection_json', JSON.stringify(detection));
+                if (detection.type === 'animal') {
+                    formData.set('type', 'animal');
+                    formData.set('animal_type', detection.animal_type || '');
+                    formData.set('mode', 'only_rig');
+                }
+            }
+            this.setConvertFormBusyMessage(isUpload ? 'upload_progress_uploading' : 'upload_progress_creating_task');
+            this.resetConvertFormProgressUI(busyMode);
+
             let ok;
             let status;
             let data;
@@ -574,7 +753,7 @@ const App = {
                     alert(t('error_login_required'));
                     window.location.href = '/auth/login';
                 } else if (status === 402) {
-                    window.location.href = '/buy-credits';
+                    window.location.href = '/buy';
                 } else {
                     alert(data.detail || t('error_generic'));
                 }
@@ -1107,7 +1286,7 @@ const App = {
                     window.location.href = '/auth/login';
                 } else if (response.status === 402) {
                     navigatingAway = true;
-                    window.location.href = '/buy-credits';
+                    window.location.href = '/buy';
                 } else {
                     alert(data.detail || t('error_generic'));
                 }
@@ -1123,6 +1302,8 @@ const App = {
         }
     }
 };
+
+window.App = App;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => App.init());

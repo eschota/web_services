@@ -4,7 +4,7 @@
 - Broadcast helpers for task events.
 - Server startup notifications with statistics.
 
-Token is read from environment: TELEGRAM_BOT_TOKEN
+Token is read via config.TELEGRAM_BOT_TOKEN (env + optional /etc/autorig-*.env loaded in config.py).
 """
 
 from __future__ import annotations
@@ -17,16 +17,22 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, case
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import AsyncSessionLocal, TelegramChat, TelegramNotification, Task
-from config import APP_URL
+from database import AsyncSessionLocal, TelegramChat, TelegramNotification, Task, SupportChatSession, SupportChatMessage
+from config import (
+    APP_URL,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_NOTIFICATION_CHAT_ID,
+)
 from workers import get_worker_base_url
 
 
 def _get_token() -> str | None:
-    tok = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    # Prefer live os.environ (systemd merges EnvironmentFile before exec); fallback to cached config.
+    tok = (os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or (TELEGRAM_BOT_TOKEN or "").strip())
     return tok or None
 
 
@@ -90,20 +96,36 @@ def _format_input_url(input_url: str | None) -> str:
         return f'📦 <a href="{html.escape(input_url)}">Source</a>'
 
 
-async def upsert_chat(chat_id: int, chat_type: str | None, title: str | None) -> None:
+def _normalize_telegram_chat_type(raw) -> str | None:
+    """PTB Chat.type may be Enum or str — store stable lowercase for SQL filters."""
+    if raw is None:
+        return None
+    v = getattr(raw, "value", None)
+    if v is None:
+        v = raw
+    s = str(v).strip().lower()
+    if not s:
+        return None
+    if "." in s:
+        s = s.rsplit(".", 1)[-1]
+    return s
+
+
+async def upsert_chat(chat_id: int, chat_type, title: str | None) -> None:
+    ctype = _normalize_telegram_chat_type(chat_type)
     async with AsyncSessionLocal() as db:
         rs = await db.execute(select(TelegramChat).where(TelegramChat.chat_id == chat_id))
         rec = rs.scalar_one_or_none()
         now = datetime.utcnow()
         if rec:
-            rec.chat_type = chat_type
+            rec.chat_type = ctype
             rec.title = title
             rec.is_active = True
             rec.last_seen_at = now
         else:
             rec = TelegramChat(
                 chat_id=chat_id,
-                chat_type=chat_type,
+                chat_type=ctype,
                 title=title,
                 is_active=True,
                 created_at=now,
@@ -116,7 +138,173 @@ async def upsert_chat(chat_id: int, chat_type: str | None, title: str | None) ->
 async def get_active_chat_ids() -> list[int]:
     async with AsyncSessionLocal() as db:
         rs = await db.execute(select(TelegramChat.chat_id).where(TelegramChat.is_active.is_(True)))
-        return [row[0] for row in rs.all()]
+        return [int(row[0]) for row in rs.all()]
+
+
+# =============================================================================
+# Site support chat (forum topic per session)
+# =============================================================================
+async def resolve_support_forum_chat_id(db: AsyncSession) -> int | None:
+    """
+    Target supergroup for support topics:
+    TELEGRAM_NOTIFICATION_CHAT_ID if set,
+    else earliest active subscriber preferring Bot-API-negative ids (forums/groups),
+    then any active chat (matches notification fan-out ordering when only positives exist).
+    """
+    if TELEGRAM_NOTIFICATION_CHAT_ID is not None and int(TELEGRAM_NOTIFICATION_CHAT_ID) != 0:
+        return int(TELEGRAM_NOTIFICATION_CHAT_ID)
+    r = await db.execute(
+        select(TelegramChat.chat_id)
+        .where(TelegramChat.is_active.is_(True))
+        .order_by(
+            case((TelegramChat.chat_id < 0, 0), else_=1),
+            TelegramChat.created_at.asc(),
+        )
+        .limit(1)
+    )
+    row = r.scalar_one_or_none()
+    return int(row) if row is not None else None
+
+
+async def support_forum_readiness_error(db: AsyncSession) -> str | None:
+    """Return None only when the bot can create support forum topics in the target chat."""
+    if not (_get_token() or ""):
+        return "TELEGRAM_BOT_TOKEN is not set"
+    cid = await resolve_support_forum_chat_id(db)
+    if cid is None or int(cid) == 0:
+        return "Support forum chat_id not resolved"
+
+    from telegram import Bot
+
+    bot = Bot(token=_get_token())
+    try:
+        chat = await bot.get_chat(chat_id=int(cid))
+        chat_type = _normalize_telegram_chat_type(getattr(chat, "type", None))
+        if chat_type != "supergroup":
+            return f"resolved support chat must be a supergroup, got {chat_type or 'unknown'}"
+        if not bool(getattr(chat, "is_forum", False)):
+            return "resolved support supergroup does not have forum topics enabled"
+
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=int(cid), user_id=int(me.id))
+        status = _normalize_telegram_chat_type(getattr(member, "status", None))
+        if status not in ("administrator", "creator", "owner"):
+            return f"support bot must be an admin in the forum supergroup, got {status or 'unknown'}"
+        if status not in ("creator", "owner") and getattr(member, "can_manage_topics", None) is not True:
+            return "support bot admin is missing the Telegram right to manage topics"
+    except Exception as exc:
+        return f"Telegram support forum check failed: {type(exc).__name__}: {exc}"
+    return None
+
+
+async def support_forum_configured_bool(db: AsyncSession) -> bool:
+    """True only when token, target forum, and bot topic-management rights are valid."""
+    return await support_forum_readiness_error(db) is None
+
+
+async def telegram_create_support_topic(db: AsyncSession, topic_name: str) -> tuple[int, int]:
+    token = _get_token()
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
+    readiness_error = await support_forum_readiness_error(db)
+    if readiness_error is not None:
+        raise RuntimeError(readiness_error)
+    cid = await resolve_support_forum_chat_id(db)
+    if cid is None:
+        raise RuntimeError(
+            "Support forum chat_id not resolved (set TELEGRAM_NOTIFICATION_CHAT_ID "
+            "or subscribe the target group with /start so a row exists in telegram_chats)"
+        )
+
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    name = (topic_name or "").strip()[:128] or "Support"
+
+    forum_t = await _send_with_retry(lambda: bot.create_forum_topic(chat_id=int(cid), name=name))
+    if not forum_t:
+        raise RuntimeError("create_forum_topic failed")
+    mtid = getattr(forum_t, "message_thread_id", None)
+    if mtid is None:
+        raise RuntimeError("create_forum_topic returned no message_thread_id")
+    return int(cid), int(mtid)
+
+
+async def telegram_send_support_message_html(
+    *,
+    forum_chat_id: int,
+    message_thread_id: int,
+    html: str,
+) -> int:
+    token = _get_token()
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    msg = await _send_with_retry(
+        lambda: bot.send_message(
+            chat_id=int(forum_chat_id),
+            message_thread_id=int(message_thread_id),
+            text=html,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        ),
+        raise_last=True,
+    )
+    if not msg:
+        raise RuntimeError("send_support_message failed")
+    return int(getattr(msg, "message_id"))
+
+
+async def ingest_support_reply_from_forum_message(
+    *,
+    forum_chat_id: int,
+    message_thread_id: int,
+    text: str,
+    telegram_message_id: int | None,
+    from_bot: bool,
+) -> None:
+    if from_bot:
+        return
+    t = (text or "").strip()
+    if not t:
+        return
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(SupportChatSession).where(
+                SupportChatSession.telegram_chat_id == int(forum_chat_id),
+                SupportChatSession.telegram_thread_id == int(message_thread_id),
+                SupportChatSession.status == "open",
+            )
+        )
+        sess = r.scalar_one_or_none()
+        if sess is None:
+            return
+
+        if telegram_message_id is not None:
+            dup_chk = await db.execute(
+                select(SupportChatMessage).where(
+                    SupportChatMessage.session_id == sess.id,
+                    SupportChatMessage.telegram_message_id == int(telegram_message_id),
+                )
+            )
+            if dup_chk.scalar_one_or_none() is not None:
+                return
+
+        db.add(
+            SupportChatMessage(
+                session_id=sess.id,
+                direction="admin",
+                body_text=t,
+                telegram_message_id=(
+                    int(telegram_message_id) if telegram_message_id is not None else None
+                ),
+            )
+        )
+        await db.commit()
 
 
 async def reserve_notification(chat_id: int, event_type: str, event_key: str) -> bool:
@@ -229,7 +417,13 @@ def _format_task_metrics(metrics: dict[str, int]) -> str:
     return f"#{ordinal} | 24h {current_24h} | {trend} {delta_str}"
 
 
-async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network: bool = True):
+async def _send_with_retry(
+    coro_factory,
+    *,
+    max_retries: int = 2,
+    retry_network: bool = True,
+    raise_last: bool = False,
+):
     """Best-effort retry for Telegram rate limits/transient errors."""
     from telegram.error import RetryAfter, TimedOut, NetworkError
 
@@ -242,16 +436,22 @@ async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network:
             print(f"[Telegram] Rate limited, retry {attempt}/{max_retries}")
             if attempt > max_retries:
                 print("[Telegram] Max retries exceeded (rate limit)")
+                if raise_last:
+                    raise
                 return None
             await asyncio.sleep(float(getattr(e, "retry_after", 1.0)) + 0.5)
         except (TimedOut, NetworkError) as e:
             if not retry_network:
                 print(f"[Telegram] Network error (no retry mode): {e}")
+                if raise_last:
+                    raise
                 return None
             attempt += 1
             print(f"[Telegram] Network error: {e}, retry {attempt}/{max_retries}")
             if attempt > max_retries:
                 print("[Telegram] Max retries exceeded (network)")
+                if raise_last:
+                    raise
                 return None
             await asyncio.sleep(1.0 * attempt)
         except Exception as e:
@@ -259,6 +459,8 @@ async def _send_with_retry(coro_factory, *, max_retries: int = 2, retry_network:
             print(f"[Telegram] API Error: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
+            if raise_last:
+                raise
             return None
 
 
@@ -579,31 +781,6 @@ async def broadcast_disk_space_low(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
-async def broadcast_youtube_bonus_click(
-    user_email: str
-) -> None:
-    """Notify when user clicks YouTube bonus link."""
-    print(f"[Telegram] broadcast_youtube_bonus_click: user={user_email}")
-    token = _get_token()
-    if not token:
-        return
-
-    from telegram import Bot
-    from telegram.constants import ParseMode
-
-    bot = Bot(token=token)
-    text = f"🎁 <b>YouTube Bonus Clicked!</b>\n👤 User: {html.escape(user_email)} | 💰 +10 credits granted"
-
-    chat_ids = await get_active_chat_ids()
-    if not chat_ids:
-        return
-
-    await asyncio.gather(*[
-        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML))
-        for cid in chat_ids
-    ])
-
-
 async def broadcast_feedback_submitted(
     user_email: str,
     text_content: str
@@ -756,29 +933,42 @@ async def _download_video_from_worker(task_id: str) -> str | None:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Task).where(Task.id == task_id))
             task = result.scalar_one_or_none()
-            if not task or not task.guid or not task.worker_api:
+            if not task:
+                print(f"[Telegram] Cannot download video: task {task_id} not found")
+                return None
+
+            if task.video_ready and task.video_url:
+                video_urls = [str(task.video_url)]
+                if "_video_small.mp4" in str(task.video_url):
+                    video_urls.append(str(task.video_url).replace("_video_small.mp4", "_video.mp4"))
+            elif task.guid and task.worker_api:
+                parsed = urlparse(task.worker_api)
+                worker_base = f"{parsed.scheme}://{parsed.netloc}"
+                video_urls = [
+                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video_small.mp4",
+                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video.mp4",
+                ]
+            else:
                 print(f"[Telegram] Cannot download video: task {task_id} has no guid or worker_api")
                 return None
-            
-            parsed = urlparse(task.worker_api)
-            worker_base = f"{parsed.scheme}://{parsed.netloc}"
-            video_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video.mp4"
-        
-        print(f"[Telegram] Downloading video from {video_url}")
         
         # Download video
         async with httpx.AsyncClient() as client:
-            resp = await client.get(video_url, timeout=60.0, follow_redirects=True)
-            if resp.status_code == 200:
-                cache_dir = "/var/autorig/videos"
-                os.makedirs(cache_dir, exist_ok=True)
-                cache_path = f"{cache_dir}/{task_id}.mp4"
-                with open(cache_path, "wb") as f:
-                    f.write(resp.content)
-                print(f"[Telegram] Video cached at {cache_path} ({len(resp.content)} bytes)")
-                return cache_path
-            else:
-                print(f"[Telegram] Failed to download video: HTTP {resp.status_code}")
+            for video_url in video_urls:
+                print(f"[Telegram] Downloading video from {video_url}")
+                try:
+                    resp = await client.get(video_url, timeout=90.0, follow_redirects=True)
+                    if resp.status_code == 200:
+                        cache_dir = "/var/autorig/videos"
+                        os.makedirs(cache_dir, exist_ok=True)
+                        cache_path = f"{cache_dir}/{task_id}.mp4"
+                        with open(cache_path, "wb") as f:
+                            f.write(resp.content)
+                        print(f"[Telegram] Video cached at {cache_path} ({len(resp.content)} bytes)")
+                        return cache_path
+                    print(f"[Telegram] Failed to download video from {video_url}: HTTP {resp.status_code}")
+                except Exception as e:
+                    print(f"[Telegram] Failed to download video from {video_url}: {type(e).__name__}: {e}")
     except Exception as e:
         print(f"[Telegram] Failed to download video: {e}")
     return None
@@ -853,13 +1043,40 @@ async def broadcast_worker_stalled(
     if not chat_ids:
         return
 
-    safe_url = html.escape(worker_url or "unknown")
+    from worker_labels import format_worker_stalled_telegram_html
+
+    worker_block = format_worker_stalled_telegram_html(worker_url)
     sample = ", ".join((sample_task_ids or [])[:3])
     sample_line = f"\n🧩 Tasks: <code>{html.escape(sample)}</code>" if sample else ""
+    link_lines: list[str] = []
+    if sample_task_ids:
+        try:
+            async with AsyncSessionLocal() as db:
+                rows = await db.execute(select(Task).where(Task.id.in_(sample_task_ids[:3])))
+                by_id = {task.id: task for task in rows.scalars().all()}
+            for task_id in sample_task_ids[:3]:
+                task = by_id.get(task_id)
+                if not task:
+                    continue
+                task_url = _task_url(task_id)
+                progress_url = task.progress_page
+                if not progress_url and task.guid and task.worker_api:
+                    worker_base = get_worker_base_url(task.worker_api)
+                    if worker_base:
+                        progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+                parts = [f'<a href="{html.escape(task_url)}">Task {html.escape(task_id[:8])}</a>']
+                if progress_url:
+                    parts.append(f'<a href="{html.escape(progress_url)}">Progress</a>')
+                link_lines.append(" · ".join(parts))
+        except Exception as e:
+            print(f"[Telegram] Failed to build stalled task links: {e}")
+    links_line = ("\n🔎 " + "\n🔎 ".join(link_lines)) if link_lines else ""
     text = (
         f"🚨 <b>Worker stalled</b>\n"
-        f"🔧 {safe_url} | 📌 stalled: {int(stalled_tasks)} | ⏱ oldest: {int(oldest_stalled_minutes)}m"
+        f"{worker_block}\n"
+        f"📌 stalled: {int(stalled_tasks)} | ⏱ oldest: {int(oldest_stalled_minutes)}m"
         f"{sample_line}"
+        f"{links_line}"
     )
 
     sem = asyncio.Semaphore(3)
@@ -1150,9 +1367,42 @@ async def broadcast_server_startup() -> None:
 # =============================================================================
 # Bot runner (polling)
 # =============================================================================
+async def _support_forum_message_handler(update, context):
+    msg = update.effective_message
+    if not msg:
+        return
+    async with AsyncSessionLocal() as db:
+        forum_cid = await resolve_support_forum_chat_id(db)
+    if forum_cid is None:
+        return
+    if int(msg.chat_id) != int(forum_cid):
+        return
+    mtid = getattr(msg, "message_thread_id", None)
+    if mtid is None:
+        return
+    user = msg.from_user
+    from_bot = bool(user is not None and getattr(user, "is_bot", False))
+    txt = getattr(msg, "text", None) or ""
+    await ingest_support_reply_from_forum_message(
+        forum_chat_id=int(msg.chat_id),
+        message_thread_id=int(mtid),
+        text=str(txt),
+        telegram_message_id=getattr(msg, "message_id", None),
+        from_bot=from_bot,
+    )
+
+
 async def _start_cmd(update, context):
     chat = update.effective_chat
     if not chat:
+        return
+    async with AsyncSessionLocal() as db:
+        forum_cid = await resolve_support_forum_chat_id(db)
+    if forum_cid is not None and int(chat.id) == int(forum_cid):
+        if update.message:
+            await update.message.reply_text(
+                "This forum is for support threads. Task notifications cannot be subscribed via /start here; use the site chat bubble."
+            )
         return
     title = getattr(chat, "title", None) or getattr(chat, "username", None) or getattr(chat, "full_name", None)
     print(f"[Telegram] /start command from chat_id={chat.id}, type={getattr(chat, 'type', None)}, title={title}")
@@ -1168,10 +1418,19 @@ async def run_polling() -> None:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    from telegram.ext import ApplicationBuilder, CommandHandler
+    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", _start_cmd))
+
+    group_filter = filters.ChatType.GROUP | filters.ChatType.SUPERGROUP
+    print("[Telegram] Support forum reply handler (resolved chat_id from env or telegram_chats)")
+    app.add_handler(
+        MessageHandler(
+            group_filter & filters.TEXT & (~filters.COMMAND),
+            _support_forum_message_handler,
+        )
+    )
 
     await app.initialize()
     await app.start()

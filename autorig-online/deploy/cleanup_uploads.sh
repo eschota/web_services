@@ -1,6 +1,6 @@
 #!/bin/bash
 # Cleanup old uploads (older than 24 hours)
-# Run via cron: 0 */6 * * * /opt/autorig-online/deploy/cleanup_uploads.sh
+# Run via cron: 0 */6 * * * /root/autorig-online/deploy/cleanup_uploads.sh
 
 UPLOAD_DIR="/var/autorig/uploads"
 MAX_AGE_MINUTES=1440  # 24 hours

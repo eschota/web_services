@@ -1,9 +1,9 @@
 """
 Server-side NSFW classification for task posters (images referenced in ready_urls).
 
-Uses NudeNet ONNX detector on poster bytes downloaded from the worker URL.
+Uses NudeNet ONNX detector on a browser-rendered preflight image first, then
+poster bytes downloaded from the worker URL as fallback.
 Optional: OpenAI vision for YouTube title/description/keywords (same image bytes).
-Policy: single pipeline — no alternate client-only source of truth for DB fields.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import base64
 import json
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
@@ -26,6 +27,7 @@ _CLASSIFIER_VERSION_MAX_LEN = 64
 
 CONTENT_CLASSIFIER_VERSION = "nudenet-320n-3.4"
 OPENAI_POSTER_MODEL = "gpt-4o-mini"
+PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 
 _classifier_locks: Dict[str, asyncio.Lock] = {}
 _classifier_locks_guard = asyncio.Lock()
@@ -233,6 +235,16 @@ def classify_image_bytes(image_bytes: bytes) -> Tuple[str, float]:
     return detections_to_rating(raw)
 
 
+def _load_preflight_render_image_bytes(task_id: str) -> Optional[bytes]:
+    try:
+        path = PREFLIGHT_RENDER_DIR / f"{task_id}.jpg"
+        if path.exists() and path.is_file():
+            return path.read_bytes()
+    except Exception as e:
+        print(f"[ContentModeration] Preflight render load failed for task {task_id}: {e}")
+    return None
+
+
 def _normalize_keyword_list(keywords: List[Any]) -> List[str]:
     cleaned: List[str] = []
     for x in keywords:
@@ -406,18 +418,22 @@ async def _run_task_poster_classification_impl(task_id: str) -> None:
         if task.status != "done":
             return
         cv_prev = task.content_classifier_version or ""
-        if task.content_classified_at is not None and ":pipeline_error" not in cv_prev:
+        if task.content_classified_at is not None and ":pipeline_error" not in cv_prev and ":fetch_error" not in cv_prev:
             await _safe_post_classify_hooks(task_id)
             return
 
+        image_bytes = _load_preflight_render_image_bytes(task_id)
+        image_source = "preflight_render" if image_bytes else "poster"
         ready_list, output_list = _task_ready_and_output_lists(task)
-        poster_url = find_poster_url(ready_list, output_list) or find_poster_url_loose(
-            ready_list, output_list
-        )
+        poster_url = None
+        if image_bytes is None:
+            poster_url = find_poster_url(ready_list, output_list) or find_poster_url_loose(
+                ready_list, output_list
+            )
         now = datetime.utcnow()
-        version = CONTENT_CLASSIFIER_VERSION
+        version = f"{CONTENT_CLASSIFIER_VERSION}:preflight" if image_source == "preflight_render" else CONTENT_CLASSIFIER_VERSION
 
-        if not poster_url:
+        if image_bytes is None and not poster_url:
             task.content_rating = "unknown"
             task.content_score = None
             task.content_classified_at = now
@@ -427,21 +443,22 @@ async def _run_task_poster_classification_impl(task_id: str) -> None:
             await _safe_post_classify_hooks(task_id)
             return
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                resp = await client.get(poster_url)
-                resp.raise_for_status()
-                image_bytes = resp.content
-        except Exception as e:
-            print(f"[ContentModeration] Poster fetch failed for task {task_id}: {e}")
-            task.content_rating = "unknown"
-            task.content_score = None
-            task.content_classified_at = now
-            task.content_classifier_version = _clip_classifier_version(f"{version}:fetch_error")
-            task.updated_at = now
-            await db.commit()
-            await _safe_post_classify_hooks(task_id)
-            return
+        if image_bytes is None:
+            try:
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                    resp = await client.get(poster_url)
+                    resp.raise_for_status()
+                    image_bytes = resp.content
+            except Exception as e:
+                print(f"[ContentModeration] Poster fetch failed for task {task_id}: {e}")
+                task.content_rating = "unknown"
+                task.content_score = None
+                task.content_classified_at = now
+                task.content_classifier_version = _clip_classifier_version(f"{version}:fetch_error")
+                task.updated_at = now
+                await db.commit()
+                await _safe_post_classify_hooks(task_id)
+                return
 
         try:
             rating, score = await asyncio.to_thread(classify_image_bytes, image_bytes)

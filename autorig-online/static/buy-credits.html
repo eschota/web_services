@@ -139,6 +139,9 @@
             .pricing-grid-billing {
                 grid-template-columns: 1fr !important;
             }
+            .paywall-feature-grid {
+                grid-template-columns: 1fr !important;
+            }
             .buy-credits-header {
                 flex-direction: column;
                 align-items: flex-start !important;
@@ -151,28 +154,24 @@
 
     <main style="padding: 3rem 0;">
         <div class="container" style="max-width: 980px;">
-            <!-- FREE Credits Section -->
-            <div class="card" style="padding: 2rem; border: 2px dashed var(--accent); background: rgba(var(--accent-rgb), 0.05);">
-                <h2 style="margin-top: 0; color: var(--accent);" data-i18n="free_title">FREE</h2>
-                <div style="line-height: 1.6;">
-                    <p style="font-weight: 600; font-size: 1.1rem; margin-bottom: 1rem;" data-i18n="free_greeting">Hi 3D ARTIST! I've been doing this project with a friend on enthusiasm for over a year and everything is free here!</p>
-                    <p data-i18n="free_message">I would like to make the RIG even cooler and I know how, but for this I need MONEY :) for beer and cookies! So if you have a couple of extra bucks, please buy credits!</p>
-                    <p style="margin-top: 1rem;" data-i18n="free_youtube_intro">And if not, then just open Free3D Online and support the project there!</p>
-                    <p style="font-weight: 700; color: var(--accent); font-size: 1.2rem; margin: 1rem 0;" data-i18n="free_credits_offer">Get 10 credits for downloading for free!!!</p>
-                    <a href="https://free3d.online/" target="_blank" class="btn btn-primary" id="youtube-bonus-link" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.377.505 9.377.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                        Free3D.online
-                    </a>
-                    <p style="margin-top: 1rem; font-style: italic; font-size: 0.9rem; color: var(--text-muted);" data-i18n="free_feedback_hint">And please leave feedback about the RIG and what you would like to improve in the form below</p>
-                </div>
-            </div>
-
-            <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;" data-i18n="donation_title">Support the project</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="donation_subtitle">Credit purchases help fund development. Progress includes all completed AutoRig credit pack sales plus a starting baseline.</p>
-                <div id="donation-stats-line" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">—</div>
-                <div style="background: rgba(255,255,255,0.06); border-radius: 999px; height: 14px; overflow: hidden; border: 1px solid var(--border);">
-                    <div id="donation-bar-fill" style="height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease;"></div>
+            <div class="card" style="padding: 2rem; border: 1px solid var(--border); background: rgba(var(--accent-rgb), 0.05);">
+                <h1 style="margin: 0 0 0.75rem; font-size: 2rem;" data-i18n="paywall_title">AutoRig Credits</h1>
+                <p style="color: var(--text-secondary); margin: 0 0 1rem; line-height: 1.55;" data-i18n="paywall_intro">
+                    Credits unlock rigged model downloads, custom animations, and full ZIP bundles.
+                </p>
+                <div class="paywall-feature-grid" style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin: 1rem 0;">
+                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
+                        <div style="font-weight:700;" data-i18n="paywall_item_zip">Full ZIP bundle</div>
+                        <div style="color:var(--text-muted); font-size:0.9rem; margin-top:0.3rem;" data-i18n="paywall_item_zip_desc">10 credits per task</div>
+                    </div>
+                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
+                        <div style="font-weight:700;" data-i18n="paywall_item_anim">All custom animations</div>
+                        <div style="color:var(--text-muted); font-size:0.9rem; margin-top:0.3rem;" data-i18n="paywall_item_anim_desc">10 credits per task</div>
+                    </div>
+                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
+                        <div style="font-weight:700;" data-i18n="paywall_item_single">Single custom animation</div>
+                        <div style="color:var(--text-muted); font-size:0.9rem; margin-top:0.3rem;" data-i18n="paywall_item_single_desc">1 credit each</div>
+                    </div>
                 </div>
             </div>
 
@@ -305,7 +304,7 @@
                     <button type="button" class="btn btn-ghost" id="feedback-reply-cancel" style="padding: 0.25rem 0.5rem; flex-shrink: 0;" data-i18n="feedback_reply_cancel">Cancel</button>
                 </div>
                 <div style="margin-top: 1rem;">
-                    <textarea id="feedback-text" style="width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="What do you think about the RIG? What should we improve?"></textarea>
+                    <textarea id="feedback-text" style="width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="What should we improve?"></textarea>
                     <button class="btn btn-primary" id="btn-submit-feedback" style="margin-top: 1rem;" data-i18n="feedback_submit">Submit Feedback</button>
                 </div>
             </div>
@@ -318,18 +317,13 @@
                 </div>
             </div>
 
-            <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;" data-i18n="roadmap_title">Roadmap — your vote</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="roadmap_intro">Pick what we should prioritize next. You can change your vote anytime.</p>
-                <div id="roadmap-cards"></div>
-            </div>
         </div>
     </main>
     <div id="site-footer"></div>
 
         <script src="/static/js/header.js?v=20260324-sitelayout"></script>
     <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/site-layout.js?v=20260324-sitelayout"></script>
+    <script src="/static/js/site-layout.js?v=20260430-supportfix"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
 <script src="/static/js/i18n.js"></script>
     <script>
@@ -494,28 +488,6 @@
             if (prev) prev.textContent = `${name}: ${snippet}${(item.text || '').length > 72 ? '…' : ''}`;
             document.getElementById('feedback-reply-banner')?.classList.remove('hidden');
             document.getElementById('feedback-text')?.focus();
-        }
-
-        async function setupYouTubeBonus() {
-            const link = document.getElementById('youtube-bonus-link');
-            link?.addEventListener('click', (e) => {
-                if (!window.__authedUser) {
-                    alert(t('buy_login_required'));
-                    e.preventDefault();
-                    return;
-                }
-
-                // Call API to grant bonus
-                try {
-                    if (navigator.sendBeacon) {
-                        navigator.sendBeacon('/api/user/grant-youtube-bonus', new Blob(['1'], { type: 'text/plain;charset=UTF-8' }));
-                    } else {
-                        fetch('/api/user/grant-youtube-bonus', { method: 'POST', keepalive: true }).catch(() => {});
-                    }
-                } catch (e) {
-                    console.error('YouTube bonus failed:', e);
-                }
-            });
         }
 
         function buildFeedbackChildrenMap(items) {
@@ -939,18 +911,14 @@
             setupThemeToggle();
             setupLangSelector();
             await updateCreditsUI();
-            await loadDonationStats();
-            await loadRoadmap();
             setupBuyButtons();
             setupBillingTabs();
             setupCryptoModal();
-            setupYouTubeBonus();
             setupFeedbackForm();
             await loadFeedback();
             window.addEventListener('languageChanged', () => {
-                loadDonationStats();
-                loadRoadmap();
                 if (window.__cryptoConfig) applyCryptoPricesToCards();
+                loadFeedback();
             });
         });
     </script>

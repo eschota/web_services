@@ -1,0 +1,25 @@
+[Unit]
+Description=AutoRig Online Telegram Bot
+After=network.target autorig.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/autorig-online/backend
+ExecStart=/root/autorig-online/venv/bin/python -m telegram_bot
+Restart=always
+RestartSec=5
+
+EnvironmentFile=/etc/autorig-telegram.env
+Environment="PYTHONPATH=/root/autorig-online/backend"
+Environment="HOME=/root"
+Environment="PATH=/root/autorig-online/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=autorig-telegram
+
+[Install]
+WantedBy=multi-user.target

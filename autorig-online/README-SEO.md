@@ -46,7 +46,7 @@ All SEO pages are served directly by nginx (not proxied to backend) for maximum 
 
 ```nginx
 location = /glb-auto-rig {
-    alias /opt/autorig-online/static/glb-auto-rig.html;
+    alias /root/autorig-online/static/glb-auto-rig.html;
     add_header Content-Type "text/html";
 }
 ```
@@ -135,7 +135,7 @@ Each landing page focuses on:
 
 ## Files Structure
 ```
-/opt/autorig-online/static/
+/root/autorig-online/static/
 ├── glb-auto-rig.html
 ├── fbx-auto-rig.html
 ├── obj-auto-rig.html

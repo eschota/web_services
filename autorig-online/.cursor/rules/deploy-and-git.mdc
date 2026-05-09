@@ -1,0 +1,29 @@
+---
+description: AutoRig.online — после изменений всегда коммит в git и выкат на прод
+globs: autorig-online/**
+alwaysApply: false
+---
+
+# Git и продакшен (AutoRig.online)
+
+После **любых** осмысленных правок под `autorig-online/` агент или разработчик обязаны завершить цикл **commit → push → деплой на сервер**. Не оставлять рабочие фиксы только локально или только на проде.
+
+## Монорепозиторий (`/root`, remote `web_services`)
+
+1. Коммитить изменения с префиксами в `autorig-online/` (не смешивать с `qwerty_vpn/` и т.д., если задача только про AutoRig).
+2. Не коммитить `autorig-online/mcp/.venv/`, `*.bak`, временные артефакты.
+3. Из корня репозитория:
+   - `git add` нужные пути под `autorig-online/`
+   - `git commit -m "…"`
+   - `git push origin <текущая-ветка>` (часто `main` или активная feature-ветка).
+
+## Продакшен (машина с systemd `autorig`)
+
+Каноническое дерево: **`/root/autorig-online`**. После `git pull` на сервере:
+
+- Быстрый цикл из каталога репозитория/проекта:  
+  `autorig-online/deploy/push-and-deploy.sh "сообщение коммита"`  
+  (на прод-машине, где есть `sudo` и nginx; скрипт пушит из корня git и перезапускает `autorig`).
+- Или вручную: обновить файлы → `sudo systemctl restart autorig` (при необходимости `pip install -r backend/requirements.txt` в venv проекта).
+
+После выката имеет смысл проверить здоровье бекенда и затронутые страницы (например `GET /api/viewer-backdrops`).

@@ -1,0 +1,58 @@
+[
+  {
+    "id": "meadow",
+    "src": "/static/env/backdrops/meadow.jpg"
+  },
+  {
+    "id": "arctic",
+    "src": "/static/env/backdrops/arctic.jpg"
+  },
+  {
+    "id": "beach",
+    "src": "/static/env/backdrops/beach.jpg"
+  },
+  {
+    "id": "cyber",
+    "src": "/static/env/backdrops/cyber.jpg"
+  },
+  {
+    "id": "crystals",
+    "src": "/static/env/backdrops/crystals.jpg"
+  },
+  {
+    "id": "desert",
+    "src": "/static/env/backdrops/desert.jpg"
+  },
+  {
+    "id": "forest",
+    "src": "/static/env/backdrops/forest.jpg"
+  },
+  {
+    "id": "hangar",
+    "src": "/static/env/backdrops/hangar.jpg"
+  },
+  {
+    "id": "moon",
+    "src": "/static/env/backdrops/moon.jpg"
+  },
+  {
+    "id": "ruins",
+    "src": "/static/env/backdrops/ruins.jpg"
+  },
+  {
+    "id": "swamp",
+    "src": "/static/env/backdrops/swamp.jpg"
+  },
+  {
+    "id": "toxic",
+    "src": "/static/env/backdrops/toxic.jpg"
+  },
+  {
+    "id": "volcano",
+    "src": "/static/env/backdrops/volcano.jpg"
+  },
+  {
+    "id": "badlands",
+    "src": "/static/env/backdrops/badlands.jpg"
+  }
+]

@@ -62,14 +62,13 @@ Allow: /auto-rig-obj-zh
 Allow: /auto-rig-obj-hi
 
 # Disallow API and admin
+Allow: /api/thumb/
+Allow: /api/video/
 Disallow: /api/
 Disallow: /admin
 Disallow: /admin/
-Disallow: /task
-Disallow: /task/
 Disallow: /auth/
 Disallow: /u/
 
 # Sitemap
 Sitemap: https://autorig.online/sitemap.xml
-

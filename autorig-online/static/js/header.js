@@ -55,7 +55,7 @@ function renderSiteHeader(options = {}) {
         <nav class="nav">
             <a href="/guides" class="${navLinkClass('/guides', activePath)}" data-i18n="nav_guides">Guides</a>
             <a href="/gallery" class="${navLinkClass('/gallery', activePath)}" data-i18n="nav_gallery">Gallery</a>
-            <a href="/buy-credits" class="${navLinkClass('/buy-credits', activePath)}" data-i18n="nav_buy">Buy</a>
+            <a href="/buy" class="${navLinkClass('/buy', activePath)}" data-i18n="nav_buy">Buy</a>
             <a href="/developers" class="${navLinkClass('/developers', activePath)}" data-i18n="nav_api">API</a>
             <a href="#" class="nav-link header-admin-tab hidden" id="header-admin-tab" title="Admin queue monitor">АДМИНКА</a>
         </nav>
@@ -261,7 +261,7 @@ function ensureAdminOverlayLoaded() {
             document.head.appendChild(l);
         }
         const s = document.createElement('script');
-            s.src = '/static/js/admin-overlay.js?v=20260327fullscreen';
+            s.src = '/static/js/admin-overlay.js?v=20260402workerlabel';
         s.onload = () => {
             _adminOverlayLoadPromise = null;
             resolve();

@@ -238,9 +238,14 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
         non_quarantined_urls = [u for u in worker_urls if not is_worker_quarantined(u)]
         return (non_quarantined_urls or worker_urls)[0]
 
+    # For direct restart/admin dispatch, avoid piling new work onto a high-weight
+    # worker that is already busy when lower-weight idle workers are available.
+    idle_candidates = [w for w in candidates_pool if (w.load or 0) <= 0]
+    dispatch_pool = idle_candidates or candidates_pool
+
     weight_by_url: Dict[str, int] = {u: w for (u, w) in workers_with_weight}
-    max_weight = max(weight_by_url.get(w.url, 0) for w in candidates_pool)
-    candidates = [w for w in candidates_pool if weight_by_url.get(w.url, 0) == max_weight]
+    max_weight = max(weight_by_url.get(w.url, 0) for w in dispatch_pool)
+    candidates = [w for w in dispatch_pool if weight_by_url.get(w.url, 0) == max_weight]
     candidates.sort(key=lambda w: w.load)
     return candidates[0].url
 
@@ -252,6 +257,8 @@ async def send_task_to_worker(
     transform_params: dict = None,
     *,
     pipeline_kind: str = "rig",
+    animal_type: Optional[str] = None,
+    mode: Optional[str] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -281,8 +288,10 @@ async def send_task_to_worker(
                 payload = {
                     "input_url": input_url,
                     "type": task_type,
-                    "mode": "only_rig",
+                    "mode": mode or "only_rig",
                 }
+                if animal_type:
+                    payload["animal_type"] = animal_type
                 if transform_params:
                     if transform_params.get("local_position"):
                         payload["local_position"] = transform_params["local_position"]

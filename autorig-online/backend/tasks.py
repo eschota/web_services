@@ -2,10 +2,12 @@
 Task management for AutoRig Online
 """
 import asyncio
+import json
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List
 from urllib.parse import urlparse
+import httpx
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -258,9 +260,27 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     pk = getattr(task, "pipeline_kind", None) or "rig"
     if pk not in ("rig", "convert"):
         pk = "rig"
+    task_type_for_worker = task.input_type or "t_pose"
+    animal_type = None
+    mode = None
+    if str(task_type_for_worker).strip().lower() == "animal":
+        try:
+            settings = json.loads(task.viewer_settings or "{}")
+            detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+            if isinstance(detection, dict):
+                animal_type = str(detection.get("animal_type") or "").strip().lower() or None
+                mode = str(detection.get("mode") or "").strip() or None
+        except Exception:
+            animal_type = None
+            mode = None
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
-        worker_url, task.input_url, task.input_type or "t_pose", pipeline_kind=pk
+        worker_url,
+        task.input_url,
+        task_type_for_worker,
+        pipeline_kind=pk,
+        animal_type=animal_type,
+        mode=mode,
     )
     if not result.success:
         task.status = "error"
@@ -326,6 +346,85 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
 # =============================================================================
 # Progress Checking
 # =============================================================================
+def _is_primary_worker_output(name: str) -> bool:
+    """Files that make a task downloadable/finalizable across worker layouts."""
+    n = (name or "").strip().lower()
+    if not n or "_temp" in n or "initial_temp" in n:
+        return False
+    return (
+        n.endswith("_model_prepared.glb")
+        or n.endswith("_model_prepared_rigged.blend")
+        or n.endswith(".zip")
+        or n.endswith("_video.mp4")
+        or n.endswith("_video_small.mp4")
+        or n.endswith("_video_poster.jpg")
+        or n.endswith("_all_animations.blend")
+        or n.endswith("_all_animations_unity.fbx")
+        or n.endswith("_hdrp.unitypackage")
+    )
+
+
+def _worker_outputs_look_complete(urls: List[str]) -> bool:
+    names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
+    has_video = any(n.endswith("_video.mp4") or n.endswith("_video_small.mp4") for n in names)
+    has_poster = any(n.endswith("_video_poster.jpg") for n in names)
+    has_download = any(
+        n.endswith("_all_animations_unity.fbx")
+        or n.endswith("_hdrp.unitypackage")
+        or n.endswith(".zip")
+        for n in names
+    )
+    return has_video and has_poster and has_download
+
+
+async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
+    """Use worker model-files API to recover concrete output URLs for animal/_100k layouts."""
+    if not task.guid or not task.worker_api:
+        return []
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return []
+
+    files_url = f"{worker_base.rstrip('/')}/api-converter-glb/model-files/{task.guid}"
+    worker_root = f"{worker_base.rstrip('/')}/converter/glb"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(files_url, timeout=8.0)
+        if resp.status_code != 200:
+            return []
+        data = resp.json() if resp.content else {}
+    except Exception:
+        return []
+
+    urls: List[str] = []
+    seen = set()
+    for folder_data in (data.get("folders") or {}).values():
+        if not isinstance(folder_data, dict):
+            continue
+        for item in folder_data.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            rel_path = str(item.get("rel_path") or "")
+            if not rel_path or not _is_primary_worker_output(name):
+                continue
+            url = f"{worker_root}/{task.guid}/{rel_path}"
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+    return urls
+
+
+def _preferred_video_url_from_outputs(urls: List[str]) -> Optional[str]:
+    for url in urls or []:
+        if url.lower().endswith("_video_small.mp4"):
+            return url
+    for url in urls or []:
+        if url.lower().endswith("_video.mp4"):
+            return url
+    return None
+
+
 async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     """
     Check and update task progress.
@@ -362,6 +461,25 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
             task.status = "done"
+
+    # Some worker modes (notably animal-only-rig and newer exporters) write the
+    # final files into concrete folders such as {guid}_100k or root, while the
+    # initial task response may contain legacy placeholder URLs. Reconcile from
+    # model-files once the actual downloadable set is present.
+    if task.status not in ("done", "error") and task.guid and task.worker_api:
+        concrete_urls = await _fetch_concrete_worker_output_urls(task)
+        if concrete_urls and _worker_outputs_look_complete(concrete_urls):
+            task.output_urls = concrete_urls
+            task.ready_urls = concrete_urls
+            task.total_count = len(concrete_urls)
+            task.ready_count = len(concrete_urls)
+            task.status = "done"
+            task.last_progress_at = datetime.utcnow()
+            preferred_video_url = _preferred_video_url_from_outputs(concrete_urls)
+            if preferred_video_url:
+                task.video_ready = True
+                task.video_url = preferred_video_url
+            task.updated_at = datetime.utcnow()
     
     # Video: prefer _video_small.mp4 for site proxy; upgrade from large when small appears later.
     if task.guid and task.worker_api:

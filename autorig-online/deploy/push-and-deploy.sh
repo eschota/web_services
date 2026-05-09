@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Commit (if needed) + push to origin, then deploy AutoRig to /opt and restart services.
-# Run on the machine that has the git repo and production paths (e.g. /root + /opt/autorig-online).
+# Commit (if needed) + push to origin, then restart the canonical AutoRig root service.
+# Run on the production machine where /root/autorig-online is the live tree.
 #
 # Usage:
 #   ./push-and-deploy.sh
@@ -20,7 +20,7 @@ if [[ -z "${GIT_ROOT}" ]]; then
 fi
 
 COMMIT_MSG="${1:-deploy: $(date -Iseconds)}"
-PROD_ROOT="${PROD_ROOT:-/opt/autorig-online}"
+PROD_ROOT="${PROD_ROOT:-$AUTORIG_ROOT}"
 NGINX_CONF_DST="${NGINX_CONF_DST:-/etc/nginx/sites-available/autorig.online}"
 
 cd "$GIT_ROOT"
@@ -34,24 +34,12 @@ else
 fi
 git push
 
-echo "==> Deploy: rsync → ${PROD_ROOT}"
-sudo mkdir -p "${PROD_ROOT}/backend" "${PROD_ROOT}/static"
-
-# Backend: all files except SQLite DB dir (prod keeps its own db)
-sudo rsync -a \
-  --exclude 'db/' \
-  "${AUTORIG_ROOT}/backend/" "${PROD_ROOT}/backend/"
-
-# Static: add/update from repo; skip heavy runtime caches. Default: no --delete (avoids wiping
-# prod-only assets that were never committed). Set RSYNC_STATIC_DELETE=1 to mirror repo exactly.
-STATIC_RSYNC=(sudo rsync -a)
-if [[ "${RSYNC_STATIC_DELETE:-0}" == "1" ]]; then
-  STATIC_RSYNC+=(--delete)
+echo "==> Deploy tree: ${PROD_ROOT}"
+if [[ "$(realpath "${PROD_ROOT}")" != "$(realpath "${AUTORIG_ROOT}")" ]]; then
+  echo "ERROR: AutoRig production must run directly from ${AUTORIG_ROOT}; refusing alternate PROD_ROOT=${PROD_ROOT}" >&2
+  exit 1
 fi
-"${STATIC_RSYNC[@]}" \
-  --exclude 'tasks/' \
-  --exclude 'glb_cache/' \
-  "${AUTORIG_ROOT}/static/" "${PROD_ROOT}/static/"
+sudo mkdir -p "${AUTORIG_ROOT}/backend/db" "${AUTORIG_ROOT}/static/tasks" "${AUTORIG_ROOT}/static/glb_cache"
 
 if [[ "${SKIP_NGINX:-0}" != "1" ]]; then
   echo "==> Nginx: install config + reload"
@@ -91,4 +79,4 @@ if [[ "${_ok}" != "1" ]]; then
   exit 1
 fi
 
-echo "OK: pushed, deployed to ${PROD_ROOT}, autorig restarted and healthy."
+echo "OK: pushed, root-based autorig restarted and healthy."

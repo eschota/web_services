@@ -12,7 +12,7 @@ import json
 import os
 import tempfile
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.parse import urlencode
 
 import httpx
@@ -39,7 +39,7 @@ from database import AsyncSessionLocal, Task, YoutubeCredentials, YoutubeUploade
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 
-# Fixed title for all auto-uploaded showcase videos
+# Fallback title used only when task-level model metadata is unavailable.
 YOUTUBE_VIDEO_TITLE = "autorig character"
 
 
@@ -65,27 +65,115 @@ async def _lock_for_sha256(sha256_hex: str) -> asyncio.Lock:
         return _sha256_upload_locks[sha256_hex]
 
 
-def _build_youtube_description(task_id: str) -> str:
+def _compact_text(value: Optional[str]) -> str:
+    return " ".join((value or "").strip().split())
+
+
+def _youtube_title_from_task(task: Task) -> str:
+    """
+    Use the model SEO title as the YouTube title, with a short product suffix when it fits.
+    YouTube title limit is 100 characters.
+    """
+    title = _compact_text(getattr(task, "poster_llm_title", None))
+    if not title:
+        return YOUTUBE_VIDEO_TITLE
+    suffix = " - AI Rigged 3D Character"
+    if len(title) + len(suffix) <= 100:
+        return f"{title}{suffix}"
+    return title[:100].rstrip()
+
+
+def _youtube_default_tags() -> List[str]:
+    return [
+        "AI rigging",
+        "auto rig",
+        "rigged character",
+        "3D character",
+        "FBX animation",
+        "GLB model",
+        "Unity",
+        "Unreal Engine",
+    ]
+
+
+def _merge_youtube_tags(*groups: List[str]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    total_len = 0
+    for group in groups:
+        for raw in group:
+            tag = _compact_text(raw)[:30]
+            if not tag:
+                continue
+            key = tag.lower()
+            if key in seen:
+                continue
+            add = len(tag) if not merged else len(tag) + 1
+            if total_len + add > 480:
+                return merged
+            merged.append(tag)
+            seen.add(key)
+            total_len += add
+            if len(merged) >= 30:
+                return merged
+    return merged
+
+
+def _build_youtube_description(
+    task_id: str,
+    *,
+    model_title: Optional[str] = None,
+    model_description: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+) -> str:
     """
     English description: service pitch and links to AutoRig and this task (no third-party source URLs).
     YouTube max description length 5000.
     """
     base = APP_URL.rstrip("/")
-    task_link = f"{base}/static/task.html?id={task_id}"
+    public_model_link = f"{base}/m/{task_id}"
+    task_link = f"{base}/task?id={task_id}"
+    clean_title = _compact_text(model_title)
+    clean_description = (model_description or "").strip()
+    clean_keywords = [k for k in (keywords or []) if _compact_text(k)]
     parts: list[str] = [
-        "AutoRig Online turns your 3D models into production-ready character rigs: automatic skeleton placement, skinning, and animations you can use in Unity, Unreal Engine, Blender, and other DCC tools.",
+        clean_description
+        if clean_description
+        else "AutoRig Online turns 3D models into production-ready character rigs with automatic skeleton placement, skinning, and animations for Unity, Unreal Engine, Blender, and other DCC tools.",
+    ]
+    if clean_title:
+        parts.extend(["", f"Model: {clean_title}"])
+    parts.extend([
+        "",
+        "AutoRig Online creates AI-assisted character rigs, animation previews, and engine-ready exports for GLB, FBX, OBJ, Unity, and Unreal Engine workflows.",
         "",
         f"Website: {base}",
-        f"This task (3D viewer & downloads): {task_link}",
-    ]
+        f"Model page: {public_model_link}",
+        f"3D viewer & downloads: {task_link}",
+    ])
+    if clean_keywords:
+        parts.extend(["", "Keywords: " + ", ".join(clean_keywords[:16])])
     parts.extend(
         [
             "",
-            "#3D #rigging #AutoRig #glb #animation #character",
+            "#3D #Rigging #AutoRig #AIRigging #GLB #FBX #Animation #GameDev",
         ]
     )
     text = "\n".join(parts)
     return text[:5000]
+
+
+def _youtube_upload_metadata_from_task(task: Task) -> Tuple[str, str, List[str]]:
+    title = _youtube_title_from_task(task)
+    poster_tags = _youtube_tags_from_poster_keywords_json(getattr(task, "poster_llm_keywords", None))
+    tags = _youtube_tags_with_shorts_first(_merge_youtube_tags(poster_tags, _youtube_default_tags()))
+    description = _build_youtube_description(
+        task.id,
+        model_title=getattr(task, "poster_llm_title", None),
+        model_description=getattr(task, "poster_llm_description", None),
+        keywords=poster_tags,
+    )
+    return title, description, tags
 
 
 def _youtube_tags_from_poster_keywords_json(raw: Optional[str]) -> List[str]:
@@ -315,15 +403,14 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
                     await db.commit()
                 print(f"[YouTube] Skip task {task_id}: OPENAI_API_KEY set but poster LLM title/description missing")
                 return
-            upload_title = pt[:100]
-            upload_desc = pd[:5000]
-            upload_tags = _youtube_tags_with_shorts_first(
-                _youtube_tags_from_poster_keywords_json(task.poster_llm_keywords)
-            )
+            upload_title, upload_desc, upload_tags = _youtube_upload_metadata_from_task(task)
         else:
-            upload_title = YOUTUBE_VIDEO_TITLE
-            upload_desc = _build_youtube_description(task.id)
-            upload_tags = _youtube_tags_with_shorts_first([])
+            if (task.poster_llm_title or "").strip() and (task.poster_llm_description or "").strip():
+                upload_title, upload_desc, upload_tags = _youtube_upload_metadata_from_task(task)
+            else:
+                upload_title = YOUTUBE_VIDEO_TITLE
+                upload_desc = _build_youtube_description(task.id)
+                upload_tags = _youtube_tags_with_shorts_first(_youtube_default_tags())
 
         cred_row = await db.get(YoutubeCredentials, 1)
         if cred_row and cred_row.refresh_token:
