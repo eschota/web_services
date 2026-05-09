@@ -1,0 +1,43 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "tiny_forest_floor.jpg",
+  "plane_color": "#6e593d",
+  "schema_version": 1,
+  "semantic_tags": [
+    "small",
+    "mouse",
+    "rabbit",
+    "insect",
+    "fairy",
+    "mushroom",
+    "forest",
+    "cute"
+  ],
+  "shadow_settings": {
+    "opacity": 0.5,
+    "shadow_y_offset": 0.005,
+    "softness": 7.5,
+    "sun_multiplier": 1.7
+  },
+  "sun_settings": {
+    "inclination": 38,
+    "intensity": 1.9,
+    "rotation": -115
+  },
+  "theme_id": "tiny_forest_floor",
+  "theme_name": "Tiny Forest Floor",
+  "theme_short_description": "Macro forest floor with moss, mushrooms and soft green bokeh."
+}

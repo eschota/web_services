@@ -90,6 +90,7 @@ class TaskStatusResponse(BaseModel):
     youtube_video_id: Optional[str] = None
     youtube_upload_status: Optional[str] = None  # uploaded | skipped | failed
     rig_v2_animal_detection: Optional[dict] = None
+    viewer_theme_selection: Optional[dict] = None
 
 
 class TaskHistoryItem(BaseModel):

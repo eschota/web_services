@@ -1,0 +1,43 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "ancient_ruins.jpg",
+  "plane_color": "#b2ab9b",
+  "schema_version": 1,
+  "semantic_tags": [
+    "ruins",
+    "ancient",
+    "mythology",
+    "statue",
+    "warrior",
+    "greek",
+    "roman",
+    "fantasy"
+  ],
+  "shadow_settings": {
+    "opacity": 0.45,
+    "shadow_y_offset": 0.005,
+    "softness": 5.5,
+    "sun_multiplier": 2.4
+  },
+  "sun_settings": {
+    "inclination": 52,
+    "intensity": 2.45,
+    "rotation": -60
+  },
+  "theme_id": "ancient_ruins",
+  "theme_name": "Ancient Marble Ruins",
+  "theme_short_description": "Bright ancient stone ruins with columns and open sky."
+}

@@ -134,6 +134,7 @@ from idle_ltx_vision import (
     IDLE_LTX_USER_PROMPT_DEFAULT,
     IDLE_LTX_VARIANT_COUNT,
 )
+from viewer_theme_vision import analyze_backdrop_theme_with_openai
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -801,9 +802,9 @@ async def lifespan(app: FastAPI):
         print(f"[Namecheap DNS] Startup: {e}")
 
     try:
-        await asyncio.to_thread(_convert_backdrop_png_files_to_jpg)
+        await _sync_viewer_backdrop_themes_async()
     except Exception as e:
-        print(f"[ViewerBackdrops] startup PNG→JPG: {e}")
+        print(f"[ViewerThemes] startup sync: {e}")
 
     yield
     
@@ -4713,12 +4714,16 @@ async def api_get_task(
         kw_list,
     )
     rig_v2_animal_detection = None
+    viewer_theme_selection = None
     try:
         settings = json.loads(task.viewer_settings or "{}")
         if isinstance(settings, dict) and isinstance(settings.get("rig_v2_animal_detection"), dict):
             rig_v2_animal_detection = settings.get("rig_v2_animal_detection")
+        if isinstance(settings, dict) and isinstance(settings.get("viewer_theme_selection"), dict):
+            viewer_theme_selection = settings.get("viewer_theme_selection")
     except Exception:
         rig_v2_animal_detection = None
+        viewer_theme_selection = None
 
     is_admin_viewer = bool(user and is_admin_email(user.email))
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
@@ -4761,6 +4766,7 @@ async def api_get_task(
         youtube_video_id=getattr(task, "youtube_video_id", None),
         youtube_upload_status=getattr(task, "youtube_upload_status", None),
         rig_v2_animal_detection=rig_v2_animal_detection,
+        viewer_theme_selection=viewer_theme_selection,
     )
 
 
@@ -9462,6 +9468,184 @@ GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "env" / "backdrops").mkdir(parents=True, exist_ok=True)
 
 VIEWER_BACKDROP_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".avif"})
+VIEWER_THEME_JSON_VERSION = 1
+
+
+def _slugify_viewer_theme(value: str) -> str:
+    s = re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower())
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "viewer_theme"
+
+
+def _viewer_theme_default_for_stem(stem: str) -> Dict[str, Any]:
+    key = _slugify_viewer_theme(stem)
+    presets: Dict[str, Dict[str, Any]] = {
+        "studio_white_softbox": {
+            "theme_name": "White Photo Studio",
+            "theme_short_description": "Clean white photography studio with softbox lights.",
+            "semantic_tags": ["studio", "product", "white", "clean", "neutral", "toy", "character"],
+            "plane_color": "#e9e9e9",
+            "shadow_settings": {"opacity": 0.42, "softness": 5.0, "sun_multiplier": 1.5, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -35, "inclination": 55, "intensity": 2.0},
+        },
+        "dog_park_yard": {
+            "theme_name": "Dog Park Yard",
+            "theme_short_description": "Sunny fenced dog yard with play equipment and warm dirt ground.",
+            "semantic_tags": ["dog", "pet", "park", "yard", "animal", "puppy", "domestic"],
+            "plane_color": "#9a7b4f",
+            "shadow_settings": {"opacity": 0.55, "softness": 6.0, "sun_multiplier": 2.4, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -55, "inclination": 48, "intensity": 2.5},
+        },
+        "mediterranean_courtyard": {
+            "theme_name": "Mediterranean Courtyard",
+            "theme_short_description": "Warm stone courtyard with plants and sunlit rustic walls.",
+            "semantic_tags": ["courtyard", "stone", "mediterranean", "garden", "human", "statue", "animal"],
+            "plane_color": "#b9a37d",
+            "shadow_settings": {"opacity": 0.5, "softness": 5.0, "sun_multiplier": 2.3, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -65, "inclination": 52, "intensity": 2.45},
+        },
+        "ranch_farmyard": {
+            "theme_name": "Ranch Farmyard",
+            "theme_short_description": "Open rural farmyard with fences, barn and dry dirt road.",
+            "semantic_tags": ["farm", "ranch", "horse", "cow", "deer", "animal", "western", "stable"],
+            "plane_color": "#a88455",
+            "shadow_settings": {"opacity": 0.55, "softness": 6.5, "sun_multiplier": 2.5, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -65, "inclination": 45, "intensity": 2.55},
+        },
+        "pine_forest_trail": {
+            "theme_name": "Pine Forest Trail",
+            "theme_short_description": "Wide pine forest trail with rocks, logs and natural dirt ground.",
+            "semantic_tags": ["forest", "pine", "wildlife", "bear", "wolf", "deer", "creature", "nature"],
+            "plane_color": "#6d573c",
+            "shadow_settings": {"opacity": 0.58, "softness": 7.0, "sun_multiplier": 1.8, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -120, "inclination": 40, "intensity": 2.1},
+        },
+        "savanna_acacia_plain": {
+            "theme_name": "Savanna Acacia Plain",
+            "theme_short_description": "Bright dry savanna with acacia trees and distant hills.",
+            "semantic_tags": ["savanna", "africa", "giraffe", "elephant", "lion", "zebra", "wildlife", "desert"],
+            "plane_color": "#b58548",
+            "shadow_settings": {"opacity": 0.55, "softness": 6.0, "sun_multiplier": 2.8, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -70, "inclination": 56, "intensity": 2.8},
+        },
+        "forest_stable_paddock": {
+            "theme_name": "Forest Stable Paddock",
+            "theme_short_description": "Wooden stable paddock framed by tall forest trees.",
+            "semantic_tags": ["stable", "horse", "deer", "farm", "forest", "ranch", "animal"],
+            "plane_color": "#a67b4c",
+            "shadow_settings": {"opacity": 0.54, "softness": 6.5, "sun_multiplier": 2.1, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -100, "inclination": 48, "intensity": 2.35},
+        },
+        "post_apocalyptic_factory": {
+            "theme_name": "Ruined Industrial Factory",
+            "theme_short_description": "Destroyed concrete factory yard under a stormy grey sky.",
+            "semantic_tags": ["industrial", "robot", "mech", "zombie", "post-apocalyptic", "vehicle", "war", "ruins"],
+            "plane_color": "#5f5a50",
+            "shadow_settings": {"opacity": 0.62, "softness": 8.0, "sun_multiplier": 1.4, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -20, "inclination": 32, "intensity": 1.6},
+        },
+        "tiny_forest_floor": {
+            "theme_name": "Tiny Forest Floor",
+            "theme_short_description": "Macro forest floor with moss, mushrooms and soft green bokeh.",
+            "semantic_tags": ["small", "mouse", "rabbit", "insect", "fairy", "mushroom", "forest", "cute"],
+            "plane_color": "#6e593d",
+            "shadow_settings": {"opacity": 0.5, "softness": 7.5, "sun_multiplier": 1.7, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -115, "inclination": 38, "intensity": 1.9},
+        },
+        "sci_fi_hangar": {
+            "theme_name": "Sci-Fi Hangar",
+            "theme_short_description": "Blue metallic spaceship hangar with glowing panels and reflective floor.",
+            "semantic_tags": ["sci-fi", "robot", "mech", "astronaut", "spaceship", "vehicle", "cyber", "metal"],
+            "plane_color": "#55606a",
+            "shadow_settings": {"opacity": 0.48, "softness": 5.5, "sun_multiplier": 1.7, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -10, "inclination": 62, "intensity": 1.9},
+        },
+        "alien_planet": {
+            "theme_name": "Alien Planet",
+            "theme_short_description": "Purple alien desert landscape with planets, rocks and sci-fi sky.",
+            "semantic_tags": ["space", "alien", "astronaut", "sci-fi", "planet", "creature", "fantasy", "robot"],
+            "plane_color": "#8b6d82",
+            "shadow_settings": {"opacity": 0.55, "softness": 7.0, "sun_multiplier": 1.9, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -135, "inclination": 28, "intensity": 2.0},
+        },
+        "ancient_ruins": {
+            "theme_name": "Ancient Marble Ruins",
+            "theme_short_description": "Bright ancient stone ruins with columns and open sky.",
+            "semantic_tags": ["ruins", "ancient", "mythology", "statue", "warrior", "greek", "roman", "fantasy"],
+            "plane_color": "#b2ab9b",
+            "shadow_settings": {"opacity": 0.45, "softness": 5.5, "sun_multiplier": 2.4, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -60, "inclination": 52, "intensity": 2.45},
+        },
+        "crystal_cavern": {
+            "theme_name": "Crystal Cavern",
+            "theme_short_description": "Glowing fantasy crystal valley in purple and blue light.",
+            "semantic_tags": ["crystal", "magic", "fantasy", "dragon", "unicorn", "creature", "gem", "cavern"],
+            "plane_color": "#8a67a7",
+            "shadow_settings": {"opacity": 0.5, "softness": 8.0, "sun_multiplier": 1.5, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -150, "inclination": 36, "intensity": 1.8},
+        },
+        "jungle_temple_ruins": {
+            "theme_name": "Jungle Temple Ruins",
+            "theme_short_description": "Mossy jungle temple courtyard with ancient stone and misty cliffs.",
+            "semantic_tags": ["jungle", "temple", "ruins", "turtle", "monkey", "lizard", "adventure", "fantasy"],
+            "plane_color": "#777469",
+            "shadow_settings": {"opacity": 0.52, "softness": 8.5, "sun_multiplier": 1.6, "shadow_y_offset": 0.005},
+            "sun_settings": {"rotation": -105, "inclination": 35, "intensity": 1.85},
+        },
+    }
+    preset = presets.get(key, {})
+    nice = str(stem or "").replace("_", " ").replace("-", " ").strip().title() or "Viewer Theme"
+    return {
+        "schema_version": VIEWER_THEME_JSON_VERSION,
+        "theme_id": key,
+        "theme_name": preset.get("theme_name", nice),
+        "theme_short_description": preset.get(
+            "theme_short_description",
+            f"Auto-discovered 3D viewer theme based on {nice.lower()}."
+        ),
+        "semantic_tags": preset.get("semantic_tags", [x for x in key.split("_") if x]),
+        "camera_transform": {
+            "position": {"x": 2.5, "y": 1.8, "z": 3.0},
+            "target": {"x": 0.0, "y": 0.8, "z": 0.0},
+            "fov": 45,
+        },
+        "plane_color": preset.get("plane_color", "#6d7d8c"),
+        "shadow_settings": preset.get(
+            "shadow_settings",
+            {"opacity": 0.5, "softness": 6.0, "sun_multiplier": 2.0, "shadow_y_offset": 0.005},
+        ),
+        "sun_settings": preset.get(
+            "sun_settings",
+            {"rotation": -75, "inclination": 45, "intensity": 2.2},
+        ),
+        "admin_edited_bool": False,
+    }
+
+
+def _viewer_theme_json_path_for_image(image_path: Path) -> Path:
+    return image_path.with_suffix(".json")
+
+
+def _viewer_theme_vision_metadata(image_path: Path, fallback_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        cfg = _rig_v2_load_vision_config()
+        data = analyze_backdrop_theme_with_openai(image_path=image_path, cfg=cfg, fallback_id=fallback_id)
+        if isinstance(data, dict):
+            return data
+    except Exception as e:
+        print(f"[ViewerThemes] vision metadata failed for {image_path.name}: {e}")
+    return None
+
+
+def _load_viewer_theme_json(image_path: Path) -> Dict[str, Any]:
+    json_path = _viewer_theme_json_path_for_image(image_path)
+    data = _read_json_file(str(json_path)) or {}
+    defaults = _viewer_theme_default_for_stem(image_path.stem)
+    merged = {**defaults, **data}
+    merged["theme_id"] = _slugify_viewer_theme(str(merged.get("theme_id") or image_path.stem))
+    merged["image_filename"] = image_path.name
+    merged["src"] = f"/static/env/backdrops/{quote(image_path.name)}"
+    return merged
 
 
 def _convert_backdrop_png_files_to_jpg() -> None:
@@ -9529,12 +9713,48 @@ def _convert_backdrop_png_files_to_jpg() -> None:
     )
 
 
-def _list_viewer_backdrop_items() -> List[Dict[str, str]]:
-    """Plate images in static/env/backdrops for the 3D viewer strip; sorted by filename (case-insensitive)."""
+def _ensure_viewer_theme_json_files() -> None:
+    d = STATIC_DIR / "env" / "backdrops"
+    if not d.is_dir():
+        return
+    for p in sorted(d.iterdir(), key=lambda x: x.name.lower()):
+        if not p.is_file() or p.suffix.lower() not in VIEWER_BACKDROP_SUFFIXES:
+            continue
+        jp = _viewer_theme_json_path_for_image(p)
+        if jp.exists():
+            continue
+        fallback_id = _slugify_viewer_theme(p.stem)
+        data = _viewer_theme_vision_metadata(p, fallback_id) or _viewer_theme_default_for_stem(p.stem)
+        suggested_id = _slugify_viewer_theme(str(data.get("theme_id") or fallback_id))
+        if suggested_id and suggested_id != fallback_id:
+            target = p.with_name(f"{suggested_id}{p.suffix.lower()}")
+            if not target.exists() and not _viewer_theme_json_path_for_image(target).exists():
+                try:
+                    p.rename(target)
+                    p = target
+                    jp = _viewer_theme_json_path_for_image(p)
+                    fallback_id = suggested_id
+                except Exception as e:
+                    print(f"[ViewerThemes] semantic rename failed {p.name} -> {target.name}: {e}")
+        data["schema_version"] = VIEWER_THEME_JSON_VERSION
+        data["theme_id"] = _slugify_viewer_theme(str(data.get("theme_id") or fallback_id))
+        data["image_filename"] = p.name
+        data.setdefault("admin_edited_bool", False)
+        _atomic_write_json_file(str(jp), data)
+
+
+async def _sync_viewer_backdrop_themes_async() -> None:
+    await asyncio.to_thread(_convert_backdrop_png_files_to_jpg)
+    await asyncio.to_thread(_ensure_viewer_theme_json_files)
+
+
+def _list_viewer_theme_items() -> List[Dict[str, Any]]:
+    """Plate themes in static/env/backdrops for the 3D viewer strip; sorted by filename (case-insensitive)."""
     d = STATIC_DIR / "env" / "backdrops"
     if not d.is_dir():
         return []
     _convert_backdrop_png_files_to_jpg()
+    _ensure_viewer_theme_json_files()
     files = [
         p
         for p in d.iterdir()
@@ -9542,9 +9762,10 @@ def _list_viewer_backdrop_items() -> List[Dict[str, str]]:
     ]
     files.sort(key=lambda p: p.name.lower())
     seen: set[str] = set()
-    out: List[Dict[str, str]] = []
+    out: List[Dict[str, Any]] = []
     for p in files:
-        stem = p.stem
+        item = _load_viewer_theme_json(p)
+        stem = _slugify_viewer_theme(str(item.get("theme_id") or p.stem))
         bid = stem
         if bid in seen:
             n = 2
@@ -9552,14 +9773,229 @@ def _list_viewer_backdrop_items() -> List[Dict[str, str]]:
                 n += 1
             bid = f"{stem}_{n}"
         seen.add(bid)
-        out.append({"id": bid, "src": f"/static/env/backdrops/{quote(p.name)}"})
+        item["id"] = bid
+        item["theme_id"] = bid
+        out.append(item)
     return out
+
+
+@app.get("/api/viewer-themes")
+async def api_viewer_themes():
+    """Auto-discovered 3D viewer themes (image + companion JSON settings, name order)."""
+    return _list_viewer_theme_items()
 
 
 @app.get("/api/viewer-backdrops")
 async def api_viewer_backdrops():
-    """Auto-discovered 3D viewer backgrounds (files in static/env/backdrops, name order)."""
-    return _list_viewer_backdrop_items()
+    """Backward-compatible alias for theme-aware viewer backgrounds."""
+    return _list_viewer_theme_items()
+
+
+@app.put("/api/admin/viewer-themes/{theme_id}")
+async def api_admin_save_viewer_theme(
+    theme_id: str,
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    body = await request.body()
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON object")
+    themes = _list_viewer_theme_items()
+    theme = next((x for x in themes if str(x.get("theme_id")) == str(theme_id)), None)
+    if not theme:
+        raise HTTPException(status_code=404, detail="Theme not found")
+    image_filename = str(theme.get("image_filename") or "")
+    image_path = STATIC_DIR / "env" / "backdrops" / image_filename
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Theme image not found")
+    existing = _load_viewer_theme_json(image_path)
+    allowed = {
+        "theme_name",
+        "theme_short_description",
+        "semantic_tags",
+        "camera_transform",
+        "plane_color",
+        "shadow_settings",
+        "sun_settings",
+    }
+    clean = {k: payload[k] for k in allowed if k in payload}
+    clean["schema_version"] = VIEWER_THEME_JSON_VERSION
+    clean["theme_id"] = str(theme_id)
+    clean["image_filename"] = image_filename
+    clean["admin_edited_bool"] = True
+    merged = {**existing, **clean}
+    _atomic_write_json_file(str(_viewer_theme_json_path_for_image(image_path)), merged)
+    return {"ok": True, "theme": _load_viewer_theme_json(image_path)}
+
+
+def _viewer_theme_score_text(theme: Dict[str, Any], text: str) -> float:
+    hay = f" {text.lower()} "
+    score = 0.0
+    for tag in theme.get("semantic_tags") or []:
+        tag_s = str(tag).strip().lower()
+        if not tag_s:
+            continue
+        if tag_s in hay:
+            score += 2.5
+        for part in re.split(r"[^a-z0-9]+", tag_s):
+            if len(part) >= 4 and f" {part} " in hay:
+                score += 1.0
+    name = str(theme.get("theme_name") or "").lower()
+    if name and any(part and part in hay for part in re.split(r"[^a-z0-9]+", name) if len(part) >= 4):
+        score += 0.75
+    return score
+
+
+async def _viewer_theme_select_with_openai(image_data_url: str, themes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not image_data_url:
+        return None
+    try:
+        cfg = _rig_v2_load_vision_config()
+    except Exception:
+        return None
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    api_url = str(cfg.get("open_ai_api_url_string") or "https://api.openai.com/v1/chat/completions").strip()
+    if not api_key or not api_url:
+        return None
+    compact = [
+        {
+            "theme_id": str(t.get("theme_id") or t.get("id") or ""),
+            "theme_name": str(t.get("theme_name") or ""),
+            "description": str(t.get("theme_short_description") or ""),
+            "tags": t.get("semantic_tags") or [],
+        }
+        for t in themes
+    ]
+    prompt = (
+        "Analyze the rendered 3D model image and choose the most semantically appropriate viewer theme. "
+        "Return only JSON: {\"theme_id\":\"<one theme_id>\",\"confidence_float\":0.0,\"reason_string\":\"short\"}. "
+        "Prefer exact concepts: astronaut/robot/mech -> sci-fi or space; dog/pet -> dog park; horse/cow/deer -> ranch/stable; "
+        "wild animal -> forest/savanna; fantasy creature -> crystal/ruins/jungle; neutral product -> studio.\n\n"
+        f"Available themes JSON:\n{json.dumps(compact, ensure_ascii=False)}"
+    )
+    model = str(cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    payload: Dict[str, Any] = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_data_url, "detail": "low"}},
+                ],
+            }
+        ],
+    }
+    if model.startswith(("gpt-5", "o3", "o4")):
+        payload["max_completion_tokens"] = 900
+    else:
+        payload["temperature"] = 0.0
+        payload["max_tokens"] = 900
+    try:
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            resp = await client.post(api_url, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=payload)
+        if resp.status_code != 200:
+            print(f"[ViewerThemes] OpenAI auto-select HTTP {resp.status_code}: {resp.text[:240]}")
+            return None
+        data = resp.json()
+        content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "")
+        parsed = json.loads(str(content))
+        if not isinstance(parsed, dict):
+            return None
+        tid = str(parsed.get("theme_id") or "").strip()
+        if not tid:
+            return None
+        match = next((t for t in themes if str(t.get("theme_id")) == tid), None)
+        if not match:
+            return None
+        return {
+            "theme_id": tid,
+            "confidence_float": max(0.0, min(1.0, float(parsed.get("confidence_float") or 0.5))),
+            "reason_string": str(parsed.get("reason_string") or "vision selected theme")[:240],
+            "provider_string": f"openai:{model}",
+        }
+    except Exception as e:
+        print(f"[ViewerThemes] OpenAI auto-select failed: {e}")
+        return None
+
+
+@app.post("/api/task/{task_id}/viewer-theme/auto-select")
+async def api_task_viewer_theme_auto_select(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            body = {}
+    except Exception:
+        body = {}
+    themes = _list_viewer_theme_items()
+    if not themes:
+        return {"ok": False, "detail": "No viewer themes"}
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    can_persist = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
+    image_data = str(body.get("image_data_url_string") or "").strip()
+    selected = await _viewer_theme_select_with_openai(image_data, themes) if can_persist else None
+    provider = selected.get("provider_string") if selected else "heuristic"
+    if not selected:
+        pieces: List[str] = [
+            str(getattr(task, "input_type", "") or ""),
+            str(getattr(task, "poster_llm_title", "") or ""),
+            str(getattr(task, "poster_llm_description", "") or ""),
+        ]
+        try:
+            kws = json.loads(getattr(task, "poster_llm_keywords", "") or "[]")
+            if isinstance(kws, list):
+                pieces.extend(str(x) for x in kws)
+        except Exception:
+            pass
+        try:
+            settings = json.loads(task.viewer_settings or "{}")
+            det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+            if isinstance(det, dict):
+                pieces.extend(str(v) for v in det.values())
+        except Exception:
+            pass
+        pieces.append(str(body.get("model_hint_string") or ""))
+        text = " ".join(pieces)
+        scored = sorted(((t, _viewer_theme_score_text(t, text)) for t in themes), key=lambda x: x[1], reverse=True)
+        best, score = scored[0]
+        if score <= 0:
+            best = next((t for t in themes if "studio" in str(t.get("theme_id", "")).lower()), themes[0])
+        selected = {
+            "theme_id": str(best.get("theme_id")),
+            "confidence_float": min(1.0, max(0.2, score / 8.0)),
+            "reason_string": "keyword match" if score > 0 else "neutral fallback",
+            "provider_string": provider,
+        }
+    if can_persist:
+        try:
+            existing = json.loads(task.viewer_settings or "{}")
+            if not isinstance(existing, dict):
+                existing = {}
+        except Exception:
+            existing = {}
+        existing["viewer_theme_selection"] = selected
+        task.viewer_settings = json.dumps(existing, ensure_ascii=False)
+        await db.commit()
+    theme = next((t for t in themes if str(t.get("theme_id")) == selected["theme_id"]), None)
+    return {"ok": True, "selection": selected, "theme": theme, "persisted": bool(can_persist)}
 
 
 def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:

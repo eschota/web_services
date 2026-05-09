@@ -1,0 +1,43 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "jungle_temple_ruins.jpg",
+  "plane_color": "#777469",
+  "schema_version": 1,
+  "semantic_tags": [
+    "jungle",
+    "temple",
+    "ruins",
+    "turtle",
+    "monkey",
+    "lizard",
+    "adventure",
+    "fantasy"
+  ],
+  "shadow_settings": {
+    "opacity": 0.52,
+    "shadow_y_offset": 0.005,
+    "softness": 8.5,
+    "sun_multiplier": 1.6
+  },
+  "sun_settings": {
+    "inclination": 35,
+    "intensity": 1.85,
+    "rotation": -105
+  },
+  "theme_id": "jungle_temple_ruins",
+  "theme_name": "Jungle Temple Ruins",
+  "theme_short_description": "Mossy jungle temple courtyard with ancient stone and misty cliffs."
+}

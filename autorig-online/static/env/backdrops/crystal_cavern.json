@@ -1,0 +1,43 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "crystal_cavern.jpg",
+  "plane_color": "#8a67a7",
+  "schema_version": 1,
+  "semantic_tags": [
+    "crystal",
+    "magic",
+    "fantasy",
+    "dragon",
+    "unicorn",
+    "creature",
+    "gem",
+    "cavern"
+  ],
+  "shadow_settings": {
+    "opacity": 0.5,
+    "shadow_y_offset": 0.005,
+    "softness": 8.0,
+    "sun_multiplier": 1.5
+  },
+  "sun_settings": {
+    "inclination": 36,
+    "intensity": 1.8,
+    "rotation": -150
+  },
+  "theme_id": "crystal_cavern",
+  "theme_name": "Crystal Cavern",
+  "theme_short_description": "Glowing fantasy crystal valley in purple and blue light."
+}

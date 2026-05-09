@@ -1,0 +1,43 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "sci_fi_hangar.jpg",
+  "plane_color": "#55606a",
+  "schema_version": 1,
+  "semantic_tags": [
+    "sci-fi",
+    "robot",
+    "mech",
+    "astronaut",
+    "spaceship",
+    "vehicle",
+    "cyber",
+    "metal"
+  ],
+  "shadow_settings": {
+    "opacity": 0.48,
+    "shadow_y_offset": 0.005,
+    "softness": 5.5,
+    "sun_multiplier": 1.7
+  },
+  "sun_settings": {
+    "inclination": 62,
+    "intensity": 1.9,
+    "rotation": -10
+  },
+  "theme_id": "sci_fi_hangar",
+  "theme_name": "Sci-Fi Hangar",
+  "theme_short_description": "Blue metallic spaceship hangar with glowing panels and reflective floor."
+}

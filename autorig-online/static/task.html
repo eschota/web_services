@@ -2819,6 +2819,8 @@
                             <input type="range" id="viewer-admin-animal-shadow-sun" min="0.35" max="3.5" step="0.05" value="1.1" />
                             <span id="viewer-admin-animal-shadow-sun-val" class="viewer-admin-shadow-val">1.10</span>
                         </div>
+                        <button type="button" class="btn btn-primary" id="viewer-admin-theme-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Сохранить тему</button>
+                        <span id="viewer-admin-theme-save-status" style="font-size:0.68rem;color:var(--text-muted);"></span>
                     </div>
                     <!-- Viewer Container (relative for overlay positioning) -->
                     <div id="model-viewer-container">
@@ -8144,34 +8146,48 @@
 
             /** Bundled plate if folder/API unavailable (always shipped under /static/env/). */
             const VIEWER_BACKDROP_FALLBACK_SRC = '/static/env/viewer-meadow-bg.png';
+            let viewerThemesManifest = [];
+            let activeViewerTheme = null;
+            let viewerThemeUserPicked = false;
+
+            function applyViewerTheme(theme, reason = '') {
+                if (!theme || !theme.src) return;
+                activeViewerTheme = theme;
+                window.__activeViewerTheme = theme;
+                window.__pendingViewerThemeSettings = theme;
+                applyViewerBackdropUrl(theme.src, reason || 'theme');
+                if (typeof window.viewerThemeRuntimeApply === 'function') {
+                    window.viewerThemeRuntimeApply(theme, reason || 'theme');
+                }
+            }
 
             async function loadViewerBackdropManifest() {
+                try {
+                    const r = await fetch('/api/viewer-themes', { cache: 'no-store' });
+                    if (r.ok) {
+                        const data = await r.json();
+                        if (Array.isArray(data)) {
+                            window.taskDbg?.('[ViewerTheme] manifest from API', data.length);
+                            return data;
+                        }
+                        console.warn('[ViewerTheme] API body is not an array');
+                        return [];
+                    }
+                    console.warn('[ViewerTheme] /api/viewer-themes HTTP', r.status, '(using legacy fallback if available)');
+                } catch (err) {
+                    console.warn('[ViewerTheme] API manifest failed', err);
+                }
                 try {
                     const r = await fetch('/api/viewer-backdrops', { cache: 'no-store' });
                     if (r.ok) {
                         const data = await r.json();
-                        if (Array.isArray(data)) {
-                            window.taskDbg?.('[ViewerBackdrop] manifest from API', data.length);
-                            return data;
-                        }
-                        console.warn('[ViewerBackdrop] API body is not an array');
-                        return [];
-                    }
-                    console.warn('[ViewerBackdrop] /api/viewer-backdrops HTTP', r.status, '(using static JSON fallback if available)');
-                } catch (err) {
-                    console.warn('[ViewerBackdrop] API manifest failed', err);
-                }
-                try {
-                    const r = await fetch('/static/env/viewer_backdrops.json', { cache: 'no-store' });
-                    if (r.ok) {
-                        const data = await r.json();
                         if (Array.isArray(data) && data.length) {
-                            console.warn('[ViewerBackdrop] using static viewer_backdrops.json — prefer /api/viewer-backdrops on server');
+                            console.warn('[ViewerTheme] using legacy /api/viewer-backdrops');
                             return data;
                         }
                     }
                 } catch (err) {
-                    console.warn('[ViewerBackdrop] static JSON fallback', err);
+                    console.warn('[ViewerTheme] legacy API fallback', err);
                 }
                 return null;
             }
@@ -8189,20 +8205,22 @@
                 let manifest = await loadViewerBackdropManifest();
                 if (manifest === null) {
                     manifest = [{ id: 'default', src: VIEWER_BACKDROP_FALLBACK_SRC }];
-                    console.warn('[ViewerBackdrop] no API/JSON — bundled fallback plate');
+                    console.warn('[ViewerTheme] no API — bundled fallback plate');
                 } else if (!manifest.length) {
                     wrapEl.classList.add('hidden');
                     strip.dataset.backdropWired = '1';
                     applyViewerBackdropUrl(VIEWER_BACKDROP_FALLBACK_SRC, 'empty backdrops folder');
                     return;
                 }
+                viewerThemesManifest = manifest;
+                window.__viewerThemesManifest = manifest;
 
                 const first = manifest.find((m) => m && m.id != null && m.src) || manifest[0];
                 let current = first;
                 try {
                     localStorage.setItem(VIEWER_BACKDROP_LS_KEY, String(first.id));
                 } catch (_) {}
-                applyViewerBackdropUrl(first.src, 'init default (first in manifest)');
+                applyViewerTheme(first, 'init default (first in themes)');
 
                 strip.replaceChildren();
 
@@ -8251,7 +8269,8 @@
                     ev.preventDefault();
                     ev.stopPropagation();
                     current = item;
-                    applyViewerBackdropUrl(item.src, 'user pick');
+                    viewerThemeUserPicked = true;
+                    applyViewerTheme(item, 'user pick');
                     try {
                         localStorage.setItem(VIEWER_BACKDROP_LS_KEY, String(item.id));
                     } catch (_) {}
@@ -9244,6 +9263,207 @@
                 }
             };
             window.viewerState = viewerState; // Make global for debugging
+
+            function _themeNumber(value, fallback) {
+                const n = Number(value);
+                return Number.isFinite(n) ? n : fallback;
+            }
+
+            function setViewerThemeSlider(id, value, decimals = 2) {
+                const el = document.getElementById(id);
+                if (el && value !== undefined && value !== null) el.value = String(value);
+                const valEl = document.getElementById(`${id}-val`);
+                if (valEl && value !== undefined && value !== null) valEl.textContent = Number(value).toFixed(decimals);
+            }
+
+            window.viewerThemeRuntimeApply = function viewerThemeRuntimeApply(theme, reason = '') {
+                if (!theme) return;
+                const shadow = theme.shadow_settings || {};
+                const sun = theme.sun_settings || {};
+                const cam = theme.camera_transform || {};
+                const plane = String(theme.plane_color || '').trim();
+                if (plane) {
+                    viewerState.groundColor = plane;
+                    const gp = document.getElementById('ground-color-picker');
+                    if (gp) gp.value = plane;
+                    const agp = document.getElementById('animal-viewer-ground-color');
+                    if (agp) agp.value = plane;
+                    try { localStorage.setItem(getAnimalGroundStorageKey(), plane); } catch (_) {}
+                }
+                if (shadow.opacity !== undefined) viewerState.shadow_opacity_float = _themeNumber(shadow.opacity, viewerState.shadow_opacity_float);
+                if (shadow.softness !== undefined) {
+                    viewerState.shadow_softness_float = _themeNumber(shadow.softness, viewerState.shadow_softness_float);
+                    viewerState.shadowRadius = viewerState.shadow_softness_float;
+                }
+                if (shadow.sun_multiplier !== undefined) viewerState.shadow_light_intensity_float = _themeNumber(shadow.sun_multiplier, viewerState.shadow_light_intensity_float);
+                if (shadow.shadow_y_offset !== undefined) viewerState.shadow_y_offset_float = _themeNumber(shadow.shadow_y_offset, viewerState.shadow_y_offset_float);
+                if (sun.rotation !== undefined) viewerState.sunRotation = _themeNumber(sun.rotation, viewerState.sunRotation);
+                if (sun.inclination !== undefined) viewerState.sunInclination = _themeNumber(sun.inclination, viewerState.sunInclination);
+                if (sun.intensity !== undefined) viewerState.mainLightIntensity = _themeNumber(sun.intensity, viewerState.mainLightIntensity);
+
+                setViewerThemeSlider('matte-shadow-opacity-slider', viewerState.shadow_opacity_float, 2);
+                setViewerThemeSlider('shadow-radius-slider', viewerState.shadow_softness_float, 3);
+                setViewerThemeSlider('matte-shadow-yofs-slider', viewerState.shadow_y_offset_float, 3);
+                setViewerThemeSlider('matte-shadow-light-slider', viewerState.shadow_light_intensity_float, 2);
+                setViewerThemeSlider('viewer-admin-animal-shadow-opacity', viewerState.shadow_opacity_float, 2);
+                setViewerThemeSlider('viewer-admin-animal-shadow-soft', viewerState.shadow_softness_float, 2);
+                setViewerThemeSlider('viewer-admin-animal-shadow-sun', viewerState.shadow_light_intensity_float, 2);
+
+                try {
+                    if (cam.position && cam.target && camera && controls) {
+                        camera.position.set(_themeNumber(cam.position.x, camera.position.x), _themeNumber(cam.position.y, camera.position.y), _themeNumber(cam.position.z, camera.position.z));
+                        controls.target.set(_themeNumber(cam.target.x, controls.target.x), _themeNumber(cam.target.y, controls.target.y), _themeNumber(cam.target.z, controls.target.z));
+                        if (cam.fov !== undefined && camera.isPerspectiveCamera) {
+                            camera.fov = _themeNumber(cam.fov, camera.fov);
+                            camera.updateProjectionMatrix();
+                        }
+                        camera.lookAt(controls.target);
+                        controls.update();
+                        viewerState.camera = {
+                            position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+                            target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+                            fov: camera.fov,
+                        };
+                    }
+                } catch (_) {}
+                try { applyViewerState(); updateViewerUI(); } catch (_) {}
+                try { updateAnimalStandaloneGroundPlaneAndFog(); } catch (_) {}
+                try { viewerAdminAnimalShadowPanelRefreshScene(); } catch (_) {}
+                window.taskDbg?.('[ViewerTheme] applied', { id: theme.theme_id || theme.id, reason });
+            };
+            if (window.__pendingViewerThemeSettings) {
+                window.viewerThemeRuntimeApply(window.__pendingViewerThemeSettings, 'runtime-ready');
+            }
+
+            function collectCurrentViewerThemeSettings() {
+                const av = window.animalStandaloneViewer || {};
+                const c = av.camera || camera;
+                const ctl = av.controls || controls;
+                const active = window.__activeViewerTheme || activeViewerTheme || {};
+                return {
+                    theme_name: active.theme_name || active.theme_id || active.id || 'Viewer Theme',
+                    theme_short_description: active.theme_short_description || '',
+                    semantic_tags: Array.isArray(active.semantic_tags) ? active.semantic_tags : [],
+                    plane_color: document.getElementById('animal-viewer-ground-color')?.value || viewerState.groundColor || '#6d7d8c',
+                    camera_transform: {
+                        position: c ? { x: c.position.x, y: c.position.y, z: c.position.z } : viewerState.camera.position,
+                        target: ctl ? { x: ctl.target.x, y: ctl.target.y, z: ctl.target.z } : viewerState.camera.target,
+                        fov: c?.fov || viewerState.camera?.fov || 45,
+                    },
+                    shadow_settings: {
+                        opacity: _themeNumber(document.getElementById('viewer-admin-animal-shadow-opacity')?.value, viewerState.shadow_opacity_float),
+                        softness: _themeNumber(document.getElementById('viewer-admin-animal-shadow-soft')?.value, viewerState.shadow_softness_float),
+                        sun_multiplier: _themeNumber(document.getElementById('viewer-admin-animal-shadow-sun')?.value, viewerState.shadow_light_intensity_float),
+                        shadow_y_offset: viewerState.shadow_y_offset_float,
+                    },
+                    sun_settings: {
+                        rotation: viewerState.sunRotation,
+                        inclination: viewerState.sunInclination,
+                        intensity: viewerState.mainLightIntensity,
+                    },
+                };
+            }
+
+            async function saveActiveViewerThemeSettings() {
+                const status = document.getElementById('viewer-admin-theme-save-status');
+                const active = window.__activeViewerTheme || activeViewerTheme;
+                const id = active && (active.theme_id || active.id);
+                if (!id) {
+                    if (status) status.textContent = 'Нет активной темы';
+                    return;
+                }
+                const isAdmin = await ensureViewerAdmin();
+                if (!isAdmin) {
+                    if (status) status.textContent = 'Admin only';
+                    return;
+                }
+                if (status) status.textContent = 'Сохраняю...';
+                const resp = await fetch(`/api/admin/viewer-themes/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collectCurrentViewerThemeSettings()),
+                });
+                if (!resp.ok) {
+                    const data = await resp.json().catch(() => ({}));
+                    if (status) status.textContent = data.detail || `HTTP ${resp.status}`;
+                    return;
+                }
+                const data = await resp.json().catch(() => ({}));
+                if (data.theme) {
+                    window.__activeViewerTheme = data.theme;
+                    activeViewerTheme = data.theme;
+                }
+                if (status) status.textContent = 'Сохранено';
+                setTimeout(() => { if (status) status.textContent = ''; }, 1800);
+            }
+
+            document.getElementById('viewer-admin-theme-save-btn')?.addEventListener('click', () => {
+                saveActiveViewerThemeSettings().catch((e) => {
+                    const status = document.getElementById('viewer-admin-theme-save-status');
+                    if (status) status.textContent = e?.message || 'Save failed';
+                });
+            });
+
+            let viewerThemeAutoSelectRequested = false;
+
+            function captureViewerThemeAutoSelectImage() {
+                try {
+                    const av = window.animalStandaloneViewer || {};
+                    if (av.renderer && av.scene && av.camera) {
+                        av.renderer.render(av.scene, av.camera);
+                        return av.renderer.domElement.toDataURL('image/jpeg', 0.72);
+                    }
+                    if (renderer?.domElement) {
+                        renderer.render?.(scene, camera);
+                        return renderer.domElement.toDataURL('image/jpeg', 0.72);
+                    }
+                } catch (e) {
+                    console.warn('[ViewerTheme] snapshot failed', e);
+                }
+                return '';
+            }
+
+            async function requestViewerThemeAutoSelect(taskState, source = '') {
+                if (viewerThemeAutoSelectRequested || viewerThemeUserPicked) return;
+                if (!Array.isArray(viewerThemesManifest) || !viewerThemesManifest.length) return;
+                viewerThemeAutoSelectRequested = true;
+                try {
+                    const imageData = captureViewerThemeAutoSelectImage();
+                    const det = taskState?.rig_v2_animal_detection || {};
+                    const resp = await fetch(`/api/task/${encodeURIComponent(taskId)}/viewer-theme/auto-select`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            image_data_url_string: imageData,
+                            model_hint_string: [
+                                taskState?.input_type,
+                                taskState?.poster_llm_title,
+                                taskState?.poster_llm_description,
+                                Array.isArray(taskState?.poster_llm_keywords) ? taskState.poster_llm_keywords.join(' ') : '',
+                                det.animal_type_string || det.animal_type || ''
+                            ].filter(Boolean).join(' '),
+                            source_string: source,
+                        }),
+                    });
+                    if (!resp.ok) {
+                        console.warn('[ViewerTheme] auto-select HTTP', resp.status);
+                        return;
+                    }
+                    const data = await resp.json();
+                    const theme = data?.theme;
+                    if (theme?.src) {
+                        const id = String(theme.theme_id || theme.id || '');
+                        const match = viewerThemesManifest.find((x) => String(x.theme_id || x.id) === id) || theme;
+                        applyViewerTheme(match, `auto-select:${data?.selection?.provider_string || 'server'}`);
+                        const strip = document.getElementById('viewer-backdrop-strip');
+                        strip?.querySelectorAll('button.viewer-backdrop-thumb').forEach((b) => {
+                            b.setAttribute('aria-pressed', String(b.dataset.backdropId) === String(id) ? 'true' : 'false');
+                        });
+                    }
+                } catch (e) {
+                    console.warn('[ViewerTheme] auto-select failed', e);
+                }
+            }
 
             let currentAdjChannel = 'albedo';
 
@@ -13324,6 +13544,7 @@
                 window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
+                void getLatestTaskState().then((ts) => requestViewerThemeAutoSelect(ts, `main:${label}`)).catch(() => {});
                 return true;
             }
 
@@ -14044,6 +14265,10 @@
                         return THREE.MathUtils.clamp(parseFloat(sl.value) || ANIMAL_PUBLIC_SHADOW_PLANE_OPACITY, 0.08, 0.95);
                     }
                 }
+                const themeOp = Number((window.__activeViewerTheme || activeViewerTheme)?.shadow_settings?.opacity);
+                if (Number.isFinite(themeOp)) {
+                    return THREE.MathUtils.clamp(themeOp, 0.08, 0.95);
+                }
                 return ANIMAL_PUBLIC_SHADOW_PLANE_OPACITY;
             }
 
@@ -14059,8 +14284,11 @@
                     sun.intensity = ANIMAL_SKY_CONFIG.sunIntensity * mul;
                     if (sun.shadow) sun.shadow.radius = rad;
                 } else {
-                    sun.intensity = ANIMAL_SKY_CONFIG.sunIntensity;
-                    if (sun.shadow) sun.shadow.radius = 3;
+                    const shadow = (window.__activeViewerTheme || activeViewerTheme)?.shadow_settings || {};
+                    const themeMul = THREE.MathUtils.clamp(Number(shadow.sun_multiplier) || 1.0, 0.35, 3.5);
+                    const themeRad = THREE.MathUtils.clamp(Number(shadow.softness) || 3, 0, 10);
+                    sun.intensity = ANIMAL_SKY_CONFIG.sunIntensity * themeMul;
+                    if (sun.shadow) sun.shadow.radius = themeRad;
                 }
             }
 
@@ -14649,6 +14877,7 @@
                     window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                     window.__taskPageBoot?.markViewerReady('Animal preview ready');
                     syncAnimalStandaloneBackdropFromPath('animal-preview-ready');
+                    void requestViewerThemeAutoSelect(taskState, 'animal-preview-ready');
                 }
 
                 await loadStandaloneAnimalAnimationsIfReady(taskState);

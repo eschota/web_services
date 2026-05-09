@@ -1,0 +1,42 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "forest_stable_paddock.jpg",
+  "plane_color": "#a67b4c",
+  "schema_version": 1,
+  "semantic_tags": [
+    "stable",
+    "horse",
+    "deer",
+    "farm",
+    "forest",
+    "ranch",
+    "animal"
+  ],
+  "shadow_settings": {
+    "opacity": 0.54,
+    "shadow_y_offset": 0.005,
+    "softness": 6.5,
+    "sun_multiplier": 2.1
+  },
+  "sun_settings": {
+    "inclination": 48,
+    "intensity": 2.35,
+    "rotation": -100
+  },
+  "theme_id": "forest_stable_paddock",
+  "theme_name": "Forest Stable Paddock",
+  "theme_short_description": "Wooden stable paddock framed by tall forest trees."
+}

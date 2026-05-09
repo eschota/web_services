@@ -1,0 +1,42 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "dog_park_yard.jpg",
+  "plane_color": "#9a7b4f",
+  "schema_version": 1,
+  "semantic_tags": [
+    "dog",
+    "pet",
+    "park",
+    "yard",
+    "animal",
+    "puppy",
+    "domestic"
+  ],
+  "shadow_settings": {
+    "opacity": 0.55,
+    "shadow_y_offset": 0.005,
+    "softness": 6.0,
+    "sun_multiplier": 2.4
+  },
+  "sun_settings": {
+    "inclination": 48,
+    "intensity": 2.5,
+    "rotation": -55
+  },
+  "theme_id": "dog_park_yard",
+  "theme_name": "Dog Park Yard",
+  "theme_short_description": "Sunny fenced dog yard with play equipment and warm dirt ground."
+}

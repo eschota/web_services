@@ -1,0 +1,43 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "savanna_acacia_plain.jpg",
+  "plane_color": "#b58548",
+  "schema_version": 1,
+  "semantic_tags": [
+    "savanna",
+    "africa",
+    "giraffe",
+    "elephant",
+    "lion",
+    "zebra",
+    "wildlife",
+    "desert"
+  ],
+  "shadow_settings": {
+    "opacity": 0.55,
+    "shadow_y_offset": 0.005,
+    "softness": 6.0,
+    "sun_multiplier": 2.8
+  },
+  "sun_settings": {
+    "inclination": 56,
+    "intensity": 2.8,
+    "rotation": -70
+  },
+  "theme_id": "savanna_acacia_plain",
+  "theme_name": "Savanna Acacia Plain",
+  "theme_short_description": "Bright dry savanna with acacia trees and distant hills."
+}

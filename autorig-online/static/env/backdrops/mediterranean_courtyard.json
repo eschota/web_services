@@ -1,0 +1,42 @@
+{
+  "admin_edited_bool": false,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 2.5,
+      "y": 1.8,
+      "z": 3.0
+    },
+    "target": {
+      "x": 0.0,
+      "y": 0.8,
+      "z": 0.0
+    }
+  },
+  "image_filename": "mediterranean_courtyard.jpg",
+  "plane_color": "#b9a37d",
+  "schema_version": 1,
+  "semantic_tags": [
+    "courtyard",
+    "stone",
+    "mediterranean",
+    "garden",
+    "human",
+    "statue",
+    "animal"
+  ],
+  "shadow_settings": {
+    "opacity": 0.5,
+    "shadow_y_offset": 0.005,
+    "softness": 5.0,
+    "sun_multiplier": 2.3
+  },
+  "sun_settings": {
+    "inclination": 52,
+    "intensity": 2.45,
+    "rotation": -65
+  },
+  "theme_id": "mediterranean_courtyard",
+  "theme_name": "Mediterranean Courtyard",
+  "theme_short_description": "Warm stone courtyard with plants and sunlit rustic walls."
+}
