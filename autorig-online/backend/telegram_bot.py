@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import html
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -470,6 +471,9 @@ async def broadcast_new_task(
     input_type: str | None,
     progress_page: str | None = None,
     via_api: bool = False,
+    title: str | None = None,
+    theme_name: str | None = None,
+    poster_path: str | None = None,
 ) -> None:
     print(f"[Telegram] broadcast_new_task called for task {task_id}")
     token = _get_token()
@@ -491,6 +495,10 @@ async def broadcast_new_task(
     if via_api:
         header += " · 🔌 <b>API</b>"
     new_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
+    if title:
+        new_parts.append(f"🖼️ <b>{html.escape(title)}</b>")
+    elif theme_name:
+        new_parts.append(f"🖼️ {html.escape(theme_name)}")
     if summary:
         new_parts.append(f"📄 {html.escape(summary)}")
     new_parts.append(html.escape(metrics_line))
@@ -513,12 +521,25 @@ async def broadcast_new_task(
             if not reserved:
                 print(f"[Telegram] Skip duplicate new-task notification for chat={chat_id}, task={task_id}")
                 return
-            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
-                chat_id=cid, 
-                text=text, 
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False
-            ), retry_network=False)
+            photo_file = Path(poster_path) if poster_path else None
+            result = None
+            if photo_file and photo_file.is_file() and len(text) <= 1000:
+                async def _send_photo(cid=chat_id, p=photo_file):
+                    with p.open("rb") as f:
+                        return await bot.send_photo(
+                            chat_id=cid,
+                            photo=f,
+                            caption=text,
+                            parse_mode=ParseMode.HTML,
+                        )
+                result = await _send_with_retry(_send_photo, retry_network=False)
+            if not result:
+                result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=False
+                ), retry_network=False)
             if result:
                 await attach_notification_message_id(chat_id, "task_new", task_id, getattr(result, "message_id", None))
                 print(f"[Telegram] New task notification sent to chat {chat_id}")

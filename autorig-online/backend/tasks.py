@@ -5,6 +5,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, Tuple, List
 from urllib.parse import urlparse
 import httpx
@@ -33,6 +34,55 @@ from workers import (
 # =============================================================================
 # Helper Functions
 # =============================================================================
+PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
+
+
+def _task_notification_theme_meta(task: Task) -> dict:
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        if not isinstance(settings, dict):
+            settings = {}
+    except Exception:
+        settings = {}
+    detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+    theme = settings.get("viewer_theme_selection") if isinstance(settings, dict) else None
+    animal_type = ""
+    if isinstance(detection, dict):
+        animal_type = str(
+            detection.get("animal_type")
+            or detection.get("animal_type_string")
+            or (detection.get("first_result") or {}).get("animal_type_string")
+            or ""
+        ).strip().lower()
+    theme_id = str(theme.get("theme_id") or "").strip() if isinstance(theme, dict) else ""
+    theme_names = {
+        "dog_park_yard": "Pet Park Yard",
+        "studio_white_softbox": "White Photo Studio",
+        "alien_planet": "Alien Planet",
+        "sci_fi_hangar": "Sci-Fi Hangar",
+        "ranch_farmyard": "Ranch Farmyard",
+        "pine_forest_trail": "Pine Forest Trail",
+        "savanna_acacia_plain": "Savanna Acacia Plain",
+        "crystal_cavern": "Crystal Cavern",
+        "ancient_ruins": "Ancient Marble Ruins",
+        "jungle_temple_ruins": "Jungle Temple Ruins",
+    }
+    title_bits = []
+    if animal_type:
+        title_bits.append(animal_type.replace("_", " ").title())
+    elif task.input_type:
+        title_bits.append(str(task.input_type).replace("_", " ").title())
+    if theme_id:
+        title_bits.append(theme_names.get(theme_id, theme_id.replace("_", " ").title()))
+    poster_path = PREFLIGHT_RENDER_DIR / f"{task.id}.jpg"
+    return {
+        "title": " · ".join(title_bits),
+        "theme_id": theme_id,
+        "theme_name": theme_names.get(theme_id, theme_id.replace("_", " ").title()) if theme_id else "",
+        "poster_path": str(poster_path) if poster_path.is_file() else "",
+    }
+
+
 def get_task_progress_reference_time(task: Task) -> Optional[datetime]:
     """
     Return last *real* progress timestamp for stale detection.
@@ -322,6 +372,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             # Construct progress_page URL from worker_api and guid
             worker_base = get_worker_base_url(worker_url)
             progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+            notify_meta = _task_notification_theme_meta(task)
             print(f"[Tasks] Scheduling Telegram notification for new task {task.id}")
             asyncio.create_task(
                 broadcast_new_task(
@@ -330,6 +381,9 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
                     task.input_type,
                     progress_url,
                     via_api=bool(getattr(task, "created_via_api", False)),
+                    title=notify_meta.get("title") or None,
+                    theme_name=notify_meta.get("theme_name") or None,
+                    poster_path=notify_meta.get("poster_path") or None,
                 )
             )
         else:

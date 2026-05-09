@@ -2946,6 +2946,14 @@ async def api_create_task(
         except Exception:
             settings = {}
         settings["rig_v2_animal_detection"] = rig_v2_detection_meta
+        if "viewer_theme_selection" not in settings:
+            selected_theme = _select_viewer_theme_from_metadata(
+                input_url=final_url,
+                input_type=input_type,
+                rig_v2_detection_meta=rig_v2_detection_meta,
+            )
+            if selected_theme:
+                settings["viewer_theme_selection"] = selected_theme
         task.viewer_settings = json.dumps(settings, ensure_ascii=False)
         await db.commit()
     
@@ -9859,6 +9867,43 @@ def _viewer_theme_score_text(theme: Dict[str, Any], text: str) -> float:
     if name and any(part and part in hay for part in re.split(r"[^a-z0-9]+", name) if len(part) >= 4):
         score += 0.75
     return score
+
+
+def _select_viewer_theme_from_metadata(
+    *,
+    input_url: Optional[str],
+    input_type: Optional[str],
+    rig_v2_detection_meta: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    try:
+        themes = _list_viewer_theme_items()
+    except Exception as e:
+        print(f"[ViewerThemes] metadata select failed to list themes: {e}")
+        return None
+    if not themes:
+        return None
+    pieces: List[str] = [str(input_type or "")]
+    if input_url:
+        try:
+            pieces.append(Path(urlparse(input_url).path or "").name)
+        except Exception:
+            pieces.append(str(input_url))
+    if isinstance(rig_v2_detection_meta, dict):
+        pieces.extend(str(v) for v in rig_v2_detection_meta.values() if isinstance(v, (str, int, float)))
+        first = rig_v2_detection_meta.get("first_result")
+        if isinstance(first, dict):
+            pieces.extend(str(v) for v in first.values() if isinstance(v, (str, int, float)))
+    text = " ".join(pieces)
+    scored = sorted(((t, _viewer_theme_score_text(t, text)) for t in themes), key=lambda x: x[1], reverse=True)
+    best, score = scored[0]
+    if score <= 0:
+        best = next((t for t in themes if "studio" in str(t.get("theme_id", "")).lower()), themes[0])
+    return {
+        "theme_id": str(best.get("theme_id")),
+        "confidence_float": min(1.0, max(0.2, score / 8.0)),
+        "reason_string": "create metadata match" if score > 0 else "create neutral fallback",
+        "provider_string": "heuristic:create",
+    }
 
 
 async def _viewer_theme_select_with_openai(image_data_url: str, themes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
