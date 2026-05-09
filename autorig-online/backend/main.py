@@ -9465,9 +9465,14 @@ VIEWER_BACKDROP_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".avif"}
 
 
 def _convert_backdrop_png_files_to_jpg() -> None:
-    """Convert *.png in static/env/backdrops to JPEG (white behind alpha), then delete the PNG."""
+    """Convert *.png in static/env/backdrops to JPEG (white behind alpha), then delete the PNG.
+
+    Runs on server startup and again before listing /api/viewer-backdrops so the folder stays JPG-only.
+    Uses imdecode/imencode + raw file bytes (works reliably for paths with spaces / non-ASCII).
+    """
     d = STATIC_DIR / "env" / "backdrops"
     if not d.is_dir():
+        print("[ViewerBackdrops] PNG→JPG: backdrops dir missing, skip")
         return
     pngs = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() == ".png"]
     if not pngs:
@@ -9475,15 +9480,23 @@ def _convert_backdrop_png_files_to_jpg() -> None:
     try:
         import cv2
         import numpy as np
-    except ImportError:
-        print("[ViewerBackdrops] PNG→JPG skipped: cv2/numpy not available")
+    except ImportError as e:
+        print(f"[ViewerBackdrops] PNG→JPG skipped (install opencv + numpy): {e}")
         return
+    converted = 0
+    failed = 0
     for p in sorted(pngs, key=lambda x: x.name.lower()):
         jpg_path = p.with_suffix(".jpg")
         try:
-            img = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+            raw = np.frombuffer(p.read_bytes(), dtype=np.uint8)
+            if raw.size == 0:
+                print(f"[ViewerBackdrops] PNG→JPG: empty {p.name}")
+                failed += 1
+                continue
+            img = cv2.imdecode(raw, cv2.IMREAD_UNCHANGED)
             if img is None:
-                print(f"[ViewerBackdrops] PNG→JPG: cannot read {p.name}")
+                print(f"[ViewerBackdrops] PNG→JPG: cannot decode {p.name}")
+                failed += 1
                 continue
             if img.ndim == 2:
                 out = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -9497,16 +9510,23 @@ def _convert_backdrop_png_files_to_jpg() -> None:
                 out = img
             else:
                 print(f"[ViewerBackdrops] PNG→JPG: unsupported shape {img.shape} ({p.name})")
+                failed += 1
                 continue
-            if not cv2.imwrite(str(jpg_path), out, [int(cv2.IMWRITE_JPEG_QUALITY), 92]):
-                print(f"[ViewerBackdrops] PNG→JPG: write failed {jpg_path.name}")
+            ok, enc = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            if not ok or enc is None:
+                print(f"[ViewerBackdrops] PNG→JPG: encode failed {p.name}")
+                failed += 1
                 continue
-            try:
-                p.unlink(missing_ok=True)
-            except OSError as ue:
-                print(f"[ViewerBackdrops] PNG→JPG: remove failed {p.name}: {ue}")
-        except OSError as e:
+            jpg_path.write_bytes(enc.tobytes())
+            p.unlink(missing_ok=True)
+            converted += 1
+        except Exception as e:
+            failed += 1
             print(f"[ViewerBackdrops] PNG→JPG: {p.name} → {e}")
+    print(
+        f"[ViewerBackdrops] PNG→JPG: startup/conversion pass — "
+        f"{converted} converted, {failed} failed, {len(pngs)} png input(s)"
+    )
 
 
 def _list_viewer_backdrop_items() -> List[Dict[str, str]]:

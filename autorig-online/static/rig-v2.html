@@ -380,15 +380,18 @@
       });
     }
 
+    const RIG_V2_BACKDROP_FALLBACK = '/static/env/viewer-meadow-bg.png';
+
     async function loadRigV2BackdropManifest() {
       try {
         const r = await fetch('/api/viewer-backdrops', { cache: 'no-store' });
         if (r.ok) {
           const data = await r.json();
-          if (Array.isArray(data) && data.length) return data;
-        } else {
-          console.warn('[RigV2] /api/viewer-backdrops HTTP', r.status);
+          if (Array.isArray(data)) return data;
+          console.warn('[RigV2] API body is not an array');
+          return [];
         }
+        console.warn('[RigV2] /api/viewer-backdrops HTTP', r.status);
       } catch (err) {
         console.warn('[RigV2] backdrop API', err);
       }
@@ -397,7 +400,7 @@
         if (r.ok) {
           const data = await r.json();
           if (Array.isArray(data) && data.length) {
-            console.warn('[RigV2] using static viewer_backdrops.json — enable /api/viewer-backdrops on server');
+            console.warn('[RigV2] using static viewer_backdrops.json — prefer /api/viewer-backdrops on server');
             return data;
           }
         }
@@ -410,8 +413,16 @@
     async function initRigV2BackdropStrip() {
       if (!backdropStrip || !backdropStripWrap || backdropStrip.dataset.wired === '1') return;
       let manifest = await loadRigV2BackdropManifest();
-      if (!Array.isArray(manifest) || !manifest.length) {
-        applyRigV2BackdropUrl('/static/env/backdrops/meadow.jpg', 'manifest-empty-fallback');
+      if (manifest === null) {
+        applyRigV2BackdropUrl(RIG_V2_BACKDROP_FALLBACK, 'manifest-null-fallback');
+        backdropStrip.replaceChildren();
+        backdropStrip.dataset.wired = '1';
+        return;
+      }
+      if (!manifest.length) {
+        applyRigV2BackdropUrl(RIG_V2_BACKDROP_FALLBACK, 'empty-backdrops');
+        backdropStrip.replaceChildren();
+        backdropStrip.dataset.wired = '1';
         return;
       }
       const first = manifest.find((m) => m && m.id != null && m.src) || manifest[0];

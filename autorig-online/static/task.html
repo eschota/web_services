@@ -7997,7 +7997,7 @@
             // ============================================================
             const LIGHTING_CONFIG = {
                 // Фон: статическое изображение (CSS под canvas) + тени на прозрачной плоскости. IBL — RoomEnvironment.
-                backdropImagePath: '/static/env/backdrops/meadow.jpg',
+                backdropImagePath: '/static/env/viewer-meadow-bg.png',
                 envIntensity: 1.0,          // scene.environmentIntensity (Three.js r152+)
 
                 // Tone mapping
@@ -8142,19 +8142,22 @@
 
             window.addEventListener('languageChanged', () => refreshBackdropStripLabels());
 
+            /** Bundled plate if folder/API unavailable (always shipped under /static/env/). */
+            const VIEWER_BACKDROP_FALLBACK_SRC = '/static/env/viewer-meadow-bg.png';
+
             async function loadViewerBackdropManifest() {
                 try {
                     const r = await fetch('/api/viewer-backdrops', { cache: 'no-store' });
                     if (r.ok) {
                         const data = await r.json();
-                        if (Array.isArray(data) && data.length) {
+                        if (Array.isArray(data)) {
                             window.taskDbg?.('[ViewerBackdrop] manifest from API', data.length);
                             return data;
                         }
-                        console.warn('[ViewerBackdrop] API returned empty list');
-                    } else {
-                        console.warn('[ViewerBackdrop] /api/viewer-backdrops HTTP', r.status, '(using static JSON fallback if available)');
+                        console.warn('[ViewerBackdrop] API body is not an array');
+                        return [];
                     }
+                    console.warn('[ViewerBackdrop] /api/viewer-backdrops HTTP', r.status, '(using static JSON fallback if available)');
                 } catch (err) {
                     console.warn('[ViewerBackdrop] API manifest failed', err);
                 }
@@ -8163,7 +8166,7 @@
                     if (r.ok) {
                         const data = await r.json();
                         if (Array.isArray(data) && data.length) {
-                            console.warn('[ViewerBackdrop] using static viewer_backdrops.json — deploy backend with /api/viewer-backdrops for auto folder scan');
+                            console.warn('[ViewerBackdrop] using static viewer_backdrops.json — prefer /api/viewer-backdrops on server');
                             return data;
                         }
                     }
@@ -8184,9 +8187,14 @@
                     return;
                 }
                 let manifest = await loadViewerBackdropManifest();
-                if (!Array.isArray(manifest) || !manifest.length) {
-                    manifest = [{ id: 'meadow', src: '/static/env/backdrops/meadow.jpg' }];
-                    console.warn('[ViewerBackdrop] using hardcoded fallback (empty folder / fetch failed)');
+                if (manifest === null) {
+                    manifest = [{ id: 'default', src: VIEWER_BACKDROP_FALLBACK_SRC }];
+                    console.warn('[ViewerBackdrop] no API/JSON — bundled fallback plate');
+                } else if (!manifest.length) {
+                    wrapEl.classList.add('hidden');
+                    strip.dataset.backdropWired = '1';
+                    applyViewerBackdropUrl(VIEWER_BACKDROP_FALLBACK_SRC, 'empty backdrops folder');
+                    return;
                 }
 
                 const first = manifest.find((m) => m && m.id != null && m.src) || manifest[0];
@@ -13878,7 +13886,7 @@
                     scene.environmentIntensity = 1.0;
                 }
 
-                const path = String(LIGHTING_CONFIG.backdropImagePath || '/static/env/backdrops/meadow.jpg').trim();
+                const path = String(LIGHTING_CONFIG.backdropImagePath || '/static/env/viewer-meadow-bg.png').trim();
                 av.backdropLoadSerial = (av.backdropLoadSerial || 0) + 1;
                 const serial = av.backdropLoadSerial;
                 const loader = new THREE.TextureLoader();
