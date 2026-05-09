@@ -8161,6 +8161,18 @@
                 }
             }
 
+            function chooseInitialViewerTheme(manifest) {
+                if (!Array.isArray(manifest) || !manifest.length) return null;
+                const byId = (id) => manifest.find((m) => String(m?.theme_id || m?.id || '') === id && m?.src);
+                return (
+                    byId('studio_white_softbox') ||
+                    byId('dog_park_yard') ||
+                    manifest.find((m) => m?.src && !String(m.theme_id || m.id || '').includes('alien')) ||
+                    manifest.find((m) => m?.src) ||
+                    null
+                );
+            }
+
             async function loadViewerBackdropManifest() {
                 try {
                     const r = await fetch('/api/viewer-themes', { cache: 'no-store' });
@@ -8215,12 +8227,11 @@
                 viewerThemesManifest = manifest;
                 window.__viewerThemesManifest = manifest;
 
-                const first = manifest.find((m) => m && m.id != null && m.src) || manifest[0];
+                const first = chooseInitialViewerTheme(manifest);
                 let current = first;
-                try {
-                    localStorage.setItem(VIEWER_BACKDROP_LS_KEY, String(first.id));
-                } catch (_) {}
-                applyViewerTheme(first, 'init default (first in themes)');
+                if (first) {
+                    applyViewerTheme(first, 'init neutral default');
+                }
 
                 strip.replaceChildren();
 

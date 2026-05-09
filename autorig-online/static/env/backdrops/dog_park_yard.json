@@ -18,6 +18,9 @@
   "schema_version": 1,
   "semantic_tags": [
     "dog",
+    "cat",
+    "kitten",
+    "feline",
     "pet",
     "park",
     "yard",
@@ -37,6 +40,6 @@
     "rotation": -55
   },
   "theme_id": "dog_park_yard",
-  "theme_name": "Dog Park Yard",
-  "theme_short_description": "Sunny fenced dog yard with play equipment and warm dirt ground."
+  "theme_name": "Pet Park Yard",
+  "theme_short_description": "Sunny fenced pet yard with play equipment and warm dirt ground."
 }

@@ -9489,9 +9489,9 @@ def _viewer_theme_default_for_stem(stem: str) -> Dict[str, Any]:
             "sun_settings": {"rotation": -35, "inclination": 55, "intensity": 2.0},
         },
         "dog_park_yard": {
-            "theme_name": "Dog Park Yard",
-            "theme_short_description": "Sunny fenced dog yard with play equipment and warm dirt ground.",
-            "semantic_tags": ["dog", "pet", "park", "yard", "animal", "puppy", "domestic"],
+            "theme_name": "Pet Park Yard",
+            "theme_short_description": "Sunny fenced pet yard with play equipment and warm dirt ground.",
+            "semantic_tags": ["dog", "cat", "kitten", "feline", "pet", "park", "yard", "animal", "puppy", "domestic"],
             "plane_color": "#9a7b4f",
             "shadow_settings": {"opacity": 0.55, "softness": 6.0, "sun_multiplier": 2.4, "shadow_y_offset": 0.005},
             "sun_settings": {"rotation": -55, "inclination": 48, "intensity": 2.5},
@@ -9835,6 +9835,17 @@ async def api_admin_save_viewer_theme(
 def _viewer_theme_score_text(theme: Dict[str, Any], text: str) -> float:
     hay = f" {text.lower()} "
     score = 0.0
+    tid = str(theme.get("theme_id") or theme.get("id") or "").lower()
+    alias_tags: Dict[str, List[str]] = {
+        "dog_park_yard": ["cat", "cats", "kitten", "kitty", "feline", "dog", "puppy", "pet", "pets"],
+        "ranch_farmyard": ["horse", "cow", "bull", "pony", "deer", "goat", "sheep"],
+        "alien_planet": ["astronaut", "space", "alien", "planet", "ufo"],
+        "sci_fi_hangar": ["robot", "mech", "android", "cyborg", "spaceship", "vehicle"],
+        "studio_white_softbox": ["product", "toy", "neutral", "studio"],
+    }
+    for alias in alias_tags.get(tid, []):
+        if f" {alias} " in hay:
+            score += 3.0
     for tag in theme.get("semantic_tags") or []:
         tag_s = str(tag).strip().lower()
         if not tag_s:
@@ -9871,9 +9882,10 @@ async def _viewer_theme_select_with_openai(image_data_url: str, themes: List[Dic
         for t in themes
     ]
     prompt = (
-        "Analyze the rendered 3D model image and choose the most semantically appropriate viewer theme. "
+        "Analyze the rendered 3D model image and choose the most semantically appropriate viewer theme for the model subject. "
+        "Ignore the current background/backdrop in the screenshot; it may be a wrong temporary default. "
         "Return only JSON: {\"theme_id\":\"<one theme_id>\",\"confidence_float\":0.0,\"reason_string\":\"short\"}. "
-        "Prefer exact concepts: astronaut/robot/mech -> sci-fi or space; dog/pet -> dog park; horse/cow/deer -> ranch/stable; "
+        "Prefer exact concepts: cat/kitten/dog/pet -> pet park; astronaut/alien/planet -> space; robot/mech -> sci-fi hangar; horse/cow/deer -> ranch/stable; "
         "wild animal -> forest/savanna; fantasy creature -> crystal/ruins/jungle; neutral product -> studio.\n\n"
         f"Available themes JSON:\n{json.dumps(compact, ensure_ascii=False)}"
     )
