@@ -8965,6 +8965,33 @@
             const MATTE_SHADOW_PLANE_NAME = 'MatteShadowReceiverPlane';
             const MATTE_SHADOW_PLANE_BASE = 200;
 
+            function getActiveImageSunSettings() {
+                const sun = (window.__activeViewerTheme || activeViewerTheme)?.sun_settings || {};
+                return {
+                    rotation: Number.isFinite(Number(viewerState.sunRotation)) ? Number(viewerState.sunRotation) : Number(sun.rotation || 45),
+                    inclination: Number.isFinite(Number(viewerState.sunInclination)) ? Number(viewerState.sunInclination) : Number(sun.inclination || 45),
+                    intensity: Number.isFinite(Number(viewerState.mainLightIntensity)) ? Number(viewerState.mainLightIntensity) : Number(sun.intensity || 2),
+                };
+            }
+
+            function getImageLockedSunDirection(viewCamera, rotationDeg, inclinationDeg, outVec) {
+                const out = outVec || new THREE.Vector3();
+                const rot = THREE.MathUtils.degToRad(Number(rotationDeg) || 0);
+                const inc = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(Number(inclinationDeg) || 35, 1, 89));
+                const cosInc = Math.cos(inc);
+                // Backdrop is a 2D plate locked to screen. Build the light in camera/image space,
+                // then rotate it into world space so orbiting the camera does not change shadow-vs-image direction.
+                out.set(
+                    Math.sin(rot) * cosInc,
+                    Math.sin(inc),
+                    Math.cos(rot) * cosInc
+                );
+                if (viewCamera?.quaternion) {
+                    out.applyQuaternion(viewCamera.quaternion);
+                }
+                return out.normalize();
+            }
+
             function shouldSkipMatteShadowCastMesh(mesh) {
                 const n = String(mesh.name || '').toLowerCase();
                 if (!n) return false;
@@ -10433,14 +10460,15 @@
                 }
                 if (!hasFocus) return;
 
-                const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
-                const theta = viewerState.sunRotation * (Math.PI / 180);
                 const r = Math.max(12, Number(viewerState.groundSize || 10) * 0.5);
-                const sunOffset = new THREE.Vector3(
-                    r * Math.sin(phi) * Math.sin(theta),
-                    Math.max(3, r * Math.cos(phi)),
-                    r * Math.sin(phi) * Math.cos(theta)
-                );
+                const imageSun = getActiveImageSunSettings();
+                const sunOffset = getImageLockedSunDirection(
+                    camera,
+                    imageSun.rotation,
+                    imageSun.inclination,
+                    new THREE.Vector3()
+                ).multiplyScalar(r);
+                if (sunOffset.y < 0.1) sunOffset.y = 0.1;
 
                 sunLight.target.position.copy(focus);
                 sunLight.position.copy(focus).add(sunOffset);
@@ -11435,10 +11463,10 @@
                         if (viewerControls) viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
                         if (playModeController?.active) playModeController.update(dt);
-                        updateSunShadowFocus(false);
                         publishMainViewerDebugState();
                         if (window.updateZoomInertia) window.updateZoomInertia();
                         controls.update();
+                        updateSunShadowFocus(false);
                         
                         if (!isDefaultComparisonOn && cameraInitialized && camera && controls) {
                             viewerState.camera.position.x = camera.position.x;
@@ -14084,9 +14112,13 @@
             };
 
             function getAnimalStandaloneSunDirection(outVec) {
-                const phi = THREE.MathUtils.degToRad(90 - ANIMAL_SKY_CONFIG.sunInclination);
-                const theta = THREE.MathUtils.degToRad(ANIMAL_SKY_CONFIG.sunRotation);
-                return (outVec || new THREE.Vector3()).setFromSphericalCoords(1, phi, theta);
+                const sun = getActiveImageSunSettings();
+                return getImageLockedSunDirection(
+                    animalStandaloneViewer.camera,
+                    sun.rotation ?? ANIMAL_SKY_CONFIG.sunRotation,
+                    sun.inclination ?? ANIMAL_SKY_CONFIG.sunInclination,
+                    outVec || new THREE.Vector3()
+                );
             }
 
             function initAnimalStandaloneBackdropPlate(scene, renderer) {
@@ -14153,6 +14185,9 @@
                 const extent = Math.max(size.x, size.y, size.z, 0.5);
                 const spanXZ = Math.max(size.x, size.z, 0.5);
                 const r = Math.max(extent * 2.2, 12);
+                getAnimalStandaloneSunDirection(dir);
+                if (dir.y < 0.1) dir.y = 0.1;
+                dir.normalize();
                 light.position.copy(center).addScaledVector(dir, r);
                 light.target.position.copy(center);
                 light.target.updateMatrixWorld();
