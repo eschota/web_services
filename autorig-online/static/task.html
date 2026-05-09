@@ -2819,6 +2819,16 @@
                             <input type="range" id="viewer-admin-animal-shadow-sun" min="0.35" max="3.5" step="0.05" value="1.1" />
                             <span id="viewer-admin-animal-shadow-sun-val" class="viewer-admin-shadow-val">1.10</span>
                         </div>
+                        <div class="viewer-admin-shadow-field">
+                            <label for="viewer-admin-animal-sun-rotation">Азимут</label>
+                            <input type="range" id="viewer-admin-animal-sun-rotation" min="-180" max="180" step="1" value="45" />
+                            <span id="viewer-admin-animal-sun-rotation-val" class="viewer-admin-shadow-val">45°</span>
+                        </div>
+                        <div class="viewer-admin-shadow-field">
+                            <label for="viewer-admin-animal-sun-inclination">Высота</label>
+                            <input type="range" id="viewer-admin-animal-sun-inclination" min="1" max="89" step="1" value="45" />
+                            <span id="viewer-admin-animal-sun-inclination-val" class="viewer-admin-shadow-val">45°</span>
+                        </div>
                         <button type="button" class="btn btn-primary" id="viewer-admin-theme-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Сохранить тему</button>
                         <span id="viewer-admin-theme-save-status" style="font-size:0.68rem;color:var(--text-muted);"></span>
                     </div>
@@ -9346,6 +9356,12 @@
                 setViewerThemeSlider('viewer-admin-animal-shadow-opacity', viewerState.shadow_opacity_float, 2);
                 setViewerThemeSlider('viewer-admin-animal-shadow-soft', viewerState.shadow_softness_float, 2);
                 setViewerThemeSlider('viewer-admin-animal-shadow-sun', viewerState.shadow_light_intensity_float, 2);
+                setViewerThemeSlider('viewer-admin-animal-sun-rotation', viewerState.sunRotation, 0);
+                setViewerThemeSlider('viewer-admin-animal-sun-inclination', viewerState.sunInclination, 0);
+                const adminSunRotVal = document.getElementById('viewer-admin-animal-sun-rotation-val');
+                const adminSunIncVal = document.getElementById('viewer-admin-animal-sun-inclination-val');
+                if (adminSunRotVal) adminSunRotVal.textContent = `${Number(viewerState.sunRotation).toFixed(0)}°`;
+                if (adminSunIncVal) adminSunIncVal.textContent = `${Number(viewerState.sunInclination).toFixed(0)}°`;
 
                 try {
                     if (cam.position && cam.target && camera && controls) {
@@ -14252,11 +14268,15 @@
                     const opacity = Number(o.opacity);
                     const soft = Number(o.soft);
                     const sunMul = Number(o.sunMul);
+                    const sunRot = Number(o.sunRot);
+                    const sunInc = Number(o.sunInc);
                     if (!Number.isFinite(opacity) || !Number.isFinite(soft) || !Number.isFinite(sunMul)) return null;
                     return {
                         opacity: THREE.MathUtils.clamp(opacity, 0.08, 0.95),
                         soft: THREE.MathUtils.clamp(soft, 0, 10),
                         sunMul: THREE.MathUtils.clamp(sunMul, 0.35, 3.5),
+                        sunRot: Number.isFinite(sunRot) ? THREE.MathUtils.clamp(sunRot, -180, 180) : null,
+                        sunInc: Number.isFinite(sunInc) ? THREE.MathUtils.clamp(sunInc, 1, 89) : null,
                     };
                 } catch (_) {
                     return null;
@@ -14268,14 +14288,20 @@
                     const opSl = document.getElementById('viewer-admin-animal-shadow-opacity');
                     const softSl = document.getElementById('viewer-admin-animal-shadow-soft');
                     const sunSl = document.getElementById('viewer-admin-animal-shadow-sun');
+                    const sunRotSl = document.getElementById('viewer-admin-animal-sun-rotation');
+                    const sunIncSl = document.getElementById('viewer-admin-animal-sun-inclination');
                     const payload = {
                         opacity: partial.opacity !== undefined ? partial.opacity : parseFloat(opSl?.value),
                         soft: partial.soft !== undefined ? partial.soft : parseFloat(softSl?.value),
                         sunMul: partial.sunMul !== undefined ? partial.sunMul : parseFloat(sunSl?.value),
+                        sunRot: partial.sunRot !== undefined ? partial.sunRot : parseFloat(sunRotSl?.value),
+                        sunInc: partial.sunInc !== undefined ? partial.sunInc : parseFloat(sunIncSl?.value),
                     };
-                    if (!Number.isFinite(payload.opacity)) payload.opacity = 0.5;
-                    if (!Number.isFinite(payload.soft)) payload.soft = 2.2;
-                    if (!Number.isFinite(payload.sunMul)) payload.sunMul = 1.1;
+                    if (!Number.isFinite(payload.opacity)) payload.opacity = Number(viewerState.shadow_opacity_float) || 0.5;
+                    if (!Number.isFinite(payload.soft)) payload.soft = Number(viewerState.shadow_softness_float) || 2.2;
+                    if (!Number.isFinite(payload.sunMul)) payload.sunMul = Number(viewerState.shadow_light_intensity_float) || 1.1;
+                    if (!Number.isFinite(payload.sunRot)) payload.sunRot = Number(viewerState.sunRotation) || 45;
+                    if (!Number.isFinite(payload.sunInc)) payload.sunInc = Number(viewerState.sunInclination) || 45;
                     localStorage.setItem(getViewerAdminAnimalShadowStorageKey(), JSON.stringify(payload));
                 } catch (_) {}
             }
@@ -14285,18 +14311,28 @@
                 const opSl = document.getElementById('viewer-admin-animal-shadow-opacity');
                 const softSl = document.getElementById('viewer-admin-animal-shadow-soft');
                 const sunSl = document.getElementById('viewer-admin-animal-shadow-sun');
+                const sunRotSl = document.getElementById('viewer-admin-animal-sun-rotation');
+                const sunIncSl = document.getElementById('viewer-admin-animal-sun-inclination');
                 const opVal = document.getElementById('viewer-admin-animal-shadow-opacity-val');
                 const softVal = document.getElementById('viewer-admin-animal-shadow-soft-val');
                 const sunV = document.getElementById('viewer-admin-animal-shadow-sun-val');
-                const op = saved ? saved.opacity : 0.5;
-                const soft = saved ? saved.soft : 2.2;
-                const sunMul = saved ? saved.sunMul : 1.1;
+                const sunRotVal = document.getElementById('viewer-admin-animal-sun-rotation-val');
+                const sunIncVal = document.getElementById('viewer-admin-animal-sun-inclination-val');
+                const op = saved ? saved.opacity : (Number(viewerState.shadow_opacity_float) || 0.5);
+                const soft = saved ? saved.soft : (Number(viewerState.shadow_softness_float) || 2.2);
+                const sunMul = saved ? saved.sunMul : (Number(viewerState.shadow_light_intensity_float) || 1.1);
+                const sunRot = (saved && saved.sunRot !== null) ? saved.sunRot : (Number(viewerState.sunRotation) || 45);
+                const sunInc = (saved && saved.sunInc !== null) ? saved.sunInc : (Number(viewerState.sunInclination) || 45);
                 if (opSl) opSl.value = String(op);
                 if (softSl) softSl.value = String(soft);
                 if (sunSl) sunSl.value = String(sunMul);
+                if (sunRotSl) sunRotSl.value = String(sunRot);
+                if (sunIncSl) sunIncSl.value = String(sunInc);
                 if (opVal) opVal.textContent = Number(op).toFixed(2);
                 if (softVal) softVal.textContent = Number(soft).toFixed(2);
                 if (sunV) sunV.textContent = Number(sunMul).toFixed(2);
+                if (sunRotVal) sunRotVal.textContent = `${Number(sunRot).toFixed(0)}°`;
+                if (sunIncVal) sunIncVal.textContent = `${Number(sunInc).toFixed(0)}°`;
             }
 
             function isViewerAdminAnimalShadowPanelVisible() {
@@ -14357,21 +14393,35 @@
                 const opSl = document.getElementById('viewer-admin-animal-shadow-opacity');
                 const softSl = document.getElementById('viewer-admin-animal-shadow-soft');
                 const sunSl = document.getElementById('viewer-admin-animal-shadow-sun');
+                const sunRotSl = document.getElementById('viewer-admin-animal-sun-rotation');
+                const sunIncSl = document.getElementById('viewer-admin-animal-sun-inclination');
                 const opVal = document.getElementById('viewer-admin-animal-shadow-opacity-val');
                 const softVal = document.getElementById('viewer-admin-animal-shadow-soft-val');
                 const sunV = document.getElementById('viewer-admin-animal-shadow-sun-val');
+                const sunRotVal = document.getElementById('viewer-admin-animal-sun-rotation-val');
+                const sunIncVal = document.getElementById('viewer-admin-animal-sun-inclination-val');
                 if (!opSl || !softSl || !sunSl) return;
                 viewerAdminAnimalShadowPanelWired = true;
                 const onChange = () => {
                     if (opVal) opVal.textContent = Number(parseFloat(opSl.value) || 0).toFixed(2);
                     if (softVal) softVal.textContent = Number(parseFloat(softSl.value) || 0).toFixed(2);
                     if (sunV) sunV.textContent = Number(parseFloat(sunSl.value) || 0).toFixed(2);
+                    const rot = parseFloat(sunRotSl?.value);
+                    const inc = parseFloat(sunIncSl?.value);
+                    if (Number.isFinite(rot)) viewerState.sunRotation = rot;
+                    if (Number.isFinite(inc)) viewerState.sunInclination = inc;
+                    if (sunRotVal) sunRotVal.textContent = `${Number(viewerState.sunRotation).toFixed(0)}°`;
+                    if (sunIncVal) sunIncVal.textContent = `${Number(viewerState.sunInclination).toFixed(0)}°`;
                     saveViewerAdminAnimalShadowTuneToStorage({});
                     viewerAdminAnimalShadowPanelRefreshScene();
+                    try { updateAnimalStandaloneGroundPlaneAndFog(); } catch (_) {}
+                    try { updateSunShadowFocus(true); } catch (_) {}
                 };
                 opSl.addEventListener('input', onChange);
                 softSl.addEventListener('input', onChange);
                 sunSl.addEventListener('input', onChange);
+                sunRotSl?.addEventListener('input', onChange);
+                sunIncSl?.addEventListener('input', onChange);
             }
 
             async function syncViewerAdminAnimalShadowPanelVisibility() {
