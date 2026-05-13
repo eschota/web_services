@@ -833,7 +833,7 @@ const App = {
         cloud.classList.remove('hidden');
         cloud.classList.add('rig-detect-cloud--grid');
 
-        const makeCard = (rigType) => {
+        for (const rigType of typesOrdered) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'rig-detect-card';
@@ -855,20 +855,8 @@ const App = {
                 </span>
             `;
             btn.addEventListener('click', () => onSelect(rigType));
-            return btn;
-        };
-
-        /* Two rows: 5 + 8 = 13 types; top row narrower (pyramid); bottom row staggered half-tile */
-        const ROW1_N = 5;
-        const row1Types = typesOrdered.slice(0, ROW1_N);
-        const row2Types = typesOrdered.slice(ROW1_N);
-        const row1El = document.createElement('div');
-        row1El.className = 'rig-detect-cloud__row rig-detect-cloud__row--narrow';
-        const row2El = document.createElement('div');
-        row2El.className = 'rig-detect-cloud__row rig-detect-cloud__row--wide';
-        row1Types.forEach((rigType) => row1El.appendChild(makeCard(rigType)));
-        row2Types.forEach((rigType) => row2El.appendChild(makeCard(rigType)));
-        cloud.append(row1El, row2El);
+            cloud.appendChild(btn);
+        }
     },
 
     refreshRigDetectCloudLabels() {

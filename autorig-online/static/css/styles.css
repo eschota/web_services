@@ -855,16 +855,13 @@ body.rig-detect-modal-open .convert-form-card {
     position: relative;
     width: 100%;
     flex: 0 0 auto;
-    --rig-detect-tile: min(3.55rem, 11vw);
-    --rig-detect-gap: 0.42rem;
 }
 
 .rig-detect-cloud.rig-detect-cloud--grid {
     position: static;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.32rem;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.35rem 0.4rem;
     height: auto;
     max-height: none;
     overflow: visible;
@@ -872,56 +869,26 @@ body.rig-detect-modal-open .convert-form-card {
     margin: 0;
 }
 
-.rig-detect-cloud__row {
-    display: flex;
-    flex-wrap: nowrap;
-    justify-content: center;
-    align-items: center;
-    gap: var(--rig-detect-gap);
-    width: auto;
-    max-width: 100%;
-    margin-inline: auto;
+@media (max-width: 420px) {
+    .rig-detect-cloud.rig-detect-cloud--grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
 }
 
-/* Brick: rows offset in opposite directions + row width not full — breaks rigid columns */
-.rig-detect-cloud__row--narrow {
-    transform: translateX(calc((var(--rig-detect-tile) + var(--rig-detect-gap)) * 0.38));
-}
-
-.rig-detect-cloud__row--wide {
-    transform: translateX(calc((var(--rig-detect-tile) + var(--rig-detect-gap)) * -0.38));
-}
-
-.rig-detect-cloud__row--wide .rig-detect-card:nth-child(odd) {
-    margin-top: 0.1rem;
-}
-
-.rig-detect-cloud__row--wide .rig-detect-card:nth-child(even) {
-    margin-top: -0.1rem;
-}
-
-.rig-detect-cloud__row--narrow .rig-detect-card:nth-child(odd) {
-    margin-top: -0.08rem;
-}
-
-.rig-detect-cloud__row--narrow .rig-detect-card:nth-child(even) {
-    margin-top: 0.08rem;
+@media (max-width: 340px) {
+    .rig-detect-cloud.rig-detect-cloud--grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 
 .rig-detect-cloud.rig-detect-cloud--grid .rig-detect-card {
-    flex: 0 0 var(--rig-detect-tile);
-    width: var(--rig-detect-tile);
-    height: var(--rig-detect-tile);
+    width: 100%;
+    max-width: none;
+    aspect-ratio: 1;
+    height: auto;
     min-width: 0;
     min-height: 0;
     padding: 0.04rem;
-}
-
-@media (max-width: 420px) {
-    .rig-detect-cloud {
-        --rig-detect-tile: min(3.05rem, 16vw);
-        --rig-detect-gap: 0.35rem;
-    }
 }
 
 .rig-detect-cloud.hidden {
