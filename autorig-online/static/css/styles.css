@@ -706,7 +706,8 @@ body.rig-detect-modal-open .convert-form-card {
     position: relative;
     z-index: 1;
     isolation: isolate;
-    max-width: min(560px, 100%);
+    /* Match .container-sm card content width: 800px max, minus section + card horizontal padding */
+    max-width: min(calc(800px - 6rem), calc(100vw - 6rem));
     width: 100%;
     max-height: calc(100dvh - 20px);
     max-height: calc(100vh - 20px);
@@ -829,9 +830,9 @@ body.rig-detect-modal-open .convert-form-card {
 
 .rig-detect-viewer-host {
     width: 100%;
-    max-width: min(260px, 48vmin);
+    max-width: min(320px, 52vmin);
     aspect-ratio: 1;
-    max-height: min(220px, 28vh);
+    max-height: min(260px, 32vh);
     margin: 0 auto;
     flex-shrink: 0;
     border-radius: 12px;
@@ -853,16 +854,15 @@ body.rig-detect-modal-open .convert-form-card {
     position: relative;
     width: 100%;
     flex: 0 0 auto;
-    height: clamp(130px, 34vmin, 210px);
-    max-height: 34vh;
-    margin: 0 auto;
+    --rig-detect-tile: min(3.55rem, 11vw);
 }
 
 .rig-detect-cloud.rig-detect-cloud--grid {
     position: static;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0.35rem 0.4rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.42rem;
     height: auto;
     max-height: none;
     overflow: visible;
@@ -870,15 +870,36 @@ body.rig-detect-modal-open .convert-form-card {
     margin: 0;
 }
 
-@media (max-width: 420px) {
-    .rig-detect-cloud.rig-detect-cloud--grid {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
+.rig-detect-cloud__row {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: center;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
 }
 
-@media (max-width: 340px) {
-    .rig-detect-cloud.rig-detect-cloud--grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+/* Bottom row wider — brick / pyramid stagger (half tile) */
+.rig-detect-cloud__row--wide {
+    transform: translateX(calc((var(--rig-detect-tile) + 0.4rem) / 2));
+}
+
+.rig-detect-cloud.rig-detect-cloud--grid .rig-detect-card {
+    flex: 0 0 var(--rig-detect-tile);
+    width: var(--rig-detect-tile);
+    height: var(--rig-detect-tile);
+    min-width: 0;
+    min-height: 0;
+    padding: 0.04rem;
+}
+
+@media (max-width: 420px) {
+    .rig-detect-cloud {
+        --rig-detect-tile: min(3.05rem, 16vw);
+    }
+
+    .rig-detect-cloud__row--wide {
+        transform: translateX(calc((var(--rig-detect-tile) + 0.35rem) / 2));
     }
 }
 
