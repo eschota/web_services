@@ -405,6 +405,7 @@ class GalleryItem(BaseModel):
     author_nickname: Optional[str] = None  # Preferred display name (fallback to email)
     version: int = 1  # restart_count + 1
     content_rating: Optional[str] = None
+    rig_icon_key: str = "humanoid"  # humanoid | dog | bear | … for UI icon under Icons_png/
 
 
 class GalleryResponse(BaseModel):

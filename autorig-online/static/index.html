@@ -22,9 +22,12 @@
     <meta name="twitter:description" content="AI-powered automatic character rigging for 3D models, games, Unity, Unreal Engine, and Blender.">
     <meta name="twitter:image" content="https://autorig.online/static/images/og-image.png">
     
-    <!-- Favicon -->
+    <!-- Favicon (humanoid brand mark from Human.png) -->
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/logo/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/images/logo/favicon-16.png">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
-    <link rel="alternate icon" href="/static/images/logo/favicon.svg">
+    <link rel="apple-touch-icon" href="/static/images/logo/apple-touch-icon.png">
     
     <!-- Styles -->
     <link rel="stylesheet" href="/static/css/styles.css?v=upload-busy-tips-1">
@@ -204,13 +207,24 @@
                 <div id="convert-form-busy" class="form-busy-overlay hidden" role="status" aria-live="polite" aria-busy="false">
                     <div class="form-busy-inner">
                         <p class="form-busy-text" id="convert-form-busy-text" data-i18n="upload_progress_uploading">Uploading your model…</p>
+                        <div id="rig-detect-layout" class="rig-detect-layout hidden">
+                            <div id="rig-detect-viewer-host" class="rig-detect-viewer-host" aria-hidden="false"></div>
+                            <div id="rig-detect-cloud" class="rig-detect-cloud" role="group" aria-label="Rig type"></div>
+                            <div id="rig-detect-review" class="rig-detect-review hidden">
+                                <p id="rig-detect-hint" class="rig-detect-hint"></p>
+                                <div class="rig-detect-cta-row">
+                                    <button type="button" id="rig-detect-start-now" class="btn btn-primary rig-detect-start-btn"></button>
+                                </div>
+                                <p id="rig-detect-footer" class="rig-detect-footer"></p>
+                            </div>
+                        </div>
                         <div class="form-busy-progress-wrap" id="convert-form-busy-progress-wrap">
                             <div class="form-busy-progress-track" id="convert-form-busy-progress-track">
                                 <div class="form-busy-progress-fill" id="convert-form-busy-progress-fill"></div>
                             </div>
                             <span class="form-busy-progress-pct" id="convert-form-busy-progress-pct" aria-hidden="true">0%</span>
                         </div>
-                        <div class="form-busy-tips">
+                        <div class="form-busy-tips" id="convert-form-busy-tips">
                             <p class="form-busy-tips-title" data-i18n="upload_busy_tips_title">While you wait</p>
                             <ul class="form-busy-tips-list">
                                 <li data-i18n="upload_busy_tip_1">Characters should have arms at shoulder height, extended to the sides (T-pose).</li>
@@ -339,9 +353,10 @@
     <!-- Scripts -->
     <script src="/static/js/header.js?v=20260324-sitelayout"></script>
     <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/site-layout.js?v=20260430-supportfix"></script>
+    <script src="/static/js/site-layout.js?v=20260509-supportpoll1"></script>
     <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script src="/static/js/task-card.js"></script>
-    <script src="/static/js/app.js?v=rig-v2-preflight-metadata-1"></script>
+    <script src="/static/js/app.js?v=rig-detect-modal-home-1"></script>
 </body>
 </html>

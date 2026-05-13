@@ -45,8 +45,16 @@ const TaskCard = {
         const versionHtml = version > 1 
             ? `<span class="tc-version" title="Version">v${version}</span>` 
             : '';
+
+        const rigKey = (typeof item.rig_icon_key === 'string' && item.rig_icon_key)
+            ? item.rig_icon_key
+            : 'humanoid';
+        const rigIconSrc = (typeof resolveRigIconUrl === 'function')
+            ? resolveRigIconUrl(rigKey)
+            : `/static/Icons_png/${rigKey === 'humanoid' ? 'Human' : (rigKey.charAt(0).toUpperCase() + rigKey.slice(1))}.png?v=rigicons1`;
+        const rigIconHtml = `<span class="tc-rig-icon" title="Rig type"><img src="${rigIconSrc}" alt="" width="64" height="64" loading="lazy" decoding="async" aria-hidden="true"></span>`;
         
-        return `<a href="${taskUrl}" class="tc-card" data-task-id="${item.task_id}"><div class="tc-media"><img class="tc-thumb" src="${thumbUrl}" alt="" onload="this.classList.add('loaded')"><video class="tc-video" src="${videoUrl}" muted loop playsinline preload="none"></video>${authorHtml}${versionHtml}<div class="tc-badges"><button class="tc-like ${liked ? 'liked' : ''}" data-like-task="${item.task_id}" onclick="event.preventDefault();event.stopPropagation();TaskCard.toggleLike(this,'${item.task_id}')"><span>♥</span><span class="tc-like-count">${likeCount}</span></button>${salesHtml}</div></div></a>`;
+        return `<a href="${taskUrl}" class="tc-card" data-task-id="${item.task_id}"><div class="tc-media"><img class="tc-thumb" src="${thumbUrl}" alt="" onload="this.classList.add('loaded')"><video class="tc-video" src="${videoUrl}" muted loop playsinline preload="none"></video>${authorHtml}${versionHtml}${rigIconHtml}<div class="tc-badges"><button class="tc-like ${liked ? 'liked' : ''}" data-like-task="${item.task_id}" onclick="event.preventDefault();event.stopPropagation();TaskCard.toggleLike(this,'${item.task_id}')"><span>♥</span><span class="tc-like-count">${likeCount}</span></button>${salesHtml}</div></div></a>`;
     },
     
     /**

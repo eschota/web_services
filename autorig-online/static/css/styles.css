@@ -640,7 +640,164 @@ h3 { font-size: 1.25rem; }
     margin-bottom: 0;
 }
 
-.card-header {
+/* Rig type detection modal (home upload) */
+.form-busy-overlay.form-busy--rig-detect .form-busy-inner {
+    max-width: min(52rem, 96vw);
+    max-height: min(92vh, 56rem);
+}
+
+.rig-detect-layout {
+    margin-bottom: 0.85rem;
+}
+
+.rig-detect-layout.hidden {
+    display: none !important;
+}
+
+.rig-detect-viewer-host {
+    width: 100%;
+    max-width: 512px;
+    margin: 0 auto 1rem;
+    aspect-ratio: 1;
+    max-height: min(40vh, 512px);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: rgb(128, 128, 128);
+}
+
+.rig-detect-viewer-host canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.rig-detect-cloud {
+    position: relative;
+    width: 100%;
+    min-height: min(58vh, 540px);
+    margin: 0 auto 0.75rem;
+}
+
+.rig-detect-cloud.hidden {
+    display: none;
+}
+
+.rig-detect-card {
+    position: absolute;
+    width: min(256px, 42vw);
+    height: min(256px, 42vw);
+    max-width: 256px;
+    max-height: 256px;
+    padding: 0.45rem;
+    margin: 0;
+    border: 2px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    transform: translate(-50%, -50%) scale(1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    color: var(--text-primary);
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.rig-detect-card img {
+    width: 55%;
+    height: auto;
+    max-height: 42%;
+    object-fit: contain;
+    flex-shrink: 0;
+    pointer-events: none;
+}
+
+.rig-detect-card-weight {
+    font-size: clamp(1.1rem, 3.5vw, 1.5rem);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    line-height: 1;
+    pointer-events: none;
+}
+
+.rig-detect-card-label {
+    font-size: clamp(0.65rem, 2.2vw, 0.82rem);
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.15;
+    max-width: 95%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    color: var(--text-secondary);
+}
+
+.rig-detect-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: rgba(255, 255, 255, 0.09);
+}
+
+.rig-detect-card--selected {
+    transform: translate(-50%, -50%) scale(1.08);
+    border-color: var(--accent);
+    box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent),
+        0 12px 36px rgba(0, 0, 0, 0.45);
+    background: color-mix(in srgb, var(--accent) 18%, rgba(255, 255, 255, 0.06));
+    z-index: 2;
+}
+
+.rig-detect-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+.rig-detect-review.hidden {
+    display: none !important;
+}
+
+.rig-detect-hint {
+    margin: 0 0 0.75rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.rig-detect-cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem 1rem;
+    margin-bottom: 0.65rem;
+}
+
+.rig-detect-start-btn {
+    min-width: 11rem;
+}
+
+.rig-detect-footer {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height:1.4;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.form-busy-overlay.form-busy--rig-detect .form-busy-tips {
+    display: none;
+}
+
+.form-busy-overlay.form-busy--rig-detect.rig-detect--review-phase .form-busy-progress-wrap {
+    display: none;
+}
+
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1416,6 +1573,32 @@ h3 { font-size: 1.25rem; }
     font-weight: 700;
     color: #fff;
     z-index: 10;
+}
+
+.tc-rig-icon,
+.gallery-rig-icon {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    height: 80px;
+    padding: 8px;
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    pointer-events: none;
+}
+
+.tc-rig-icon img,
+.gallery-rig-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
 }
 
 .tc-badges {

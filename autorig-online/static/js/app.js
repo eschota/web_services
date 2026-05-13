@@ -298,36 +298,178 @@ const App = {
         return this.state.rigV2VisionDeps;
     },
 
-    async runHiddenAnimalDetection(source) {
+    /** All rig types shown on home detection modal (humanoid + 12 animals). */
+    RIG_DETECT_RIG_TYPES: ['humanoid', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'],
+    RIG_DETECT_REVIEW_SECONDS: 30,
+
+    _rigDetectLabelKey(rigKey) {
+        const k = String(rigKey || '').toLowerCase();
+        return k === 'humanoid' ? 'upload_rig_type_humanoid' : `upload_rig_type_${k}`;
+    },
+
+    rigDetectTypeLabel(rigKey) {
+        const key = this._rigDetectLabelKey(rigKey);
+        const label = typeof t === 'function' ? t(key) : key;
+        return label === key ? String(rigKey) : label;
+    },
+
+    rigDetectAutoKey(detection) {
+        if (!detection) return 'humanoid';
+        if (detection.type === 'animal' && detection.animal_type) return String(detection.animal_type).toLowerCase();
+        return 'humanoid';
+    },
+
+    _rigDetectJitter01(str) {
+        let h = 0;
+        const s = String(str || '');
+        for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return (h % 1000) / 1000;
+    },
+
+    /**
+     * Client-side detection + optional live viewer in viewerHost.
+     * @returns {{ detection: object|null, dispose: () => void }}
+     */
+    async runHiddenAnimalDetection(source, options = {}) {
+        const viewerHost = options.viewerHost || null;
+        const deferDisposal = !!viewerHost;
         const animalTypes = ['dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+        const animalDecisionThreshold = 0.62;
+        const animalDecisionMinMargin = 0.14;
+        const animalDecisionMinVotes = 3;
         const model = 'gpt-5.4-nano';
+
         let objectUrl = '';
-        let host = null;
+        let rafId = 0;
+        let disposed = false;
+        let renderer = null;
+        let controls = null;
+        let pmremGenerator = null;
+        let offHost = null;
+        let resizeObserver = null;
+
+        const dispose = () => {
+            if (disposed) return;
+            disposed = true;
+            try {
+                resizeObserver?.disconnect();
+            } catch (e) {
+                /* ignore */
+            }
+            resizeObserver = null;
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = 0;
+            }
+            if (objectUrl) {
+                try {
+                    URL.revokeObjectURL(objectUrl);
+                } catch (e) {
+                    /* ignore */
+                }
+                objectUrl = '';
+            }
+            try {
+                controls?.dispose();
+            } catch (e) {
+                /* ignore */
+            }
+            controls = null;
+            try {
+                pmremGenerator?.dispose();
+            } catch (e) {
+                /* ignore */
+            }
+            pmremGenerator = null;
+            try {
+                renderer?.dispose();
+            } catch (e) {
+                /* ignore */
+            }
+            renderer = null;
+            if (viewerHost) viewerHost.replaceChildren();
+            if (offHost && offHost.parentNode) offHost.parentNode.removeChild(offHost);
+            offHost = null;
+        };
+
         try {
             const deps = await this.loadRigV2VisionDeps();
             const { THREE, GLTFLoader, FBXLoader, OBJLoader, OrbitControls, RoomEnvironment } = deps;
             const url = source.file ? URL.createObjectURL(source.file) : source.url;
             objectUrl = source.file ? url : '';
             const ext = (source.ext || '').replace(/^\./, '').toLowerCase();
-            host = document.createElement('div');
-            host.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:512px;height:512px;pointer-events:none;';
-            document.body.appendChild(host);
+
+            if (viewerHost) {
+                viewerHost.replaceChildren();
+            } else {
+                offHost = document.createElement('div');
+                offHost.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:512px;height:512px;pointer-events:none;';
+                document.body.appendChild(offHost);
+            }
+            const mountEl = viewerHost || offHost;
+
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x111827);
+            scene.background = new THREE.Color(0x808080);
             const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
-            const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.setPixelRatio(1);
-            renderer.setSize(512, 512, false);
-            host.appendChild(renderer.domElement);
-            const controls = new OrbitControls(camera, renderer.domElement);
-            scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 1.5));
-            const key = new THREE.DirectionalLight(0xffffff, 2.2);
+            renderer.toneMappingExposure = 1.35;
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+            controls = new OrbitControls(camera, renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 1.8));
+            scene.add(new THREE.HemisphereLight(0xffffff, 0xdbeafe, 2.2));
+            const key = new THREE.DirectionalLight(0xffffff, 3.0);
             key.position.set(-3, 5, -4);
             scene.add(key);
-            const pmrem = new THREE.PMREMGenerator(renderer);
-            scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+            const fill = new THREE.DirectionalLight(0xffffff, 1.8);
+            fill.position.set(4, 2, 5);
+            scene.add(fill);
+            const rim = new THREE.DirectionalLight(0xffffff, 1.4);
+            rim.position.set(0, 4, -6);
+            scene.add(rim);
+            pmremGenerator = new THREE.PMREMGenerator(renderer);
+            scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+            const syncViewerSize = () => {
+                if (!renderer || !camera) return;
+                let w = 512;
+                let h = 512;
+                if (viewerHost) {
+                    w = Math.max(160, viewerHost.clientWidth || 512);
+                    h = Math.max(160, viewerHost.clientHeight || w);
+                }
+                renderer.setSize(w, h, false);
+                camera.aspect = w / Math.max(h, 1);
+                camera.updateProjectionMatrix();
+            };
+
+            if (viewerHost) {
+                mountEl.appendChild(renderer.domElement);
+                renderer.domElement.style.touchAction = 'none';
+                syncViewerSize();
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.06;
+                const tick = () => {
+                    if (disposed) return;
+                    rafId = requestAnimationFrame(tick);
+                    controls.update();
+                    renderer.render(scene, camera);
+                };
+                rafId = requestAnimationFrame(tick);
+                if (typeof ResizeObserver !== 'undefined') {
+                    resizeObserver = new ResizeObserver(() => {
+                        if (!disposed) syncViewerSize();
+                    });
+                    resizeObserver.observe(viewerHost);
+                }
+            } else {
+                renderer.setSize(512, 512, false);
+                mountEl.appendChild(renderer.domElement);
+                syncViewerSize();
+            }
 
             const loadWithLoader = (loader, loadUrl) => new Promise((resolve, reject) => loader.load(loadUrl, resolve, undefined, reject));
             let object;
@@ -338,11 +480,59 @@ const App = {
             } else if (ext === 'obj') {
                 object = await loadWithLoader(new OBJLoader(), url);
             } else {
-                return null;
+                dispose();
+                return { detection: null, dispose: () => {} };
             }
+            const detectorFallbackMaterial = new THREE.MeshStandardMaterial({
+                name: 'vision_detector_neutral_gray',
+                color: 0xaab4c3,
+                roughness: 0.82,
+                metalness: 0.02,
+                side: THREE.DoubleSide,
+            });
+            const materialUsesTexture = (mat) => !!mat && [
+                'map',
+                'normalMap',
+                'roughnessMap',
+                'metalnessMap',
+                'aoMap',
+                'emissiveMap',
+                'alphaMap',
+                'bumpMap',
+                'displacementMap',
+            ].some((k) => !!mat[k]);
+            const materialLuminance = (mat) => {
+                const color = mat?.color;
+                if (!color) return 1;
+                return (color.r * 0.2126) + (color.g * 0.7152) + (color.b * 0.0722);
+            };
+            const prepareDetectorMaterial = (mat, node) => {
+                const hasTexture = materialUsesTexture(mat);
+                const tooDark = materialLuminance(mat) < 0.22;
+                if (!mat || !hasTexture || tooDark) {
+                    const replacement = detectorFallbackMaterial.clone();
+                    replacement.skinning = !!node?.isSkinnedMesh;
+                    replacement.vertexColors = false;
+                    replacement.needsUpdate = true;
+                    return replacement;
+                }
+                mat.side = THREE.DoubleSide;
+                if (mat.color && materialLuminance(mat) < 0.55) {
+                    mat.color.set(0xffffff);
+                }
+                if ('roughness' in mat) mat.roughness = Math.min(Number(mat.roughness ?? 0.8), 0.88);
+                if ('metalness' in mat) mat.metalness = Math.min(Number(mat.metalness ?? 0), 0.12);
+                if ('envMapIntensity' in mat) mat.envMapIntensity = Math.max(Number(mat.envMapIntensity || 0), 1.3);
+                mat.needsUpdate = true;
+                return mat;
+            };
             object.traverse?.((node) => {
-                const mats = Array.isArray(node.material) ? node.material : (node.material ? [node.material] : []);
-                mats.forEach((mat) => { mat.side = THREE.DoubleSide; mat.needsUpdate = true; });
+                if (!node?.isMesh) return;
+                if (Array.isArray(node.material)) {
+                    node.material = node.material.map((mat) => prepareDetectorMaterial(mat, node));
+                } else {
+                    node.material = prepareDetectorMaterial(node.material, node);
+                }
             });
             scene.add(object);
             const box = new THREE.Box3().setFromObject(object);
@@ -352,7 +542,9 @@ const App = {
             const dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * 1.45;
             camera.near = Math.max(0.001, dist / 1000);
             camera.far = Math.max(1000, dist * 10);
+            syncViewerSize();
             camera.updateProjectionMatrix();
+
             const views = [
                 { id: 'top_side_45', label: 'top-side 45', forward: new THREE.Vector3(-1, -1, -1), up: new THREE.Vector3(0, 1, 0) },
                 { id: 'front', label: 'front', forward: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0) },
@@ -381,8 +573,8 @@ const App = {
                         image_jpg_base64_string: image,
                         view_id_string: view.id,
                         force_openai_bool: true,
-                        open_ai_model_override_string: model
-                    })
+                        open_ai_model_override_string: model,
+                    }),
                 });
                 const data = await resp.json();
                 return { view_id_string: view.id, ...data };
@@ -392,37 +584,255 @@ const App = {
             const rest = await Promise.all(views.slice(1).map(analyze));
             const results = [first].concat(rest);
             const scores = {};
+            const votes = {};
             for (const result of results) {
                 const type = String(result.animal_type_string || '').toLowerCase();
                 if (!type) continue;
                 scores[type] = (scores[type] || 0) + Math.max(0.05, Math.min(1, Number(result.confidence_float || 0.5)));
+                votes[type] = (votes[type] || 0) + 1;
             }
-            let best = '';
-            let bestScore = 0;
-            Object.entries(scores).forEach(([type, score]) => {
-                if (score > bestScore) { best = type; bestScore = score; }
-            });
-            const isAnimal = best && best !== 'humanoid';
-            let animalType = isAnimal && animalTypes.includes(best) ? best : '';
-            if (isAnimal && !animalType) animalType = animalTypes[Math.floor(Math.random() * animalTypes.length)];
-            return {
-                type: isAnimal ? 'animal' : 'humanoid',
-                animal_type: animalType,
+            const sortedScores = Object.entries(scores).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
+            const best = String(sortedScores[0]?.[0] || '').toLowerCase();
+            const bestScore = Math.max(0, Number(sortedScores[0]?.[1] || 0));
+            const runnerUp = String(sortedScores[1]?.[0] || '').toLowerCase();
+            const runnerUpScore = Math.max(0, Number(sortedScores[1]?.[1] || 0));
+            const viewCount = Math.max(1, results.length || 0);
+            const bestVotes = Number(votes[best] || 0);
+            const decisionWeight = Math.max(0, Math.min(1, bestScore / viewCount));
+            const decisionMargin = Math.max(0, Math.min(1, (bestScore - runnerUpScore) / viewCount));
+            const selectedAvgConfidence = bestVotes > 0 ? Math.max(0, Math.min(1, bestScore / bestVotes)) : 0;
+            const bestIsAllowedAnimal = animalTypes.includes(best);
+            const acceptedAnimal = (
+                bestIsAllowedAnimal
+                && decisionWeight >= animalDecisionThreshold
+                && decisionMargin >= animalDecisionMinMargin
+                && bestVotes >= animalDecisionMinVotes
+            );
+            let rejectedReason = '';
+            if (!acceptedAnimal) {
+                if (!bestIsAllowedAnimal) {
+                    rejectedReason = best === 'humanoid' ? 'best_is_humanoid' : 'best_is_not_allowed_animal';
+                } else if (decisionWeight < animalDecisionThreshold) {
+                    rejectedReason = 'decision_weight_below_threshold';
+                } else if (decisionMargin < animalDecisionMinMargin) {
+                    rejectedReason = 'decision_margin_below_threshold';
+                } else if (bestVotes < animalDecisionMinVotes) {
+                    rejectedReason = 'not_enough_consistent_views';
+                } else {
+                    rejectedReason = 'animal_decision_rejected';
+                }
+            }
+            const detection = {
+                type: acceptedAnimal ? 'animal' : 'humanoid',
+                animal_type: acceptedAnimal ? best : '',
+                candidate_animal_type_string: bestIsAllowedAnimal ? best : '',
                 mode: 'only_rig',
                 model_used: model,
                 first_result: first,
                 results,
                 scores,
                 selected_score: bestScore,
+                selected_type_string: best,
+                runner_up_type_string: runnerUp,
+                runner_up_score: runnerUpScore,
+                selected_votes_int: bestVotes,
+                view_count_int: viewCount,
+                selected_avg_confidence_float: selectedAvgConfidence,
+                animal_decision_weight_float: decisionWeight,
+                animal_decision_threshold_float: animalDecisionThreshold,
+                animal_decision_margin_float: decisionMargin,
+                animal_decision_min_margin_float: animalDecisionMinMargin,
+                animal_decision_min_votes_int: animalDecisionMinVotes,
+                animal_decision_accepted_bool: acceptedAnimal,
+                animal_decision_rejected_reason_string: rejectedReason,
                 preflight_render_jpg_base64_string: preflightRender,
             };
+
+            if (!deferDisposal) {
+                dispose();
+                return { detection, dispose: () => {} };
+            }
+            return { detection, dispose };
         } catch (err) {
             console.warn('[RigV2Preflight] animal detection skipped:', err);
-            return null;
-        } finally {
-            if (objectUrl) URL.revokeObjectURL(objectUrl);
-            if (host) host.remove();
+            dispose();
+            return { detection: null, dispose: () => {} };
         }
+    },
+
+    buildRigDetectionSubmitPayload(detection, selectedRigKey) {
+        const d = JSON.parse(JSON.stringify(detection));
+        delete d.preflight_render_jpg_base64_string;
+        const autoKey = this.rigDetectAutoKey(detection);
+        const sel = String(selectedRigKey || 'humanoid').toLowerCase();
+        if (sel === 'humanoid') {
+            d.type = 'humanoid';
+            d.animal_type = '';
+            d.user_selected_bool = autoKey !== 'humanoid';
+        } else {
+            d.type = 'animal';
+            d.animal_type = sel;
+            d.mode = 'only_rig';
+            d.user_selected_bool = sel !== autoKey;
+        }
+        return d;
+    },
+
+    applyRigSelectionToFormData(formData, detection, selectedRigKey) {
+        formData.set('type', 't_pose');
+        formData.delete('animal_type');
+        formData.delete('mode');
+        const payload = this.buildRigDetectionSubmitPayload(detection, selectedRigKey);
+        formData.set('rig_v2_animal_detection_json', JSON.stringify(payload));
+        const preflight = detection.preflight_render_jpg_base64_string;
+        if (preflight) {
+            formData.set('preflight_render_jpg_base64_string', preflight);
+        }
+        const sel = String(selectedRigKey || 'humanoid').toLowerCase();
+        if (sel !== 'humanoid') {
+            formData.set('type', 'animal');
+            formData.set('animal_type', sel);
+            formData.set('mode', 'only_rig');
+        }
+    },
+
+    updateRigDetectSelection(selectedKey) {
+        document.querySelectorAll('.rig-detect-card').forEach((btn) => {
+            btn.classList.toggle('rig-detect-card--selected', btn.dataset.rigType === selectedKey);
+        });
+    },
+
+    renderRigDetectCloud(detection, selectedKey, onSelect) {
+        const cloud = document.getElementById('rig-detect-cloud');
+        if (!cloud) return;
+        const scores = detection.scores || {};
+        const vc = Math.max(1, Number(detection.view_count_int) || 7);
+        const types = [...this.RIG_DETECT_RIG_TYPES.filter((x) => x !== 'humanoid'), 'humanoid'];
+        const animals = types.filter((x) => x !== 'humanoid');
+        cloud.replaceChildren();
+        cloud.classList.remove('hidden');
+
+        for (const rigType of types) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'rig-detect-card';
+            if (rigType === selectedKey) btn.classList.add('rig-detect-card--selected');
+            btn.dataset.rigType = rigType;
+            if (rigType === 'humanoid') btn.style.zIndex = '3';
+
+            let leftPct = 50;
+            let topPct = 50;
+            if (rigType !== 'humanoid') {
+                const idx = animals.indexOf(rigType);
+                const angle = (idx / 12) * Math.PI * 2 - Math.PI / 2;
+                const r = 42;
+                const jitter = (this._rigDetectJitter01(rigType) - 0.5) * 6;
+                leftPct = 50 + (r + jitter) * Math.cos(angle);
+                topPct = 50 + (r + jitter) * Math.sin(angle);
+            }
+            btn.style.left = `${leftPct}%`;
+            btn.style.top = `${topPct}%`;
+
+            const raw = Number(scores[rigType] || 0);
+            const weightPct = Math.max(0, Math.min(100, Math.round((raw / vc) * 100)));
+            const iconSrc = (typeof resolveRigIconUrl === 'function')
+                ? resolveRigIconUrl(rigType)
+                : `/static/Icons_png/${rigType === 'humanoid' ? 'Human' : (rigType.charAt(0).toUpperCase() + rigType.slice(1))}.png?v=rigicons1`;
+            const label = this.rigDetectTypeLabel(rigType);
+            btn.innerHTML = `
+                <img src="${iconSrc}" alt="" loading="lazy" decoding="async" width="120" height="120" />
+                <span class="rig-detect-card-weight">${weightPct}</span>
+                <span class="rig-detect-card-label">${label}</span>
+            `;
+            btn.addEventListener('click', () => onSelect(rigType));
+            cloud.appendChild(btn);
+        }
+    },
+
+    refreshRigDetectCloudLabels() {
+        document.querySelectorAll('.rig-detect-card').forEach((btn) => {
+            const rt = btn.dataset.rigType;
+            const lab = btn.querySelector('.rig-detect-card-label');
+            if (lab && rt) lab.textContent = this.rigDetectTypeLabel(rt);
+        });
+    },
+
+    /**
+     * @returns {Promise<string>} selected rig key (humanoid | animal)
+     */
+    waitRigDetectReview(detection, initialSelected) {
+        return new Promise((resolve) => {
+            const overlay = document.getElementById('convert-form-busy');
+            const review = document.getElementById('rig-detect-review');
+            const hint = document.getElementById('rig-detect-hint');
+            const startBtn = document.getElementById('rig-detect-start-now');
+            const footer = document.getElementById('rig-detect-footer');
+
+            let selected = initialSelected;
+            let secondsLeft = this.RIG_DETECT_REVIEW_SECONDS;
+            let interval = 0;
+
+            const renderHint = () => {
+                if (hint && typeof t === 'function') {
+                    hint.textContent = t('upload_rig_review_hint', {
+                        animation_type: this.rigDetectTypeLabel(selected),
+                        timer: String(secondsLeft),
+                    });
+                }
+            };
+            const refreshFooter = () => {
+                if (footer && typeof t === 'function') {
+                    footer.textContent = t('upload_rig_review_footer');
+                }
+            };
+            const refreshStartBtn = () => {
+                if (startBtn && typeof t === 'function') {
+                    startBtn.textContent = t('upload_rig_start_now_with_timer', { timer: String(secondsLeft) });
+                }
+            };
+
+            overlay?.classList.add('rig-detect--review-phase');
+            review?.classList.remove('hidden');
+
+            this.renderRigDetectCloud(detection, selected, (rig) => {
+                selected = rig;
+                this.updateRigDetectSelection(selected);
+                renderHint();
+            });
+
+            renderHint();
+            refreshFooter();
+            refreshStartBtn();
+
+            const onLang = () => {
+                renderHint();
+                refreshFooter();
+                refreshStartBtn();
+                this.refreshRigDetectCloudLabels();
+            };
+            window.addEventListener('languageChanged', onLang);
+
+            const finish = (value) => {
+                if (interval) clearInterval(interval);
+                window.removeEventListener('languageChanged', onLang);
+                if (startBtn) startBtn.onclick = null;
+                overlay?.classList.remove('rig-detect--review-phase');
+                resolve(value);
+            };
+
+            interval = window.setInterval(() => {
+                secondsLeft -= 1;
+                renderHint();
+                refreshStartBtn();
+                if (secondsLeft <= 0) {
+                    finish(selected);
+                }
+            }, 1000);
+
+            if (startBtn) {
+                startBtn.onclick = () => finish(selected);
+            }
+        });
     },
 
     showFree3DCreateOverlay(title) {
@@ -695,14 +1105,27 @@ const App = {
         const isUpload = busyMode === 'upload';
         this.setConvertFormBusy(true, busyMode);
 
+        const overlay = document.getElementById('convert-form-busy');
+        const rigLayout = document.getElementById('rig-detect-layout');
+        const viewerHost = document.getElementById('rig-detect-viewer-host');
+        const rigCloud = document.getElementById('rig-detect-cloud');
+        const rigReview = document.getElementById('rig-detect-review');
+
+        overlay?.classList.add('form-busy--rig-detect');
+        rigLayout?.classList.remove('hidden');
+        rigCloud?.classList.add('hidden');
+        rigReview?.classList.add('hidden');
+        overlay?.classList.remove('rig-detect--review-phase');
+
         // Disable button (visible on link tab)
         if (startBtn) {
             startBtn.disabled = true;
             startBtn.textContent = typeof t === 'function' ? t('upload_progress_btn') : 'Please wait…';
         }
 
+        let detectionDispose = () => {};
         try {
-            this.setConvertFormBusyText('Detecting model type...');
+            this.setConvertFormBusyMessage('upload_rig_detect_analyzing');
             this.setConvertFormUploadProgress(null);
             const sourceInfo = isUpload
                 ? {
@@ -713,15 +1136,25 @@ const App = {
                     url: linkVal,
                     ext: '.' + String(linkVal || '').split('?')[0].split('#')[0].split('.').pop().toLowerCase()
                 };
-            const detection = await this.runHiddenAnimalDetection(sourceInfo);
+            const { detection, dispose: dDispose } = await this.runHiddenAnimalDetection(sourceInfo, { viewerHost: viewerHost || null });
+            detectionDispose = dDispose;
+
+            let selectedRigKey = this.rigDetectAutoKey(detection);
             if (detection) {
-                formData.set('rig_v2_animal_detection_json', JSON.stringify(detection));
-                if (detection.type === 'animal') {
-                    formData.set('type', 'animal');
-                    formData.set('animal_type', detection.animal_type || '');
-                    formData.set('mode', 'only_rig');
-                }
+                selectedRigKey = await this.waitRigDetectReview(detection, selectedRigKey);
             }
+            detectionDispose();
+            detectionDispose = () => {};
+
+            rigLayout?.classList.add('hidden');
+            overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
+            rigReview?.classList.add('hidden');
+            rigCloud?.classList.add('hidden');
+
+            if (detection) {
+                this.applyRigSelectionToFormData(formData, detection, selectedRigKey);
+            }
+
             this.setConvertFormBusyMessage(isUpload ? 'upload_progress_uploading' : 'upload_progress_creating_task');
             this.resetConvertFormProgressUI(busyMode);
 
@@ -762,7 +1195,16 @@ const App = {
             console.error('Submit error:', error);
             alert(t('error_generic'));
         } finally {
+            try {
+                detectionDispose();
+            } catch (e) {
+                /* ignore */
+            }
             this.setConvertFormBusy(false);
+            overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
+            rigLayout?.classList.add('hidden');
+            rigReview?.classList.add('hidden');
+            rigCloud?.classList.add('hidden');
             if (startBtn) {
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn_start');
@@ -818,9 +1260,15 @@ const App = {
                 grid.innerHTML = items.map(it => {
                     const taskUrl = `/task?id=${it.task_id}`;
                     const thumbUrl = it.thumbnail_url || `/api/thumb/${it.task_id}`;
+                    const rigKey = (typeof it.rig_icon_key === 'string' && it.rig_icon_key) ? it.rig_icon_key : 'humanoid';
+                    const rigSrc = (typeof resolveRigIconUrl === 'function')
+                        ? resolveRigIconUrl(rigKey)
+                        : `/static/Icons_png/${rigKey === 'humanoid' ? 'Human' : (rigKey.charAt(0).toUpperCase() + rigKey.slice(1))}.png?v=rigicons1`;
+                    const rigBadge = `<span class="gallery-rig-icon" title="Rig type"><img src="${rigSrc}" alt="" width="64" height="64" loading="lazy" decoding="async" aria-hidden="true"></span>`;
                     return `<a href="${taskUrl}" style="display:block; border-radius:12px; overflow:hidden;">
                         <div style="position:relative; width:100%; aspect-ratio: 9 / 16; background:#111;">
                             <img src="${thumbUrl}" style="width:100%; height:100%; object-fit: cover;" alt="" />
+                            ${rigBadge}
                         </div>
                     </a>`;
                 }).join('');

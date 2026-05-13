@@ -14,6 +14,8 @@ EnvironmentFile=-/etc/autorig-telegram.env
 # Single uvicorn process: one in-process background loop (dispatch/stale). Remote converters are separate HTTP endpoints, not OS workers.
 # Use `python -m uvicorn` from the canonical project tree.
 ExecStart=/root/autorig-online/venv/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+# If restarts loop with Telegram "Server started" spam: another process holds :8000
+# (e.g. manual `uvicorn` / Cursor). Check: ss -tlnp | grep 8000 — kill orphan, then: systemctl restart autorig
 Restart=always
 RestartSec=5
 # Uvicorn may wait indefinitely on "background tasks" during SIGTERM; cap stop so deploy/restart cannot hang the site.

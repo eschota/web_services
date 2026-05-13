@@ -20,6 +20,7 @@ import tempfile
 import zipfile
 import re
 import html
+import math
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse, quote, unquote, parse_qsl
@@ -2906,11 +2907,66 @@ async def api_create_task(
             detail="pipeline=convert requires a .glb input URL or .glb upload filename.",
         )
 
-    input_type = normalize_task_type(input_type)
+    input_type = normalize_task_type(input_type).strip().lower()
     animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
+    animal_decision = _rig_v2_animal_decision_from_detection_meta(
+        rig_v2_detection_meta,
+        animal_allowed,
+    ) if rig_v2_detection_meta else None
+    if isinstance(rig_v2_detection_meta, dict) and animal_decision:
+        candidate_animal = str(animal_decision.get("candidate_animal_type_string") or "").strip().lower()
+        rig_v2_detection_meta = {
+            **rig_v2_detection_meta,
+            "animal_decision_accepted_bool": bool(animal_decision.get("accepted_bool")),
+            "animal_decision_weight_float": round(float(animal_decision.get("decision_weight_float") or 0.0), 4),
+            "animal_decision_threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
+            "animal_decision_margin_float": round(float(animal_decision.get("margin_float") or 0.0), 4),
+            "animal_decision_min_margin_float": RIG_V2_ANIMAL_DECISION_MIN_MARGIN,
+            "animal_decision_min_votes_int": RIG_V2_ANIMAL_DECISION_MIN_VOTES,
+            "selected_votes_int": int(animal_decision.get("selected_votes_int") or 0),
+            "view_count_int": int(animal_decision.get("view_count_int") or 0),
+            "selected_type_string": str(animal_decision.get("selected_type_string") or "").strip().lower(),
+            "candidate_animal_type_string": candidate_animal,
+            "animal_decision_rejected_reason_string": str(animal_decision.get("reason_string") or "").strip(),
+        }
+
+    if input_type == "animal":
+        if not animal_decision or not bool(animal_decision.get("accepted_bool")):
+            # If detector is not confident, use the regular rigging pipeline instead of guessing an animal rig.
+            print(
+                "[RigV2Preflight] animal pipeline rejected; falling back to t_pose "
+                f"weight={animal_decision.get('decision_weight_float') if animal_decision else 0} "
+                f"threshold={RIG_V2_ANIMAL_DECISION_THRESHOLD} "
+                f"reason={animal_decision.get('reason_string') if animal_decision else 'missing_detection'}",
+                flush=True,
+            )
+            input_type = "t_pose"
+            animal_type = None
+            rig_mode = None
+            if isinstance(rig_v2_detection_meta, dict):
+                rig_v2_detection_meta = {
+                    **rig_v2_detection_meta,
+                    "type": "humanoid",
+                    "animal_type": "",
+                    "mode": "",
+                }
+        else:
+            decided_animal = str(animal_decision.get("animal_type_string") or "").strip().lower()
+            if decided_animal in animal_allowed:
+                animal_type = decided_animal
     if input_type == "animal":
         if animal_type not in animal_allowed:
-            animal_type = random.choice(animal_allowed)
+            inferred_animal_type = _rig_v2_animal_type_from_detection_meta(
+                rig_v2_detection_meta,
+                animal_allowed,
+            )
+            if inferred_animal_type:
+                animal_type = inferred_animal_type
+        if animal_type not in animal_allowed:
+            raise HTTPException(
+                status_code=400,
+                detail="Animal rig requires a detected animal_type. Please retry the upload so AI animal detection can finish.",
+            )
         rig_mode = rig_mode or "only_rig"
         if rig_v2_detection_meta is None:
             rig_v2_detection_meta = {}
@@ -2950,7 +3006,7 @@ async def api_create_task(
             selected_theme = _select_viewer_theme_from_metadata(
                 input_url=final_url,
                 input_type=input_type,
-                rig_v2_detection_meta=rig_v2_detection_meta,
+                rig_v2_detection_meta=rig_v2_detection_meta if input_type == "animal" else None,
             )
             if selected_theme:
                 settings["viewer_theme_selection"] = selected_theme
@@ -3015,8 +3071,218 @@ RIG_V2_ALLOWED_ANIMAL_TYPES = [
     "rabbit",
     "turtle",
 ]
+
+
+def _gallery_rig_icon_key(task: Task) -> str:
+    """Humanoid vs animal rig key for gallery UI icons (matches frontend resolveRigIconUrl)."""
+    it = str(getattr(task, "input_type", "") or "").strip().lower()
+    if it != "animal":
+        return "humanoid"
+    allowed = {x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"}
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+    except Exception:
+        settings = {}
+    det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+    if not isinstance(det, dict):
+        return "humanoid"
+    animal = str(
+        det.get("animal_type")
+        or det.get("animal_type_string")
+        or ""
+    ).strip().lower()
+    if animal in allowed:
+        return animal
+    return "humanoid"
+
+
+RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
+RIG_V2_ANIMAL_DECISION_MIN_MARGIN = 0.14
+RIG_V2_ANIMAL_DECISION_MIN_VOTES = 3
 RIG_V2_DISCOVERED_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
 RIG_V2_OPENAI_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
+
+
+def _rig_v2_animal_type_from_detection_meta(
+    meta: Optional[Dict[str, Any]],
+    allowed_animals: List[str],
+) -> Optional[str]:
+    if not isinstance(meta, dict):
+        return None
+    allowed = {str(x).strip().lower() for x in allowed_animals if str(x).strip()}
+
+    direct_keys = (
+        "animal_type",
+        "animal_type_string",
+        "selected_animal_type",
+        "selected_animal_type_string",
+    )
+    for key in direct_keys:
+        value = str(meta.get(key) or "").strip().lower()
+        if value in allowed:
+            return value
+
+    best_type = ""
+    best_score = 0.0
+    scores = meta.get("scores")
+    if isinstance(scores, dict):
+        for key, raw_score in scores.items():
+            animal = str(key or "").strip().lower()
+            if animal not in allowed:
+                continue
+            try:
+                score = float(raw_score)
+            except Exception:
+                score = 0.0
+            if score > best_score:
+                best_type = animal
+                best_score = score
+
+    results = meta.get("results")
+    if isinstance(results, list):
+        tally: Dict[str, float] = {}
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            animal = str(result.get("animal_type_string") or result.get("animal_type") or "").strip().lower()
+            if animal not in allowed:
+                continue
+            try:
+                confidence = float(result.get("confidence_float") or result.get("confidence") or 0.5)
+            except Exception:
+                confidence = 0.5
+            tally[animal] = tally.get(animal, 0.0) + max(0.05, min(1.0, confidence))
+        for animal, score in tally.items():
+            if score > best_score:
+                best_type = animal
+                best_score = score
+
+    return best_type or None
+
+
+def _rig_v2_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except Exception:
+        out = default
+    if not math.isfinite(out):
+        return default
+    return out
+
+
+def _rig_v2_animal_decision_from_detection_meta(
+    meta: Optional[Dict[str, Any]],
+    allowed_animals: List[str],
+) -> Dict[str, Any]:
+    allowed = {str(x).strip().lower() for x in allowed_animals if str(x).strip()}
+    if not isinstance(meta, dict):
+        return {
+            "accepted_bool": False,
+            "animal_type_string": "",
+            "candidate_animal_type_string": "",
+            "decision_weight_float": 0.0,
+            "threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
+            "margin_float": 0.0,
+            "reason_string": "missing_detection_meta",
+        }
+
+    user_selected = bool(meta.get("user_selected_bool"))
+    direct = str(
+        meta.get("animal_type")
+        or meta.get("animal_type_string")
+        or meta.get("selected_animal_type")
+        or meta.get("selected_animal_type_string")
+        or ""
+    ).strip().lower()
+    if user_selected and direct in allowed:
+        return {
+            "accepted_bool": True,
+            "animal_type_string": direct,
+            "candidate_animal_type_string": direct,
+            "decision_weight_float": 1.0,
+            "threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
+            "margin_float": 1.0,
+            "reason_string": "user_selected",
+        }
+
+    scores: Dict[str, float] = {}
+    votes: Dict[str, int] = {}
+    raw_scores = meta.get("scores")
+    if isinstance(raw_scores, dict):
+        for key, raw_score in raw_scores.items():
+            label = str(key or "").strip().lower()
+            if label not in allowed and label != "humanoid":
+                continue
+            score = max(0.0, min(99.0, _rig_v2_float(raw_score, 0.0)))
+            if score <= 0:
+                continue
+            scores[label] = max(scores.get(label, 0.0), score)
+
+    results = meta.get("results")
+    if isinstance(results, list):
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            label = str(result.get("animal_type_string") or result.get("animal_type") or "").strip().lower()
+            if label not in allowed and label != "humanoid":
+                continue
+            confidence = max(0.05, min(1.0, _rig_v2_float(result.get("confidence_float") or result.get("confidence"), 0.5)))
+            votes[label] = votes.get(label, 0) + 1
+            # Prefer client-provided aggregate when present, but rebuild missing labels from raw view results.
+            if label not in scores:
+                scores[label] = 0.0
+            scores[label] += confidence if not isinstance(raw_scores, dict) else 0.0
+
+    if not scores and direct:
+        label = direct if direct in allowed else "humanoid"
+        scores[label] = _rig_v2_float(meta.get("animal_decision_weight_float"), 0.0)
+
+    sorted_scores = sorted(scores.items(), key=lambda item: float(item[1] or 0.0), reverse=True)
+    best, best_score = (sorted_scores[0] if sorted_scores else ("", 0.0))
+    runner, runner_score = (sorted_scores[1] if len(sorted_scores) > 1 else ("", 0.0))
+    view_count = int(_rig_v2_float(meta.get("view_count_int"), 0.0))
+    if view_count <= 0:
+        view_count = len(results) if isinstance(results, list) and results else max(sum(votes.values()), 1)
+    view_count = max(1, view_count)
+    best_votes = int(meta.get("selected_votes_int") or votes.get(best, 0) or 0)
+    decision_weight = max(0.0, min(1.0, _rig_v2_float(meta.get("animal_decision_weight_float"), best_score / view_count)))
+    margin = max(0.0, min(1.0, _rig_v2_float(meta.get("animal_decision_margin_float"), (float(best_score or 0.0) - float(runner_score or 0.0)) / view_count)))
+
+    best_is_allowed_animal = best in allowed
+    accepted = (
+        best_is_allowed_animal
+        and decision_weight >= RIG_V2_ANIMAL_DECISION_THRESHOLD
+        and margin >= RIG_V2_ANIMAL_DECISION_MIN_MARGIN
+        and best_votes >= RIG_V2_ANIMAL_DECISION_MIN_VOTES
+    )
+    if accepted:
+        reason = "accepted"
+    elif not best_is_allowed_animal:
+        reason = "best_is_humanoid" if best == "humanoid" else "best_is_not_allowed_animal"
+    elif decision_weight < RIG_V2_ANIMAL_DECISION_THRESHOLD:
+        reason = "decision_weight_below_threshold"
+    elif margin < RIG_V2_ANIMAL_DECISION_MIN_MARGIN:
+        reason = "decision_margin_below_threshold"
+    elif best_votes < RIG_V2_ANIMAL_DECISION_MIN_VOTES:
+        reason = "not_enough_consistent_views"
+    else:
+        reason = "animal_decision_rejected"
+
+    return {
+        "accepted_bool": bool(accepted),
+        "animal_type_string": best if accepted else "",
+        "candidate_animal_type_string": best if best_is_allowed_animal else "",
+        "selected_type_string": best,
+        "runner_up_type_string": runner,
+        "decision_weight_float": decision_weight,
+        "threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
+        "margin_float": margin,
+        "min_margin_float": RIG_V2_ANIMAL_DECISION_MIN_MARGIN,
+        "selected_votes_int": best_votes,
+        "min_votes_int": RIG_V2_ANIMAL_DECISION_MIN_VOTES,
+        "view_count_int": view_count,
+        "reason_string": reason,
+    }
 
 
 def _rig_v2_server_time() -> int:
@@ -3046,10 +3312,10 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
             + ", ".join(RIG_V2_ALLOWED_ANIMAL_TYPES)
             + '. Return only valid JSON: {"animal_type":"<one_allowed_value>","confidence_float":0.0}. '
             "confidence_float must be between 0 and 1 and should reflect visual certainty for this single view. "
-            "Choose humanoid only for a clearly upright human-like biped with a head, torso, two arms, and two legs. "
-            "Do not choose humanoid for robots, spider/mech robots, vehicles, drones, or low multi-legged bodies. "
-            "For spider-like or multi-legged mechanical models, choose the closest non-humanoid quadruped/low-body animal type, often turtle, dog, cat, or mouse depending on silhouette. "
-            "If uncertain, choose the closest visual body type and lower confidence."
+            "Choose humanoid for a human-like character in any pose, including standing, sitting, crouching, lying, falling, rotated, armored, clothed, or holding weapons/tools. "
+            "Do not choose turtle or another animal just because a human-like model is horizontal, low in frame, or seen from an unusual angle. "
+            "Do not choose humanoid for clearly non-human robots, spider/mech robots, vehicles, drones, or low multi-legged mechanical bodies. "
+            "If uncertain between humanoid and animal, choose humanoid and lower confidence. If uncertain between animal classes, choose the closest animal type and lower confidence."
         ),
     )
     cfg.setdefault(
@@ -3834,6 +4100,21 @@ async def _idle_ltx_clip_status_resolve(
     if parsed_url:
         return {"success_bool": True, "source_string": "output_url", **parsed_url}
 
+    if ou or tid:
+        return {
+            "success_bool": True,
+            "source_string": "pending_fallback",
+            "status_int": 2,
+            "phase_string": "pending_or_processing",
+            "output_url_string": ou or None,
+            "playback_url_string": None,
+            "video_url_string": ou or None,
+            "error_string": "Renderfin status is temporarily unavailable; retrying.",
+            "render_server_name_string": None,
+            "prompt_id_string": None,
+            "raw_object": None,
+        }
+
     raise HTTPException(status_code=502, detail="Unable to resolve clip status (no valid output_url or task_id)")
 
 
@@ -3911,6 +4192,173 @@ def _idle_ltx_user_slug_for_task(task_id: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_\-]", "_", f"autorig_{task_id}")[:56] or "autorig"
 
 
+IDLE_LTX_VARIANT_KEYS = ("idle", "walk", "run", "die")
+IDLE_LTX_STATIC_CAMERA_SENTENCE = (
+    "Single locked-off tripod shot. Static frame. Fixed viewpoint. The camera is bolted down and never moves. "
+    "No push-in, no pull-back, no dolly in, no dolly out, no zoom, no pan, no tilt, no orbit, no tracking, "
+    "no handheld shake, no reframing. The distance between camera and subject never changes. "
+    "The entire frame, including the selected theme backdrop, stays pixel-locked with zero parallax."
+)
+IDLE_LTX_CAMERA_LOCK_NEGATIVE = (
+    "camera movement, moving camera, orbit camera, rotating camera, camera pan, camera tilt, camera zoom, "
+    "dolly shot, tracking shot, handheld camera, camera shake, viewpoint change, reframing, dynamic camera, "
+    "cinematic camera move, push in, pull out, push-in, pull-back, dolly in, dolly out, moving closer, "
+    "moving away, camera forward movement, camera backward movement, changing camera distance, parallax shift, "
+    "background drift, lens zoom, rack focus"
+)
+
+
+def _idle_ltx_with_hard_camera_lock(prompt: str) -> str:
+    body = str(prompt or "").strip()
+    lock = IDLE_LTX_STATIC_CAMERA_SENTENCE
+    if not body:
+        return lock
+    if lock.lower() in body.lower():
+        return body
+    return f"{lock} {body} Final camera rule: {lock}"
+
+
+def _idle_ltx_merge_negative_prompt(value: str) -> str:
+    neg = str(value or "").strip() or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
+    merged = f"{neg}, {IDLE_LTX_DEFAULT_NEGATIVE_PROMPT}, {IDLE_LTX_CAMERA_LOCK_NEGATIVE}"
+    parts: List[str] = []
+    seen = set()
+    for raw in merged.split(","):
+        item = raw.strip()
+        key = item.lower()
+        if item and key not in seen:
+            seen.add(key)
+            parts.append(item)
+    return ", ".join(parts)[:2400]
+
+
+def _idle_ltx_theme_context_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
+    raw = body.get("theme_context_object")
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key in ("theme_name", "theme_short_description", "theme_id", "background_src"):
+        val = str(raw.get(key) or "").strip()
+        if val:
+            out[key] = val[:240]
+    tags = raw.get("semantic_tags")
+    if isinstance(tags, list):
+        out["semantic_tags"] = [str(x).strip()[:60] for x in tags if str(x).strip()][:12]
+    return out
+
+
+def _idle_ltx_clean_variant_prompt(value: Any) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text[:700]
+
+
+def _idle_ltx_variant_prompts_from_body(body: Dict[str, Any]) -> Dict[str, str]:
+    prompts: Dict[str, str] = {}
+    raw_obj = body.get("variant_prompts_object")
+    if isinstance(raw_obj, dict):
+        for key in IDLE_LTX_VARIANT_KEYS:
+            value = raw_obj.get(key) or raw_obj.get(f"{key}_prompt_string")
+            cleaned = _idle_ltx_clean_variant_prompt(value)
+            if cleaned:
+                prompts[key] = cleaned
+
+    raw_array = body.get("variant_prompts_array")
+    if isinstance(raw_array, list):
+        for i, item in enumerate(raw_array):
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("variant_name_string") or item.get("key_string") or "").strip().lower()
+            if not key and i < len(IDLE_LTX_VARIANT_KEYS):
+                key = IDLE_LTX_VARIANT_KEYS[i]
+            if key not in IDLE_LTX_VARIANT_KEYS:
+                continue
+            value = item.get("user_prompt_string") or item.get("prompt_string") or item.get("text_string")
+            cleaned = _idle_ltx_clean_variant_prompt(value)
+            if cleaned:
+                prompts[key] = cleaned
+    return prompts
+
+
+def _idle_ltx_build_user_prompt(
+    base_prompt: str,
+    variant_prompts: Dict[str, str],
+    theme_context: Optional[Dict[str, Any]] = None,
+) -> str:
+    base = (base_prompt or "").strip() or IDLE_LTX_USER_PROMPT_DEFAULT
+    theme_context = theme_context or {}
+    if not variant_prompts and not theme_context:
+        return base
+    lines = [
+        base,
+        "",
+        "Backdrop/theme context from the current 3D viewer must be preserved as a fixed static plate:",
+    ]
+    if theme_context:
+        if theme_context.get("theme_name"):
+            lines.append(f"theme: {theme_context['theme_name']}")
+        if theme_context.get("theme_short_description"):
+            lines.append(f"description: {theme_context['theme_short_description']}")
+        if theme_context.get("semantic_tags"):
+            lines.append(f"tags: {', '.join(theme_context['semantic_tags'])}")
+    lines.extend([
+        "The full input frame includes both the model and the selected theme background. Do not crop, push toward, pull away from, or reframe around the model.",
+        "",
+        "User editable variant prompts. These are mandatory motion intents for the four generated videos:",
+    ])
+    for key in IDLE_LTX_VARIANT_KEYS:
+        if variant_prompts.get(key):
+            lines.append(f"{key}: {variant_prompts[key]}")
+    lines.extend(
+        [
+            "",
+            IDLE_LTX_STATIC_CAMERA_SENTENCE,
+            "Do not invent camera movement. Keep every video locked to the exact same viewpoint as the input frame.",
+            "The generated subject may animate, but the camera must not move closer, move farther, pan, tilt, orbit, zoom, or reframe.",
+        ]
+    )
+    return "\n".join(lines)[:4000]
+
+
+def _idle_ltx_apply_variant_prompts_to_vision(
+    vision_json: Dict[str, Any],
+    variant_prompts: Dict[str, str],
+) -> Dict[str, Any]:
+    if not variant_prompts and isinstance(vision_json.get("ltx_variants_array"), list):
+        for i, item in enumerate(vision_json["ltx_variants_array"][: len(IDLE_LTX_VARIANT_KEYS)]):
+            if isinstance(item, dict):
+                item["variant_name_string"] = IDLE_LTX_VARIANT_KEYS[i]
+                item["prompt_string"] = _idle_ltx_with_hard_camera_lock(str(item.get("prompt_string") or ""))[:1800]
+        vision_json["ltx_base_prompt_string"] = _idle_ltx_with_hard_camera_lock(
+            str(vision_json.get("ltx_base_prompt_string") or "")
+        )[:1800]
+        return vision_json
+
+    variants = vision_json.get("ltx_variants_array")
+    if not isinstance(variants, list):
+        variants = []
+    out: List[Dict[str, Any]] = []
+    base = str(vision_json.get("ltx_base_prompt_string") or "").strip()
+    for i, key in enumerate(IDLE_LTX_VARIANT_KEYS):
+        row = variants[i] if i < len(variants) and isinstance(variants[i], dict) else {}
+        prompt = str(row.get("prompt_string") or base or "").strip()
+        user_part = variant_prompts.get(key, "")
+        if user_part and user_part.lower() not in prompt.lower():
+            prompt = f"{prompt} Motion intent: {user_part}."
+        prompt = _idle_ltx_with_hard_camera_lock(prompt)
+        out.append(
+            {
+                **row,
+                "variant_name_string": key,
+                "prompt_string": prompt.strip()[:1800],
+                "user_variant_prompt_string": user_part,
+            }
+        )
+    vision_json["ltx_variants_array"] = out
+    vision_json["ltx_base_prompt_string"] = _idle_ltx_with_hard_camera_lock(base)[:1800]
+    return vision_json
+
+
 async def _idle_ltx_vision_upload_and_analyze(
     task_id: str,
     db: AsyncSession,
@@ -3925,8 +4373,9 @@ async def _idle_ltx_vision_upload_and_analyze(
 
     image_bytes = _idle_ltx_normalize_jpeg_base64(str(body.get("frame_jpeg_base64_string") or ""))
     user_prompt = str(body.get("user_prompt_string") or body.get("base_prompt_string") or "").strip()
-    if not user_prompt:
-        user_prompt = IDLE_LTX_USER_PROMPT_DEFAULT
+    variant_prompts = _idle_ltx_variant_prompts_from_body(body)
+    theme_context = _idle_ltx_theme_context_from_body(body)
+    user_prompt = _idle_ltx_build_user_prompt(user_prompt, variant_prompts, theme_context)
 
     user_slug = _idle_ltx_user_slug_for_task(task_id)
 
@@ -3956,6 +4405,7 @@ async def _idle_ltx_vision_upload_and_analyze(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Vision analysis error: {e}") from e
 
+    vision_json = _idle_ltx_apply_variant_prompts_to_vision(vision_json, variant_prompts)
     variants = vision_json.get("ltx_variants_array")
     if not isinstance(variants, list) or len(variants) < 1:
         raise HTTPException(status_code=502, detail="Vision JSON missing ltx_variants_array")
@@ -3970,7 +4420,7 @@ async def _idle_ltx_vision_upload_and_analyze(
     extra_neg = str(body.get("negative_prompt_string") or "").strip()
     if extra_neg:
         neg_base = f"{neg_base}, {extra_neg}"
-    neg_base = neg_base[:2000]
+    neg_base = _idle_ltx_merge_negative_prompt(neg_base)
 
     return {
         "user_prompt_string": user_prompt,
@@ -3981,6 +4431,8 @@ async def _idle_ltx_vision_upload_and_analyze(
         "image_url_string": image_url,
         "negative_prompt_string": neg_base,
         "frame_count_int": fc,
+        "variant_prompts_object": variant_prompts,
+        "theme_context_object": theme_context,
     }
 
 
@@ -4065,6 +4517,7 @@ async def api_task_idle_ltx_vision_start(
     task_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
 ):
     """Upload frame → Vision only. UI then calls /idle-ltx/render-variant four times (smaller responses)."""
     try:
@@ -4074,7 +4527,60 @@ async def api_task_idle_ltx_vision_start(
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="JSON body must be an object")
     phase = await _idle_ltx_vision_upload_and_analyze(task_id, db, body)
+    try:
+        from telegram_bot import broadcast_ltx_video_generation_started
+        theme_context = phase.get("theme_context_object") or {}
+        asyncio.create_task(broadcast_ltx_video_generation_started(
+            task_id=task_id,
+            user_email=getattr(user, "email", None),
+            theme_name=str(theme_context.get("theme_name") or ""),
+            background_hint=str(theme_context.get("theme_short_description") or ""),
+            variant_count=IDLE_LTX_VARIANT_COUNT,
+        ))
+    except Exception as e:
+        print(f"[Telegram] LTX generation notification enqueue failed: {e}")
     return {"success_bool": True, **phase}
+
+
+@app.post("/api/task/{task_id}/idle-ltx/fitting-started")
+@limiter.limit("60/minute")
+async def api_task_idle_ltx_fitting_started(
+    task_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    """Record/notify that the user started fitting a bone animation from a selected LTX reference video."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
+        raise HTTPException(status_code=400, detail="Animation fitting is only available for animal tasks")
+    variant_name = str(body.get("variant_name_string") or "").strip()[:80]
+    video_url = str(body.get("video_url_string") or "").strip()
+    if video_url and not (video_url.startswith("https://") or video_url.startswith("http://")):
+        raise HTTPException(status_code=400, detail="video_url_string must be http(s)")
+    try:
+        from telegram_bot import broadcast_animation_fitting_started
+        asyncio.create_task(broadcast_animation_fitting_started(
+            task_id=task_id,
+            variant_name=variant_name or "selected reference",
+            video_url=video_url,
+            user_email=getattr(user, "email", None),
+        ))
+    except Exception as e:
+        print(f"[Telegram] animation fitting notification enqueue failed: {e}")
+    return {
+        "success_bool": True,
+        "task_id_string": task_id,
+        "variant_name_string": variant_name,
+    }
 
 
 @app.post("/api/task/{task_id}/idle-ltx/render-variant")
@@ -4119,9 +4625,10 @@ async def api_task_idle_ltx_render_variant(
     prompt_clip = str(body.get("prompt_string") or "").strip()
     if not prompt_clip:
         raise HTTPException(status_code=400, detail="prompt_string is required")
+    prompt_clip = _idle_ltx_with_hard_camera_lock(prompt_clip)[:1800]
 
     neg_base = str(body.get("negative_prompt_string") or "").strip() or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
-    neg_base = neg_base[:2000]
+    neg_base = _idle_ltx_merge_negative_prompt(neg_base)
 
     vn = str(body.get("variant_name_string") or f"variant_{idx}").strip()
     fc = int(body.get("frame_count_int") or IDLE_LTX_FRAME_COUNT_DEFAULT)
@@ -4132,6 +4639,7 @@ async def api_task_idle_ltx_render_variant(
 
     species = body.get("detected_species_string")
     conf = body.get("species_confidence_float")
+    user_variant_prompt = str(body.get("user_variant_prompt_string") or "").strip()[:700]
 
     gb: Dict[str, Any] = {
         "prompt": prompt_clip,
@@ -4167,6 +4675,7 @@ async def api_task_idle_ltx_render_variant(
         "species_confidence_float": conf,
         "prompt_string": prompt_clip,
         "negative_prompt_string": neg_base,
+        "user_variant_prompt_string": user_variant_prompt,
         "renderfin_task_id_string": rf_task,
         "output_url_string": out_url or None,
         "generate_video_request_object": gbo,
@@ -4222,6 +4731,7 @@ async def api_task_idle_ltx_start(
                 prompt_clip = str(var.get("prompt_string") or vision_json.get("ltx_base_prompt_string") or "").strip()
                 if not prompt_clip:
                     raise HTTPException(status_code=502, detail=f"Vision variant {idx} has empty prompt_string")
+                prompt_clip = _idle_ltx_with_hard_camera_lock(prompt_clip)[:1800]
                 gb: Dict[str, Any] = {
                     "prompt": prompt_clip,
                     "image_url": image_url,
@@ -4275,6 +4785,7 @@ async def api_task_idle_ltx_start(
         "image_url_string": image_url,
         "vision_provider_string": vision_provider,
         "vision_analysis_object": vision_json,
+        "variant_prompts_object": phase.get("variant_prompts_object") or {},
         "user_name_string": user_slug,
         "upload_response_object": upload_obj,
         "generate_video_request_object": clips_out[0]["generate_video_request_object"],
@@ -5950,6 +6461,7 @@ async def api_get_gallery(
             author_email=t.owner_id if t.owner_type == "user" else None,
             author_nickname=author_nicknames.get(t.owner_id) if t.owner_type == "user" else None,
             content_rating=getattr(t, "content_rating", None),
+            rig_icon_key=_gallery_rig_icon_key(t),
         )
         for t, like_count in rows
     ]
@@ -8707,14 +9219,18 @@ async def api_proxy_model_glb(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.guid or not task.worker_api:
+    if not task.guid:
         raise HTTPException(status_code=404, detail="Model not available yet")
-    
-    from workers import get_worker_base_url
-    worker_base = get_worker_base_url(task.worker_api)
+
+    worker_base = _resolve_worker_base_from_task(task)
+    if not worker_base:
+        raise HTTPException(status_code=404, detail="Model worker is not available yet")
     model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
     
-    return await _proxy_model_file(model_url, f"{task_id}_model.glb")
+    cached = await _get_cached_glb(task_id, model_url, "model")
+    if cached:
+        return cached
+    raise HTTPException(status_code=404, detail="Model GLB not available yet")
 
 
 @app.get("/api/task/{task_id}/animations.glb")
@@ -9595,7 +10111,20 @@ def _viewer_theme_default_for_stem(stem: str) -> Dict[str, Any]:
         "jungle_temple_ruins": {
             "theme_name": "Jungle Temple Ruins",
             "theme_short_description": "Mossy jungle temple courtyard with ancient stone and misty cliffs.",
-            "semantic_tags": ["jungle", "temple", "ruins", "turtle", "monkey", "lizard", "adventure", "fantasy"],
+            "semantic_tags": [
+                "jungle",
+                "temple",
+                "ruins",
+                "turtle",
+                "dinosaur",
+                "dino",
+                "reptile",
+                "prehistoric",
+                "monkey",
+                "lizard",
+                "adventure",
+                "fantasy",
+            ],
             "plane_color": "#777469",
             "shadow_settings": {"opacity": 0.52, "softness": 8.5, "sun_multiplier": 1.6, "shadow_y_offset": 0.005},
             "sun_settings": {"rotation": -105, "inclination": 35, "intensity": 1.85},
@@ -9621,6 +10150,10 @@ def _viewer_theme_default_for_stem(stem: str) -> Dict[str, Any]:
         "shadow_settings": preset.get(
             "shadow_settings",
             {"opacity": 0.5, "softness": 6.0, "sun_multiplier": 2.0, "shadow_y_offset": 0.005},
+        ),
+        "environment_settings": preset.get(
+            "environment_settings",
+            {"mode": "image", "source": "backdrop", "intensity": 1.0, "reflection_intensity": 3.0},
         ),
         "sun_settings": preset.get(
             "sun_settings",
@@ -9828,6 +10361,7 @@ async def api_admin_save_viewer_theme(
         "camera_transform",
         "plane_color",
         "shadow_settings",
+        "environment_settings",
         "sun_settings",
     }
     clean = {k: payload[k] for k in allowed if k in payload}
@@ -9846,9 +10380,10 @@ def _viewer_theme_score_text(theme: Dict[str, Any], text: str) -> float:
     tid = str(theme.get("theme_id") or theme.get("id") or "").lower()
     alias_tags: Dict[str, List[str]] = {
         "dog_park_yard": ["cat", "cats", "kitten", "kitty", "feline", "dog", "puppy", "pet", "pets"],
-        "ranch_farmyard": ["horse", "cow", "bull", "pony", "deer", "goat", "sheep"],
+        "ranch_farmyard": ["horse", "cow", "bull", "pony", "deer", "goat", "sheep", "pig", "piglet", "hog", "boar", "swine"],
         "alien_planet": ["astronaut", "space", "alien", "planet", "ufo"],
         "sci_fi_hangar": ["robot", "mech", "android", "cyborg", "spaceship", "vehicle"],
+        "jungle_temple_ruins": ["dinosaur", "dinosaurs", "dino", "reptile", "prehistoric", "lizard", "turtle"],
         "studio_white_softbox": ["product", "toy", "neutral", "studio"],
     }
     for alias in alias_tags.get(tid, []):
@@ -9867,6 +10402,48 @@ def _viewer_theme_score_text(theme: Dict[str, Any], text: str) -> float:
     if name and any(part and part in hay for part in re.split(r"[^a-z0-9]+", name) if len(part) >= 4):
         score += 0.75
     return score
+
+
+def _viewer_theme_text_has_any(text: str, terms: List[str]) -> bool:
+    tokens = set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+    return any(str(term or "").lower() in tokens for term in terms)
+
+
+def _viewer_theme_rule_based_selection(
+    themes: List[Dict[str, Any]],
+    text: str,
+    *,
+    provider_string: str,
+) -> Optional[Dict[str, Any]]:
+    rules = [
+        (
+            ["pig", "piglet", "hog", "boar", "swine", "cow", "bull", "horse", "pony", "goat", "sheep"],
+            "ranch_farmyard",
+            "farm/livestock animal keyword match",
+        ),
+        (
+            ["dinosaur", "dinosaurs", "dino", "prehistoric", "reptile"],
+            "jungle_temple_ruins",
+            "dinosaur/reptile keyword match",
+        ),
+        (
+            ["dragon", "wyvern"],
+            "crystal_cavern",
+            "dragon/fantasy creature keyword match",
+        ),
+    ]
+    for terms, theme_id, reason in rules:
+        if not _viewer_theme_text_has_any(text, terms):
+            continue
+        if not any(str(t.get("theme_id")) == theme_id for t in themes):
+            continue
+        return {
+            "theme_id": theme_id,
+            "confidence_float": 0.95,
+            "reason_string": reason,
+            "provider_string": provider_string,
+        }
+    return None
 
 
 def _select_viewer_theme_from_metadata(
@@ -9894,6 +10471,9 @@ def _select_viewer_theme_from_metadata(
         if isinstance(first, dict):
             pieces.extend(str(v) for v in first.values() if isinstance(v, (str, int, float)))
     text = " ".join(pieces)
+    rule_selected = _viewer_theme_rule_based_selection(themes, text, provider_string="heuristic:create-rule")
+    if rule_selected:
+        return rule_selected
     scored = sorted(((t, _viewer_theme_score_text(t, text)) for t in themes), key=lambda x: x[1], reverse=True)
     best, score = scored[0]
     if score <= 0:
@@ -10008,30 +10588,42 @@ async def api_task_viewer_theme_auto_select(
         anon_session = None
     can_persist = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
     image_data = str(body.get("image_data_url_string") or "").strip()
-    selected = await _viewer_theme_select_with_openai(image_data, themes) if can_persist else None
+    hint_pieces: List[str] = [
+        str(getattr(task, "input_type", "") or ""),
+        str(getattr(task, "poster_llm_title", "") or ""),
+        str(getattr(task, "poster_llm_description", "") or ""),
+    ]
+    input_url_text = str(getattr(task, "input_url", "") or "")
+    if input_url_text:
+        hint_pieces.append(input_url_text)
+        try:
+            hint_pieces.append(Path(urlparse(input_url_text).path or "").name)
+        except Exception:
+            pass
+    try:
+        kws = json.loads(getattr(task, "poster_llm_keywords", "") or "[]")
+        if isinstance(kws, list):
+            hint_pieces.extend(str(x) for x in kws)
+    except Exception:
+        pass
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+        if isinstance(det, dict):
+            hint_pieces.extend(str(v) for v in det.values() if isinstance(v, (str, int, float)))
+            for result in det.get("results") or []:
+                if isinstance(result, dict):
+                    hint_pieces.extend(str(v) for v in result.values() if isinstance(v, (str, int, float)))
+    except Exception:
+        pass
+    hint_pieces.append(str(body.get("model_hint_string") or ""))
+    hint_text = " ".join(hint_pieces)
+    selected = _viewer_theme_rule_based_selection(themes, hint_text, provider_string="heuristic:auto-rule")
+    if not selected and can_persist:
+        selected = await _viewer_theme_select_with_openai(image_data, themes)
     provider = selected.get("provider_string") if selected else "heuristic"
     if not selected:
-        pieces: List[str] = [
-            str(getattr(task, "input_type", "") or ""),
-            str(getattr(task, "poster_llm_title", "") or ""),
-            str(getattr(task, "poster_llm_description", "") or ""),
-        ]
-        try:
-            kws = json.loads(getattr(task, "poster_llm_keywords", "") or "[]")
-            if isinstance(kws, list):
-                pieces.extend(str(x) for x in kws)
-        except Exception:
-            pass
-        try:
-            settings = json.loads(task.viewer_settings or "{}")
-            det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
-            if isinstance(det, dict):
-                pieces.extend(str(v) for v in det.values())
-        except Exception:
-            pass
-        pieces.append(str(body.get("model_hint_string") or ""))
-        text = " ".join(pieces)
-        scored = sorted(((t, _viewer_theme_score_text(t, text)) for t in themes), key=lambda x: x[1], reverse=True)
+        scored = sorted(((t, _viewer_theme_score_text(t, hint_text)) for t in themes), key=lambda x: x[1], reverse=True)
         best, score = scored[0]
         if score <= 0:
             best = next((t for t in themes if "studio" in str(t.get("theme_id", "")).lower()), themes[0])
@@ -10470,15 +11062,15 @@ async def serve_llm_txt():
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-FAVICON_SVG = STATIC_DIR / "images" / "logo" / "favicon.svg"
+FAVICON_ICO = STATIC_DIR / "images" / "logo" / "favicon.ico"
 
 
 @app.get("/favicon.ico")
 async def favicon_ico():
-    """Browsers request /favicon.ico by default; serve existing SVG (no separate .ico asset)."""
-    if not FAVICON_SVG.is_file():
+    """Browsers request /favicon.ico by default; multi-resolution ICO generated from brand mark."""
+    if not FAVICON_ICO.is_file():
         raise HTTPException(status_code=404, detail="Not found")
-    return FileResponse(str(FAVICON_SVG), media_type="image/svg+xml")
+    return FileResponse(str(FAVICON_ICO), media_type="image/x-icon")
 
 
 @app.get("/")
@@ -10993,7 +11585,7 @@ async def auto_rig_obj_hi_page():
 @app.get("/sitemap.xml")
 async def sitemap_index(db: AsyncSession = Depends(get_db)):
     """
-    Sitemap index: static marketing pages + public /m/{id} urlsets by part.
+    Sitemap index: static marketing pages + public gallery `/task?id=` urlsets by part.
     """
     from seo_gallery import (
         build_sitemap_index_xml,
@@ -11042,7 +11634,7 @@ async def sitemap_mirror(db: AsyncSession = Depends(get_db)):
 @app.head("/sitemap/gallery/part/{part}.xml")
 @app.get("/sitemap/gallery/part/{part}.xml")
 async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(get_db)):
-    """Chunk (max 50) of public /m/{task_id} URLs (no SEO gate)."""
+    """Chunk (max 50) of public `/task?id=` URLs (no SEO gate)."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_all_part
 
     if part < 0:
@@ -11058,7 +11650,7 @@ async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(ge
 @app.head("/sitemap/gallery/indexing/part/{part}.xml")
 @app.get("/sitemap/gallery/indexing/part/{part}.xml")
 async def sitemap_gallery_indexing_part_only(part: int, db: AsyncSession = Depends(get_db)):
-    """SEO-gated chunk (max 50) of /m/{task_id} URLs."""
+    """SEO-gated chunk (max 50) of `/task?id=` URLs."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_indexing_part
 
     if part < 0:
@@ -11074,7 +11666,7 @@ async def sitemap_gallery_indexing_part_only(part: int, db: AsyncSession = Depen
 @app.head("/sitemap/videos.xml")
 @app.get("/sitemap/videos.xml")
 async def sitemap_videos(db: AsyncSession = Depends(get_db)):
-    """Google Video sitemap for public model pages with uploaded YouTube previews."""
+    """Google Video sitemap for public task pages with uploaded YouTube previews."""
     from seo_gallery import build_video_sitemap_xml, video_sitemap_entries
 
     base = (APP_URL or "https://autorig.online").rstrip("/")
@@ -11085,41 +11677,21 @@ async def sitemap_videos(db: AsyncSession = Depends(get_db)):
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
-@app.head("/m/{task_id}", response_class=HTMLResponse)
-@app.get("/m/{task_id}", response_class=HTMLResponse)
+@app.head("/m/{task_id}")
+@app.get("/m/{task_id}")
 async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)):
     """
-    Lightweight indexable landing: poster + LLM metadata + link to full /task viewer.
-    Gallery-eligible tasks only; adult-rated tasks excluded (same as sitemap).
+    Legacy URL: permanent redirect to the task viewer for gallery-eligible tasks only.
+    Bookmarks and external links to /m/{id} continue to work.
     """
-    from seo_gallery import (
-        build_public_model_page_html,
-        enrich_seo_metadata,
-        load_task_for_public_model_page,
-    )
+    from seo_gallery import load_task_for_public_model_page
 
     task = await load_task_for_public_model_page(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Not found")
-    base = APP_URL or "https://autorig.online"
-    title, desc, keywords, semantic = enrich_seo_metadata(task)
-    youtube_video_id = (getattr(task, "youtube_video_id", None) or "").strip()
-    youtube_uploaded = (
-        str(getattr(task, "youtube_upload_status", "") or "").strip().lower() == "uploaded"
-        and bool(youtube_video_id)
-    )
-    html_page = build_public_model_page_html(
-        base,
-        task_id,
-        title,
-        desc,
-        keywords,
-        semantic_section=semantic,
-        youtube_video_id=youtube_video_id,
-        youtube_video_uploaded=youtube_uploaded,
-        last_modified=task.updated_at,
-    )
-    return HTMLResponse(content=html_page)
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    target = f"{base}/task?id={task_id}"
+    return RedirectResponse(url=target, status_code=301)
 
 
 @app.get("/robots.txt")
