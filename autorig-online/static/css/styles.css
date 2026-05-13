@@ -515,6 +515,19 @@ body.rig-detect-modal-open {
     overflow: hidden;
 }
 
+/*
+ * Rig-detect: scrim sits on body (z 9998). The busy overlay lives inside .convert-form-card,
+ * but .card uses backdrop-filter, which creates a stacking context at z-index auto — so the
+ * whole card subtree painted below the scrim and the modal looked blurred. Lift this card
+ * above the scrim and drop its own backdrop blur for this phase so the inner panel stays sharp.
+ */
+body.rig-detect-modal-open .convert-form-card {
+    position: relative;
+    z-index: 10001;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
 /* Full-viewport dim + blur behind rig-detect (overlay card stays crisp on top) */
 .rig-detect-scrim {
     position: fixed;
