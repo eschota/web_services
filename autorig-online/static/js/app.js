@@ -236,6 +236,9 @@ const App = {
             overlay.setAttribute('aria-busy', 'false');
             card?.classList.remove('form-is-busy');
             document.body.classList.remove('rig-detect-modal-open');
+            const rigScrim = document.getElementById('rig-detect-scrim');
+            rigScrim?.classList.add('hidden');
+            rigScrim?.setAttribute('aria-hidden', 'true');
             this.resetConvertFormProgressUI('upload');
             const track = document.getElementById('convert-form-busy-progress-track');
             track?.classList.remove('indeterminate');
@@ -708,31 +711,27 @@ const App = {
         if (!cloud) return;
         const scores = detection.scores || {};
         const vc = Math.max(1, Number(detection.view_count_int) || 7);
-        const types = [...this.RIG_DETECT_RIG_TYPES.filter((x) => x !== 'humanoid'), 'humanoid'];
-        const animals = types.filter((x) => x !== 'humanoid');
+        const typesOrdered = [...this.RIG_DETECT_RIG_TYPES]
+            .map((rigType) => ({
+                rigType,
+                raw: Number(scores[rigType] || 0),
+            }))
+            .sort((a, b) => {
+                if (b.raw !== a.raw) return b.raw - a.raw;
+                return a.rigType.localeCompare(b.rigType);
+            })
+            .map((x) => x.rigType);
+
         cloud.replaceChildren();
         cloud.classList.remove('hidden');
+        cloud.classList.add('rig-detect-cloud--grid');
 
-        for (const rigType of types) {
+        for (const rigType of typesOrdered) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'rig-detect-card';
             if (rigType === selectedKey) btn.classList.add('rig-detect-card--selected');
             btn.dataset.rigType = rigType;
-            if (rigType === 'humanoid') btn.style.zIndex = '6';
-
-            let leftPct = 50;
-            let topPct = 50;
-            if (rigType !== 'humanoid') {
-                const idx = animals.indexOf(rigType);
-                const angle = (idx / 12) * Math.PI * 2 - Math.PI / 2;
-                const r = 27;
-                const jitter = (this._rigDetectJitter01(rigType) - 0.5) * 4;
-                leftPct = 50 + (r + jitter) * Math.cos(angle);
-                topPct = 50 + (r + jitter) * Math.sin(angle);
-            }
-            btn.style.left = `${leftPct}%`;
-            btn.style.top = `${topPct}%`;
 
             const raw = Number(scores[rigType] || 0);
             const weightPct = Math.max(0, Math.min(100, Math.round((raw / vc) * 100)));
@@ -740,12 +739,13 @@ const App = {
                 ? resolveRigIconUrl(rigType)
                 : `/static/Icons_png/${rigType === 'humanoid' ? 'Human' : (rigType.charAt(0).toUpperCase() + rigType.slice(1))}.png?v=rigicons1`;
             const label = this.rigDetectTypeLabel(rigType);
+            btn.title = label;
+            btn.setAttribute('aria-label', label);
             btn.innerHTML = `
                 <span class="rig-detect-card-visual">
                     <img src="${iconSrc}" alt="" loading="lazy" decoding="async" />
                     <span class="rig-detect-card-weight">${weightPct}</span>
                 </span>
-                <span class="rig-detect-card-label">${label}</span>
             `;
             btn.addEventListener('click', () => onSelect(rigType));
             cloud.appendChild(btn);
@@ -755,8 +755,10 @@ const App = {
     refreshRigDetectCloudLabels() {
         document.querySelectorAll('.rig-detect-card').forEach((btn) => {
             const rt = btn.dataset.rigType;
-            const lab = btn.querySelector('.rig-detect-card-label');
-            if (lab && rt) lab.textContent = this.rigDetectTypeLabel(rt);
+            if (!rt) return;
+            const label = this.rigDetectTypeLabel(rt);
+            btn.title = label;
+            btn.setAttribute('aria-label', label);
         });
     },
 
@@ -1116,6 +1118,9 @@ const App = {
 
         overlay?.classList.add('form-busy--rig-detect');
         document.body.classList.add('rig-detect-modal-open');
+        const rigScrimEl = document.getElementById('rig-detect-scrim');
+        rigScrimEl?.classList.remove('hidden');
+        rigScrimEl?.setAttribute('aria-hidden', 'false');
         rigLayout?.classList.remove('hidden');
         rigCloud?.classList.add('hidden');
         rigReview?.classList.add('hidden');
@@ -1153,6 +1158,9 @@ const App = {
             rigLayout?.classList.add('hidden');
             overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
             document.body.classList.remove('rig-detect-modal-open');
+            const rigScrimDone = document.getElementById('rig-detect-scrim');
+            rigScrimDone?.classList.add('hidden');
+            rigScrimDone?.setAttribute('aria-hidden', 'true');
             rigReview?.classList.add('hidden');
             rigCloud?.classList.add('hidden');
 
@@ -1208,6 +1216,9 @@ const App = {
             this.setConvertFormBusy(false);
             overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
             document.body.classList.remove('rig-detect-modal-open');
+            const rigScrimFinally = document.getElementById('rig-detect-scrim');
+            rigScrimFinally?.classList.add('hidden');
+            rigScrimFinally?.setAttribute('aria-hidden', 'true');
             rigLayout?.classList.add('hidden');
             rigReview?.classList.add('hidden');
             rigCloud?.classList.add('hidden');
