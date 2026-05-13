@@ -235,6 +235,7 @@ const App = {
             overlay.classList.add('hidden');
             overlay.setAttribute('aria-busy', 'false');
             card?.classList.remove('form-is-busy');
+            document.body.classList.remove('rig-detect-modal-open');
             this.resetConvertFormProgressUI('upload');
             const track = document.getElementById('convert-form-busy-progress-track');
             track?.classList.remove('indeterminate');
@@ -718,15 +719,15 @@ const App = {
             btn.className = 'rig-detect-card';
             if (rigType === selectedKey) btn.classList.add('rig-detect-card--selected');
             btn.dataset.rigType = rigType;
-            if (rigType === 'humanoid') btn.style.zIndex = '3';
+            if (rigType === 'humanoid') btn.style.zIndex = '6';
 
             let leftPct = 50;
             let topPct = 50;
             if (rigType !== 'humanoid') {
                 const idx = animals.indexOf(rigType);
                 const angle = (idx / 12) * Math.PI * 2 - Math.PI / 2;
-                const r = 42;
-                const jitter = (this._rigDetectJitter01(rigType) - 0.5) * 6;
+                const r = 27;
+                const jitter = (this._rigDetectJitter01(rigType) - 0.5) * 4;
                 leftPct = 50 + (r + jitter) * Math.cos(angle);
                 topPct = 50 + (r + jitter) * Math.sin(angle);
             }
@@ -740,8 +741,10 @@ const App = {
                 : `/static/Icons_png/${rigType === 'humanoid' ? 'Human' : (rigType.charAt(0).toUpperCase() + rigType.slice(1))}.png?v=rigicons1`;
             const label = this.rigDetectTypeLabel(rigType);
             btn.innerHTML = `
-                <img src="${iconSrc}" alt="" loading="lazy" decoding="async" width="120" height="120" />
-                <span class="rig-detect-card-weight">${weightPct}</span>
+                <span class="rig-detect-card-visual">
+                    <img src="${iconSrc}" alt="" loading="lazy" decoding="async" />
+                    <span class="rig-detect-card-weight">${weightPct}</span>
+                </span>
                 <span class="rig-detect-card-label">${label}</span>
             `;
             btn.addEventListener('click', () => onSelect(rigType));
@@ -1112,6 +1115,7 @@ const App = {
         const rigReview = document.getElementById('rig-detect-review');
 
         overlay?.classList.add('form-busy--rig-detect');
+        document.body.classList.add('rig-detect-modal-open');
         rigLayout?.classList.remove('hidden');
         rigCloud?.classList.add('hidden');
         rigReview?.classList.add('hidden');
@@ -1148,6 +1152,7 @@ const App = {
 
             rigLayout?.classList.add('hidden');
             overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
+            document.body.classList.remove('rig-detect-modal-open');
             rigReview?.classList.add('hidden');
             rigCloud?.classList.add('hidden');
 
@@ -1202,6 +1207,7 @@ const App = {
             }
             this.setConvertFormBusy(false);
             overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
+            document.body.classList.remove('rig-detect-modal-open');
             rigLayout?.classList.add('hidden');
             rigReview?.classList.add('hidden');
             rigCloud?.classList.add('hidden');
