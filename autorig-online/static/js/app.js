@@ -102,7 +102,6 @@ const App = {
         const creditsEl = document.getElementById('credits-count');
         const creditsLabel = document.getElementById('credits-label');
         const startBtn = document.getElementById('start-btn');
-        const loginHint = document.getElementById('login-hint');
         
         if (this.state.user) {
             // Logged in
@@ -119,15 +118,11 @@ const App = {
                 }
             }
             if (creditsLabel) creditsLabel.textContent = t('credits_remaining');
-            if (loginHint) loginHint.classList.add('hidden');
         } else {
             // Anonymous
             if (loginBtn) loginBtn.classList.remove('hidden');
             if (userInfo) userInfo.classList.add('hidden');
             if (creditsLabel) creditsLabel.textContent = t('credits_free');
-            if (loginHint && this.state.creditsRemaining < 3) {
-                loginHint.classList.remove('hidden');
-            }
         }
         
         if (creditsEl) {
