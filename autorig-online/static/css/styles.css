@@ -703,12 +703,17 @@ body.rig-detect-modal-open .convert-form-card {
 }
 
 .form-busy-overlay.form-busy--rig-detect .form-busy-inner {
+    position: relative;
+    z-index: 1;
+    isolation: isolate;
     max-width: min(520px, 100%);
     width: 100%;
     max-height: calc(100dvh - 20px);
     max-height: calc(100vh - 20px);
     height: auto;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     display: flex;
     flex-direction: column;
     padding: 0.65rem 0.75rem 0.75rem;
@@ -716,7 +721,11 @@ body.rig-detect-modal-open .convert-form-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    box-shadow:
+        0 24px 80px rgba(0, 0, 0, 0.55),
+        0 0 0 1px rgba(255, 255, 255, 0.06);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 .form-busy-overlay.form-busy--rig-detect .form-busy-text {
@@ -772,12 +781,10 @@ body.rig-detect-modal-open .convert-form-card {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.35rem 0.4rem;
     height: auto;
-    max-height: min(220px, 36vh);
-    overflow-x: hidden;
-    overflow-y: auto;
+    max-height: none;
+    overflow: visible;
     padding: 0.1rem 0 0.15rem;
     margin: 0;
-    -webkit-overflow-scrolling: touch;
 }
 
 @media (max-width: 420px) {
@@ -802,7 +809,7 @@ body.rig-detect-modal-open .convert-form-card {
     max-width: none;
     aspect-ratio: 1;
     height: auto;
-    padding: 0.15rem;
+    padding: 0.02rem;
     margin: 0;
     z-index: 1;
     border: 2px solid rgba(255, 255, 255, 0.16);
@@ -824,6 +831,7 @@ body.rig-detect-modal-open .convert-form-card {
 .rig-detect-card-visual {
     position: relative;
     width: 100%;
+    height: 100%;
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
@@ -832,8 +840,8 @@ body.rig-detect-modal-open .convert-form-card {
 }
 
 .rig-detect-card img {
-    width: 78%;
-    height: 78%;
+    width: 100%;
+    height: 100%;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;

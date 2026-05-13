@@ -323,6 +323,19 @@ const App = {
         return 'humanoid';
     },
 
+    /** Initial card selection + timer default: matches best vision candidate when shown in the grid, even if animal gates rejected. */
+    rigDetectReviewInitialKey(detection) {
+        if (!detection) return 'humanoid';
+        if (detection.type === 'animal' && detection.animal_type) {
+            return String(detection.animal_type).toLowerCase();
+        }
+        const cand = String(
+            detection.candidate_animal_type_string || detection.selected_type_string || ''
+        ).toLowerCase();
+        if (cand && this.RIG_DETECT_RIG_TYPES.includes(cand)) return cand;
+        return 'humanoid';
+    },
+
     _rigDetectJitter01(str) {
         let h = 0;
         const s = String(str || '');
@@ -420,6 +433,8 @@ const App = {
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
             renderer.toneMappingExposure = 1.35;
             renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
             controls = new OrbitControls(camera, renderer.domElement);
 
@@ -427,12 +442,16 @@ const App = {
             scene.add(new THREE.HemisphereLight(0xffffff, 0xdbeafe, 2.2));
             const key = new THREE.DirectionalLight(0xffffff, 3.0);
             key.position.set(-3, 5, -4);
+            key.target.position.set(0, 0, 0);
             scene.add(key);
+            scene.add(key.target);
             const fill = new THREE.DirectionalLight(0xffffff, 1.8);
             fill.position.set(4, 2, 5);
+            fill.castShadow = false;
             scene.add(fill);
             const rim = new THREE.DirectionalLight(0xffffff, 1.4);
             rim.position.set(0, 4, -6);
+            rim.castShadow = false;
             scene.add(rim);
             pmremGenerator = new THREE.PMREMGenerator(renderer);
             scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -542,7 +561,39 @@ const App = {
             const box = new THREE.Box3().setFromObject(object);
             object.position.sub(box.getCenter(new THREE.Vector3()));
             const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
+            const bounds = new THREE.Box3().setFromObject(object);
             const maxDim = Math.max(size.x, size.y, size.z, 1);
+
+            key.castShadow = true;
+            const shadowExtent = maxDim * 2.75;
+            key.shadow.mapSize.set(1024, 1024);
+            key.shadow.camera.near = 0.25;
+            key.shadow.camera.far = Math.max(500, maxDim * 25);
+            key.shadow.camera.left = -shadowExtent;
+            key.shadow.camera.right = shadowExtent;
+            key.shadow.camera.top = shadowExtent;
+            key.shadow.camera.bottom = -shadowExtent;
+            key.shadow.bias = -0.00025;
+            key.shadow.normalBias = 0.045;
+
+            object.traverse?.((n) => {
+                if (n.isMesh) {
+                    n.castShadow = true;
+                    n.receiveShadow = true;
+                }
+            });
+
+            const groundMat = new THREE.MeshStandardMaterial({
+                color: 0x5a5a62,
+                roughness: 1,
+                metalness: 0,
+            });
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(maxDim * 12, maxDim * 12), groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = bounds.min.y - maxDim * 0.03;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
             const dist = (maxDim / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * 1.45;
             camera.near = Math.max(0.001, dist / 1000);
             camera.far = Math.max(1000, dist * 10);
@@ -1148,7 +1199,7 @@ const App = {
             const { detection, dispose: dDispose } = await this.runHiddenAnimalDetection(sourceInfo, { viewerHost: viewerHost || null });
             detectionDispose = dDispose;
 
-            let selectedRigKey = this.rigDetectAutoKey(detection);
+            let selectedRigKey = this.rigDetectReviewInitialKey(detection);
             if (detection) {
                 selectedRigKey = await this.waitRigDetectReview(detection, selectedRigKey);
             }
