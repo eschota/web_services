@@ -317,6 +317,14 @@ const App = {
         return label === key ? String(rigKey) : label;
     },
 
+    /** @param {'analyze'|'review'} phase */
+    refreshRigDetectViewerTitle(phase) {
+        const el = document.getElementById('rig-detect-viewer-title');
+        if (!el) return;
+        const key = phase === 'review' ? 'upload_rig_review_viewer_title' : 'upload_rig_detect_analyzing';
+        el.textContent = typeof t === 'function' ? t(key) : key;
+    },
+
     rigDetectAutoKey(detection) {
         if (!detection) return 'humanoid';
         if (detection.type === 'animal' && detection.animal_type) return String(detection.animal_type).toLowerCase();
@@ -824,6 +832,8 @@ const App = {
             const startBtn = document.getElementById('rig-detect-start-now');
             const footer = document.getElementById('rig-detect-footer');
 
+            let viewerTitlePhase = 'review';
+            const refreshViewerTitle = () => this.refreshRigDetectViewerTitle(viewerTitlePhase);
             let selected = initialSelected;
             let secondsLeft = this.RIG_DETECT_REVIEW_SECONDS;
             let interval = 0;
@@ -849,6 +859,7 @@ const App = {
 
             overlay?.classList.add('rig-detect--review-phase');
             review?.classList.remove('hidden');
+            refreshViewerTitle();
 
             this.renderRigDetectCloud(detection, selected, (rig) => {
                 selected = rig;
@@ -864,6 +875,7 @@ const App = {
                 renderHint();
                 refreshFooter();
                 refreshStartBtn();
+                refreshViewerTitle();
                 this.refreshRigDetectCloudLabels();
             };
             window.addEventListener('languageChanged', onLang);
@@ -1176,6 +1188,7 @@ const App = {
         rigCloud?.classList.add('hidden');
         rigReview?.classList.add('hidden');
         overlay?.classList.remove('rig-detect--review-phase');
+        this.refreshRigDetectViewerTitle('analyze');
 
         // Disable button (visible on link tab)
         if (startBtn) {

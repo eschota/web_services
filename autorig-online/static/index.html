@@ -30,7 +30,7 @@
     <link rel="apple-touch-icon" href="/static/images/logo/apple-touch-icon.png">
     
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=rig-detect-modal-polish-1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=rig-detect-modal-plank-1">
     <script type="importmap">
     {
         "imports": {
@@ -209,14 +209,23 @@
                     <div class="form-busy-inner">
                         <p class="form-busy-text" id="convert-form-busy-text" data-i18n="upload_progress_uploading">Uploading your model…</p>
                         <div id="rig-detect-layout" class="rig-detect-layout hidden">
-                            <div id="rig-detect-viewer-host" class="rig-detect-viewer-host" aria-hidden="false"></div>
-                            <div id="rig-detect-cloud" class="rig-detect-cloud" role="group" aria-label="Rig type"></div>
-                            <div id="rig-detect-review" class="rig-detect-review hidden">
-                                <p id="rig-detect-hint" class="rig-detect-hint"></p>
-                                <div class="rig-detect-cta-row">
-                                    <button type="button" id="rig-detect-start-now" class="btn btn-primary rig-detect-start-btn"></button>
+                            <div class="rig-detect-modal-plank">
+                                <div class="rig-detect-viewer-shell" aria-labelledby="rig-detect-viewer-title">
+                                    <div class="rig-detect-viewer-head">
+                                        <span id="rig-detect-viewer-title" class="rig-detect-viewer-title" role="heading" aria-level="2"></span>
+                                    </div>
+                                    <div class="rig-detect-viewer-frame">
+                                        <div id="rig-detect-viewer-host" class="rig-detect-viewer-host" aria-hidden="false"></div>
+                                    </div>
                                 </div>
-                                <p id="rig-detect-footer" class="rig-detect-footer"></p>
+                                <div id="rig-detect-cloud" class="rig-detect-cloud" role="group" aria-label="Rig type"></div>
+                                <div id="rig-detect-review" class="rig-detect-review hidden">
+                                    <p id="rig-detect-hint" class="rig-detect-hint"></p>
+                                    <div class="rig-detect-cta-row">
+                                        <button type="button" id="rig-detect-start-now" class="btn btn-primary rig-detect-start-btn"></button>
+                                    </div>
+                                    <p id="rig-detect-footer" class="rig-detect-footer"></p>
+                                </div>
                             </div>
                         </div>
                         <div class="form-busy-progress-wrap" id="convert-form-busy-progress-wrap">
@@ -358,6 +367,6 @@
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script src="/static/js/task-card.js"></script>
-    <script src="/static/js/app.js?v=rig-detect-modal-polish-1"></script>
+    <script src="/static/js/app.js?v=rig-detect-modal-plank-1"></script>
 </body>
 </html>
