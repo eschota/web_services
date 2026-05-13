@@ -706,8 +706,7 @@ body.rig-detect-modal-open .convert-form-card {
     position: relative;
     z-index: 1;
     isolation: isolate;
-    /* Match .container-sm card content width: 800px max, minus section + card horizontal padding */
-    max-width: min(calc(800px - 6rem), calc(100vw - 6rem));
+    max-width: 100%;
     width: 100%;
     max-height: calc(100dvh - 20px);
     max-height: calc(100vh - 20px);
@@ -759,6 +758,8 @@ body.rig-detect-modal-open .convert-form-card {
         0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
         0 28px 70px rgba(0, 0, 0, 0.65),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    overflow-x: visible;
+    overflow-y: visible;
 }
 
 [data-theme="light"] .rig-detect-modal-plank {
@@ -855,6 +856,7 @@ body.rig-detect-modal-open .convert-form-card {
     width: 100%;
     flex: 0 0 auto;
     --rig-detect-tile: min(3.55rem, 11vw);
+    --rig-detect-gap: 0.42rem;
 }
 
 .rig-detect-cloud.rig-detect-cloud--grid {
@@ -862,7 +864,7 @@ body.rig-detect-modal-open .convert-form-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.42rem;
+    gap: 0.32rem;
     height: auto;
     max-height: none;
     overflow: visible;
@@ -875,13 +877,35 @@ body.rig-detect-modal-open .convert-form-card {
     flex-wrap: nowrap;
     justify-content: center;
     align-items: center;
-    gap: 0.4rem;
-    width: 100%;
+    gap: var(--rig-detect-gap);
+    width: auto;
+    max-width: 100%;
+    margin-inline: auto;
 }
 
-/* Bottom row wider — brick / pyramid stagger (half tile) */
+/* Brick: rows offset in opposite directions + row width not full — breaks rigid columns */
+.rig-detect-cloud__row--narrow {
+    transform: translateX(calc((var(--rig-detect-tile) + var(--rig-detect-gap)) * 0.38));
+}
+
 .rig-detect-cloud__row--wide {
-    transform: translateX(calc((var(--rig-detect-tile) + 0.4rem) / 2));
+    transform: translateX(calc((var(--rig-detect-tile) + var(--rig-detect-gap)) * -0.38));
+}
+
+.rig-detect-cloud__row--wide .rig-detect-card:nth-child(odd) {
+    margin-top: 0.1rem;
+}
+
+.rig-detect-cloud__row--wide .rig-detect-card:nth-child(even) {
+    margin-top: -0.1rem;
+}
+
+.rig-detect-cloud__row--narrow .rig-detect-card:nth-child(odd) {
+    margin-top: -0.08rem;
+}
+
+.rig-detect-cloud__row--narrow .rig-detect-card:nth-child(even) {
+    margin-top: 0.08rem;
 }
 
 .rig-detect-cloud.rig-detect-cloud--grid .rig-detect-card {
@@ -896,10 +920,7 @@ body.rig-detect-modal-open .convert-form-card {
 @media (max-width: 420px) {
     .rig-detect-cloud {
         --rig-detect-tile: min(3.05rem, 16vw);
-    }
-
-    .rig-detect-cloud__row--wide {
-        transform: translateX(calc((var(--rig-detect-tile) + 0.35rem) / 2));
+        --rig-detect-gap: 0.35rem;
     }
 }
 
@@ -1003,10 +1024,20 @@ body.rig-detect-modal-open .convert-form-card {
     display: none !important;
 }
 
+.rig-detect-lead {
+    margin: 0 0 0.35rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--text-primary);
+    text-align: center;
+    flex-shrink: 0;
+}
+
 .rig-detect-hint {
     margin: 0 0 0.45rem;
-    font-size: 0.78rem;
-    line-height: 1.35;
+    font-size: 0.76rem;
+    line-height: 1.4;
     color: var(--text-secondary);
     text-align: center;
     flex-shrink: 0;

@@ -12,7 +12,8 @@ const App = {
         activeTab: 'upload',
         free3dCreateInFlight: false,
         taskSubmitInProgress: false,
-        rigV2VisionDeps: null
+        rigV2VisionDeps: null,
+        rigDetectModalResizeObs: null,
     },
 
     scheduleNonCriticalWork(callback, timeout = 1200) {
@@ -323,6 +324,58 @@ const App = {
         if (!el) return;
         const key = phase === 'review' ? 'upload_rig_review_viewer_title' : 'upload_rig_detect_analyzing';
         el.textContent = typeof t === 'function' ? t(key) : key;
+    },
+
+    syncRigDetectModalWidth() {
+        const card = document.querySelector('.convert-form-card');
+        const inner = document.querySelector('#convert-form-busy.form-busy--rig-detect .form-busy-inner');
+        if (!card || !inner) return;
+        const w = Math.max(260, Math.round(card.getBoundingClientRect().width));
+        inner.style.boxSizing = 'border-box';
+        inner.style.width = `${w}px`;
+        inner.style.maxWidth = `${w}px`;
+    },
+
+    clearRigDetectModalWidthSync() {
+        const busy = document.getElementById('convert-form-busy');
+        const inner = busy?.querySelector('.form-busy-inner');
+        if (!inner) return;
+        inner.style.width = '';
+        inner.style.maxWidth = '';
+        inner.style.boxSizing = '';
+    },
+
+    bindRigDetectModalWidthSync() {
+        this.unbindRigDetectModalWidthSync();
+        const card = document.querySelector('.convert-form-card');
+        if (!card) return;
+        this.syncRigDetectModalWidth();
+        const again = () => this.syncRigDetectModalWidth();
+        window.requestAnimationFrame(again);
+        window.requestAnimationFrame(() => window.requestAnimationFrame(again));
+        if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', again);
+            this._rigDetectWidthOnResize = again;
+            return;
+        }
+        this.state.rigDetectModalResizeObs = new ResizeObserver(again);
+        this.state.rigDetectModalResizeObs.observe(card);
+    },
+
+    unbindRigDetectModalWidthSync() {
+        if (this.state.rigDetectModalResizeObs) {
+            try {
+                this.state.rigDetectModalResizeObs.disconnect();
+            } catch (e) {
+                /* ignore */
+            }
+            this.state.rigDetectModalResizeObs = null;
+        }
+        if (this._rigDetectWidthOnResize) {
+            window.removeEventListener('resize', this._rigDetectWidthOnResize);
+            this._rigDetectWidthOnResize = null;
+        }
+        this.clearRigDetectModalWidthSync();
     },
 
     rigDetectAutoKey(detection) {
@@ -840,9 +893,12 @@ const App = {
         return new Promise((resolve) => {
             const overlay = document.getElementById('convert-form-busy');
             const review = document.getElementById('rig-detect-review');
+            const lead = document.getElementById('rig-detect-lead');
             const hint = document.getElementById('rig-detect-hint');
             const startBtn = document.getElementById('rig-detect-start-now');
             const footer = document.getElementById('rig-detect-footer');
+
+            const initialReviewSelection = initialSelected;
 
             let viewerTitlePhase = 'review';
             const refreshViewerTitle = () => this.refreshRigDetectViewerTitle(viewerTitlePhase);
@@ -850,12 +906,15 @@ const App = {
             let secondsLeft = this.RIG_DETECT_REVIEW_SECONDS;
             let interval = 0;
 
-            const renderHint = () => {
-                if (hint && typeof t === 'function') {
-                    hint.textContent = t('upload_rig_review_hint', {
-                        animation_type: this.rigDetectTypeLabel(selected),
-                        timer: String(secondsLeft),
-                    });
+            const renderReviewCopy = () => {
+                if (typeof t !== 'function') return;
+                const manual = selected !== initialReviewSelection;
+                const leadKey = manual ? 'upload_rig_review_lead_manual' : 'upload_rig_review_lead_auto';
+                if (lead) {
+                    lead.textContent = t(leadKey, { animation_type: this.rigDetectTypeLabel(selected) });
+                }
+                if (hint) {
+                    hint.textContent = t('upload_rig_review_sub', { timer: String(secondsLeft) });
                 }
             };
             const refreshFooter = () => {
@@ -876,15 +935,15 @@ const App = {
             this.renderRigDetectCloud(detection, selected, (rig) => {
                 selected = rig;
                 this.updateRigDetectSelection(selected);
-                renderHint();
+                renderReviewCopy();
             });
 
-            renderHint();
+            renderReviewCopy();
             refreshFooter();
             refreshStartBtn();
 
             const onLang = () => {
-                renderHint();
+                renderReviewCopy();
                 refreshFooter();
                 refreshStartBtn();
                 refreshViewerTitle();
@@ -902,7 +961,7 @@ const App = {
 
             interval = window.setInterval(() => {
                 secondsLeft -= 1;
-                renderHint();
+                renderReviewCopy();
                 refreshStartBtn();
                 if (secondsLeft <= 0) {
                     finish(selected);
@@ -1201,6 +1260,7 @@ const App = {
         rigReview?.classList.add('hidden');
         overlay?.classList.remove('rig-detect--review-phase');
         this.refreshRigDetectViewerTitle('analyze');
+        this.bindRigDetectModalWidthSync();
 
         // Disable button (visible on link tab)
         if (startBtn) {
@@ -1289,6 +1349,7 @@ const App = {
             } catch (e) {
                 /* ignore */
             }
+            this.unbindRigDetectModalWidthSync();
             this.setConvertFormBusy(false);
             overlay?.classList.remove('form-busy--rig-detect', 'rig-detect--review-phase');
             document.body.classList.remove('rig-detect-modal-open');
