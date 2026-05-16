@@ -8880,11 +8880,6 @@ async def redirect_animal_rig_animation_page():
     return RedirectResponse(url="/animal-rig", status_code=301)
 
 
-@app.get("/rig-v2.html", include_in_schema=False)
-async def redirect_rig_v2_page():
-    return RedirectResponse(url="/animal-rig", status_code=301)
-
-
 @app.get("/developers")
 async def developers_page():
     """API documentation and key management for developers."""
