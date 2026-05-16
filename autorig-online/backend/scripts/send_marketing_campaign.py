@@ -5,8 +5,8 @@ Resumable marketing campaign sender for AutoRig.online.
 Run from /root/autorig-online/backend:
 
   PYTHONPATH=. python3 scripts/send_marketing_campaign.py --dry-run
-  PYTHONPATH=. python3 scripts/send_marketing_campaign.py --send-test admin@example.com
-  PYTHONPATH=. python3 scripts/send_marketing_campaign.py --yes-live --limit 25
+  PYTHONPATH=. python3 scripts/send_marketing_campaign.py --send-test admin@example.com --allow-missing-postal-address
+  PYTHONPATH=. python3 scripts/send_marketing_campaign.py --yes-live --limit 25 --allow-missing-postal-address
 """
 from __future__ import annotations
 
@@ -178,16 +178,23 @@ async def run_dry(campaign_key: str, sample_count: int) -> int:
     return 0
 
 
-async def run_test(campaign_key: str, email: str) -> int:
+async def run_test(campaign_key: str, email: str, allow_missing_postal_address: bool) -> int:
     await init_db()
-    result = await send_marketing_campaign_email(email, campaign_key + "-test")
+    result = await send_marketing_campaign_email(
+        email,
+        campaign_key + "-test",
+        allow_missing_postal_address=allow_missing_postal_address,
+    )
     print(json.dumps({"recipient": mask_email(email), **result}, indent=2, ensure_ascii=False))
     return 0 if result.get("ok") else 1
 
 
 async def run_live(args) -> int:
-    if not MARKETING_POSTAL_ADDRESS:
-        print("ERROR: MARKETING_POSTAL_ADDRESS is not configured; refusing live send.")
+    if not MARKETING_POSTAL_ADDRESS and not args.allow_missing_postal_address:
+        print(
+            "ERROR: MARKETING_POSTAL_ADDRESS is not configured; refusing live send. "
+            "Pass --allow-missing-postal-address to accept this deliverability/compliance risk."
+        )
         return 2
     if args.limit <= 0:
         print("ERROR: --limit must be greater than 0 for live sends.")
@@ -210,7 +217,11 @@ async def run_live(args) -> int:
                 print(f"[{index}/{len(batch)}] skip already logged {mask_email(recipient.email)}")
                 continue
 
-            result = await send_marketing_campaign_email(recipient.email, args.campaign)
+            result = await send_marketing_campaign_email(
+                recipient.email,
+                args.campaign,
+                allow_missing_postal_address=args.allow_missing_postal_address,
+            )
             await update_send_row(db, row, result)
 
             ok = bool(result.get("ok"))
@@ -250,8 +261,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--send-test", metavar="EMAIL")
     parser.add_argument("--yes-live", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--delay-seconds", type=float, default=48.0)
-    parser.add_argument("--jitter-seconds", type=float, default=12.0)
+    parser.add_argument(
+        "--allow-missing-postal-address",
+        action="store_true",
+        help="Allow sending without MARKETING_POSTAL_ADDRESS. This is a compliance/deliverability risk.",
+    )
+    parser.add_argument("--delay-seconds", type=float, default=360.0)
+    parser.add_argument("--jitter-seconds", type=float, default=0.0)
     parser.add_argument("--sample", type=int, default=5)
     return parser.parse_args()
 
@@ -259,7 +275,7 @@ def parse_args() -> argparse.Namespace:
 async def async_main() -> int:
     args = parse_args()
     if args.send_test:
-        return await run_test(args.campaign, args.send_test)
+        return await run_test(args.campaign, args.send_test, args.allow_missing_postal_address)
     if args.yes_live:
         return await run_live(args)
     return await run_dry(args.campaign, args.sample)

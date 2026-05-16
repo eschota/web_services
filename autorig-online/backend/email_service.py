@@ -263,12 +263,18 @@ def _response_message_id(response) -> Optional[str]:
     return str(raw) if raw else None
 
 
+def _marketing_sender_footer() -> str:
+    if MARKETING_POSTAL_ADDRESS:
+        return escape(MARKETING_POSTAL_ADDRESS)
+    return f"No postal address provided. Contact: {escape(EMAIL_FROM)}"
+
+
 def _marketing_email_html(visible_unsubscribe_url: str) -> str:
     base = APP_URL.rstrip("/")
     animal_url = f"{base}/animal-rig"
     home_url = f"{base}/"
     youtube_url = "https://www.youtube.com/shorts/vEn7laZijOI"
-    address = escape(MARKETING_POSTAL_ADDRESS)
+    sender_footer = _marketing_sender_footer()
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -323,7 +329,7 @@ def _marketing_email_html(visible_unsubscribe_url: str) -> str:
                 <a href="{visible_unsubscribe_url}" style="color:#a5b4fc;text-decoration:underline;">Unsubscribe from marketing emails</a>
               </p>
               <p style="margin:10px 0 0;color:#8c93aa;font-size:11px;line-height:1.5;">
-                AutoRig.online<br>{address}
+                AutoRig.online<br>{sender_footer}
               </p>
             </td>
           </tr>
@@ -352,16 +358,20 @@ def _marketing_email_text(visible_unsubscribe_url: str) -> str:
             f"Unsubscribe from marketing emails: {visible_unsubscribe_url}",
             "",
             "AutoRig.online",
-            MARKETING_POSTAL_ADDRESS,
+            MARKETING_POSTAL_ADDRESS or f"No postal address provided. Contact: {EMAIL_FROM}",
         ]
     )
 
 
-async def send_marketing_campaign_email(to_email: str, campaign_key: str) -> dict:
+async def send_marketing_campaign_email(
+    to_email: str,
+    campaign_key: str,
+    allow_missing_postal_address: bool = False,
+) -> dict:
     """Send one AutoRig marketing campaign email with one-click unsubscribe headers."""
     if not RESEND_API_KEY:
         return {"ok": False, "provider_message_id": None, "error": "RESEND_API_KEY is not configured"}
-    if not MARKETING_POSTAL_ADDRESS:
+    if not MARKETING_POSTAL_ADDRESS and not allow_missing_postal_address:
         return {"ok": False, "provider_message_id": None, "error": "MARKETING_POSTAL_ADDRESS is not configured"}
     if not to_email:
         return {"ok": False, "provider_message_id": None, "error": "recipient email is empty"}
