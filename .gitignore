@@ -105,6 +105,13 @@ Thumbs.db
 .cursor-server/
 .cursor/
 
+# Local server snapshot/runtime folders
+.config/
+.local/
+.venv-autorig/
+.vscode-remote-containers/
+.wdm/
+
 # SSH keys
 .ssh/
 
@@ -116,11 +123,21 @@ __pycache__/
 
 # Python venv
 autorig-online/venv/
+autorig-online/mcp/.venv/
+qwerty_vpn/gateway/venv/
+CGTrader_SUBMIT_SERVER/venv/
 
 # Large binary files and runtime data
 *.zip
+*.tar.gz
 *.glb
 *.blend
+*.bak
+*.bak-*
+page_content.html
+page_debug.png
+screenshot*.png
+custom_animations_test.png
 autorig-online/static/tasks/
 autorig-online/static/glb_cache/
 autorig/uploads/
