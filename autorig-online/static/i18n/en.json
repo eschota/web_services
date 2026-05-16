@@ -2,10 +2,8 @@
     "site_name": "AutoRig Online",
     "hero_title": "Automatic 3D Model Rigging",
     "hero_subtitle": "Upload your GLB, FBX, or OBJ model and get it rigged with animations in minutes",
-    
     "tab_upload": "Upload File",
     "tab_link": "Paste Link",
-    
     "upload_title": "Drop your 3D model here",
     "upload_subtitle": "or click to browse (GLB, FBX, OBJ up to 100MB)",
     "upload_selected": "Selected file",
@@ -17,27 +15,21 @@
     "upload_busy_tip_2": "Legs should stand about shoulder-width apart.",
     "upload_busy_tip_3": "Mesh topology should be enough for clean deformation at animation hotspots—elbows, knees, fingers, and similar joints.",
     "upload_busy_tip_4": "Rigging usually takes from about 5 minutes depending on model complexity. Take a breath—the pipeline continues automatically once you land on the task page.",
-    
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "Model URL",
-    
     "tpose_notice": "Models must be in T-Pose for best results",
-    
     "btn_start": "Start Rigging",
     "btn_login": "Sign in with Google",
     "btn_login_continue": "Sign in with Google to continue",
     "btn_logout": "Sign out",
     "btn_copy_all": "Copy All Links",
     "btn_download_all": "Download All",
-    
     "credits_free": "Free conversions left",
     "credits_remaining": "Credits remaining",
     "credits_login_hint": "Sign in for 7 more free conversions",
-    
     "history_title": "Your Recent Tasks",
     "history_empty": "No tasks yet. Start your first conversion!",
     "history_view": "View",
-    
     "task_title": "AutoRig task",
     "task_title_convert": "Auto Convert task",
     "retopo_convert_title": "Retopology and Convert Formats",
@@ -54,12 +46,10 @@
     "admin_worker_api": "Worker API (admin)",
     "task_status_error": "Error",
     "task_status_restarting": "Restarting...",
-    
     "task_files_ready": "files ready",
     "task_video_ready": "Video Preview",
     "task_video_pending": "Video is being generated...",
     "task_youtube_open": "Open on YouTube",
-
     "task_free3d_similar_title": "Similar 3D models",
     "task_free3d_similar_subtitle": "Semantic search from poster title + keywords (Free3D)",
     "task_free3d_loading": "Loading similar models…",
@@ -74,39 +64,33 @@
     "task_meta_poster_err_classify": "Safety analysis failed for this poster.",
     "task_meta_poster_err_openai": "Title and keywords could not be generated (AI step failed).",
     "task_meta_poster_err_pipeline": "Poster pipeline failed unexpectedly. Try refreshing the page.",
-
     "task_fbx_glb_title": "FBX → GLB",
     "task_fbx_glb_pending": "Converting FBX to GLB...",
     "task_fbx_glb_ready": "FBX converted to GLB",
     "task_fbx_glb_error": "FBX → GLB conversion failed",
     "task_fbx_glb_download": "Download GLB",
-
     "btn_restart_task": "Restart task",
     "btn_restart_task_working": "Restarting...",
     "btn_edit_scene": "Edit Model/Scene",
     "btn_save_rig_tpose": "💾 SAVE RIG T-POSE",
     "btn_save_rig_tpose_saving": "Saving...",
-
     "error_no_file": "Please select a file or enter a URL",
     "error_no_credits": "No credits remaining",
     "error_login_required": "Please sign in to continue",
     "error_payment_required": "Payment required. Contact support for more credits.",
     "error_generic": "Something went wrong. Please try again.",
-    
     "admin_title": "Admin Panel",
     "admin_users": "Users",
     "admin_search": "Search by email...",
     "admin_balance": "Balance",
     "admin_tasks": "Tasks",
     "admin_save": "Save",
-    
     "feature_fast_title": "Fast Processing",
     "feature_fast_desc": "Get your rigged model in just a few minutes",
     "feature_animations_title": "50+ Animations",
     "feature_animations_desc": "Pre-configured animations for your character",
     "feature_formats_title": "Multiple Formats",
     "feature_formats_desc": "Support for GLB, FBX, and OBJ models",
-    
     "queue_status": "Server Queue",
     "queue_active": "Active",
     "queue_pending": "In Queue",
@@ -117,7 +101,6 @@
     "queue_wait_lt1min": "< 1 min",
     "queue_wait_minutes": "~{minutes} min",
     "queue_wait_hours": "~{hours}h {minutes}m",
-    
     "footer_text": "AutoRig Online © 2026",
     "footer_tagline": "AI-powered automatic 3D character rigging. Upload your model and get it rigged with animations in minutes.",
     "footer_services": "Services",
@@ -138,14 +121,12 @@
     "footer_copyright": "© 2026 AutoRig Online. All rights reserved.",
     "footer_terms": "Terms of Use",
     "footer_user_agreement": "User Agreement",
-
     "nav_home": "Home",
     "nav_guides": "Guides",
     "nav_gallery": "Gallery",
     "nav_dashboard": "Dashboard",
     "nav_buy": "Buy",
     "nav_api": "API",
-
     "dashboard_page_title": "Dashboard | AutoRig.online",
     "dashboard_heading": "Dashboard",
     "dashboard_notifications_title": "Notifications",
@@ -159,7 +140,6 @@
     "dashboard_save_success_on": "Saved. You will receive emails when your rigging tasks are ready.",
     "dashboard_save_success_off": "Saved. You will not receive task-ready emails.",
     "dashboard_save_success_generic": "Settings saved.",
-
     "buy_title": "Buy Credits",
     "buy_subtitle": "Credits are needed to download finished 3D models with rigging and all animations.",
     "buy_notice": "Card (Gumroad): credits usually arrive in 1–2 minutes.",
@@ -241,12 +221,10 @@
     "crypto_note_required": "If you are not signed in, add your email or agent id in the note field.",
     "crypto_submit_ok": "Received. We will verify and credit you as soon as possible.",
     "crypto_submit_fail": "Could not submit. Try again or contact support.",
-
     "payment_success_title": "Payment successful",
     "payment_success_desc": "Payment successful. Credits will appear shortly (usually within 1–2 minutes).",
     "payment_success_back": "Back to Home",
     "payment_success_buy": "Buy more credits",
-
     "api_access_title": "API Access",
     "api_access_desc": "Generate an API key to use AutoRig REST API from external tools.",
     "api_access_generate": "Generate API Key",
@@ -261,7 +239,6 @@
     "api_access_copied": "Copied",
     "api_access_need_cookie": "Open this site once in your browser (anonymous session) or sign in with Google to manage API keys.",
     "btn_copy": "Copy",
-
     "developers_page_title": "Developer API | AutoRig.online",
     "developers_heading": "Developer API",
     "developers_intro": "Use the AutoRig HTTP API to create rigging jobs from a link or upload, poll until completion, then download prepared GLB, animation packs, and related files via stable URLs.",
@@ -282,7 +259,6 @@
     "developers_examples_title": "Examples",
     "developers_examples_note": "Replace TASK_ID and YOUR_API_KEY. For link-based input, use a publicly reachable URL to your GLB/FBX/OBJ.",
     "developers_agent_hint": "Machine-readable API brief for agents is embedded as JSON at the end of this page.",
-
     "free_title": "FREE",
     "free_greeting": "Hi 3D ARTIST! I've been doing this project with a friend on enthusiasm for over a year and everything is free here!",
     "free_message": "I would like to make the RIG even cooler and I know how, but for this I need MONEY :) for beer and cookies! So if you have a couple of extra bucks, please buy credits!",
@@ -297,39 +273,29 @@
     "feedback_loading": "Loading feedback...",
     "feedback_empty": "No feedback yet. Be the first!",
     "feedback_success": "Thanks for the feedback! We'll read everything (honestly).",
-
     "guides_title": "Guides & Tutorials",
     "guides_intro": "Learn more about character rigging, Unity/Unreal workflows, and best practices",
-
     "guide_mixamo_title": "Mixamo Alternative",
     "guide_mixamo_desc": "Professional auto rigging service as an alternative to Mixamo. Get rigged characters with 50+ animations.",
-
     "guide_unity_title": "Rig GLB for Unity",
     "guide_unity_desc": "Complete workflow to rig GLB characters for Unity Mecanim. Step-by-step Unity import guide.",
-
     "guide_unreal_title": "Rig FBX for Unreal",
     "guide_unreal_desc": "How to prepare and rig FBX characters for Unreal Engine. Tutorial for Skeletal Mesh import.",
-
     "guide_tpose_title": "T-Pose vs A-Pose",
     "guide_tpose_desc": "Comparison of T-pose vs A-pose for character rigging. Which pose works better for auto-rigging?",
-
     "guide_formats_title": "GLB vs FBX",
     "guide_formats_desc": "Complete comparison of GLB vs FBX formats for character rigging and game development.",
-
     "guide_obj_title": "Auto Rig OBJ",
     "guide_obj_desc": "How to auto rig OBJ characters. What works, what breaks, and preparation tips.",
-
     "guide_retargeting_title": "Animation Retargeting",
     "guide_retargeting_desc": "Guide to retargeting animations in Unity & Unreal. Simple pipeline for auto-rigged characters.",
     "guide_face_rig_title": "Face Rig & Animation",
     "guide_face_rig_desc": "How head analysis builds facial soft masks and landmarks for animation and lip sync.",
-
     "read_guide": "Read Guide →",
-
     "gallery_title": "🎬 Recent Rigged Models",
-    "gallery_subtitle": "Real results from our users",
+    "gallery_subtitle": "7,124+ rigs completed. Loading last 24 hours...",
     "gallery_page_title": "Gallery",
-    "gallery_page_subtitle": "Real completed tasks. Sort by likes or newest.",
+    "gallery_page_subtitle": "Real completed tasks. Browse newest results by rig type.",
     "gallery_all_works": "All works",
     "gallery_total": "Total: {count}",
     "gallery_sort_label": "Sort:",
@@ -343,10 +309,8 @@
     "gallery_empty": "No works yet",
     "gallery_open": "Open",
     "gallery_clear_filter": "Clear filter",
-
     "formats_title": "Supported Export Formats",
     "formats_desc": "We support conversion to all major 3D software and game engines:",
-
     "services_title": "Our Services",
     "service_rig_title": "🦴 Automatic Rigging",
     "service_rig_desc": "AI-powered bone generation and skinning for your 3D characters",
@@ -356,34 +320,27 @@
     "service_retopo_desc": "Automatic mesh optimization and retopology for better performance",
     "service_convert_title": "🔀 Format Conversion",
     "service_convert_desc": "Convert between GLB, FBX, OBJ, and export to Unity, Unreal, 3ds Max, Maya, Cinema 4D",
-
     "api_title": "🔌 REST API for Developers",
     "api_desc": "Integrate AutoRig into your pipeline with our REST API. Automate uploads, task tracking, and result downloads in your tools and services.",
     "api_contact": "For API access and integration details, please contact:",
     "api_contact_btn": "Contact on Telegram",
-
     "btn_download": "Download",
     "btn_purchase": "Download",
     "btn_buy_credits": "Buy Credits",
     "btn_login_to_purchase": "Sign in to download",
     "btn_owner_tasks": "All tasks",
-    "btn_download_all": "Download All",
-    
     "purchase_all_bundle": "Download All Files",
     "purchase_save_credits": "Save 6 credits with bundle!",
     "purchase_buy_all": "Download All",
     "purchase_confirm_file": "Download file",
     "purchase_confirm_all": "Download all files for",
-    
     "credits": "credits",
     "credit": "credit",
-
     "support_questions_title": "Have questions?",
     "support_questions_desc": "Join our Telegram support group",
     "support_questions_cta": "Open Telegram",
     "gallery_view_all_plain": "View all",
     "gallery_view_all": "View all ({count})",
-
     "free3d_search_label": "Search Free 3D Models",
     "free3d_cat_characters": "Characters",
     "free3d_cat_animals": "Animals",
@@ -397,28 +354,22 @@
     "free3d_confirm_create": "Add model \"{title}\" to rigging queue?",
     "free3d_creating_task_title": "Creating task for \"{title}\"",
     "free3d_creating_task_subtitle": "Please wait. You will be redirected automatically.",
-
     "log_copy": "Copy",
     "log_copied": "Copied!",
-
     "hiw_meta_title": "How Auto Rigging Works — Complete Character Rigging Pipeline",
     "hiw_hero_title": "How Auto Rigging Works",
     "hiw_hero_lead": "An automated pipeline for preparing 3D models: the user uploads a model and receives a production-ready character. The system performs all technical steps — from initial normalization and body part detection to rigging, skinning, animation preparation, and final export, including Unity HDRP package and realistic video preview.",
-    
     "hiw_product_title": "What Is This Product",
     "hiw_product_desc": "The pipeline is designed for batch processing and repeatable results: it removes the need for users to understand the technical details of rigging and engine assembly, turning model upload into a simple \"input → ready output\" service.",
     "hiw_product_highlight": "Upload your model and get a fully prepared character ready for production use.",
-    
     "hiw_formats_title": "Supported Formats",
     "hiw_formats_desc": "The system automatically recognizes the format, correctly imports it, and brings it to a unified working state so that further stages are performed stably and identically.",
-    
     "hiw_openpose_title": "Automatic Body Marker Detection (OpenPose)",
     "hiw_openpose_desc": "One of the key elements of quality is automatic detection of character reference points using OpenPose. The system can work with up to 137 markers:",
     "hiw_markers_body": "Body markers (core kinematics)",
     "hiw_markers_hands": "Hand markers (21 per hand)",
     "hiw_markers_face": "Face markers (head/face binding)",
     "hiw_openpose_humanoid": "Automatic detection works best on humanoid forms (characters with familiar anatomy): in this case, the pipeline most confidently determines limbs, hands, and proportions, which directly improves the quality of subsequent rigging and deformations.",
-    
     "hiw_tpose_title": "Automatic Model Preparation for Correct T-Pose",
     "hiw_tpose_intro": "For the automatic rig to be created correctly and produce predictable deformations, the pipeline prepares the model and brings it to a technically correct state:",
     "hiw_tpose_orientation": "<strong>Model orientation:</strong> normalization of \"forward/up\" direction, bringing to correct position relative to scene axes so that rigging, animations, and engine export work without surprises.",
@@ -426,7 +377,6 @@
     "hiw_tpose_limbs": "<strong>Leg and arm position correction:</strong> adjusting the pose toward cleaner T-pose logic. Important for stable joint detection, correct segment lengths, and quality skinning.",
     "hiw_tpose_fingers": "<strong>Finger detection and preparation:</strong> separate work with hands to improve finger rig accuracy and reduce deformation artifacts during animation.",
     "hiw_tpose_result": "Result: the model becomes \"ready for rigging\": correctly oriented, at the right scale, and in a pose suitable for automatic skeleton construction.",
-    
     "hiw_skeleton_title": "AI-Powered Skeleton Creation & Automatic Skinning",
     "hiw_skeleton_intro": "After preparation, the pipeline automatically performs the key technical part:",
     "hiw_skeleton_create": "🦴 Skeleton Creation",
@@ -434,7 +384,6 @@
     "hiw_skinning_auto": "⚡ Automatic Skinning",
     "hiw_skinning_auto_desc": "Vertex weights are distributed across bones so that when the skeleton moves, the model deforms naturally without \"breaking\".",
     "hiw_skeleton_result": "This transforms a static model into a fully animatable character without manual routine work.",
-    
     "hiw_animations_title": "Animations & Control Rig: Two Directions",
     "hiw_animations_intro": "The pipeline delivers results in two forms to cover different workflows:",
     "hiw_baked_title": "🎬 Baked Animations",
@@ -442,30 +391,25 @@
     "hiw_controlrig_title": "🎮 Control Rig (.blend)",
     "hiw_controlrig_desc": "Fully suitable for manual animation in Blender. Important if you need to manually adjust pose/movement, create unique animation for a task, or quickly make artistic edits without rebuilding the entire pipeline.",
     "hiw_animations_result": "The system supports both the \"production\" path (engines) and the \"artistic\" path (manual animation).",
-    
     "hiw_unity_title": "Unity HDRP Export: Turnkey unitypackage",
     "hiw_unity_intro": "For Unity, the pipeline creates a unitypackage ready for use in Unity HDRP projects:",
     "hiw_unity_1": "Model and animations prepared for correct import",
     "hiw_unity_2": "Materials and textures brought to HDRP-render compatible form",
     "hiw_unity_3": "Result is convenient to connect to projects without manual assembly and lengthy setup",
     "hiw_unity_result": "This reduces integration time and decreases typical errors when transferring a character to Unity.",
-    
     "hiw_video_title": "Realistic Result Visualization (Video)",
     "hiw_video_intro": "After assembly, the system automatically creates a realistic video:",
     "hiw_video_1": "Shows the final character appearance with correct lighting and materials",
     "hiw_video_2": "Shows how the rig and deformations work in motion",
     "hiw_video_3": "Quick quality assessment without manual scene and render setup",
     "hiw_video_result": "Video serves as quick quality control of the final assembly: it's clear what came out \"at the output\" and where refinement is needed if necessary.",
-    
     "hiw_roadmap_title": "Roadmap (Coming Soon)",
     "hiw_roadmap_1": "Automatic retopology to target polygon count",
     "hiw_roadmap_2": "Selection and application of specific animation to processed model",
     "hiw_roadmap_3": "Automatic export to Unreal and other game engines",
-    
     "hiw_cta_title": "Ready to Rig Your Character?",
     "hiw_cta_subtitle": "Upload GLB/FBX/OBJ and get production-ready results in minutes.",
     "hiw_cta_button": "Start Auto Rigging Now",
-
     "support_chat_title": "Support",
     "support_chat_disclaimer": "You are chatting with a live human operator (Escho) — replies are never from AI or scripted bots.",
     "support_chat_placeholder": "Type a message…",
@@ -484,5 +428,21 @@
     "support_chat_error_api_connect": "Could not reach Support API (routing or old server). Reload the page; ops must expose /api/support-chat/* on FastAPI.",
     "support_chat_error_session_missing": "Session expired — reopen the chat.",
     "support_chat_arialabel_open": "Open support chat",
-    "support_chat_arialabel_panel": "Support chat dialog"
+    "support_chat_arialabel_panel": "Support chat dialog",
+    "gallery_home_stats": "{total}+ rigs completed. {last24} rigs completed in the last 24 hours.",
+    "gallery_rig_type_label": "Rig type:",
+    "gallery_rig_type_all": "All rig types",
+    "gallery_rig_type_humanoid": "Humanoid",
+    "gallery_rig_type_dog": "Dog",
+    "gallery_rig_type_bear": "Bear",
+    "gallery_rig_type_cat": "Cat",
+    "gallery_rig_type_cow": "Cow",
+    "gallery_rig_type_deer": "Deer",
+    "gallery_rig_type_elephant": "Elephant",
+    "gallery_rig_type_giraffe": "Giraffe",
+    "gallery_rig_type_horse": "Horse",
+    "gallery_rig_type_mouse": "Mouse",
+    "gallery_rig_type_pig": "Pig",
+    "gallery_rig_type_rabbit": "Rabbit",
+    "gallery_rig_type_turtle": "Turtle"
 }

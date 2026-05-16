@@ -402,6 +402,13 @@ class GalleryItem(BaseModel):
     author_nickname: Optional[str] = None  # Preferred display name (fallback to email)
     version: int = 1  # restart_count + 1
     content_rating: Optional[str] = None
+    rig_icon_key: str = "humanoid"
+
+
+class GalleryStats(BaseModel):
+    """Public gallery counters not tied to current retained gallery rows."""
+    completed_total: int
+    completed_last_24h: int
 
 
 class GalleryResponse(BaseModel):
@@ -411,6 +418,7 @@ class GalleryResponse(BaseModel):
     page: int
     per_page: int
     has_more: bool
+    stats: GalleryStats
 
 
 class LikeResponse(BaseModel):

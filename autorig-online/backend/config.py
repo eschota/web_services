@@ -103,6 +103,13 @@ USER_FREE_LIMIT = 0  # Total free credits after login (0 credits for all registe
 USER_BONUS_AFTER_LOGIN = 27  # Additional credits after login (30 - max anon used)
 
 # =============================================================================
+# Public Gallery Stats
+# =============================================================================
+# Marketing-facing completed rig counter. This is intentionally independent from
+# the current tasks table because old task rows/cache may be purged for disk space.
+PUBLIC_COMPLETED_RIG_BASELINE = int(os.getenv("PUBLIC_COMPLETED_RIG_BASELINE", "7124"))
+
+# =============================================================================
 # Upload Settings
 # =============================================================================
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/var/autorig/uploads")

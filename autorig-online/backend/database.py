@@ -1,7 +1,7 @@
 """
 Database models and setup for AutoRig Online
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import json
 
@@ -248,9 +248,20 @@ class AdminOverlayCounters(Base):
     id = Column(Integer, primary_key=True, default=1)
     completed_count = Column(Integer, nullable=False, default=0)
     total_duration_seconds = Column(Float, nullable=False, default=0.0)
+    # Public all-time completed rig count; not reset by admin overlay metrics.
+    public_completed_total = Column(Integer, nullable=False, default=7124)
     # Upper bound for total size of static/tasks (GB); evict oldest cache dirs when exceeded
     task_cache_max_gb = Column(Float, nullable=False, default=30.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RigCompletionEvent(Base):
+    """Durable public completion event, independent from purged task rows/cache."""
+    __tablename__ = "rig_completion_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, unique=True, index=True)
+    completed_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 class YoutubeCredentials(Base):
@@ -569,7 +580,7 @@ _ADMIN_OVERLAY_ROW_ID = 1
 
 async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlayCounters:
     from sqlalchemy import select
-    from config import TASK_CACHE_MAX_GB
+    from config import PUBLIC_COMPLETED_RIG_BASELINE, TASK_CACHE_MAX_GB
 
     result = await db.execute(
         select(AdminOverlayCounters).where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
@@ -580,9 +591,14 @@ async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlay
             id=_ADMIN_OVERLAY_ROW_ID,
             completed_count=0,
             total_duration_seconds=0.0,
+            public_completed_total=int(PUBLIC_COMPLETED_RIG_BASELINE),
             task_cache_max_gb=float(TASK_CACHE_MAX_GB),
         )
         db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    elif int(row.public_completed_total or 0) < int(PUBLIC_COMPLETED_RIG_BASELINE):
+        row.public_completed_total = int(PUBLIC_COMPLETED_RIG_BASELINE)
         await db.commit()
         await db.refresh(row)
     return row
@@ -590,22 +606,77 @@ async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlay
 
 async def bump_admin_overlay_task_completed(db: AsyncSession, task: Task) -> None:
     """Счётчик периода: +1 done и сумма длительностей (created→updated)."""
-    from sqlalchemy import update
+    from sqlalchemy import select, update
 
     await get_or_create_admin_overlay_counters(db)
+    existing_event = await db.execute(
+        select(RigCompletionEvent.id).where(RigCompletionEvent.task_id == task.id)
+    )
+    is_new_public_event = existing_event.scalar_one_or_none() is None
+    if is_new_public_event:
+        db.add(RigCompletionEvent(task_id=task.id, completed_at=datetime.utcnow()))
+
     dur = 0.0
     if task.created_at and task.updated_at:
         dur = max(0.0, (task.updated_at - task.created_at).total_seconds())
+    values = {
+        "completed_count": AdminOverlayCounters.completed_count + 1,
+        "total_duration_seconds": AdminOverlayCounters.total_duration_seconds + dur,
+        "updated_at": datetime.utcnow(),
+    }
+    if is_new_public_event:
+        values["public_completed_total"] = AdminOverlayCounters.public_completed_total + 1
     await db.execute(
         update(AdminOverlayCounters)
         .where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
-        .values(
-            completed_count=AdminOverlayCounters.completed_count + 1,
-            total_duration_seconds=AdminOverlayCounters.total_duration_seconds + dur,
-            updated_at=datetime.utcnow(),
-        )
+        .values(**values)
     )
     await db.commit()
+
+
+async def get_public_gallery_stats(db: AsyncSession) -> dict:
+    """Public counters for the homepage/gallery, independent from visible gallery rows."""
+    from sqlalchemy import distinct, func, select
+    from config import PUBLIC_COMPLETED_RIG_BASELINE
+
+    row = await get_or_create_admin_overlay_counters(db)
+    completed_total = max(
+        int(PUBLIC_COMPLETED_RIG_BASELINE),
+        int(getattr(row, "public_completed_total", 0) or 0),
+    )
+    since = datetime.utcnow() - timedelta(hours=24)
+
+    event_result = await db.execute(
+        select(func.count(distinct(RigCompletionEvent.task_id))).where(
+            RigCompletionEvent.completed_at >= since
+        )
+    )
+    event_last_24h = int(event_result.scalar() or 0)
+
+    task_result = await db.execute(
+        select(func.count(Task.id)).where(
+            Task.status == "done",
+            Task.updated_at >= since,
+        )
+    )
+    task_last_24h = int(task_result.scalar() or 0)
+
+    telegram_last_24h = 0
+    try:
+        telegram_result = await db.execute(
+            select(func.count(distinct(TelegramNotification.event_key))).where(
+                TelegramNotification.event_type == "task_done",
+                TelegramNotification.created_at >= since,
+            )
+        )
+        telegram_last_24h = int(telegram_result.scalar() or 0)
+    except Exception:
+        telegram_last_24h = 0
+
+    return {
+        "completed_total": completed_total,
+        "completed_last_24h": max(event_last_24h, task_last_24h, telegram_last_24h),
+    }
 
 
 async def reset_admin_overlay_counters(db: AsyncSession) -> None:
@@ -679,6 +750,24 @@ async def init_db():
             await _try_add_column(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 30"
             )
+            await _try_add_column(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN public_completed_total INTEGER DEFAULT 7124"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS rig_completion_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id VARCHAR(36) NOT NULL UNIQUE,
+                        completed_at DATETIME NOT NULL
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_rig_completion_events_completed_at ON rig_completion_events (completed_at)"
+                )
+            except Exception:
+                pass
             try:
                 await conn.exec_driver_sql(
                     """
@@ -944,6 +1033,24 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 30"
             )
+            await _try_add_column_any(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS public_completed_total INTEGER NOT NULL DEFAULT 7124"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS rig_completion_events (
+                        id SERIAL PRIMARY KEY,
+                        task_id VARCHAR(36) NOT NULL UNIQUE,
+                        completed_at TIMESTAMP NOT NULL
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_rig_completion_events_completed_at ON rig_completion_events (completed_at)"
+                )
+            except Exception:
+                pass
             await _try_add_column_any(
                 "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS parent_id INTEGER"
             )

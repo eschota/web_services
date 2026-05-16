@@ -79,6 +79,7 @@ from database import (
     SupportChatMessage,
     reset_admin_overlay_counters,
     get_or_create_admin_overlay_counters,
+    get_public_gallery_stats,
 )
 from models import (
     TaskCreateResponse, TaskStatusResponse,
@@ -4239,6 +4240,7 @@ async def api_get_gallery(
     page: int = 1,
     per_page: int = 12,
     sort: str = "likes",
+    rig_type: str = "all",
     author: Optional[str] = None,  # Filter by author email
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -4260,18 +4262,22 @@ async def api_get_gallery(
         base_conditions.append(Task.owner_type == "user")
         base_conditions.append(Task.owner_id == author)
 
-    # Count total completed tasks with video (with author filter if present)
-    count_result = await db.execute(
-        select(func.count(distinct(func.coalesce(Task.input_url, Task.id)))).where(*base_conditions)
-    )
-    total = count_result.scalar() or 0
+    sort = (sort or "date").strip().lower()
+    if sort not in {"date", "likes", "sales"}:
+        sort = "date"
+    rig_filter = (rig_type or "all").strip().lower()
+    if rig_filter not in GALLERY_RIG_TYPES:
+        rig_filter = "all"
+    should_filter_rig = rig_filter != "all"
 
     # Get task IDs with like counts
     offset = (page - 1) * per_page
+    page_offset = 0 if should_filter_rig else offset
+    page_limit = None if should_filter_rig else per_page
 
     if sort == "likes":
         # Sort by like count (descending), then by date
-        result = await db.execute(
+        query = (
             select(
                 Task,
                 func.count(TaskLike.id).label('like_count')
@@ -4280,12 +4286,10 @@ async def api_get_gallery(
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc('like_count'), desc(Task.created_at))
-            .offset(offset)
-            .limit(per_page)
         )
     elif sort == "sales":
         # Sort by sales count (descending), then by date
-        result = await db.execute(
+        query = (
             select(
                 Task,
                 func.count(TaskLike.id).label('like_count'),
@@ -4296,12 +4300,10 @@ async def api_get_gallery(
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc('sales_count'), desc(Task.created_at))
-            .offset(offset)
-            .limit(per_page)
         )
     else:
         # Sort by date (newest first) - default
-        result = await db.execute(
+        query = (
             select(
                 Task,
                 func.count(TaskLike.id).label('like_count')
@@ -4310,11 +4312,24 @@ async def api_get_gallery(
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc(Task.created_at))
-            .offset(offset)
-            .limit(per_page)
         )
+
+    if page_offset:
+        query = query.offset(page_offset)
+    if page_limit is not None:
+        query = query.limit(page_limit)
     
+    result = await db.execute(query)
     rows = result.all()
+    if should_filter_rig:
+        rows = [row for row in rows if _gallery_rig_icon_key(row[0]) == rig_filter]
+        total = len(rows)
+        rows = rows[offset:offset + per_page]
+    else:
+        count_result = await db.execute(
+            select(func.count(distinct(func.coalesce(Task.input_url, Task.id)))).where(*base_conditions)
+        )
+        total = count_result.scalar() or 0
     task_ids = [row[0].id for row in rows]
     
     # Get user's likes if logged in
@@ -4350,8 +4365,11 @@ async def api_get_gallery(
         )
         author_nicknames = {r[0]: r[1] for r in users_result.all()}
     
-    items = [
-        GalleryItem(
+    items = []
+    for row in rows:
+        t = row[0]
+        like_count = row[1] if len(row) > 1 else 0
+        items.append(GalleryItem(
             task_id=t.id,
             video_url=f"/api/video/{t.id}",
             thumbnail_url=f"/thumb/{t.id}",
@@ -4363,9 +4381,8 @@ async def api_get_gallery(
             author_email=t.owner_id if t.owner_type == "user" else None,
             author_nickname=author_nicknames.get(t.owner_id) if t.owner_type == "user" else None,
             content_rating=getattr(t, "content_rating", None),
-        )
-        for t, like_count in rows
-    ]
+            rig_icon_key=_gallery_rig_icon_key(t),
+        ))
     
     has_more = (page * per_page) < total
     
@@ -4374,7 +4391,8 @@ async def api_get_gallery(
         total=total,
         page=page,
         per_page=per_page,
-        has_more=has_more
+        has_more=has_more,
+        stats=await get_public_gallery_stats(db),
     )
 
 
@@ -6358,6 +6376,43 @@ def _gallery_task_has_poster_sql():
     pats = ("_video_poster.jpg", "_poster.jpg", "icon.png", "Render_1_view.jpg")
     cols = (Task._ready_urls, Task._output_urls)
     return or_(*[func.instr(col, p) > 0 for col in cols for p in pats])
+
+
+GALLERY_RIG_TYPES = (
+    "humanoid",
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+)
+
+
+def _gallery_rig_icon_key(task: Task) -> str:
+    """Humanoid vs animal rig key for gallery UI icons and filters."""
+    input_type = str(getattr(task, "input_type", "") or "").strip().lower()
+    if input_type != "animal":
+        return "humanoid"
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+    except Exception:
+        settings = {}
+    det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+    if not isinstance(det, dict):
+        return "humanoid"
+    animal = str(
+        det.get("animal_type")
+        or det.get("animal_type_string")
+        or ""
+    ).strip().lower()
+    return animal if animal in GALLERY_RIG_TYPES and animal != "humanoid" else "humanoid"
 
 
 def _resolve_worker_base_from_task(task) -> Optional[str]:

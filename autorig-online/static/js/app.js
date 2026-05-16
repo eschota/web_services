@@ -606,23 +606,30 @@ const App = {
         console.log('[Gallery] Loading preview...');
 
         try {
-            // Homepage preview should show top liked by default
-            const resp = await fetch('/api/gallery?per_page=12&sort=likes&t=' + Date.now());
+            // Homepage preview follows the public gallery order.
+            const resp = await fetch('/api/gallery?per_page=12&sort=date&t=' + Date.now());
             const data = await resp.json();
             const items = (data && data.items) ? data.items : [];
             
             console.log('[Gallery] Received items:', items.length);
-            const total = (data && typeof data.total === 'number') ? data.total : null;
+            const stats = (data && data.stats) ? data.stats : null;
+            const completedTotal = stats && typeof stats.completed_total === 'number' ? stats.completed_total : null;
+            const completedLast24h = stats && typeof stats.completed_last_24h === 'number' ? stats.completed_last_24h : null;
 
             const viewAllLink = document.getElementById('gallery-view-all-link');
-            if (viewAllLink && total !== null) {
-                // Localized: "View all (N)"
-                if (typeof window.t === 'function') {
-                    viewAllLink.textContent = t('gallery_view_all', { count: total });
-                } else {
-                    viewAllLink.textContent = `View all (${total})`;
-                }
+            if (viewAllLink) {
+                viewAllLink.textContent = (typeof window.t === 'function') ? t('gallery_view_all_plain') : 'View all';
                 viewAllLink.href = '/gallery';
+            }
+            const subtitleEl = document.getElementById('gallery-preview-subtitle');
+            if (subtitleEl && completedTotal !== null && completedLast24h !== null) {
+                const formatCount = (value) => Number(value || 0).toLocaleString();
+                subtitleEl.textContent = (typeof window.t === 'function')
+                    ? t('gallery_home_stats', {
+                        total: formatCount(completedTotal),
+                        last24: formatCount(completedLast24h)
+                    })
+                    : `${formatCount(completedTotal)}+ rigs completed. ${formatCount(completedLast24h)} rigs completed in the last 24 hours.`;
             }
 
             if (!items.length) {
@@ -632,8 +639,8 @@ const App = {
 
             // Use TaskCard component if available
             if (typeof TaskCard !== 'undefined') {
-                grid.innerHTML = items.map(it => TaskCard.render(it, { currentSort: 'likes' })).join('');
-                TaskCard.attachHandlers(grid, { currentSort: 'likes' });
+                grid.innerHTML = items.map(it => TaskCard.render(it, { currentSort: 'date' })).join('');
+                TaskCard.attachHandlers(grid, { currentSort: 'date' });
             } else {
                 // Fallback if TaskCard not loaded
                 grid.innerHTML = items.map(it => {

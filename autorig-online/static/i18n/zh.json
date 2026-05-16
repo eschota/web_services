@@ -2,10 +2,8 @@
     "site_name": "AutoRig Online",
     "hero_title": "自动3D模型绑定和动画",
     "hero_subtitle": "上传您的GLB、FBX或OBJ模型，并在一分钟内获得50+动画。导出到Unity、Unreal Engine、3ds Max、Maya、Cinema 4D。",
-
     "tab_upload": "上传文件",
     "tab_link": "粘贴链接",
-
     "upload_title": "将3D模型拖拽到此处",
     "upload_subtitle": "GLB、FBX、OBJ最高100MB",
     "upload_selected": "已选择文件",
@@ -17,33 +15,25 @@
     "upload_busy_tip_2": "双腿站立宽度约与肩同宽。",
     "upload_busy_tip_3": "网格拓扑应足以在动画关键部位（肘、膝、手指等）良好弯曲变形。",
     "upload_busy_tip_4": "绑定通常约需 5 分钟或更长，视模型复杂度而定。请耐心等待并放松，进入任务页后流程会自动继续。",
-
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "模型URL",
-
     "tpose_notice": "为了获得最佳结果，模型应处于T-pose",
-
     "btn_start": "开始绑定",
     "btn_login": "通过Google登录",
     "btn_login_continue": "登录以继续",
-
     "feature_fast_title": "快速处理",
     "feature_fast_desc": "只需几分钟即可获得rigged模型",
     "feature_animations_title": "50+动画",
     "feature_animations_desc": "为您的角色预配置动画",
     "feature_formats_title": "多种格式",
     "feature_formats_desc": "支持GLB、FBX和OBJ模型",
-
     "queue_title": "队列状态",
     "queue_active": "活跃任务",
     "queue_waiting": "等待中",
     "queue_servers": "服务器",
-
     "history_title": "您的最近任务",
-
     "credits_free": "剩余免费转换",
     "credits_login_hint": "登录获取7次额外免费转换",
-
     "task_free3d_similar_title": "相似3D模型",
     "task_free3d_similar_subtitle": "基于海报标题与关键词的语义搜索（Free3D）",
     "task_free3d_loading": "正在加载相似模型…",
@@ -58,7 +48,6 @@
     "task_meta_poster_err_classify": "此海报的安全分析失败。",
     "task_meta_poster_err_openai": "无法生成标题和关键词（AI 步骤失败）。",
     "task_meta_poster_err_pipeline": "海报处理流程异常，请刷新页面重试。",
-
     "footer_text": "AutoRig Online © 2026",
     "footer_tagline": "AI驱动的自动3D角色绑定。上传您的模型，几分钟内即可获得带动画的绑定模型。",
     "footer_services": "服务",
@@ -79,42 +68,31 @@
     "footer_copyright": "© 2026 AutoRig Online. 保留所有权利。",
     "footer_terms": "使用条款",
     "footer_user_agreement": "用户协议",
-
     "guides_title": "指南和教程",
     "guides_intro": "了解更多关于角色绑定、Unity/Unreal工作流程和最佳实践的信息",
-
     "guide_mixamo_title": "Mixamo替代方案",
     "guide_mixamo_desc": "作为Mixamo替代方案的专业自动绑定服务。获得带有50+动画的rigged角色。",
-
     "guide_unity_title": "为Unity绑定GLB",
     "guide_unity_desc": "为Unity Mecanim绑定GLB角色的完整工作流程。逐步Unity导入指南。",
-
     "guide_unreal_title": "为Unreal绑定FBX",
     "guide_unreal_desc": "如何为Unreal Engine准备和绑定FBX角色。Skeletal Mesh导入教程。",
-
     "guide_tpose_title": "T-Pose vs A-Pose",
     "guide_tpose_desc": "角色绑定中T-pose vs A-pose的比较。哪种姿势更适合自动绑定？",
-
     "guide_formats_title": "GLB vs FBX",
     "guide_formats_desc": "角色绑定和游戏开发的GLB vs FBX格式的完整比较。",
-
     "guide_obj_title": "自动绑定OBJ",
     "guide_obj_desc": "如何自动绑定OBJ角色。什么有效，什么无效，以及准备提示。",
-
     "guide_retargeting_title": "动画重定向",
     "guide_retargeting_desc": "Unity和Unreal动画重定向指南。自动绑定角色的简单管道。",
     "guide_face_rig_title": "面部绑定与动画",
     "guide_face_rig_desc": "头部分析如何生成面部柔体遮罩与关键点，用于动画与口型同步。",
-
     "read_guide": "阅读指南 →",
-
     "nav_home": "首页",
     "nav_guides": "指南",
     "nav_gallery": "画廊",
     "nav_dashboard": "控制台",
     "nav_buy": "购买",
     "nav_api": "API",
-
     "dashboard_page_title": "控制台 | AutoRig.online",
     "dashboard_heading": "控制台",
     "dashboard_notifications_title": "通知",
@@ -128,7 +106,6 @@
     "dashboard_save_success_on": "已保存。任务完成时将发送邮件通知。",
     "dashboard_save_success_off": "已保存。将不再发送任务完成邮件。",
     "dashboard_save_success_generic": "设置已保存。",
-
     "free3d_search_label": "搜索免费 3D 模型",
     "free3d_cat_characters": "角色",
     "free3d_cat_animals": "动物",
@@ -196,7 +173,6 @@
     "task_progress_error": "错误",
     "admin_input_url": "输入 URL (管理员)",
     "admin_worker_page": "🔧 工作节点进度页面",
-
     "free_title": "免费",
     "free_greeting": "嘿，3D艺术家！我和朋友凭着热情做这个项目已经一年多了，这里的一切都是免费的！",
     "free_message": "我想把RIG做得更酷，我也知道该怎么做，但这需要钱 :) 买啤酒和饼干！所以如果你有几块钱闲钱，请购买积分吧！",
@@ -211,7 +187,6 @@
     "feedback_loading": "正在加载反馈...",
     "feedback_empty": "还没有反馈。成为第一个吧！",
     "feedback_success": "感谢您的反馈！我们会认真阅读的（真的真的）。",
-
     "api_access_title": "API 访问",
     "api_access_desc": "生成 API 密钥，以便从外部工具调用 AutoRig REST API。",
     "api_access_generate": "生成 API 密钥",
@@ -226,7 +201,6 @@
     "api_access_revoke_confirm": "撤销此 API 密钥？",
     "api_access_copied": "已复制",
     "btn_copy": "复制",
-
     "developers_page_title": "开发者 API | AutoRig.online",
     "developers_heading": "开发者 API",
     "developers_intro": "通过 AutoRig HTTP API 从链接或上传创建绑骨任务，轮询直到完成，然后通过固定 URL 下载预处理的 GLB、动画包及相关文件。",
@@ -247,7 +221,6 @@
     "developers_examples_title": "示例",
     "developers_examples_note": "将 TASK_ID 与 YOUR_API_KEY 替换为实际值。使用链接输入时，模型 URL 需公开可访问。",
     "developers_agent_hint": "面向自动化代理的机器可读 API 摘要位于页面 JSON 中。",
-
     "support_chat_title": "客服",
     "support_chat_disclaimer": "您正在与真人运营者（Escho）对话 — 回复来自人工，不是 AI 或自动脚本。",
     "support_chat_placeholder": "输入消息…",
@@ -266,5 +239,23 @@
     "support_chat_error_api_connect": "无法连接客服接口（路由或后端未更新）。请刷新页面并确认已将 /api/support-chat/* 转发到 FastAPI。",
     "support_chat_error_session_missing": "会话已失效 — 请重新打开聊天。",
     "support_chat_arialabel_open": "打开客服聊天",
-    "support_chat_arialabel_panel": "客服聊天窗口"
+    "support_chat_arialabel_panel": "客服聊天窗口",
+    "gallery_subtitle": "已完成 7,124+ 个绑定。正在加载过去 24 小时数据...",
+    "gallery_page_subtitle": "真实完成任务。按绑定类型浏览最新结果。",
+    "gallery_home_stats": "已完成 {total}+ 个绑定。过去 24 小时完成 {last24} 个。",
+    "gallery_rig_type_label": "绑定类型：",
+    "gallery_rig_type_all": "所有绑定类型",
+    "gallery_rig_type_humanoid": "人形",
+    "gallery_rig_type_dog": "狗",
+    "gallery_rig_type_bear": "熊",
+    "gallery_rig_type_cat": "猫",
+    "gallery_rig_type_cow": "牛",
+    "gallery_rig_type_deer": "鹿",
+    "gallery_rig_type_elephant": "象",
+    "gallery_rig_type_giraffe": "长颈鹿",
+    "gallery_rig_type_horse": "马",
+    "gallery_rig_type_mouse": "鼠",
+    "gallery_rig_type_pig": "猪",
+    "gallery_rig_type_rabbit": "兔",
+    "gallery_rig_type_turtle": "龟"
 }

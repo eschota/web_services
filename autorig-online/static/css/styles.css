@@ -1418,6 +1418,32 @@ h3 { font-size: 1.25rem; }
     z-index: 10;
 }
 
+.tc-rig-icon,
+.gallery-rig-icon {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    height: 80px;
+    padding: 8px;
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    pointer-events: none;
+}
+
+.tc-rig-icon img,
+.gallery-rig-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
 .tc-badges {
     position: absolute;
     top: 12px;
@@ -1426,41 +1452,6 @@ h3 { font-size: 1.25rem; }
     flex-direction: column;
     gap: 8px;
     z-index: 10;
-}
-
-.tc-like {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 6px 12px;
-    border-radius: 20px;
-    color: #fff;
-    cursor: pointer;
-    transition: all var(--transition);
-    font-family: inherit;
-}
-
-.tc-like:hover {
-    background: rgba(0, 0, 0, 0.7);
-    border-color: var(--accent);
-}
-
-.tc-like.liked {
-    background: rgba(239, 68, 68, 0.2);
-    border-color: rgba(239, 68, 68, 0.5);
-    color: #ef4444;
-}
-
-.tc-like.liked span:first-child {
-    color: #ef4444;
-}
-
-.tc-like-count {
-    font-size: 0.85rem;
-    font-weight: 600;
 }
 
 .tc-badge {
@@ -1558,45 +1549,6 @@ h3 { font-size: 1.25rem; }
 .gallery-time {
     color: var(--text-secondary);
     font-size: 0.875rem;
-}
-
-.like-btn {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.35rem 0.55rem;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.12);
-    background: rgba(0,0,0,0.35);
-    color: #fff;
-    cursor: pointer;
-    user-select: none;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-}
-
-.like-btn:hover {
-    background: rgba(0,0,0,0.5);
-}
-
-.like-btn.liked {
-    border-color: rgba(239, 68, 68, 0.45);
-    background: rgba(239, 68, 68, 0.22);
-}
-
-.like-heart {
-    font-size: 0.9rem;
-    line-height: 1;
-}
-
-.like-count {
-    font-size: 0.85rem;
-    font-weight: 600;
-    line-height: 1;
 }
 
 .gallery-pagination {

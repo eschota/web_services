@@ -2,10 +2,8 @@
     "site_name": "AutoRig Online",
     "hero_title": "स्वचालित 3D मॉडल रिगिंग और एनिमेशन",
     "hero_subtitle": "अपने GLB, FBX या OBJ मॉडल अपलोड करें और उन्हें 50+ एनिमेशन के साथ मिनटों में प्राप्त करें। Unity, Unreal Engine, 3ds Max, Maya, Cinema 4D में निर्यात करें।",
-
     "tab_upload": "फाइल अपलोड करें",
     "tab_link": "लिंक पेस्ट करें",
-
     "upload_title": "3D मॉडल को यहां खींचें",
     "upload_subtitle": "GLB, FBX, OBJ अधिकतम 100MB",
     "upload_selected": "चयनित फाइल",
@@ -17,33 +15,25 @@
     "upload_busy_tip_2": "पैर कंधों जितनी चौड़ाई पर खड़े हों।",
     "upload_busy_tip_3": "मेश टोपोलॉजी एनीमेशन के मोड़ वाले हिस्सों—कोहनी, घुटने, उँगलियाँ आदि—के लिए पर्याप्त होनी चाहिए।",
     "upload_busy_tip_4": "रिगिंग में आमतौर पर लगभग 5 मिनट या उससे अधिक लग सकते हैं, मॉडल की जटिलता पर निर्भर करके। धैर्य रखें और आराम करें—टास्क पेज पर आने के बाद बाकी काम अपने आप चलेगा।",
-
     "link_placeholder": "https://example.com/model.glb",
     "link_label": "मॉडल URL",
-
     "tpose_notice": "सर्वोत्तम परिणामों के लिए, मॉडल T-pose में होना चाहिए",
-
     "btn_start": "रिगिंग शुरू करें",
     "btn_login": "Google के माध्यम से लॉगिन करें",
     "btn_login_continue": "जारी रखने के लिए लॉगिन करें",
-
     "feature_fast_title": "तेज प्रोसेसिंग",
     "feature_fast_desc": "कुछ मिनटों में अपना rigged मॉडल प्राप्त करें",
     "feature_animations_title": "50+ एनिमेशन",
     "feature_animations_desc": "आपके कैरेक्टर के लिए पूर्व-कॉन्फ़िगर किए गए एनिमेशन",
     "feature_formats_title": "एकाधिक फॉर्मेट",
     "feature_formats_desc": "GLB, FBX और OBJ मॉडल का समर्थन",
-
     "queue_title": "कतार स्थिति",
     "queue_active": "सक्रिय कार्य",
     "queue_waiting": "प्रतीक्षा में",
     "queue_servers": "सर्वर",
-
     "history_title": "आपके हाल के कार्य",
-
     "credits_free": "मुफ्त रूपांतरण शेष",
     "credits_login_hint": "7 और मुफ्त रूपांतरण के लिए साइन इन करें",
-
     "task_free3d_similar_title": "समान 3D मॉडल",
     "task_free3d_similar_subtitle": "पोस्टर शीर्षक + कीवर्ड से सेमांटिक खोज (Free3D)",
     "task_free3d_loading": "समान मॉडल लोड हो रहे हैं…",
@@ -58,7 +48,6 @@
     "task_meta_poster_err_classify": "इस पोस्टर के लिए सुरक्षा विश्लेषण विफल।",
     "task_meta_poster_err_openai": "शीर्षक और कीवर्ड नहीं बन सके (AI चरण विफल)।",
     "task_meta_poster_err_pipeline": "पोस्टर पाइपलाइन अप्रत्याशित रूप से विफल। पृष्ठ रीफ़्रेश करें।",
-
     "footer_text": "AutoRig Online © 2026",
     "footer_tagline": "AI-संचालित स्वचालित 3D कैरेक्टर रिगिंग। अपना मॉडल अपलोड करें और कुछ ही मिनटों में एनिमेशन के साथ रिग्ड मॉडल प्राप्त करें।",
     "footer_services": "सेवाएं",
@@ -79,42 +68,31 @@
     "footer_copyright": "© 2026 AutoRig Online. सर्वाधिकार सुरक्षित।",
     "footer_terms": "उपयोग की शर्तें",
     "footer_user_agreement": "उपयोगकर्ता समझौता",
-
     "guides_title": "गाइड और ट्यूटोरियल",
     "guides_intro": "कैरेक्टर रिगिंग, Unity/Unreal वर्कफ्लो और बेस्ट प्रैक्टिस के बारे में और जानें",
-
     "guide_mixamo_title": "Mixamo विकल्प",
     "guide_mixamo_desc": "Mixamo के विकल्प के रूप में पेशेवर ऑटो रिगिंग सेवा। 50+ एनिमेशन के साथ rigged कैरेक्टर प्राप्त करें।",
-
     "guide_unity_title": "Unity के लिए GLB रिग करें",
     "guide_unity_desc": "Unity Mecanim के लिए GLB कैरेक्टर रिग करने का पूरा वर्कफ्लो। Unity इंपोर्ट के लिए स्टेप-बाय-स्टेप गाइड।",
-
     "guide_unreal_title": "Unreal के लिए FBX रिग करें",
     "guide_unreal_desc": "Unreal Engine के लिए FBX कैरेक्टर तैयार और रिग कैसे करें। Skeletal Mesh इंपोर्ट ट्यूटोरियल।",
-
     "guide_tpose_title": "T-Pose vs A-Pose",
     "guide_tpose_desc": "कैरेक्टर रिगिंग के लिए T-pose vs A-pose की तुलना। ऑटो-रिगिंग के लिए कौन सी पोज बेहतर काम करती है?",
-
     "guide_formats_title": "GLB vs FBX",
     "guide_formats_desc": "कैरेक्टर रिगिंग और गेम डेवलपमेंट के लिए GLB vs FBX फॉर्मेट की पूरी तुलना।",
-
     "guide_obj_title": "OBJ ऑटो रिग करें",
     "guide_obj_desc": "OBJ कैरेक्टर ऑटो रिग कैसे करें। क्या काम करता है, क्या टूटता है, और तैयारी टिप्स।",
-
     "guide_retargeting_title": "एनिमेशन रिटारगेटिंग",
     "guide_retargeting_desc": "Unity और Unreal एनिमेशन रिटारगेटिंग गाइड। ऑटो-रिग्ड कैरेक्टर के लिए साधारण पाइपलाइन।",
     "guide_face_rig_title": "फेस रिग और एनीमेशन",
     "guide_face_rig_desc": "हेड विश्लेषण चेहरे के सॉफ्ट मास्क और लैंडमार्क कैसे बनाता है—एनीमेशन और लिप सिंक के लिए।",
-
     "read_guide": "गाइड पढ़ें →",
-
     "nav_home": "होम",
     "nav_guides": "गाइड",
     "nav_gallery": "गैलरी",
     "nav_dashboard": "डैशबोर्ड",
     "nav_buy": "खरीदें",
     "nav_api": "API",
-
     "dashboard_page_title": "डैशबोर्ड | AutoRig.online",
     "dashboard_heading": "डैशबोर्ड",
     "dashboard_notifications_title": "सूचनाएँ",
@@ -128,7 +106,6 @@
     "dashboard_save_success_on": "सहेजा गया। रिगिंग टास्क तैयार होने पर ईमेल मिलेंगे।",
     "dashboard_save_success_off": "सहेजा गया। टास्क-रेडी ईमेल नहीं मिलेंगे।",
     "dashboard_save_success_generic": "सेटिंग सहेजी गईं।",
-
     "free3d_search_label": "मुफ्त 3D मॉडल खोजें",
     "free3d_cat_characters": "कैरेक्टर",
     "free3d_cat_animals": "जानवर",
@@ -196,7 +173,6 @@
     "task_progress_error": "त्रुटि",
     "admin_input_url": "इनपुट URL (एडमिन)",
     "admin_worker_page": " वर्कर प्रगति पेज",
-
     "free_title": "मुफ्त",
     "free_greeting": "नमस्ते 3D कलाकार! मैं एक साल से अधिक समय से उत्साह के साथ एक दोस्त के साथ यह प्रोजेक्ट कर रहा हूं और यहां सब कुछ मुफ्त है!",
     "free_message": "मैं RIG को और भी शानदार बनाना चाहता हूं और मुझे पता है कि कैसे, लेकिन इसके लिए पैसे चाहिए :) बीयर और कुकीज़ के लिए! इसलिए यदि आपके पास कुछ अतिरिक्त डॉलर हैं, तो कृपया क्रेडिट खरीदें!",
@@ -211,7 +187,6 @@
     "feedback_loading": "फीडबैक लोड हो रहा है...",
     "feedback_empty": "अभी तक कोई फीडबैक नहीं है। पहले बनें!",
     "feedback_success": "फीडबैक के लिए धन्यवाद! हम सब कुछ पढ़ेंगे (ईमानदारी से)।",
-
     "api_access_title": "API एक्सेस",
     "api_access_desc": "बाहरी टूल से AutoRig REST API उपयोग करने के लिए API कुंजी बनाएं।",
     "api_access_generate": "API कुंजी बनाएं",
@@ -226,7 +201,6 @@
     "api_access_revoke_confirm": "यह API कुंजी रद्द करें?",
     "api_access_copied": "कॉपी हो गया",
     "btn_copy": "कॉपी",
-
     "developers_page_title": "डेवलपर API | AutoRig.online",
     "developers_heading": "डेवलपर API",
     "developers_intro": "AutoRig HTTP API से लिंक या अपलोड से रिगिंग जॉब बनाएं, पूर्ण होने तक पोल करें, फिर तैयार GLB, एनिमेशन पैक और अन्य फाइलें स्थिर URL से डाउनलोड करें।",
@@ -247,7 +221,6 @@
     "developers_examples_title": "उदाहरण",
     "developers_examples_note": "TASK_ID और YOUR_API_KEY बदलें। लिंक इनपुट के लिए सार्वजनिक URL उपयोग करें।",
     "developers_agent_hint": "एजेंट्स के लिए JSON ब्रीफ पेज के अंत में है।",
-
     "support_chat_title": "सहायता",
     "support_chat_disclaimer": "आप एक जीवित ऑपरेटर (Escho) से चैट कर रहे हैं — जवाब मानव देते हैं, AI या स्वचालित बॉट नहीं।",
     "support_chat_placeholder": "संदेश लिखें…",
@@ -266,5 +239,23 @@
     "support_chat_error_api_connect": "सहायता API नहीं मिल रहा (रूटिंग या पुराना सर्वर)। पृष्ठ रीफ़्रेश करें; /api/support-chat/* को FastAPI पर प्रॉक्सी करना चाहिए।",
     "support_chat_error_session_missing": "सत्र समाप्त — चैट दोबारा खोलें।",
     "support_chat_arialabel_open": "सहायता चैट खोलें",
-    "support_chat_arialabel_panel": "सहायता चैट विंडो"
+    "support_chat_arialabel_panel": "सहायता चैट विंडो",
+    "gallery_subtitle": "7,124+ rigs completed. Loading last 24 hours...",
+    "gallery_page_subtitle": "Real completed tasks. Browse newest results by rig type.",
+    "gallery_home_stats": "{total}+ rigs completed. {last24} rigs completed in the last 24 hours.",
+    "gallery_rig_type_label": "Rig type:",
+    "gallery_rig_type_all": "All rig types",
+    "gallery_rig_type_humanoid": "Humanoid",
+    "gallery_rig_type_dog": "Dog",
+    "gallery_rig_type_bear": "Bear",
+    "gallery_rig_type_cat": "Cat",
+    "gallery_rig_type_cow": "Cow",
+    "gallery_rig_type_deer": "Deer",
+    "gallery_rig_type_elephant": "Elephant",
+    "gallery_rig_type_giraffe": "Giraffe",
+    "gallery_rig_type_horse": "Horse",
+    "gallery_rig_type_mouse": "Mouse",
+    "gallery_rig_type_pig": "Pig",
+    "gallery_rig_type_rabbit": "Rabbit",
+    "gallery_rig_type_turtle": "Turtle"
 }
