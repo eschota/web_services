@@ -605,6 +605,59 @@ h3 { font-size: 1.25rem; }
     overflow: hidden;
 }
 
+.demo-youtube-header {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.85rem 0.95rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.demo-youtube-header:hover {
+    color: var(--text-primary);
+    border-color: rgba(255, 0, 51, 0.42);
+}
+
+.demo-youtube-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 34px;
+    flex: 0 0 46px;
+    border-radius: 8px;
+    background: rgba(255, 0, 51, 0.1);
+    color: #fff;
+}
+
+.demo-youtube-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.demo-youtube-copy strong {
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.demo-youtube-copy span {
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+}
+
+.demo-youtube-arrow {
+    margin-left: auto;
+    color: #ff4668;
+    font-size: 1.25rem;
+    font-weight: 800;
+}
+
 .demo-video-link {
     display: block;
     flex: 1 1 auto;
@@ -670,6 +723,24 @@ h3 { font-size: 1.25rem; }
     opacity: 0;
 }
 
+.demo-youtube-chip {
+    position: absolute;
+    right: 0.85rem;
+    bottom: 0.85rem;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.42rem 0.58rem;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.68);
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
 .product-hunt-badge {
     display: flex;
     align-items: center;
@@ -723,6 +794,91 @@ h3 { font-size: 1.25rem; }
     font-size: 1.25rem;
     font-weight: 800;
     line-height: 1;
+}
+
+.home-pipeline {
+    margin-top: 2rem;
+}
+
+.home-pipeline-panel {
+    padding: clamp(1.5rem, 3vw, 2.25rem);
+    border: 1px solid rgba(var(--accent-rgb), 0.34);
+    background:
+        radial-gradient(circle at 8% 0%, rgba(var(--accent-rgb), 0.18), transparent 30%),
+        rgba(255, 255, 255, 0.045);
+}
+
+.home-pipeline-kicker {
+    margin: 0 0 0.65rem;
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 850;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.home-pipeline-title {
+    max-width: 860px;
+    margin: 0;
+    font-size: clamp(1.9rem, 4vw, 3rem);
+    line-height: 1.08;
+    letter-spacing: 0;
+}
+
+.home-pipeline-lead {
+    max-width: 900px;
+    margin: 1rem 0 0;
+    color: var(--text-secondary);
+    font-size: 1.04rem;
+    line-height: 1.65;
+}
+
+.home-pipeline-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.1rem;
+}
+
+.home-pipeline-tags span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0.38rem 0.62rem;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.home-pipeline-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1.35rem;
+}
+
+.home-pipeline-feature {
+    min-width: 0;
+    padding: 1.1rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.14);
+}
+
+.home-pipeline-feature h3 {
+    margin: 0;
+    font-size: 1.06rem;
+    line-height: 1.25;
+}
+
+.home-pipeline-feature p {
+    margin: 0.6rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.94rem;
+    line-height: 1.55;
 }
 
 .convert-form-card.form-is-busy:hover {
@@ -2163,6 +2319,22 @@ h3 { font-size: 1.25rem; }
         min-height: min(520px, 118vw);
     }
 
+    .demo-youtube-header {
+        padding: 0.78rem 0.82rem;
+    }
+
+    .home-pipeline-panel {
+        padding: 1.35rem;
+    }
+
+    .home-pipeline-title {
+        font-size: 1.85rem;
+    }
+
+    .home-pipeline-grid {
+        grid-template-columns: 1fr;
+    }
+
     .card {
         padding: 1.15rem;
     }
@@ -2278,6 +2450,25 @@ h3 { font-size: 1.25rem; }
     .product-hunt-badge {
         min-height: 66px;
         padding: 0.7rem 0.8rem;
+    }
+
+    .demo-youtube-copy strong {
+        font-size: 0.95rem;
+    }
+
+    .demo-youtube-copy span {
+        font-size: 0.78rem;
+    }
+
+    .demo-youtube-icon {
+        width: 42px;
+        height: 32px;
+        flex-basis: 42px;
+    }
+
+    .demo-youtube-chip {
+        right: 0.65rem;
+        bottom: 0.65rem;
     }
 
     .gallery-controls,
