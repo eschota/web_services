@@ -1190,7 +1190,23 @@
         }
 
         #model-viewer-container {
-            min-height: clamp(220px, 48vw, 620px);
+            min-height: 0;
+        }
+
+        #model-viewer {
+            position: relative;
+            z-index: 1;
+            min-height: 100%;
+            background: transparent !important;
+        }
+
+        #model-viewer canvas {
+            position: relative;
+            z-index: 1;
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 12px;
         }
 
         #admin-input-url-row summary {
@@ -2462,7 +2478,7 @@
                         <div id="model-viewer-backdrop" class="model-viewer-backdrop" aria-hidden="true"></div>
                         <div class="boot-skeleton-overlay" data-label="Preparing 3D preview..."></div>
                         <!-- Three.js Canvas Target -->
-                        <div id="model-viewer" style="width: 100%; height: 100%; border-radius: 12px; background: #000; border: 1px solid rgba(255,255,255,0.08); overflow: hidden;"></div>
+                        <div id="model-viewer" style="width: 100%; height: 100%; border-radius: 12px; background: transparent; border: 1px solid rgba(255,255,255,0.08); overflow: hidden;"></div>
                         
                         <!-- Viewer Overlay UI (above canvas) -->
                         <div id="viewer-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; border-radius: 12px;">
@@ -8234,8 +8250,15 @@
                         }
                         // Save camera position separately - will be applied after model loads
                         if (settings.camera && settings.camera.position && settings.camera.target) {
+                            viewerState.camera = {
+                                ...viewerState.camera,
+                                ...settings.camera,
+                                position: { ...settings.camera.position },
+                                target: { ...settings.camera.target }
+                            };
                             savedCameraPosition = { ...settings.camera.position };
                             savedCameraTarget = { ...settings.camera.target };
+                            savedCameraBoundsSignature = String(settings.camera.model_bounds_signature || settings.camera.bounds_signature || '').trim() || null;
                             window.taskDbg('[Viewer] Saved camera position for later:', savedCameraPosition);
                         }
                         
@@ -8298,6 +8321,8 @@
             let cameraInitialized = false; // Flag to prevent camera sync until loaded from server
             let savedCameraPosition = null; // Store camera position from server until model loads
             let savedCameraTarget = null;
+            let savedCameraBoundsSignature = null;
+            let pendingThemeCameraHint = null;
 
 
             // ============================================================
@@ -8487,23 +8512,22 @@
                     z: _themeNumber(target.z, NaN),
                 };
                 if (!Number.isFinite(nextPos.x + nextPos.y + nextPos.z + nextTarget.x + nextTarget.y + nextTarget.z)) return false;
-                savedCameraPosition = nextPos;
-                savedCameraTarget = nextTarget;
+                pendingThemeCameraHint = {
+                    position: nextPos,
+                    target: nextTarget,
+                    fov: Number.isFinite(Number(cam.fov)) ? Number(cam.fov) : null,
+                    reason,
+                };
                 viewerState.camera = viewerState.camera || {};
-                viewerState.camera.position = { ...nextPos };
-                viewerState.camera.target = { ...nextTarget };
-                if (camera && controls) {
-                    camera.position.set(nextPos.x, nextPos.y, nextPos.z);
-                    controls.target.set(nextTarget.x, nextTarget.y, nextTarget.z);
-                    if (Number.isFinite(Number(cam.fov)) && camera.fov !== undefined) {
-                        camera.fov = Number(cam.fov);
-                        camera.updateProjectionMatrix?.();
-                        viewerState.camera.fov = Number(cam.fov);
-                    }
-                    controls.update?.();
-                    viewerControls?.skipNextFocusOnModel?.();
+                if (pendingThemeCameraHint.fov && camera && camera.fov !== undefined) {
+                    camera.fov = pendingThemeCameraHint.fov;
+                    camera.updateProjectionMatrix?.();
+                    viewerState.camera.fov = pendingThemeCameraHint.fov;
                 }
-                window.taskDbg?.('[ViewerTheme] camera applied', { reason, camera: viewerState.camera });
+                if (camera && controls && currentModel) {
+                    fitCameraToModelBounds(currentModel, reason || 'theme camera', { force: true });
+                }
+                window.taskDbg?.('[ViewerTheme] camera hint stored', { reason, cameraHint: pendingThemeCameraHint });
                 return true;
             }
 
@@ -8706,6 +8730,13 @@
                     // Update viewerState with restored values
                     viewerState.camera.position = { ...savedCameraPosition };
                     viewerState.camera.target = { ...savedCameraTarget };
+                    if (savedCameraBoundsSignature) {
+                        viewerState.camera.model_bounds_signature = savedCameraBoundsSignature;
+                    }
+                    if (Number.isFinite(Number(viewerState.camera.fov)) && camera.fov !== undefined) {
+                        camera.fov = Number(viewerState.camera.fov);
+                        camera.updateProjectionMatrix?.();
+                    }
                     
                     // Tell ViewerControls to skip next focus (will be called by setRigType)
                     if (viewerControls) {
@@ -8713,6 +8744,7 @@
                     }
                     
                     window.taskDbg('[Viewer] Camera restored successfully');
+                    publishMainViewerDebugState();
                 } else {
                     window.taskDbg('[Viewer] No saved camera position, using current/default');
                 }
@@ -9208,6 +9240,160 @@
                 }
             }
 
+            function roundViewerDebugNumber(value, digits = 4) {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return null;
+                const scale = Math.pow(10, digits);
+                return Math.round(n * scale) / scale;
+            }
+
+            function vectorToDebugObject(vec) {
+                if (!vec) return null;
+                return {
+                    x: roundViewerDebugNumber(vec.x),
+                    y: roundViewerDebugNumber(vec.y),
+                    z: roundViewerDebugNumber(vec.z),
+                };
+            }
+
+            function countModelGeometryStats(model) {
+                const stats = { meshCount: 0, vertexCount: 0 };
+                if (!model?.traverse) return stats;
+                model.traverse((node) => {
+                    if (!node?.isMesh) return;
+                    stats.meshCount += 1;
+                    const pos = node.geometry?.attributes?.position;
+                    if (pos?.count) stats.vertexCount += Number(pos.count || 0);
+                });
+                return stats;
+            }
+
+            function getModelBoundsInfo(model) {
+                if (!model || !THREE) return null;
+                model.updateMatrixWorld?.(true);
+                const box = new THREE.Box3().setFromObject(model);
+                const finiteBox = Number.isFinite(box.min.x + box.min.y + box.min.z + box.max.x + box.max.y + box.max.z);
+                if (!finiteBox) return null;
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+                const radius = Math.max(size.length() / 2, maxDim / 2, 0.05);
+                const stats = countModelGeometryStats(model);
+                return { box, center, size, maxDim, radius, ...stats };
+            }
+
+            function getModelBoundsSignature(boundsInfo) {
+                if (!boundsInfo?.size) return '';
+                return [
+                    boundsInfo.size.x,
+                    boundsInfo.size.y,
+                    boundsInfo.size.z,
+                ].map((value) => roundViewerDebugNumber(Math.max(0, Number(value) || 0), 4).toFixed(4)).join('x');
+            }
+
+            function isSavedCameraUsableForBounds(boundsInfo) {
+                if (!savedCameraPosition || !savedCameraTarget || !boundsInfo) return false;
+                const currentSignature = getModelBoundsSignature(boundsInfo);
+                const savedSignature = String(savedCameraBoundsSignature || viewerState.camera?.model_bounds_signature || '').trim();
+                return !!currentSignature && !!savedSignature && currentSignature === savedSignature;
+            }
+
+            function getCameraHintDirection() {
+                if (pendingThemeCameraHint?.position && pendingThemeCameraHint?.target && THREE) {
+                    const pos = pendingThemeCameraHint.position;
+                    const target = pendingThemeCameraHint.target;
+                    const direction = new THREE.Vector3(
+                        Number(pos.x) - Number(target.x),
+                        Number(pos.y) - Number(target.y),
+                        Number(pos.z) - Number(target.z)
+                    );
+                    if (direction.lengthSq() > 0.000001) return direction.normalize();
+                }
+                return new THREE.Vector3(0.65, 0.42, 0.65).normalize();
+            }
+
+            function fitCameraToModelBounds(model, reason = 'model load', options = {}) {
+                if (!model || !camera || !controls || !THREE) return false;
+                const boundsInfo = options.boundsInfo || getModelBoundsInfo(model);
+                if (!boundsInfo) return false;
+
+                const fovHint = pendingThemeCameraHint?.fov || viewerState.camera?.fov || camera.fov || 45;
+                const nextFov = Math.min(80, Math.max(18, Number(fovHint) || 45));
+                camera.fov = nextFov;
+                const hostWidth = Math.max(1, host?.clientWidth || renderer?.domElement?.clientWidth || 1280);
+                const hostHeight = Math.max(1, host?.clientHeight || renderer?.domElement?.clientHeight || Math.round(hostWidth * 9 / 16));
+                camera.aspect = hostWidth / hostHeight;
+                camera.updateProjectionMatrix?.();
+
+                const size = boundsInfo.size;
+                const center = boundsInfo.center.clone();
+                const target = center.clone();
+                target.y = Math.max(center.y, boundsInfo.box.min.y + size.y * 0.45);
+
+                const fovRad = THREE.MathUtils.degToRad(nextFov);
+                const halfTan = Math.tan(fovRad / 2);
+                const hFov = 2 * Math.atan(halfTan * Math.max(0.1, camera.aspect || (16 / 9)));
+                const fitHeightDistance = (Math.max(size.y, 0.08) * 0.5) / Math.max(0.001, halfTan);
+                const fitWidthDistance = (Math.max(size.x, size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(hFov / 2));
+                const sphereDistance = boundsInfo.radius / Math.max(0.001, Math.sin(fovRad / 2));
+                const distance = Math.max(
+                    fitHeightDistance,
+                    fitWidthDistance,
+                    sphereDistance,
+                    boundsInfo.maxDim * 1.8,
+                    0.85
+                ) * 1.25;
+
+                const direction = getCameraHintDirection();
+                const nextPosition = target.clone().add(direction.multiplyScalar(distance));
+                if (nextPosition.y < target.y + boundsInfo.maxDim * 0.15) {
+                    nextPosition.y = target.y + boundsInfo.maxDim * 0.15;
+                }
+
+                controls.target.copy(target);
+                camera.position.copy(nextPosition);
+                camera.near = Math.max(0.001, distance / 1000);
+                camera.far = Math.max(100, distance * 20 + boundsInfo.radius * 20);
+                camera.lookAt(target);
+                camera.updateProjectionMatrix?.();
+                controls.minDistance = Math.max(0.05, distance * 0.08);
+                controls.maxDistance = Math.max(10, distance * 8);
+                if (zoomState) {
+                    zoomState.minDist = controls.minDistance;
+                    zoomState.maxDist = controls.maxDistance;
+                }
+                controls.update?.();
+                viewerControls?.skipNextFocusOnModel?.();
+
+                const signature = getModelBoundsSignature(boundsInfo);
+                savedCameraBoundsSignature = signature;
+                viewerState.camera = {
+                    ...viewerState.camera,
+                    position: vectorToDebugObject(camera.position),
+                    target: vectorToDebugObject(controls.target),
+                    fov: nextFov,
+                    model_bounds_signature: signature,
+                    model_bounds: {
+                        min: vectorToDebugObject(boundsInfo.box.min),
+                        max: vectorToDebugObject(boundsInfo.box.max),
+                        size: vectorToDebugObject(boundsInfo.size),
+                        center: vectorToDebugObject(boundsInfo.center),
+                    },
+                };
+                savedCameraPosition = { ...viewerState.camera.position };
+                savedCameraTarget = { ...viewerState.camera.target };
+                cameraInitialized = true;
+                publishMainViewerDebugState();
+                console.info('[ViewerCamera] fitted model', {
+                    reason,
+                    theme: activeViewerTheme?.theme_id || activeViewerTheme?.id || null,
+                    bounds: viewerState.camera.model_bounds,
+                    camera: viewerState.camera,
+                    canvas: window.__mainViewerDebug?.canvas || null,
+                });
+                return true;
+            }
+
             // Fullscreen functionality
             function toggleFullscreen() {
                 window.taskDbg('[Viewer] toggleFullscreen called, current state:', isFullscreen);
@@ -9457,22 +9643,53 @@
 
             function publishMainViewerDebugState() {
                 let modelBox = null;
+                let modelStats = null;
                 if (currentModel) {
                     try {
-                        const box = new THREE.Box3().setFromObject(currentModel);
+                        const boundsInfo = getModelBoundsInfo(currentModel);
+                        const box = boundsInfo?.box;
                         modelBox = {
-                            minY: box.min.y,
-                            maxY: box.max.y,
-                            height: box.max.y - box.min.y,
-                            modelY: currentModel.position.y,
+                            min: vectorToDebugObject(box?.min),
+                            max: vectorToDebugObject(box?.max),
+                            size: vectorToDebugObject(boundsInfo?.size),
+                            center: vectorToDebugObject(boundsInfo?.center),
+                            minY: roundViewerDebugNumber(box?.min?.y),
+                            maxY: roundViewerDebugNumber(box?.max?.y),
+                            height: roundViewerDebugNumber((box?.max?.y || 0) - (box?.min?.y || 0)),
+                            modelY: roundViewerDebugNumber(currentModel.position.y),
+                            signature: getModelBoundsSignature(boundsInfo),
+                        };
+                        modelStats = {
+                            meshCount: boundsInfo?.meshCount || 0,
+                            vertexCount: boundsInfo?.vertexCount || 0,
                         };
                     } catch (_) {
                         modelBox = null;
+                        modelStats = null;
                     }
                 }
+                const canvas = renderer?.domElement || null;
+                const cameraDistance = camera && controls ? camera.position.distanceTo(controls.target) : null;
                 window.__mainViewerDebug = {
                     quality: mainViewerQualityMode,
+                    activeThemeId: activeViewerTheme?.theme_id || activeViewerTheme?.id || null,
                     modelBox,
+                    modelStats,
+                    camera: camera ? {
+                        position: vectorToDebugObject(camera.position),
+                        target: vectorToDebugObject(controls?.target),
+                        distance: roundViewerDebugNumber(cameraDistance),
+                        fov: roundViewerDebugNumber(camera.fov),
+                        aspect: roundViewerDebugNumber(camera.aspect),
+                        near: roundViewerDebugNumber(camera.near),
+                        far: roundViewerDebugNumber(camera.far),
+                    } : null,
+                    canvas: canvas ? {
+                        clientWidth: canvas.clientWidth,
+                        clientHeight: canvas.clientHeight,
+                        width: canvas.width,
+                        height: canvas.height,
+                    } : null,
                     hasSky: !!skyObject,
                     backgroundType: scene?.background?.type || scene?.background?.constructor?.name || null,
                     hasEnvironment: !!scene?.environment,
@@ -12410,49 +12627,12 @@
                     window.updateHierarchyUI();
                 }
 
-                // Restore camera from saved state (or use defaults if no saved state)
-                if (savedCameraPosition && savedCameraTarget) {
+                const modelBoundsInfo = getModelBoundsInfo(model);
+                if (isSavedCameraUsableForBounds(modelBoundsInfo)) {
                     restoreSavedCamera();
-                } else {
-                    // No saved camera - calculate static above-side position based on model size
-                        window.taskDbg('[Viewer] Setting up static camera for T-pose view');
-                        try {
-                            const box = new THREE.Box3().setFromObject(model);
-                            const center = box.getCenter(new THREE.Vector3());
-                            const size = box.getSize(new THREE.Vector3());
-                            const maxDim = Math.max(size.x, size.y, size.z);
-                            const distance = maxDim * 2;
-
-                            // Target the center of the model
-                            const targetY = center.y;
-                            controls.target.set(0, targetY, 0);
-                            
-                            // Static camera: above-side view (45° from above, 45° from side)
-                            // Position: front-right diagonal
-                            camera.position.set(
-                                distance * 0.7,   // X: to the right
-                                targetY + distance * 0.5,  // Y: above
-                                distance * 0.7    // Z: in front
-                            );
-                            camera.lookAt(0, targetY, 0);
-                            controls.update();
-
-                            // Save this position to state
-                            viewerState.camera = {
-                                position: { 
-                                    x: distance * 0.7, 
-                                    y: targetY + distance * 0.5, 
-                                    z: distance * 0.7 
-                                },
-                                target: { x: 0, y: targetY, z: 0 }
-                            };
-                            window.taskDbg('[Viewer] Static camera set:', viewerState.camera);
-                        } catch (err) {
-                            console.error('[Viewer] Camera setup error:', err);
-                        }
-                        cameraInitialized = true; // Allow sync
-                    }
-                
+                } else if (!fitCameraToModelBounds(model, `load ${label}`, { boundsInfo: modelBoundsInfo })) {
+                    cameraInitialized = true;
+                }
                 // Mark loading complete
                 loadingManager.updateProgress(100, `${label} loaded!`);
                 loadingManager.setItemStatus(label, 'done');
@@ -12659,48 +12839,12 @@
                     updateHierarchyUI();
                 }
 
-                // Restore camera from saved state (or use defaults if no saved state)
-                if (savedCameraPosition && savedCameraTarget) {
+                const fbxModelBoundsInfo = getModelBoundsInfo(model);
+                if (isSavedCameraUsableForBounds(fbxModelBoundsInfo)) {
                     restoreSavedCamera();
-                } else {
-                    // No saved camera - calculate static above-side position (FBX)
-                    window.taskDbg('[Viewer] Setting up static camera for T-pose view (FBX)');
-                    try {
-                        const box = new THREE.Box3().setFromObject(model);
-                        const center = box.getCenter(new THREE.Vector3());
-                        const size = box.getSize(new THREE.Vector3());
-                        const maxDim = Math.max(size.x, size.y, size.z);
-                        const distance = maxDim * 2;
-                        
-                        // Target the center of the model
-                        const targetY = center.y;
-                        controls.target.set(0, targetY, 0);
-                        
-                        // Static camera: above-side view (45° from above, 45° from side)
-                        camera.position.set(
-                            distance * 0.7,   // X: to the right
-                            targetY + distance * 0.5,  // Y: above
-                            distance * 0.7    // Z: in front
-                        );
-                        camera.lookAt(0, targetY, 0);
-                        controls.update();
-                        
-                        // Save this position to state
-                        viewerState.camera = {
-                            position: { 
-                                x: distance * 0.7, 
-                                y: targetY + distance * 0.5, 
-                                z: distance * 0.7 
-                            },
-                            target: { x: 0, y: targetY, z: 0 }
-                        };
-                        window.taskDbg('[Viewer] Static camera set (FBX):', viewerState.camera);
-                    } catch (err) {
-                        console.error('[Viewer] FBX camera setup error:', err);
-                    }
-                    cameraInitialized = true; // Allow sync
+                } else if (!fitCameraToModelBounds(model, `load ${label}`, { boundsInfo: fbxModelBoundsInfo })) {
+                    cameraInitialized = true;
                 }
-                
                 // Mark loading complete
                 loadingManager.updateProgress(100, `${label} loaded!`);
                 loadingManager.setItemStatus(label, 'done');
