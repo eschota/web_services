@@ -84,6 +84,7 @@ for them.
 Virtualenv directories are runtime state, not source code. Keep them ignored:
 
 ```text
+autorig-online/venv/
 autorig-online/mcp/.venv/
 qwerty_vpn/gateway/venv/
 CGTrader_SUBMIT_SERVER/venv/
@@ -93,8 +94,10 @@ If a cleanup commit removes tracked venv files, do not deploy it with a plain
 `git pull` over production unless the production venvs have first been copied
 aside or recreated. Safe sequence: copy the venv directory outside the repo,
 pull the cleanup commit, move the venv back into the same ignored path, then
-verify the matching service. `qwerty-gateway.service` and the AutoRig MCP
-process have been observed using in-tree venv paths on the VPS.
+verify the matching service. `autorig.service`, `autorig-telegram.service`,
+`qwerty-gateway.service`, the AutoRig MCP process, and
+`cgtrader_submit.service` have been observed using in-tree venv paths on the
+VPS.
 
 ## AutoRig.online
 
