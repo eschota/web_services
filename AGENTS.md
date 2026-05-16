@@ -233,6 +233,10 @@ Do not touch unrelated services when the request is about AutoRig only.
 - For frontend changes, verify live production HTML/JS with `curl` and browser
   testing against `https://autorig.online` when the UI behavior matters. Do not
   create local preview servers for AutoRig UI QA.
+- Task viewer theme/backdrop assets are 16:9, not 9:16. Keep source JPGs in
+  `static/env/backdrops/source/`, generate viewer derivatives as 16:9 JPGs
+  (`1280x720` as the current target), and generate tiny strip thumbnails as
+  16:9 JPGs (`160x90`). Do not replace them with vertical derivatives.
 
 ### SEO-Critical Layout
 

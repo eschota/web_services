@@ -9155,6 +9155,7 @@ VIEWER_THEME_ROOT_DIR = Path(__file__).resolve().parent.parent / "static" / "env
 VIEWER_THEME_SOURCE_DIR = VIEWER_THEME_ROOT_DIR / "source"
 VIEWER_THEME_VIEWER_DIR = VIEWER_THEME_ROOT_DIR / "viewer"
 VIEWER_THEME_THUMB_DIR = VIEWER_THEME_ROOT_DIR / "thumbs"
+VIEWER_THEME_ASSET_VERSION = "20260516-16x9"
 
 
 
@@ -9195,8 +9196,8 @@ def _load_viewer_theme_json(image_path: Path) -> Dict[str, Any]:
     merged["id"] = theme_id
     merged["image_filename"] = image_path.name
     merged["source_src"] = f"/static/env/backdrops/source/{quote(image_path.name)}"
-    merged["src"] = f"/static/env/backdrops/viewer/{quote(theme_id)}.jpg"
-    merged["thumb_src"] = f"/static/env/backdrops/thumbs/{quote(theme_id)}.jpg"
+    merged["src"] = f"/static/env/backdrops/viewer/{quote(theme_id)}.jpg?v={VIEWER_THEME_ASSET_VERSION}"
+    merged["thumb_src"] = f"/static/env/backdrops/thumbs/{quote(theme_id)}.jpg?v={VIEWER_THEME_ASSET_VERSION}"
     return merged
 
 def _viewer_theme_source_images() -> List[Path]:
