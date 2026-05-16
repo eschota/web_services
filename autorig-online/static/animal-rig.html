@@ -168,6 +168,16 @@
             object-fit: cover;
             background: #0d0e1c;
         }
+        .animal-lazy-video {
+            pointer-events: none;
+        }
+        .animal-lazy-video::-webkit-media-controls,
+        .animal-lazy-video::-webkit-media-controls-panel,
+        .animal-lazy-video::-webkit-media-controls-play-button,
+        .animal-lazy-video::-webkit-media-controls-start-playback-button {
+            display: none !important;
+            opacity: 0 !important;
+        }
         .animal-video-caption {
             display: flex;
             flex-wrap: wrap;
@@ -449,9 +459,7 @@
                     <p>AutoRig V2 builds a usable rig for an animal model and shows the result through an animated preview.</p>
                 </div>
                 <div class="animal-video-frame">
-                    <video controls playsinline preload="metadata" poster="/static/videos/animal-rig/after-poster-20260516.png">
-                        <source src="/static/videos/animal-rig/after.mp4" type="video/mp4">
-                    </video>
+                    <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/after-poster-20260516.png" data-src="/static/videos/animal-rig/after.mp4" aria-label="After V2 animal rig animation"></video>
                     <div class="animal-video-caption">
                         <strong>After V2 animal rig</strong>
                         <span>Beaver model with generated rig and animation preview</span>
@@ -468,18 +476,14 @@
                 </div>
                 <div class="animal-compare-grid">
                     <article class="animal-video-frame">
-                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/before-poster-20260516.png">
-                            <source src="/static/videos/animal-rig/before.mp4" type="video/mp4">
-                        </video>
+                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/before-poster-20260516.png" data-src="/static/videos/animal-rig/before.mp4" aria-label="Original beaver model before V2 animal rigging"></video>
                         <div class="animal-video-caption">
                             <strong>Before</strong>
                             <span>Original beaver model</span>
                         </div>
                     </article>
                     <article class="animal-video-frame">
-                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/after-poster-20260516.png">
-                            <source src="/static/videos/animal-rig/after.mp4" type="video/mp4">
-                        </video>
+                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/after-poster-20260516.png" data-src="/static/videos/animal-rig/after.mp4" aria-label="Rigged beaver model after V2 animal rigging"></video>
                         <div class="animal-video-caption">
                             <strong>After</strong>
                             <span>Rigged and animated with V2</span>
@@ -497,45 +501,35 @@
                 </div>
                 <div class="animal-example-grid">
                     <article class="animal-example-card">
-                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/cat-v2-rig-poster-20260516.png">
-                            <source src="/static/videos/animal-rig/cat-v2-rig.mp4" type="video/mp4">
-                        </video>
+                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/cat-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/cat-v2-rig.mp4" aria-label="Cat V2 rig animation"></video>
                         <div class="animal-card-body">
                             <h3>Cat V2 rig</h3>
                             <p>Quadruped body motion for a small animal model.</p>
                         </div>
                     </article>
                     <article class="animal-example-card">
-                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png">
-                            <source src="/static/videos/animal-rig/alpaca-v2-rig.mp4" type="video/mp4">
-                        </video>
+                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/alpaca-v2-rig.mp4" aria-label="Alpaca V2 rig animation"></video>
                         <div class="animal-card-body">
                             <h3>Alpaca V2 rig</h3>
                             <p>Long-neck animal motion with generated animation preview.</p>
                         </div>
                     </article>
                     <article class="animal-example-card">
-                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png">
-                            <source src="/static/videos/animal-rig/rabbit-v2-rig.mp4" type="video/mp4">
-                        </video>
+                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/rabbit-v2-rig.mp4" aria-label="Rabbit V2 rig animation"></video>
                         <div class="animal-card-body">
                             <h3>Rabbit V2 rig</h3>
                             <p>Compact creature rigging for stylized animal proportions.</p>
                         </div>
                     </article>
                     <article class="animal-example-card">
-                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png">
-                            <source src="/static/videos/animal-rig/turtle-v2-rig.mp4" type="video/mp4">
-                        </video>
+                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/turtle-v2-rig.mp4" aria-label="Turtle V2 rig animation"></video>
                         <div class="animal-card-body">
                             <h3>Turtle V2 rig</h3>
                             <p>Low-profile animal animation with a different body structure.</p>
                         </div>
                     </article>
                     <article class="animal-example-card">
-                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/spider-robot-v2-rig-poster-20260516.png">
-                            <source src="/static/videos/animal-rig/spider-robot-v2-rig.mp4" type="video/mp4">
-                        </video>
+                        <video class="animal-lazy-video" autoplay muted loop playsinline preload="none" poster="/static/videos/animal-rig/spider-robot-v2-rig-poster-20260516.png" data-src="/static/videos/animal-rig/spider-robot-v2-rig.mp4" aria-label="Spider robot V2 rig animation"></video>
                         <div class="animal-card-body">
                             <h3>Spider robot V2 rig</h3>
                             <p>Non-humanoid mechanical model with multiple legs.</p>
@@ -619,5 +613,62 @@
     <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>
+    <script>
+        (() => {
+            const videos = Array.from(document.querySelectorAll("video.animal-lazy-video[data-src]"));
+            if (!videos.length) return;
+
+            const playVideo = (video) => {
+                const playPromise = video.play();
+                if (playPromise && typeof playPromise.catch === "function") {
+                    playPromise.catch(() => {});
+                }
+            };
+
+            const loadVideo = (video) => {
+                if (video.dataset.loaded === "1") {
+                    playVideo(video);
+                    return;
+                }
+                video.src = video.dataset.src;
+                video.dataset.loaded = "1";
+                video.load();
+                if (video.readyState >= 2) {
+                    playVideo(video);
+                } else {
+                    video.addEventListener("canplay", () => playVideo(video), { once: true });
+                }
+            };
+
+            if ("IntersectionObserver" in window) {
+                const observer = new IntersectionObserver((entries) => {
+                    entries.forEach((entry) => {
+                        const video = entry.target;
+                        if (entry.isIntersecting) {
+                            loadVideo(video);
+                        } else if (video.dataset.loaded === "1") {
+                            video.pause();
+                        }
+                    });
+                }, { rootMargin: "420px 0px", threshold: 0.08 });
+                videos.forEach((video) => observer.observe(video));
+            } else {
+                videos.forEach(loadVideo);
+            }
+
+            document.addEventListener("visibilitychange", () => {
+                if (document.hidden) {
+                    videos.forEach((video) => video.pause());
+                    return;
+                }
+                videos.forEach((video) => {
+                    const rect = video.getBoundingClientRect();
+                    if (rect.bottom > 0 && rect.top < window.innerHeight) {
+                        loadVideo(video);
+                    }
+                });
+            });
+        })();
+    </script>
 </body>
 </html>
