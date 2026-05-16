@@ -58,6 +58,7 @@ class User(Base):
     total_tasks = Column(Integer, default=0)
     youtube_bonus_received = Column(Boolean, default=False)
     email_task_completed = Column(Boolean, default=True, nullable=False)  # task-ready emails; False = unsubscribed
+    email_marketing_unsubscribed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, default=datetime.utcnow)
     
@@ -65,6 +66,26 @@ class User(Base):
     def is_admin(self) -> bool:
         from config import is_admin_email
         return is_admin_email(self.email)
+
+
+class EmailCampaignSend(Base):
+    """Per-recipient campaign send log for resumable marketing email sends."""
+    __tablename__ = "email_campaign_sends"
+    __table_args__ = (
+        UniqueConstraint("campaign_key", "email_hash", name="uq_email_campaign_key_hash"),
+        Index("ix_email_campaign_sends_campaign_status", "campaign_key", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_key = Column(String(128), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    email_hash = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+    provider_message_id = Column(String(128), nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime, nullable=True)
 
 
 class AnonSession(Base):
@@ -714,7 +735,47 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_marketing_unsubscribed_at DATETIME")
             await _try_add_column("ALTER TABLE feedback ADD COLUMN parent_id INTEGER")
+
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_sends (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                        provider_message_id VARCHAR(128),
+                        error TEXT,
+                        created_at DATETIME,
+                        updated_at DATETIME,
+                        sent_at DATETIME,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_email_campaign_key_hash
+                    ON email_campaign_sends (campaign_key, email_hash)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_campaign_status
+                    ON email_campaign_sends (campaign_key, status)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_email_hash
+                    ON email_campaign_sends (email_hash)
+                    """
+                )
+            except Exception:
+                pass
 
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_name VARCHAR(255)")
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_description TEXT")
@@ -982,6 +1043,46 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_task_completed BOOLEAN DEFAULT TRUE NOT NULL"
             )
+            await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_marketing_unsubscribed_at TIMESTAMP"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_sends (
+                        id SERIAL PRIMARY KEY,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                        provider_message_id VARCHAR(128),
+                        error TEXT,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        sent_at TIMESTAMP
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_email_campaign_key_hash
+                    ON email_campaign_sends (campaign_key, email_hash)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_campaign_status
+                    ON email_campaign_sends (campaign_key, status)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_email_hash
+                    ON email_campaign_sends (email_hash)
+                    """
+                )
+            except Exception:
+                pass
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_rating VARCHAR(20) NOT NULL DEFAULT 'unknown'"
             )

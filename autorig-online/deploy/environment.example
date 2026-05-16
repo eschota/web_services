@@ -10,6 +10,8 @@
 RESEND_API_KEY=
 # Must be a verified sender/domain in Resend
 EMAIL_FROM=noreply@autorig.online
+# Required before marketing campaign sends. Use a real business/postal address.
+MARKETING_POSTAL_ADDRESS=
 
 # Telegram: token + optional fixed group id (backend/config.py also loads /etc/autorig-telegram.env and /etc/autorig-backend.env when present).
 # TELEGRAM_BOT_TOKEN=...

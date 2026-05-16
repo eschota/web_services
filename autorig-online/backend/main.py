@@ -1826,6 +1826,74 @@ async def unsubscribe_email(
     return HTMLResponse(content=html)
 
 
+@app.post("/api/email/marketing-unsubscribe")
+async def api_marketing_unsubscribe(
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """RFC 8058 one-click unsubscribe for marketing emails."""
+    from unsubscribe_tokens import verify_marketing_unsubscribe_token
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    email = verify_marketing_unsubscribe_token(token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    rs = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
+    row = rs.scalar_one_or_none()
+    if row and not row.email_marketing_unsubscribed_at:
+        row.email_marketing_unsubscribed_at = datetime.utcnow()
+        await db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/unsubscribe/marketing", response_class=HTMLResponse)
+async def marketing_unsubscribe_page(
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Visible unsubscribe page for marketing emails."""
+    from unsubscribe_tokens import verify_marketing_unsubscribe_token
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    email = verify_marketing_unsubscribe_token(token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    rs = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
+    row = rs.scalar_one_or_none()
+    if row and not row.email_marketing_unsubscribed_at:
+        row.email_marketing_unsubscribed_at = datetime.utcnow()
+        await db.commit()
+
+    safe_email = html.escape(email)
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marketing emails unsubscribed - AutoRig.online</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body style="margin:0;padding:2rem;font-family:system-ui,sans-serif;background:var(--bg,#0a0a0f);color:var(--text,#f0f0f5);">
+  <div style="max-width:560px;margin:0 auto;">
+    <h1 style="font-size:1.35rem;margin-top:0;">You are unsubscribed</h1>
+    <p style="color:var(--text-secondary,#a0a0b0);line-height:1.5;">
+      Marketing emails for {safe_email} have been turned off. Task-ready notifications are unchanged.
+    </p>
+    <p style="margin-top:1.5rem;">
+      <a href="{APP_URL}/dashboard" style="color:#6366f1;">Notification settings</a>
+      &nbsp;-&nbsp;
+      <a href="{APP_URL}" style="color:#6366f1;">Home</a>
+    </p>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+
 # =============================================================================
 # API Keys (User)
 # =============================================================================
