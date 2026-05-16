@@ -25,6 +25,13 @@
     <priority>0.88</priority>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
     <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/before.png</video:thumbnail_loc>
+      <video:title>Before V2 animal rig</video:title>
+      <video:description>Original beaver model before AutoRig V2 animal rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/before.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+    <video:video>
       <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/after.png</video:thumbnail_loc>
       <video:title>AutoRig V2 Animal RIG presentation</video:title>
       <video:description>AI animal rigging and animation preview for a beaver model after V2 rigging.</video:description>
@@ -36,6 +43,27 @@
       <video:title>Cat V2 animal rig animation example</video:title>
       <video:description>Cat animation generated with AutoRig V2 animal rigging.</video:description>
       <video:content_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.png</video:thumbnail_loc>
+      <video:title>Alpaca V2 animal rig animation example</video:title>
+      <video:description>Alpaca animation generated with AutoRig V2 animal rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.png</video:thumbnail_loc>
+      <video:title>Rabbit V2 animal rig animation example</video:title>
+      <video:description>Rabbit animation generated with AutoRig V2 animal rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/turtle-v2-rig.png</video:thumbnail_loc>
+      <video:title>Turtle V2 animal rig animation example</video:title>
+      <video:description>Turtle animation generated with AutoRig V2 animal rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/turtle-v2-rig.mp4</video:content_loc>
       <video:publication_date>2026-05-16</video:publication_date>
     </video:video>
     <video:video>

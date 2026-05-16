@@ -35,7 +35,11 @@ Cursor `.cursor/rules` instructions for this project.
 
 ## General Workflow
 
-Prefer working from the local repository, then deploy through SSH.
+Use a production-first deployment workflow for AutoRig.online. Do not run local
+dev servers, local preview servers, or local browser QA for this project unless
+the user explicitly asks for a local-only experiment. The local checkout exists
+for source control, commits, and exact file preparation; runtime verification
+happens on production.
 
 1. Make changes in `R:\autorig`.
 2. Check the local working tree before editing:
@@ -47,9 +51,12 @@ git status --short
 3. Keep changes scoped to the requested service directory.
 4. Commit and push from the local repository when the change should be
    preserved.
-5. SSH to production only for deploy, health checks, logs, and emergency
-   diagnostics.
-6. On the VPS, deploy by pulling in `/root`:
+5. Deploy immediately to production and test against `https://autorig.online`
+   with `curl`, service logs, and browser checks.
+6. Fix production-visible issues in the same deploy loop. If a direct production
+   edit is needed to unblock the site, mirror the exact change back into
+   `R:\autorig`, commit it, and push it.
+7. On the VPS, deploy by pulling in `/root` only when it is safe:
 
 ```bash
 ssh autorig-vps
@@ -223,8 +230,9 @@ Do not touch unrelated services when the request is about AutoRig only.
   files required for the task.
 - Do not bypass login, captcha, 2FA, account lock, rate limits, or
   anti-automation screens during live tests.
-- For frontend changes, verify live HTML/JS with `curl` and browser testing when
-  the UI behavior matters.
+- For frontend changes, verify live production HTML/JS with `curl` and browser
+  testing against `https://autorig.online` when the UI behavior matters. Do not
+  create local preview servers for AutoRig UI QA.
 
 ### SEO-Critical Layout
 
