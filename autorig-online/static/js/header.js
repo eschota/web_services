@@ -51,10 +51,19 @@ function renderSiteHeader(options = {}) {
         activePath = undefined
     } = options;
     
+    const mobileNavToggleHtml = showNav ? `
+        <button class="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-controls="site-primary-nav" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+    ` : '';
+
     const navHtml = showNav ? `
-        <nav class="nav">
+        <nav class="nav" id="site-primary-nav" aria-label="Primary navigation">
             <a href="/guides" class="${navLinkClass('/guides', activePath)}" data-i18n="nav_guides">Guides</a>
             <a href="/gallery" class="${navLinkClass('/gallery', activePath)}" data-i18n="nav_gallery">Gallery</a>
+            <a href="/animal-rig" class="${navLinkClass('/animal-rig', activePath)}" data-i18n="nav_animal_rig">Animals</a>
             <a href="/buy-credits" class="${navLinkClass('/buy-credits', activePath)}" data-i18n="nav_buy">Buy</a>
             <a href="/blender-plugin" class="${navLinkClass('/blender-plugin', activePath)}" data-i18n="nav_blender_plugin">Blender Plugin</a>
             <a href="/developers" class="${navLinkClass('/developers', activePath)}" data-i18n="nav_api">API</a>
@@ -82,6 +91,7 @@ function renderSiteHeader(options = {}) {
                          height="80">
                 </a>
 
+                ${mobileNavToggleHtml}
                 ${navHtml}
                 
                 <div class="header-actions">
@@ -171,6 +181,33 @@ function renderFree3DSearch() {
  * - Credits display
  */
 async function initSiteHeader() {
+    // Mobile navigation
+    const header = document.querySelector('.header');
+    const mobileNavToggle = document.querySelector('.mobile-nav-toggle');
+    const primaryNav = document.getElementById('site-primary-nav') || document.querySelector('.nav');
+
+    if (header && mobileNavToggle && primaryNav) {
+        const setNavOpen = (open) => {
+            header.classList.toggle('mobile-nav-open', open);
+            mobileNavToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            mobileNavToggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+        };
+
+        mobileNavToggle.addEventListener('click', () => {
+            setNavOpen(!header.classList.contains('mobile-nav-open'));
+        });
+
+        primaryNav.querySelectorAll('a').forEach((link) => {
+            link.addEventListener('click', () => setNavOpen(false));
+        });
+
+        document.addEventListener('click', (event) => {
+            if (!header.contains(event.target)) {
+                setNavOpen(false);
+            }
+        });
+    }
+
     // Theme toggle
     const themeToggle = document.getElementById('theme-toggle');
     if (themeToggle) {

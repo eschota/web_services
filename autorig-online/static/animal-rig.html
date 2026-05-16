@@ -18,7 +18,7 @@
     <meta name="twitter:description" content="AutoRig V2 animal rigging and animation examples for non-humanoid 3D models.">
     <meta name="twitter:image" content="https://autorig.online/static/videos/animal-rig/after-poster-20260516.png">
     <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
-    <link rel="stylesheet" href="/static/css/styles.css?v=gallery-stats-rigtypes-1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
     <style>
         .animal-page {
             background:
@@ -276,15 +276,39 @@
         @media (max-width: 700px) {
             .animal-hero {
                 min-height: auto;
+                overflow: visible;
             }
             .animal-hero-inner {
-                padding-top: 2.5rem;
+                padding-top: 2rem;
+                padding-bottom: 2.25rem;
+            }
+            .animal-hero-copy {
+                max-width: 100%;
+                min-width: 0;
+            }
+            .animal-hero h1 {
+                max-width: 100%;
+                font-size: clamp(2rem, 11vw, 3rem);
+                line-height: 1.06;
+                overflow-wrap: anywhere;
+            }
+            .animal-lead {
+                font-size: 1rem;
+                line-height: 1.55;
             }
             .animal-actions {
                 flex-direction: column;
             }
             .animal-btn {
                 width: 100%;
+            }
+            .animal-pill-row {
+                align-items: stretch;
+            }
+            .animal-pill {
+                max-width: 100%;
+                justify-content: center;
+                text-align: center;
             }
             .animal-compare-grid,
             .animal-example-grid,
@@ -603,7 +627,7 @@
 
     <div id="site-footer"></div>
 
-    <script src="/static/js/header.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>

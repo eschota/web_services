@@ -27,7 +27,7 @@
     <link rel="alternate icon" href="/static/images/logo/favicon.svg">
     
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=gallery-stats-rigtypes-1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
     
     <!-- Schema.org SoftwareApplication markup -->
     <script type="application/ld+json">
@@ -130,10 +130,11 @@
     <div id="site-header"></div>
     
     <main>
-        <!-- Conversion Form -->
-        <section class="container-sm">
-            <div class="card convert-form-card">
-                <h1 style="text-align: center; margin: 0 0 1.5rem 0; font-size: 1.75rem;">
+        <!-- Conversion Form + Demo Preview -->
+        <section class="container home-convert-shell">
+            <div class="home-convert-grid">
+                <div class="card convert-form-card">
+                <h1 class="home-convert-title">
                     <span class="text-gradient" data-i18n="hero_title">Automatic 3D Model Rigging</span>
                 </h1>
                 <form id="convert-form">
@@ -214,33 +215,30 @@
                         </div>
                     </div>
                 </div>
-            </div>
-        </section>
+                </div>
 
-        <!-- Launch Links -->
-        <section class="container-sm mt-4" aria-label="AutoRig.online launch links">
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; width: 100%;">
-                <a href="https://www.producthunt.com/products/autorig-online?embed=true&amp;utm_source=embed&amp;utm_medium=post_embed" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; gap: 12px; min-height: 86px; padding: 14px 16px; background: #ffffff; border: 1px solid rgba(224, 224, 224, 0.95); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); color: #1a1a1a; text-decoration: none; overflow: hidden;">
-                    <img alt="AutoRig.online" src="https://ph-files.imgix.net/8a6be386-0972-4915-8161-07aa93ad6d03.png?auto=format&amp;fit=crop&amp;w=80&amp;h=80" style="width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" loading="lazy">
-                    <span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.2;">
-                        <span style="font-size: 16px; font-weight: 700; color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Product Hunt</span>
-                        <span style="font-size: 13px; font-weight: 600; color: #ff6154;">Check it out</span>
-                    </span>
-                    <span aria-hidden="true" style="margin-left: auto; color: #ff6154; font-size: 18px; font-weight: 700; line-height: 1;">&rarr;</span>
-                </a>
-                <a href="https://www.youtube.com/@AIRIGONLINE" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; gap: 12px; min-height: 86px; padding: 14px 16px; background: #ffffff; border: 1px solid rgba(224, 224, 224, 0.95); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); color: #1a1a1a; text-decoration: none; overflow: hidden;">
-                    <span aria-hidden="true" style="display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 8px; background: #ff0033; flex-shrink: 0;">
-                        <svg width="22" height="16" viewBox="0 0 22 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block;">
-                            <path d="M21.55 2.5C21.3 1.55 20.55 0.8 19.62 0.55C17.92 0.1 11.1 0.1 11.1 0.1C11.1 0.1 4.28 0.1 2.58 0.55C1.65 0.8 0.9 1.55 0.65 2.5C0.2 4.22 0.2 7.8 0.2 7.8C0.2 7.8 0.2 11.38 0.65 13.1C0.9 14.05 1.65 14.8 2.58 15.05C4.28 15.5 11.1 15.5 11.1 15.5C11.1 15.5 17.92 15.5 19.62 15.05C20.55 14.8 21.3 14.05 21.55 13.1C22 11.38 22 7.8 22 7.8C22 7.8 22 4.22 21.55 2.5Z" fill="#FF0033"/>
-                            <path d="M8.9 11.1V4.5L14.6 7.8L8.9 11.1Z" fill="white"/>
-                        </svg>
-                    </span>
-                    <span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.2;">
-                        <span style="font-size: 16px; font-weight: 700; color: #1a1a1a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">YouTube</span>
-                        <span style="font-size: 13px; font-weight: 600; color: #ff0033;">Watch demos</span>
-                    </span>
-                    <span aria-hidden="true" style="margin-left: auto; color: #ff0033; font-size: 18px; font-weight: 700; line-height: 1;">&rarr;</span>
-                </a>
+                <aside class="card demo-preview-card" aria-label="AutoRig.online presentation preview">
+                    <a class="demo-video-link" href="https://www.youtube.com/@AIRIGONLINE" target="_blank" rel="noopener noreferrer" aria-label="Watch AutoRig.online demos on YouTube">
+                        <span class="demo-video-shell">
+                            <img class="demo-preview-poster" src="/static/videos/home/rigging-demo-poster.jpg" alt="AutoRig.online presentation preview" width="540" height="960" loading="eager">
+                            <video id="home-demo-video" class="demo-preview-video" muted loop playsinline preload="none" poster="/static/videos/home/rigging-demo-poster.jpg" data-src="/static/videos/home/rigging-demo-preview.mp4" aria-label="AutoRig.online rigging demo preview"></video>
+                            <span class="demo-youtube-mark" aria-hidden="true">
+                                <svg width="42" height="30" viewBox="0 0 42 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M41.15 4.75C40.67 2.95 39.25 1.53 37.48 1.05C34.24 0.2 21.2 0.2 21.2 0.2C21.2 0.2 8.16 0.2 4.92 1.05C3.15 1.53 1.73 2.95 1.25 4.75C0.4 8.02 0.4 14.85 0.4 14.85C0.4 14.85 0.4 21.68 1.25 24.95C1.73 26.75 3.15 28.17 4.92 28.65C8.16 29.5 21.2 29.5 21.2 29.5C21.2 29.5 34.24 29.5 37.48 28.65C39.25 28.17 40.67 26.75 41.15 24.95C42 21.68 42 14.85 42 14.85C42 14.85 42 8.02 41.15 4.75Z" fill="#FF0033"/>
+                                    <path d="M17 21.1V8.6L27.9 14.85L17 21.1Z" fill="white"/>
+                                </svg>
+                            </span>
+                        </span>
+                    </a>
+                    <a class="product-hunt-badge" href="https://www.producthunt.com/products/autorig-online?embed=true&amp;utm_source=embed&amp;utm_medium=post_embed" target="_blank" rel="noopener noreferrer" aria-label="AutoRig.online on Product Hunt">
+                        <img alt="AutoRig.online" src="https://ph-files.imgix.net/8a6be386-0972-4915-8161-07aa93ad6d03.png?auto=format&amp;fit=crop&amp;w=80&amp;h=80" width="44" height="44" loading="lazy">
+                        <span class="product-hunt-copy">
+                            <strong>Product Hunt</strong>
+                            <span>Check it out</span>
+                        </span>
+                        <span class="product-hunt-arrow" aria-hidden="true">&rarr;</span>
+                    </a>
+                </aside>
             </div>
         </section>
 
@@ -348,12 +346,13 @@
     <div id="site-footer"></div>
     
     <!-- Scripts -->
-    <script src="/static/js/header.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
     <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script src="/static/js/task-card.js?v=gallery-stats-rigtypes-1"></script>
+    <script src="/static/js/home-demo-preview.js?v=20260516-home-demo"></script>
     <script src="/static/js/app.js?v=gallery-rigtype-filter-1"></script>
 </body>
 </html>
