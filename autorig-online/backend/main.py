@@ -9990,7 +9990,6 @@ async def task_page(
         )
         return HTMLResponse(content=_inject_static_layout(html_content))
     
-    safe_task_description = html.escape(task_description, quote=True)
     title_suffix = f" | AutoRig task {task_id[:8]}"
     compact_task_title = re.sub(r"\s+", " ", task_title).strip() or "Rigged 3D model"
     max_task_title_len = max(24, 70 - len(title_suffix))
@@ -9998,6 +9997,11 @@ async def task_page(
         compact_task_title = compact_task_title[: max_task_title_len - 3].rstrip() + "..."
     task_page_title = f"{compact_task_title}{title_suffix}"
     safe_task_page_title = html.escape(task_page_title, quote=True)
+    safe_task_heading = html.escape(compact_task_title)
+    task_meta_description = re.sub(r"\s+", " ", task_description).strip()
+    if len(task_meta_description) > 170:
+        task_meta_description = task_meta_description[:167].rsplit(" ", 1)[0].rstrip(".,;:-") + "..."
+    safe_task_meta_description = html.escape(task_meta_description, quote=True)
     keywords_meta = ""
     if task_keywords:
         safe_keywords = html.escape(", ".join(task_keywords[:24]), quote=True)
@@ -10016,7 +10020,7 @@ async def task_page(
         if task_keywords:
             creative_work["keywords"] = ", ".join(task_keywords[:24])
         json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
-    standard_seo_tags = f'<meta name="description" content="{safe_task_description}">{keywords_meta}{json_ld}'
+    standard_seo_tags = f'<meta name="description" content="{safe_task_meta_description}">{keywords_meta}{json_ld}'
 
     # Build OG meta tags
     og_tags = f'''
@@ -10024,7 +10028,7 @@ async def task_page(
     <meta property="og:type" content="{'video.other' if has_video else 'website'}">
     <meta property="og:url" content="{task_url}">
     <meta property="og:title" content="{safe_task_page_title}">
-    <meta property="og:description" content="{safe_task_description}">
+    <meta property="og:description" content="{safe_task_meta_description}">
     <meta property="og:site_name" content="AutoRig.online">'''
     
     # Add image/video tags
@@ -10059,7 +10063,7 @@ async def task_page(
     
     og_tags += f'''
     <meta name="twitter:title" content="{safe_task_page_title}">
-    <meta name="twitter:description" content="{safe_task_description}">
+    <meta name="twitter:description" content="{safe_task_meta_description}">
     '''
     
     # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
@@ -10076,6 +10080,10 @@ async def task_page(
     html_content = html_content.replace(
         '<title>Task Progress | AutoRig.online</title>',
         f'<title>{safe_task_page_title}</title>'
+    )
+    html_content = html_content.replace(
+        '<h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>',
+        f'<h1 class="task-status-header-title" id="task-seo-heading">{safe_task_heading}</h1>',
     )
     
     return HTMLResponse(content=_inject_static_layout(html_content))
