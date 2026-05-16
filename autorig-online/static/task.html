@@ -1175,9 +1175,33 @@
 
         .viewer-custom-layout {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
+            grid-template-columns: minmax(0, 1fr);
             gap: 1rem;
             align-items: start;
+        }
+
+        .viewer-custom-layout:has(#custom-animations-wrap:not(.hidden)) {
+            grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
+        }
+
+        #model-viewer-wrap {
+            width: 100%;
+            min-width: 0;
+        }
+
+        #model-viewer-container {
+            min-height: clamp(220px, 48vw, 620px);
+        }
+
+        #admin-input-url-row summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text-secondary);
+            list-style-position: inside;
+        }
+
+        #admin-input-url-row[open] summary {
+            margin-bottom: 0.6rem;
         }
 
         .viewer-side-panel {
@@ -2311,8 +2335,9 @@
             </div>
 
             <!-- Admin-only: Input URL + Worker Progress -->
-            <div id="admin-input-url-row" class="hidden"
+            <details id="admin-input-url-row" class="hidden"
                  style="margin: -0.25rem 0 0.85rem; padding: 0.65rem 0.85rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.14);">
+                <summary>Admin diagnostics</summary>
                 <div style="display:flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;">
                     <div style="min-width: 200px; flex: 1;">
                         <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;" data-i18n="admin_input_url">Input URL (admin)</div>
@@ -2338,7 +2363,7 @@
                     <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;" data-i18n="admin_worker_api">Worker API (admin)</div>
                     <span id="admin-worker-api-text" style="font-size: 0.85rem; word-break: break-all; color: var(--text);">-</span>
                 </div>
-            </div>
+            </details>
 
             <!-- Queue Status (compact) -->
             <div class="queue-status-compact mt-3" id="queue-status-compact">
@@ -2404,7 +2429,7 @@
             <!-- Viewer + Custom Animations side-by-side -->
             <div id="viewer-custom-layout" class="viewer-custom-layout">
                 <!-- Model Viewer (GLB) -->
-                <div id="model-viewer-wrap" class="hidden boot-reveal-surface" style="margin-bottom: 1rem;">
+                <div id="model-viewer-wrap" class="boot-reveal-surface" style="margin-bottom: 1rem;">
                     <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem;">
                         <div style="font-weight: 600; font-size: 1.1rem;">🎮 3D Preview</div>
                         <div id="model-viewer-status" style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">Loading...</div>
@@ -2433,7 +2458,7 @@
                         <span id="viewer-admin-theme-save-status" style="font-size:0.68rem;color:var(--text-muted);"></span>
                     </div>
                     <!-- Viewer Container (relative for overlay positioning) -->
-                    <div id="model-viewer-container" style="position: relative; width: 100%; aspect-ratio: 9/16; max-height: 70vh;">
+                    <div id="model-viewer-container" style="position: relative; width: 100%; aspect-ratio: 16 / 9;">
                         <div id="model-viewer-backdrop" class="model-viewer-backdrop" aria-hidden="true"></div>
                         <div class="boot-skeleton-overlay" data-label="Preparing 3D preview..."></div>
                         <!-- Three.js Canvas Target -->
@@ -4593,7 +4618,10 @@
                     return;
                 }
 
-                const classified = !!task.content_classified_at;
+                const cv = String(task.content_classifier_version || '');
+                const hasLlm = !!(task.poster_llm_title && String(task.poster_llm_title).trim());
+                const retryableFetch = !!task.content_classified_at && !hasLlm && /:fetch_error|:poster_pending/.test(cv);
+                const classified = !!task.content_classified_at && !retryableFetch;
                 const done = task.status === 'done';
 
                 if (!done && !classified) {
@@ -4622,7 +4650,10 @@
                     if (!this._posterClassifyPollInterval) {
                         this._posterClassifyPollInterval = setInterval(() => {
                             if (document.hidden || !this.taskId) return;
-                            if (this.task && this.task.content_classified_at) {
+                            const pollCv = String(this.task?.content_classifier_version || '');
+                            const pollHasLlm = !!(this.task?.poster_llm_title && String(this.task.poster_llm_title).trim());
+                            const pollRetryable = !!this.task?.content_classified_at && !pollHasLlm && /:fetch_error|:poster_pending/.test(pollCv);
+                            if (this.task && this.task.content_classified_at && !pollRetryable) {
                                 clearInterval(this._posterClassifyPollInterval);
                                 this._posterClassifyPollInterval = null;
                                 return;
@@ -4642,11 +4673,10 @@
                 if (staleEl) staleEl.classList.add('hidden');
                 contentEl.classList.remove('hidden');
 
-                const cv = String(task.content_classifier_version || '');
                 const classifyFailed = /:fetch_error|:classify_error|:openai_error|:pipeline_error/.test(cv);
                 const tFn = (k, fb) => (window.t ? window.t(k) : fb);
                 if (errBlock && errText) {
-                    if (classifyFailed) {
+                    if (classifyFailed && !hasLlm) {
                         errBlock.classList.remove('hidden');
                         let msg = tFn('task_meta_poster_err_generic', 'Poster check did not complete successfully.');
                         if (cv.includes(':fetch_error')) {
@@ -4681,9 +4711,8 @@
                     scoreWrap.classList.add('hidden');
                 }
 
-                const hasLlm = !!(task.poster_llm_title && String(task.poster_llm_title).trim());
                 if (llmBlock) {
-                    if (hasLlm && !classifyFailed) {
+                    if (hasLlm) {
                         llmBlock.classList.remove('hidden');
                         const titleEl = document.getElementById('task-meta-llm-title');
                         const kwEl = document.getElementById('task-meta-keywords');
@@ -5048,10 +5077,6 @@
                 const downloadUrls = (task.output_urls && task.output_urls.length > 0) ? task.output_urls : task.ready_urls;
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
-
-                // Custom animations: never await here — /animations/catalog can be slow (worker probes) and would block
-                // fetchTask (fetchInFlight stuck), freezing progress/log polling. stateHash dedupes duplicate fetches.
-                void this.loadAnimationCatalog().catch(() => {});
 
                 this.renderPosterMetadataSection();
                 void this.loadSimilarFree3DCharacters(false).catch(() => {});
@@ -14958,10 +14983,28 @@
                 }, 5000);
             }
 
+            function showViewerWaitingOverlay(statusText = 'Waiting for 3D preview...') {
+                try {
+                    window.__taskPageBoot?.revealElement('model-viewer-wrap', 0);
+                    if (typeof loadingManager !== 'undefined' && loadingManager) {
+                        if (!loadingManager.isVisible) {
+                            loadingManager.show('Loading 3D Preview');
+                        }
+                        loadingManager.setQueue([
+                            { name: 'Task status', status: 'done' },
+                            { name: '3D model', status: 'active' },
+                            { name: 'Scene setup', status: 'pending' },
+                        ]);
+                        loadingManager.updateProgress(12, statusText);
+                    }
+                    setStatus(statusText);
+                } catch (_) {}
+            }
+
             async function startMainViewerAfterVideoPhase() {
                 try {
-                    await window.__taskPageBoot?.waitFor('video');
                     window.__taskPageBoot?.beginViewer('Loading 3D preview...');
+                    showViewerWaitingOverlay('Waiting for prepared 3D model...');
                     await waitAndInitViewer();
                 } catch (error) {
                     perfLogger?.log('MainViewer', 'deferred start failed', {
@@ -15005,6 +15048,18 @@
 
                     const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
                     window.currentTaskIsFree3D = isFree3DTask; // Global flag for loadModel to use
+
+                    if (!isFree3DTask && !preparedLoaded && !preparedLoadingInProgress && !free3dModelLoaded) {
+                        const taskProgress = Math.max(0, Math.min(100, Number(t?.progress || 0)));
+                        const waitingProgress = taskProgress > 0
+                            ? Math.max(12, Math.min(65, taskProgress))
+                            : 12;
+                        showViewerWaitingOverlay(
+                            t?.status === 'done'
+                                ? 'Preparing 3D preview...'
+                                : `Rigging in progress... ${Math.round(waitingProgress)}%`
+                        );
+                    }
 
                     // 1. FREE3D: Load immediately from free3d.online (no waiting for worker)
                     if (isFree3DTask && !free3dModelLoaded) {

@@ -1,17 +1,19 @@
 """
 Server-side NSFW classification for task posters (images referenced in ready_urls).
 
-Uses NudeNet ONNX detector on poster bytes downloaded from the worker URL.
+Uses NudeNet ONNX detector on a browser-rendered preflight image first, then
+poster bytes downloaded from the worker URL as fallback.
 Optional: OpenAI vision for YouTube title/description/keywords (same image bytes).
-Policy: single pipeline — no alternate client-only source of truth for DB fields.
 """
 from __future__ import annotations
 
 import asyncio
 import base64
 import json
+import re
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
@@ -26,6 +28,7 @@ _CLASSIFIER_VERSION_MAX_LEN = 64
 
 CONTENT_CLASSIFIER_VERSION = "nudenet-320n-3.4"
 OPENAI_POSTER_MODEL = "gpt-4o-mini"
+PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 
 _classifier_locks: Dict[str, asyncio.Lock] = {}
 _classifier_locks_guard = asyncio.Lock()
@@ -233,6 +236,16 @@ def classify_image_bytes(image_bytes: bytes) -> Tuple[str, float]:
     return detections_to_rating(raw)
 
 
+def _load_preflight_render_image_bytes(task_id: str) -> Optional[bytes]:
+    try:
+        path = PREFLIGHT_RENDER_DIR / f"{task_id}.jpg"
+        if path.exists() and path.is_file():
+            return path.read_bytes()
+    except Exception as e:
+        print(f"[ContentModeration] Preflight render load failed for task {task_id}: {e}")
+    return None
+
+
 def _normalize_keyword_list(keywords: List[Any]) -> List[str]:
     cleaned: List[str] = []
     for x in keywords:
@@ -257,6 +270,12 @@ def _normalize_keyword_list(keywords: List[Any]) -> List[str]:
         "low poly",
         "pbr",
         "download",
+        "animated model",
+        "model download",
+        "3d asset",
+        "character animation",
+        "game character",
+        "realtime character",
     ]
     pi = 0
     while len(cleaned) < 25:
@@ -264,9 +283,81 @@ def _normalize_keyword_list(keywords: List[Any]) -> List[str]:
         pi += 1
         if p not in cleaned:
             cleaned.append(p)
-        else:
-            cleaned.append(f"{p}-{pi}")
+        elif pi > len(pool) * 2:
+            cleaned.append(f"3d asset {len(cleaned) + 1}")
     return cleaned[:25]
+
+
+def _humanize_filename_from_url(url: Optional[str]) -> str:
+    raw = str(url or "").split("?", 1)[0].rstrip("/")
+    name = unquote(raw.rsplit("/", 1)[-1]) if raw else ""
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", stem) if w]
+    return " ".join(words).strip()
+
+
+def _task_animal_type(task: Task) -> Optional[str]:
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+        if not isinstance(det, dict):
+            return None
+        value = (
+            det.get("animal_type")
+            or det.get("animal_type_string")
+            or (det.get("first_result") or {}).get("animal_type_string")
+        )
+        s = str(value or "").strip().lower()
+        return s or None
+    except Exception:
+        return None
+
+
+def fallback_poster_metadata_for_task(task: Task) -> dict:
+    """
+    Deterministic metadata fallback when OpenAI is unavailable/quota-limited.
+    Keeps task pages, Free3D suggestions and YouTube scheduling from staying blank.
+    """
+    filename_title = _humanize_filename_from_url(getattr(task, "input_url", None))
+    animal_type = _task_animal_type(task)
+    subject = filename_title or animal_type or str(getattr(task, "input_type", "") or "character")
+    subject_title = subject.title()
+    if not filename_title and animal_type and animal_type not in subject.lower():
+        subject_title = f"{subject_title} {animal_type.title()}".strip()
+    title = f"{subject_title} Rigged Character".strip()[:95]
+    description = (
+        f"{subject_title} is a rigged 3D character generated from the uploaded model. "
+        "The preview shows the processed model with an animation-ready rig for use in game, "
+        "Blender, Unity, Unreal, and realtime character workflows.\n\n"
+        "This metadata was generated automatically from the task filename and detected model "
+        "type because AI poster metadata generation was unavailable."
+    )
+    specific_terms = [subject.lower()]
+    if filename_title:
+        specific_terms.extend(w.lower() for w in filename_title.split())
+    if animal_type and not filename_title:
+        specific_terms.extend([animal_type, f"{animal_type} rig", f"{animal_type} 3d model"])
+    keywords = _normalize_keyword_list(
+        specific_terms
+        + [
+            "rigged character",
+            "animal rig",
+            "3d character",
+            "character rig",
+            "game ready",
+            "animation ready",
+            "skeletal mesh",
+            "autorig",
+            "blender",
+            "unity",
+            "unreal",
+            "fbx",
+            "glb",
+            "3d model",
+            "download",
+        ]
+    )
+    return {"title": title, "description": description, "keywords": keywords}
 
 
 def analyze_poster_llm_metadata(image_bytes: bytes) -> Optional[dict]:
@@ -406,42 +497,50 @@ async def _run_task_poster_classification_impl(task_id: str) -> None:
         if task.status != "done":
             return
         cv_prev = task.content_classifier_version or ""
-        if task.content_classified_at is not None and ":pipeline_error" not in cv_prev:
+        if (
+            task.content_classified_at is not None
+            and ":pipeline_error" not in cv_prev
+            and ":fetch_error" not in cv_prev
+            and ":poster_pending" not in cv_prev
+        ):
             await _safe_post_classify_hooks(task_id)
             return
 
+        image_bytes = _load_preflight_render_image_bytes(task_id)
+        image_source = "preflight_render" if image_bytes else "poster"
         ready_list, output_list = _task_ready_and_output_lists(task)
-        poster_url = find_poster_url(ready_list, output_list) or find_poster_url_loose(
-            ready_list, output_list
-        )
+        poster_url = None
+        if image_bytes is None:
+            poster_url = find_poster_url(ready_list, output_list) or find_poster_url_loose(
+                ready_list, output_list
+            )
         now = datetime.utcnow()
-        version = CONTENT_CLASSIFIER_VERSION
+        version = f"{CONTENT_CLASSIFIER_VERSION}:preflight" if image_source == "preflight_render" else CONTENT_CLASSIFIER_VERSION
 
-        if not poster_url:
+        if image_bytes is None and not poster_url:
             task.content_rating = "unknown"
             task.content_score = None
-            task.content_classified_at = now
-            task.content_classifier_version = _clip_classifier_version(version)
+            task.content_classified_at = None
+            task.content_classifier_version = _clip_classifier_version(f"{version}:poster_pending")
             task.updated_at = now
             await db.commit()
-            await _safe_post_classify_hooks(task_id)
             return
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                resp = await client.get(poster_url)
-                resp.raise_for_status()
-                image_bytes = resp.content
-        except Exception as e:
-            print(f"[ContentModeration] Poster fetch failed for task {task_id}: {e}")
-            task.content_rating = "unknown"
-            task.content_score = None
-            task.content_classified_at = now
-            task.content_classifier_version = _clip_classifier_version(f"{version}:fetch_error")
-            task.updated_at = now
-            await db.commit()
-            await _safe_post_classify_hooks(task_id)
-            return
+        if image_bytes is None:
+            try:
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                    resp = await client.get(poster_url)
+                    resp.raise_for_status()
+                    image_bytes = resp.content
+            except Exception as e:
+                print(f"[ContentModeration] Poster fetch failed for task {task_id}: {e}")
+                task.content_rating = "unknown"
+                task.content_score = None
+                task.content_classified_at = None
+                task.content_classifier_version = _clip_classifier_version(f"{version}:poster_pending")
+                task.updated_at = now
+                await db.commit()
+                return
 
         try:
             rating, score = await asyncio.to_thread(classify_image_bytes, image_bytes)
@@ -485,6 +584,14 @@ async def _run_task_poster_classification_impl(task_id: str) -> None:
                     cv = _clip_classifier_version(f"{version}:openai_error")
             else:
                 cv = _clip_classifier_version(f"{version}:openai_error")
+
+        if not (llm_title and llm_desc and llm_keywords_json):
+            fallback = fallback_poster_metadata_for_task(task)
+            llm_title = str(fallback["title"]).strip()[:256]
+            llm_desc = str(fallback["description"]).strip()[:5000]
+            llm_keywords_json = json.dumps(_normalize_keyword_list(fallback["keywords"]))
+            llm_at = datetime.utcnow()
+            cv = _clip_classifier_version(f"{cv or version}+fallback")
 
         task.content_rating = rating
         task.content_score = score

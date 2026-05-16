@@ -178,10 +178,21 @@ def _decode_preflight_render_image(data_url_or_b64: str) -> bytes:
     raw = (data_url_or_b64 or "").strip()
     if "," in raw and raw.lower().startswith("data:image/"):
         raw = raw.split(",", 1)[1]
-    raw = re.sub(r"\s+", "", raw)
     if not raw:
         raise ValueError("empty preflight render image")
-    data = base64.b64decode(raw, validate=True)
+
+    def _decode_candidate(candidate: str) -> bytes:
+        return base64.b64decode(candidate, validate=True)
+
+    compact = re.sub(r"\s+", "", raw)
+    try:
+        data = _decode_candidate(compact)
+    except Exception:
+        # Multipart form parsing can turn literal '+' characters in a data URL
+        # into spaces. Try that repair only after strict decoding fails.
+        repaired = re.sub(r"\s+", "+", raw)
+        data = _decode_candidate(repaired)
+
     if len(data) > PREFLIGHT_RENDER_MAX_BYTES:
         raise ValueError("preflight render image too large")
     if not (data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"RIFF")):
@@ -211,7 +222,7 @@ def _task_needs_poster_classification(task) -> bool:
     if getattr(task, "content_classified_at", None) is None:
         return True
     cv = getattr(task, "content_classifier_version", None) or ""
-    return ":pipeline_error" in cv
+    return ":pipeline_error" in cv or ":fetch_error" in cv or ":poster_pending" in cv
 
 
 def _schedule_poster_recovery_throttled(task_id: str) -> None:
@@ -716,14 +727,18 @@ async def background_task_updater():
                     await asyncio.gather(*[_update_one(tid) for tid in task_ids])
 
                 # =============================================================
-                # 4. Poster classification recovery (done but content_classified_at never set)
+                # 4. Poster classification recovery (pending or transient poster fetch errors)
                 # =============================================================
                 try:
                     async with AsyncSessionLocal() as db:
                         r2 = await db.execute(
                             select(Task.id).where(
                                 Task.status == "done",
-                                Task.content_classified_at.is_(None),
+                                or_(
+                                    Task.content_classified_at.is_(None),
+                                    Task.content_classifier_version.like("%:fetch_error%"),
+                                    Task.content_classifier_version.like("%:poster_pending%"),
+                                ),
                             ).limit(25)
                         )
                         pending_poster = list(r2.scalars().all())
