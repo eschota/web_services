@@ -74,7 +74,7 @@ from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
     TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
-    CryptoPaymentReport,
+    CryptoPaymentReport, EmailCampaignClick,
     SupportChatSession,
     SupportChatMessage,
     reset_admin_overlay_counters,
@@ -1892,6 +1892,74 @@ async def marketing_unsubscribe_page(
 </body>
 </html>"""
     return HTMLResponse(content=html_content)
+
+
+def _campaign_click_destination(campaign_key: str, link_key: str) -> Optional[str]:
+    from urllib.parse import urlencode
+
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    campaign = (campaign_key or "email-campaign")[:128]
+    content = (link_key or "link")[:64]
+    utm = urlencode(
+        {
+            "utm_source": "email",
+            "utm_medium": "campaign",
+            "utm_campaign": campaign,
+            "utm_content": content,
+        }
+    )
+    if link_key == "animal_rig":
+        return f"{base}/animal-rig?{utm}"
+    if link_key == "home":
+        return f"{base}/?{utm}"
+    if link_key == "youtube_short":
+        return f"https://www.youtube.com/shorts/vEn7laZijOI?{utm}"
+    return None
+
+
+@app.get("/email/click")
+async def email_campaign_click(
+    request: Request,
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tracked redirect for signed marketing campaign links."""
+    from unsubscribe_tokens import verify_campaign_click_token
+
+    payload = verify_campaign_click_token(token or "")
+    if not payload:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    campaign_key = payload["campaign_key"]
+    email = payload["email"]
+    link_key = payload["link_key"]
+    destination_url = _campaign_click_destination(campaign_key, link_key)
+    if not destination_url:
+        raise HTTPException(status_code=400, detail="Unknown link")
+
+    rs = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
+    user = rs.scalar_one_or_none()
+    email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()
+    client_ip = request.client.host if request.client else ""
+    ip_hash = (
+        hmac.new(SECRET_KEY.encode("utf-8"), client_ip.encode("utf-8"), hashlib.sha256).hexdigest()
+        if client_ip else None
+    )
+    user_agent = (request.headers.get("user-agent") or "")[:512] or None
+    db.add(
+        EmailCampaignClick(
+            campaign_key=campaign_key,
+            user_id=user.id if user else None,
+            email_hash=email_hash,
+            link_key=link_key,
+            destination_url=destination_url,
+            ip_hash=ip_hash,
+            user_agent=user_agent,
+            clicked_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+    return RedirectResponse(url=destination_url, status_code=302)
 
 
 # =============================================================================

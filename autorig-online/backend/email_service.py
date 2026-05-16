@@ -11,7 +11,11 @@ from typing import Optional
 from urllib.parse import quote
 
 from config import RESEND_API_KEY, EMAIL_FROM, APP_URL, MARKETING_POSTAL_ADDRESS
-from unsubscribe_tokens import build_unsubscribe_token, build_marketing_unsubscribe_token
+from unsubscribe_tokens import (
+    build_unsubscribe_token,
+    build_marketing_unsubscribe_token,
+    build_campaign_click_token,
+)
 
 
 # Initialize Resend
@@ -269,12 +273,17 @@ def _marketing_sender_footer() -> str:
     return f"No postal address provided. Contact: {escape(EMAIL_FROM)}"
 
 
-def _marketing_email_html(visible_unsubscribe_url: str) -> str:
+def _marketing_click_url(campaign_key: str, email: str, link_key: str) -> str:
+    token = build_campaign_click_token(campaign_key, email, link_key)
+    return f"{APP_URL.rstrip('/')}/email/click?token={quote(token, safe='')}"
+
+
+def _marketing_email_html(visible_unsubscribe_url: str, click_urls: dict) -> str:
     base = APP_URL.rstrip("/")
-    animal_url = f"{base}/animal-rig"
-    home_url = f"{base}/"
+    animal_url = click_urls.get("animal_rig") or f"{base}/animal-rig"
+    youtube_url = click_urls.get("youtube_short") or "https://www.youtube.com/shorts/vEn7laZijOI"
+    home_url = click_urls.get("home") or f"{base}/"
     poster_url = f"{base}/static/images/email/autorig-v2-animal-rig-poster.jpg?v=20260516"
-    youtube_url = "https://www.youtube.com/shorts/vEn7laZijOI"
     sender_footer = _marketing_sender_footer()
     return f"""<!DOCTYPE html>
 <html>
@@ -349,8 +358,11 @@ def _marketing_email_html(visible_unsubscribe_url: str) -> str:
 </html>"""
 
 
-def _marketing_email_text(visible_unsubscribe_url: str) -> str:
+def _marketing_email_text(visible_unsubscribe_url: str, click_urls: dict) -> str:
     base = APP_URL.rstrip("/")
+    animal_url = click_urls.get("animal_rig") or f"{base}/animal-rig"
+    youtube_url = click_urls.get("youtube_short") or "https://www.youtube.com/shorts/vEn7laZijOI"
+    home_url = click_urls.get("home") or f"{base}/"
     return "\n".join(
         [
             "AutoRig V2: animal rigging is live",
@@ -358,9 +370,9 @@ def _marketing_email_text(visible_unsubscribe_url: str) -> str:
             "AutoRig.online now rigs animals and other non-humanoid 3D models.",
             "We also made the humanoid character rig stronger, cleaner, and more predictable.",
             "",
-            f"See V2 animal rigging: {base}/animal-rig",
-            "Watch the short: https://www.youtube.com/shorts/vEn7laZijOI",
-            f"Try AutoRig.online: {base}/",
+            f"See V2 animal rigging: {animal_url}",
+            f"Watch the short: {youtube_url}",
+            f"Try AutoRig.online: {home_url}",
             "",
             "You are receiving this because you signed in to AutoRig.online and have not unsubscribed from email notifications.",
             f"Unsubscribe from marketing emails: {visible_unsubscribe_url}",
@@ -390,13 +402,18 @@ async def send_marketing_campaign_email(
         encoded_token = quote(token, safe="")
         one_click_unsubscribe_url = f"{base}/api/email/marketing-unsubscribe?token={encoded_token}"
         visible_unsubscribe_url = f"{base}/unsubscribe/marketing?token={encoded_token}"
+        click_urls = {
+            "animal_rig": _marketing_click_url(campaign_key, to_email, "animal_rig"),
+            "youtube_short": _marketing_click_url(campaign_key, to_email, "youtube_short"),
+            "home": _marketing_click_url(campaign_key, to_email, "home"),
+        }
         email_hash = hashlib.sha256(to_email.strip().lower().encode("utf-8")).hexdigest()
         email_params: resend.Emails.SendParams = {
             "from": f"AutoRig.online <{EMAIL_FROM}>",
             "to": [to_email],
             "subject": "AutoRig V2: animal rigging is live",
-            "html": _marketing_email_html(visible_unsubscribe_url),
-            "text": _marketing_email_text(visible_unsubscribe_url),
+            "html": _marketing_email_html(visible_unsubscribe_url, click_urls),
+            "text": _marketing_email_text(visible_unsubscribe_url, click_urls),
             "headers": {
                 "List-Unsubscribe": f"<{one_click_unsubscribe_url}>",
                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",

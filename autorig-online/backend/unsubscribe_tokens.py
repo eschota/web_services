@@ -4,6 +4,7 @@ Signed tokens for one-click email unsubscribe links (HMAC-SHA256).
 import base64
 import hashlib
 import hmac
+import json
 import struct
 from typing import Optional
 
@@ -109,3 +110,54 @@ def build_marketing_unsubscribe_token(email: str) -> str:
 def verify_marketing_unsubscribe_token(token: str) -> Optional[str]:
     """Returns normalized email for a valid marketing unsubscribe token."""
     return _verify_scoped_token("marketing", token)
+
+
+def build_campaign_click_token(campaign_key: str, email: str, link_key: str) -> str:
+    """URL-safe signed token for campaign click redirects."""
+    payload = {
+        "campaign_key": campaign_key or "",
+        "email": _normalize_email(email),
+        "link_key": link_key or "",
+    }
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    if len(body) > 2048:
+        raise ValueError("click token payload too long")
+    sig = hmac.new(SECRET_KEY.encode("utf-8"), b"click\0" + body, hashlib.sha256).digest()
+    raw = struct.pack("!H", len(body)) + body + sig
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def verify_campaign_click_token(token: str) -> Optional[dict]:
+    """Returns campaign click payload if signature is valid, else None."""
+    if not token or not isinstance(token, str):
+        return None
+    pad = "=" * (-len(token) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(token + pad)
+    except Exception:
+        return None
+    if len(raw) < 2 + 32:
+        return None
+    try:
+        n = struct.unpack("!H", raw[:2])[0]
+        body = raw[2 : 2 + n]
+        sig = raw[2 + n :]
+        if len(body) != n or len(sig) != 32:
+            return None
+    except Exception:
+        return None
+    expected = hmac.new(SECRET_KEY.encode("utf-8"), b"click\0" + body, hashlib.sha256).digest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    campaign_key = str(payload.get("campaign_key") or "")[:128]
+    email = _normalize_email(str(payload.get("email") or ""))
+    link_key = str(payload.get("link_key") or "")[:64]
+    if not campaign_key or not email or not link_key:
+        return None
+    return {"campaign_key": campaign_key, "email": email, "link_key": link_key}

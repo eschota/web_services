@@ -88,6 +88,25 @@ class EmailCampaignSend(Base):
     sent_at = Column(DateTime, nullable=True)
 
 
+class EmailCampaignClick(Base):
+    """Click events for tracked marketing campaign links."""
+    __tablename__ = "email_campaign_clicks"
+    __table_args__ = (
+        Index("ix_email_campaign_clicks_campaign_link", "campaign_key", "link_key"),
+        Index("ix_email_campaign_clicks_email_hash", "email_hash"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_key = Column(String(128), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    email_hash = Column(String(64), nullable=False, index=True)
+    link_key = Column(String(64), nullable=False, index=True)
+    destination_url = Column(String(1024), nullable=False)
+    ip_hash = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    clicked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class AnonSession(Base):
     """Anonymous user session (tracked by cookie)"""
     __tablename__ = "anon_sessions"
@@ -777,6 +796,38 @@ async def init_db():
             except Exception:
                 pass
 
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_clicks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        link_key VARCHAR(64) NOT NULL,
+                        destination_url VARCHAR(1024) NOT NULL,
+                        ip_hash VARCHAR(64),
+                        user_agent VARCHAR(512),
+                        clicked_at DATETIME NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_campaign_link
+                    ON email_campaign_clicks (campaign_key, link_key)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_email_hash
+                    ON email_campaign_clicks (email_hash)
+                    """
+                )
+            except Exception:
+                pass
+
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_name VARCHAR(255)")
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_description TEXT")
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN registered_as_agent BOOLEAN DEFAULT 0")
@@ -1079,6 +1130,37 @@ async def init_db():
                     """
                     CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_email_hash
                     ON email_campaign_sends (email_hash)
+                    """
+                )
+            except Exception:
+                pass
+
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_clicks (
+                        id SERIAL PRIMARY KEY,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        link_key VARCHAR(64) NOT NULL,
+                        destination_url VARCHAR(1024) NOT NULL,
+                        ip_hash VARCHAR(64),
+                        user_agent VARCHAR(512),
+                        clicked_at TIMESTAMP NOT NULL
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_campaign_link
+                    ON email_campaign_clicks (campaign_key, link_key)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_email_hash
+                    ON email_campaign_clicks (email_hash)
                     """
                 )
             except Exception:
