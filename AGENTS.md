@@ -81,8 +81,7 @@ There are also historical/runtime-looking directories such as `.config`,
 Treat these as sensitive or runtime state unless the user gives a specific task
 for them.
 
-Some virtualenv directories may still exist as tracked files until they are
-migrated safely:
+Virtualenv directories are runtime state, not source code. Keep them ignored:
 
 ```text
 autorig-online/mcp/.venv/
@@ -90,10 +89,12 @@ qwerty_vpn/gateway/venv/
 CGTrader_SUBMIT_SERVER/venv/
 ```
 
-Do not remove those tracked venvs from git and then deploy with a plain
-`git pull` unless the production venvs have first been moved/recreated and the
-matching systemd services have been verified. `qwerty-gateway.service` and the
-AutoRig MCP process have been observed using in-tree venv paths on the VPS.
+If a cleanup commit removes tracked venv files, do not deploy it with a plain
+`git pull` over production unless the production venvs have first been copied
+aside or recreated. Safe sequence: copy the venv directory outside the repo,
+pull the cleanup commit, move the venv back into the same ignored path, then
+verify the matching service. `qwerty-gateway.service` and the AutoRig MCP
+process have been observed using in-tree venv paths on the VPS.
 
 ## AutoRig.online
 
