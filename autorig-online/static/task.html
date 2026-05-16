@@ -7973,6 +7973,7 @@
                 if (!renderer) return false;
                 setStatus('Loading IBL...');
                 if (usingStaticBackdrop && LIGHTING_CONFIG.backdropImagePath) {
+                    if (skyObject) skyObject.visible = false;
                     syncSceneBackdropFromPath('loadEnvironment');
                     syncSceneEnvironmentFromPath('loadEnvironment');
                     return true;
@@ -8009,6 +8010,7 @@
             function updateSkyEnvironment(forcePmrem = false) {
                 if (usingStaticBackdrop) return;
                 if (!scene || !renderer || !skyObject) return;
+                skyObject.visible = true;
                 const uniforms = skyObject.material.uniforms;
                 uniforms.turbidity.value = LIGHTING_CONFIG.skyTurbidity;
                 uniforms.rayleigh.value = LIGHTING_CONFIG.skyRayleigh;
@@ -8329,7 +8331,9 @@
             // Viewer theme backdrops + image based lighting
             // ============================================================
             let backdropSceneTexture = null;
-            let backdropTextureLoadSerial = 0;
+            let backdropSceneTextureLoadSerial = 0;
+            let backdropEnvironmentTextureLoadSerial = 0;
+            let backdropRenderFrameLogged = false;
             let backdropEnvironmentTexture = null;
             let backdropEnvironmentRenderTarget = null;
             let roomEnvironmentTexture = null;
@@ -8386,24 +8390,82 @@
                 applyModelEnvironmentIntensity();
             }
 
+            function updateScreenBackdropCover() {
+                const tex = backdropSceneTexture;
+                if (!tex?.image || !camera) return;
+                const imgW = Number(tex.image.naturalWidth || tex.image.width || 0);
+                const imgH = Number(tex.image.naturalHeight || tex.image.height || 0);
+                if (!imgW || !imgH) return;
+                const viewAspect = Math.max(0.01, Number(camera.aspect || 1));
+                const imageAspect = imgW / imgH;
+                tex.offset.set(0, 0);
+                tex.repeat.set(1, 1);
+                if (imageAspect > viewAspect) {
+                    const repeatX = viewAspect / imageAspect;
+                    tex.repeat.x = repeatX;
+                    tex.offset.x = (1 - repeatX) * 0.5;
+                } else {
+                    const repeatY = imageAspect / viewAspect;
+                    tex.repeat.y = repeatY;
+                    tex.offset.y = (1 - repeatY) * 0.5;
+                }
+                tex.needsUpdate = true;
+            }
+
+            function renderMainViewerFrame() {
+                if (!renderer || !scene || !camera) return;
+                const hasThemeBackdrop = !!(usingStaticBackdrop && backdropSceneTexture);
+                if (!hasThemeBackdrop) {
+                    if (skyObject) skyObject.visible = true;
+                    renderer.render(scene, camera);
+                    return;
+                }
+                if (skyObject) skyObject.visible = false;
+                if (!backdropRenderFrameLogged) {
+                    backdropRenderFrameLogged = true;
+                    console.info('[ViewerTheme] scene background render active', {
+                        usingStaticBackdrop,
+                        hasMap: !!backdropSceneTexture,
+                        sceneBackground: scene.background?.type || scene.background?.constructor?.name || null,
+                    });
+                }
+                scene.background = backdropSceneTexture;
+                renderer.render(scene, camera);
+            }
+
+            function applyScreenBackdropTexture(tex, path = '') {
+                if (!THREE || !scene || !tex) return;
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.mapping = THREE.UVMapping;
+                tex.minFilter = THREE.LinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                tex.wrapS = THREE.ClampToEdgeWrapping;
+                tex.wrapT = THREE.ClampToEdgeWrapping;
+                try { tex.generateMipmaps = false; } catch (_) {}
+                updateScreenBackdropCover();
+                scene.background = tex;
+                renderer?.setClearAlpha?.(1);
+                console.info('[ViewerTheme] scene.background applied', { path, mode: 'scene-background' });
+            }
+
             function syncSceneBackdropFromPath(reason = '') {
                 if (!THREE || !scene || !usingStaticBackdrop) return;
                 const path = String(LIGHTING_CONFIG.backdropImagePath || '').trim();
                 if (!path) return;
-                backdropTextureLoadSerial += 1;
-                const serial = backdropTextureLoadSerial;
+                backdropSceneTextureLoadSerial += 1;
+                const serial = backdropSceneTextureLoadSerial;
                 const loader = new THREE.TextureLoader();
                 loader.setCrossOrigin('anonymous');
                 loader.load(path, (tex) => {
-                    if (serial !== backdropTextureLoadSerial) { disposeTextureSafe(tex); return; }
+                    if (serial !== backdropSceneTextureLoadSerial) { disposeTextureSafe(tex); return; }
                     tex.colorSpace = THREE.SRGBColorSpace;
                     tex.minFilter = THREE.LinearFilter;
                     tex.magFilter = THREE.LinearFilter;
                     try { tex.generateMipmaps = false; } catch (_) {}
                     disposeTextureSafe(backdropSceneTexture);
                     backdropSceneTexture = tex;
-                    scene.background = tex;
-                    window.taskDbg?.('[ViewerTheme] scene.background applied', { path, reason });
+                    applyScreenBackdropTexture(tex, path);
+                    console.info('[ViewerTheme] backdrop texture ready', { path, reason });
                 }, undefined, (err) => console.warn('[ViewerTheme] backdrop texture failed', path, err));
             }
 
@@ -8411,11 +8473,11 @@
                 if (!THREE || !scene || !renderer || !usingStaticBackdrop) return;
                 const path = String(LIGHTING_CONFIG.backdropImagePath || '').trim();
                 if (!path) { console.error('[ViewerIBL] Theme environment path is empty', reason); return; }
-                const serial = ++backdropTextureLoadSerial;
+                const serial = ++backdropEnvironmentTextureLoadSerial;
                 const loader = new THREE.TextureLoader();
                 loader.setCrossOrigin('anonymous');
                 loader.load(path, (tex) => {
-                    if (serial !== backdropTextureLoadSerial) { disposeTextureSafe(tex); return; }
+                    if (serial !== backdropEnvironmentTextureLoadSerial) { disposeTextureSafe(tex); return; }
                     try {
                         tex.colorSpace = THREE.SRGBColorSpace;
                         tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -8424,7 +8486,7 @@
                         const renderTarget = pmremGenerator.fromEquirectangular(tex);
                         pmremGenerator.dispose();
                         disposeTextureSafe(tex);
-                        if (serial !== backdropTextureLoadSerial) { disposeRenderTargetSafe(renderTarget); return; }
+                        if (serial !== backdropEnvironmentTextureLoadSerial) { disposeRenderTargetSafe(renderTarget); return; }
                         if (backdropEnvironmentRenderTarget && backdropEnvironmentRenderTarget !== renderTarget) {
                             disposeRenderTargetSafe(backdropEnvironmentRenderTarget);
                         }
@@ -8433,7 +8495,7 @@
                         scene.environment = backdropEnvironmentTexture;
                         activeEnvironmentSource = path;
                         applySceneEnvironmentIntensity();
-                        window.taskDbg?.('[ViewerIBL] image-based PMREM environment applied', { path, reason });
+                        console.info('[ViewerIBL] image-based PMREM environment applied', { path, reason });
                     } catch (err) {
                         disposeTextureSafe(tex);
                         console.error('[ViewerIBL] image environment failed', path, err);
@@ -8478,9 +8540,16 @@
                 const next = String(pathOpt || LIGHTING_CONFIG.backdropImagePath || '').trim();
                 if (next) LIGHTING_CONFIG.backdropImagePath = next;
                 usingStaticBackdrop = !!LIGHTING_CONFIG.backdropImagePath;
+                if (skyObject) skyObject.visible = !usingStaticBackdrop;
                 const el = document.getElementById('model-viewer-backdrop');
                 const path = String(LIGHTING_CONFIG.backdropImagePath || '').trim();
                 if (el && path) el.style.backgroundImage = `url(${JSON.stringify(path)})`;
+                if (host && path) {
+                    host.style.backgroundImage = `url(${JSON.stringify(path)})`;
+                    host.style.backgroundPosition = 'center center';
+                    host.style.backgroundSize = 'cover';
+                    host.style.backgroundRepeat = 'no-repeat';
+                }
                 if (logTag) console.log('[ViewerTheme] backdrop', logTag, { path, hasEl: !!el });
                 syncSceneBackdropFromPath(logTag || 'applyViewerBackdropUrl');
                 syncSceneEnvironmentFromPath(logTag || 'applyViewerBackdropUrl');
@@ -8605,7 +8674,8 @@
             function captureViewerThemeAutoSelectImage() {
                 try {
                     if (renderer?.domElement && scene && camera) {
-                        renderer.render?.(scene, camera);
+                        if (typeof renderMainViewerFrame === 'function') renderMainViewerFrame();
+                        else renderer.render?.(scene, camera);
                         return renderer.domElement.toDataURL('image/jpeg', 0.68);
                     }
                 } catch (e) {
@@ -8970,7 +9040,7 @@
                 
                 // Background color fallback / picker sync. The procedural sky owns the visible background.
                 if (scene) {
-                    if (!skyObject) scene.background = new THREE.Color(viewerState.bgColor);
+                    if (!usingStaticBackdrop && !skyObject) scene.background = new THREE.Color(viewerState.bgColor);
                     const preview = document.getElementById('bg-color-preview');
                     if (preview) preview.style.backgroundColor = viewerState.bgColor;
                     const picker = document.getElementById('bg-color-picker');
@@ -8998,10 +9068,19 @@
 
                 // 1.6 Ground Plane
                 if (viewerControls) {
-                    viewerControls.setGroundParams({
-                        color: viewerState.groundColor,
-                        size: viewerState.groundSize
-                    });
+                    if (groundPlaneMesh?.userData?.shadowCatcher) {
+                        viewerControls.setGroundParams({ size: viewerState.groundSize });
+                        if (groundPlaneMesh.material) {
+                            groundPlaneMesh.material.color?.set?.(0x000000);
+                            groundPlaneMesh.material.opacity = Math.max(0.08, Math.min(0.55, _themeNumber(viewerState.shadowIntensity, 0.32)));
+                            groundPlaneMesh.material.needsUpdate = true;
+                        }
+                    } else {
+                        viewerControls.setGroundParams({
+                            color: viewerState.groundColor,
+                            size: viewerState.groundSize
+                        });
+                    }
                 }
 
                 // 1.7 Shadows
@@ -9010,8 +9089,8 @@
                     // For shadow intensity, we usually adjust the shadow darknees via bias or just the light intensity.
                     // But in Three.js, you usually use a separate "shadow only" light or post-processing.
                     // Actually, the easiest way to control shadow "strength" is via shadow.radius (blur) and shadow.bias.
-                    // Another way: use THREE.ShadowMaterial on a ground, but we have a PBR ground.
-                    // Let's use shadow.radius for softness.
+                    // ShadowMaterial opacity is controlled through viewerState.shadowIntensity.
+                    // Use shadow.radius for softness.
                     sunLight.shadow.radius = viewerState.shadowRadius;
                 }
                 
@@ -9021,7 +9100,7 @@
                     currentModel.traverse(child => {
                         if (child.isMesh) {
                             child.castShadow = true;
-                            child.receiveShadow = true;
+                            child.receiveShadow = false;
                         }
                     });
                 }
@@ -9230,8 +9309,11 @@
                         currentModel.position.x -= center.x;
                         currentModel.position.z -= center.z;
                     }
-                    if (groundPlaneMesh) groundPlaneMesh.position.y = 0;
                     currentModel.updateMatrixWorld(true);
+                    if (groundPlaneMesh) {
+                        const groundedBox = new THREE.Box3().setFromObject(currentModel);
+                        groundPlaneMesh.position.y = Number.isFinite(groundedBox.min.y) ? groundedBox.min.y - 0.005 : 0;
+                    }
                 } catch (error) {
                     if (!window.__snapGroundWarningShown) {
                         window.__snapGroundWarningShown = true;
@@ -9553,7 +9635,7 @@
             }
 
             function shouldUseMainViewerComposer() {
-                return !!composer && !!getMainViewerQualityProfile().useComposer;
+                return !!composer && !!getMainViewerQualityProfile().useComposer && !usingStaticBackdrop;
             }
 
             function syncMainViewerBloomPass() {
@@ -9574,12 +9656,20 @@
                 sunLight.castShadow = shadowsEnabled;
                 if (groundPlaneMesh) {
                     groundPlaneMesh.receiveShadow = shadowsEnabled;
+                    groundPlaneMesh.castShadow = false;
+                    groundPlaneMesh.visible = shadowsEnabled;
                 }
                 if (currentModel) {
                     currentModel.traverse((child) => {
                         if (!child.isMesh) return;
+                        const name = String(child.name || '').toLowerCase();
+                        if (name.includes('helper') || name.includes('shadowcatcher') || name.includes('shadow_catcher')) {
+                            child.castShadow = false;
+                            child.receiveShadow = false;
+                            return;
+                        }
                         child.castShadow = shadowsEnabled;
-                        child.receiveShadow = shadowsEnabled;
+                        child.receiveShadow = false;
                     });
                 }
                 if (sunLight.shadow) {
@@ -9598,6 +9688,7 @@
             function updateSunShadowFocus(force = false) {
                 if (!sunLight || !sunLight.target || !THREE) return;
                 const focus = new THREE.Vector3();
+                const modelSize = new THREE.Vector3(2, 2, 2);
                 let hasFocus = false;
 
                 if (playModeController?.active && playModeController.model) {
@@ -9605,7 +9696,12 @@
                     hasFocus = true;
                 } else if (currentModel) {
                     try {
-                        new THREE.Box3().setFromObject(currentModel).getCenter(focus);
+                        const box = new THREE.Box3().setFromObject(currentModel);
+                        box.getCenter(focus);
+                        box.getSize(modelSize);
+                        if (groundPlaneMesh) {
+                            groundPlaneMesh.position.y = Number.isFinite(box.min.y) ? box.min.y - 0.005 : 0;
+                        }
                         hasFocus = true;
                     } catch (error) {
                         hasFocus = false;
@@ -9628,7 +9724,7 @@
                 sunLight.updateMatrixWorld();
 
                 if (sunLight.shadow) {
-                    const size = Math.max(8, Math.min(60, Number(viewerState.groundSize || 10)));
+                    const size = Math.max(4, Math.min(60, Math.max(modelSize.x, modelSize.z, 2) * 1.15 + 2));
                     sunLight.shadow.camera.left = -size;
                     sunLight.shadow.camera.right = size;
                     sunLight.shadow.camera.top = size;
@@ -10188,7 +10284,8 @@
                 scene.background = new THREE.Color(LIGHTING_CONFIG.bgColor);
 
                 // Renderer (PBR critical settings from config)
-                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false });
+                renderer.setClearColor(0x000000, 0);
                 renderer.setPixelRatio(getMainViewerTargetPixelRatio());
                 renderer.shadowMap.enabled = true;
                 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -10329,62 +10426,22 @@
                 const outputPass = new OutputPass();
                 composer.addPass(outputPass);
 
-                // Ground Plane
-                const groundGeo = new THREE.PlaneGeometry(10, 10); // Much larger to handle gradient fade
-                const groundMat = new THREE.MeshStandardMaterial({ 
-                    color: 0x222222,
-                    roughness: 0.8,
-                    metalness: 0.1,
-                    transparent: true
+                // Shadow matte only: the theme image owns the visible background.
+                const groundGeo = new THREE.PlaneGeometry(200, 200);
+                const groundMat = new THREE.ShadowMaterial({
+                    color: 0x000000,
+                    opacity: Math.max(0.08, Math.min(0.55, _themeNumber(viewerState.shadowIntensity, 0.32))),
+                    transparent: true,
+                    depthWrite: false,
                 });
-
-                groundMat.onBeforeCompile = (shader) => {
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        '#include <common>',
-                        `
-                        #include <common>
-                        varying vec2 vWorldUv;
-                        `
-                    );
-                    shader.vertexShader = shader.vertexShader.replace(
-                        '#include <common>',
-                        `
-                        #include <common>
-                        varying vec2 vWorldUv;
-                        `
-                    );
-                    shader.vertexShader = shader.vertexShader.replace(
-                        '#include <begin_vertex>',
-                        `
-                        #include <begin_vertex>
-                        vWorldUv = uv;
-                        `
-                    );
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        '#include <output_fragment>',
-                        `
-                        // Radial alpha gradient
-                        // vWorldUv is 0..1 over the 10x10 plane. 
-                        // Center is 0.5, 0.5. 
-                        // 1.5m radius in 10m plane is 1.5/10 = 0.15 normalized units.
-                        float dist = distance(vWorldUv, vec2(0.5));
-                        float radius = 0.45; // Normalized radius for fade (starts at 1.5m, fades to 4.5m)
-                        
-                        // Long entry: stay opaque for 1.5m, then fade out slowly
-                        // 1.5m is 0.15 dist. Let's fade from 0.15 to 0.45.
-                        float alpha = 1.0 - smoothstep(0.15, 0.48, dist);
-                        
-                        // Apply to output
-                        gl_FragColor.a *= alpha;
-                        #include <output_fragment>
-                        `
-                    );
-                };
-
                 groundPlaneMesh = new THREE.Mesh(groundGeo, groundMat);
                 groundPlaneMesh.rotation.x = -Math.PI / 2;
                 groundPlaneMesh.position.set(0, 0, 0);
                 groundPlaneMesh.receiveShadow = true;
+                groundPlaneMesh.castShadow = false;
+                groundPlaneMesh.renderOrder = -1;
+                groundPlaneMesh.name = 'TaskViewerShadowCatcher';
+                groundPlaneMesh.userData.shadowCatcher = true;
                 scene.add(groundPlaneMesh);
                 
                 // Setup viewer controls and load saved settings
@@ -10402,6 +10459,7 @@
                     renderer.setSize(w, h, true);
                     if (composer) composer.setSize(w, h);
                     if (bloomPass) bloomPass.resolution.set(w, h);
+                    updateScreenBackdropCover();
                 };
                 window.addEventListener('resize', mainViewerResize);
                 mainViewerResize();
@@ -10686,7 +10744,7 @@
                         if (shouldUseMainViewerComposer()) {
                             composer.render();
                         } else {
-                            renderer.render(scene, camera);
+                            renderMainViewerFrame();
                         }
                     }
 
@@ -12633,6 +12691,10 @@
                 } else if (!fitCameraToModelBounds(model, `load ${label}`, { boundsInfo: modelBoundsInfo })) {
                     cameraInitialized = true;
                 }
+                if (activeViewerTheme?.src) {
+                    applyViewerBackdropUrl(activeViewerTheme.src, `model load ${label}`);
+                    viewerThemeRuntimeApply(activeViewerTheme, `model load ${label}`);
+                }
                 // Mark loading complete
                 loadingManager.updateProgress(100, `${label} loaded!`);
                 loadingManager.setItemStatus(label, 'done');
@@ -12844,6 +12906,10 @@
                     restoreSavedCamera();
                 } else if (!fitCameraToModelBounds(model, `load ${label}`, { boundsInfo: fbxModelBoundsInfo })) {
                     cameraInitialized = true;
+                }
+                if (activeViewerTheme?.src) {
+                    applyViewerBackdropUrl(activeViewerTheme.src, `model load ${label}`);
+                    viewerThemeRuntimeApply(activeViewerTheme, `model load ${label}`);
                 }
                 // Mark loading complete
                 loadingManager.updateProgress(100, `${label} loaded!`);
