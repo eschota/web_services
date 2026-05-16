@@ -131,7 +131,6 @@ def _build_youtube_description(
     YouTube max description length 5000.
     """
     base = APP_URL.rstrip("/")
-    public_model_link = f"{base}/m/{task_id}"
     task_link = f"{base}/task?id={task_id}"
     clean_title = _compact_text(model_title)
     clean_description = (model_description or "").strip()
@@ -148,8 +147,7 @@ def _build_youtube_description(
         "AutoRig Online creates AI-assisted character rigs, animation previews, and engine-ready exports for GLB, FBX, OBJ, Unity, and Unreal Engine workflows.",
         "",
         f"Website: {base}",
-        f"Model page: {public_model_link}",
-        f"3D viewer & downloads: {task_link}",
+        f"Task page, 3D viewer & downloads: {task_link}",
     ])
     if clean_keywords:
         parts.extend(["", "Keywords: " + ", ".join(clean_keywords[:16])])

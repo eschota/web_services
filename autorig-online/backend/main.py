@@ -6876,7 +6876,7 @@ def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> st
             {
                 "@type": "ListItem",
                 "position": idx + 1,
-                "url": f"{base}/m/{task.id}",
+                "url": f"{base}/task?id={task.id}",
                 "name": _task_public_title(task, text["h1"]),
                 "image": f"{base}/thumb/{task.id}",
             }
@@ -6894,7 +6894,7 @@ def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> st
         for task in examples:
             task_title = html.escape(_task_public_title(task, text["h1"]), quote=True)
             cards.append(f"""
-                    <a class="rig-article-example" href="/m/{html.escape(task.id, quote=True)}">
+                    <a class="rig-article-example" href="/task?id={html.escape(task.id, quote=True)}">
                         <span class="rig-article-example-media">
                             <img src="/thumb/{html.escape(task.id, quote=True)}" alt="{task_title}" loading="lazy" width="360" height="640">
                         </span>
@@ -9244,6 +9244,7 @@ async def task_page(
     has_video = False
     has_thumb = False
     task = None
+    task_keywords: List[str] = []
     
     try:
         from database import Task
@@ -9254,6 +9255,17 @@ async def task_page(
             if task.status == "done":
                 task_title = "✅ Rigged 3D Model Ready"
                 task_description = "3D character rigged with skeleton and 50+ animations. Download in GLB, FBX, OBJ formats."
+                try:
+                    from seo_gallery import enrich_seo_metadata
+
+                    seo_title, seo_desc, seo_keywords, _seo_semantic = enrich_seo_metadata(task)
+                    if seo_title:
+                        task_title = seo_title
+                    if seo_desc:
+                        task_description = seo_desc[:500]
+                    task_keywords = seo_keywords
+                except Exception as seo_error:
+                    print(f"[Task Page] Error enriching SEO metadata: {seo_error}")
             elif task.status == "processing":
                 task_title = "⏳ Rigging in Progress..."
                 task_description = "3D model is being rigged with AI. View live progress."
@@ -9277,14 +9289,35 @@ async def task_page(
         )
         return HTMLResponse(content=_inject_static_layout(html_content))
     
+    safe_task_title = html.escape(task_title, quote=True)
+    safe_task_description = html.escape(task_description, quote=True)
+    keywords_meta = ""
+    if task_keywords:
+        safe_keywords = html.escape(", ".join(task_keywords[:24]), quote=True)
+        keywords_meta = f'\n    <meta name="keywords" content="{safe_keywords}">'
+    json_ld = ""
+    if task.status == "done":
+        creative_work = {
+            "@context": "https://schema.org",
+            "@type": "CreativeWork",
+            "name": task_title[:200],
+            "description": task_description[:2000],
+            "url": task_url,
+            "image": f"{base_url}/api/thumb/{task_id}",
+            "mainEntityOfPage": task_url,
+        }
+        if task_keywords:
+            creative_work["keywords"] = ", ".join(task_keywords[:24])
+        json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
+
     # Build OG meta tags
     og_tags = f'''
     <!-- Open Graph / Telegram / Social -->
     <meta property="og:type" content="{'video.other' if has_video else 'website'}">
     <meta property="og:url" content="{task_url}">
-    <meta property="og:title" content="{task_title} | AutoRig.online">
-    <meta property="og:description" content="{task_description}">
-    <meta property="og:site_name" content="AutoRig.online">'''
+    <meta property="og:title" content="{safe_task_title} | AutoRig.online">
+    <meta property="og:description" content="{safe_task_description}">
+    <meta property="og:site_name" content="AutoRig.online">{keywords_meta}{json_ld}'''
     
     # Add image/video tags
     if has_thumb:
@@ -9317,8 +9350,8 @@ async def task_page(
     <meta name="twitter:card" content="summary">'''
     
     og_tags += f'''
-    <meta name="twitter:title" content="{task_title} | AutoRig.online">
-    <meta name="twitter:description" content="{task_description}">
+    <meta name="twitter:title" content="{safe_task_title} | AutoRig.online">
+    <meta name="twitter:description" content="{safe_task_description}">
     '''
     
     # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
@@ -9334,7 +9367,7 @@ async def task_page(
     # Update <title> tag to be dynamic
     html_content = html_content.replace(
         '<title>Task Progress | AutoRig.online</title>',
-        f'<title>{task_title} | AutoRig.online</title>'
+        f'<title>{html.escape(task_title)} | AutoRig.online</title>'
     )
     
     return HTMLResponse(content=_inject_static_layout(html_content))
@@ -9735,7 +9768,7 @@ for _rig_key in GALLERY_RIG_TYPES:
 @app.get("/sitemap.xml")
 async def sitemap_index(db: AsyncSession = Depends(get_db)):
     """
-    Sitemap index: static marketing pages + public /m/{id} urlsets by part.
+    Sitemap index: static marketing pages + public task urlsets by part.
     """
     from seo_gallery import (
         build_sitemap_index_xml,
@@ -9784,7 +9817,7 @@ async def sitemap_mirror(db: AsyncSession = Depends(get_db)):
 @app.head("/sitemap/gallery/part/{part}.xml")
 @app.get("/sitemap/gallery/part/{part}.xml")
 async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(get_db)):
-    """Chunk (max 50) of public /m/{task_id} URLs (no SEO gate)."""
+    """Chunk (max 50) of public /task?id={task_id} URLs (no SEO gate)."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_all_part
 
     if part < 0:
@@ -9800,7 +9833,7 @@ async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(ge
 @app.head("/sitemap/gallery/indexing/part/{part}.xml")
 @app.get("/sitemap/gallery/indexing/part/{part}.xml")
 async def sitemap_gallery_indexing_part_only(part: int, db: AsyncSession = Depends(get_db)):
-    """SEO-gated chunk (max 50) of /m/{task_id} URLs."""
+    """SEO-gated chunk (max 50) of /task?id={task_id} URLs."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_indexing_part
 
     if part < 0:
@@ -9825,43 +9858,6 @@ async def sitemap_videos(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Empty video sitemap")
     xml = build_video_sitemap_xml(base, entries)
     return Response(content=xml, media_type="application/xml; charset=utf-8")
-
-
-@app.head("/m/{task_id}", response_class=HTMLResponse)
-@app.get("/m/{task_id}", response_class=HTMLResponse)
-async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)):
-    """
-    Lightweight indexable landing: poster + LLM metadata + link to full /task viewer.
-    Gallery-eligible tasks only; adult-rated tasks excluded (same as sitemap).
-    """
-    from seo_gallery import (
-        build_public_model_page_html,
-        enrich_seo_metadata,
-        load_task_for_public_model_page,
-    )
-
-    task = await load_task_for_public_model_page(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Not found")
-    base = APP_URL or "https://autorig.online"
-    title, desc, keywords, semantic = enrich_seo_metadata(task)
-    youtube_video_id = (getattr(task, "youtube_video_id", None) or "").strip()
-    youtube_uploaded = (
-        str(getattr(task, "youtube_upload_status", "") or "").strip().lower() == "uploaded"
-        and bool(youtube_video_id)
-    )
-    html_page = build_public_model_page_html(
-        base,
-        task_id,
-        title,
-        desc,
-        keywords,
-        semantic_section=semantic,
-        youtube_video_id=youtube_video_id,
-        youtube_video_uploaded=youtube_uploaded,
-        last_modified=task.updated_at,
-    )
-    return HTMLResponse(content=html_page)
 
 
 @app.get("/robots.txt")

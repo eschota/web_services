@@ -4,7 +4,6 @@ Allow: /
 
 # Main pages
 Allow: /gallery
-Allow: /m/
 Allow: /guides
 Allow: /buy-credits
 Allow: /blender-plugin

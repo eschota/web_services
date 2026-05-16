@@ -15,5 +15,5 @@
 
 ## Discovery
 
-- **Sitemap index (updates on request; marketing pages + SEO-vetted `/m/{task_id}` chunks):** https://autorig.online/sitemap.xml
+- **Sitemap index (updates on request; marketing pages + public `/task?id={task_id}` chunks):** https://autorig.online/sitemap.xml
 - **This file (llm.txt):** https://autorig.online/llm.txt
