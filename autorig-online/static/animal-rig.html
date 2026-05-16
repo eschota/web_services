@@ -28,14 +28,14 @@
         }
         .animal-hero {
             position: relative;
-            min-height: min(760px, calc(100vh - 96px));
+            min-height: clamp(420px, 58vh, 620px);
             display: flex;
             align-items: center;
             border-bottom: 1px solid var(--border);
             overflow: hidden;
             background:
-                linear-gradient(90deg, rgba(13, 14, 28, 0.96) 0%, rgba(13, 14, 28, 0.9) 44%, rgba(13, 14, 28, 0.38) 100%),
-                url("/static/videos/animal-rig/after-poster-20260516.png") right center / min(52vw, 720px) auto no-repeat;
+                linear-gradient(90deg, rgba(13, 14, 28, 0.98) 0%, rgba(13, 14, 28, 0.92) 56%, rgba(13, 14, 28, 0.72) 100%),
+                linear-gradient(180deg, rgba(123, 92, 255, 0.08), rgba(56, 189, 248, 0.03));
         }
         .animal-hero::after {
             content: "";
@@ -266,13 +266,7 @@
         }
         @media (max-width: 1020px) {
             .animal-hero {
-                background:
-                    linear-gradient(180deg, rgba(13, 14, 28, 0.88), rgba(13, 14, 28, 0.96)),
-                    url("/static/videos/animal-rig/after-poster-20260516.png") center bottom / min(92vw, 640px) auto no-repeat;
                 align-items: flex-start;
-            }
-            .animal-hero-inner {
-                padding-bottom: min(58vw, 380px);
             }
             .animal-example-grid,
             .animal-feature-grid {
