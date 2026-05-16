@@ -8,6 +8,7 @@ from typing import Optional, List, Tuple, Dict, Any
 from dataclasses import dataclass, field
 import random
 import os
+import time
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
@@ -87,6 +88,97 @@ def extract_guid(text: str) -> Optional[str]:
 # =============================================================================
 # Worker Communication
 # =============================================================================
+async def _recover_worker_task_after_post_timeout(
+    client: httpx.AsyncClient,
+    worker_url: str,
+    input_url: str,
+    request_started_at: float,
+) -> Optional[WorkerTaskResult]:
+    """
+    Some workers accept the job, create /converter/glb/{guid}/ immediately, but
+    keep the POST request open long enough for our 30s client timeout. If the
+    worker status exposes the running job, recover its GUID/progress page instead
+    of incorrectly marking the task as Worker timeout.
+    """
+    try:
+        resp = await client.get(worker_url, timeout=5.0)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        refs, has_payload = parse_worker_active_tasks_from_json(data)
+        if not has_payload or not refs:
+            return None
+        blob = "\n".join(refs)
+        blob_lc = blob.lower()
+        input_lc = (input_url or "").strip().lower()
+        total_active = int(data.get("total_active") or 0)
+        # Prefer exact input match; allow single-active-worker fallback because
+        # start_task_on_worker only posts to a worker reported as free. The
+        # fallback still requires a recently-created worker job so an unrelated
+        # long-running task is not attached to our DB task.
+        if input_lc and input_lc not in blob_lc:
+            if total_active != 1:
+                return None
+            created_values: List[float] = []
+            for bucket in ("active_tasks", "processing_tasks", "pending_tasks"):
+                val = data.get(bucket)
+                items = val.values() if isinstance(val, dict) else val if isinstance(val, list) else []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        created_values.append(float(item.get("created_at") or 0))
+                    except Exception:
+                        continue
+            if created_values and max(created_values) < (request_started_at - 10.0):
+                return None
+
+        guid = None
+        for ref in refs:
+            s = str(ref or "").strip()
+            if "/converter/glb/" not in s:
+                continue
+            m = re.search(r"/converter/glb/([0-9a-fA-F\-]{36})(?:/|\.zip|$)", s)
+            if m:
+                guid = m.group(1)
+                break
+        if not guid:
+            guid = extract_guid(blob)
+        if not guid:
+            return None
+        progress_page = None
+        output_urls: List[str] = []
+        for ref in refs:
+            s = str(ref or "").strip()
+            if not s:
+                continue
+            if guid in s and s.startswith(("http://", "https://")):
+                if "/converter/glb/" in s and s.endswith(".html") and not progress_page:
+                    progress_page = s
+                output_urls.append(s)
+        if not progress_page:
+            worker_base = get_worker_base_url(worker_url)
+            if not worker_base:
+                return None
+            progress_page = f"{worker_base}/converter/glb/{guid}/{guid}.html"
+        print(
+            f"[Workers] POST timeout recovered active worker task: "
+            f"worker={worker_url} guid={guid} progress_page={progress_page}"
+        )
+        return WorkerTaskResult(
+            success=True,
+            task_id=guid,
+            output_urls=output_urls,
+            progress_page=progress_page,
+            guid=guid,
+        )
+    except Exception as e:
+        print(f"[Workers] POST timeout recovery failed for {worker_url}: {e}")
+        return None
+
+
 async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) -> List[Tuple[str, int]]:
     """
     Return enabled worker URLs ordered by weight desc (priority), id asc.
@@ -238,9 +330,14 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
         non_quarantined_urls = [u for u in worker_urls if not is_worker_quarantined(u)]
         return (non_quarantined_urls or worker_urls)[0]
 
+    # For direct restart/admin dispatch, avoid piling new work onto a high-weight
+    # worker that is already busy when lower-weight idle workers are available.
+    idle_candidates = [w for w in candidates_pool if (w.load or 0) <= 0]
+    dispatch_pool = idle_candidates or candidates_pool
+
     weight_by_url: Dict[str, int] = {u: w for (u, w) in workers_with_weight}
-    max_weight = max(weight_by_url.get(w.url, 0) for w in candidates_pool)
-    candidates = [w for w in candidates_pool if weight_by_url.get(w.url, 0) == max_weight]
+    max_weight = max(weight_by_url.get(w.url, 0) for w in dispatch_pool)
+    candidates = [w for w in dispatch_pool if weight_by_url.get(w.url, 0) == max_weight]
     candidates.sort(key=lambda w: w.load)
     return candidates[0].url
 
@@ -252,6 +349,8 @@ async def send_task_to_worker(
     transform_params: dict = None,
     *,
     pipeline_kind: str = "rig",
+    animal_type: Optional[str] = None,
+    mode: Optional[str] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -281,8 +380,10 @@ async def send_task_to_worker(
                 payload = {
                     "input_url": input_url,
                     "type": task_type,
-                    "mode": "only_rig",
+                    "mode": mode or "only_rig",
                 }
+                if animal_type:
+                    payload["animal_type"] = animal_type
                 if transform_params:
                     if transform_params.get("local_position"):
                         payload["local_position"] = transform_params["local_position"]
@@ -291,6 +392,7 @@ async def send_task_to_worker(
                     if transform_params.get("local_scale"):
                         payload["local_scale"] = transform_params["local_scale"]
             
+            request_started_at = time.time()
             response = await client.post(
                 worker_url,
                 json=payload,
@@ -326,6 +428,14 @@ async def send_task_to_worker(
                 )
                 
         except httpx.TimeoutException:
+            recovered = await _recover_worker_task_after_post_timeout(
+                client,
+                worker_url,
+                input_url,
+                request_started_at,
+            )
+            if recovered is not None:
+                return recovered
             return WorkerTaskResult(success=False, error="Worker timeout")
         except Exception as e:
             return WorkerTaskResult(success=False, error=str(e))

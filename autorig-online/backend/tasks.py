@@ -2,10 +2,14 @@
 Task management for AutoRig Online
 """
 import asyncio
+import json
+import re
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, List
+from pathlib import Path
+from typing import Optional, Tuple, List, Dict, Any
 from urllib.parse import urlparse
+import httpx
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +35,166 @@ from workers import (
 # =============================================================================
 # Helper Functions
 # =============================================================================
+PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
+RIG_V2_WORKER_ANIMAL_TYPES = {
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+}
+RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
+
+
+def _animal_detection_confident_enough(detection: Any) -> bool:
+    if not isinstance(detection, dict):
+        return False
+    if detection.get("user_selected_bool"):
+        return True
+    if detection.get("animal_decision_accepted_bool") is True:
+        return True
+    if "animal_decision_accepted_bool" in detection:
+        return False
+    try:
+        weight = float(detection.get("animal_decision_weight_float") or 0.0)
+    except Exception:
+        weight = 0.0
+    try:
+        threshold = float(detection.get("animal_decision_threshold_float") or RIG_V2_ANIMAL_DECISION_THRESHOLD)
+    except Exception:
+        threshold = RIG_V2_ANIMAL_DECISION_THRESHOLD
+    return weight >= threshold
+
+
+def _animal_type_from_detection_meta(detection: Any) -> Optional[str]:
+    if not isinstance(detection, dict):
+        return None
+    for key in ("animal_type", "animal_type_string", "selected_animal_type", "selected_animal_type_string"):
+        animal = str(detection.get(key) or "").strip().lower()
+        if animal in RIG_V2_WORKER_ANIMAL_TYPES:
+            return animal
+
+    best_type = ""
+    best_score = 0.0
+    scores = detection.get("scores")
+    if isinstance(scores, dict):
+        for key, raw_score in scores.items():
+            animal = str(key or "").strip().lower()
+            if animal not in RIG_V2_WORKER_ANIMAL_TYPES:
+                continue
+            try:
+                score = float(raw_score)
+            except Exception:
+                score = 0.0
+            if score > best_score:
+                best_type = animal
+                best_score = score
+
+    results = detection.get("results")
+    if isinstance(results, list):
+        tally: Dict[str, float] = {}
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            animal = str(result.get("animal_type_string") or result.get("animal_type") or "").strip().lower()
+            if animal not in RIG_V2_WORKER_ANIMAL_TYPES:
+                continue
+            try:
+                confidence = float(result.get("confidence_float") or result.get("confidence") or 0.5)
+            except Exception:
+                confidence = 0.5
+            tally[animal] = tally.get(animal, 0.0) + max(0.05, min(1.0, confidence))
+        for animal, score in tally.items():
+            if score > best_score:
+                best_type = animal
+                best_score = score
+
+    return best_type or None
+
+
+def _task_notification_theme_meta(task: Task) -> dict:
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        if not isinstance(settings, dict):
+            settings = {}
+    except Exception:
+        settings = {}
+    detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+    theme = settings.get("viewer_theme_selection") if isinstance(settings, dict) else None
+    animal_type = ""
+    detector_text = ""
+    if isinstance(detection, dict):
+        accepted = _animal_detection_confident_enough(detection)
+        candidate = str(
+            detection.get("candidate_animal_type_string")
+            or detection.get("selected_type_string")
+            or detection.get("animal_type")
+            or detection.get("animal_type_string")
+            or (detection.get("first_result") or {}).get("animal_type_string")
+            or ""
+        ).strip().lower()
+        try:
+            weight = float(detection.get("animal_decision_weight_float") or 0.0)
+        except Exception:
+            weight = 0.0
+        try:
+            threshold = float(detection.get("animal_decision_threshold_float") or RIG_V2_ANIMAL_DECISION_THRESHOLD)
+        except Exception:
+            threshold = RIG_V2_ANIMAL_DECISION_THRESHOLD
+        votes = detection.get("selected_votes_int")
+        views = detection.get("view_count_int")
+        if candidate or "animal_decision_weight_float" in detection:
+            vote_suffix = ""
+            try:
+                if votes is not None and views is not None:
+                    vote_suffix = f" v={int(votes)}/{int(views)}"
+            except Exception:
+                vote_suffix = ""
+            verdict = "accepted" if accepted else "rejected"
+            detector_text = f"AI {candidate or '?'} w={weight:.2f}/{threshold:.2f}{vote_suffix} {verdict}"
+        if accepted:
+            animal_type = str(
+                detection.get("animal_type")
+                or detection.get("animal_type_string")
+                or ""
+            ).strip().lower()
+    theme_id = str(theme.get("theme_id") or "").strip() if isinstance(theme, dict) else ""
+    theme_names = {
+        "dog_park_yard": "Pet Park Yard",
+        "studio_white_softbox": "White Photo Studio",
+        "alien_planet": "Alien Planet",
+        "sci_fi_hangar": "Sci-Fi Hangar",
+        "ranch_farmyard": "Ranch Farmyard",
+        "pine_forest_trail": "Pine Forest Trail",
+        "savanna_acacia_plain": "Savanna Acacia Plain",
+        "crystal_cavern": "Crystal Cavern",
+        "ancient_ruins": "Ancient Marble Ruins",
+        "jungle_temple_ruins": "Jungle Temple Ruins",
+    }
+    title_bits = []
+    if animal_type:
+        title_bits.append(animal_type.replace("_", " ").title())
+    elif task.input_type:
+        title_bits.append(str(task.input_type).replace("_", " ").title())
+    if theme_id:
+        title_bits.append(theme_names.get(theme_id, theme_id.replace("_", " ").title()))
+    poster_path = PREFLIGHT_RENDER_DIR / f"{task.id}.jpg"
+    return {
+        "title": " · ".join(title_bits),
+        "theme_id": theme_id,
+        "theme_name": theme_names.get(theme_id, theme_id.replace("_", " ").title()) if theme_id else "",
+        "poster_path": str(poster_path) if poster_path.is_file() else "",
+        "detector_text": detector_text,
+    }
+
+
 def get_task_progress_reference_time(task: Task) -> Optional[datetime]:
     """
     Return last *real* progress timestamp for stale detection.
@@ -258,9 +422,41 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     pk = getattr(task, "pipeline_kind", None) or "rig"
     if pk not in ("rig", "convert"):
         pk = "rig"
+    task_type_for_worker = task.input_type or "t_pose"
+    animal_type = None
+    mode = None
+    if str(task_type_for_worker).strip().lower() == "animal":
+        try:
+            settings = json.loads(task.viewer_settings or "{}")
+            detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+            if isinstance(detection, dict):
+                if _animal_detection_confident_enough(detection):
+                    animal_type = _animal_type_from_detection_meta(detection)
+                    mode = str(detection.get("mode") or "").strip() or None
+                else:
+                    animal_type = None
+                    mode = None
+        except Exception:
+            animal_type = None
+            mode = None
+        if not animal_type:
+            task.status = "error"
+            task.error_message = (
+                "Animal rig task is missing animal_type metadata. "
+                "Please retry the upload so AI animal detection can finish."
+            )
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            return task, task.error_message
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
-        worker_url, task.input_url, task.input_type or "t_pose", pipeline_kind=pk
+        worker_url,
+        task.input_url,
+        task_type_for_worker,
+        pipeline_kind=pk,
+        animal_type=animal_type,
+        mode=mode,
     )
     if not result.success:
         task.status = "error"
@@ -302,6 +498,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             # Construct progress_page URL from worker_api and guid
             worker_base = get_worker_base_url(worker_url)
             progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+            notify_meta = _task_notification_theme_meta(task)
             print(f"[Tasks] Scheduling Telegram notification for new task {task.id}")
             asyncio.create_task(
                 broadcast_new_task(
@@ -310,6 +507,10 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
                     task.input_type,
                     progress_url,
                     via_api=bool(getattr(task, "created_via_api", False)),
+                    title=notify_meta.get("title") or None,
+                    theme_name=notify_meta.get("theme_name") or None,
+                    poster_path=notify_meta.get("poster_path") or None,
+                    detector_text=notify_meta.get("detector_text") or None,
                 )
             )
         else:
@@ -326,6 +527,124 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
 # =============================================================================
 # Progress Checking
 # =============================================================================
+def _is_primary_worker_output(name: str) -> bool:
+    """Files that make a task downloadable/finalizable across worker layouts."""
+    n = (name or "").strip().lower()
+    if not n or "_temp" in n or "initial_temp" in n:
+        return False
+    return (
+        n.endswith("_model_prepared.glb")
+        or n.endswith("_model_prepared_rigged.blend")
+        or n.endswith(".zip")
+        or n.endswith("_video.mp4")
+        or n.endswith("_video_small.mp4")
+        or n.endswith("_video_poster.jpg")
+        or n.endswith("_all_animations.blend")
+        or n.endswith("_all_animations_unity.fbx")
+        or n.endswith("_hdrp.unitypackage")
+    )
+
+
+def _worker_outputs_look_complete(urls: List[str]) -> bool:
+    names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
+    has_video = any(n.endswith("_video.mp4") or n.endswith("_video_small.mp4") for n in names)
+    has_poster = any(n.endswith("_video_poster.jpg") for n in names)
+    has_download = any(
+        n.endswith("_all_animations_unity.fbx")
+        or n.endswith("_hdrp.unitypackage")
+        or n.endswith(".zip")
+        for n in names
+    )
+    return has_video and has_poster and has_download
+
+
+async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
+    """Use worker model-files API to recover concrete output URLs for animal/_100k layouts."""
+    if not task.guid or not task.worker_api:
+        return []
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return []
+
+    files_url = f"{worker_base.rstrip('/')}/api-converter-glb/model-files/{task.guid}"
+    worker_root = f"{worker_base.rstrip('/')}/converter/glb"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(files_url, timeout=8.0)
+        if resp.status_code != 200:
+            return []
+        data = resp.json() if resp.content else {}
+    except Exception:
+        return []
+
+    urls: List[str] = []
+    seen = set()
+    for folder_data in (data.get("folders") or {}).values():
+        if not isinstance(folder_data, dict):
+            continue
+        for item in folder_data.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            rel_path = str(item.get("rel_path") or "")
+            if not rel_path or not _is_primary_worker_output(name):
+                continue
+            url = f"{worker_root}/{task.guid}/{rel_path}"
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+    return urls
+
+
+async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
+    """Return terminal worker failure text from {guid}_progress.txt, if present."""
+    if not task.guid or not task.worker_api:
+        return None
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(log_url)
+        if resp.status_code != 200:
+            return None
+        text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+    except Exception:
+        return None
+
+    failure_re = re.compile(r"\b(FAILURE|FATAL|ERROR)\s*:\s*(.+)", re.IGNORECASE)
+    for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
+        match = failure_re.search(line)
+        if not match:
+            continue
+        message = match.group(2).strip() or line
+        return message[:500]
+    return None
+
+
+async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> bool:
+    failure = await _fetch_worker_failure_message(task)
+    if not failure:
+        return False
+    task.status = "error"
+    task.error_message = f"Worker failed: {failure}"
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    print(f"[Tasks] Worker reported terminal failure for {task.id}: {failure}")
+    return True
+
+
+def _preferred_video_url_from_outputs(urls: List[str]) -> Optional[str]:
+    for url in urls or []:
+        if url.lower().endswith("_video_small.mp4"):
+            return url
+    for url in urls or []:
+        if url.lower().endswith("_video.mp4"):
+            return url
+    return None
+
+
 async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     """
     Check and update task progress.
@@ -362,6 +681,30 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
             task.status = "done"
+
+    # Some worker modes (notably animal-only-rig and newer exporters) write the
+    # final files into concrete folders such as {guid}_100k or root, while the
+    # initial task response may contain legacy placeholder URLs. Reconcile from
+    # model-files once the actual downloadable set is present.
+    if task.status not in ("done", "error") and task.guid and task.worker_api:
+        concrete_urls = await _fetch_concrete_worker_output_urls(task)
+        if concrete_urls and _worker_outputs_look_complete(concrete_urls):
+            task.output_urls = concrete_urls
+            task.ready_urls = concrete_urls
+            task.total_count = len(concrete_urls)
+            task.ready_count = len(concrete_urls)
+            task.status = "done"
+            task.last_progress_at = datetime.utcnow()
+            preferred_video_url = _preferred_video_url_from_outputs(concrete_urls)
+            if preferred_video_url:
+                task.video_ready = True
+                task.video_url = preferred_video_url
+            task.updated_at = datetime.utcnow()
+
+    if task.status not in ("done", "error") and task.guid and task.worker_api:
+        if await _mark_task_worker_failed_if_reported(db, task):
+            await db.refresh(task)
+            return task
     
     # Video: prefer _video_small.mp4 for site proxy; upgrade from large when small appears later.
     if task.guid and task.worker_api:
@@ -630,6 +973,9 @@ async def find_and_reset_stale_tasks(
             reason = "partial_progress_stale"
 
         if should_reset:
+            if await _mark_task_worker_failed_if_reported(db, task):
+                action_count += 1
+                continue
             no_progress_min = get_task_no_progress_minutes(task, now=now)
             print(
                 f"[Stale Task] Detected stale task {task.id} ({reason}): "

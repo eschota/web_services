@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import html
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -470,6 +471,10 @@ async def broadcast_new_task(
     input_type: str | None,
     progress_page: str | None = None,
     via_api: bool = False,
+    title: str | None = None,
+    theme_name: str | None = None,
+    poster_path: str | None = None,
+    detector_text: str | None = None,
 ) -> None:
     print(f"[Telegram] broadcast_new_task called for task {task_id}")
     token = _get_token()
@@ -491,8 +496,14 @@ async def broadcast_new_task(
     if via_api:
         header += " · 🔌 <b>API</b>"
     new_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
+    if title:
+        new_parts.append(f"🖼️ <b>{html.escape(title)}</b>")
+    elif theme_name:
+        new_parts.append(f"🖼️ {html.escape(theme_name)}")
     if summary:
         new_parts.append(f"📄 {html.escape(summary)}")
+    if detector_text:
+        new_parts.append(f"🧠 {html.escape(detector_text)}")
     new_parts.append(html.escape(metrics_line))
     text = header + "\n" + " | ".join(new_parts)
     if progress_page:
@@ -513,12 +524,25 @@ async def broadcast_new_task(
             if not reserved:
                 print(f"[Telegram] Skip duplicate new-task notification for chat={chat_id}, task={task_id}")
                 return
-            result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
-                chat_id=cid, 
-                text=text, 
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False
-            ), retry_network=False)
+            photo_file = Path(poster_path) if poster_path else None
+            result = None
+            if photo_file and photo_file.is_file() and len(text) <= 1000:
+                async def _send_photo(cid=chat_id, p=photo_file):
+                    with p.open("rb") as f:
+                        return await bot.send_photo(
+                            chat_id=cid,
+                            photo=f,
+                            caption=text,
+                            parse_mode=ParseMode.HTML,
+                        )
+                result = await _send_with_retry(_send_photo, retry_network=False)
+            if not result:
+                result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=False
+                ), retry_network=False)
             if result:
                 await attach_notification_message_id(chat_id, "task_new", task_id, getattr(result, "message_id", None))
                 print(f"[Telegram] New task notification sent to chat {chat_id}")
@@ -574,6 +598,102 @@ async def broadcast_purchase_intent(
             ))
             if result:
                 print(f"[Telegram] Purchase intent sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
+async def broadcast_ltx_video_generation_started(
+    *,
+    task_id: str,
+    user_email: str | None = None,
+    theme_name: str | None = None,
+    background_hint: str | None = None,
+    variant_count: int = 4,
+) -> None:
+    """Notify admins when a user starts LTX motion-reference video generation."""
+    print(f"[Telegram] broadcast_ltx_video_generation_started task={task_id}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping LTX generation notification")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    url = _task_url(task_id)
+    actor = user_email or "anon"
+    parts = [
+        f'🔗 <a href="{html.escape(url)}">Task</a>',
+        f"👤 {html.escape(actor)}",
+        f"🎞️ {int(variant_count or 4)} refs",
+    ]
+    if theme_name:
+        parts.append(f"🖼️ {html.escape(theme_name)}")
+    if background_hint:
+        parts.append(f"🌄 {html.escape(background_hint[:120])}")
+    text = "🎬 <b>LTX reference generation started</b>\n" + " | ".join(parts)
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False,
+            ), retry_network=False)
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
+async def broadcast_animation_fitting_started(
+    *,
+    task_id: str,
+    variant_name: str | None = None,
+    video_url: str | None = None,
+    user_email: str | None = None,
+) -> None:
+    """Notify admins when a user starts fitting a skeletal animation from a reference video."""
+    print(f"[Telegram] broadcast_animation_fitting_started task={task_id} variant={variant_name}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping animation fitting notification")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    url = _task_url(task_id)
+    actor = user_email or "anon"
+    variant = (variant_name or "selected video").strip()
+    parts = [
+        f'🔗 <a href="{html.escape(url)}">Task</a>',
+        f"👤 {html.escape(actor)}",
+        f"🦴 {html.escape(variant)}",
+    ]
+    if video_url:
+        parts.append(f'🎥 <a href="{html.escape(video_url)}">Reference video</a>')
+    text = "🧬 <b>Animation fitting started</b>\n" + " | ".join(parts)
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                chat_id=cid,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False,
+            ), retry_network=False)
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
@@ -781,31 +901,6 @@ async def broadcast_disk_space_low(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
-async def broadcast_youtube_bonus_click(
-    user_email: str
-) -> None:
-    """Notify when user clicks YouTube bonus link."""
-    print(f"[Telegram] broadcast_youtube_bonus_click: user={user_email}")
-    token = _get_token()
-    if not token:
-        return
-
-    from telegram import Bot
-    from telegram.constants import ParseMode
-
-    bot = Bot(token=token)
-    text = f"🎁 <b>YouTube Bonus Clicked!</b>\n👤 User: {html.escape(user_email)} | 💰 +10 credits granted"
-
-    chat_ids = await get_active_chat_ids()
-    if not chat_ids:
-        return
-
-    await asyncio.gather(*[
-        _send_with_retry(lambda cid=cid: bot.send_message(chat_id=cid, text=text, parse_mode=ParseMode.HTML))
-        for cid in chat_ids
-    ])
-
-
 async def broadcast_feedback_submitted(
     user_email: str,
     text_content: str
@@ -958,29 +1053,42 @@ async def _download_video_from_worker(task_id: str) -> str | None:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Task).where(Task.id == task_id))
             task = result.scalar_one_or_none()
-            if not task or not task.guid or not task.worker_api:
+            if not task:
+                print(f"[Telegram] Cannot download video: task {task_id} not found")
+                return None
+
+            if task.video_ready and task.video_url:
+                video_urls = [str(task.video_url)]
+                if "_video_small.mp4" in str(task.video_url):
+                    video_urls.append(str(task.video_url).replace("_video_small.mp4", "_video.mp4"))
+            elif task.guid and task.worker_api:
+                parsed = urlparse(task.worker_api)
+                worker_base = f"{parsed.scheme}://{parsed.netloc}"
+                video_urls = [
+                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video_small.mp4",
+                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video.mp4",
+                ]
+            else:
                 print(f"[Telegram] Cannot download video: task {task_id} has no guid or worker_api")
                 return None
-            
-            parsed = urlparse(task.worker_api)
-            worker_base = f"{parsed.scheme}://{parsed.netloc}"
-            video_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video.mp4"
-        
-        print(f"[Telegram] Downloading video from {video_url}")
         
         # Download video
         async with httpx.AsyncClient() as client:
-            resp = await client.get(video_url, timeout=60.0, follow_redirects=True)
-            if resp.status_code == 200:
-                cache_dir = "/var/autorig/videos"
-                os.makedirs(cache_dir, exist_ok=True)
-                cache_path = f"{cache_dir}/{task_id}.mp4"
-                with open(cache_path, "wb") as f:
-                    f.write(resp.content)
-                print(f"[Telegram] Video cached at {cache_path} ({len(resp.content)} bytes)")
-                return cache_path
-            else:
-                print(f"[Telegram] Failed to download video: HTTP {resp.status_code}")
+            for video_url in video_urls:
+                print(f"[Telegram] Downloading video from {video_url}")
+                try:
+                    resp = await client.get(video_url, timeout=90.0, follow_redirects=True)
+                    if resp.status_code == 200:
+                        cache_dir = "/var/autorig/videos"
+                        os.makedirs(cache_dir, exist_ok=True)
+                        cache_path = f"{cache_dir}/{task_id}.mp4"
+                        with open(cache_path, "wb") as f:
+                            f.write(resp.content)
+                        print(f"[Telegram] Video cached at {cache_path} ({len(resp.content)} bytes)")
+                        return cache_path
+                    print(f"[Telegram] Failed to download video from {video_url}: HTTP {resp.status_code}")
+                except Exception as e:
+                    print(f"[Telegram] Failed to download video from {video_url}: {type(e).__name__}: {e}")
     except Exception as e:
         print(f"[Telegram] Failed to download video: {e}")
     return None
@@ -1060,11 +1168,35 @@ async def broadcast_worker_stalled(
     worker_block = format_worker_stalled_telegram_html(worker_url)
     sample = ", ".join((sample_task_ids or [])[:3])
     sample_line = f"\n🧩 Tasks: <code>{html.escape(sample)}</code>" if sample else ""
+    link_lines: list[str] = []
+    if sample_task_ids:
+        try:
+            async with AsyncSessionLocal() as db:
+                rows = await db.execute(select(Task).where(Task.id.in_(sample_task_ids[:3])))
+                by_id = {task.id: task for task in rows.scalars().all()}
+            for task_id in sample_task_ids[:3]:
+                task = by_id.get(task_id)
+                if not task:
+                    continue
+                task_url = _task_url(task_id)
+                progress_url = task.progress_page
+                if not progress_url and task.guid and task.worker_api:
+                    worker_base = get_worker_base_url(task.worker_api)
+                    if worker_base:
+                        progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+                parts = [f'<a href="{html.escape(task_url)}">Task {html.escape(task_id[:8])}</a>']
+                if progress_url:
+                    parts.append(f'<a href="{html.escape(progress_url)}">Progress</a>')
+                link_lines.append(" · ".join(parts))
+        except Exception as e:
+            print(f"[Telegram] Failed to build stalled task links: {e}")
+    links_line = ("\n🔎 " + "\n🔎 ".join(link_lines)) if link_lines else ""
     text = (
         f"🚨 <b>Worker stalled</b>\n"
         f"{worker_block}\n"
         f"📌 stalled: {int(stalled_tasks)} | ⏱ oldest: {int(oldest_stalled_minutes)}m"
         f"{sample_line}"
+        f"{links_line}"
     )
 
     sem = asyncio.Semaphore(3)

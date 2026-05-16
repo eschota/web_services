@@ -27,7 +27,15 @@
     <link rel="alternate icon" href="/static/images/logo/favicon.svg">
     
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-pipeline">
+    <link rel="stylesheet" href="/static/css/styles.css?v=rig-detect-restore-20260516-1">
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
     
     <!-- Schema.org SoftwareApplication markup -->
     <script type="application/ld+json">
@@ -140,6 +148,7 @@
     </script>
 </head>
 <body data-layout-free3d-ribbon="1" data-layout-free3d-init="none" data-layout-active-path="/">
+    <div id="rig-detect-scrim" class="rig-detect-scrim hidden" aria-hidden="true"></div>
     <div id="site-header"></div>
     
     <main>
@@ -211,13 +220,34 @@
                 <div id="convert-form-busy" class="form-busy-overlay hidden" role="status" aria-live="polite" aria-busy="false">
                     <div class="form-busy-inner">
                         <p class="form-busy-text" id="convert-form-busy-text" data-i18n="upload_progress_uploading">Uploading your model…</p>
+                        <div id="rig-detect-layout" class="rig-detect-layout hidden">
+                            <div class="rig-detect-modal-plank">
+                                <div class="rig-detect-viewer-shell" aria-labelledby="rig-detect-viewer-title">
+                                    <div class="rig-detect-viewer-head">
+                                        <span id="rig-detect-viewer-title" class="rig-detect-viewer-title" role="heading" aria-level="2"></span>
+                                    </div>
+                                    <div class="rig-detect-viewer-frame">
+                                        <div id="rig-detect-viewer-host" class="rig-detect-viewer-host" aria-hidden="false"></div>
+                                    </div>
+                                </div>
+                                <div id="rig-detect-cloud" class="rig-detect-cloud" role="group" aria-label="Rig type"></div>
+                                <div id="rig-detect-review" class="rig-detect-review hidden">
+                                    <p id="rig-detect-lead" class="rig-detect-lead" aria-live="polite"></p>
+                                    <p id="rig-detect-hint" class="rig-detect-hint"></p>
+                                    <div class="rig-detect-cta-row">
+                                        <button type="button" id="rig-detect-start-now" class="btn btn-primary rig-detect-start-btn"></button>
+                                    </div>
+                                    <p id="rig-detect-footer" class="rig-detect-footer"></p>
+                                </div>
+                            </div>
+                        </div>
                         <div class="form-busy-progress-wrap" id="convert-form-busy-progress-wrap">
                             <div class="form-busy-progress-track" id="convert-form-busy-progress-track">
                                 <div class="form-busy-progress-fill" id="convert-form-busy-progress-fill"></div>
                             </div>
                             <span class="form-busy-progress-pct" id="convert-form-busy-progress-pct" aria-hidden="true">0%</span>
                         </div>
-                        <div class="form-busy-tips">
+                        <div class="form-busy-tips" id="convert-form-busy-tips">
                             <p class="form-busy-tips-title" data-i18n="upload_busy_tips_title">While you wait</p>
                             <ul class="form-busy-tips-list">
                                 <li data-i18n="upload_busy_tip_1">Characters should have arms at shoulder height, extended to the sides (T-pose).</li>
@@ -387,6 +417,6 @@
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script src="/static/js/task-card.js?v=gallery-stats-rigtypes-1"></script>
     <script src="/static/js/home-demo-preview.js?v=20260516-home-demo"></script>
-    <script src="/static/js/app.js?v=gallery-rigtype-filter-1"></script>
+    <script src="/static/js/app.js?v=rig-detect-restore-20260516-1"></script>
 </body>
 </html>

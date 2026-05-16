@@ -48,6 +48,7 @@ class TaskStatusResponse(BaseModel):
     video_url: Optional[str]
     # Input URL (for Free3D models viewer loads directly from this)
     input_url: Optional[str] = None
+    input_type: Optional[str] = None
     # FBX -> GLB pre-conversion (only when input was .fbx)
     fbx_glb_output_url: Optional[str] = None
     fbx_glb_model_name: Optional[str] = None
@@ -88,6 +89,8 @@ class TaskStatusResponse(BaseModel):
     # YouTube auto-upload (public video id when upload succeeded)
     youtube_video_id: Optional[str] = None
     youtube_upload_status: Optional[str] = None  # uploaded | skipped | failed
+    rig_v2_animal_detection: Optional[dict] = None
+    viewer_theme_selection: Optional[dict] = None
 
 
 class TaskHistoryItem(BaseModel):
@@ -402,7 +405,7 @@ class GalleryItem(BaseModel):
     author_nickname: Optional[str] = None  # Preferred display name (fallback to email)
     version: int = 1  # restart_count + 1
     content_rating: Optional[str] = None
-    rig_icon_key: str = "humanoid"
+    rig_icon_key: str = "humanoid"  # humanoid | dog | bear | … for UI icon under Icons_png/
 
 
 class GalleryStats(BaseModel):

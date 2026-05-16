@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import secrets
 import json
+import base64
 import tempfile
 import zipfile
 import re
@@ -154,6 +155,52 @@ from namecheap_remote_api import router as namecheap_remote_router
 # Throttle poster-classification recovery triggers from GET /api/task (per task_id).
 _poster_recovery_throttle: Dict[str, float] = {}
 POSTER_RECOVERY_THROTTLE_SEC = 20.0
+PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
+PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
+
+
+def _pop_preflight_render_image_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(meta, dict):
+        return None
+    for key in (
+        "preflight_render_jpg_base64_string",
+        "preflight_render_image_jpg_base64_string",
+        "preview_image_jpg_base64_string",
+    ):
+        value = meta.pop(key, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _decode_preflight_render_image(data_url_or_b64: str) -> bytes:
+    raw = (data_url_or_b64 or "").strip()
+    if "," in raw and raw.lower().startswith("data:image/"):
+        raw = raw.split(",", 1)[1]
+    raw = re.sub(r"\s+", "", raw)
+    if not raw:
+        raise ValueError("empty preflight render image")
+    data = base64.b64decode(raw, validate=True)
+    if len(data) > PREFLIGHT_RENDER_MAX_BYTES:
+        raise ValueError("preflight render image too large")
+    if not (data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"RIFF")):
+        raise ValueError("unsupported preflight render image")
+    return data
+
+
+def _save_preflight_render_image(task_id: str, data_url_or_b64: Optional[str]) -> None:
+    if not data_url_or_b64:
+        return
+    try:
+        image_bytes = _decode_preflight_render_image(data_url_or_b64)
+        PREFLIGHT_RENDER_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_path = PREFLIGHT_RENDER_DIR / f"{task_id}.tmp"
+        final_path = PREFLIGHT_RENDER_DIR / f"{task_id}.jpg"
+        tmp_path.write_bytes(image_bytes)
+        tmp_path.replace(final_path)
+    except Exception as e:
+        print(f"[PreflightRender] Failed to save render image for task {task_id}: {e}")
+
 
 
 def _task_needs_poster_classification(task) -> bool:
@@ -2825,6 +2872,10 @@ async def api_create_task(
     file: Optional[UploadFile] = None
     pipeline = "rig"
     uploaded_bytes: Optional[int] = None
+    animal_type: Optional[str] = None
+    rig_mode: Optional[str] = None
+    rig_v2_detection_meta: Optional[Dict[str, Any]] = None
+    preflight_render_image_data_url: Optional[str] = None
 
     if "application/json" in content_type:
         try:
@@ -2849,6 +2900,25 @@ async def api_create_task(
         raw_pipeline = data.get("pipeline")
         if raw_pipeline is not None and str(raw_pipeline).strip():
             pipeline = str(raw_pipeline).strip().lower()
+        raw_animal_type = data.get("animal_type")
+        if raw_animal_type is not None and str(raw_animal_type).strip():
+            animal_type = str(raw_animal_type).strip().lower()
+        raw_mode = data.get("mode")
+        if raw_mode is not None and str(raw_mode).strip():
+            rig_mode = str(raw_mode).strip()
+        raw_detection = data.get("rig_v2_animal_detection")
+        if isinstance(raw_detection, dict):
+            rig_v2_detection_meta = raw_detection
+        elif data.get("rig_v2_animal_detection_json"):
+            try:
+                parsed_detection = json.loads(str(data.get("rig_v2_animal_detection_json") or "{}"))
+                if isinstance(parsed_detection, dict):
+                    rig_v2_detection_meta = parsed_detection
+            except Exception:
+                rig_v2_detection_meta = None
+        raw_preflight_render = data.get("preflight_render_jpg_base64_string")
+        if isinstance(raw_preflight_render, str) and raw_preflight_render.strip():
+            preflight_render_image_data_url = raw_preflight_render.strip()
     else:
         form = await request.form()
         raw_source = form.get("source")
@@ -2867,6 +2937,23 @@ async def api_create_task(
         raw_pipeline = form.get("pipeline")
         if raw_pipeline is not None and str(raw_pipeline).strip():
             pipeline = str(raw_pipeline).strip().lower()
+        raw_animal_type = form.get("animal_type")
+        if raw_animal_type is not None and str(raw_animal_type).strip():
+            animal_type = str(raw_animal_type).strip().lower()
+        raw_mode = form.get("mode")
+        if raw_mode is not None and str(raw_mode).strip():
+            rig_mode = str(raw_mode).strip()
+        raw_detection = form.get("rig_v2_animal_detection_json")
+        if raw_detection is not None and str(raw_detection).strip():
+            try:
+                parsed_detection = json.loads(str(raw_detection))
+                if isinstance(parsed_detection, dict):
+                    rig_v2_detection_meta = parsed_detection
+            except Exception:
+                rig_v2_detection_meta = None
+        raw_preflight_render = form.get("preflight_render_jpg_base64_string")
+        if raw_preflight_render is not None and str(raw_preflight_render).strip():
+            preflight_render_image_data_url = str(raw_preflight_render).strip()
         fu = form.get("file")
         # Accept any Starlette/FastAPI upload object (isinstance can fail across re-exports).
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
@@ -2915,6 +3002,11 @@ async def api_create_task(
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
+    preflight_render_image_data_url = (
+        preflight_render_image_data_url
+        or _pop_preflight_render_image_from_meta(rig_v2_detection_meta)
+    )
+
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
 
@@ -2925,6 +3017,23 @@ async def api_create_task(
         )
 
     input_type = normalize_task_type(input_type)
+    animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
+    if input_type == "animal":
+        if animal_type not in animal_allowed and isinstance(rig_v2_detection_meta, dict):
+            candidate = str(rig_v2_detection_meta.get("animal_type") or "").strip().lower()
+            if candidate in animal_allowed:
+                animal_type = candidate
+        if animal_type not in animal_allowed:
+            raise HTTPException(status_code=400, detail="animal_type is required for animal rig tasks")
+        rig_mode = rig_mode or "only_rig"
+        if rig_v2_detection_meta is None:
+            rig_v2_detection_meta = {}
+        rig_v2_detection_meta = {
+            **rig_v2_detection_meta,
+            "type": "animal",
+            "animal_type": animal_type,
+            "mode": rig_mode,
+        }
 
     # Create task
     task, error = await create_conversion_task(
@@ -2940,6 +3049,19 @@ async def api_create_task(
     
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
+
+    _save_preflight_render_image(task.id, preflight_render_image_data_url)
+
+    if rig_v2_detection_meta:
+        try:
+            settings = json.loads(task.viewer_settings or "{}")
+            if not isinstance(settings, dict):
+                settings = {}
+        except Exception:
+            settings = {}
+        settings["rig_v2_animal_detection"] = rig_v2_detection_meta
+        task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+        await db.commit()
     
     # Store GA client ID if provided
     if ga_client_id:
@@ -2979,6 +3101,566 @@ async def api_create_task(
         message=error,
     )
 
+RIG_V2_ALLOWED_EXTS = {".fbx", ".glb", ".obj"}
+RIG_V2_ALLOWED_SUPPORT_EXTS = {".mtl"}
+RIG_V2_PREVIEW_STATUS = "rig_v2_preview"
+RIG_V2_VISION_CONFIG_PATH = Path("/root/autorig/ai_vision_animal_type_detect.json")
+RIG_V2_ALLOWED_ANIMAL_TYPES = [
+    "humanoid",
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+]
+RIG_V2_DISCOVERED_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
+RIG_V2_OPENAI_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
+
+
+def _rig_v2_server_time() -> int:
+    return int(time.time())
+
+
+def _rig_v2_load_vision_config() -> Dict[str, Any]:
+    try:
+        raw = RIG_V2_VISION_CONFIG_PATH.read_text(encoding="utf-8")
+        cfg = json.loads(raw)
+        if not isinstance(cfg, dict):
+            cfg = {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rig V2 vision config error: {e}")
+
+    cfg.setdefault("open_router_api_url_string", "https://openrouter.ai/api/v1/chat/completions")
+    cfg.setdefault("open_router_models_url_string", "https://openrouter.ai/api/v1/models")
+    cfg.setdefault("open_ai_api_url_string", "https://api.openai.com/v1/chat/completions")
+    cfg.setdefault("open_ai_vision_model_string", "gpt-4o-mini")
+    cfg.setdefault("open_ai_strong_vision_model_string", "gpt-5.4-nano")
+    cfg.setdefault("image_size_int", 512)
+    cfg.setdefault("allowed_animal_types_array", RIG_V2_ALLOWED_ANIMAL_TYPES)
+    cfg.setdefault(
+        "prompt",
+        (
+            "Analyze this 3D model render. Choose exactly one animal_type from: "
+            + ", ".join(RIG_V2_ALLOWED_ANIMAL_TYPES)
+            + '. Return only valid JSON: {"animal_type":"<one_allowed_value>","confidence_float":0.0}. '
+            "confidence_float must be between 0 and 1 and should reflect visual certainty for this single view. "
+            "Choose humanoid only for a clearly upright human-like biped with a head, torso, two arms, and two legs. "
+            "Do not choose humanoid for robots, spider/mech robots, vehicles, drones, or low multi-legged bodies. "
+            "For spider-like or multi-legged mechanical models, choose the closest non-humanoid quadruped/low-body animal type, often turtle, dog, cat, or mouse depending on silhouette. "
+            "If uncertain, choose the closest visual body type and lower confidence."
+        ),
+    )
+    cfg.setdefault(
+        "open_router_free_vision_models_array",
+        [
+            "qwen/qwen2.5-vl-72b-instruct:free",
+            "qwen/qwen2.5-vl-32b-instruct:free",
+            "google/gemini-2.0-flash-exp:free",
+            "meta-llama/llama-3.2-11b-vision-instruct:free",
+        ],
+    )
+    return cfg
+
+
+def _rig_v2_normalize_image_data_url(image_value: str) -> str:
+    value = (image_value or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="image_jpg_base64_string is required")
+    if value.startswith("data:image/"):
+        header, _, b64 = value.partition(",")
+        if not b64:
+            raise HTTPException(status_code=400, detail="Invalid image data URL")
+        mime = "image/jpeg" if "jpeg" in header or "jpg" in header else "image/png"
+    else:
+        b64 = value
+        mime = "image/jpeg"
+    try:
+        decoded = base64.b64decode(b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="image_jpg_base64_string must be valid base64")
+    if not decoded:
+        raise HTTPException(status_code=400, detail="image_jpg_base64_string is empty")
+    if len(decoded) > 2_500_000:
+        raise HTTPException(status_code=413, detail="Vision image is too large")
+    return f"data:{mime};base64,{base64.b64encode(decoded).decode('ascii')}"
+
+
+def _rig_v2_prompt_from_config(cfg: Dict[str, Any], prompt_override: str = "") -> str:
+    prompt = (prompt_override or "").strip()
+    if not prompt:
+        prompt = str(cfg.get("prompt") or "").strip()
+    if len(prompt) > 6000:
+        raise HTTPException(status_code=400, detail="prompt_override_string is too long")
+    return prompt
+
+
+def _rig_v2_is_openai_vision_model_id(model_id: str) -> bool:
+    model = (model_id or "").strip().lower()
+    if not model:
+        return False
+    non_vision_markers = (
+        "audio",
+        "codex",
+        "dall-e",
+        "embedding",
+        "image",
+        "moderation",
+        "realtime",
+        "search",
+        "speech",
+        "transcribe",
+        "tts",
+        "whisper",
+    )
+    if any(marker in model for marker in non_vision_markers):
+        return False
+    return model.startswith(("gpt-5", "gpt-4.1", "gpt-4o", "o3", "o4"))
+
+
+def _rig_v2_sort_openai_model_ids(model_ids: List[str], preferred_model: str = "") -> List[str]:
+    preferred = (preferred_model or "").strip()
+
+    def score(model_id: str) -> Tuple[int, str]:
+        if preferred and model_id == preferred:
+            return (0, model_id)
+        if model_id.startswith("gpt-5.5"):
+            return (1, model_id)
+        if model_id.startswith("gpt-5.4"):
+            return (2, model_id)
+        if model_id.startswith("gpt-5"):
+            return (3, model_id)
+        if model_id.startswith("gpt-4.1"):
+            return (4, model_id)
+        if model_id.startswith("gpt-4o"):
+            return (5, model_id)
+        if model_id.startswith(("o4", "o3")):
+            return (6, model_id)
+        return (20, model_id)
+
+    return sorted(model_ids, key=score)
+
+
+async def _rig_v2_list_openai_models(cfg: Dict[str, Any]) -> List[str]:
+    now = time.time()
+    cached_until = float(RIG_V2_OPENAI_MODELS_CACHE.get("expires_at") or 0.0)
+    cached_models = RIG_V2_OPENAI_MODELS_CACHE.get("models") or []
+    if now < cached_until and isinstance(cached_models, list):
+        return [str(model) for model in cached_models if str(model).strip()]
+
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    if not api_key:
+        return []
+    models_url = str(cfg.get("open_ai_models_url_string") or "https://api.openai.com/v1/models").strip()
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(models_url, headers={"Authorization": f"Bearer {api_key}"})
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    except Exception:
+        return []
+    model_ids = [
+        str(item.get("id") or "").strip()
+        for item in data.get("data", []) if isinstance(item, dict)
+        if _rig_v2_is_openai_vision_model_id(str(item.get("id") or ""))
+    ]
+    model_ids = _rig_v2_sort_openai_model_ids(
+        list(dict.fromkeys(model_ids)),
+        str(cfg.get("open_ai_strong_vision_model_string") or ""),
+    )
+    RIG_V2_OPENAI_MODELS_CACHE["models"] = model_ids
+    RIG_V2_OPENAI_MODELS_CACHE["expires_at"] = now + 300
+    return model_ids
+
+
+def _rig_v2_extract_vision_result(text: str, allowed: List[str]) -> Tuple[Optional[str], float]:
+    raw = (text or "").strip()
+    candidates = [raw]
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if m:
+        candidates.insert(0, m.group(0))
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            animal = str(data.get("animal_type") or data.get("animal_type_string") or "").strip().lower()
+            if animal in allowed:
+                confidence_value = data.get("confidence_float")
+                if confidence_value is None:
+                    confidence_value = data.get("confidence")
+                if confidence_value is None:
+                    confidence_value = data.get("weight_float")
+                if confidence_value is None:
+                    confidence_value = 1.0
+                try:
+                    confidence = float(confidence_value)
+                except Exception:
+                    confidence = 1.0
+                return animal, max(0.0, min(1.0, confidence))
+    lowered = raw.lower()
+    for animal in allowed:
+        if re.search(rf"\b{re.escape(animal)}\b", lowered):
+            return animal, 1.0
+    return None, 0.0
+
+
+async def _rig_v2_discover_free_vision_models(cfg: Dict[str, Any], api_key: str) -> List[str]:
+    now = time.time()
+    cached_until = float(RIG_V2_DISCOVERED_MODELS_CACHE.get("expires_at") or 0.0)
+    cached_models = RIG_V2_DISCOVERED_MODELS_CACHE.get("models") or []
+    if now < cached_until and isinstance(cached_models, list):
+        return [str(model) for model in cached_models if str(model).strip()]
+
+    models_url = str(cfg.get("open_router_models_url_string") or "").strip()
+    if not models_url:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(
+                models_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": (APP_URL or "https://autorig.online").rstrip("/"),
+                    "X-Title": "AutoRig Rig V2",
+                },
+            )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    except Exception:
+        return []
+    out: List[str] = []
+    for item in data.get("data", []) if isinstance(data, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if not model_id or not model_id.endswith(":free"):
+            continue
+        haystack = json.dumps(item, ensure_ascii=False).lower()
+        if "image" not in haystack and "vision" not in haystack:
+            continue
+        out.append(model_id)
+    out = out[:24]
+    RIG_V2_DISCOVERED_MODELS_CACHE["models"] = out
+    RIG_V2_DISCOVERED_MODELS_CACHE["expires_at"] = now + 300
+    return out
+
+
+async def _rig_v2_call_openrouter_vision(
+    *,
+    cfg: Dict[str, Any],
+    image_data_url: str,
+    prompt_override: str = "",
+) -> Dict[str, Any]:
+    api_key = str(cfg.get("open_router_api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OpenRouter API key is not configured")
+    api_url = str(cfg.get("open_router_api_url_string") or "").strip()
+    if not api_url:
+        raise HTTPException(status_code=500, detail="OpenRouter API URL is not configured")
+
+    allowed = [
+        str(x).strip().lower()
+        for x in (cfg.get("allowed_animal_types_array") or RIG_V2_ALLOWED_ANIMAL_TYPES)
+        if str(x).strip()
+    ]
+    prompt = _rig_v2_prompt_from_config(cfg, prompt_override)
+    configured_models = [
+        str(x).strip()
+        for x in (cfg.get("open_router_free_vision_models_array") or [])
+        if str(x).strip()
+    ]
+    discovered_models = await _rig_v2_discover_free_vision_models(cfg, api_key)
+    models: List[str] = []
+    for model in configured_models + discovered_models:
+        if model not in models:
+            models.append(model)
+    if not models:
+        raise HTTPException(status_code=500, detail="No OpenRouter vision models configured or discovered")
+
+    last_error = ""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": (APP_URL or "https://autorig.online").rstrip("/"),
+        "X-Title": "AutoRig Rig V2",
+    }
+    for model in models:
+        payload = {
+            "model": model,
+            "temperature": 0,
+            "max_tokens": 64,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
+                    ],
+                }
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+                resp = await client.post(api_url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                last_error = f"{model}: HTTP {resp.status_code} {resp.text[:240]}"
+                if resp.status_code == 429:
+                    return {
+                        "success_bool": False,
+                        "status_string": "vision_rate_limited",
+                        "animal_type_string": "",
+                        "model_used_string": model,
+                        "error_string": last_error[:500],
+                        "server_time_unix_int": _rig_v2_server_time(),
+                    }
+                continue
+            data = resp.json()
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            if isinstance(content, list):
+                content = " ".join(
+                    str(part.get("text") or part) if isinstance(part, dict) else str(part)
+                    for part in content
+                )
+            animal_type, confidence_float = _rig_v2_extract_vision_result(str(content), allowed)
+            if animal_type:
+                return {
+                    "success_bool": True,
+                    "status_string": "ok",
+                    "animal_type_string": animal_type,
+                    "confidence_float": confidence_float,
+                    "model_used_string": model,
+                    "server_time_unix_int": _rig_v2_server_time(),
+                }
+            last_error = f"{model}: response did not contain allowed animal_type"
+        except Exception as e:
+            last_error = f"{model}: {e}"
+            continue
+    return {
+        "success_bool": False,
+        "status_string": "vision_failed",
+        "animal_type_string": "",
+        "model_used_string": "",
+        "error_string": last_error[:500],
+        "server_time_unix_int": _rig_v2_server_time(),
+    }
+
+
+async def _rig_v2_call_openai_vision(
+    *,
+    cfg: Dict[str, Any],
+    image_data_url: str,
+    fallback_reason: str,
+    view_id: str = "",
+    prompt_override: str = "",
+    model_override: str = "",
+) -> Dict[str, Any]:
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+    if not api_key:
+        return {
+            "success_bool": False,
+            "status_string": "openai_fallback_not_configured",
+            "animal_type_string": "",
+            "model_used_string": "",
+            "error_string": fallback_reason[:500],
+            "server_time_unix_int": _rig_v2_server_time(),
+        }
+    api_url = str(cfg.get("open_ai_api_url_string") or "").strip()
+    default_model = str(cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+    strong_model = str(cfg.get("open_ai_strong_vision_model_string") or default_model).strip()
+    model = (model_override or "").strip() or (strong_model if view_id == "top_side_45" else default_model)
+    if len(model) > 160 or not re.match(r"^[A-Za-z0-9._:/-]+$", model):
+        raise HTTPException(status_code=400, detail="Invalid open_ai_model_override_string")
+    allowed = [
+        str(x).strip().lower()
+        for x in (cfg.get("allowed_animal_types_array") or RIG_V2_ALLOWED_ANIMAL_TYPES)
+        if str(x).strip()
+    ]
+    prompt = _rig_v2_prompt_from_config(cfg, prompt_override)
+    payload = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_data_url, "detail": "low"}},
+                ],
+            }
+        ],
+    }
+    if model.startswith(("gpt-5", "o3", "o4")):
+        payload["max_completion_tokens"] = 256
+    else:
+        payload["temperature"] = 0
+        payload["max_tokens"] = 80
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            resp = await client.post(api_url, headers=headers, json=payload)
+        if resp.status_code != 200:
+            return {
+                "success_bool": False,
+                "status_string": "openai_fallback_failed",
+                "animal_type_string": "",
+                "model_used_string": model,
+                "error_string": f"OpenRouter fallback reason: {fallback_reason[:220]}; OpenAI HTTP {resp.status_code} {resp.text[:220]}",
+                "server_time_unix_int": _rig_v2_server_time(),
+            }
+        data = resp.json()
+        content = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if isinstance(content, list):
+            content = " ".join(
+                str(part.get("text") or part) if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        animal_type, confidence_float = _rig_v2_extract_vision_result(str(content), allowed)
+        if animal_type:
+            return {
+                "success_bool": True,
+                "status_string": "ok_openai_fallback",
+                "animal_type_string": animal_type,
+                "confidence_float": confidence_float,
+                "model_used_string": f"openai/{model}",
+                "view_id_string": view_id,
+                "fallback_reason_string": fallback_reason[:500],
+                "server_time_unix_int": _rig_v2_server_time(),
+            }
+        return {
+            "success_bool": False,
+            "status_string": "openai_fallback_invalid_response",
+            "animal_type_string": "",
+            "model_used_string": model,
+            "error_string": f"OpenAI response did not contain allowed animal_type. OpenRouter fallback reason: {fallback_reason[:300]}",
+            "server_time_unix_int": _rig_v2_server_time(),
+        }
+    except Exception as e:
+        return {
+            "success_bool": False,
+            "status_string": "openai_fallback_failed",
+            "animal_type_string": "",
+            "model_used_string": model,
+            "error_string": f"OpenRouter fallback reason: {fallback_reason[:220]}; OpenAI error: {e}",
+            "server_time_unix_int": _rig_v2_server_time(),
+        }
+
+
+
+
+@app.get("/api/rig-v2/vision/animal-type")
+async def api_rig_v2_vision_animal_type_docs():
+    """GET mirror documenting the POST vision endpoint."""
+    return {
+        "status_string": "ok",
+        "method_string": "POST",
+        "url_string": "/api/rig-v2/vision/animal-type",
+        "required_fields_array": ["image_jpg_base64_string"],
+        "optional_fields_array": [
+            "task_id_string",
+            "view_id_string",
+            "prompt_override_string",
+            "force_openai_bool",
+            "open_ai_model_override_string",
+        ],
+        "allowed_animal_types_array": RIG_V2_ALLOWED_ANIMAL_TYPES,
+        "example_request_object": {
+            "image_jpg_base64_string": "data:image/jpeg;base64,/9j/...",
+            "task_id_string": "optional-task-id",
+        },
+        "example_response_object": {
+            "success_bool": True,
+            "status_string": "ok",
+            "animal_type_string": "rabbit",
+            "confidence_float": 0.86,
+            "model_used_string": "provider/model:free or openai/model",
+            "server_time_unix_int": 0,
+        },
+        "server_time_unix_int": _rig_v2_server_time(),
+    }
+
+
+@app.get("/api/rig-v2/vision/config")
+async def api_rig_v2_vision_config():
+    """Expose editable prototype prompt and available OpenAI model IDs without exposing API keys."""
+    cfg = _rig_v2_load_vision_config()
+    models = await _rig_v2_list_openai_models(cfg)
+    strong_model = str(cfg.get("open_ai_strong_vision_model_string") or "").strip()
+    default_model = str(cfg.get("open_ai_vision_model_string") or "").strip()
+    return {
+        "success_bool": True,
+        "status_string": "ok",
+        "prompt_string": _rig_v2_prompt_from_config(cfg),
+        "open_ai_models_array": models,
+        "open_ai_default_model_string": default_model,
+        "open_ai_strong_model_string": strong_model,
+        "server_time_unix_int": _rig_v2_server_time(),
+    }
+
+
+@app.post("/api/rig-v2/vision/animal-type")
+@limiter.limit("30/minute")
+async def api_rig_v2_vision_animal_type(request: Request):
+    """Classify a 512x512 JPEG render via OpenRouter, with OpenAI only as rate-limit fallback."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    image_data_url = _rig_v2_normalize_image_data_url(
+        str(body.get("image_jpg_base64_string") or "")
+    )
+    view_id = str(body.get("view_id_string") or "").strip()
+    prompt_override = str(body.get("prompt_override_string") or "").strip()
+    model_override = str(body.get("open_ai_model_override_string") or "").strip()
+    force_openai = bool(body.get("force_openai_bool"))
+    cfg = _rig_v2_load_vision_config()
+    if force_openai:
+        return await _rig_v2_call_openai_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            fallback_reason="forced_openai_retry",
+            view_id=view_id,
+            prompt_override=prompt_override,
+            model_override=model_override,
+        )
+    openrouter_result = await _rig_v2_call_openrouter_vision(
+        cfg=cfg,
+        image_data_url=image_data_url,
+        prompt_override=prompt_override,
+    )
+    if openrouter_result.get("status_string") == "vision_rate_limited":
+        fallback_reason = str(openrouter_result.get("error_string") or openrouter_result.get("status_string") or "")
+        return await _rig_v2_call_openai_vision(
+            cfg=cfg,
+            image_data_url=image_data_url,
+            fallback_reason=fallback_reason,
+            view_id=view_id,
+            prompt_override=prompt_override,
+            model_override=model_override,
+        )
+    return openrouter_result
 
 @app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
@@ -3324,6 +4006,21 @@ async def api_get_task(
         kw_list,
     )
 
+    rig_v2_animal_detection = None
+    viewer_theme_selection = None
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        if isinstance(settings, dict):
+            detection = settings.get("rig_v2_animal_detection")
+            if isinstance(detection, dict):
+                rig_v2_animal_detection = detection
+            theme = settings.get("viewer_theme_selection")
+            if isinstance(theme, dict):
+                viewer_theme_selection = theme
+    except Exception:
+        rig_v2_animal_detection = None
+        viewer_theme_selection = None
+
     is_admin_viewer = bool(user and is_admin_email(user.email))
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
 
@@ -3338,6 +4035,9 @@ async def api_get_task(
         video_ready=task.video_ready,
         video_url=task.video_url,
         input_url=task.input_url,
+        input_type=task.input_type,
+        rig_v2_animal_detection=rig_v2_animal_detection,
+        viewer_theme_selection=viewer_theme_selection,
         fbx_glb_output_url=task.fbx_glb_output_url,
         fbx_glb_model_name=task.fbx_glb_model_name,
         fbx_glb_ready=task.fbx_glb_ready,

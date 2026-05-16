@@ -1010,6 +1010,543 @@ h3 { font-size: 1.25rem; }
     margin-bottom: 0;
 }
 
+body.rig-detect-modal-open {
+    overflow: hidden;
+}
+
+/*
+ * Rig-detect: scrim sits on body (z 9998). The busy overlay lives inside .convert-form-card,
+ * but .card uses backdrop-filter, which creates a stacking context at z-index auto — so the
+ * whole card subtree painted below the scrim and the modal looked blurred. Lift this card
+ * above the scrim and drop its own backdrop blur for this phase so the inner panel stays sharp.
+ */
+body.rig-detect-modal-open .convert-form-card {
+    position: relative;
+    z-index: 10001;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+/* Full-viewport dim + blur behind rig-detect (modal panel stays crisp on top) */
+.rig-detect-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    pointer-events: none;
+    background: rgba(3, 5, 12, 0.78);
+    backdrop-filter: blur(22px) saturate(1.08);
+    -webkit-backdrop-filter: blur(22px) saturate(1.08);
+}
+
+[data-theme="light"] .rig-detect-scrim {
+    background: rgba(210, 214, 228, 0.78);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+}
+
+.rig-detect-scrim.hidden {
+    display: none;
+}
+
+.convert-form-card.form-is-busy:hover {
+    border-color: var(--glass-border);
+    box-shadow: none;
+}
+
+.form-busy-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    border-radius: var(--radius-lg);
+    background: rgba(10, 10, 15, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+[data-theme="light"] .form-busy-overlay {
+    background: rgba(245, 245, 248, 0.92);
+}
+
+.form-busy-overlay.hidden {
+    display: none;
+}
+
+.form-busy-inner {
+    text-align: left;
+    padding: 1.25rem 1.35rem;
+    max-width: min(34rem, 94vw);
+    max-height: min(88vh, 42rem);
+    overflow-y: auto;
+}
+
+.form-busy-text {
+    margin: 0 0 0.85rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-primary);
+    text-align: center;
+}
+
+.form-busy-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-bottom: 1.1rem;
+}
+
+.form-busy-progress-track {
+    flex: 1;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    min-width: 0;
+}
+
+[data-theme="light"] .form-busy-progress-track {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+.form-busy-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-hover), var(--accent));
+    transition: width 0.12s ease-out;
+}
+
+.form-busy-progress-track.indeterminate .form-busy-progress-fill {
+    width: 38% !important;
+    transition: none;
+    animation: form-busy-indet 1.15s ease-in-out infinite;
+}
+
+@keyframes form-busy-indet {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(280%);
+    }
+}
+
+.form-busy-progress-pct {
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    min-width: 2.5rem;
+    text-align: right;
+}
+
+.form-busy-progress-wrap.link-mode .form-busy-progress-pct {
+    visibility: hidden;
+    width: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.form-busy-tips-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+}
+
+.form-busy-tips-list {
+    margin: 0;
+    padding-left: 1.15rem;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.form-busy-tips-list li {
+    margin-bottom: 0.45rem;
+}
+
+.form-busy-tips-list li:last-child {
+    margin-bottom: 0;
+}
+
+/* Rig type detection modal (home upload) */
+.form-busy-overlay.form-busy--rig-detect {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    border-radius: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    align-items: center;
+    justify-content: center;
+    padding:
+        max(10px, env(safe-area-inset-top, 0px))
+        max(12px, env(safe-area-inset-right, 0px))
+        max(10px, env(safe-area-inset-bottom, 0px))
+        max(12px, env(safe-area-inset-left, 0px));
+}
+
+[data-theme="light"] .form-busy-overlay.form-busy--rig-detect {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+.form-busy-overlay.form-busy--rig-detect .form-busy-inner {
+    position: relative;
+    z-index: 1;
+    isolation: isolate;
+    max-width: 100%;
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    max-height: calc(100vh - 20px);
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+    box-sizing: border-box;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-lg);
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+/* Title row hidden — copy lives in #rig-detect-viewer-title while rig-detect is open */
+.form-busy-overlay.form-busy--rig-detect .form-busy-text {
+    display: none !important;
+}
+
+.rig-detect-layout {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 0;
+    margin-bottom: 0.35rem;
+}
+
+.rig-detect-layout.hidden {
+    display: none !important;
+}
+
+.rig-detect-modal-plank {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 0.85rem 0.95rem 1rem;
+    border-radius: 16px;
+    background: linear-gradient(145deg, rgba(22, 26, 38, 0.98) 0%, rgba(12, 14, 22, 0.99) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+        0 28px 70px rgba(0, 0, 0, 0.65),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    overflow-x: visible;
+    overflow-y: visible;
+}
+
+[data-theme="light"] .rig-detect-modal-plank {
+    background: linear-gradient(145deg, #f4f5fb 0%, #e8eaf3 100%);
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+        0 24px 56px rgba(30, 40, 80, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.rig-detect-viewer-shell {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] .rig-detect-viewer-shell {
+    background: rgba(255, 255, 255, 0.55);
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.85);
+}
+
+.rig-detect-viewer-head {
+    padding: 0.55rem 0.75rem;
+    text-align: center;
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--accent) 16%, rgba(18, 20, 30, 0.95)) 0%,
+        rgba(14, 16, 24, 0.92) 100%
+    );
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="light"] .rig-detect-viewer-head {
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--accent) 12%, #fff) 0%,
+        #e8eaf4 100%
+    );
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+.rig-detect-viewer-title {
+    margin: 0;
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.3;
+    letter-spacing: 0.02em;
+    color: var(--text-primary);
+}
+
+.rig-detect-viewer-frame {
+    position: relative;
+    padding: 0.65rem;
+    background:
+        radial-gradient(ellipse 85% 75% at 50% 38%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 62%),
+        radial-gradient(ellipse 120% 80% at 50% 100%, rgba(0, 0, 0, 0.42) 0%, transparent 55%),
+        linear-gradient(168deg, #242a3d 0%, #12151f 48%, #0a0c12 100%);
+}
+
+[data-theme="light"] .rig-detect-viewer-frame {
+    background:
+        radial-gradient(ellipse 85% 75% at 50% 38%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 55%),
+        linear-gradient(168deg, #dfe4f4 0%, #c8cfde 100%);
+}
+
+.rig-detect-viewer-host {
+    width: 100%;
+    max-width: min(320px, 52vmin);
+    aspect-ratio: 1;
+    max-height: min(260px, 32vh);
+    margin: 0 auto;
+    flex-shrink: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgb(108, 110, 122);
+    box-shadow:
+        0 12px 32px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.rig-detect-viewer-host canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.rig-detect-cloud {
+    position: relative;
+    width: 100%;
+    flex: 0 0 auto;
+}
+
+.rig-detect-cloud.rig-detect-cloud--grid {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.35rem 0.4rem;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    padding: 0.1rem 0 0.15rem;
+    margin: 0;
+}
+
+@media (max-width: 420px) {
+    .rig-detect-cloud.rig-detect-cloud--grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 340px) {
+    .rig-detect-cloud.rig-detect-cloud--grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.rig-detect-cloud.rig-detect-cloud--grid .rig-detect-card {
+    width: 100%;
+    max-width: none;
+    aspect-ratio: 1;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    padding: 0.04rem;
+}
+
+.rig-detect-cloud.hidden {
+    display: none;
+}
+
+.rig-detect-card {
+    position: relative;
+    width: 100%;
+    max-width: none;
+    aspect-ratio: 1;
+    height: auto;
+    padding: 0.02rem;
+    margin: 0;
+    z-index: 1;
+    border: 2px solid rgba(255, 255, 255, 0.16);
+    border-radius: 11px;
+    background: rgba(28, 32, 44, 0.92);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transform: none;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    color: var(--text-primary);
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+}
+
+.rig-detect-card-visual {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rig-detect-card img {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    flex-shrink: 0;
+    pointer-events: none;
+}
+
+.rig-detect-card-weight {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+    min-width: 1.35rem;
+    text-align: center;
+    padding: 0.1rem 0.28rem;
+    border-radius: 6px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.rig-detect-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+    background: rgba(40, 44, 58, 0.95);
+}
+
+.rig-detect-card--selected {
+    transform: scale(1.06);
+    border-color: #fff;
+    outline: 3px solid var(--accent);
+    outline-offset: 0;
+    box-shadow:
+        0 0 0 4px color-mix(in srgb, var(--accent) 45%, transparent),
+        0 12px 32px rgba(0, 0, 0, 0.55);
+    background: color-mix(in srgb, var(--accent) 22%, rgba(28, 32, 44, 0.95));
+    z-index: 2;
+}
+
+.rig-detect-card:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.rig-detect-review {
+    flex-shrink: 0;
+}
+
+.rig-detect-review.hidden {
+    display: none !important;
+}
+
+.rig-detect-lead {
+    margin: 0 0 0.35rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--text-primary);
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.rig-detect-hint {
+    margin: 0 0 0.45rem;
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.rig-detect-cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem 0.75rem;
+    margin-bottom: 0.35rem;
+    flex-shrink: 0;
+}
+
+.rig-detect-start-btn {
+    min-width: 9.5rem;
+    padding: 0.45rem 0.85rem;
+    font-size: 0.88rem;
+}
+
+.rig-detect-footer {
+    margin: 0;
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: var(--text-muted);
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.form-busy-overlay.form-busy--rig-detect .form-busy-tips {
+    display: none;
+}
+
+.form-busy-overlay.form-busy--rig-detect.rig-detect--review-phase .form-busy-progress-wrap {
+    display: none;
+}
+
+.form-busy-overlay.form-busy--rig-detect .form-busy-progress-wrap {
+    flex-shrink: 0;
+    margin-bottom: 0.45rem;
+}
+
 .card-header {
     display: flex;
     justify-content: space-between;
