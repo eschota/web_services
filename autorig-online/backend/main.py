@@ -198,6 +198,7 @@ def _save_preflight_render_image(task_id: str, data_url_or_b64: Optional[str]) -
         final_path = PREFLIGHT_RENDER_DIR / f"{task_id}.jpg"
         tmp_path.write_bytes(image_bytes)
         tmp_path.replace(final_path)
+        print(f"[PreflightRender] Saved render image for task {task_id}: {final_path} ({len(image_bytes)} bytes)")
     except Exception as e:
         print(f"[PreflightRender] Failed to save render image for task {task_id}: {e}")
 

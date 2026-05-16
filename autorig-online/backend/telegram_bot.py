@@ -526,6 +526,7 @@ async def broadcast_new_task(
                 return
             photo_file = Path(poster_path) if poster_path else None
             result = None
+            sent_method = "text"
             if photo_file and photo_file.is_file() and len(text) <= 1000:
                 async def _send_photo(cid=chat_id, p=photo_file):
                     with p.open("rb") as f:
@@ -536,16 +537,24 @@ async def broadcast_new_task(
                             parse_mode=ParseMode.HTML,
                         )
                 result = await _send_with_retry(_send_photo, retry_network=False)
+                if result:
+                    sent_method = "photo"
+                else:
+                    print(f"[Telegram] Photo send failed for task {task_id}, chat {chat_id}; falling back to text")
+            elif photo_file and not photo_file.is_file():
+                print(f"[Telegram] Poster file missing for task {task_id}: {photo_file}")
+            elif photo_file and len(text) > 1000:
+                print(f"[Telegram] Caption too long for photo task {task_id}: {len(text)} chars")
             if not result:
                 result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                     chat_id=cid,
                     text=text,
                     parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=False
+                    disable_web_page_preview=True
                 ), retry_network=False)
             if result:
                 await attach_notification_message_id(chat_id, "task_new", task_id, getattr(result, "message_id", None))
-                print(f"[Telegram] New task notification sent to chat {chat_id}")
+                print(f"[Telegram] New task notification sent to chat {chat_id} via {sent_method}")
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
