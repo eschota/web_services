@@ -57,6 +57,10 @@ cd /root
 git pull
 ```
 
+If `/root` has server-side drift from GitHub, do not run a blind `git pull`.
+Deploy the exact changed files with a targeted patch/copy, or first resolve the
+repository divergence as a separate task.
+
 Avoid SSH-only code edits. If an emergency production edit is unavoidable, copy
 the exact change back to `R:\autorig`, commit it, and push it so local git
 and production do not drift.
@@ -157,6 +161,11 @@ git pull
 curl -fsS https://autorig.online/gallery >/dev/null
 ```
 
+Use the `git pull` deploy path only when `/root` is clean and aligned with the
+remote repository. If it is not aligned, apply a targeted patch/copy to
+`/root/autorig-online` and then copy the same change back into `R:\autorig`,
+commit it, and push it.
+
 Backend Python or dependency changes:
 
 ```bash
@@ -216,3 +225,13 @@ Do not touch unrelated services when the request is about AutoRig only.
   anti-automation screens during live tests.
 - For frontend changes, verify live HTML/JS with `curl` and browser testing when
   the UI behavior matters.
+
+### SEO-Critical Layout
+
+Google, Bing, Yandex, and other search engines are the primary traffic source.
+Public navigation, footer links, and other crawl-critical internal links must be
+present in the initial HTML returned by the server. Do not make SEO-critical
+header/footer links depend only on client-side JavaScript rendering. Shared
+layout partials are the canonical source for public header/footer markup; JS may
+only enhance that markup for auth state, credits, language, theme, and menu
+behavior.

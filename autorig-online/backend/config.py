@@ -193,8 +193,8 @@ CRYPTO_DISCOUNT_FRACTION = float(os.getenv("CRYPTO_DISCOUNT_FRACTION", "0.2"))
 CRYPTO_BTC_USD_RATE = float(os.getenv("CRYPTO_BTC_USD_RATE", "95000"))
 # (gumroad_permalink_key, credits, list_price_usd)
 AUTORIG_CRYPTO_TIERS: list[tuple[str, int, float]] = [
-    ("autorig-100", 100, 10.0),
-    ("autorig-500", 500, 30.0),
+    ("autorig-100", 100, 20.0),
+    ("autorig-500", 500, 50.0),
     ("autorig-1000", 1000, 100.0),
 ]
 CRYPTO_ALLOWED_TIER_KEYS = frozenset(t[0] for t in AUTORIG_CRYPTO_TIERS)

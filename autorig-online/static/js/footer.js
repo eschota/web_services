@@ -31,6 +31,7 @@ function renderSiteFooter() {
                         <li><a href="/glb-auto-rig" data-i18n="footer_glb_rig">GLB Auto Rigging</a></li>
                         <li><a href="/fbx-auto-rig" data-i18n="footer_fbx_rig">FBX Auto Rigging</a></li>
                         <li><a href="/obj-auto-rig" data-i18n="footer_obj_rig">OBJ Auto Rigging</a></li>
+                        <li><a href="/blender-plugin" data-i18n="footer_blender_plugin">Blender Plugin</a></li>
                         <li><a href="/gallery" data-i18n="nav_gallery">Gallery</a></li>
                     </ul>
                 </div>

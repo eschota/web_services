@@ -8049,6 +8049,51 @@ TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _read_static_partial(name: str) -> str:
+    path = STATIC_DIR / "partials" / name
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _inject_static_layout(html_content: str) -> str:
+    body_match = re.search(r"<body\b[^>]*>", html_content, flags=re.IGNORECASE)
+    body_tag = body_match.group(0) if body_match else ""
+    show_search = (
+        'data-layout-free3d-ribbon="1"' in body_tag
+        or "data-layout-free3d-ribbon='1'" in body_tag
+        or 'data-layout-free3d-ribbon="true"' in body_tag
+        or "data-layout-free3d-ribbon='true'" in body_tag
+    )
+
+    if '<div id="site-header"></div>' in html_content:
+        header_markup = _read_static_partial("site-header.html")
+        if show_search:
+            header_markup = f"{header_markup}\n{_read_static_partial('site-free3d-search.html')}"
+        html_content = html_content.replace(
+            '<div id="site-header"></div>',
+            f'<div id="site-header" data-server-rendered="1">\n{header_markup}\n</div>',
+            1,
+        )
+
+    if '<div id="site-footer"></div>' in html_content:
+        footer_markup = _read_static_partial("site-footer.html")
+        html_content = html_content.replace(
+            '<div id="site-footer"></div>',
+            f'<div id="site-footer" data-server-rendered="1">\n{footer_markup}\n</div>',
+            1,
+        )
+
+    return html_content
+
+
+def _static_html_response(filename: str) -> HTMLResponse:
+    path = STATIC_DIR / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return HTMLResponse(content=_inject_static_layout(path.read_text(encoding="utf-8")))
+
+
 def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:
     """Sum of file sizes under static/tasks/{task_id}/ when cache exists."""
     d = TASK_CACHE_DIR / task_id
@@ -8500,7 +8545,7 @@ async def favicon_ico():
 @app.get("/")
 async def index():
     """Serve main page"""
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return _static_html_response("index.html")
 
 
 @app.get("/task")
@@ -8520,7 +8565,7 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
         )
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=_inject_static_layout(html_content))
     
     task_id = id.strip()
     if not task_id:
@@ -8528,7 +8573,7 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
         )
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=_inject_static_layout(html_content))
 
     base_url = (APP_URL or "https://autorig.online").rstrip("/")
     task_url = f"{base_url}/task?id={task_id}"
@@ -8570,7 +8615,7 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{base_url}/task">',
         )
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=_inject_static_layout(html_content))
     
     # Build OG meta tags
     og_tags = f'''
@@ -8632,7 +8677,7 @@ async def task_page(
         f'<title>{task_title} | AutoRig.online</title>'
     )
     
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=_inject_static_layout(html_content))
 
 
 @app.post("/api/task/{task_id}/purchase-intent")
@@ -8710,7 +8755,7 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin page"""
     if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
-    return FileResponse(str(STATIC_DIR / "admin.html"))
+    return _static_html_response("admin.html")
 
 
 @app.get("/admin/workers")
@@ -8718,43 +8763,49 @@ async def admin_workers_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin workers page (dedicated)."""
     if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
-    return FileResponse(str(STATIC_DIR / "admin-workers.html"))
+    return _static_html_response("admin-workers.html")
 
 
 @app.get("/gallery")
 async def gallery_page():
     """Serve Gallery page"""
-    return FileResponse(str(STATIC_DIR / "gallery.html"))
+    return _static_html_response("gallery.html")
 
 
 @app.get("/dashboard")
 async def dashboard_page():
     """User dashboard: notification settings."""
-    return FileResponse(str(STATIC_DIR / "dashboard.html"))
+    return _static_html_response("dashboard.html")
 
 
 @app.get("/guides")
 async def guides_page():
     """Serve Guides page"""
-    return FileResponse(str(STATIC_DIR / "guides.html"))
+    return _static_html_response("guides.html")
 
 
 @app.get("/buy-credits")
 async def buy_credits_page():
     """Serve Buy Credits page"""
-    return FileResponse(str(STATIC_DIR / "buy-credits.html"))
+    return _static_html_response("buy-credits.html")
+
+
+@app.get("/blender-plugin")
+async def blender_plugin_page():
+    """Native Blender plugin landing page."""
+    return _static_html_response("blender-plugin.html")
 
 
 @app.get("/developers")
 async def developers_page():
     """API documentation and key management for developers."""
-    return FileResponse(str(STATIC_DIR / "developers.html"))
+    return _static_html_response("developers.html")
 
 
 @app.get("/payment/success")
 async def payment_success_page():
     """Serve payment success info page (no credit logic here)."""
-    return FileResponse(str(STATIC_DIR / "payment-success.html"))
+    return _static_html_response("payment-success.html")
 
 
 # =============================================================================
@@ -8765,223 +8816,223 @@ async def payment_success_page():
 @app.get("/glb-auto-rig")
 async def glb_auto_rig_page():
     """GLB auto-rigging landing page"""
-    return FileResponse(str(STATIC_DIR / "glb-auto-rig.html"))
+    return _static_html_response("glb-auto-rig.html")
 
 
 @app.get("/fbx-auto-rig")
 async def fbx_auto_rig_page():
     """FBX auto-rigging landing page"""
-    return FileResponse(str(STATIC_DIR / "fbx-auto-rig.html"))
+    return _static_html_response("fbx-auto-rig.html")
 
 
 @app.get("/obj-auto-rig")
 async def obj_auto_rig_page():
     """OBJ auto-rigging landing page"""
-    return FileResponse(str(STATIC_DIR / "obj-auto-rig.html"))
+    return _static_html_response("obj-auto-rig.html")
 
 
 # Info pages
 @app.get("/how-it-works")
 async def how_it_works_page():
     """How it works page"""
-    return FileResponse(str(STATIC_DIR / "how-it-works.html"))
+    return _static_html_response("how-it-works.html")
 
 
 @app.get("/faq")
 async def faq_page():
     """FAQ page"""
-    return FileResponse(str(STATIC_DIR / "faq.html"))
+    return _static_html_response("faq.html")
 
 
 @app.get("/terms")
 async def terms_of_use_page():
     """Terms of Use (website)."""
-    return FileResponse(str(STATIC_DIR / "terms-of-use.html"))
+    return _static_html_response("terms-of-use.html")
 
 
 @app.get("/user-agreement")
 async def user_agreement_page():
     """User Agreement (content license, previews, promotional use)."""
-    return FileResponse(str(STATIC_DIR / "user-agreement.html"))
+    return _static_html_response("user-agreement.html")
 
 
 @app.get("/guides")
 async def guides_page():
     """Guides page"""
-    return FileResponse(str(STATIC_DIR / "guides.html"))
+    return _static_html_response("guides.html")
 
 
 @app.get("/t-pose-rig")
 async def t_pose_rig_page():
     """T-pose rig page"""
-    return FileResponse(str(STATIC_DIR / "t-pose-rig.html"))
+    return _static_html_response("t-pose-rig.html")
 
 
 # Mixamo alternative pages (4 languages)
 @app.get("/mixamo-alternative")
 async def mixamo_alternative_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative.html"))
+    return _static_html_response("mixamo-alternative.html")
 
 
 @app.get("/mixamo-alternative-ru")
 async def mixamo_alternative_ru_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-ru.html"))
+    return _static_html_response("mixamo-alternative-ru.html")
 
 
 @app.get("/mixamo-alternative-zh")
 async def mixamo_alternative_zh_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-zh.html"))
+    return _static_html_response("mixamo-alternative-zh.html")
 
 
 @app.get("/mixamo-alternative-hi")
 async def mixamo_alternative_hi_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-hi.html"))
+    return _static_html_response("mixamo-alternative-hi.html")
 
 
 # Rig GLB for Unity pages (4 languages)
 @app.get("/rig-glb-unity")
 async def rig_glb_unity_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity.html"))
+    return _static_html_response("rig-glb-unity.html")
 
 
 @app.get("/rig-glb-unity-ru")
 async def rig_glb_unity_ru_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-ru.html"))
+    return _static_html_response("rig-glb-unity-ru.html")
 
 
 @app.get("/rig-glb-unity-zh")
 async def rig_glb_unity_zh_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-zh.html"))
+    return _static_html_response("rig-glb-unity-zh.html")
 
 
 @app.get("/rig-glb-unity-hi")
 async def rig_glb_unity_hi_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-hi.html"))
+    return _static_html_response("rig-glb-unity-hi.html")
 
 
 # Rig FBX for Unreal pages (4 languages)
 @app.get("/rig-fbx-unreal")
 async def rig_fbx_unreal_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal.html"))
+    return _static_html_response("rig-fbx-unreal.html")
 
 
 @app.get("/rig-fbx-unreal-ru")
 async def rig_fbx_unreal_ru_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-ru.html"))
+    return _static_html_response("rig-fbx-unreal-ru.html")
 
 
 @app.get("/rig-fbx-unreal-zh")
 async def rig_fbx_unreal_zh_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-zh.html"))
+    return _static_html_response("rig-fbx-unreal-zh.html")
 
 
 @app.get("/rig-fbx-unreal-hi")
 async def rig_fbx_unreal_hi_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-hi.html"))
+    return _static_html_response("rig-fbx-unreal-hi.html")
 
 
 # GLB vs FBX comparison pages (4 languages)
 @app.get("/glb-vs-fbx")
 async def glb_vs_fbx_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx.html"))
+    return _static_html_response("glb-vs-fbx.html")
 
 
 @app.get("/glb-vs-fbx-ru")
 async def glb_vs_fbx_ru_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-ru.html"))
+    return _static_html_response("glb-vs-fbx-ru.html")
 
 
 @app.get("/glb-vs-fbx-zh")
 async def glb_vs_fbx_zh_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-zh.html"))
+    return _static_html_response("glb-vs-fbx-zh.html")
 
 
 @app.get("/glb-vs-fbx-hi")
 async def glb_vs_fbx_hi_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-hi.html"))
+    return _static_html_response("glb-vs-fbx-hi.html")
 
 
 # T-pose vs A-pose comparison pages (4 languages)
 @app.get("/t-pose-vs-a-pose")
 async def t_pose_vs_a_pose_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose.html"))
+    return _static_html_response("t-pose-vs-a-pose.html")
 
 
 @app.get("/t-pose-vs-a-pose-ru")
 async def t_pose_vs_a_pose_ru_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-ru.html"))
+    return _static_html_response("t-pose-vs-a-pose-ru.html")
 
 
 @app.get("/t-pose-vs-a-pose-zh")
 async def t_pose_vs_a_pose_zh_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-zh.html"))
+    return _static_html_response("t-pose-vs-a-pose-zh.html")
 
 
 @app.get("/t-pose-vs-a-pose-hi")
 async def t_pose_vs_a_pose_hi_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-hi.html"))
+    return _static_html_response("t-pose-vs-a-pose-hi.html")
 
 
 # Animation retargeting pages (4 languages)
 @app.get("/animation-retargeting")
 async def animation_retargeting_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting.html"))
+    return _static_html_response("animation-retargeting.html")
 
 
 @app.get("/animation-retargeting-ru")
 async def animation_retargeting_ru_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-ru.html"))
+    return _static_html_response("animation-retargeting-ru.html")
 
 
 @app.get("/animation-retargeting-zh")
 async def animation_retargeting_zh_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-zh.html"))
+    return _static_html_response("animation-retargeting-zh.html")
 
 
 @app.get("/animation-retargeting-hi")
 async def animation_retargeting_hi_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-hi.html"))
+    return _static_html_response("animation-retargeting-hi.html")
 
 
 @app.get("/face-rig-animation")
 async def face_rig_animation_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation.html"))
+    return _static_html_response("face-rig-animation.html")
 
 
 @app.get("/face-rig-animation-ru")
 async def face_rig_animation_ru_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation-ru.html"))
+    return _static_html_response("face-rig-animation-ru.html")
 
 
 @app.get("/face-rig-animation-zh")
 async def face_rig_animation_zh_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation-zh.html"))
+    return _static_html_response("face-rig-animation-zh.html")
 
 
 @app.get("/face-rig-animation-hi")
 async def face_rig_animation_hi_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation-hi.html"))
+    return _static_html_response("face-rig-animation-hi.html")
 
 
 # Auto-rig OBJ pages (4 languages)
 @app.get("/auto-rig-obj")
 async def auto_rig_obj_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj.html"))
+    return _static_html_response("auto-rig-obj.html")
 
 
 @app.get("/auto-rig-obj-ru")
 async def auto_rig_obj_ru_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-ru.html"))
+    return _static_html_response("auto-rig-obj-ru.html")
 
 
 @app.get("/auto-rig-obj-zh")
 async def auto_rig_obj_zh_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-zh.html"))
+    return _static_html_response("auto-rig-obj-zh.html")
 
 
 @app.get("/auto-rig-obj-hi")
 async def auto_rig_obj_hi_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-hi.html"))
+    return _static_html_response("auto-rig-obj-hi.html")
 
 
 # Sitemap and robots.txt

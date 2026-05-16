@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blender Auto Rig Plugin | AutoRig.online</title>
+    <meta name="description" content="Native Blender auto-rigging plugin from AutoRig.online. Rig 3D characters in Blender, customize the rig, adjust animation settings, and buy the plugin on Gumroad.">
+    <meta name="keywords" content="Blender auto rig plugin, Blender character rigging, Blender AI rigging, automatic rigging Blender, AutoRig.online Blender plugin, rig customization Blender, animation settings Blender">
+    <link rel="canonical" href="https://autorig.online/blender-plugin">
+    <meta property="og:title" content="Blender Auto Rig Plugin | AutoRig.online">
+    <meta property="og:description" content="A native Blender plugin for automatic character rigging, rig customization, and animation settings from AutoRig.online.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/blender-plugin">
+    <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Blender Auto Rig Plugin">
+    <meta name="twitter:description" content="Native Blender auto-rigging, rig customization, and animation settings from AutoRig.online.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/og-image.png">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css?v=gallery-stats-rigtypes-1">
+    <style>
+        .plugin-page {
+            padding: 3rem 0 4rem;
+        }
+        .plugin-hero {
+            position: relative;
+            padding: clamp(2rem, 4vw, 3.25rem) 0;
+            border-bottom: 1px solid var(--border);
+            background: #10111e url("/static/images/icons/blender_logo.png") right 8% center / min(32vw, 320px) auto no-repeat;
+        }
+        .plugin-hero-content {
+            max-width: 760px;
+        }
+        .plugin-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--accent);
+            font-size: 0.9rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+        .plugin-hero h1 {
+            font-size: clamp(2.1rem, 5vw, 4rem);
+            line-height: 1.02;
+            margin: 0;
+        }
+        .plugin-lead {
+            color: var(--text-secondary);
+            font-size: clamp(1rem, 2vw, 1.2rem);
+            line-height: 1.65;
+            margin: 1.2rem 0 0;
+            max-width: 48rem;
+        }
+        .plugin-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1.6rem;
+        }
+        .plugin-section {
+            margin-top: 2rem;
+        }
+        .plugin-feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .plugin-feature {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            padding: 1.3rem;
+        }
+        .plugin-feature h2,
+        .plugin-feature h3 {
+            margin: 0 0 0.65rem;
+            font-size: 1.05rem;
+        }
+        .plugin-feature p {
+            color: var(--text-secondary);
+            line-height: 1.55;
+            margin: 0;
+        }
+        .plugin-link-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .plugin-link-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            padding: 1.25rem;
+        }
+        .plugin-link-card span {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        .plugin-cta-band {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            border: 1px solid rgba(var(--accent-rgb), 0.5);
+            border-radius: 8px;
+            background: rgba(var(--accent-rgb), 0.08);
+            padding: 1.5rem;
+        }
+        .plugin-cta-band h2 {
+            margin: 0 0 0.35rem;
+        }
+        .plugin-cta-band p {
+            margin: 0;
+            color: var(--text-secondary);
+        }
+        @media (max-width: 860px) {
+            .plugin-feature-grid,
+            .plugin-link-grid {
+                grid-template-columns: 1fr;
+            }
+            .plugin-hero {
+                background: #10111e url("/static/images/icons/blender_logo.png") right 1rem top 1rem / 92px auto no-repeat;
+            }
+            .plugin-page {
+                padding-top: 2rem;
+            }
+        }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "AutoRig.online Blender Plugin",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Blender",
+        "url": "https://autorig.online/blender-plugin",
+        "downloadUrl": "https://u3d.gumroad.com/l/blender-plugin",
+        "image": "https://autorig.online/static/images/og-image.png",
+        "description": "Native Blender plugin for automatic 3D character rigging, rig customization, and animation settings.",
+        "offers": {
+            "@type": "Offer",
+            "url": "https://u3d.gumroad.com/l/blender-plugin",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock"
+        },
+        "author": {
+            "@type": "Organization",
+            "name": "AutoRig.online"
+        }
+    }
+    </script>
+</head>
+<body data-layout-free3d-init="none" data-layout-active-path="/blender-plugin">
+    <div id="site-header"></div>
+
+    <main>
+        <section class="plugin-hero">
+            <div class="container">
+                <div class="plugin-hero-content">
+                    <div class="plugin-kicker">
+                        <img src="/static/images/icons/blender_logo.png" alt="" width="28" height="28">
+                        Native Blender Plugin
+                    </div>
+                    <h1>Auto rig 3D characters directly in Blender.</h1>
+                    <p class="plugin-lead">
+                        The AutoRig.online Blender plugin brings the same automatic rigging workflow into Blender:
+                        generate a character rig, customize rig behavior, tune animation settings, and keep your
+                        Blender scene moving without switching to the web uploader.
+                    </p>
+                    <div class="plugin-actions">
+                        <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Buy on Gumroad</a>
+                        <a href="https://www.youtube.com/@AIRIGONLINE" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">Watch demos</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="container plugin-page">
+            <section class="plugin-section plugin-feature-grid" aria-label="Blender plugin features">
+                <article class="plugin-feature">
+                    <h2>Automatic character rigging</h2>
+                    <p>Build an animation-ready character rig for Blender projects without manually placing every bone and control.</p>
+                </article>
+                <article class="plugin-feature">
+                    <h2>Full rig customization</h2>
+                    <p>Adjust rig setup and control behavior in the Blender workflow after generation, so the result fits the model.</p>
+                </article>
+                <article class="plugin-feature">
+                    <h2>Animation settings</h2>
+                    <p>Prepare the rig for motion previews, animation workflow, and export decisions directly from the plugin UI.</p>
+                </article>
+            </section>
+
+            <section class="plugin-section plugin-cta-band">
+                <div>
+                    <h2>Prefer working locally in Blender?</h2>
+                    <p>Use the web service for browser uploads or buy the native plugin for a Blender-first rigging workflow.</p>
+                </div>
+                <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Get the Blender Plugin</a>
+            </section>
+
+            <section class="plugin-section plugin-feature-grid" aria-label="Workflow details">
+                <article class="plugin-feature">
+                    <h3>Blender-native workflow</h3>
+                    <p>Stay in your scene while preparing characters for rigging and animation experiments.</p>
+                </article>
+                <article class="plugin-feature">
+                    <h3>Same AutoRig direction</h3>
+                    <p>The plugin is built around the same promise as AutoRig.online: faster character rigging with less manual setup.</p>
+                </article>
+                <article class="plugin-feature">
+                    <h3>For creators and teams</h3>
+                    <p>Useful for artists, indie game teams, marketplace creators, and Blender users who rig characters repeatedly.</p>
+                </article>
+            </section>
+
+            <section class="plugin-section plugin-link-grid" aria-label="External links">
+                <a class="plugin-link-card" href="https://www.producthunt.com/products/autorig-online?launch=autorig-online" target="_blank" rel="noopener noreferrer">
+                    <strong>AutoRig.online on Product Hunt</strong>
+                    <span>Launch page</span>
+                </a>
+                <a class="plugin-link-card" href="https://www.youtube.com/@AIRIGONLINE" target="_blank" rel="noopener noreferrer">
+                    <strong>AutoRig.online on YouTube</strong>
+                    <span>Videos and demos</span>
+                </a>
+            </section>
+        </div>
+    </main>
+
+    <div id="site-footer"></div>
+
+    <script src="/static/js/header.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js"></script>
+</body>
+</html>
