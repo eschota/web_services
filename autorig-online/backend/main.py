@@ -9990,8 +9990,14 @@ async def task_page(
         )
         return HTMLResponse(content=_inject_static_layout(html_content))
     
-    safe_task_title = html.escape(task_title, quote=True)
     safe_task_description = html.escape(task_description, quote=True)
+    title_suffix = f" | AutoRig task {task_id[:8]}"
+    compact_task_title = re.sub(r"\s+", " ", task_title).strip() or "Rigged 3D model"
+    max_task_title_len = max(24, 70 - len(title_suffix))
+    if len(compact_task_title) > max_task_title_len:
+        compact_task_title = compact_task_title[: max_task_title_len - 3].rstrip() + "..."
+    task_page_title = f"{compact_task_title}{title_suffix}"
+    safe_task_page_title = html.escape(task_page_title, quote=True)
     keywords_meta = ""
     if task_keywords:
         safe_keywords = html.escape(", ".join(task_keywords[:24]), quote=True)
@@ -10001,7 +10007,7 @@ async def task_page(
         creative_work = {
             "@context": "https://schema.org",
             "@type": "CreativeWork",
-            "name": task_title[:200],
+            "name": task_page_title[:200],
             "description": task_description[:2000],
             "url": task_url,
             "image": f"{base_url}/api/thumb/{task_id}",
@@ -10017,7 +10023,7 @@ async def task_page(
     <!-- Open Graph / Telegram / Social -->
     <meta property="og:type" content="{'video.other' if has_video else 'website'}">
     <meta property="og:url" content="{task_url}">
-    <meta property="og:title" content="{safe_task_title} | AutoRig.online">
+    <meta property="og:title" content="{safe_task_page_title}">
     <meta property="og:description" content="{safe_task_description}">
     <meta property="og:site_name" content="AutoRig.online">'''
     
@@ -10052,7 +10058,7 @@ async def task_page(
     <meta name="twitter:card" content="summary">'''
     
     og_tags += f'''
-    <meta name="twitter:title" content="{safe_task_title} | AutoRig.online">
+    <meta name="twitter:title" content="{safe_task_page_title}">
     <meta name="twitter:description" content="{safe_task_description}">
     '''
     
@@ -10069,7 +10075,7 @@ async def task_page(
     # Update <title> tag to be dynamic
     html_content = html_content.replace(
         '<title>Task Progress | AutoRig.online</title>',
-        f'<title>{html.escape(task_title)} | AutoRig.online</title>'
+        f'<title>{safe_task_page_title}</title>'
     )
     
     return HTMLResponse(content=_inject_static_layout(html_content))
