@@ -273,6 +273,7 @@ def _marketing_email_html(visible_unsubscribe_url: str) -> str:
     base = APP_URL.rstrip("/")
     animal_url = f"{base}/animal-rig"
     home_url = f"{base}/"
+    poster_url = f"{base}/static/images/email/autorig-v2-animal-rig-poster.jpg?v=20260516"
     youtube_url = "https://www.youtube.com/shorts/vEn7laZijOI"
     sender_footer = _marketing_sender_footer()
     return f"""<!DOCTYPE html>
@@ -294,6 +295,13 @@ def _marketing_email_html(visible_unsubscribe_url: str) -> str:
               <p style="margin:18px 0 0;color:#c9cde0;font-size:16px;line-height:1.6;">
                 AutoRig.online now rigs animals and other non-humanoid 3D models. We also made the humanoid character rig stronger, cleaner, and more predictable.
               </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0;background:#10101d;">
+              <a href="{animal_url}" style="display:block;text-decoration:none;">
+                <img src="{poster_url}" width="600" alt="AutoRig V2 animal rigging preview" style="display:block;width:100%;max-width:600px;height:auto;border:0;">
+              </a>
             </td>
           </tr>
           <tr>
