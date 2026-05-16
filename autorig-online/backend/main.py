@@ -6551,6 +6551,462 @@ def _gallery_rig_icon_key(task: Task) -> str:
     return animal if animal in GALLERY_RIG_TYPES and animal != "humanoid" else "humanoid"
 
 
+RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
+    "en": {
+        "suffix": "",
+        "html_lang": "en",
+        "guides": "Guides",
+        "kicker": "Rig type SEO guide",
+        "overview": "What this rig type is for",
+        "workflow": "Online workflow",
+        "prep": "Model preparation tips",
+        "examples": "Real AutoRig examples",
+        "faq": "FAQ",
+        "cta_upload": "Start auto rigging online",
+        "cta_gallery": "Browse real examples",
+        "empty": "Real public examples for this rig type will appear here automatically after matching completed tasks are published in the gallery.",
+        "open_example": "Open rig preview",
+        "examples_intro": "These examples are pulled from completed public AutoRig tasks and refreshed from the live gallery data.",
+    },
+    "ru": {
+        "suffix": "-ru",
+        "html_lang": "ru",
+        "guides": "Руководства",
+        "kicker": "SEO-статья по типу рига",
+        "overview": "Для чего нужен этот тип рига",
+        "workflow": "Онлайн workflow",
+        "prep": "Как подготовить модель",
+        "examples": "Реальные примеры AutoRig",
+        "faq": "FAQ",
+        "cta_upload": "Запустить auto rigging online",
+        "cta_gallery": "Смотреть реальные примеры",
+        "empty": "Реальные публичные примеры для этого типа появятся здесь автоматически после публикации подходящих задач в галерее.",
+        "open_example": "Открыть preview рига",
+        "examples_intro": "Эти примеры подтягиваются из завершённых публичных задач AutoRig и обновляются по live gallery data.",
+    },
+    "zh": {
+        "suffix": "-zh",
+        "html_lang": "zh",
+        "guides": "指南",
+        "kicker": "绑定类型 SEO 指南",
+        "overview": "这个绑定类型适合什么",
+        "workflow": "在线工作流",
+        "prep": "模型准备建议",
+        "examples": "真实 AutoRig 示例",
+        "faq": "FAQ",
+        "cta_upload": "开始在线自动绑定",
+        "cta_gallery": "浏览真实示例",
+        "empty": "当图库中出现匹配的已完成公开任务后，此处会自动显示该绑定类型的真实示例。",
+        "open_example": "打开绑定预览",
+        "examples_intro": "这些示例来自已完成的公开 AutoRig 任务，并从实时图库数据刷新。",
+    },
+    "hi": {
+        "suffix": "-hi",
+        "html_lang": "hi",
+        "guides": "Guides",
+        "kicker": "Rig type SEO guide",
+        "overview": "यह rig type किसके लिए है",
+        "workflow": "Online workflow",
+        "prep": "Model preparation tips",
+        "examples": "Real AutoRig examples",
+        "faq": "FAQ",
+        "cta_upload": "Online auto rigging शुरू करें",
+        "cta_gallery": "Real examples देखें",
+        "empty": "इस rig type के real public examples matching completed tasks gallery में publish होते ही यहां automatically दिखेंगे।",
+        "open_example": "Rig preview खोलें",
+        "examples_intro": "ये examples completed public AutoRig tasks से आते हैं और live gallery data से refresh होते हैं।",
+    },
+}
+
+
+RIG_ARTICLE_TYPES: Dict[str, Dict[str, Any]] = {
+    "humanoid": {
+        "labels": {"en": "humanoid character", "ru": "humanoid-персонаж", "zh": "人形角色", "hi": "humanoid character"},
+        "shape": {"en": "biped characters with arms, legs, hands, head, and animation-ready proportions", "ru": "двуногие персонажи с руками, ногами, кистями, головой и animation-ready пропорциями", "zh": "带有手臂、腿部、手、头部和动画比例的人形角色", "hi": "arms, legs, hands, head और animation-ready proportions वाले biped characters"},
+        "use": {"en": "game heroes, NPCs, stylized people, robots, and human-like creatures", "ru": "игровых героев, NPC, stylized people, роботов и human-like creatures", "zh": "游戏主角、NPC、风格化人物、机器人和类人生物", "hi": "game heroes, NPCs, stylized people, robots और human-like creatures"},
+        "tip": {"en": "Use a clear T-pose or relaxed A-pose, keep arms away from the torso, and avoid fused fingers if hand motion matters.", "ru": "Используйте чистую T-pose или relaxed A-pose, держите руки отдельно от тела и не склеивайте пальцы, если важна анимация кистей.", "zh": "使用清晰的 T-pose 或放松的 A-pose，让手臂离开身体；如果需要手部动画，避免手指粘连。", "hi": "Clear T-pose या relaxed A-pose रखें, arms को torso से अलग रखें, और hand motion चाहिए तो fused fingers से बचें।"},
+    },
+    "dog": {
+        "labels": {"en": "dog and wolf", "ru": "собака и wolf", "zh": "狗和狼", "hi": "dog और wolf"},
+        "shape": {"en": "quadruped bodies with paws, tail motion, shoulder/hip deformation, and low head posture", "ru": "quadruped body с лапами, tail motion, shoulder/hip deformation и низким положением головы", "zh": "具有爪子、尾巴运动、肩/髋变形和较低头部姿态的四足身体", "hi": "paws, tail motion, shoulder/hip deformation और low head posture वाले quadruped bodies"},
+        "use": {"en": "dogs, wolves, stylized pets, fantasy companions, and canine game creatures", "ru": "собак, волков, stylized pets, fantasy companions и canine game creatures", "zh": "狗、狼、风格化宠物、奇幻伙伴和犬科游戏生物", "hi": "dogs, wolves, stylized pets, fantasy companions और canine game creatures"},
+        "tip": {"en": "Keep legs separated, make paws visible, and leave enough mesh loops around shoulders, hips, neck, and tail.", "ru": "Разведите лапы, сделайте paws читаемыми и оставьте достаточно mesh loops у плеч, таза, шеи и хвоста.", "zh": "让四肢分开、爪子清晰，并在肩部、髋部、颈部和尾巴周围保留足够网格环。", "hi": "Legs अलग रखें, paws visible रखें, और shoulders, hips, neck तथा tail के आसपास पर्याप्त mesh loops रखें।"},
+    },
+    "bear": {
+        "labels": {"en": "bear", "ru": "медведь", "zh": "熊", "hi": "bear"},
+        "shape": {"en": "heavy quadrupeds with broad shoulders, thick paws, short tail, and powerful torso motion", "ru": "тяжёлые quadrupeds с широкими плечами, мощными лапами, коротким хвостом и массивным корпусом", "zh": "宽肩、厚爪、短尾和强壮躯干运动的大型四足动物", "hi": "broad shoulders, thick paws, short tail और powerful torso motion वाले heavy quadrupeds"},
+        "use": {"en": "bears, stylized cubs, fantasy beasts, and bulky animal characters", "ru": "медведей, stylized cubs, fantasy beasts и bulky animal characters", "zh": "熊、风格化幼熊、奇幻野兽和大型动物角色", "hi": "bears, stylized cubs, fantasy beasts और bulky animal characters"},
+        "tip": {"en": "Avoid merged front legs and give the shoulder area enough geometry for weight transfer during walking animations.", "ru": "Не склеивайте передние лапы и добавьте геометрию в зоне плеч для корректного переноса веса при walk animations.", "zh": "避免前腿粘连，并为肩部区域提供足够几何，以支持行走动画中的重心转移。", "hi": "Front legs merge न करें और walking animations में weight transfer के लिए shoulder area में enough geometry रखें।"},
+    },
+    "cat": {
+        "labels": {"en": "cat", "ru": "кошка", "zh": "猫", "hi": "cat"},
+        "shape": {"en": "flexible quadrupeds with arched backs, small paws, long tails, and agile spine motion", "ru": "гибкие quadrupeds с арочной спиной, маленькими лапами, длинным хвостом и agile spine motion", "zh": "具有弓背、小爪、长尾和灵活脊柱运动的四足动物", "hi": "arched backs, small paws, long tails और agile spine motion वाले flexible quadrupeds"},
+        "use": {"en": "cats, kittens, cartoon pets, feline companions, and stylized fantasy animals", "ru": "кошек, kittens, cartoon pets, feline companions и stylized fantasy animals", "zh": "猫、小猫、卡通宠物、猫科伙伴和风格化奇幻动物", "hi": "cats, kittens, cartoon pets, feline companions और stylized fantasy animals"},
+        "tip": {"en": "Keep the tail detached from the body silhouette and make the spine topology clean enough for curved poses.", "ru": "Держите хвост отдельным от силуэта тела и сделайте topology спины достаточно чистой для curved poses.", "zh": "让尾巴在轮廓上与身体分离，并保持脊柱拓扑干净，以支持弯曲姿态。", "hi": "Tail को body silhouette से अलग रखें और curved poses के लिए spine topology clean रखें।"},
+    },
+    "cow": {
+        "labels": {"en": "cow", "ru": "корова", "zh": "牛", "hi": "cow"},
+        "shape": {"en": "large farm quadrupeds with hooves, broad torso, neck motion, and optional horns or udder details", "ru": "крупные farm quadrupeds с копытами, широким корпусом, neck motion и optional horns/udder details", "zh": "带蹄、宽大躯干、颈部运动以及可选角/乳房细节的大型农场四足动物", "hi": "hooves, broad torso, neck motion और optional horns/udder details वाले large farm quadrupeds"},
+        "use": {"en": "cows, bulls, calves, farm animals, and stylized livestock for games or animation", "ru": "коров, быков, телят, farm animals и stylized livestock для игр или animation", "zh": "奶牛、公牛、小牛、农场动物和游戏/动画中的风格化家畜", "hi": "cows, bulls, calves, farm animals और games या animation के stylized livestock"},
+        "tip": {"en": "Separate hooves clearly, avoid a single fused underside mesh, and keep horns as readable geometry if they should move with the head.", "ru": "Чётко разделите копыта, не делайте слитную нижнюю часть mesh и оставьте horns читаемой геометрией, если они должны двигаться с головой.", "zh": "清晰分离蹄子，避免底部网格完全粘连；如果角要随头部移动，应保持角的几何清晰。", "hi": "Hooves clearly separate रखें, underside mesh fused न रखें, और horns को readable geometry रखें यदि वे head के साथ move करने चाहिए।"},
+    },
+    "deer": {
+        "labels": {"en": "deer", "ru": "олень", "zh": "鹿", "hi": "deer"},
+        "shape": {"en": "slender quadrupeds with thin legs, light torso, neck motion, and optional antlers", "ru": "стройные quadrupeds с тонкими ногами, лёгким корпусом, neck motion и optional antlers", "zh": "细腿、轻盈躯干、颈部运动和可选鹿角的纤细四足动物", "hi": "thin legs, light torso, neck motion और optional antlers वाले slender quadrupeds"},
+        "use": {"en": "deer, elk-like creatures, forest animals, fantasy mounts, and elegant wildlife models", "ru": "оленей, elk-like creatures, forest animals, fantasy mounts и elegant wildlife models", "zh": "鹿、麋鹿类生物、森林动物、奇幻坐骑和优雅野生动物模型", "hi": "deer, elk-like creatures, forest animals, fantasy mounts और elegant wildlife models"},
+        "tip": {"en": "Give thin legs enough thickness for skin weights and keep antlers separate enough to avoid confusing them with ears.", "ru": "Сделайте тонкие ноги достаточно толстыми для skin weights и отделите antlers от ушей, чтобы модель читалась правильно.", "zh": "让细腿有足够厚度以便蒙皮权重稳定，并让鹿角与耳朵足够分离。", "hi": "Thin legs में skin weights के लिए enough thickness रखें और antlers को ears से clear separation दें।"},
+    },
+    "elephant": {
+        "labels": {"en": "elephant", "ru": "слон", "zh": "大象", "hi": "elephant"},
+        "shape": {"en": "large quadrupeds with heavy legs, big ears, trunk silhouette, and slow weight-shift motion", "ru": "крупные quadrupeds с массивными ногами, большими ушами, trunk silhouette и slow weight-shift motion", "zh": "具有粗壮腿、大耳朵、象鼻轮廓和缓慢重心移动的大型四足动物", "hi": "heavy legs, big ears, trunk silhouette और slow weight-shift motion वाले large quadrupeds"},
+        "use": {"en": "elephants, mammoths, fantasy giants, stylized zoo animals, and large creature rigs", "ru": "слонов, мамонтов, fantasy giants, stylized zoo animals и large creature rigs", "zh": "大象、猛犸、奇幻巨兽、风格化动物园动物和大型生物绑定", "hi": "elephants, mammoths, fantasy giants, stylized zoo animals और large creature rigs"},
+        "tip": {"en": "Keep the trunk visible and separated from the legs, and avoid very thin ear geometry that cannot deform cleanly.", "ru": "Держите trunk видимым и отделённым от ног, избегайте слишком тонкой геометрии ушей, которая плохо деформируется.", "zh": "保持象鼻清晰并与腿部分离，避免耳朵几何过薄导致变形不干净。", "hi": "Trunk को visible और legs से separate रखें, और बहुत thin ear geometry से बचें जो clean deform नहीं कर सके।"},
+    },
+    "giraffe": {
+        "labels": {"en": "giraffe", "ru": "жираф", "zh": "长颈鹿", "hi": "giraffe"},
+        "shape": {"en": "tall quadrupeds with long necks, long legs, small horns, and high center-of-mass motion", "ru": "высокие quadrupeds с длинной шеей, длинными ногами, маленькими horns и высоким center-of-mass motion", "zh": "长颈、长腿、小角和高重心运动的高大四足动物", "hi": "long necks, long legs, small horns और high center-of-mass motion वाले tall quadrupeds"},
+        "use": {"en": "giraffes, tall fantasy herbivores, stylized safari animals, and long-necked creatures", "ru": "жирафов, tall fantasy herbivores, stylized safari animals и long-necked creatures", "zh": "长颈鹿、高大奇幻食草动物、风格化 safari 动物和长颈生物", "hi": "giraffes, tall fantasy herbivores, stylized safari animals और long-necked creatures"},
+        "tip": {"en": "Keep the neck segmented with enough topology and avoid merging thin legs into the body silhouette.", "ru": "Добавьте достаточно topology по шее и не сливайте тонкие ноги с body silhouette.", "zh": "颈部需要足够分段拓扑，并避免细腿与身体轮廓粘连。", "hi": "Neck में enough segmented topology रखें और thin legs को body silhouette में merge न करें।"},
+    },
+    "horse": {
+        "labels": {"en": "horse", "ru": "лошадь", "zh": "马", "hi": "horse"},
+        "shape": {"en": "equine quadrupeds with long legs, hooves, mane, tail, and gait-focused deformation", "ru": "equine quadrupeds с длинными ногами, копытами, гривой, хвостом и gait-focused deformation", "zh": "长腿、蹄、鬃毛、尾巴和步态变形重点的马类四足动物", "hi": "long legs, hooves, mane, tail और gait-focused deformation वाले equine quadrupeds"},
+        "use": {"en": "horses, ponies, mounts, unicorns, and stylized riding animals", "ru": "лошадей, пони, mounts, unicorns и stylized riding animals", "zh": "马、小马、坐骑、独角兽和风格化骑乘动物", "hi": "horses, ponies, mounts, unicorns और stylized riding animals"},
+        "tip": {"en": "Make hooves distinct, keep the tail separate, and add clean loops around shoulders and hips for walk and run cycles.", "ru": "Сделайте копыта различимыми, отделите хвост и добавьте clean loops вокруг плеч и таза для walk/run cycles.", "zh": "让蹄子清晰、尾巴分离，并在肩部和髋部添加干净网格环以支持走/跑循环。", "hi": "Hooves distinct रखें, tail separate रखें, और walk/run cycles के लिए shoulders और hips के आसपास clean loops रखें।"},
+    },
+    "mouse": {
+        "labels": {"en": "mouse", "ru": "мышь", "zh": "老鼠", "hi": "mouse"},
+        "shape": {"en": "small rodent bodies with short legs, round torso, large ears, and a thin tail", "ru": "маленькие rodent bodies с короткими ногами, круглым корпусом, большими ушами и тонким хвостом", "zh": "短腿、圆身体、大耳朵和细尾巴的小型啮齿动物身体", "hi": "short legs, round torso, large ears और thin tail वाले small rodent bodies"},
+        "use": {"en": "mice, rats, cartoon rodents, tiny game companions, and stylized mascot animals", "ru": "мышей, крыс, cartoon rodents, tiny game companions и stylized mascot animals", "zh": "老鼠、鼠类、卡通啮齿动物、小型游戏伙伴和风格化吉祥物动物", "hi": "mice, rats, cartoon rodents, tiny game companions और stylized mascot animals"},
+        "tip": {"en": "Keep the tail and ears readable, and avoid paws that are too small to deform in preview animations.", "ru": "Держите хвост и уши читаемыми, избегайте лап, слишком маленьких для деформации в preview animations.", "zh": "保持尾巴和耳朵清晰，避免爪子过小导致预览动画无法良好变形。", "hi": "Tail और ears readable रखें, और paws इतने छोटे न हों कि preview animations में deform न हो सकें।"},
+    },
+    "pig": {
+        "labels": {"en": "pig", "ru": "свинья", "zh": "猪", "hi": "pig"},
+        "shape": {"en": "compact quadrupeds with short legs, rounded torso, snout, ears, and small tail motion", "ru": "compact quadrupeds с короткими ногами, круглым корпусом, snout, ушами и small tail motion", "zh": "短腿、圆躯干、猪鼻、耳朵和小尾巴运动的紧凑四足动物", "hi": "short legs, rounded torso, snout, ears और small tail motion वाले compact quadrupeds"},
+        "use": {"en": "pigs, boars, farm animals, cartoon mascots, and stylized livestock characters", "ru": "свиней, кабанов, farm animals, cartoon mascots и stylized livestock characters", "zh": "猪、野猪、农场动物、卡通吉祥物和风格化家畜角色", "hi": "pigs, boars, farm animals, cartoon mascots और stylized livestock characters"},
+        "tip": {"en": "Leave space under the belly, separate the legs clearly, and keep the snout geometry attached cleanly to the head.", "ru": "Оставьте пространство под животом, чётко разделите ноги и аккуратно соедините snout geometry с головой.", "zh": "腹部下方留出空间，腿部清晰分离，并让猪鼻几何干净连接到头部。", "hi": "Belly के नीचे space रखें, legs clear separate रखें, और snout geometry को head से clean attach करें।"},
+    },
+    "rabbit": {
+        "labels": {"en": "rabbit", "ru": "кролик", "zh": "兔子", "hi": "rabbit"},
+        "shape": {"en": "small quadrupeds with long ears, strong back legs, compact torso, and short tail", "ru": "small quadrupeds с длинными ушами, сильными задними ногами, compact torso и short tail", "zh": "长耳、强后腿、紧凑躯干和短尾的小型四足动物", "hi": "long ears, strong back legs, compact torso और short tail वाले small quadrupeds"},
+        "use": {"en": "rabbits, hares, cartoon pets, fantasy familiars, and cute game creatures", "ru": "кроликов, зайцев, cartoon pets, fantasy familiars и cute game creatures", "zh": "兔子、野兔、卡通宠物、奇幻伙伴和可爱游戏生物", "hi": "rabbits, hares, cartoon pets, fantasy familiars और cute game creatures"},
+        "tip": {"en": "Keep long ears separate from the body and give the rear legs enough topology for crouch and hop poses.", "ru": "Держите длинные уши отдельно от тела и добавьте topology задним ногам для crouch/hop poses.", "zh": "长耳要与身体分离，并为后腿提供足够拓扑以支持蹲伏和跳跃姿态。", "hi": "Long ears को body से separate रखें और crouch/hop poses के लिए rear legs में enough topology दें।"},
+    },
+    "turtle": {
+        "labels": {"en": "turtle", "ru": "черепаха", "zh": "乌龟", "hi": "turtle"},
+        "shape": {"en": "shell-based non-humanoid bodies with short legs, neck motion, tail, and rigid shell areas", "ru": "shell-based non-humanoid bodies с короткими ногами, neck motion, хвостом и rigid shell areas", "zh": "基于龟壳的非人形身体，带短腿、颈部运动、尾巴和刚性龟壳区域", "hi": "short legs, neck motion, tail और rigid shell areas वाले shell-based non-humanoid bodies"},
+        "use": {"en": "turtles, tortoises, armored creatures, stylized reptiles, and shell-backed game characters", "ru": "черепах, tortoises, armored creatures, stylized reptiles и shell-backed game characters", "zh": "乌龟、陆龟、装甲生物、风格化爬行动物和带壳游戏角色", "hi": "turtles, tortoises, armored creatures, stylized reptiles और shell-backed game characters"},
+        "tip": {"en": "Keep the shell as a clear rigid volume and separate the neck and legs enough for visible motion.", "ru": "Держите панцирь как clear rigid volume и отделите шею и ноги достаточно для заметного motion.", "zh": "龟壳应保持清晰刚性体积，颈部和腿部要足够分离以显示运动。", "hi": "Shell को clear rigid volume रखें और visible motion के लिए neck तथा legs को enough separate रखें।"},
+    },
+}
+
+
+def _rig_article_path(rig_key: str, lang: str = "en") -> str:
+    suffix = RIG_ARTICLE_LANGS.get(lang, RIG_ARTICLE_LANGS["en"])["suffix"]
+    return f"/{rig_key}-auto-rig{suffix}"
+
+
+def _rig_article_localized_urls(base: str, rig_key: str) -> Dict[str, str]:
+    return {
+        lang: f"{base}{_rig_article_path(rig_key, lang)}"
+        for lang in RIG_ARTICLE_LANGS
+    }
+
+
+def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
+    ui = RIG_ARTICLE_LANGS.get(lang, RIG_ARTICLE_LANGS["en"])
+    info = RIG_ARTICLE_TYPES[rig_key]
+    label = info["labels"].get(lang, info["labels"]["en"])
+    shape = info["shape"].get(lang, info["shape"]["en"])
+    use = info["use"].get(lang, info["use"]["en"])
+    tip = info["tip"].get(lang, info["tip"]["en"])
+    if lang == "ru":
+        title = f"AI auto rigging online: {label} | AutoRig.online"
+        description = f"Онлайн AI-риггинг для типа {label}: загрузите GLB, FBX или OBJ и получите rigged модель с animation-ready preview для Blender, Unity и Unreal Engine."
+        h1 = f"AI auto rigging online: {label}"
+        lead = f"AutoRig.online автоматически строит rig для {label}: {shape}. Страница сфокусирована на задачах, где пользователю нужно быстро получить готовый rig онлайн без ручной расстановки костей."
+        workflow = f"Загрузите GLB, FBX или OBJ, дождитесь обработки, откройте task preview и скачайте результат для Blender, Unity, Unreal Engine или web viewers. Такой workflow подходит для {use}."
+        prep = tip
+        faq = [
+            (f"Можно ли сделать auto rig для {label} онлайн?", f"Да. AutoRig.online принимает GLB, FBX и OBJ модели и запускает AI-assisted rigging workflow для {label}, если геометрия подходит для выбранного типа."),
+            (f"Какие файлы подходят для {label} rigging?", "Лучше всего подходят чистые GLB, FBX или OBJ модели с разделёнными конечностями, читаемым силуэтом и достаточной topology в местах сгиба."),
+            (f"Можно ли использовать результат в Blender, Unity и Unreal Engine?", "Да. После обработки можно открыть preview, скачать rigged файлы и использовать их в Blender, Unity, Unreal Engine и других 3D pipelines."),
+        ]
+    elif lang == "zh":
+        title = f"{label} AI 在线自动绑定 | AutoRig.online"
+        description = f"面向 {label} 的在线 AI 自动绑定。上传 GLB、FBX 或 OBJ，生成适合 Blender、Unity、Unreal Engine 和网页预览的可动画 rigged 模型。"
+        h1 = f"{label} AI 在线自动绑定"
+        lead = f"AutoRig.online 为 {label} 自动生成 rig：{shape}。此页面面向需要在线自动绑定特定动物或模型类型的创作者。"
+        workflow = f"上传 GLB、FBX 或 OBJ，等待处理，打开 task preview，并导出到 Blender、Unity、Unreal Engine 或网页查看器。该流程适合 {use}。"
+        prep = tip
+        faq = [
+            (f"可以在线自动绑定 {label} 吗？", f"可以。AutoRig.online 支持上传 GLB、FBX 或 OBJ，并为 {label} 运行 AI-assisted rigging workflow。"),
+            (f"{label} 绑定前模型应该怎样准备？", "保持轮廓清晰、四肢分离，并在关节和弯曲区域保留足够拓扑。"),
+            ("结果可以用于 Blender、Unity 和 Unreal Engine 吗？", "可以。处理完成后可打开 preview，下载 rigged 文件，并用于常见 3D 和游戏开发流程。"),
+        ]
+    elif lang == "hi":
+        title = f"{label} AI auto rigging online | AutoRig.online"
+        description = f"{label} के लिए online AI auto rigging. GLB, FBX या OBJ upload करें और Blender, Unity, Unreal Engine तथा web previews के लिए rigged animation-ready model export करें."
+        h1 = f"{label} AI auto rigging online"
+        lead = f"AutoRig.online {label} के लिए automatically rig बनाता है: {shape}. यह page उन creators के लिए है जिन्हें specific rig type के लिए online automatic rigging चाहिए."
+        workflow = f"GLB, FBX या OBJ upload करें, processing complete होने दें, task preview खोलें, और Blender, Unity, Unreal Engine या web viewers के लिए result download करें. यह workflow {use} के लिए useful है."
+        prep = tip
+        faq = [
+            (f"क्या {label} को online auto rig किया जा सकता है?", f"हाँ. AutoRig.online GLB, FBX और OBJ uploads लेकर {label} के लिए AI-assisted rigging workflow चलाता है."),
+            (f"{label} rigging के लिए model कैसे prepare करें?", "Clear silhouette, separated limbs और bending areas में enough topology रखें ताकि animation preview साफ रहे।"),
+            ("क्या result Blender, Unity और Unreal Engine में काम करेगा?", "हाँ. Processing के बाद preview खोलें, rigged files download करें, और उन्हें common 3D/game pipelines में use करें।"),
+        ]
+    else:
+        title = f"{label.title()} AI auto rigging online | AutoRig.online"
+        description = f"Online AI auto rigging for {label} 3D models. Upload GLB, FBX, or OBJ and export a rigged, animation-ready result for Blender, Unity, Unreal Engine, and web previews."
+        h1 = f"{label.title()} AI auto rigging online"
+        lead = f"AutoRig.online automatically builds rigs for {label} models: {shape}. This page targets creators who need a fast online workflow for a specific rig type, not only generic humanoid character rigging."
+        workflow = f"Upload a GLB, FBX, or OBJ file, wait for the AI-assisted rigging task, open the task preview, and export the rigged result for Blender, Unity, Unreal Engine, or web viewers. The workflow is designed for {use}."
+        prep = tip
+        faq = [
+            (f"Can I auto rig a {label} model online?", f"Yes. AutoRig.online accepts GLB, FBX, and OBJ uploads and runs an AI-assisted rigging workflow for {label} models when the geometry matches the supported rig type."),
+            (f"What should I prepare before {label} auto rigging?", "Use a clean silhouette, separated limbs, and enough topology around bending areas so the generated rig and animation preview can deform cleanly."),
+            ("Can I use the result in Blender, Unity, and Unreal Engine?", "Yes. After processing, open the preview, download the rigged files, and use them in common 3D and game development pipelines."),
+        ]
+    return {
+        "title": title,
+        "description": description,
+        "h1": h1,
+        "lead": lead,
+        "workflow": workflow,
+        "prep": prep,
+        "label": label,
+        "shape": shape,
+        "use": use,
+        "faq": faq,
+        "ui": ui,
+        "keywords": [
+            f"{label} auto rig",
+            f"{label} rigging",
+            f"{label} 3D model rig",
+            "AI auto rigging",
+            "animal rigging online",
+            "GLB FBX OBJ rigging",
+            "Blender rigging",
+            "Unity Unreal rigging",
+        ],
+    }
+
+
+async def _rig_article_examples(db: AsyncSession, rig_key: str, limit: int = 6) -> List[Task]:
+    base_conditions = [
+        Task.status == "done",
+        Task.video_ready == True,
+        _gallery_task_has_poster_sql(),
+        or_(Task.content_rating.is_(None), Task.content_rating != "adult"),
+    ]
+    result = await db.execute(
+        select(Task)
+        .where(*base_conditions)
+        .order_by(func.coalesce(Task.updated_at, Task.created_at).desc())
+        .limit(700)
+    )
+    out: List[Task] = []
+    for task in result.scalars().all():
+        if _gallery_rig_icon_key(task) == rig_key:
+            out.append(task)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _task_public_title(task: Task, fallback: str) -> str:
+    title = str(getattr(task, "poster_llm_title", "") or "").strip()
+    return title[:96] if title else fallback
+
+
+def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> str:
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    lang = lang if lang in RIG_ARTICLE_LANGS else "en"
+    text = _rig_article_text(rig_key, lang)
+    ui = text["ui"]
+    canonical = f"{base}{_rig_article_path(rig_key, lang)}"
+    localized_urls = _rig_article_localized_urls(base, rig_key)
+    first_image = f"{base}/thumb/{examples[0].id}" if examples else f"{base}/static/images/og-image.png"
+    article_json = {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": text["title"],
+        "description": text["description"],
+        "inLanguage": ui["html_lang"],
+        "url": canonical,
+        "mainEntityOfPage": canonical,
+        "image": first_image,
+        "keywords": ", ".join(text["keywords"]),
+        "publisher": {"@type": "Organization", "name": "AutoRig.online", "url": base},
+        "about": [
+            text["label"],
+            "AI auto rigging",
+            "animal rigging",
+            "GLB FBX OBJ workflow",
+            "Blender Unity Unreal export",
+        ],
+    }
+    faq_json = {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": q,
+                "acceptedAnswer": {"@type": "Answer", "text": a},
+            }
+            for q, a in text["faq"]
+        ],
+    }
+    breadcrumb_json = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "AutoRig.online", "item": base},
+            {"@type": "ListItem", "position": 2, "name": ui["guides"], "item": f"{base}/guides"},
+            {"@type": "ListItem", "position": 3, "name": text["h1"], "item": canonical},
+        ],
+    }
+    item_list_json = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": f"{text['label']} AutoRig examples",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": idx + 1,
+                "url": f"{base}/m/{task.id}",
+                "name": _task_public_title(task, text["h1"]),
+                "image": f"{base}/thumb/{task.id}",
+            }
+            for idx, task in enumerate(examples)
+        ],
+    }
+    alt_links = "\n".join(
+        f'    <link rel="alternate" hreflang="{hreflang}" href="{html.escape(url, quote=True)}">'
+        for hreflang, url in localized_urls.items()
+    )
+    alt_links += f'\n    <link rel="alternate" hreflang="x-default" href="{html.escape(localized_urls["en"], quote=True)}">'
+    examples_html = ""
+    if examples:
+        cards: List[str] = []
+        for task in examples:
+            task_title = html.escape(_task_public_title(task, text["h1"]), quote=True)
+            cards.append(f"""
+                    <a class="rig-article-example" href="/m/{html.escape(task.id, quote=True)}">
+                        <span class="rig-article-example-media">
+                            <img src="/thumb/{html.escape(task.id, quote=True)}" alt="{task_title}" loading="lazy" width="360" height="640">
+                        </span>
+                        <span class="rig-article-example-title">{task_title}</span>
+                        <span class="rig-article-example-link">{html.escape(ui["open_example"])}</span>
+                    </a>""")
+        examples_html = "\n".join(cards)
+    else:
+        examples_html = f'<div class="rig-article-empty">{html.escape(ui["empty"])}</div>'
+
+    faq_html = "\n".join(
+        f"""
+                    <article class="rig-article-faq-item">
+                        <h3>{html.escape(q)}</h3>
+                        <p>{html.escape(a)}</p>
+                    </article>"""
+        for q, a in text["faq"]
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="{html.escape(ui["html_lang"], quote=True)}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{html.escape(text["title"])}</title>
+    <meta name="description" content="{html.escape(text["description"], quote=True)}">
+    <meta name="keywords" content="{html.escape(", ".join(text["keywords"]), quote=True)}">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="{html.escape(canonical, quote=True)}">
+{alt_links}
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="{html.escape(canonical, quote=True)}">
+    <meta property="og:title" content="{html.escape(text["title"], quote=True)}">
+    <meta property="og:description" content="{html.escape(text["description"], quote=True)}">
+    <meta property="og:image" content="{html.escape(first_image, quote=True)}">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{html.escape(text["title"], quote=True)}">
+    <meta name="twitter:description" content="{html.escape(text["description"], quote=True)}">
+    <meta name="twitter:image" content="{html.escape(first_image, quote=True)}">
+    <script type="application/ld+json">{json.dumps(article_json, ensure_ascii=False)}</script>
+    <script type="application/ld+json">{json.dumps(faq_json, ensure_ascii=False)}</script>
+    <script type="application/ld+json">{json.dumps(breadcrumb_json, ensure_ascii=False)}</script>
+    <script type="application/ld+json">{json.dumps(item_list_json, ensure_ascii=False)}</script>
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-rig-type-seo">
+</head>
+<body data-layout-free3d-init="none">
+    <div id="site-header"></div>
+    <main class="rig-article-page">
+        <section class="rig-article-hero">
+            <div class="container rig-article-hero-inner">
+                <p class="rig-article-kicker">{html.escape(ui["kicker"])}</p>
+                <h1>{html.escape(text["h1"])}</h1>
+                <p class="rig-article-lead">{html.escape(text["lead"])}</p>
+                <div class="rig-article-actions">
+                    <a class="btn btn-primary" href="/">{html.escape(ui["cta_upload"])}</a>
+                    <a class="btn btn-secondary" href="/gallery?rig_type={html.escape(rig_key, quote=True)}">{html.escape(ui["cta_gallery"])}</a>
+                </div>
+            </div>
+        </section>
+        <section class="container rig-article-section">
+            <div class="rig-article-content-grid">
+                <article class="rig-article-panel">
+                    <h2>{html.escape(ui["overview"])}</h2>
+                    <p>{html.escape(text["shape"])}</p>
+                    <p>{html.escape(text["use"])}</p>
+                </article>
+                <article class="rig-article-panel">
+                    <h2>{html.escape(ui["workflow"])}</h2>
+                    <p>{html.escape(text["workflow"])}</p>
+                </article>
+                <article class="rig-article-panel">
+                    <h2>{html.escape(ui["prep"])}</h2>
+                    <p>{html.escape(text["prep"])}</p>
+                </article>
+            </div>
+        </section>
+        <section class="container rig-article-section">
+            <div class="rig-article-section-header">
+                <h2>{html.escape(ui["examples"])}</h2>
+                <p>{html.escape(ui["examples_intro"])}</p>
+            </div>
+            <div class="rig-article-examples">
+{examples_html}
+            </div>
+        </section>
+        <section class="container rig-article-section">
+            <div class="rig-article-section-header">
+                <h2>{html.escape(ui["faq"])}</h2>
+            </div>
+            <div class="rig-article-faq">
+{faq_html}
+            </div>
+        </section>
+    </main>
+    <div id="site-footer"></div>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js"></script>
+</body>
+</html>
+"""
+
+
+async def _rig_article_response(rig_key: str, lang: str, db: AsyncSession) -> HTMLResponse:
+    if rig_key not in RIG_ARTICLE_TYPES or lang not in RIG_ARTICLE_LANGS:
+        raise HTTPException(status_code=404, detail="Not found")
+    examples = await _rig_article_examples(db, rig_key)
+    return HTMLResponse(content=_inject_static_layout(_build_rig_article_html(rig_key, lang, examples)))
+
+
 def _resolve_worker_base_from_task(task) -> Optional[str]:
     """Resolve worker base URL from task metadata without requiring worker_api."""
     from workers import get_worker_base_url
@@ -9253,6 +9709,25 @@ async def auto_rig_obj_zh_page():
 @app.get("/auto-rig-obj-hi")
 async def auto_rig_obj_hi_page():
     return _static_html_response("auto-rig-obj-hi.html")
+
+
+def _make_rig_article_endpoint(rig_key: str, lang: str):
+    async def rig_article_endpoint(db: AsyncSession = Depends(get_db)):
+        return await _rig_article_response(rig_key, lang, db)
+
+    rig_article_endpoint.__name__ = f"{rig_key}_auto_rig_{lang}_page"
+    return rig_article_endpoint
+
+
+for _rig_key in GALLERY_RIG_TYPES:
+    for _lang in RIG_ARTICLE_LANGS:
+        app.add_api_route(
+            _rig_article_path(_rig_key, _lang),
+            _make_rig_article_endpoint(_rig_key, _lang),
+            methods=["GET", "HEAD"],
+            response_class=HTMLResponse,
+            include_in_schema=False,
+        )
 
 
 # Sitemap and robots.txt

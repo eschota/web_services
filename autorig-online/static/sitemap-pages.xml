@@ -561,4 +561,629 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/auto-rig-obj"/>
   </url>
 
+  <!-- Rig type SEO landing pages -->
+  <url>
+    <loc>https://autorig.online/humanoid-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/humanoid-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/humanoid-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/humanoid-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/humanoid-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/humanoid-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/humanoid-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/humanoid-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/humanoid-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/humanoid-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/humanoid-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/humanoid-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/humanoid-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/humanoid-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/humanoid-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/humanoid-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/humanoid-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/humanoid-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/humanoid-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/humanoid-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/humanoid-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/humanoid-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/humanoid-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/humanoid-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/dog-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/dog-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/dog-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/dog-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/dog-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/dog-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/dog-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/dog-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/dog-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/dog-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/dog-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/dog-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/dog-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/dog-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/dog-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/dog-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/dog-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/dog-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/dog-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/dog-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/dog-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/dog-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/dog-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/dog-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/bear-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/bear-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/bear-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/bear-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/bear-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/bear-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/bear-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/bear-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/bear-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/bear-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/bear-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/bear-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/bear-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/bear-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/bear-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/bear-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/bear-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/bear-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/bear-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/bear-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/bear-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/bear-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/bear-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/bear-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cat-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cat-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cat-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cat-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cat-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cat-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cat-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cat-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cat-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cat-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cat-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cat-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cat-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cat-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cat-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cat-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cat-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cat-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cat-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cat-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cat-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cat-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cat-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cat-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cow-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cow-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cow-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cow-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cow-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cow-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cow-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cow-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cow-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cow-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cow-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cow-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cow-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cow-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cow-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cow-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cow-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cow-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cow-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cow-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/cow-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/cow-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/cow-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cow-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/deer-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/deer-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/deer-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/deer-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/deer-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/deer-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/deer-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/deer-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/deer-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/deer-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/deer-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/deer-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/deer-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/deer-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/deer-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/deer-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/deer-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/deer-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/deer-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/deer-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/deer-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/deer-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/deer-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/deer-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/elephant-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/elephant-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/elephant-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/elephant-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/elephant-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/elephant-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/elephant-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/elephant-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/elephant-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/elephant-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/elephant-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/elephant-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/elephant-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/elephant-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/elephant-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/elephant-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/elephant-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/elephant-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/elephant-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/elephant-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/elephant-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/elephant-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/elephant-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/elephant-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/giraffe-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/giraffe-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/giraffe-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/giraffe-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/giraffe-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/giraffe-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/giraffe-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/giraffe-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/giraffe-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/giraffe-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/giraffe-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/giraffe-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/giraffe-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/giraffe-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/giraffe-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/giraffe-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/giraffe-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/giraffe-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/giraffe-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/giraffe-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/giraffe-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/giraffe-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/giraffe-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/giraffe-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/horse-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/horse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/horse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/horse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/horse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/horse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/horse-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/horse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/horse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/horse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/horse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/horse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/horse-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/horse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/horse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/horse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/horse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/horse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/horse-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/horse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/horse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/horse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/horse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/horse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/mouse-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/mouse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/mouse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/mouse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/mouse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/mouse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/mouse-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/mouse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/mouse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/mouse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/mouse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/mouse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/mouse-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/mouse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/mouse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/mouse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/mouse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/mouse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/mouse-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/mouse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/mouse-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/mouse-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/mouse-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/mouse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/pig-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/pig-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/pig-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/pig-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/pig-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/pig-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/pig-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/pig-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/pig-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/pig-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/pig-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/pig-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/pig-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/pig-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/pig-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/pig-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/pig-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/pig-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/pig-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/pig-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/pig-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/pig-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/pig-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/pig-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/rabbit-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/rabbit-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/rabbit-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/rabbit-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/rabbit-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rabbit-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/rabbit-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/rabbit-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/rabbit-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/rabbit-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/rabbit-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rabbit-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/rabbit-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/rabbit-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/rabbit-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/rabbit-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/rabbit-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rabbit-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/rabbit-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/rabbit-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/rabbit-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/rabbit-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/rabbit-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rabbit-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/turtle-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/turtle-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/turtle-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/turtle-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/turtle-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/turtle-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/turtle-auto-rig-ru</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/turtle-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/turtle-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/turtle-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/turtle-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/turtle-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/turtle-auto-rig-zh</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/turtle-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/turtle-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/turtle-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/turtle-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/turtle-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/turtle-auto-rig-hi</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/turtle-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/turtle-auto-rig-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/turtle-auto-rig-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/turtle-auto-rig-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/turtle-auto-rig"/>
+  </url>
+
 </urlset>

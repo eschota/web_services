@@ -2031,6 +2031,225 @@ h3 { font-size: 1.25rem; }
 }
 
 /* =============================================================================
+   Rig Type SEO Articles
+   ============================================================================= */
+.rig-article-page {
+    min-width: 0;
+}
+
+.rig-article-hero {
+    padding: 4rem 0 2.5rem;
+}
+
+.rig-article-hero-inner {
+    max-width: 960px;
+}
+
+.rig-article-kicker {
+    margin: 0 0 0.8rem;
+    color: var(--accent);
+    font-size: 0.82rem;
+    font-weight: 850;
+    text-transform: uppercase;
+}
+
+.rig-article-hero h1 {
+    max-width: 900px;
+    margin: 0;
+    font-size: 3.7rem;
+    line-height: 1.05;
+    letter-spacing: 0;
+}
+
+.rig-article-lead {
+    max-width: 860px;
+    margin: 1.1rem 0 0;
+    color: var(--text-secondary);
+    font-size: 1.08rem;
+    line-height: 1.7;
+}
+
+.rig-article-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.4rem;
+}
+
+.rig-article-section {
+    margin-top: 2rem;
+}
+
+.rig-article-content-grid,
+.rig-article-faq {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.rig-article-panel,
+.rig-article-faq-item,
+.rig-article-empty {
+    min-width: 0;
+    padding: 1.25rem;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+}
+
+.rig-article-panel h2,
+.rig-article-faq-item h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    line-height: 1.25;
+}
+
+.rig-article-panel p,
+.rig-article-faq-item p {
+    margin: 0.7rem 0 0;
+    color: var(--text-secondary);
+    line-height: 1.65;
+}
+
+.rig-article-section-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.rig-article-section-header h2 {
+    margin: 0;
+}
+
+.rig-article-section-header p {
+    max-width: 620px;
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.55;
+}
+
+.rig-article-examples {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 1rem;
+}
+
+.rig-article-example {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.75rem;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: all var(--transition);
+}
+
+.rig-article-example:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+    transform: translateY(-2px);
+}
+
+.rig-article-example-media {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: #050711;
+}
+
+.rig-article-example-media img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.rig-article-example-title {
+    overflow: hidden;
+    color: var(--text-primary);
+    font-weight: 750;
+    line-height: 1.35;
+}
+
+.rig-article-example-link {
+    color: var(--accent);
+    font-size: 0.86rem;
+    font-weight: 800;
+}
+
+.rig-article-empty {
+    grid-column: 1 / -1;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.guides-type-section {
+    margin-bottom: 3rem;
+}
+
+.guides-section-heading {
+    max-width: 760px;
+    margin: 0 auto 2rem;
+    text-align: center;
+}
+
+.guides-section-heading h2 {
+    margin-bottom: 0.75rem;
+}
+
+.guide-type-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.guide-type-card {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 1.25rem;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: all var(--transition);
+}
+
+.guide-type-card:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+    transform: translateY(-2px);
+}
+
+.guide-type-card strong {
+    font-size: 1.05rem;
+    line-height: 1.3;
+}
+
+.guide-type-card span {
+    color: var(--text-secondary);
+    line-height: 1.55;
+}
+
+.guide-type-card em {
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 800;
+}
+
+/* =============================================================================
    API / Developers page
    ============================================================================= */
 .api-toc {
@@ -2376,6 +2595,29 @@ h3 { font-size: 1.25rem; }
         padding: 2.25rem 0;
     }
 
+    .rig-article-hero {
+        padding: 2.5rem 0 1.5rem;
+    }
+
+    .rig-article-hero h1 {
+        font-size: 2.1rem;
+        line-height: 1.12;
+    }
+
+    .rig-article-lead {
+        font-size: 1rem;
+    }
+
+    .rig-article-content-grid,
+    .rig-article-faq {
+        grid-template-columns: 1fr;
+    }
+
+    .rig-article-section-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
     .feature {
         padding: 1.25rem;
     }
@@ -2491,6 +2733,21 @@ h3 { font-size: 1.25rem; }
         width: 56px;
         height: 56px;
         padding: 6px;
+    }
+
+    .rig-article-actions .btn {
+        width: 100%;
+    }
+
+    .rig-article-examples {
+        grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .rig-article-panel,
+    .rig-article-faq-item,
+    .rig-article-empty {
+        padding: 1rem;
     }
 }
 
@@ -2620,6 +2877,19 @@ img[loading="lazy"] {
 
     .guide-card {
         padding: 1.5rem;
+    }
+
+    .guides-type-section {
+        margin-bottom: 2.25rem;
+    }
+
+    .guide-type-grid {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
+    .guide-type-card {
+        padding: 1rem;
     }
 }
 
