@@ -99,7 +99,7 @@ class EmailCampaignClick(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     campaign_key = Column(String(128), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    email_hash = Column(String(64), nullable=False, index=True)
+    email_hash = Column(String(64), nullable=False)
     link_key = Column(String(64), nullable=False, index=True)
     destination_url = Column(String(1024), nullable=False)
     ip_hash = Column(String(64), nullable=True)
