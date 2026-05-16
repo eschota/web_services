@@ -130,6 +130,22 @@ Active production wiring:
 For AutoRig changes, touch only `autorig-online/...` unless the user asks for
 cross-service work.
 
+### AutoRig Runtime Storage
+
+AutoRig intentionally keeps generated task assets on disk so the public site
+stays populated:
+
+- `/root/autorig-online/static/tasks`: cached public task downloads.
+- `/root/autorig-online/static/glb_cache`: cached model files for fast viewing.
+- `/var/autorig/videos`: cached task preview videos.
+- `/var/autorig/uploads`: original uploaded source files.
+- `/var/autorig/preflight-renders`: preflight poster/render files.
+
+Do not delete these by age. Cleanup must be pressure-based: only run when root
+free space is below the configured critical threshold. Prefer removing
+regenerable ZIP bundles and old terminal-task upload originals before deleting
+public task cache, GLB cache, videos, posters, or database task rows.
+
 ### AutoRig Deploy
 
 Static-only changes:

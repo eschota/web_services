@@ -43,6 +43,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
+    UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS,
     NEW_TASK_MIN_FREE_GB, NEW_TASK_PURGE_TASKS_MAX_FREED_GB,
     AUTOMATIC_TASK_DB_DELETION,
     STUCK_HOUR_MINUTES,
@@ -5302,7 +5303,7 @@ async def api_admin_cleanup(
 ):
     """
     Manually trigger disk cleanup (admin only).
-    Deletes oldest task files until MIN_FREE_SPACE_GB is available.
+    Runs pressure cleanup until MIN_FREE_SPACE_GB is available.
     """
     import shutil
     
@@ -5451,6 +5452,7 @@ async def api_admin_disk_stats(
             "new_task_purge_max_freed_gb": round(float(NEW_TASK_PURGE_TASKS_MAX_FREED_GB), 2),
             "cleanup_interval_cycles": CLEANUP_CHECK_INTERVAL_CYCLES,
             "min_age_hours": CLEANUP_MIN_AGE_HOURS,
+            "upload_pressure_cleanup_min_age_hours": round(float(UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS), 2),
             "gallery_db_purge_interval_cycles": GALLERY_DB_PURGE_INTERVAL_CYCLES,
             "automatic_task_db_deletion": AUTOMATIC_TASK_DB_DELETION,
             "task_cache_max_gb": round(float(task_cache_max_gb), 4),
@@ -6573,6 +6575,19 @@ def _estimate_path_size(path: Path) -> int:
         return 0
 
 
+def _upload_path_for_token(upload_token: Optional[str]) -> Optional[Path]:
+    if not upload_token or upload_token in (".", "..") or "/" in upload_token or "\\" in upload_token:
+        return None
+    try:
+        base = Path(UPLOAD_DIR).resolve()
+        path = (base / upload_token).resolve()
+        if path == base or os.path.commonpath([str(base), str(path)]) != str(base):
+            return None
+        return path
+    except Exception:
+        return None
+
+
 def _iter_task_artifact_paths(task: Task) -> List[Path]:
     paths: List[Path] = [
         TASK_CACHE_DIR / task.id,
@@ -6580,8 +6595,9 @@ def _iter_task_artifact_paths(task: Task) -> List[Path]:
     ]
     paths.extend(GLB_CACHE_DIR.glob(f"{task.id}_*.glb"))
     upload_token = _extract_upload_token_from_input_url(getattr(task, "input_url", None))
-    if upload_token:
-        paths.append(Path(UPLOAD_DIR) / upload_token)
+    upload_path = _upload_path_for_token(upload_token)
+    if upload_path:
+        paths.append(upload_path)
 
     unique_paths: List[Path] = []
     seen: set[str] = set()
@@ -6713,12 +6729,94 @@ def purge_task_cache_bundle_zips(
     return deleted, freed
 
 
+async def purge_terminal_upload_dirs(
+    db: AsyncSession,
+    *,
+    target_free_bytes: Optional[int] = None,
+    min_age_hours: float = UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS,
+    record_items: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[int, int]:
+    """
+    Under disk pressure, remove original upload folders for completed/failed tasks.
+
+    This preserves public gallery rows, cached task downloads, GLB cache, videos, and
+    poster assets. Upload folders for created/processing tasks are always protected.
+    """
+    upload_base = Path(UPLOAD_DIR)
+    if not upload_base.exists():
+        return 0, 0
+
+    cutoff_ts = time.time() - max(0.0, float(min_age_hours)) * 3600
+    protected_tokens: set[str] = set()
+    candidate_paths: Dict[str, Path] = {}
+
+    rows = (
+        await db.execute(
+            select(Task.id, Task.status, Task.input_url)
+            .where(Task.input_url.isnot(None))
+        )
+    ).all()
+
+    for _task_id, status, input_url in rows:
+        token = _extract_upload_token_from_input_url(input_url)
+        if not token:
+            continue
+        path = _upload_path_for_token(token)
+        if path is None or not path.is_dir():
+            continue
+        if status not in ("done", "error"):
+            protected_tokens.add(token)
+            candidate_paths.pop(token, None)
+            continue
+        if token not in protected_tokens:
+            candidate_paths[token] = path
+
+    cleanable: List[Tuple[float, Path]] = []
+    for token, path in candidate_paths.items():
+        if token in protected_tokens:
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff_ts:
+            cleanable.append((mtime, path))
+
+    cleanable.sort(key=lambda x: x[0])
+    deleted = 0
+    freed = 0
+
+    for _mtime, path in cleanable:
+        if target_free_bytes is not None and shutil.disk_usage("/").free >= target_free_bytes:
+            break
+        if not path.is_dir():
+            continue
+        size = _estimate_path_size(path)
+        try:
+            shutil.rmtree(path)
+            deleted += 1
+            freed += size
+            print(f"[Disk] Removed terminal upload {path.name} ({size / (1024**2):.1f} MB)")
+            if record_items is not None:
+                record_items.append(
+                    {
+                        "path": path.name,
+                        "type": "terminal_upload",
+                        "size_mb": size / (1024**2),
+                    }
+                )
+        except Exception as e:
+            print(f"[Disk] Failed to remove terminal upload {path}: {e}")
+
+    return deleted, freed
+
+
 async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
     """
     Run when creating a new task: if free space on / is below NEW_TASK_MIN_FREE_GB,
-    first delete bundle ZIPs; if still low, delete oldest done/error tasks (DB + artifacts)
-    until free space target is met or NEW_TASK_PURGE_TASKS_MAX_FREED_GB of data was removed
-    in that second phase (whichever comes first).
+    first delete bundle ZIPs, then old terminal-task upload originals; if still low,
+    delete oldest done/error tasks (DB + artifacts) until free space target is met or
+    NEW_TASK_PURGE_TASKS_MAX_FREED_GB of data was removed in that final phase.
     """
     target_bytes = NEW_TASK_MIN_FREE_GB * 1024 * 1024 * 1024
     max_task_phase_bytes = NEW_TASK_PURGE_TASKS_MAX_FREED_GB * 1024 * 1024 * 1024
@@ -6728,6 +6826,8 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
         "initial_free_gb": free_bytes / (1024**3),
         "zips_deleted": 0,
         "zip_freed_bytes": 0,
+        "terminal_uploads_deleted": 0,
+        "terminal_upload_freed_bytes": 0,
         "tasks_purged": 0,
         "task_phase_freed_bytes": 0,
         "final_free_gb": free_bytes / (1024**3),
@@ -6746,6 +6846,20 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
         if zd:
             print(
                 f"[NewTask Disk] ZIP purge: removed {zd} file(s), "
+                f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB)"
+            )
+        return summary
+
+    ud, ub = await purge_terminal_upload_dirs(db, target_free_bytes=target_bytes)
+    summary["terminal_uploads_deleted"] = ud
+    summary["terminal_upload_freed_bytes"] = ub
+
+    free_bytes = shutil.disk_usage("/").free
+    summary["final_free_gb"] = free_bytes / (1024**3)
+    if free_bytes >= target_bytes:
+        if ud:
+            print(
+                f"[NewTask Disk] Upload purge: removed {ud} folder(s), "
                 f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB)"
             )
         return summary
@@ -6786,9 +6900,10 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
 
     free_bytes = shutil.disk_usage("/").free
     summary["final_free_gb"] = free_bytes / (1024**3)
-    if summary["zips_deleted"] or summary["tasks_purged"]:
+    if summary["zips_deleted"] or summary["terminal_uploads_deleted"] or summary["tasks_purged"]:
         print(
             f"[NewTask Disk] Headroom pass done: zips={summary['zips_deleted']}, "
+            f"uploads={summary['terminal_uploads_deleted']}, "
             f"tasks={summary['tasks_purged']}, free now {summary['final_free_gb']:.2f} GB "
             f"(target {NEW_TASK_MIN_FREE_GB} GB)"
         )
@@ -8041,8 +8156,10 @@ async def cleanup_disk_space(
     Clean up old files when disk space is low.
 
     Priority:
-    1. Remove the oldest completed/error tasks physically and delete their DB rows (if delete_task_rows).
-    2. Remove orphaned cache/upload/video files not referenced by any remaining task.
+    1. Remove regenerable bundle ZIPs.
+    2. Remove old upload originals for terminal tasks, preserving gallery/cache/video/poster data.
+    3. Remove the oldest completed/error tasks physically and delete their DB rows (only if delete_task_rows).
+    4. Remove orphaned cache/upload/video files not referenced by any remaining task.
     """
     if delete_task_rows is None:
         delete_task_rows = AUTOMATIC_TASK_DB_DELETION
@@ -8120,6 +8237,26 @@ async def cleanup_disk_space(
                     and task.created_at < age_cutoff
                 ):
                     task_cleanup_candidates.append(task)
+
+            ud, ub = await purge_terminal_upload_dirs(
+                cleanup_db,
+                target_free_bytes=min_free_bytes,
+                record_items=result["deleted_items"],
+            )
+            result["deleted_count"] += ud
+            result["freed_bytes"] += ub
+
+            disk_usage = shutil.disk_usage("/")
+            free_bytes = disk_usage.free
+            if free_bytes >= min_free_bytes:
+                result["freed_gb"] = result["freed_bytes"] / (1024**3)
+                result["final_free_gb"] = free_bytes / (1024**3)
+                if ud > 0:
+                    print(
+                        f"[Disk Cleanup] Target reached after terminal upload purge: "
+                        f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
+                    )
+                return result
 
             if delete_task_rows:
                 for task in task_cleanup_candidates:

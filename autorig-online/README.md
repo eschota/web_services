@@ -250,9 +250,8 @@ sudo systemctl reload nginx
 # Редактирование crontab
 sudo crontab -e
 
-# Добавление задачи очистки файлов старше 24 часов
-0 */6 * * * find /var/autorig/uploads -type f -mmin +1440 -delete
-0 */6 * * * find /var/autorig/uploads -type d -empty -delete
+# Pressure-only cleanup: script exits without deleting while free space is healthy.
+0 */6 * * * bash /root/autorig-online/deploy/cleanup_uploads.sh >> /var/log/autorig-upload-cleanup.log 2>&1
 ```
 
 ### 📇 Ежедневный дамп задач для SEO (JSON snapshot)

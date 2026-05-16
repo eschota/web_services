@@ -260,9 +260,12 @@ SUPPORT_CHAT_MESSAGE_MAX_CHARS = int(os.getenv("SUPPORT_CHAT_MESSAGE_MAX_CHARS",
 # Set AUTOMATIC_TASK_DB_DELETION=1 to restore legacy automatic DB row deletion.
 AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
 
-MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain (background cleanup)
+MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "2.5"))  # Critical free-space floor for background cleanup
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
+UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS = float(
+    os.getenv("UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS", "24")
+)  # Under disk pressure, terminal-task upload originals older than this may be removed
 
 # Before each new task: try to reach at least this much free space on /
 NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
@@ -271,7 +274,7 @@ NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
 NEW_TASK_PURGE_TASKS_MAX_FREED_GB = float(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "8"))
 
 # Max total size of static/tasks (task file cache); enforced before new task; admin can override in DB
-TASK_CACHE_MAX_GB = float(os.getenv("TASK_CACHE_MAX_GB", "10.0"))
+TASK_CACHE_MAX_GB = float(os.getenv("TASK_CACHE_MAX_GB", "30.0"))
 
 # Purge DB rows for terminal tasks that have neither video nor any thumbnail URL in ready/output lists
 # (Used only as legacy env name; gallery purges are gated by GALLERY_DB_PURGE_INTERVAL_CYCLES below.)
