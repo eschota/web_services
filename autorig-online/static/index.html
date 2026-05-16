@@ -247,12 +247,31 @@
         <!-- Gallery Preview -->
         <section class="container mt-4">
             <div class="card" style="padding: 2rem;">
-                <div class="card-header" style="padding: 0; margin-bottom: 1rem; display:flex; align-items:flex-start; justify-content: space-between; gap: 1rem;">
+                <div class="card-header" style="padding: 0; margin-bottom: 1rem; display:flex; align-items:flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
                     <div>
                         <h3 class="card-title" style="margin: 0;" data-i18n="gallery_title">🎬 Recent Rigged Models</h3>
                         <p id="gallery-preview-subtitle" style="margin: 0.5rem 0 0 0; color: var(--text-secondary);" data-i18n="gallery_subtitle">7,124+ rigs completed. Loading last 24 hours...</p>
                     </div>
-                    <a href="/gallery" class="btn btn-ghost" id="gallery-view-all-link" data-i18n="gallery_view_all_plain">View all</a>
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:0.75rem; flex-wrap:wrap;">
+                        <label for="gallery-preview-rig-type" style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="gallery_rig_type_label">Rig type:</label>
+                        <select id="gallery-preview-rig-type" class="form-select" style="width: 220px; max-width: 100%;">
+                            <option value="all" data-i18n="gallery_rig_type_all">All rig types</option>
+                            <option value="humanoid" data-i18n="gallery_rig_type_humanoid">Humanoid</option>
+                            <option value="dog" data-i18n="gallery_rig_type_dog">Dog</option>
+                            <option value="bear" data-i18n="gallery_rig_type_bear">Bear</option>
+                            <option value="cat" data-i18n="gallery_rig_type_cat">Cat</option>
+                            <option value="cow" data-i18n="gallery_rig_type_cow">Cow</option>
+                            <option value="deer" data-i18n="gallery_rig_type_deer">Deer</option>
+                            <option value="elephant" data-i18n="gallery_rig_type_elephant">Elephant</option>
+                            <option value="giraffe" data-i18n="gallery_rig_type_giraffe">Giraffe</option>
+                            <option value="horse" data-i18n="gallery_rig_type_horse">Horse</option>
+                            <option value="mouse" data-i18n="gallery_rig_type_mouse">Mouse</option>
+                            <option value="pig" data-i18n="gallery_rig_type_pig">Pig</option>
+                            <option value="rabbit" data-i18n="gallery_rig_type_rabbit">Rabbit</option>
+                            <option value="turtle" data-i18n="gallery_rig_type_turtle">Turtle</option>
+                        </select>
+                        <a href="/gallery" class="btn btn-ghost" id="gallery-view-all-link" data-i18n="gallery_view_all_plain">View all</a>
+                    </div>
                 </div>
                 <div class="features" id="gallery-preview-grid" style="margin: 0;">
                     <div class="card" style="padding: 1rem; color: var(--text-muted);">Loading…</div>
@@ -335,6 +354,6 @@
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script src="/static/js/task-card.js?v=gallery-stats-rigtypes-1"></script>
-    <script src="/static/js/app.js?v=gallery-stats-rigtypes-1"></script>
+    <script src="/static/js/app.js?v=gallery-rigtype-filter-1"></script>
 </body>
 </html>

@@ -606,8 +606,21 @@ const App = {
         console.log('[Gallery] Loading preview...');
 
         try {
+            const rigTypeEl = document.getElementById('gallery-preview-rig-type');
+            if (rigTypeEl && rigTypeEl.dataset.galleryPreviewBound !== '1') {
+                rigTypeEl.dataset.galleryPreviewBound = '1';
+                rigTypeEl.addEventListener('change', () => this.loadGalleryPreview());
+            }
+            const rigType = (rigTypeEl && rigTypeEl.value) ? rigTypeEl.value : 'all';
+
             // Homepage preview follows the public gallery order.
-            const resp = await fetch('/api/gallery?per_page=12&sort=date&t=' + Date.now());
+            const params = new URLSearchParams({
+                per_page: '12',
+                sort: 'date',
+                rig_type: rigType,
+                t: String(Date.now())
+            });
+            const resp = await fetch(`/api/gallery?${params.toString()}`);
             const data = await resp.json();
             const items = (data && data.items) ? data.items : [];
             
@@ -619,7 +632,7 @@ const App = {
             const viewAllLink = document.getElementById('gallery-view-all-link');
             if (viewAllLink) {
                 viewAllLink.textContent = (typeof window.t === 'function') ? t('gallery_view_all_plain') : 'View all';
-                viewAllLink.href = '/gallery';
+                viewAllLink.href = rigType === 'all' ? '/gallery' : `/gallery?rig_type=${encodeURIComponent(rigType)}`;
             }
             const subtitleEl = document.getElementById('gallery-preview-subtitle');
             if (subtitleEl && completedTotal !== null && completedLast24h !== null) {

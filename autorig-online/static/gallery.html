@@ -85,13 +85,17 @@
 <script src="/static/js/i18n.js"></script>
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script src="/static/js/task-card.js?v=gallery-stats-rigtypes-1"></script>
-    <script src="/static/js/app.js?v=gallery-stats-rigtypes-1"></script>
+    <script src="/static/js/app.js?v=gallery-rigtype-filter-1"></script>
     <script>
         const GalleryPage = {
             page: 1,
             perPage: 24,
             sort: 'date',
-            rigType: 'all',
+            rigType: (() => {
+                const value = new URLSearchParams(window.location.search).get('rig_type') || 'all';
+                const allowed = ['all', 'humanoid', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+                return allowed.includes(value) ? value : 'all';
+            })(),
             loading: false,
 
             async load() {
@@ -216,6 +220,13 @@
                     rigTypeEl.addEventListener('change', () => {
                         this.rigType = rigTypeEl.value || 'all';
                         this.page = 1;
+                        const url = new URL(window.location.href);
+                        if (this.rigType === 'all') {
+                            url.searchParams.delete('rig_type');
+                        } else {
+                            url.searchParams.set('rig_type', this.rigType);
+                        }
+                        window.history.replaceState({}, '', url);
                         this.load();
                     });
                 }
