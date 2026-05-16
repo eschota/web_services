@@ -10009,6 +10009,7 @@ async def task_page(
         if task_keywords:
             creative_work["keywords"] = ", ".join(task_keywords[:24])
         json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
+    standard_seo_tags = f'<meta name="description" content="{safe_task_description}">{keywords_meta}{json_ld}'
 
     # Build OG meta tags
     og_tags = f'''
@@ -10017,7 +10018,7 @@ async def task_page(
     <meta property="og:url" content="{task_url}">
     <meta property="og:title" content="{safe_task_title} | AutoRig.online">
     <meta property="og:description" content="{safe_task_description}">
-    <meta property="og:site_name" content="AutoRig.online">{keywords_meta}{json_ld}'''
+    <meta property="og:site_name" content="AutoRig.online">'''
     
     # Add image/video tags
     if has_thumb:
@@ -10061,7 +10062,7 @@ async def task_page(
     )
     html_content = html_content.replace(
         "<!-- TASK_SEO_PLACEHOLDER -->",
-        f'<link rel="canonical" href="{task_url}">\n    {og_tags}',
+        f'{standard_seo_tags}\n    <link rel="canonical" href="{task_url}">\n    {og_tags}',
     )
     
     # Update <title> tag to be dynamic
