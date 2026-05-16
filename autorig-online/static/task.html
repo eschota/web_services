@@ -12267,8 +12267,8 @@
             
             async function loadAnimationsInBackground() {
                 const modelCache = getSharedModelCache();
-                if (animationsLoadingInBackground || modelCache.animations) {
-                    return; // Already loading or cached
+                if (animationsLoadingInBackground || animationsBackgroundFinished || modelCache.animations) {
+                    return; // Already loading, finished, or cached
                 }
                 
                 animationsLoadingInBackground = true;
@@ -14616,6 +14616,12 @@
                             }
                         } catch (_) {}
                         window.taskDbg('[Viewer] preparedModelReady: task failed, skip early load');
+                        return;
+                    }
+                    if (!ts?.prepared_glb_ready) {
+                        preparedPreviewFailed = true;
+                        markViewerUnavailableIfNoModel('prepared-event-without-prepared-glb');
+                        window.taskDbg('[Viewer] preparedModelReady: API says prepared_glb_ready=false, skip early load');
                         return;
                     }
                 } catch (e) {
