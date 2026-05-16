@@ -3,10 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Buy Credits | AutoRig.online</title>
-    <meta name="description" content="Buy AutoRig.online credits for AI 3D model rigging and animation previews. Choose 100, 500 or 1000 credit packages, or use the Blender plugin for a native Blender workflow.">
+    <title>Buy AutoRig Credits and Blender Plugin | AutoRig.online</title>
+    <meta name="description" content="Buy AutoRig.online credits for web-based AI rigging, downloads and animation exports, or buy the native Blender plugin for automatic rigging directly inside Blender.">
     <link rel="canonical" href="https://autorig.online/buy-credits">
     <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "AutoRig.online products",
+        "url": "https://autorig.online/buy-credits",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "item": {
+                    "@type": "Product",
+                    "name": "AutoRig Credits",
+                    "description": "Credit packs for AutoRig.online web-based AI rigging, downloads, animation exports and production workflows.",
+                    "brand": {
+                        "@type": "Brand",
+                        "name": "AutoRig.online"
+                    },
+                    "offers": {
+                        "@type": "AggregateOffer",
+                        "url": "https://autorig.online/buy-credits",
+                        "priceCurrency": "USD",
+                        "lowPrice": "20",
+                        "highPrice": "100",
+                        "offerCount": "3",
+                        "availability": "https://schema.org/InStock"
+                    }
+                }
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "item": {
+                    "@type": "SoftwareApplication",
+                    "name": "AutoRig.online Blender Plugin",
+                    "description": "Native Blender add-on for AutoRig.online automatic character, animal and non-humanoid rigging workflows.",
+                    "applicationCategory": "MultimediaApplication",
+                    "operatingSystem": "Blender",
+                    "url": "https://autorig.online/blender-plugin",
+                    "offers": {
+                        "@type": "Offer",
+                        "url": "https://u3d.gumroad.com/l/blender-plugin",
+                        "availability": "https://schema.org/InStock"
+                    }
+                }
+            }
+        ]
+    }
+    </script>
     <style>
         #roadmap-cards {
             display: grid;
@@ -126,39 +175,140 @@
             font-size: 1.2rem;
             font-weight: 700;
         }
-        .buy-plugin-promo {
+        .buy-hero {
+            padding: clamp(2rem, 5vw, 3rem);
+            margin-bottom: 1rem;
+            border: 1px solid rgba(var(--accent-rgb), 0.42);
+            background:
+                radial-gradient(circle at 12% 10%, rgba(var(--accent-rgb), 0.2), transparent 30%),
+                rgba(255, 255, 255, 0.045);
+        }
+        .buy-hero-kicker {
+            margin: 0 0 0.65rem;
+            color: var(--accent);
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .buy-hero h1 {
+            max-width: 760px;
+            margin: 0;
+            font-size: clamp(2rem, 5vw, 3.7rem);
+            line-height: 1.05;
+            letter-spacing: 0;
+        }
+        .buy-hero p {
+            max-width: 760px;
+            margin: 1rem 0 0;
+            color: var(--text-secondary);
+            font-size: clamp(1rem, 2vw, 1.18rem);
+            line-height: 1.65;
+        }
+        .buy-product-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 1rem;
-            align-items: center;
-            margin-top: 1rem;
-            padding: 1.25rem;
-            border: 1px solid rgba(var(--accent-rgb), 0.45);
+            margin-bottom: 1rem;
+        }
+        .buy-product-card {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            padding: 1.5rem;
             border-radius: 8px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.045);
+        }
+        .buy-product-card-featured {
+            border-color: rgba(var(--accent-rgb), 0.48);
             background: rgba(var(--accent-rgb), 0.08);
         }
-        .buy-plugin-promo-main {
+        .buy-product-card-header {
             display: flex;
             align-items: center;
             gap: 0.9rem;
             min-width: 0;
+            margin-bottom: 0.85rem;
         }
-        .buy-plugin-promo-main img {
+        .buy-product-card-header img {
             width: 48px;
             height: 48px;
             object-fit: contain;
             flex-shrink: 0;
         }
-        .buy-plugin-promo-title {
-            margin: 0;
-            font-size: 1.05rem;
-            font-weight: 800;
+        .buy-product-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            flex-shrink: 0;
+            border-radius: 8px;
+            background: rgba(var(--accent-rgb), 0.16);
+            color: var(--accent);
+            font-size: 1.35rem;
+            font-weight: 900;
         }
-        .buy-plugin-promo-copy {
-            margin: 0.25rem 0 0;
+        .buy-product-eyebrow {
+            display: block;
+            margin-bottom: 0.2rem;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .buy-product-title {
+            margin: 0;
+            font-size: clamp(1.25rem, 3vw, 1.65rem);
+            font-weight: 800;
+            line-height: 1.15;
+        }
+        .buy-product-copy {
+            margin: 0;
             color: var(--text-secondary);
-            line-height: 1.45;
+            line-height: 1.55;
+        }
+        .buy-product-list {
+            display: grid;
+            gap: 0.45rem;
+            margin: 1rem 0 0;
+            padding: 0;
+            list-style: none;
+            color: var(--text-secondary);
             font-size: 0.92rem;
+            line-height: 1.45;
+        }
+        .buy-product-list li {
+            display: flex;
+            gap: 0.5rem;
+            min-width: 0;
+        }
+        .buy-product-list li::before {
+            content: "";
+            width: 0.48rem;
+            height: 0.48rem;
+            margin-top: 0.45rem;
+            flex: 0 0 auto;
+            border-radius: 999px;
+            background: var(--accent);
+        }
+        .buy-product-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            margin-top: auto;
+            padding-top: 1.25rem;
+        }
+        .buy-product-actions .btn {
+            min-width: 150px;
+        }
+        .buy-section-intro {
+            margin: 0 0 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
+            max-width: 48rem;
         }
         .sr-only {
             position: absolute;
@@ -175,12 +325,22 @@
             .pricing-grid-billing {
                 grid-template-columns: 1fr !important;
             }
+            .buy-product-grid {
+                grid-template-columns: 1fr;
+            }
+            .buy-hero {
+                padding: 1.5rem;
+            }
+            .buy-hero h1 {
+                font-size: clamp(2rem, 9vw, 2.6rem);
+            }
             .buy-credits-header {
                 flex-direction: column;
                 align-items: flex-start !important;
             }
-            .buy-plugin-promo {
-                grid-template-columns: 1fr;
+            .buy-product-actions,
+            .buy-product-actions .btn {
+                width: 100%;
             }
         }
     </style>
@@ -190,34 +350,55 @@
 
     <main style="padding: 3rem 0;">
         <div class="container" style="max-width: 980px;">
-            <!-- FREE Credits Section -->
-            <div class="card" style="padding: 2rem; border: 2px dashed var(--accent); background: rgba(var(--accent-rgb), 0.05);">
-                <h2 style="margin-top: 0; color: var(--accent);" data-i18n="free_title">FREE</h2>
-                <div style="line-height: 1.6;">
-                    <p style="font-weight: 600; font-size: 1.1rem; margin-bottom: 1rem;" data-i18n="free_greeting">Hi 3D ARTIST! I've been doing this project with a friend on enthusiasm for over a year and everything is free here!</p>
-                    <p data-i18n="free_message">I would like to make the RIG even cooler and I know how, but for this I need MONEY :) for beer and cookies! So if you have a couple of extra bucks, please buy credits!</p>
-                    <p style="margin-top: 1rem;" data-i18n="free_youtube_intro">And if not, then just open Free3D Online and support the project there!</p>
-                    <p style="font-weight: 700; color: var(--accent); font-size: 1.2rem; margin: 1rem 0;" data-i18n="free_credits_offer">Get 10 credits for downloading for free!!!</p>
-                    <a href="https://free3d.online/" target="_blank" class="btn btn-primary" id="youtube-bonus-link" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.377.505 9.377.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                        Free3D.online
-                    </a>
-                    <p style="margin-top: 1rem; font-style: italic; font-size: 0.9rem; color: var(--text-muted);" data-i18n="free_feedback_hint">And please leave feedback about the RIG and what you would like to improve in the form below</p>
-                </div>
-            </div>
+            <section class="card buy-hero" aria-labelledby="buy-page-title">
+                <p class="buy-hero-kicker" data-i18n="buy_page_kicker">AutoRig Store</p>
+                <h1 id="buy-page-title" data-i18n="buy_page_title">Buy AutoRig credits and the Blender plugin</h1>
+                <p data-i18n="buy_page_intro">Use credits for the browser rigging workflow, downloads, and animation exports. Use the native Blender plugin when you want AutoRig.online rigging tools directly inside Blender.</p>
+            </section>
 
-            <div class="card" style="padding: 2rem; margin-top: 1rem;">
-                <h2 style="margin-top: 0;" data-i18n="donation_title">Support the project</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="donation_subtitle">Credit purchases help fund development. Progress includes all completed AutoRig credit pack sales plus a starting baseline.</p>
-                <div id="donation-stats-line" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--text-primary);">—</div>
-                <div style="background: rgba(255,255,255,0.06); border-radius: 999px; height: 14px; overflow: hidden; border: 1px solid var(--border);">
-                    <div id="donation-bar-fill" style="height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width 0.4s ease;"></div>
-                </div>
-            </div>
+            <section class="buy-product-grid" aria-label="AutoRig products">
+                <article class="buy-product-card buy-product-card-featured">
+                    <div class="buy-product-card-header">
+                        <span class="buy-product-icon" aria-hidden="true">C</span>
+                        <div>
+                            <span class="buy-product-eyebrow" data-i18n="buy_product_credits_label">Web workflow</span>
+                            <h2 class="buy-product-title" data-i18n="buy_product_credits_title">AutoRig Credits</h2>
+                        </div>
+                    </div>
+                    <p class="buy-product-copy" data-i18n="buy_product_credits_desc">Credits unlock finished web rigging results, animation downloads, and iteration inside the AutoRig.online task flow.</p>
+                    <ul class="buy-product-list">
+                        <li data-i18n="buy_product_credits_point_1">Use with GLB, FBX, and OBJ uploads.</li>
+                        <li data-i18n="buy_product_credits_point_2">Download rigged models and animation packs.</li>
+                        <li data-i18n="buy_product_credits_point_3">Pay by card or crypto using the packs below.</li>
+                    </ul>
+                    <div class="buy-product-actions">
+                        <a href="#credits-packs" class="btn btn-primary" data-i18n="buy_product_credits_cta">Choose credits</a>
+                    </div>
+                </article>
 
-            <div class="card" style="padding: 1.25rem 1.5rem; margin-top: 1rem;">
+                <article class="buy-product-card">
+                    <div class="buy-product-card-header">
+                        <img src="/static/images/icons/blender_logo.png" alt="" width="48" height="48" loading="eager">
+                        <div>
+                            <span class="buy-product-eyebrow" data-i18n="buy_product_plugin_label">Native add-on</span>
+                            <h2 class="buy-product-title" data-i18n="buy_product_plugin_title">Native Blender Plugin</h2>
+                        </div>
+                    </div>
+                    <p class="buy-product-copy" data-i18n="buy_product_plugin_desc">Run the AutoRig.online workflow from Blender, use presets, and prepare humanoid, animal, and non-humanoid models without switching tools.</p>
+                    <ul class="buy-product-list">
+                        <li data-i18n="buy_product_plugin_point_1">Rig and adjust models directly in Blender.</li>
+                        <li data-i18n="buy_product_plugin_point_2">Use V2 animal and non-humanoid workflows.</li>
+                        <li data-i18n="buy_product_plugin_point_3">Buy once through Gumroad.</li>
+                    </ul>
+                    <div class="buy-product-actions">
+                        <a href="/blender-plugin" class="btn btn-ghost" data-i18n="buy_product_plugin_learn">Learn more</a>
+                        <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" data-i18n="buy_product_plugin_cta">Buy Blender Plugin</a>
+                    </div>
+                </article>
+            </section>
+            <div class="card" id="credits-packs" style="padding: 1.25rem 1.5rem; margin-top: 1rem;">
                 <div class="buy-credits-header" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.65rem 1rem; margin-bottom: 0.5rem;">
-                    <h2 style="margin: 0;" data-i18n="buy_title">Buy Credits</h2>
+                    <h2 style="margin: 0;" data-i18n="buy_title">Buy AutoRig Credits</h2>
                     <div id="billing-tabs" class="billing-method-row" role="tablist" aria-label="Payment method">
                         <button type="button" class="billing-method-btn billing-tab-active" id="billing-tab-card" data-billing="card" role="tab" aria-selected="true" data-i18n-title="buy_pay_methods_a11y" title="Pay with Visa, Mastercard, or PayPal (Gumroad)">
                             <span class="pay-icons" aria-hidden="true">
@@ -259,6 +440,7 @@
                 <p id="buy-notice-crypto" class="buy-credits-hint hidden" data-i18n="buy_crypto_notice">
                     Pay with crypto on this page. After you send funds, submit your transaction ID. Credits are added manually after we verify the payment (usually within a day).
                 </p>
+                <p class="buy-section-intro" data-i18n="buy_credits_section_intro">Choose a credit pack for the web app. Credits are attached to your signed-in AutoRig.online account.</p>
 
             <div id="panel-billing-card" class="billing-panel pricing-grid-billing" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 0;">
                 <div class="card" style="padding: 1.5rem; text-align: center;">
@@ -307,19 +489,6 @@
                 </div>
             </div>
 
-            <div class="buy-plugin-promo" aria-label="Blender Plugin">
-                <div class="buy-plugin-promo-main">
-                    <img src="/static/images/icons/blender_logo.png" alt="" width="48" height="48" loading="lazy">
-                    <div>
-                        <h3 class="buy-plugin-promo-title">Native Blender Plugin</h3>
-                        <p class="buy-plugin-promo-copy">Rig characters, customize the rig, and adjust animation settings directly inside Blender.</p>
-                    </div>
-                </div>
-                <div style="display:flex; gap:0.6rem; flex-wrap:wrap; justify-content:flex-end;">
-                    <a href="/blender-plugin" class="btn btn-ghost">Learn more</a>
-                    <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">Buy Blender Plugin</a>
-                </div>
-            </div>
             </div>
 
             <div id="crypto-modal-overlay" class="hidden" role="dialog" aria-modal="true">
@@ -453,25 +622,6 @@
             return ({ face_rig_animation: 'roadmap_face_rig_title', animals_rig_animation: 'roadmap_animals_title', avatar_speech_lipsync: 'roadmap_avatar_title' })[k] || k;
         }
 
-        async function loadDonationStats() {
-            const line = document.getElementById('donation-stats-line');
-            const fill = document.getElementById('donation-bar-fill');
-            if (!line || !fill) return;
-            try {
-                const resp = await fetch('/api/buy-credits/donation-stats');
-                if (!resp.ok) throw new Error('bad status');
-                const d = await resp.json();
-                const raised = Number(d.raised_usd) || 0;
-                const goal = Number(d.goal_usd) || 1000;
-                const pct = Math.min(100, goal > 0 ? (raised / goal) * 100 : 0);
-                line.textContent = t('donation_progress_line', { raised: raised.toFixed(2), goal: String(goal) });
-                fill.style.width = pct.toFixed(2) + '%';
-            } catch (e) {
-                console.error('Donation stats failed:', e);
-                line.textContent = '—';
-            }
-        }
-
         async function loadRoadmap() {
             const host = document.getElementById('roadmap-cards');
             if (!host) return;
@@ -547,28 +697,6 @@
             if (prev) prev.textContent = `${name}: ${snippet}${(item.text || '').length > 72 ? '…' : ''}`;
             document.getElementById('feedback-reply-banner')?.classList.remove('hidden');
             document.getElementById('feedback-text')?.focus();
-        }
-
-        async function setupYouTubeBonus() {
-            const link = document.getElementById('youtube-bonus-link');
-            link?.addEventListener('click', (e) => {
-                if (!window.__authedUser) {
-                    alert(t('buy_login_required'));
-                    e.preventDefault();
-                    return;
-                }
-
-                // Call API to grant bonus
-                try {
-                    if (navigator.sendBeacon) {
-                        navigator.sendBeacon('/api/user/grant-youtube-bonus', new Blob(['1'], { type: 'text/plain;charset=UTF-8' }));
-                    } else {
-                        fetch('/api/user/grant-youtube-bonus', { method: 'POST', keepalive: true }).catch(() => {});
-                    }
-                } catch (e) {
-                    console.error('YouTube bonus failed:', e);
-                }
-            });
         }
 
         function buildFeedbackChildrenMap(items) {
@@ -992,16 +1120,13 @@
             setupThemeToggle();
             setupLangSelector();
             await updateCreditsUI();
-            await loadDonationStats();
             await loadRoadmap();
             setupBuyButtons();
             setupBillingTabs();
             setupCryptoModal();
-            setupYouTubeBonus();
             setupFeedbackForm();
             await loadFeedback();
             window.addEventListener('languageChanged', () => {
-                loadDonationStats();
                 loadRoadmap();
                 if (window.__cryptoConfig) applyCryptoPricesToCards();
             });
