@@ -37,8 +37,6 @@
         body.webapp-mode #task-share-btn { display: inline-flex !important; }
         /* Hide downloads and video player in webapp mode - only 3D viewer */
         body.webapp-mode #downloads-card { display: none !important; }
-        body.webapp-mode #retopo-convert-card { display: none !important; }
-        body.webapp-mode #sprite-sheet-card { display: none !important; }
         body.webapp-mode #video-player { display: none !important; }
         body.webapp-mode #video-youtube-bar { display: none !important; }
         body.webapp-mode #hdrp-renders { display: none !important; }
@@ -1139,40 +1137,6 @@
             color: #f59e0b;
         }
 
-        .sprite-sheet-views-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-            gap: 0.65rem;
-            margin-top: 0.55rem;
-        }
-        .sprite-sheet-view-cell {
-            border: 1px solid var(--border, rgba(255,255,255,0.12));
-            border-radius: 8px;
-            padding: 0.45rem;
-            background: rgba(0,0,0,0.2);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.35rem;
-        }
-        .sprite-sheet-view-cell canvas {
-            image-rendering: pixelated;
-            border-radius: 4px;
-            background: repeating-conic-gradient(#80808020 0% 25%, #fff0 0% 50%) 50% / 12px 12px;
-        }
-        .sprite-sheet-view-label {
-            font-size: 0.68rem;
-            font-weight: 600;
-            color: var(--text-muted);
-            text-align: center;
-        }
-        .sprite-sheet-view-dl {
-            font-size: 0.65rem;
-            color: var(--accent);
-            cursor: pointer;
-            text-decoration: underline;
-        }
-
         .viewer-custom-layout {
             display: grid;
             grid-template-columns: minmax(0, 1fr);
@@ -1247,15 +1211,6 @@
             border-top: 1px solid rgba(255, 255, 255, 0.1);
             padding-top: 1rem;
             margin-top: 1rem;
-        }
-
-        /* Retopo + sprite: separate cards in the right column (not inside #task-sidebar-bundle) */
-        #task-columns-secondary #retopo-convert-card.card,
-        #task-columns-secondary #sprite-sheet-card.card {
-            width: 540px;
-            max-width: 100%;
-            box-sizing: border-box;
-            padding: 1rem 1.25rem 1.25rem;
         }
 
         main.task-page-main.container-sm {
@@ -3544,7 +3499,7 @@
             <!-- Actions removed (buttons moved into header) -->
         </div>
 
-        <!-- Video + model params + downloads (right column). Retopo + sprite are separate .card siblings below. -->
+        <!-- Video + model params + downloads (right column). -->
         <div id="task-sidebar-bundle" class="card mt-3 boot-deferred-section">
             <div class="alert alert-info hidden" id="video-pending">
                 <span data-i18n="task_video_pending">Video is being generated...</span>
@@ -3600,66 +3555,6 @@
             </div>
         </div>
 
-        <div id="retopo-convert-card" class="card mt-3 boot-deferred-section boot-reveal-surface hidden">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.45rem;">
-                    <h3 class="card-title" style="margin:0; font-size:1rem;" data-i18n="retopo_convert_title">Retopology and Convert Formats</h3>
-                </div>
-                <p style="font-size:0.78rem; color:var(--text-muted); margin:0 0 0.55rem 0;" data-i18n="retopo_convert_lead">
-                    Need retopology or a new format? We convert to 12 formats for free, professional quad retopology, and free LODs. Click the button below.
-                </p>
-                <p style="font-size:0.72rem; color:var(--text-muted); margin:0 0 0.65rem 0;" data-i18n="retopo_convert_time">
-                    Conversion can take up to 30 minutes depending on model complexity.
-                </p>
-                <button type="button" id="retopo-convert-start-btn" class="btn btn-primary" style="width:100%; display:inline-flex; align-items:center; justify-content:center; gap:0.45rem; padding:0.56rem 0.8rem; font-size:0.78rem;"
-                    data-i18n-title="retopo_convert_tooltip"
-                    title="1. Conversion to 3ds Max, Maya, Unity, Unreal, Blender, Marmoset, Cinema 4D, STL, OBJ, GLB, FBX. 2. Quad retopology at 100k, 10k, and 1k polygons while preserving rig, skin, and animations."
-                    data-i18n="retopo_convert_cta">
-                    Start Retopology and Convert Formats
-                </button>
-        </div>
-
-            <!-- Sprite sheet MVP: separate card below Retopo -->
-            <div id="sprite-sheet-card" class="card mt-3 hidden boot-deferred-section boot-reveal-surface">
-                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-                    <h3 class="card-title" style="margin:0; font-size:1rem;">2D Sprite sheet</h3>
-                    <div style="font-size:0.72rem; color:var(--text-muted);">Five views · PNG atlas · Three.js</div>
-                </div>
-                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.55rem;">
-                    Same custom animations as in 3D preview. Renders automatically when you pick an animation (or change options).
-                </div>
-                <div id="sprite-sheet-mode-hint" class="hidden" style="font-size:0.78rem; color:var(--accent); margin-bottom:0.5rem; line-height:1.35;"></div>
-                <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap; margin-bottom:0.45rem;">
-                    <label for="sprite-sheet-anim-type" style="font-size:0.72rem; color:var(--text-muted);">Type:</label>
-                    <select id="sprite-sheet-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
-                        <option value="walk" selected>Walk</option>
-                    </select>
-                    <div id="sprite-sheet-anim-stats" style="font-size:0.72rem; color:var(--text-muted);"></div>
-                </div>
-                <div id="sprite-sheet-anim-grid" class="custom-anim-grid">
-                    <div style="grid-column:1/-1; color:var(--text-muted);">Loading…</div>
-                </div>
-                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.65rem; padding-top:0.55rem; border-top:1px solid var(--border-subtle, rgba(255,255,255,0.08));">
-                    <label for="sprite-sheet-resolution" style="font-size:0.72rem; color:var(--text-muted);">Cell size</label>
-                    <select id="sprite-sheet-resolution" class="form-input" style="max-width:120px; padding:0.35rem 0.45rem; font-size:0.75rem;">
-                        <option value="64">64 px</option>
-                        <option value="128">128 px</option>
-                        <option value="256" selected>256 px</option>
-                        <option value="512">512 px</option>
-                        <option value="1024">1024 px</option>
-                    </select>
-                    <label for="sprite-sheet-frames" style="font-size:0.72rem; color:var(--text-muted);">Frames</label>
-                    <input id="sprite-sheet-frames" type="number" min="1" max="64" value="30" class="form-input" style="width:64px; padding:0.35rem 0.4rem; font-size:0.75rem;">
-                    <span style="font-size:0.68rem; color:var(--text-muted);">Views: front, back, left, top, top-right 45°</span>
-                </div>
-                <div id="sprite-sheet-progress" style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem; min-height:1.2em;"></div>
-                <div id="sprite-sheet-views-grid" class="sprite-sheet-views-grid"></div>
-                <pre id="sprite-sheet-meta" style="display:none; margin-top:0.45rem; padding:0.45rem; font-size:0.62rem; background:rgba(0,0,0,0.35); border-radius:6px; overflow:auto; max-height:160px;"></pre>
-                <div style="display:flex; gap:0.45rem; margin-top:0.45rem; flex-wrap:wrap;">
-                    <button type="button" id="sprite-sheet-download-json-btn" class="btn btn-secondary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download pack JSON</button>
-                    <button type="button" id="sprite-sheet-download-all-png-btn" class="btn btn-primary" style="padding:0.45rem 0.55rem; font-size:0.75rem; display:none;">Download all PNGs</button>
-                </div>
-        </div>
-        
         <!-- Additional Content (Textures) -->
         <div class="card mt-3 boot-deferred-section boot-reveal-surface" id="additional-content-section" style="display: none;">
             <div class="card-header">
@@ -4165,9 +4060,6 @@
             animationCatalogHash: null,
             selectedAnimationId: null,
             animationApplyToken: 0,
-            spriteSheetGenId: 0,
-            spriteSheetDebounceTimer: null,
-            spriteSheetLastPack: null,
             animationTypeFilter: 'walk',
             free3dSimilarPool: [],
             free3dSimilarCacheKey: '',
@@ -4910,55 +4802,6 @@
                     titleEl.textContent = pl === 'convert' ? t('task_title_convert') : t('task_title');
                 }
 
-                const retopoCard = document.getElementById('retopo-convert-card');
-                if (retopoCard) {
-                    const pl = task.pipeline || 'rig';
-                    if (task.status === 'done' && pl === 'rig') {
-                        retopoCard.classList.remove('hidden');
-                        try {
-                            window.__taskPageBoot?.revealElement('retopo-convert-card', 0);
-                        } catch (_) { /* noop */ }
-                    } else {
-                        retopoCard.classList.add('hidden');
-                    }
-                }
-
-                const retopoBtn = document.getElementById('retopo-convert-start-btn');
-                if (retopoBtn && !retopoBtn.__retopoWired) {
-                    retopoBtn.__retopoWired = true;
-                    retopoBtn.addEventListener('click', async () => {
-                        const tid = this.taskId;
-                        if (!tid) return;
-                        retopoBtn.disabled = true;
-                        try {
-                            const r = await fetch(`/api/task/${encodeURIComponent(tid)}/create-convert`, {
-                                method: 'POST',
-                                credentials: 'same-origin',
-                                headers: { Accept: 'application/json' },
-                            });
-                            let errDetail = '';
-                            try {
-                                const data = await r.json();
-                                if (r.ok && data.task_id) {
-                                    window.location.href = `/task?id=${encodeURIComponent(data.task_id)}`;
-                                    return;
-                                }
-                                errDetail = data.detail || data.message || '';
-                                if (typeof errDetail !== 'string') {
-                                    errDetail = Array.isArray(errDetail)
-                                        ? errDetail.map((x) => (x && x.msg) || x).join(' ')
-                                        : String(errDetail);
-                                }
-                            } catch (_) {
-                                errDetail = `HTTP ${r.status}`;
-                            }
-                            alert(errDetail || `HTTP ${r.status}`);
-                        } finally {
-                            retopoBtn.disabled = false;
-                        }
-                    });
-                }
-                
                 // Hide progress blocks when task is done
                 if (task.status === 'done') {
                     document.getElementById('queue-status-compact')?.classList.add('hidden');
@@ -5813,307 +5656,12 @@
                     typeSelect.__wired = true;
                     typeSelect.addEventListener('change', () => {
                         this.animationTypeFilter = String(typeSelect.value || 'walk').toLowerCase();
-                        const st = document.getElementById('sprite-sheet-anim-type');
-                        if (st) st.value = this.animationTypeFilter;
                         this.renderAnimationCatalog();
                     });
                 }
                 if (downloadBtn && !downloadBtn.__wired) {
                     downloadBtn.__wired = true;
                     downloadBtn.addEventListener('click', () => this.downloadSelectedAnimationAction());
-                }
-
-                const spriteType = document.getElementById('sprite-sheet-anim-type');
-                if (spriteType && !spriteType.__wired) {
-                    spriteType.__wired = true;
-                    spriteType.addEventListener('change', () => {
-                        this.animationTypeFilter = String(spriteType.value || 'walk').toLowerCase();
-                        const main = document.getElementById('custom-anim-type');
-                        if (main) main.value = this.animationTypeFilter;
-                        this.renderAnimationCatalog();
-                    });
-                }
-                const resSel = document.getElementById('sprite-sheet-resolution');
-                if (resSel && !resSel.__wired) {
-                    resSel.__wired = true;
-                    resSel.addEventListener('change', () => this.scheduleSpriteSheetAutoRender());
-                }
-                const framesIn = document.getElementById('sprite-sheet-frames');
-                if (framesIn && !framesIn.__wired) {
-                    framesIn.__wired = true;
-                    framesIn.addEventListener('change', () => this.scheduleSpriteSheetAutoRender());
-                }
-            },
-
-            updateSpriteSheetControlsState() {
-                const card = document.getElementById('sprite-sheet-card');
-                const hint = document.getElementById('sprite-sheet-mode-hint');
-                const getCtx = window.__getViewerSpriteSheetContext;
-                const selected = this.getSelectedAnimationItem();
-                const hasSelection = Boolean(selected?.ready && selected?.preview_url);
-
-                let viewerReadyForSprite = false;
-                if (getCtx && hasSelection) {
-                    try {
-                        const ctx = getCtx();
-                        viewerReadyForSprite = Boolean(
-                            ctx?.currentModelType === 'animations' &&
-                            ctx?.currentModel &&
-                            ctx?.mixer &&
-                            ctx?.scene &&
-                            ctx?.renderer
-                        );
-                    } catch (_) {
-                        viewerReadyForSprite = false;
-                    }
-                }
-
-                const pr = document.getElementById('sprite-sheet-progress');
-                if (!card || !hint) {
-                    return;
-                }
-
-                if (!getCtx || !hasSelection) {
-                    card.classList.add('hidden');
-                    hint.classList.add('hidden');
-                    hint.textContent = '';
-                    this._stopSpriteSheetPreviews();
-                    if (pr) pr.textContent = '';
-                    return;
-                }
-
-                card.classList.remove('hidden');
-                window.__taskPageBoot?.revealElement('sprite-sheet-card', 0);
-
-                if (!viewerReadyForSprite) {
-                    hint.classList.remove('hidden');
-                    hint.textContent = this.tSafe(
-                        'sprite_sheet_switch_animation_mode',
-                        'Switch the 3D viewer to Animation mode (top toolbar) to render sprite sheets.'
-                    );
-                    this._stopSpriteSheetPreviews();
-                    if (pr) pr.textContent = '';
-                    return;
-                }
-
-                hint.classList.add('hidden');
-                hint.textContent = '';
-                this.scheduleSpriteSheetAutoRender();
-            },
-
-            scheduleSpriteSheetAutoRender() {
-                if (this.spriteSheetDebounceTimer) {
-                    clearTimeout(this.spriteSheetDebounceTimer);
-                }
-                this.spriteSheetDebounceTimer = setTimeout(() => {
-                    this.spriteSheetDebounceTimer = null;
-                    this.generateSpriteSheetAction({ auto: true });
-                }, 420);
-            },
-
-            _stopSpriteSheetPreviews() {
-                const stoppers = this._spritePreviewStoppers;
-                if (Array.isArray(stoppers) && stoppers.length) {
-                    stoppers.forEach((fn) => {
-                        try {
-                            if (typeof fn === 'function') fn();
-                        } catch (_) {}
-                    });
-                }
-                this._spritePreviewStoppers = [];
-                const pack = this.spriteSheetLastPack;
-                if (pack?.urls) {
-                    pack.urls.forEach((u) => {
-                        try {
-                            URL.revokeObjectURL(u);
-                        } catch (_) {}
-                    });
-                }
-                this.spriteSheetLastPack = null;
-            },
-
-            async generateSpriteSheetAction(opts = {}) {
-                const auto = Boolean(opts.auto);
-                const capPack = window.captureStandardSpriteSheetPack;
-                const getCtx = window.__getViewerSpriteSheetContext;
-                const lim = window.SPRITE_SHEET_LIMITS || { minFrames: 1, maxFrames: 64, minFrameSize: 64, maxFrameSize: 1024 };
-                const progressEl = document.getElementById('sprite-sheet-progress');
-                const viewsGrid = document.getElementById('sprite-sheet-views-grid');
-                const metaEl = document.getElementById('sprite-sheet-meta');
-                const dlJson = document.getElementById('sprite-sheet-download-json-btn');
-                const dlAll = document.getElementById('sprite-sheet-download-all-png-btn');
-                const views = window.SPRITE_STANDARD_VIEW_IDS || ['front', 'back', 'left', 'top', 'top_right'];
-
-                if (!capPack || !getCtx) {
-                    if (!auto) alert('Viewer is not ready yet.');
-                    return;
-                }
-
-                const selected = this.getSelectedAnimationItem();
-                if (!selected?.preview_url || !selected.ready) {
-                    if (viewsGrid) viewsGrid.innerHTML = '';
-                    if (progressEl) progressEl.textContent = '';
-                    return;
-                }
-
-                const ctx = getCtx();
-                if (ctx.currentModelType !== 'animations' || !ctx.currentModel || !ctx.mixer) {
-                    if (!auto) {
-                        alert('Animations model must be loaded. Wait for the viewer to finish loading.');
-                    }
-                    return;
-                }
-
-                const framesIn = document.getElementById('sprite-sheet-frames');
-                const resSel = document.getElementById('sprite-sheet-resolution');
-                let frameCount = parseInt(String(framesIn?.value || '30'), 10);
-                let cell = parseInt(String(resSel?.value || '256'), 10);
-                frameCount = Math.min(lim.maxFrames, Math.max(lim.minFrames, frameCount));
-                cell = Math.min(lim.maxFrameSize, Math.max(lim.minFrameSize, cell));
-                if (framesIn) framesIn.value = String(frameCount);
-
-                const bridge = window.CustomAnimationViewerBridge;
-                if (bridge?.playByFbxUrl) {
-                    const okLoad = await bridge.playByFbxUrl(selected.preview_url, [
-                        selected.name,
-                        selected.id,
-                        selected.file_name,
-                    ]);
-                    if (!okLoad) {
-                        if (!auto) alert('Could not load animation FBX for this selection.');
-                        return;
-                    }
-                }
-
-                const clips = ctx.animations || [];
-                if (!clips.length) {
-                    if (!auto) alert('No animation clips on the model.');
-                    return;
-                }
-                const clip = clips[0];
-
-                const genId = ++this.spriteSheetGenId;
-                this._stopSpriteSheetPreviews();
-                if (progressEl) progressEl.textContent = 'Rendering sprite sheets…';
-                if (viewsGrid) viewsGrid.innerHTML = '';
-                if (metaEl) {
-                    metaEl.style.display = 'none';
-                    metaEl.textContent = '';
-                }
-                if (dlJson) dlJson.style.display = 'none';
-                if (dlAll) dlAll.style.display = 'none';
-
-                ctx.stopMainViewerLoop();
-                try {
-                    const { results, packMeta } = await capPack({
-                        THREE: ctx.THREE,
-                        renderer: ctx.renderer,
-                        scene: ctx.scene,
-                        rootObject: ctx.currentModel,
-                        mixer: ctx.mixer,
-                        clip,
-                        frameCount,
-                        frameWidth: cell,
-                        frameHeight: cell,
-                        views,
-                        transparentBackground: true,
-                        groundObject: ctx.groundPlaneMesh,
-                        onProgress: (p) => {
-                            if (this.spriteSheetGenId !== genId) return;
-                            if (progressEl) progressEl.textContent = `Rendering… ${Math.round(p * 100)}%`;
-                        },
-                    });
-
-                    if (this.spriteSheetGenId !== genId) return;
-
-                    packMeta.animationId = this.normalizeAnimationKey(selected.id);
-                    packMeta.animationName = selected.name;
-                    packMeta.taskId = this.taskId;
-
-                    const urlList = [];
-                    const stoppers = [];
-                    const labels = {};
-                    (window.STANDARD_SPRITE_VIEWS || []).forEach((v) => {
-                        labels[v.id] = v.label;
-                    });
-
-                    if (viewsGrid) {
-                        viewsGrid.innerHTML = '';
-                        results.forEach((r, idx) => {
-                            const url = URL.createObjectURL(r.pngBlob);
-                            urlList.push(url);
-                            const cellEl = document.createElement('div');
-                            cellEl.className = 'sprite-sheet-view-cell';
-                            const lab = document.createElement('div');
-                            lab.className = 'sprite-sheet-view-label';
-                            lab.textContent = labels[r.view] || r.view;
-                            const canvas = document.createElement('canvas');
-                            canvas.width = 120;
-                            canvas.height = 120;
-                            const dl = document.createElement('span');
-                            dl.className = 'sprite-sheet-view-dl';
-                            dl.textContent = 'PNG';
-                            dl.addEventListener('click', () => {
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = `spritesheet_${this.taskId}_${packMeta.animationId}_${r.view}.png`;
-                                a.click();
-                            });
-                            cellEl.appendChild(lab);
-                            cellEl.appendChild(canvas);
-                            cellEl.appendChild(dl);
-                            viewsGrid.appendChild(cellEl);
-
-                            const stop = window.startAtlasPreviewAnimation(canvas, url, r.meta, Math.max(8, Math.min(24, r.meta.fps || 12)));
-                            stoppers.push(stop);
-                        });
-                        this._spritePreviewStoppers = stoppers;
-                    }
-
-                    this.spriteSheetLastPack = { urls: urlList, packMeta, results };
-
-                    if (metaEl) {
-                        metaEl.textContent = JSON.stringify(packMeta, null, 2);
-                        metaEl.style.display = 'block';
-                    }
-                    if (progressEl) progressEl.textContent = 'Done — all views.';
-
-                    if (dlJson) {
-                        dlJson.style.display = 'inline-flex';
-                        dlJson.onclick = () => {
-                            const jb = new Blob([JSON.stringify(packMeta, null, 2)], { type: 'application/json' });
-                            const u = URL.createObjectURL(jb);
-                            const a = document.createElement('a');
-                            a.href = u;
-                            a.download = `spritesheet_pack_${this.taskId}_${packMeta.animationId}.json`;
-                            a.click();
-                            setTimeout(() => URL.revokeObjectURL(u), 2000);
-                        };
-                    }
-                    if (dlAll) {
-                        dlAll.style.display = 'inline-flex';
-                        dlAll.onclick = () => {
-                            results.forEach((r) => {
-                                const u = URL.createObjectURL(r.pngBlob);
-                                const a = document.createElement('a');
-                                a.href = u;
-                                a.download = `spritesheet_${this.taskId}_${packMeta.animationId}_${r.view}.png`;
-                                a.click();
-                                setTimeout(() => URL.revokeObjectURL(u), 200);
-                            });
-                        };
-                    }
-                } catch (e) {
-                    console.error('[SpriteSheet]', e);
-                    if (!auto) alert(e?.message || 'Sprite sheet generation failed.');
-                    if (progressEl) progressEl.textContent = '';
-                } finally {
-                    ctx.startMainViewerLoop();
-                    try {
-                        await this.applySelectedAnimationToViewer();
-                    } catch (err) {
-                        console.warn('[SpriteSheet] restore animation failed:', err);
-                    }
                 }
             },
 
@@ -6158,8 +5706,6 @@
                 };
 
                 moveToSecondary(taskSidebarBundle);
-                moveToSecondary(document.getElementById('retopo-convert-card'));
-                moveToSecondary(document.getElementById('sprite-sheet-card'));
                 moveToSecondary(additionalSection);
             },
 
@@ -6312,12 +5858,6 @@
                     this.selectedAnimationId = null;
                     const emptyMsg = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No ready custom animations yet.')}</div>`;
                     grid.innerHTML = emptyMsg;
-                    const sg = document.getElementById('sprite-sheet-anim-grid');
-                    const st = document.getElementById('sprite-sheet-anim-type');
-                    const ss = document.getElementById('sprite-sheet-anim-stats');
-                    if (sg) sg.innerHTML = emptyMsg;
-                    if (st) st.innerHTML = '';
-                    if (ss) ss.textContent = '';
                     this.updateCustomAnimationActions();
                     return;
                 }
@@ -6360,13 +5900,6 @@
                 if (!filtered.length) {
                     const emptyType = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_type', 'No ready animations in this type.')}</div>`;
                     grid.innerHTML = emptyType;
-                    const sg = document.getElementById('sprite-sheet-anim-grid');
-                    const st = document.getElementById('sprite-sheet-anim-type');
-                    const ss = document.getElementById('sprite-sheet-anim-stats');
-                    if (sg) sg.innerHTML = emptyType;
-                    if (st) st.innerHTML = typeSelect.innerHTML;
-                    if (st) st.value = selectedType;
-                    if (ss) ss.textContent = stats.textContent;
                     this.updateCustomAnimationActions();
                     return;
                 }
@@ -6395,17 +5928,6 @@
                     });
                 };
                 wireGrid(grid);
-
-                const spriteType = document.getElementById('sprite-sheet-anim-type');
-                const spriteGrid = document.getElementById('sprite-sheet-anim-grid');
-                const spriteStats = document.getElementById('sprite-sheet-anim-stats');
-                if (spriteType && spriteGrid && spriteStats) {
-                    spriteType.innerHTML = typeSelect.innerHTML;
-                    spriteType.value = selectedType;
-                    spriteStats.textContent = stats.textContent;
-                    spriteGrid.innerHTML = grid.innerHTML;
-                    wireGrid(spriteGrid);
-                }
 
                 this.updateCustomAnimationActions();
             },
@@ -6478,13 +6000,11 @@
                 if (!selected || !selected.available || !selected.ready) {
                     labelEl.textContent = this.tSafe('custom_anim_no_selection', 'Select an animation');
                     downloadBtn.disabled = true;
-                    this.updateSpriteSheetControlsState();
                     return;
                 }
 
                 labelEl.textContent = this.getLocalizedAnimationName(selected);
                 downloadBtn.disabled = false;
-                this.updateSpriteSheetControlsState();
             },
 
             async notifyCustomAnimationIntent(source = 'custom_animation_download', animationId = null, animationName = null) {
@@ -7324,21 +6844,7 @@
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
         } from '/static/js/rig-editor.js?v=64';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
-        import {
-            captureSpriteSheetAtlas,
-            captureStandardSpriteSheetPack,
-            startAtlasPreviewAnimation,
-            STANDARD_SPRITE_VIEWS,
-            SPRITE_SHEET_LIMITS,
-        } from '/static/js/sprite-sheet-mvp.js?v=6';
         import { PlayModeController } from '/static/js/task-play-mode.js?v=24';
-
-        window.captureSpriteSheetAtlas = captureSpriteSheetAtlas;
-        window.captureStandardSpriteSheetPack = captureStandardSpriteSheetPack;
-        window.startAtlasPreviewAnimation = startAtlasPreviewAnimation;
-        window.STANDARD_SPRITE_VIEWS = STANDARD_SPRITE_VIEWS;
-        window.SPRITE_STANDARD_VIEW_IDS = STANDARD_SPRITE_VIEWS.map((v) => v.id);
-        window.SPRITE_SHEET_LIMITS = SPRITE_SHEET_LIMITS;
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -11934,20 +11440,6 @@
 
                 startMainViewerLoop();
 
-                window.__getViewerSpriteSheetContext = function () {
-                    return {
-                        THREE,
-                        scene,
-                        renderer,
-                        mixer,
-                        animations,
-                        currentModel,
-                        currentModelType,
-                        groundPlaneMesh,
-                        stopMainViewerLoop,
-                        startMainViewerLoop,
-                    };
-                };
             }
 
             // Get model transform parameters for sending to worker
@@ -15257,7 +14749,6 @@
                         videoPreview: true,
                         mainViewer: true,
                         customAnimations: true,
-                        spriteSheet: true,
                         popularFree3d: true,
                         downloads: true,
                         additionalContent: true
