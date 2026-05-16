@@ -8113,7 +8113,7 @@
                 mainLightIntensity: 3.0,
                 envIntensity: 1.0,
                 reflectionIntensity: 3.0,
-                modelRotation: 'z180',
+                modelRotation: 'none',
                 bgColor: '#000000',
                 groundColor: '#222222',
                 groundSize: 100.0,
@@ -8151,9 +8151,53 @@
                     position: { x: 0, y: 0, z: 0 },
                     rotation: { x: 0, y: 0, z: 0 },  // radians
                     scale: { x: 1, y: 1, z: 1 }
-                }
+                },
+                viewerTransformVersion: 2
             };
             window.viewerState = viewerState; // Make global for debugging
+
+            const VIEWER_TRANSFORM_VERSION = 2;
+
+            function makeIdentityModelTransform() {
+                return {
+                    position: { x: 0, y: 0, z: 0 },
+                    rotation: { x: 0, y: 0, z: 0 },
+                    scale: { x: 1, y: 1, z: 1 }
+                };
+            }
+
+            function getViewerTransformVersion(settings = viewerState) {
+                const candidates = [
+                    settings?.viewerTransformVersion,
+                    settings?.modelTransform?.viewerTransformVersion,
+                    settings?.modelTransform?.version
+                ];
+                for (const value of candidates) {
+                    const n = Number(value);
+                    if (Number.isFinite(n)) return n;
+                }
+                return 0;
+            }
+
+            function normalizeSettingsModelRotation(value, settings = null) {
+                const normalized = String(value || 'none').trim() || 'none';
+                // Legacy defaults stored z180 globally and now flip valid worker GLBs upside down.
+                if (normalized === 'z180' && getViewerTransformVersion(settings || {}) < VIEWER_TRANSFORM_VERSION) {
+                    return 'none';
+                }
+                return normalized;
+            }
+
+            function hasVersionedViewerTransform(settings = viewerState) {
+                return getViewerTransformVersion(settings) >= VIEWER_TRANSFORM_VERSION;
+            }
+
+            function markViewerTransformCurrent() {
+                viewerState.viewerTransformVersion = VIEWER_TRANSFORM_VERSION;
+                if (viewerState.modelTransform) {
+                    viewerState.modelTransform.viewerTransformVersion = VIEWER_TRANSFORM_VERSION;
+                }
+            }
 
             let currentAdjChannel = 'albedo';
 
@@ -8226,7 +8270,7 @@
                         viewerState.mainLightIntensity = settings.mainLightIntensity !== undefined ? settings.mainLightIntensity : 3.0;
                         viewerState.envIntensity = settings.envIntensity !== undefined ? settings.envIntensity : 1.0;
                         viewerState.reflectionIntensity = settings.reflectionIntensity !== undefined ? settings.reflectionIntensity : 3.0;
-                        viewerState.modelRotation = settings.modelRotation || 'z180';
+                        viewerState.modelRotation = normalizeSettingsModelRotation(settings.modelRotation, settings);
                         viewerState.bgColor = settings.bgColor || '#000000';
                         viewerState.groundColor = settings.groundColor || '#222222';
                         viewerState.groundSize = settings.groundSize !== undefined ? settings.groundSize : 100.0;
@@ -8284,14 +8328,21 @@
                             };
                         }
                         
-                        // Load model transform
-                        if (settings.modelTransform) {
+                        // Load model transform. Unversioned transforms are legacy viewer state and can flip
+                        // current worker GLBs; ignore them and let the model load in its exported orientation.
+                        if (settings.modelTransform && hasVersionedViewerTransform(settings)) {
                             viewerState.modelTransform = {
                                 position: settings.modelTransform.position || { x: 0, y: 0, z: 0 },
                                 rotation: settings.modelTransform.rotation || { x: 0, y: 0, z: 0 },
-                                scale: settings.modelTransform.scale || { x: 1, y: 1, z: 1 }
+                                scale: settings.modelTransform.scale || { x: 1, y: 1, z: 1 },
+                                viewerTransformVersion: VIEWER_TRANSFORM_VERSION
                             };
+                            viewerState.viewerTransformVersion = VIEWER_TRANSFORM_VERSION;
                             window.taskDbg('[Viewer] Loaded model transform:', viewerState.modelTransform);
+                        } else {
+                            viewerState.modelTransform = makeIdentityModelTransform();
+                            viewerState.viewerTransformVersion = VIEWER_TRANSFORM_VERSION;
+                            window.taskDbg('[Viewer] Ignored legacy model transform and reset to identity');
                         }
 
                         applyViewerState(); // Apply everything EXCEPT camera
@@ -8941,6 +8992,7 @@
 
             // Force immediate sync to server
             async function forceSyncToServer() {
+                markViewerTransformCurrent();
                 const currentState = JSON.stringify(viewerState);
                 try {
                     const resp = await fetch(`/api/task/${taskId}/viewer-settings`, {
@@ -8968,6 +9020,7 @@
                 setInterval(async () => {
                     if (!mainViewerEnabled || document.hidden) return;
                     if (isDefaultComparisonOn) return; // Don't sync defaults
+                    markViewerTransformCurrent();
                     const currentState = JSON.stringify(viewerState);
                     if (currentState !== lastSyncedState) {
                         window.taskDbg('[Viewer] State changed, syncing...');
@@ -9105,7 +9158,12 @@
                     });
                 }
                 if (viewerControls) {
-                    viewerControls.setModelRotation(viewerState.modelRotation);
+                    viewerState.modelRotation = normalizeSettingsModelRotation(viewerState.modelRotation, viewerState);
+                    if (viewerState.modelRotation && viewerState.modelRotation !== 'none') {
+                        viewerControls.setModelRotation(viewerState.modelRotation);
+                    } else if (viewerControls.currentRotationPreset && viewerControls.currentRotationPreset !== 'none') {
+                        viewerControls.setModelRotation('none');
+                    }
                     // Pass all adjustments to ViewerControls
                     for (const chan in viewerState.adjustments) {
                         viewerControls.setChannelAdjustments(chan, viewerState.adjustments[chan]);
@@ -11019,12 +11077,27 @@
                     }
                     
                     // Update references
+                    if (viewerControls) {
+                        viewerControls.setAOSettings(viewerState.aoSettings);
+                        viewerControls.setModel(currentModel);
+                    }
+                    snapCurrentModelToGround({ centerXZ: true, force: true });
+                    applyImprovedMaterials(currentModel);
                     if (transformManager) transformManager.setModel(currentModel);
                     if (hierarchyNavigator) {
                         hierarchyNavigator.setModel(currentModel);
                         window.updateHierarchyUI?.();
                     }
                     if (window.recreateWireframe) window.recreateWireframe();
+                    const cachedBoundsInfo = getModelBoundsInfo(currentModel);
+                    if (!fitCameraToModelBounds(currentModel, `cache ${cacheKey}`, { boundsInfo: cachedBoundsInfo })) {
+                        cameraInitialized = true;
+                    }
+                    if (activeViewerTheme?.src) {
+                        applyViewerBackdropUrl(activeViewerTheme.src, `cache ${cacheKey}`);
+                        viewerThemeRuntimeApply(activeViewerTheme, `cache ${cacheKey}`);
+                    }
+                    applyViewerState();
                     
                     return true;
                 }
@@ -11228,12 +11301,16 @@
                                         loadingManager.setQueue([
                                             { name: 'Animations GLB', status: 'pending' }
                                         ]);
-                                        const ok = await loadModel(
+                                        let ok = await loadModel(
                                             `/api/task/${taskId}/animations.glb`,
                                             'Animations GLB',
                                             0,
                                             120000
                                         );
+                                        if (!ok) {
+                                            window.taskDbg('[Viewer] Animations GLB unavailable; trying package FBX preview...');
+                                            ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                                        }
                                         if (ok) {
                                             currentModelType = 'animations';
                                             // Cache for future use
@@ -11241,8 +11318,8 @@
                                             modelCache.animationsData = [...animations];
                                             window.taskDbg('[Viewer] ✓ Cached animations model');
                                         } else {
-                                            console.error('[Viewer] Animations GLB failed; file is unavailable or corrupted');
-                                            setStatus('Animations GLB unavailable/corrupted');
+                                            console.error('[Viewer] Animation preview failed; GLB and FBX are unavailable or corrupted');
+                                            setStatus('Animation preview unavailable/corrupted');
                                             mode = 'tpose';
                                             animBtn?.classList.remove('active');
                                             tposeBtn?.classList.add('active');
@@ -11339,12 +11416,16 @@
                                     setLoadingUIState(true);
                                     loadingManager.show('Loading Ragdoll');
                                     loadingManager.setQueue([{ name: 'Skinned Animations GLB', status: 'pending' }]);
-                                    const ok = await loadModel(
+                                    let ok = await loadModel(
                                         `/api/task/${taskId}/animations.glb`,
                                         'Skinned Animations GLB',
                                         0,
                                         120000
                                     );
+                                    if (!ok) {
+                                        window.taskDbg('[Viewer] Ragdoll GLB unavailable; trying package FBX preview...');
+                                        ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Skinned Animations FBX');
+                                    }
                                     setLoadingUIState(false);
                                     if (ok) {
                                         currentModelType = 'animations';
@@ -13080,6 +13161,22 @@
                         '[Viewer] Background animations.glb load failed (Diagnose: Network tab /api/task/.../animations.glb). Animation mode will retry on click:',
                         err.message
                     );
+                    try {
+                        window.taskDbg('[Viewer] Background animation fallback: trying animations.fbx');
+                        const fbxOk = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                        if (fbxOk) {
+                            currentModelType = 'animations';
+                            modelCache.animations = currentModel;
+                            modelCache.animationsData = [...animations];
+                            animationsLoaded = !!animations.length;
+                            showAnimationsReadyNotification();
+                            loadingManager?.hide?.();
+                            setLoadingUIState(false);
+                            window.taskDbg('[Viewer] ✓ Background FBX animations loaded and cached!', animations.length, 'animations');
+                        }
+                    } catch (fbxErr) {
+                        console.warn('[Viewer] Background animations.fbx fallback failed:', fbxErr?.message || fbxErr);
+                    }
                 } finally {
                     animationsLoadingInBackground = false;
                     animationsBackgroundFinished = true;
@@ -15240,7 +15337,8 @@
                     
                     // Check if animations are ready in ready_urls
                     const animationsReady = t && t.ready_urls && t.ready_urls.some(url => 
-                        url.toLowerCase().includes('_all_animations') && url.toLowerCase().endsWith('.glb')
+                        url.toLowerCase().includes('_all_animations') &&
+                        (url.toLowerCase().endsWith('.glb') || url.toLowerCase().endsWith('.fbx'))
                     );
                     
                     window.taskDbg('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
@@ -15259,7 +15357,7 @@
                     const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
                     window.currentTaskIsFree3D = isFree3DTask; // Global flag for loadModel to use
 
-                    if (!isFree3DTask && !preparedLoaded && !preparedLoadingInProgress && !free3dModelLoaded) {
+                    if (!isFree3DTask && !currentModel && !modelCache.animations && !preparedLoaded && !preparedLoadingInProgress && !free3dModelLoaded) {
                         const taskProgress = Math.max(0, Math.min(100, Number(t?.progress || 0)));
                         const waitingProgress = taskProgress > 0
                             ? Math.max(12, Math.min(65, taskProgress))
