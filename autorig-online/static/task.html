@@ -13171,7 +13171,7 @@
                             animationsLoaded = !!animations.length;
                             showAnimationsReadyNotification();
                             loadingManager?.hide?.();
-                            setLoadingUIState(false);
+                            if (typeof setLoadingUIState === 'function') setLoadingUIState(false);
                             window.taskDbg('[Viewer] ✓ Background FBX animations loaded and cached!', animations.length, 'animations');
                         }
                     } catch (fbxErr) {
