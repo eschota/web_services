@@ -1,0 +1,44 @@
+{
+  "admin_edited_bool": true,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": -79.3176195026892,
+      "y": 20.318310870538795,
+      "z": 201.11461151756748
+    },
+    "target": {
+      "x": 29.164314995661215,
+      "y": 31.178679900641562,
+      "z": -1.9152128555350785
+    }
+  },
+  "image_filename": "alien_planet.jpg",
+  "plane_color": "#5e4d6f",
+  "schema_version": 1,
+  "semantic_tags": [
+    "space",
+    "alien",
+    "astronaut",
+    "sci-fi",
+    "planet",
+    "creature",
+    "fantasy",
+    "robot"
+  ],
+  "shadow_settings": {
+    "opacity": 0.71,
+    "shadow_y_offset": 0.005,
+    "softness": 0.2,
+    "sun_multiplier": 3.5
+  },
+  "src": "/static/env/backdrops/alien_planet.jpg",
+  "sun_settings": {
+    "inclination": 19,
+    "intensity": 2,
+    "rotation": -93
+  },
+  "theme_id": "alien_planet",
+  "theme_name": "Alien Planet",
+  "theme_short_description": "Purple alien desert landscape with planets, rocks and sci-fi sky."
+}

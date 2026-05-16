@@ -1,0 +1,50 @@
+{
+  "admin_edited_bool": true,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 363.626463641795,
+      "y": 133.01217969840954,
+      "z": 497.36853801950707
+    },
+    "target": {
+      "x": 72.09023529880051,
+      "y": 74.9902545397754,
+      "z": -9.008786602808819
+    }
+  },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
+  "image_filename": "pine_forest_trail.jpg",
+  "plane_color": "#38332e",
+  "schema_version": 1,
+  "semantic_tags": [
+    "forest",
+    "pine",
+    "wildlife",
+    "bear",
+    "wolf",
+    "deer",
+    "creature",
+    "nature"
+  ],
+  "shadow_settings": {
+    "opacity": 0.62,
+    "shadow_y_offset": 0.01,
+    "softness": 7,
+    "sun_multiplier": 1.8
+  },
+  "src": "/static/env/backdrops/pine_forest_trail.jpg",
+  "sun_settings": {
+    "inclination": 28,
+    "intensity": 2.1,
+    "rotation": -91
+  },
+  "theme_id": "pine_forest_trail",
+  "theme_name": "Pine Forest Trail",
+  "theme_short_description": "Wide pine forest trail with rocks, logs and natural dirt ground."
+}

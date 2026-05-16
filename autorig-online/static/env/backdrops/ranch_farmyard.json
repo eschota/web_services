@@ -1,0 +1,58 @@
+{
+  "admin_edited_bool": true,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 343.28082117890983,
+      "y": 86.16020433031223,
+      "z": 222.32465523488762
+    },
+    "target": {
+      "x": 61.599274794859994,
+      "y": 50.86019268816238,
+      "z": -53.921817464632646
+    }
+  },
+  "environment_settings": {
+    "intensity": 1.1,
+    "mode": "image",
+    "reflection_intensity": 1.78,
+    "source": "backdrop"
+  },
+  "image_filename": "ranch_farmyard.jpg",
+  "plane_color": "#40301c",
+  "schema_version": 1,
+  "semantic_tags": [
+    "farm",
+    "ranch",
+    "horse",
+    "cow",
+    "pig",
+    "piglet",
+    "hog",
+    "boar",
+    "swine",
+    "deer",
+    "goat",
+    "sheep",
+    "livestock",
+    "animal",
+    "western",
+    "stable"
+  ],
+  "shadow_settings": {
+    "opacity": 0.39,
+    "shadow_y_offset": -2,
+    "softness": 0,
+    "sun_multiplier": 2.2
+  },
+  "src": "/static/env/backdrops/ranch_farmyard.jpg",
+  "sun_settings": {
+    "inclination": 51,
+    "intensity": 2.55,
+    "rotation": -97
+  },
+  "theme_id": "ranch_farmyard",
+  "theme_name": "Ranch Farmyard",
+  "theme_short_description": "Open rural farmyard with fences, barn and dry dirt road."
+}

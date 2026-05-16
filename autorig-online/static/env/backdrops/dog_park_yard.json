@@ -1,0 +1,52 @@
+{
+  "admin_edited_bool": true,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 425.07163725053675,
+      "y": 238.53843236083517,
+      "z": 228.66647445420284
+    },
+    "target": {
+      "x": 20.197730551090487,
+      "y": 55.706326182645,
+      "z": -60.25099490243753
+    }
+  },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
+  "image_filename": "dog_park_yard.jpg",
+  "plane_color": "#332f28",
+  "schema_version": 1,
+  "semantic_tags": [
+    "dog",
+    "cat",
+    "kitten",
+    "feline",
+    "pet",
+    "park",
+    "yard",
+    "animal",
+    "puppy",
+    "domestic"
+  ],
+  "shadow_settings": {
+    "opacity": 0.67,
+    "shadow_y_offset": 0.01,
+    "softness": 0,
+    "sun_multiplier": 1.75
+  },
+  "src": "/static/env/backdrops/dog_park_yard.jpg",
+  "sun_settings": {
+    "inclination": 25,
+    "intensity": 2.5,
+    "rotation": 63
+  },
+  "theme_id": "dog_park_yard",
+  "theme_name": "Pet Park Yard",
+  "theme_short_description": "Sunny fenced pet yard with play equipment and warm dirt ground."
+}

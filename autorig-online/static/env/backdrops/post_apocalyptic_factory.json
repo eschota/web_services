@@ -1,0 +1,50 @@
+{
+  "admin_edited_bool": true,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 379.434421036991,
+      "y": 81.13993194069769,
+      "z": 304.3643767574581
+    },
+    "target": {
+      "x": 19.73630794200862,
+      "y": 82.4355433684938,
+      "z": -43.658771074505225
+    }
+  },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
+  "image_filename": "post_apocalyptic_factory.jpg",
+  "plane_color": "#5f5a50",
+  "schema_version": 1,
+  "semantic_tags": [
+    "industrial",
+    "robot",
+    "mech",
+    "zombie",
+    "post-apocalyptic",
+    "vehicle",
+    "war",
+    "ruins"
+  ],
+  "shadow_settings": {
+    "opacity": 0.4,
+    "shadow_y_offset": 0.01,
+    "softness": 60,
+    "sun_multiplier": 1.4
+  },
+  "src": "/static/env/backdrops/post_apocalyptic_factory.jpg",
+  "sun_settings": {
+    "inclination": 32,
+    "intensity": 1.6,
+    "rotation": -20
+  },
+  "theme_id": "post_apocalyptic_factory",
+  "theme_name": "Ruined Industrial Factory",
+  "theme_short_description": "Destroyed concrete factory yard under a stormy grey sky."
+}

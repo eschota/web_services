@@ -1,0 +1,54 @@
+{
+  "admin_edited_bool": true,
+  "camera_transform": {
+    "fov": 45,
+    "position": {
+      "x": 308.95884172718047,
+      "y": 194.59688433551204,
+      "z": 586.7467689864626
+    },
+    "target": {
+      "x": 96.36274957312405,
+      "y": 61.05037237008492,
+      "z": -129.36096625180323
+    }
+  },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
+  "image_filename": "forest_stable_paddock.jpg",
+  "plane_color": "#4e453c",
+  "schema_version": 1,
+  "semantic_tags": [
+    "stable",
+    "horse",
+    "deer",
+    "pig",
+    "piglet",
+    "hog",
+    "boar",
+    "livestock",
+    "farm",
+    "forest",
+    "ranch",
+    "animal"
+  ],
+  "shadow_settings": {
+    "opacity": 0.68,
+    "shadow_y_offset": 0.01,
+    "softness": 3.8,
+    "sun_multiplier": 3.5
+  },
+  "src": "/static/env/backdrops/forest_stable_paddock.jpg",
+  "sun_settings": {
+    "inclination": 19,
+    "intensity": 2.35,
+    "rotation": -89
+  },
+  "theme_id": "forest_stable_paddock",
+  "theme_name": "Forest Stable Paddock",
+  "theme_short_description": "Wooden stable paddock framed by tall forest trees."
+}
