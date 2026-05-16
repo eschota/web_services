@@ -12250,6 +12250,20 @@
             let animationsLoadingInBackground = false;
             /** True after loadAnimationsInBackground finished (success or failure), so viewer poll can stop. */
             let animationsBackgroundFinished = false;
+
+            function markViewerUnavailableIfNoModel(reason = 'preview-unavailable') {
+                const modelCache = getSharedModelCache();
+                if (currentModel || preparedLoaded || free3dModelLoaded || modelCache.animations) {
+                    return false;
+                }
+                try {
+                    loadingManager?.hide?.();
+                } catch (_) {}
+                setStatus('3D preview unavailable. Video preview and downloads are ready.');
+                window.taskDbg('[Viewer] 3D preview unavailable; closing boot stage:', reason);
+                window.__taskPageBoot?.markViewerReady('Video preview ready');
+                return true;
+            }
             
             async function loadAnimationsInBackground() {
                 const modelCache = getSharedModelCache();
@@ -12308,6 +12322,7 @@
                 } finally {
                     animationsLoadingInBackground = false;
                     animationsBackgroundFinished = true;
+                    markViewerUnavailableIfNoModel('animations-glb-load-finished-without-model');
                 }
             }
             
@@ -14563,6 +14578,7 @@
                             preparedPreviewFailed;
                         const animSettled = modelCache.animations || animationsBackgroundFinished;
                         if (previewSettled && animSettled) {
+                            markViewerUnavailableIfNoModel('task-done-without-previewable-glb');
                             window.taskDbg('[Viewer] Task done, viewer settled. Stopping poll.');
                             return;
                         }
