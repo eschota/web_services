@@ -10,6 +10,8 @@
 ## Site
 
 - **Home:** https://autorig.online/
+- **Animal and non-humanoid rigging:** https://autorig.online/animal-rig
+- **Blender plugin:** https://autorig.online/blender-plugin
 
 ## Discovery
 

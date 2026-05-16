@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Animal Rigging Online for Non-Humanoid 3D Models | AutoRig.online</title>
+    <meta name="description" content="AutoRig V2 animal rigging for non-humanoid 3D models. See the beaver before and after V2 rigging, then watch animal animation examples for cat, alpaca, rabbit, turtle and spider robot models.">
+    <meta name="keywords" content="AI animal rigging, non-humanoid rigging, auto rig animals, creature rigging, quadruped rigging, animal animation, AutoRig V2 Animal RIG">
+    <link rel="canonical" href="https://autorig.online/animal-rig">
+    <meta property="og:title" content="AI Animal Rigging for Non-Humanoid 3D Models">
+    <meta property="og:description" content="New AutoRig V2 Animal RIG for animals, creatures and non-humanoid 3D models. Watch before/after rigging and animation examples.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/animal-rig">
+    <meta property="og:image" content="https://autorig.online/static/videos/animal-rig/after.png">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AI Animal Rigging Online | AutoRig.online">
+    <meta name="twitter:description" content="AutoRig V2 animal rigging and animation examples for non-humanoid 3D models.">
+    <meta name="twitter:image" content="https://autorig.online/static/videos/animal-rig/after.png">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="stylesheet" href="/static/css/styles.css?v=gallery-stats-rigtypes-1">
+    <style>
+        .animal-page {
+            background:
+                radial-gradient(circle at 12% 8%, rgba(123, 92, 255, 0.22), transparent 34%),
+                linear-gradient(180deg, #111226 0%, #15162b 48%, #10111d 100%);
+            color: var(--text-primary);
+        }
+        .animal-hero {
+            position: relative;
+            min-height: min(760px, calc(100vh - 96px));
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            overflow: hidden;
+            background:
+                linear-gradient(90deg, rgba(13, 14, 28, 0.96) 0%, rgba(13, 14, 28, 0.9) 44%, rgba(13, 14, 28, 0.38) 100%),
+                url("/static/videos/animal-rig/after.png") right center / min(52vw, 720px) auto no-repeat;
+        }
+        .animal-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto 0 0;
+            height: 140px;
+            pointer-events: none;
+            background: linear-gradient(180deg, rgba(16, 17, 29, 0), rgba(16, 17, 29, 0.96));
+        }
+        .animal-hero-inner {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            padding: clamp(3rem, 7vw, 6rem) 0 clamp(3rem, 7vw, 6rem);
+        }
+        .animal-hero-copy {
+            max-width: 720px;
+        }
+        .animal-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            color: #ffca3a;
+            font-size: 0.9rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .animal-hero h1 {
+            margin: 0;
+            max-width: 680px;
+            font-size: clamp(2.35rem, 5.7vw, 5.2rem);
+            line-height: 0.98;
+            letter-spacing: 0;
+        }
+        .animal-gradient-text {
+            color: #ffffff;
+            background: linear-gradient(90deg, #ffffff 0%, #a78bfa 46%, #38bdf8 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .animal-lead {
+            max-width: 680px;
+            margin: 1.25rem 0 0;
+            color: var(--text-secondary);
+            font-size: clamp(1.02rem, 2vw, 1.25rem);
+            line-height: 1.65;
+        }
+        .animal-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1.75rem;
+        }
+        .animal-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 44px;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            font-weight: 800;
+            text-decoration: none;
+            transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+        }
+        .animal-btn-primary {
+            color: #111226;
+            background: #ffca3a;
+        }
+        .animal-btn-secondary {
+            color: var(--text-primary);
+            border-color: rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .animal-btn:hover {
+            transform: translateY(-1px);
+        }
+        .animal-pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin-top: 1.6rem;
+            max-width: 700px;
+        }
+        .animal-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 32px;
+            padding: 0.45rem 0.65rem;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.07);
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+        .animal-section {
+            padding: clamp(2.5rem, 5vw, 4.5rem) 0;
+        }
+        .animal-section-header {
+            max-width: 760px;
+            margin-bottom: 1.5rem;
+        }
+        .animal-section-header h2 {
+            margin: 0;
+            font-size: clamp(1.75rem, 3.8vw, 3rem);
+            line-height: 1.05;
+            letter-spacing: 0;
+        }
+        .animal-section-header p {
+            margin: 0.75rem 0 0;
+            color: var(--text-secondary);
+            font-size: 1rem;
+            line-height: 1.65;
+        }
+        .animal-video-frame {
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: #0d0e1c;
+            box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+        }
+        .animal-video-frame video {
+            display: block;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            background: #0d0e1c;
+        }
+        .animal-video-caption {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem 0.7rem;
+            justify-content: space-between;
+            padding: 0.85rem 1rem;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .animal-video-caption strong {
+            color: var(--text-primary);
+        }
+        .animal-compare-grid,
+        .animal-example-grid,
+        .animal-feature-grid,
+        .animal-faq-grid {
+            display: grid;
+            gap: 1rem;
+        }
+        .animal-compare-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .animal-example-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .animal-feature-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+        .animal-example-card,
+        .animal-feature-card,
+        .animal-faq-card {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.045);
+        }
+        .animal-example-card {
+            overflow: hidden;
+        }
+        .animal-example-card video {
+            display: block;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+            background: #10111d;
+        }
+        .animal-card-body,
+        .animal-feature-card,
+        .animal-faq-card {
+            padding: 1rem;
+        }
+        .animal-card-body h3,
+        .animal-feature-card h3,
+        .animal-faq-card h3 {
+            margin: 0;
+            font-size: 1rem;
+            line-height: 1.25;
+        }
+        .animal-card-body p,
+        .animal-feature-card p,
+        .animal-faq-card p {
+            margin: 0.55rem 0 0;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.55;
+        }
+        .animal-faq-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .animal-cta-band {
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: linear-gradient(135deg, rgba(123, 92, 255, 0.26), rgba(56, 189, 248, 0.12));
+        }
+        .animal-cta-band h2 {
+            margin: 0;
+            font-size: clamp(1.6rem, 3vw, 2.4rem);
+            letter-spacing: 0;
+        }
+        .animal-cta-band p {
+            max-width: 760px;
+            margin: 0.75rem 0 0;
+            color: var(--text-secondary);
+            line-height: 1.65;
+        }
+        @media (max-width: 1020px) {
+            .animal-hero {
+                background:
+                    linear-gradient(180deg, rgba(13, 14, 28, 0.88), rgba(13, 14, 28, 0.96)),
+                    url("/static/videos/animal-rig/after.png") center bottom / min(92vw, 640px) auto no-repeat;
+                align-items: flex-start;
+            }
+            .animal-hero-inner {
+                padding-bottom: min(58vw, 380px);
+            }
+            .animal-example-grid,
+            .animal-feature-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+        @media (max-width: 700px) {
+            .animal-hero {
+                min-height: auto;
+            }
+            .animal-hero-inner {
+                padding-top: 2.5rem;
+            }
+            .animal-actions {
+                flex-direction: column;
+            }
+            .animal-btn {
+                width: 100%;
+            }
+            .animal-compare-grid,
+            .animal-example-grid,
+            .animal-feature-grid,
+            .animal-faq-grid {
+                grid-template-columns: 1fr;
+            }
+            .animal-cta-band {
+                padding: 1.25rem;
+            }
+        }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "AI Animal Rigging Online for Non-Humanoid 3D Models",
+        "url": "https://autorig.online/animal-rig",
+        "description": "AutoRig V2 animal rigging for non-humanoid 3D models with before/after and animation examples.",
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "AutoRig.online",
+            "url": "https://autorig.online/"
+        },
+        "about": [
+            "AI animal rigging",
+            "non-humanoid 3D model rigging",
+            "creature animation"
+        ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "AutoRig V2 Animal RIG video examples",
+        "itemListElement": [
+            {
+                "@type": "VideoObject",
+                "position": 1,
+                "name": "AutoRig V2 Animal RIG presentation",
+                "description": "Beaver model after AutoRig V2 animal rigging with animation preview.",
+                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/after.png",
+                "contentUrl": "https://autorig.online/static/videos/animal-rig/after.mp4",
+                "uploadDate": "2026-05-16"
+            },
+            {
+                "@type": "VideoObject",
+                "position": 2,
+                "name": "Before V2 animal rig",
+                "description": "Original beaver model before V2 animal rigging.",
+                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/before.png",
+                "contentUrl": "https://autorig.online/static/videos/animal-rig/before.mp4",
+                "uploadDate": "2026-05-16"
+            },
+            {
+                "@type": "VideoObject",
+                "position": 3,
+                "name": "Cat V2 rig animation example",
+                "description": "Cat animation generated with AutoRig V2 animal rigging.",
+                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/cat-v2-rig.png",
+                "contentUrl": "https://autorig.online/static/videos/animal-rig/cat-v2-rig.mp4",
+                "uploadDate": "2026-05-16"
+            },
+            {
+                "@type": "VideoObject",
+                "position": 4,
+                "name": "Alpaca V2 rig animation example",
+                "description": "Alpaca animation generated with AutoRig V2 animal rigging.",
+                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.png",
+                "contentUrl": "https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.mp4",
+                "uploadDate": "2026-05-16"
+            },
+            {
+                "@type": "VideoObject",
+                "position": 5,
+                "name": "Rabbit V2 rig animation example",
+                "description": "Rabbit animation generated with AutoRig V2 animal rigging.",
+                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.png",
+                "contentUrl": "https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.mp4",
+                "uploadDate": "2026-05-16"
+            },
+            {
+                "@type": "VideoObject",
+                "position": 6,
+                "name": "Turtle V2 rig animation example",
+                "description": "Turtle animation generated with AutoRig V2 animal rigging.",
+                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/turtle-v2-rig.png",
+                "contentUrl": "https://autorig.online/static/videos/animal-rig/turtle-v2-rig.mp4",
+                "uploadDate": "2026-05-16"
+            },
+            {
+                "@type": "VideoObject",
+                "position": 7,
+                "name": "Spider robot V2 rig animation example",
+                "description": "Spider robot animation generated with AutoRig V2 non-humanoid rigging.",
+                "thumbnailUrl": "https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.png",
+                "contentUrl": "https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.mp4",
+                "uploadDate": "2026-05-16"
+            }
+        ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "What is AutoRig V2 Animal RIG?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "AutoRig V2 Animal RIG is AutoRig.online's animal and non-humanoid rigging workflow for 3D models such as quadrupeds, creatures and stylized robot models."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Can it rig non-humanoid models?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. The page shows non-humanoid examples including a beaver before/after, cat, alpaca, rabbit, turtle and spider robot animation previews."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Do I need Blender to use animal rigging online?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "No. The online service runs in the browser. AutoRig.online also offers a separate Blender plugin for users who prefer a Blender-native workflow."
+                }
+            }
+        ]
+    }
+    </script>
+</head>
+<body class="animal-page">
+    <div id="site-header"></div>
+
+    <main>
+        <section class="animal-hero" aria-labelledby="animal-hero-title">
+            <div class="container animal-hero-inner">
+                <div class="animal-hero-copy">
+                    <span class="animal-kicker">New: AutoRig V2 Animal RIG</span>
+                    <h1 id="animal-hero-title"><span class="animal-gradient-text">AI animal rigging</span> for non-humanoid 3D models</h1>
+                    <p class="animal-lead">See the beaver before and after V2 rigging, then watch animal animation examples for cat, alpaca, rabbit, turtle and spider robot models.</p>
+                    <div class="animal-actions">
+                        <a class="animal-btn animal-btn-primary" href="#presentation">Watch animal rig presentation</a>
+                        <a class="animal-btn animal-btn-secondary" href="/">Try animal rigging online</a>
+                    </div>
+                    <div class="animal-pill-row" aria-label="Supported example model types">
+                        <span class="animal-pill">Quadrupeds</span>
+                        <span class="animal-pill">Creatures</span>
+                        <span class="animal-pill">Stylized animals</span>
+                        <span class="animal-pill">Spider robots</span>
+                        <span class="animal-pill">Game-ready previews</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="presentation" class="animal-section" aria-labelledby="presentation-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="presentation-title">Animal rig presentation</h2>
+                    <p>AutoRig V2 builds a usable rig for an animal model and shows the result through an animated preview.</p>
+                </div>
+                <div class="animal-video-frame">
+                    <video controls playsinline preload="metadata" poster="/static/videos/animal-rig/after.png">
+                        <source src="/static/videos/animal-rig/after.mp4" type="video/mp4">
+                    </video>
+                    <div class="animal-video-caption">
+                        <strong>After V2 animal rig</strong>
+                        <span>Beaver model with generated rig and animation preview</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="before-after-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="before-after-title">Before V2 animal rig</h2>
+                    <p>Compare the original animal model with the rigged and animated result generated by AutoRig V2.</p>
+                </div>
+                <div class="animal-compare-grid">
+                    <article class="animal-video-frame">
+                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/before.png">
+                            <source src="/static/videos/animal-rig/before.mp4" type="video/mp4">
+                        </video>
+                        <div class="animal-video-caption">
+                            <strong>Before</strong>
+                            <span>Original beaver model</span>
+                        </div>
+                    </article>
+                    <article class="animal-video-frame">
+                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/after.png">
+                            <source src="/static/videos/animal-rig/after.mp4" type="video/mp4">
+                        </video>
+                        <div class="animal-video-caption">
+                            <strong>After</strong>
+                            <span>Rigged and animated with V2</span>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="examples-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="examples-title">Animal animation examples</h2>
+                    <p>Examples include organic animals and hard-surface non-humanoid models so you can judge the range of the V2 animal rig.</p>
+                </div>
+                <div class="animal-example-grid">
+                    <article class="animal-example-card">
+                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/cat-v2-rig.png">
+                            <source src="/static/videos/animal-rig/cat-v2-rig.mp4" type="video/mp4">
+                        </video>
+                        <div class="animal-card-body">
+                            <h3>Cat V2 rig</h3>
+                            <p>Quadruped body motion for a small animal model.</p>
+                        </div>
+                    </article>
+                    <article class="animal-example-card">
+                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/alpaca-v2-rig.png">
+                            <source src="/static/videos/animal-rig/alpaca-v2-rig.mp4" type="video/mp4">
+                        </video>
+                        <div class="animal-card-body">
+                            <h3>Alpaca V2 rig</h3>
+                            <p>Long-neck animal motion with generated animation preview.</p>
+                        </div>
+                    </article>
+                    <article class="animal-example-card">
+                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/rabbit-v2-rig.png">
+                            <source src="/static/videos/animal-rig/rabbit-v2-rig.mp4" type="video/mp4">
+                        </video>
+                        <div class="animal-card-body">
+                            <h3>Rabbit V2 rig</h3>
+                            <p>Compact creature rigging for stylized animal proportions.</p>
+                        </div>
+                    </article>
+                    <article class="animal-example-card">
+                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/turtle-v2-rig.png">
+                            <source src="/static/videos/animal-rig/turtle-v2-rig.mp4" type="video/mp4">
+                        </video>
+                        <div class="animal-card-body">
+                            <h3>Turtle V2 rig</h3>
+                            <p>Low-profile animal animation with a different body structure.</p>
+                        </div>
+                    </article>
+                    <article class="animal-example-card">
+                        <video controls playsinline preload="none" poster="/static/videos/animal-rig/spider-robot-v2-rig.png">
+                            <source src="/static/videos/animal-rig/spider-robot-v2-rig.mp4" type="video/mp4">
+                        </video>
+                        <div class="animal-card-body">
+                            <h3>Spider robot V2 rig</h3>
+                            <p>Non-humanoid mechanical model with multiple legs.</p>
+                        </div>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="workflow-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="workflow-title">How V2 animal rigging helps</h2>
+                    <p>Use the online service when you need a fast rigging pass for animal, creature or other non-humanoid models without hand-placing every control.</p>
+                </div>
+                <div class="animal-feature-grid">
+                    <article class="animal-feature-card">
+                        <h3>Non-humanoid focus</h3>
+                        <p>Designed for models that do not fit a standard human biped skeleton.</p>
+                    </article>
+                    <article class="animal-feature-card">
+                        <h3>Animation preview</h3>
+                        <p>Review the generated rig with a motion preview before using it in your pipeline.</p>
+                    </article>
+                    <article class="animal-feature-card">
+                        <h3>Browser workflow</h3>
+                        <p>Upload a model online and get a rigged result without installing a full DCC pipeline.</p>
+                    </article>
+                    <article class="animal-feature-card">
+                        <h3>Production direction</h3>
+                        <p>Useful for prototyping game assets, marketplace models, videos and animation tests.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-labelledby="faq-title">
+            <div class="container">
+                <div class="animal-section-header">
+                    <h2 id="faq-title">Animal rigging FAQ</h2>
+                    <p>Short answers for creators comparing humanoid auto-rigging with animal and creature rigging.</p>
+                </div>
+                <div class="animal-faq-grid">
+                    <article class="animal-faq-card">
+                        <h3>What is AutoRig V2 Animal RIG?</h3>
+                        <p>It is the AutoRig.online V2 workflow for animal and non-humanoid models such as quadrupeds, creatures and stylized robot models.</p>
+                    </article>
+                    <article class="animal-faq-card">
+                        <h3>Does it only work for animals?</h3>
+                        <p>No. The examples include a spider robot because the same page targets broader non-humanoid rigging problems.</p>
+                    </article>
+                    <article class="animal-faq-card">
+                        <h3>Can I use it without Blender?</h3>
+                        <p>Yes. The online version runs through AutoRig.online. A separate Blender plugin exists for users who want a Blender-native workflow.</p>
+                    </article>
+                    <article class="animal-faq-card">
+                        <h3>Which examples are shown here?</h3>
+                        <p>The page includes beaver before/after V2 rigging plus animation examples for cat, alpaca, rabbit, turtle and spider robot models.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="animal-section" aria-label="Try AutoRig animal rigging">
+            <div class="container">
+                <div class="animal-cta-band">
+                    <h2>Try AI animal rigging online</h2>
+                    <p>Upload an animal, creature or other non-humanoid 3D model and use AutoRig.online to generate a rigging result with animation preview.</p>
+                    <div class="animal-actions">
+                        <a class="animal-btn animal-btn-primary" href="/">Upload a model</a>
+                        <a class="animal-btn animal-btn-secondary" href="/blender-plugin">Blender plugin</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="site-footer"></div>
+
+    <script src="/static/js/header.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js"></script>
+</body>
+</html>

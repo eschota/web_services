@@ -1941,7 +1941,7 @@ async def api_revoke_api_key(
 def _skill_md_candidate_paths() -> List[Path]:
     """Primary: autorig-online/skill.md next to backend/; fallback: parent of repo root."""
     here = Path(__file__).resolve().parent
-    return [here.parent.parent / "skill.md", here.parent.parent.parent / "skill.md"]
+    return [here.parent / "skill.md", here.parent.parent / "skill.md", here.parent.parent.parent / "skill.md"]
 
 
 @app.post("/api/agents/register", response_model=AgentRegisterResponse)
@@ -8048,6 +8048,57 @@ GLB_CACHE_DIR = STATIC_DIR / "glb_cache"  # Cached GLB files for fast loading
 TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
+    "index.html": "/",
+    "gallery.html": "/gallery",
+    "guides.html": "/guides",
+    "buy-credits.html": "/buy-credits",
+    "blender-plugin.html": "/blender-plugin",
+    "animal-rig.html": "/animal-rig",
+    "developers.html": "/developers",
+    "payment-success.html": "/payment/success",
+    "glb-auto-rig.html": "/glb-auto-rig",
+    "fbx-auto-rig.html": "/fbx-auto-rig",
+    "obj-auto-rig.html": "/obj-auto-rig",
+    "how-it-works.html": "/how-it-works",
+    "faq.html": "/faq",
+    "terms-of-use.html": "/terms",
+    "user-agreement.html": "/user-agreement",
+    "t-pose-rig.html": "/t-pose-rig",
+    "mixamo-alternative.html": "/mixamo-alternative",
+    "mixamo-alternative-ru.html": "/mixamo-alternative-ru",
+    "mixamo-alternative-zh.html": "/mixamo-alternative-zh",
+    "mixamo-alternative-hi.html": "/mixamo-alternative-hi",
+    "rig-glb-unity.html": "/rig-glb-unity",
+    "rig-glb-unity-ru.html": "/rig-glb-unity-ru",
+    "rig-glb-unity-zh.html": "/rig-glb-unity-zh",
+    "rig-glb-unity-hi.html": "/rig-glb-unity-hi",
+    "rig-fbx-unreal.html": "/rig-fbx-unreal",
+    "rig-fbx-unreal-ru.html": "/rig-fbx-unreal-ru",
+    "rig-fbx-unreal-zh.html": "/rig-fbx-unreal-zh",
+    "rig-fbx-unreal-hi.html": "/rig-fbx-unreal-hi",
+    "glb-vs-fbx.html": "/glb-vs-fbx",
+    "glb-vs-fbx-ru.html": "/glb-vs-fbx-ru",
+    "glb-vs-fbx-zh.html": "/glb-vs-fbx-zh",
+    "glb-vs-fbx-hi.html": "/glb-vs-fbx-hi",
+    "t-pose-vs-a-pose.html": "/t-pose-vs-a-pose",
+    "t-pose-vs-a-pose-ru.html": "/t-pose-vs-a-pose-ru",
+    "t-pose-vs-a-pose-zh.html": "/t-pose-vs-a-pose-zh",
+    "t-pose-vs-a-pose-hi.html": "/t-pose-vs-a-pose-hi",
+    "animation-retargeting.html": "/animation-retargeting",
+    "animation-retargeting-ru.html": "/animation-retargeting-ru",
+    "animation-retargeting-zh.html": "/animation-retargeting-zh",
+    "animation-retargeting-hi.html": "/animation-retargeting-hi",
+    "face-rig-animation.html": "/face-rig-animation",
+    "face-rig-animation-ru.html": "/face-rig-animation-ru",
+    "face-rig-animation-zh.html": "/face-rig-animation-zh",
+    "face-rig-animation-hi.html": "/face-rig-animation-hi",
+    "auto-rig-obj.html": "/auto-rig-obj",
+    "auto-rig-obj-ru.html": "/auto-rig-obj-ru",
+    "auto-rig-obj-zh.html": "/auto-rig-obj-zh",
+    "auto-rig-obj-hi.html": "/auto-rig-obj-hi",
+}
+
 
 def _read_static_partial(name: str) -> str:
     path = STATIC_DIR / "partials" / name
@@ -8056,7 +8107,7 @@ def _read_static_partial(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _inject_static_layout(html_content: str) -> str:
+def _inject_static_layout(html_content: str, canonical_path: Optional[str] = None) -> str:
     body_match = re.search(r"<body\b[^>]*>", html_content, flags=re.IGNORECASE)
     body_tag = body_match.group(0) if body_match else ""
     show_search = (
@@ -8084,6 +8135,18 @@ def _inject_static_layout(html_content: str) -> str:
             1,
         )
 
+    if canonical_path and not re.search(r"<link\b[^>]+rel=[\"']canonical[\"']", html_content, flags=re.IGNORECASE):
+        base_url = (APP_URL or "https://autorig.online").rstrip("/")
+        canonical_url = f"{base_url}{canonical_path}"
+        canonical_tag = f'    <link rel="canonical" href="{html.escape(canonical_url, quote=True)}">\n'
+        html_content = re.sub(
+            r"</head\s*>",
+            f"{canonical_tag}</head>",
+            html_content,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
     return html_content
 
 
@@ -8091,7 +8154,12 @@ def _static_html_response(filename: str) -> HTMLResponse:
     path = STATIC_DIR / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Not found")
-    return HTMLResponse(content=_inject_static_layout(path.read_text(encoding="utf-8")))
+    return HTMLResponse(
+        content=_inject_static_layout(
+            path.read_text(encoding="utf-8"),
+            canonical_path=STATIC_PAGE_CANONICAL_PATHS.get(filename),
+        )
+    )
 
 
 def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:
@@ -8794,6 +8862,27 @@ async def buy_credits_page():
 async def blender_plugin_page():
     """Native Blender plugin landing page."""
     return _static_html_response("blender-plugin.html")
+
+
+@app.get("/animal-rig")
+async def animal_rig_page():
+    """AutoRig V2 animal and non-humanoid rigging landing page."""
+    return _static_html_response("animal-rig.html")
+
+
+@app.get("/rig-animals", include_in_schema=False)
+async def redirect_rig_animals_page():
+    return RedirectResponse(url="/animal-rig", status_code=301)
+
+
+@app.get("/animal-rig-animation", include_in_schema=False)
+async def redirect_animal_rig_animation_page():
+    return RedirectResponse(url="/animal-rig", status_code=301)
+
+
+@app.get("/rig-v2.html", include_in_schema=False)
+async def redirect_rig_v2_page():
+    return RedirectResponse(url="/animal-rig", status_code=301)
 
 
 @app.get("/developers")

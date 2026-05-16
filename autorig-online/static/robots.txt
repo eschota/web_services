@@ -8,6 +8,7 @@ Allow: /m/
 Allow: /guides
 Allow: /buy-credits
 Allow: /blender-plugin
+Allow: /animal-rig
 Allow: /how-it-works
 Allow: /faq
 

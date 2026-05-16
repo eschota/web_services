@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+        xmlns:xhtml="http://www.w3.org/1999/xhtml"
+        xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
 
   <!-- Main pages -->
   <url>
@@ -18,6 +19,35 @@
   </url>
 
   <url>
+    <loc>https://autorig.online/animal-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.88</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/after.png</video:thumbnail_loc>
+      <video:title>AutoRig V2 Animal RIG presentation</video:title>
+      <video:description>AI animal rigging and animation preview for a beaver model after V2 rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/after.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig.png</video:thumbnail_loc>
+      <video:title>Cat V2 animal rig animation example</video:title>
+      <video:description>Cat animation generated with AutoRig V2 animal rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.png</video:thumbnail_loc>
+      <video:title>Spider robot non-humanoid V2 rig animation example</video:title>
+      <video:description>Spider robot animation generated with AutoRig V2 non-humanoid rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+  </url>
+
+  <url>
     <loc>https://autorig.online/guides</loc>
     <lastmod>2026-01-01</lastmod>
     <changefreq>weekly</changefreq>
@@ -29,6 +59,14 @@
     <lastmod>2026-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/blender-plugin</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
   </url>
 
   <url>
@@ -53,52 +91,12 @@
     <priority>0.55</priority>
   </url>
 
-  <!-- How It Works (4 languages) -->
+  <!-- How It Works -->
   <url>
     <loc>https://autorig.online/how-it-works</loc>
     <lastmod>2026-01-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/how-it-works-ru</loc>
-    <lastmod>2026-01-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/how-it-works-zh</loc>
-    <lastmod>2026-01-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/how-it-works-hi</loc>
-    <lastmod>2026-01-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
   </url>
 
