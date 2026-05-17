@@ -7498,6 +7498,63 @@ async def _resolve_task_blueprint_urls(task: Task) -> Tuple[Optional[str], Optio
     return skeleton_url, rig_preview_url
 
 
+async def _resolve_task_blueprint_model_url(task: Task) -> Optional[str]:
+    urls = list(task.ready_urls or []) + list(task.output_urls or [])
+    for pattern in ("_model_prepared.glb", "_model_prepared_temp.glb"):
+        existing = _find_file_in_ready_urls(urls, pattern, ".glb")
+        if existing:
+            return existing
+    if not task.guid or not task.worker_api:
+        return None
+
+    from workers import get_worker_base_url
+
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    worker_base = worker_base.rstrip("/")
+    worker_root = f"{worker_base}/converter/glb"
+    for filename in (
+        f"{task.guid}_model_prepared.glb",
+        f"{task.guid}_model_prepared_temp.glb",
+        f"{task.guid}.glb",
+    ):
+        direct_url = f"{worker_root}/{task.guid}/{filename}"
+        if await _remote_file_exists(direct_url):
+            return direct_url
+
+    files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(files_url)
+        if resp.status_code != 200:
+            return None
+        data = resp.json() if resp.content else {}
+    except Exception:
+        return None
+
+    priority = (
+        f"{task.guid}_model_prepared.glb",
+        f"{task.guid}_model_prepared_temp.glb",
+        f"{task.guid}.glb",
+    )
+    candidates: Dict[str, str] = {}
+    for folder_data in (data.get("folders") or {}).values():
+        if not isinstance(folder_data, dict):
+            continue
+        for item in folder_data.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            rel_path = str(item.get("rel_path") or "")
+            if rel_path and name in priority:
+                candidates[name] = f"{worker_root}/{task.guid}/{rel_path}"
+    for name in priority:
+        if name in candidates:
+            return candidates[name]
+    return None
+
+
 def _task_has_poster(task: Task) -> bool:
     """True if ready_urls/output_urls contain a file usable as /api/thumb source (same rules as api_proxy_thumb)."""
     urls = list(task.ready_urls or []) + list(task.output_urls or [])
@@ -9108,6 +9165,36 @@ async def api_proxy_blueprint_rig_preview(
         "video/mp4",
         db,
     )
+
+
+@app.head("/api/task/{task_id}/blueprint/model.glb")
+@app.get("/api/task/{task_id}/blueprint/model.glb")
+async def api_proxy_blueprint_model_glb(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(task.input_type or "").strip().lower() != "animal":
+        raise HTTPException(status_code=404, detail="Blueprint model is available for animal rig tasks only")
+
+    cache_path = GLB_CACHE_DIR / f"{task_id}_blueprint.glb"
+    if cache_path.exists() and _validate_glb_file(cache_path):
+        return FileResponse(
+            path=str(cache_path),
+            media_type="model/gltf-binary",
+            filename=f"{task_id}_blueprint.glb",
+            headers=dict(_GLB_FILE_HTTP_HEADERS),
+        )
+
+    source_url = await _resolve_task_blueprint_model_url(task)
+    if not source_url:
+        raise HTTPException(status_code=404, detail="Blueprint model not available yet")
+    result = await _get_cached_glb(task_id, source_url, "blueprint")
+    if result:
+        return result
+    raise HTTPException(status_code=404, detail="Blueprint model not available yet")
 
 
 @app.head("/thumb/{task_id}")

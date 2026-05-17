@@ -242,7 +242,21 @@ class AnimalBlueprintViewerController {
     async loadModel() {
         if (this.model) return;
         const loader = new GLTFLoader();
-        const gltf = await loader.loadAsync(`/api/task/${this.taskId}/prepared.glb`);
+        let gltf = null;
+        let lastError = null;
+        for (const url of [
+            `/api/task/${this.taskId}/blueprint/model.glb`,
+            `/api/task/${this.taskId}/prepared.glb`,
+            `/api/task/${this.taskId}/animations.glb`,
+        ]) {
+            try {
+                gltf = await loader.loadAsync(url);
+                break;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+        if (!gltf) throw lastError || new Error('Blueprint model is unavailable');
         this.model = gltf.scene;
         this.modelGroup.clear();
         this.modelGroup.add(this.model);
