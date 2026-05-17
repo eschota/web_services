@@ -79,6 +79,8 @@
     "blueprint_cube_left_title": "बायां view",
     "blueprint_fit_title": "कैमरा फिट करें",
     "blueprint_reset_title": "कैमरा रीसेट करें",
+    "blueprint_reset_rig_label": "Rig shifts रीसेट करें",
+    "blueprint_reset_rig_tooltip": "सभी Blueprint nodes को मूल detected skeleton पर लौटाएं और जोड़े गए helper nodes हटाएं।",
     "blueprint_add_node_label": "Node जोड़ें",
     "blueprint_add_node_tooltip": "चुने हुए node के पास एक linked helper point जोड़ता है।",
     "blueprint_retarget_label": "Rig Animation Retarget करें",

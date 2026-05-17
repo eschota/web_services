@@ -1467,6 +1467,35 @@
             margin-top: 0.55rem;
         }
 
+        .blueprint-rig-reset-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.42rem;
+            flex: 0 0 auto;
+            border: 1px solid rgba(251, 113, 133, 0.35);
+            border-radius: 8px;
+            background: rgba(76, 5, 25, 0.34);
+            color: #fecdd3;
+            font-size: 0.74rem;
+            font-weight: 800;
+            padding: 0.5rem 0.7rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .blueprint-rig-reset-btn svg {
+            width: 1rem;
+            height: 1rem;
+            stroke: currentColor;
+        }
+
+        .blueprint-rig-reset-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.48;
+            filter: saturate(0.55);
+        }
+
         .blueprint-actions .blueprint-add-node-btn {
             flex: 0 0 auto;
             border: 1px solid rgba(125, 211, 252, 0.34);
@@ -2581,6 +2610,12 @@
 
               .blueprint-actions {
                   flex-direction: column;
+              }
+
+              .blueprint-rig-reset-btn,
+              .blueprint-actions .blueprint-add-node-btn,
+              .blueprint-actions .blueprint-retarget-btn {
+                  width: 100%;
               }
 
               .blueprint-legend {
@@ -3834,6 +3869,15 @@
                 <div class="blueprint-actions">
                     <button type="button" id="blueprint-add-node-btn" class="blueprint-add-node-btn" data-i18n="blueprint_add_node_label" data-i18n-title="blueprint_add_node_tooltip">
                         Add node
+                    </button>
+                    <button type="button" id="blueprint-reset-rig-btn" class="blueprint-rig-reset-btn" disabled data-i18n-title="blueprint_reset_rig_tooltip" aria-label="Reset rig shifts to default" title="Reset rig shifts to default">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 7v6h6"></path>
+                            <path d="M21 17a9 9 0 0 0-15.2-6.5L3 13"></path>
+                            <path d="M9 17h6"></path>
+                            <path d="M12 14v6"></path>
+                        </svg>
+                        <span data-i18n="blueprint_reset_rig_label">Reset rig shifts to default</span>
                     </button>
                     <button type="button" id="blueprint-retarget-btn" class="blueprint-retarget-btn" data-i18n="blueprint_retarget_label" data-i18n-title="blueprint_retarget_tooltip">
                         Retarget Rig Animation
@@ -7417,7 +7461,7 @@
           }
         }
     </script>
-    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=19"></script>
+    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=20"></script>
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';

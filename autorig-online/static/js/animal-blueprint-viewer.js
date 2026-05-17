@@ -164,6 +164,7 @@ class AnimalBlueprintViewerController {
         this.coordsEl = document.getElementById('blueprint-coordinates');
         this.retargetBtn = document.getElementById('blueprint-retarget-btn');
         this.addNodeBtn = document.getElementById('blueprint-add-node-btn');
+        this.resetRigBtn = document.getElementById('blueprint-reset-rig-btn');
         this.viewSelect = document.getElementById('blueprint-view-select');
         this.viewCube = document.getElementById('blueprint-view-cube');
         this.viewCubeLabel = document.getElementById('blueprint-view-cube-label');
@@ -239,6 +240,7 @@ class AnimalBlueprintViewerController {
         this.card.querySelector('[data-blueprint-action="fit"]')?.addEventListener('click', () => this.fitCamera());
         this.card.querySelector('[data-blueprint-action="reset"]')?.addEventListener('click', () => this.setView(this.activeView || 'right'));
         this.addNodeBtn?.addEventListener('click', () => this.addLinkedNode());
+        this.resetRigBtn?.addEventListener('click', () => this.resetAllNodes());
         this.retargetBtn?.addEventListener('click', () => this.retarget());
     }
 
@@ -275,6 +277,17 @@ class AnimalBlueprintViewerController {
             const addTitle = bpT('blueprint_add_node_tooltip', 'Add a linked helper point near the selected node.');
             this.addNodeBtn.title = addTitle;
             this.addNodeBtn.setAttribute('aria-label', addTitle);
+        }
+        if (this.resetRigBtn) {
+            const resetRigText = bpT('blueprint_reset_rig_label', 'Reset rig shifts to default');
+            const resetRigTitle = bpT(
+                'blueprint_reset_rig_tooltip',
+                'Restore all Blueprint nodes to the original detected skeleton and remove added helper nodes.',
+            );
+            const label = this.resetRigBtn.querySelector('span');
+            if (label) label.textContent = resetRigText;
+            this.resetRigBtn.title = resetRigTitle;
+            this.resetRigBtn.setAttribute('aria-label', resetRigTitle);
         }
         if (this.viewSelect) {
             const selectTitle = bpT('blueprint_view_select_title', 'Blueprint camera view');
@@ -498,6 +511,7 @@ class AnimalBlueprintViewerController {
         this.dirty = false;
         this.setRetargetVisible(false);
         this.setAddNodeVisible(false);
+        this.setResetRigEnabled(false);
 
         const lines = Array.isArray(this.skeleton?.semantic_lines) ? this.skeleton.semantic_lines : [];
         for (const line of lines) {
@@ -925,6 +939,7 @@ class AnimalBlueprintViewerController {
         }
         this.dirty = dirty;
         this.setRetargetVisible(dirty);
+        this.setResetRigEnabled(dirty);
     }
 
     setRetargetVisible(visible) {
@@ -933,6 +948,12 @@ class AnimalBlueprintViewerController {
 
     setAddNodeVisible(visible) {
         this.addNodeBtn?.classList.toggle('is-visible', Boolean(visible));
+    }
+
+    setResetRigEnabled(enabled) {
+        if (!this.resetRigBtn) return;
+        this.resetRigBtn.disabled = !enabled;
+        this.resetRigBtn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
     }
 
     addLinkedNode() {
@@ -984,6 +1005,12 @@ class AnimalBlueprintViewerController {
             this.labelSprites.delete(String(id));
             this.additionalParents.delete(String(id));
         }
+        if (this.selectedNodeId && !this.nodes.has(String(this.selectedNodeId))) {
+            this.updateSelection(null);
+        } else if (this.selectedNodeId) {
+            this.updateSelection(this.selectedNodeId);
+        }
+        this.redrawLines();
         this.updateDirtyState();
     }
 

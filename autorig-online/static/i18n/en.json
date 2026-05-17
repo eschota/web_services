@@ -81,6 +81,8 @@
     "blueprint_cube_left_title": "Left view",
     "blueprint_fit_title": "Fit camera",
     "blueprint_reset_title": "Reset camera",
+    "blueprint_reset_rig_label": "Reset rig shifts to default",
+    "blueprint_reset_rig_tooltip": "Restore all Blueprint nodes to the original detected skeleton and remove added helper nodes.",
     "blueprint_add_node_label": "Add node",
     "blueprint_add_node_tooltip": "Add a linked helper point near the selected node.",
     "blueprint_retarget_label": "Retarget Rig Animation",

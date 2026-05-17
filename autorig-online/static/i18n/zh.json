@@ -79,6 +79,8 @@
     "blueprint_cube_left_title": "左视图",
     "blueprint_fit_title": "适配相机",
     "blueprint_reset_title": "重置相机",
+    "blueprint_reset_rig_label": "重置绑定偏移",
+    "blueprint_reset_rig_tooltip": "将所有 Blueprint 节点恢复到最初识别的骨架，并删除新增的辅助节点。",
     "blueprint_add_node_label": "添加节点",
     "blueprint_add_node_tooltip": "在所选节点附近添加一个关联辅助点。",
     "blueprint_retarget_label": "重新生成绑定动画",

@@ -81,6 +81,8 @@
     "blueprint_cube_left_title": "Вид слева",
     "blueprint_fit_title": "Вписать камеру",
     "blueprint_reset_title": "Сбросить камеру",
+    "blueprint_reset_rig_label": "Сбросить смещения рига",
+    "blueprint_reset_rig_tooltip": "Вернуть все узлы Blueprint к исходному найденному скелету и удалить добавленные вспомогательные точки.",
     "blueprint_add_node_label": "Добавить узел",
     "blueprint_add_node_tooltip": "Добавляет связанную вспомогательную точку рядом с выбранным узлом.",
     "blueprint_retarget_label": "Ретаргет рига и анимации",
