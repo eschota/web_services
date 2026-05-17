@@ -9080,6 +9080,7 @@ async def _blueprint_file_response(
     return await _proxy_model_file(source_url, public_filename, as_attachment=False)
 
 
+@app.head("/api/task/{task_id}/blueprint/skeleton.json")
 @app.get("/api/task/{task_id}/blueprint/skeleton.json")
 async def api_proxy_blueprint_skeleton(
     task_id: str,
@@ -9094,6 +9095,7 @@ async def api_proxy_blueprint_skeleton(
     )
 
 
+@app.head("/api/task/{task_id}/blueprint/rig-preview.mp4")
 @app.get("/api/task/{task_id}/blueprint/rig-preview.mp4")
 async def api_proxy_blueprint_rig_preview(
     task_id: str,
