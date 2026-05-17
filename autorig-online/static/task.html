@@ -1393,7 +1393,7 @@
         }
 
         .blueprint-cube-hit {
-            z-index: 3;
+            z-index: 6;
             opacity: 0;
         }
 
@@ -1410,6 +1410,11 @@
         .blueprint-cube-hit-right { right: 0; top: 0.58rem; width: 0.94rem; height: 1.76rem; }
         .blueprint-cube-hit-front { left: 1.02rem; bottom: 0.62rem; width: 0.78rem; height: 0.64rem; }
         .blueprint-cube-hit-back { right: 0.62rem; top: 0.2rem; width: 0.82rem; height: 0.64rem; }
+
+        .blueprint-cube-hit-front,
+        .blueprint-cube-hit-back {
+            z-index: 3;
+        }
 
         .blueprint-view-cube[data-active-view="perspective"] .blueprint-cube-center {
             border-color: rgba(167, 139, 250, 0.76);
