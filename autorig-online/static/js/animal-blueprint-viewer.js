@@ -219,10 +219,6 @@ class AnimalBlueprintViewerController {
                 this.setView(button.dataset.blueprintCubeView);
             });
         });
-        this.card.querySelector('[data-blueprint-cube-plane]')?.addEventListener('click', (event) => {
-            event.stopPropagation();
-            this.setView(this.viewFromCubePoint(event));
-        });
         this.card.querySelector('[data-blueprint-cycle]')?.addEventListener('click', () => this.cycleView());
         this.card.querySelector('[data-blueprint-action="fit"]')?.addEventListener('click', () => this.fitCamera());
         this.card.querySelector('[data-blueprint-action="reset"]')?.addEventListener('click', () => this.setView(this.activeView || 'right'));
@@ -281,6 +277,31 @@ class AnimalBlueprintViewerController {
             resetButton.title = resetTitle;
             resetButton.setAttribute('aria-label', resetTitle);
         }
+        if (this.viewCube) {
+            const cubeTitle = bpT('blueprint_cube_title', 'Blueprint view cube');
+            this.viewCube.title = cubeTitle;
+            this.viewCube.setAttribute('aria-label', cubeTitle);
+        }
+        const cubeNext = this.card?.querySelector('[data-blueprint-cycle]');
+        if (cubeNext) {
+            const nextTitle = bpT('blueprint_cube_next_title', 'Next blueprint camera view');
+            cubeNext.title = nextTitle;
+            cubeNext.setAttribute('aria-label', nextTitle);
+        }
+        const cubeTitles = {
+            top: ['blueprint_cube_top_title', 'Top view'],
+            right: ['blueprint_cube_right_title', 'Right view'],
+            bottom: ['blueprint_cube_bottom_title', 'Bottom view'],
+            left: ['blueprint_cube_left_title', 'Left view'],
+        };
+        Object.entries(cubeTitles).forEach(([view, [key, fallback]]) => {
+            const button = this.card?.querySelector(`[data-blueprint-cube-view="${view}"]`);
+            if (!button) return;
+            const title = bpT(key, fallback);
+            button.title = title;
+            button.setAttribute('aria-label', title);
+        });
+        this.syncViewUi(this.activeView || 'right');
     }
 
     async load(task) {
@@ -585,19 +606,6 @@ class AnimalBlueprintViewerController {
         const index = VIEW_ORDER.indexOf(this.activeView);
         const next = VIEW_ORDER[(index + 1) % VIEW_ORDER.length] || 'right';
         this.setView(next);
-    }
-
-    viewFromCubePoint(event) {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const x = (event.clientX - rect.left) / Math.max(1, rect.width);
-        const y = (event.clientY - rect.top) / Math.max(1, rect.height);
-        if (y > 0.24 && y < 0.76) {
-            if (x < 0.42) return 'left';
-            if (x > 0.52) return 'right';
-        }
-        if (y < 0.45) return 'top';
-        if (y > 0.55) return 'bottom';
-        return y < 0.5 ? 'back' : 'front';
     }
 
     syncViewUi(view) {
