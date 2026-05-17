@@ -2952,7 +2952,7 @@
                     <div id="viewer-admin-animal-shadow-row" aria-hidden="true" title="Admin-only theme lighting controls">
                         <span style="font-size: 0.72rem; color: rgba(129,140,248,0.95); font-weight: 600;">Admin: theme lighting</span>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-shadow-opacity">Shadow</label><input type="range" id="viewer-admin-animal-shadow-opacity" min="0.02" max="0.95" step="0.01" value="0.50" /><span id="viewer-admin-animal-shadow-opacity-val" class="viewer-admin-shadow-val">0.50</span></div>
-                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-shadow-soft">Soft</label><input type="range" id="viewer-admin-animal-shadow-soft" min="0" max="80" step="0.1" value="1.0" /><span id="viewer-admin-animal-shadow-soft-val" class="viewer-admin-shadow-val">1.00</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-shadow-soft">Soft</label><input type="range" id="viewer-admin-animal-shadow-soft" min="0" max="8" step="0.05" value="1.0" /><span id="viewer-admin-animal-shadow-soft-val" class="viewer-admin-shadow-val">1.00</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-shadow-sun">Shadow sun</label><input type="range" id="viewer-admin-animal-shadow-sun" min="0" max="5" step="0.05" value="1.00" /><span id="viewer-admin-animal-shadow-sun-val" class="viewer-admin-shadow-val">1.00</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-shadow-y-offset">Y offset</label><input type="range" id="viewer-admin-shadow-y-offset" min="-2" max="2" step="0.001" value="0.005" /><span id="viewer-admin-shadow-y-offset-val" class="viewer-admin-shadow-val">0.005</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-sun-rotation">Sun rot</label><input type="range" id="viewer-admin-animal-sun-rotation" min="-180" max="180" step="1" value="45" /><span id="viewer-admin-animal-sun-rotation-val" class="viewer-admin-shadow-val">45°</span></div>
@@ -8502,6 +8502,9 @@
             let activeViewerTheme = null;
             let viewerThemeUserPicked = false;
             let viewerThemeAutoSelectRequested = false;
+            let appliedTaskViewerThemeSelectionId = '';
+            let viewerSettingsSyncInterval = null;
+            let viewerSettingsSyncInFlight = false;
 
             function _themeNumber(value, fallback) {
                 const n = Number(value);
@@ -8848,11 +8851,10 @@
                 const footprint = Math.max(Number(modelSize?.x || 0), Number(modelSize?.z || 0), 2);
                 const inclinationDeg = clampNumber(viewerState.sunInclination, 4, 88);
                 const reach = Number(modelSize?.y || 2) / Math.max(0.12, Math.tan(inclinationDeg * Math.PI / 180));
-                const configured = Math.max(0, Number(viewerState.groundSize || 0));
                 return clampNumber(
-                    Math.max(footprint * 12, maxDim * 8, reach * 4 + footprint * 4, configured * 1.6, 80),
-                    80,
-                    1400
+                    Math.max(footprint * 3.2, maxDim * 2.8, reach * 1.4 + footprint * 1.8, 3),
+                    3,
+                    90
                 );
             }
 
@@ -8917,6 +8919,7 @@
                 if (data.theme) {
                     window.__activeViewerTheme = data.theme;
                     activeViewerTheme = data.theme;
+                    appliedTaskViewerThemeSelectionId = String(data.theme.theme_id || data.theme.id || '').trim();
                     viewerThemeRuntimeApply(data.theme, 'theme save response');
                 }
                 if (status) status.textContent = 'Saved';
@@ -9039,9 +9042,16 @@
 
             function applyTaskViewerThemeSelection(taskState, reason = 'task selection') {
                 if (viewerThemeUserPicked) return false;
+                const selection = taskState?.viewer_theme_selection || viewerState?.viewer_theme_selection;
+                const selectionId = String(selection?.theme_id || selection?.id || '').trim();
+                const currentThemeId = String(activeViewerTheme?.theme_id || activeViewerTheme?.id || '').trim();
+                if (selectionId && selectionId === appliedTaskViewerThemeSelectionId && selectionId === currentThemeId) {
+                    return false;
+                }
                 const match = findViewerThemeForTaskSelection(taskState);
                 if (!match?.src) return false;
                 applyViewerTheme(match, reason);
+                appliedTaskViewerThemeSelectionId = String(match.theme_id || match.id || selectionId || '').trim();
                 refreshThemeStripPressed(String(match.theme_id || match.id || ''));
                 return true;
             }
@@ -9163,6 +9173,7 @@
                         ev.stopPropagation();
                         viewerThemeUserPicked = true;
                         viewerState.viewer_theme_selection = themeSelectionFromTheme(item, 'user');
+                        appliedTaskViewerThemeSelectionId = String(item.theme_id || item.id || '').trim();
                         applyViewerTheme(item, 'user pick');
                         refreshThemeStripPressed(id);
                         try { await forceSyncToServer(); } catch (_) {}
@@ -9363,14 +9374,20 @@
             window.forceSyncToServer = forceSyncToServer;
             
             function startPeriodicSync() {
+                if (viewerSettingsSyncInterval) {
+                    window.taskDbg('[Viewer] Periodic sync already running');
+                    return;
+                }
                 window.taskDbg('[Viewer] Starting periodic sync (every 3s)');
-                setInterval(async () => {
+                viewerSettingsSyncInterval = setInterval(async () => {
                     if (!mainViewerEnabled || document.hidden) return;
                     if (isDefaultComparisonOn) return; // Don't sync defaults
+                    if (viewerSettingsSyncInFlight) return;
                     markViewerTransformCurrent();
                     const currentState = JSON.stringify(viewerState);
                     if (currentState !== lastSyncedState) {
                         window.taskDbg('[Viewer] State changed, syncing...');
+                        viewerSettingsSyncInFlight = true;
                         try {
                             const resp = await fetch(`/api/task/${taskId}/viewer-settings`, {
                                 method: 'POST',
@@ -9388,6 +9405,8 @@
                             }
                         } catch (e) {
                             console.warn('[Viewer] Periodic sync failed:', e);
+                        } finally {
+                            viewerSettingsSyncInFlight = false;
                         }
                     }
                 }, 3000); // Reduced to 3 seconds
