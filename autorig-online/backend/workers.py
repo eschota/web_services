@@ -959,12 +959,25 @@ async def get_global_queue_status(db: Optional[AsyncSession] = None) -> GlobalQu
         
         # Calculate totals
         available_workers = [w for w in workers if w.available]
-        total_active = sum(w.total_active for w in available_workers)
+        backend_processing = await get_backend_worker_processing_counts(db)
+        backend_created = 0
+        if db:
+            try:
+                created_res = await db.execute(
+                    select(func.count())
+                    .select_from(Task)
+                    .where(Task.status == "created")
+                )
+                backend_created = int(created_res.scalar() or 0)
+            except Exception as e:
+                print(f"[Workers] Could not read backend queued count: {e}")
+
+        total_active = sum(get_worker_effective_active(w, backend_processing) for w in available_workers)
         total_pending = sum(w.total_pending for w in available_workers)
-        total_queue = sum(w.queue_size for w in available_workers)
+        worker_queue = sum(w.queue_size for w in available_workers)
+        total_queue = worker_queue + backend_created
         
-        # Calculate estimated wait time
-        # Formula: (pending + active tasks) * avg_time / num_available_workers
+        # Calculate estimated wait time for a newly submitted task.
         avg_task_time = 900  # 15 minutes default
         if available_workers:
             # Use average from workers that have data
@@ -972,12 +985,17 @@ async def get_global_queue_status(db: Optional[AsyncSession] = None) -> GlobalQu
             if times:
                 avg_task_time = sum(times) / len(times)
         
-        num_workers = len(available_workers) if available_workers else 1
-        tasks_ahead = total_pending + total_active
-        
-        # Each worker can process 1 task at a time (max_concurrent=1)
-        # So wait time = (tasks_ahead / num_workers) * avg_task_time
-        estimated_wait_seconds = int((tasks_ahead / num_workers) * avg_task_time) if num_workers > 0 else 0
+        total_capacity = sum(max(1, w.max_concurrent) for w in available_workers) or 1
+        free_capacity = max(0, total_capacity - total_active)
+        waiting_tasks = total_pending + total_queue
+
+        # If the pool still has free capacity after already queued jobs, a new
+        # task should dispatch immediately instead of showing a fake wait.
+        if free_capacity > waiting_tasks:
+            estimated_wait_seconds = 0
+        else:
+            tasks_ahead = max(0, waiting_tasks - free_capacity + 1)
+            estimated_wait_seconds = int((tasks_ahead / total_capacity) * avg_task_time) if total_capacity > 0 else 0
         
         # Format wait time
         if estimated_wait_seconds < 60:
