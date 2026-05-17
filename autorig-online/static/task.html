@@ -1187,6 +1187,7 @@
             color: #e0f2fe;
             box-shadow: none !important;
             --blueprint-stage-height: auto;
+            --blueprint-stage-offset: 0px;
         }
 
         .blueprint-viewer-card.hidden {
@@ -1476,8 +1477,13 @@
         }
 
         @media (min-width: 1201px) {
+            .blueprint-viewer-card {
+                margin-top: var(--blueprint-stage-offset, 0px);
+            }
+
             .blueprint-viewer-stage {
                 aspect-ratio: auto;
+                min-height: 0;
             }
         }
 
