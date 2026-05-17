@@ -36,6 +36,8 @@ const VIEW_LABELS = {
     perspective: 'Perspective',
 };
 
+const CLASSIC_CAMERA_UP = new THREE.Vector3(0, 1, 0);
+
 const GLTF_TO_SEMANTIC_AXIS_MATRIX = new THREE.Matrix4().set(
     1, 0, 0, 0,
     0, 0, -1, 0,
@@ -355,6 +357,7 @@ class AnimalBlueprintViewerController {
 
         this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
         this.perspectiveCamera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
+        this.perspectiveCamera.up.copy(CLASSIC_CAMERA_UP);
         this.camera = this.orthoCamera;
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
@@ -621,6 +624,7 @@ class AnimalBlueprintViewerController {
         this.syncViewUi(view);
         if (view === 'perspective') {
             this.camera = this.perspectiveCamera;
+            this.camera.up.copy(CLASSIC_CAMERA_UP);
             this.transformControls.camera = this.camera;
             this.controls.object = this.camera;
             this.controls.enabled = true;
@@ -628,7 +632,11 @@ class AnimalBlueprintViewerController {
             this.controls.enablePan = true;
             this.controls.enableZoom = false;
             this.controls.screenSpacePanning = true;
+            this.controls.minPolarAngle = 0;
             this.controls.maxPolarAngle = Math.PI * 0.9;
+            this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+            this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+            this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
             this.fitPerspective();
             if (this.selectedNodeId) this.transformControls.attach(this.nodeMeshes.get(this.selectedNodeId));
             this.setStatus('Perspective edit mode');
@@ -643,6 +651,9 @@ class AnimalBlueprintViewerController {
         this.controls.enablePan = true;
         this.controls.enableZoom = true;
         this.controls.screenSpacePanning = true;
+        this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+        this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+        this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
         this.fitOrthographic(view);
         this.setStatus(`${view[0].toUpperCase()}${view.slice(1)} orthographic edit mode`);
     }
@@ -725,7 +736,7 @@ class AnimalBlueprintViewerController {
         const size = this.bounds.getSize(new THREE.Vector3());
         const distance = Math.max(size.length() * 1.25, 1.6);
         this.perspectiveCamera.position.copy(center).add(new THREE.Vector3(distance, -distance, distance * 0.7));
-        this.perspectiveCamera.up.set(0, 0, 1);
+        this.perspectiveCamera.up.copy(CLASSIC_CAMERA_UP);
         this.perspectiveCamera.lookAt(center);
         this.perspectiveCamera.updateProjectionMatrix();
         if (this.controls) {
