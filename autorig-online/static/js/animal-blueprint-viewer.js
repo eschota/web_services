@@ -614,12 +614,34 @@ class AnimalBlueprintViewerController {
         }
         if (this.viewCube) {
             this.viewCube.dataset.activeView = view;
+            const cubeTitle = bpT('blueprint_cube_title', 'Blueprint view cube');
+            this.viewCube.title = cubeTitle;
+            this.viewCube.setAttribute('aria-label', cubeTitle);
         }
         if (this.viewCubeLabel) {
             this.viewCubeLabel.textContent = bpT(`blueprint_view_${view}`, VIEW_LABELS[view] || 'Right');
         }
+        const cubeNext = this.card.querySelector('[data-blueprint-cycle]');
+        if (cubeNext) {
+            const nextTitle = bpT('blueprint_cube_next_title', 'Next blueprint camera view');
+            cubeNext.title = nextTitle;
+            cubeNext.setAttribute('aria-label', nextTitle);
+        }
+        const cubeTitles = {
+            top: ['blueprint_cube_top_title', 'Top view'],
+            right: ['blueprint_cube_right_title', 'Right view'],
+            bottom: ['blueprint_cube_bottom_title', 'Bottom view'],
+            left: ['blueprint_cube_left_title', 'Left view'],
+        };
         this.card.querySelectorAll('[data-blueprint-cube-view]').forEach((button) => {
-            button.setAttribute('aria-pressed', button.dataset.blueprintCubeView === view ? 'true' : 'false');
+            const buttonView = button.dataset.blueprintCubeView;
+            const [key, fallback] = cubeTitles[buttonView] || [];
+            if (key) {
+                const title = bpT(key, fallback);
+                button.title = title;
+                button.setAttribute('aria-label', title);
+            }
+            button.setAttribute('aria-pressed', buttonView === view ? 'true' : 'false');
         });
     }
 
