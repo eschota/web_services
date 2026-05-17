@@ -1569,12 +1569,13 @@ const App = {
 
             // Update values
             activeEl.textContent = data.total_active;
-            pendingEl.textContent = data.total_pending;
+            const queued = Number(data.total_queue ?? data.total_pending ?? 0);
+            pendingEl.textContent = queued;
             waitEl.textContent = formatWait(data.estimated_wait_seconds);
             serversEl.textContent = `${data.available_workers}/${data.total_workers}`;
             
             // Add warning class if queue is long
-            if (data.total_pending > 5) {
+            if (queued > 5) {
                 pendingEl.classList.add('warning');
             } else {
                 pendingEl.classList.remove('warning');

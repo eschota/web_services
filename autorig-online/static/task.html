@@ -7362,7 +7362,8 @@
                     const data = await response.json();
                     
                     activeEl.textContent = data.total_active;
-                    pendingEl.textContent = data.total_pending;
+                    const queued = Number(data.total_queue ?? data.total_pending ?? 0);
+                    pendingEl.textContent = queued;
                     const s = Number(data.estimated_wait_seconds || 0);
                     if (s < 60) {
                         waitEl.textContent = t('queue_wait_lt1min');
@@ -7377,7 +7378,7 @@
                     serversEl.textContent = `${data.available_workers}/${data.total_workers}`;
                     
                     // Color coding
-                    if (data.total_pending > 5) {
+                    if (queued > 5) {
                         pendingEl.classList.add('warning');
                     } else {
                         pendingEl.classList.remove('warning');
@@ -7390,7 +7391,7 @@
                     }
                     window.__taskPerf?.measureEnd('TaskPage', 'loadQueueStatus', {
                         active: Number(data.total_active || 0),
-                        pending: Number(data.total_pending || 0)
+                        pending: queued
                     });
                 } catch (error) {
                     console.error('Queue status error:', error);
