@@ -623,7 +623,12 @@ class AnimalBlueprintViewerController {
     async retarget() {
         if (!this.task || !this.dirty || !this.retargetBtn) return;
         const detection = this.task.rig_v2_animal_detection || {};
-        const animalType = detection.animal_type || detection.animal_type_string || detection.candidate_animal_type_string;
+        const animalType = this.task.animal_type
+            || this.task.rig_type
+            || detection.animal_type
+            || detection.animal_type_string
+            || detection.selected_type_string
+            || detection.candidate_animal_type_string;
         if (!this.task.input_url || !animalType) {
             this.setStatus('Retarget requires input URL and animal type');
             return;

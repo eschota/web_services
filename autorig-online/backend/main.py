@@ -4147,9 +4147,32 @@ async def api_get_task(
         rig_v2_animal_detection = None
         viewer_theme_selection = None
 
+    def _task_response_animal_type(detection: Optional[dict]) -> Optional[str]:
+        if not isinstance(detection, dict):
+            return None
+        for key in (
+            "animal_type",
+            "animal_type_string",
+            "selected_type_string",
+            "candidate_animal_type_string",
+            "selected_animal_type",
+            "selected_animal_type_string",
+        ):
+            value = str(detection.get(key) or "").strip().lower()
+            if value:
+                return value
+        first_result = detection.get("first_result")
+        if isinstance(first_result, dict):
+            for key in ("animal_type", "animal_type_string"):
+                value = str(first_result.get(key) or "").strip().lower()
+                if value:
+                    return value
+        return None
+
     is_admin_viewer = bool(user and is_admin_email(user.email))
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
     blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
+    response_animal_type = _task_response_animal_type(rig_v2_animal_detection)
 
     return TaskStatusResponse(
         task_id=task.id,
@@ -4167,6 +4190,8 @@ async def api_get_task(
         blueprint_rig_preview_url=blueprint_rig_preview_url,
         input_url=task.input_url,
         input_type=task.input_type,
+        animal_type=response_animal_type,
+        rig_type=response_animal_type,
         rig_v2_animal_detection=rig_v2_animal_detection,
         viewer_theme_selection=viewer_theme_selection,
         fbx_glb_output_url=task.fbx_glb_output_url,

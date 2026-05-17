@@ -61,6 +61,8 @@ class TaskStatusResponse(BaseModel):
     # Input URL (for Free3D models viewer loads directly from this)
     input_url: Optional[str] = None
     input_type: Optional[str] = None
+    animal_type: Optional[str] = None
+    rig_type: Optional[str] = None
     # FBX -> GLB pre-conversion (only when input was .fbx)
     fbx_glb_output_url: Optional[str] = None
     fbx_glb_model_name: Optional[str] = None
