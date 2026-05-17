@@ -2422,6 +2422,13 @@
                     </div>
                     <div id="viewer-admin-animal-shadow-row" aria-hidden="true" title="Admin-only theme lighting controls">
                         <span style="font-size: 0.72rem; color: rgba(129,140,248,0.95); font-weight: 600;">Admin: theme lighting</span>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-shadow-opacity">Shadow</label><input type="range" id="viewer-admin-animal-shadow-opacity" min="0.02" max="0.95" step="0.01" value="0.50" /><span id="viewer-admin-animal-shadow-opacity-val" class="viewer-admin-shadow-val">0.50</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-shadow-soft">Soft</label><input type="range" id="viewer-admin-animal-shadow-soft" min="0" max="80" step="0.1" value="1.0" /><span id="viewer-admin-animal-shadow-soft-val" class="viewer-admin-shadow-val">1.00</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-shadow-sun">Shadow sun</label><input type="range" id="viewer-admin-animal-shadow-sun" min="0" max="5" step="0.05" value="1.00" /><span id="viewer-admin-animal-shadow-sun-val" class="viewer-admin-shadow-val">1.00</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-shadow-y-offset">Y offset</label><input type="range" id="viewer-admin-shadow-y-offset" min="-2" max="2" step="0.001" value="0.005" /><span id="viewer-admin-shadow-y-offset-val" class="viewer-admin-shadow-val">0.005</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-sun-rotation">Sun rot</label><input type="range" id="viewer-admin-animal-sun-rotation" min="-180" max="180" step="1" value="45" /><span id="viewer-admin-animal-sun-rotation-val" class="viewer-admin-shadow-val">45°</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-sun-inclination">Sun inc</label><input type="range" id="viewer-admin-animal-sun-inclination" min="0" max="90" step="1" value="45" /><span id="viewer-admin-animal-sun-inclination-val" class="viewer-admin-shadow-val">45°</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-sun-intensity">Sun power</label><input type="range" id="viewer-admin-sun-intensity" min="0" max="5" step="0.05" value="2" /><span id="viewer-admin-sun-intensity-val" class="viewer-admin-shadow-val">2.00</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-env-ibl">Env IBL</label><input type="range" id="viewer-admin-env-ibl" min="0" max="10" step="0.01" value="1" /><span id="viewer-admin-env-ibl-val" class="viewer-admin-shadow-val">1.00</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-reflect">Reflect</label><input type="range" id="viewer-admin-reflect" min="0" max="10" step="0.01" value="3" /><span id="viewer-admin-reflect-val" class="viewer-admin-shadow-val">3.00</span></div>
                         <button type="button" class="btn btn-primary" id="viewer-admin-theme-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Save theme</button>
@@ -7625,6 +7632,10 @@
                 groundSize: 100.0,
                 shadowIntensity: 0.5,
                 shadowRadius: 1.0,
+                shadow_opacity_float: 0.5,
+                shadow_softness_float: 1.0,
+                shadow_light_intensity_float: 1.0,
+                shadow_y_offset_float: 0.005,
                 sunRotation: 45.0,
                 sunInclination: 45.0,
                 timeOfDay: 12.0,
@@ -7782,6 +7793,10 @@
                         viewerState.groundSize = settings.groundSize !== undefined ? settings.groundSize : 100.0;
                         viewerState.shadowIntensity = settings.shadowIntensity !== undefined ? settings.shadowIntensity : 0.5;
                         viewerState.shadowRadius = settings.shadowRadius !== undefined ? settings.shadowRadius : 1.0;
+                        viewerState.shadow_opacity_float = settings.shadow_opacity_float !== undefined ? settings.shadow_opacity_float : viewerState.shadowIntensity;
+                        viewerState.shadow_softness_float = settings.shadow_softness_float !== undefined ? settings.shadow_softness_float : viewerState.shadowRadius;
+                        viewerState.shadow_light_intensity_float = settings.shadow_light_intensity_float !== undefined ? settings.shadow_light_intensity_float : 1.0;
+                        viewerState.shadow_y_offset_float = settings.shadow_y_offset_float !== undefined ? settings.shadow_y_offset_float : 0.005;
                         viewerState.sunRotation = settings.sunRotation !== undefined ? settings.sunRotation : 45.0;
                         viewerState.sunInclination = settings.sunInclination !== undefined ? settings.sunInclination : 45.0;
                         viewerState.timeOfDay = settings.timeOfDay !== undefined ? settings.timeOfDay : 12.0;
@@ -8157,6 +8172,171 @@
                 return true;
             }
 
+            function setViewerThemeSlider(id, value, decimals = 2, suffix = '') {
+                const el = document.getElementById(id);
+                const n = _themeNumber(value, null);
+                if (el && n !== null) el.value = String(n);
+                const valEl = document.getElementById(`${id}-val`);
+                if (valEl && n !== null) valEl.textContent = `${Number(n).toFixed(decimals)}${suffix}`;
+            }
+
+            function readViewerThemeSliderNumber(id, fallback) {
+                const el = document.getElementById(id);
+                return _themeNumber(el?.value, fallback);
+            }
+
+            function syncViewerAdminThemeControlsFromState() {
+                setViewerThemeSlider('viewer-admin-animal-shadow-opacity', viewerState.shadow_opacity_float ?? viewerState.shadowIntensity, 2);
+                setViewerThemeSlider('viewer-admin-animal-shadow-soft', viewerState.shadow_softness_float ?? viewerState.shadowRadius, 2);
+                setViewerThemeSlider('viewer-admin-animal-shadow-sun', viewerState.shadow_light_intensity_float, 2);
+                setViewerThemeSlider('viewer-admin-shadow-y-offset', viewerState.shadow_y_offset_float, 3);
+                setViewerThemeSlider('viewer-admin-animal-sun-rotation', viewerState.sunRotation, 0, '°');
+                setViewerThemeSlider('viewer-admin-animal-sun-inclination', viewerState.sunInclination, 0, '°');
+                setViewerThemeSlider('viewer-admin-sun-intensity', viewerState.mainLightIntensity, 2);
+                setViewerThemeSlider('viewer-admin-env-ibl', viewerState.envIntensity, 2);
+                setViewerThemeSlider('viewer-admin-reflect', viewerState.reflectionIntensity, 2);
+            }
+
+            function getViewerShadowYOffset() {
+                return _themeNumber(viewerState.shadow_y_offset_float, 0.005);
+            }
+
+            function collectCurrentViewerThemeSettings() {
+                const active = window.__activeViewerTheme || activeViewerTheme || {};
+                const c = camera || {};
+                const ctl = controls || {};
+                const camState = viewerState.camera || {};
+                return {
+                    theme_name: active.theme_name || active.theme_id || active.id || 'Viewer Theme',
+                    theme_short_description: active.theme_short_description || '',
+                    semantic_tags: Array.isArray(active.semantic_tags) ? active.semantic_tags : [],
+                    plane_color: document.getElementById('animal-viewer-ground-color')?.value || viewerState.groundColor || '#222222',
+                    camera_transform: {
+                        position: c.position ? { x: c.position.x, y: c.position.y, z: c.position.z } : camState.position,
+                        target: ctl.target ? { x: ctl.target.x, y: ctl.target.y, z: ctl.target.z } : camState.target,
+                        fov: c.fov || camState.fov || 45,
+                    },
+                    shadow_settings: {
+                        opacity: readViewerThemeSliderNumber('viewer-admin-animal-shadow-opacity', viewerState.shadow_opacity_float ?? viewerState.shadowIntensity),
+                        softness: readViewerThemeSliderNumber('viewer-admin-animal-shadow-soft', viewerState.shadow_softness_float ?? viewerState.shadowRadius),
+                        sun_multiplier: readViewerThemeSliderNumber('viewer-admin-animal-shadow-sun', viewerState.shadow_light_intensity_float),
+                        shadow_y_offset: readViewerThemeSliderNumber('viewer-admin-shadow-y-offset', viewerState.shadow_y_offset_float),
+                    },
+                    environment_settings: {
+                        intensity: readViewerThemeSliderNumber('viewer-admin-env-ibl', viewerState.envIntensity),
+                        reflection_intensity: readViewerThemeSliderNumber('viewer-admin-reflect', viewerState.reflectionIntensity),
+                    },
+                    sun_settings: {
+                        rotation: readViewerThemeSliderNumber('viewer-admin-animal-sun-rotation', viewerState.sunRotation),
+                        inclination: readViewerThemeSliderNumber('viewer-admin-animal-sun-inclination', viewerState.sunInclination),
+                        intensity: readViewerThemeSliderNumber('viewer-admin-sun-intensity', viewerState.mainLightIntensity),
+                    },
+                };
+            }
+
+            async function saveActiveViewerThemeSettings() {
+                const status = document.getElementById('viewer-admin-theme-save-status');
+                const active = window.__activeViewerTheme || activeViewerTheme;
+                const id = active && (active.theme_id || active.id);
+                if (!id) {
+                    if (status) status.textContent = 'No active theme';
+                    return;
+                }
+                const isAdmin = await ensureViewerAdmin();
+                if (!isAdmin) {
+                    if (status) status.textContent = 'Admin only';
+                    return;
+                }
+                if (status) status.textContent = 'Saving...';
+                const resp = await fetch(`/api/admin/viewer-themes/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collectCurrentViewerThemeSettings()),
+                });
+                if (!resp.ok) {
+                    const data = await resp.json().catch(() => ({}));
+                    if (status) status.textContent = data.detail || `HTTP ${resp.status}`;
+                    return;
+                }
+                const data = await resp.json().catch(() => ({}));
+                if (data.theme) {
+                    window.__activeViewerTheme = data.theme;
+                    activeViewerTheme = data.theme;
+                    viewerThemeRuntimeApply(data.theme, 'theme save response');
+                }
+                if (status) status.textContent = 'Saved';
+                setTimeout(() => { if (status) status.textContent = ''; }, 1800);
+            }
+
+            let viewerAdminThemePanelWired = false;
+
+            function wireViewerAdminThemePanel() {
+                if (viewerAdminThemePanelWired) return;
+                const row = document.getElementById('viewer-admin-animal-shadow-row');
+                if (!row) return;
+                viewerAdminThemePanelWired = true;
+
+                const onInput = () => {
+                    viewerState.shadow_opacity_float = readViewerThemeSliderNumber('viewer-admin-animal-shadow-opacity', viewerState.shadow_opacity_float ?? viewerState.shadowIntensity);
+                    viewerState.shadowIntensity = viewerState.shadow_opacity_float;
+                    viewerState.shadow_softness_float = readViewerThemeSliderNumber('viewer-admin-animal-shadow-soft', viewerState.shadow_softness_float ?? viewerState.shadowRadius);
+                    viewerState.shadowRadius = viewerState.shadow_softness_float;
+                    viewerState.shadow_light_intensity_float = readViewerThemeSliderNumber('viewer-admin-animal-shadow-sun', viewerState.shadow_light_intensity_float);
+                    viewerState.shadow_y_offset_float = readViewerThemeSliderNumber('viewer-admin-shadow-y-offset', viewerState.shadow_y_offset_float);
+                    viewerState.sunRotation = readViewerThemeSliderNumber('viewer-admin-animal-sun-rotation', viewerState.sunRotation);
+                    viewerState.sunInclination = readViewerThemeSliderNumber('viewer-admin-animal-sun-inclination', viewerState.sunInclination);
+                    viewerState.mainLightIntensity = readViewerThemeSliderNumber('viewer-admin-sun-intensity', viewerState.mainLightIntensity);
+                    viewerState.envIntensity = readViewerThemeSliderNumber('viewer-admin-env-ibl', viewerState.envIntensity);
+                    viewerState.reflectionIntensity = readViewerThemeSliderNumber('viewer-admin-reflect', viewerState.reflectionIntensity);
+                    syncViewerAdminThemeControlsFromState();
+                    applyViewerState();
+                    applySceneEnvironmentIntensity();
+                    updateSunShadowFocus(true);
+                };
+
+                [
+                    'viewer-admin-animal-shadow-opacity',
+                    'viewer-admin-animal-shadow-soft',
+                    'viewer-admin-animal-shadow-sun',
+                    'viewer-admin-shadow-y-offset',
+                    'viewer-admin-animal-sun-rotation',
+                    'viewer-admin-animal-sun-inclination',
+                    'viewer-admin-sun-intensity',
+                    'viewer-admin-env-ibl',
+                    'viewer-admin-reflect',
+                ].forEach((id) => {
+                    document.getElementById(id)?.addEventListener('input', onInput);
+                });
+
+                document.getElementById('viewer-admin-theme-save-btn')?.addEventListener('click', () => {
+                    saveActiveViewerThemeSettings().catch((e) => {
+                        const status = document.getElementById('viewer-admin-theme-save-status');
+                        if (status) status.textContent = e?.message || 'Save failed';
+                    });
+                });
+
+                document.getElementById('viewer-admin-default-save-btn')?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    saveDefaultViewerSettings('theme-admin-row');
+                });
+            }
+
+            async function syncViewerAdminThemePanelVisibility() {
+                const row = document.getElementById('viewer-admin-animal-shadow-row');
+                if (!row) return;
+                let isAdmin = false;
+                try {
+                    isAdmin = await ensureViewerAdmin();
+                } catch (_) {}
+                const show = !!isAdmin && !document.body.classList.contains('webapp-mode');
+                row.setAttribute('aria-hidden', show ? 'false' : 'true');
+                row.classList.toggle('is-visible', show);
+                if (show) {
+                    wireViewerAdminThemePanel();
+                    syncViewerAdminThemeControlsFromState();
+                }
+            }
+
             function viewerThemeRuntimeApply(theme, reason = '') {
                 if (!theme) return;
                 const shadow = theme.shadow_settings || {};
@@ -8164,8 +8344,14 @@
                 const env = theme.environment_settings || {};
                 const plane = String(theme.plane_color || '').trim();
                 if (plane) viewerState.groundColor = plane;
-                if (shadow.opacity !== undefined) viewerState.shadow_opacity_float = _themeNumber(shadow.opacity, viewerState.shadow_opacity_float || 0.5);
-                if (shadow.softness !== undefined) viewerState.shadowRadius = _themeNumber(shadow.softness, viewerState.shadowRadius || 1.0);
+                if (shadow.opacity !== undefined) {
+                    viewerState.shadow_opacity_float = _themeNumber(shadow.opacity, viewerState.shadow_opacity_float || 0.5);
+                    viewerState.shadowIntensity = viewerState.shadow_opacity_float;
+                }
+                if (shadow.softness !== undefined) {
+                    viewerState.shadow_softness_float = _themeNumber(shadow.softness, viewerState.shadow_softness_float || viewerState.shadowRadius || 1.0);
+                    viewerState.shadowRadius = viewerState.shadow_softness_float;
+                }
                 if (shadow.sun_multiplier !== undefined) viewerState.shadow_light_intensity_float = _themeNumber(shadow.sun_multiplier, viewerState.shadow_light_intensity_float || 1.0);
                 if (shadow.shadow_y_offset !== undefined) viewerState.shadow_y_offset_float = _themeNumber(shadow.shadow_y_offset, viewerState.shadow_y_offset_float || 0.0);
                 if (sun.rotation !== undefined) viewerState.sunRotation = _themeNumber(sun.rotation, viewerState.sunRotation);
@@ -8174,7 +8360,7 @@
                 if (env.intensity !== undefined) viewerState.envIntensity = _themeNumber(env.intensity, viewerState.envIntensity);
                 if (env.reflection_intensity !== undefined) viewerState.reflectionIntensity = _themeNumber(env.reflection_intensity, viewerState.reflectionIntensity);
                 applyViewerThemeCameraTransform(theme.camera_transform || {}, reason || 'theme');
-                try { applyViewerState(); updateViewerUI(); } catch (_) {}
+                try { applyViewerState(); updateViewerUI(); syncViewerAdminThemeControlsFromState(); } catch (_) {}
                 try { applySceneEnvironmentIntensity(); } catch (_) {}
                 window.taskDbg?.('[ViewerTheme] applied settings', { id: theme.theme_id || theme.id, reason });
             }
@@ -8631,7 +8817,7 @@
                         viewerControls.setGroundParams({ size: viewerState.groundSize });
                         if (groundPlaneMesh.material) {
                             groundPlaneMesh.material.color?.set?.(0x000000);
-                            groundPlaneMesh.material.opacity = Math.max(0.08, Math.min(0.55, _themeNumber(viewerState.shadowIntensity, 0.32)));
+                            groundPlaneMesh.material.opacity = Math.max(0.02, Math.min(0.95, _themeNumber(viewerState.shadow_opacity_float ?? viewerState.shadowIntensity, 0.32)));
                             groundPlaneMesh.material.needsUpdate = true;
                         }
                     } else {
@@ -8772,6 +8958,7 @@
                 if (mainVal) mainVal.textContent = Number(viewerState.mainLightIntensity).toFixed(3);
                 if (envVal) envVal.textContent = Number(viewerState.envIntensity).toFixed(3);
                 if (reflectVal) reflectVal.textContent = Number(viewerState.reflectionIntensity).toFixed(3);
+                syncViewerAdminThemeControlsFromState();
 
                 // Update ground controls
                 const groundPicker = document.getElementById('ground-color-picker');
@@ -8876,7 +9063,7 @@
                     currentModel.updateMatrixWorld(true);
                     if (groundPlaneMesh) {
                         const groundedBox = new THREE.Box3().setFromObject(currentModel);
-                        groundPlaneMesh.position.y = Number.isFinite(groundedBox.min.y) ? groundedBox.min.y - 0.005 : 0;
+                        groundPlaneMesh.position.y = Number.isFinite(groundedBox.min.y) ? groundedBox.min.y - getViewerShadowYOffset() : 0;
                     }
                 } catch (error) {
                     if (!window.__snapGroundWarningShown) {
@@ -9264,7 +9451,7 @@
                         box.getCenter(focus);
                         box.getSize(modelSize);
                         if (groundPlaneMesh) {
-                            groundPlaneMesh.position.y = Number.isFinite(box.min.y) ? box.min.y - 0.005 : 0;
+                            groundPlaneMesh.position.y = Number.isFinite(box.min.y) ? box.min.y - getViewerShadowYOffset() : 0;
                         }
                         hasFocus = true;
                     } catch (error) {
@@ -9542,6 +9729,7 @@
                     if (ambientLight) ambientLight.intensity = LIGHTING_CONFIG.ambientIntensity * val;
                     if (hemiLight) hemiLight.intensity = LIGHTING_CONFIG.hemiIntensity * val;
                     document.getElementById('light-main-val').textContent = val.toFixed(3);
+                    syncViewerAdminThemeControlsFromState();
                 });
                 
                 envSlider?.addEventListener('input', (e) => {
@@ -9553,6 +9741,7 @@
                         scene.environmentIntensity = LIGHTING_CONFIG.envIntensity * val;
                     }
                     document.getElementById('light-env-val').textContent = val.toFixed(3);
+                    syncViewerAdminThemeControlsFromState();
                 });
                 
                 reflectSlider?.addEventListener('input', (e) => {
@@ -9568,6 +9757,7 @@
                         });
                     }
                     document.getElementById('light-reflect-val').textContent = val.toFixed(3);
+                    syncViewerAdminThemeControlsFromState();
                 });
 
                 document.getElementById('bloom-strength-slider')?.addEventListener('input', (e) => {
@@ -9622,7 +9812,9 @@
                     if (sunLight && sunLight.shadow) {
                         sunLight.shadow.radius = val;
                     }
+                    viewerState.shadow_softness_float = val;
                     document.getElementById('shadow-radius-val').textContent = val.toFixed(3);
+                    syncViewerAdminThemeControlsFromState();
                 });
 
                 document.getElementById('lighting-time-slider')?.addEventListener('input', (e) => {
@@ -9643,11 +9835,13 @@
                 document.getElementById('sun-rotation-slider')?.addEventListener('input', (e) => {
                     viewerState.sunRotation = parseFloat(e.target.value);
                     applyViewerState();
+                    syncViewerAdminThemeControlsFromState();
                 });
 
                 document.getElementById('sun-inclination-slider')?.addEventListener('input', (e) => {
                     viewerState.sunInclination = parseFloat(e.target.value);
                     applyViewerState();
+                    syncViewerAdminThemeControlsFromState();
                 });
 
                 document.getElementById('ambient-color-picker')?.addEventListener('input', (e) => {
@@ -9994,7 +10188,7 @@
                 const groundGeo = new THREE.PlaneGeometry(200, 200);
                 const groundMat = new THREE.ShadowMaterial({
                     color: 0x000000,
-                    opacity: Math.max(0.08, Math.min(0.55, _themeNumber(viewerState.shadowIntensity, 0.32))),
+                    opacity: Math.max(0.02, Math.min(0.95, _themeNumber(viewerState.shadow_opacity_float ?? viewerState.shadowIntensity, 0.32))),
                     transparent: true,
                     depthWrite: false,
                 });
@@ -12027,6 +12221,7 @@
                     
                     window.taskDbg('[Viewer] Admin Z button added to settings area');
                 });
+                syncViewerAdminThemePanelVisibility().catch(() => {});
             }
 
             // Track if current model is from Free3D (needs rotation fix)

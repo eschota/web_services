@@ -13,6 +13,12 @@
       "z": -1.9152128555350785
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "alien_planet.jpg",
   "plane_color": "#5e4d6f",
   "schema_version": 1,
