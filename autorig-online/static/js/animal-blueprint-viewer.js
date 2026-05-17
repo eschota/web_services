@@ -159,7 +159,6 @@ class AnimalBlueprintViewerController {
         this.viewCube = document.getElementById('blueprint-view-cube');
         this.viewCubeLabel = document.getElementById('blueprint-view-cube-label');
         this.heightTarget = document.getElementById('model-viewer-container');
-        this.heightWrap = document.getElementById('model-viewer-wrap');
         this.task = null;
         this.loadedTaskId = null;
         this.loadedSkeletonUrl = null;
@@ -241,17 +240,7 @@ class AnimalBlueprintViewerController {
 
     syncStageHeight() {
         if (!this.card || !this.heightTarget) return;
-        const desktop = window.matchMedia('(min-width: 1201px)').matches;
-        if (!desktop) {
-            this.card.style.removeProperty('--blueprint-stage-height');
-            this.card.style.removeProperty('--blueprint-stage-offset');
-            return;
-        }
         const height = this.heightTarget.getBoundingClientRect().height;
-        const targetTop = this.heightTarget.getBoundingClientRect().top;
-        const wrapTop = this.heightWrap?.getBoundingClientRect().top ?? targetTop;
-        const offset = Math.max(0, targetTop - wrapTop);
-        this.card.style.setProperty('--blueprint-stage-offset', `${Math.round(offset)}px`);
         if (height > 120) {
             this.card.style.setProperty('--blueprint-stage-height', `${Math.round(height)}px`);
             this.resize();
