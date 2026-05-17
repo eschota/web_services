@@ -36,6 +36,31 @@ const VIEW_LABELS = {
     perspective: 'Perspective',
 };
 
+const FRESNEL_VERTEX_SHADER = `
+    varying vec3 vNormalView;
+    varying vec3 vViewDir;
+
+    void main() {
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vNormalView = normalize(normalMatrix * normal);
+        vViewDir = normalize(-mvPosition.xyz);
+        gl_Position = projectionMatrix * mvPosition;
+    }
+`;
+
+const FRESNEL_FRAGMENT_SHADER = `
+    varying vec3 vNormalView;
+    varying vec3 vViewDir;
+
+    void main() {
+        float rim = pow(1.0 - abs(dot(normalize(vNormalView), normalize(vViewDir))), 1.8);
+        float alpha = clamp(rim, 0.08, 1.0);
+        vec3 edge = vec3(1.0, 1.0, 1.0);
+        vec3 blue = vec3(0.32, 0.82, 1.0);
+        gl_FragColor = vec4(mix(blue, edge, alpha), alpha);
+    }
+`;
+
 function getTaskId() {
     const raw = new URLSearchParams(window.location.search).get('id') || '';
     return raw.split('?')[0];
@@ -66,21 +91,27 @@ function roleLabel(role) {
     return 'NODE';
 }
 
-function createRoleSprite(THREERef, role, colorHex) {
+function bpT(key, fallback) {
+    if (!key) return fallback || '';
+    const translated = window.t ? window.t(key) : key;
+    return translated && translated !== key ? translated : (fallback || key);
+}
+
+function createRoleTexture(THREERef, role, colorHex, selected = false) {
     const canvas = document.createElement('canvas');
     canvas.width = 160;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
     const color = `#${colorHex.toString(16).padStart(6, '0')}`;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.72)';
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
+    ctx.fillStyle = selected ? 'rgba(14, 116, 144, 0.9)' : 'rgba(2, 6, 23, 0.72)';
+    ctx.strokeStyle = selected ? '#ffffff' : color;
+    ctx.lineWidth = selected ? 5 : 3;
     ctx.beginPath();
     ctx.roundRect(8, 10, 144, 44, 14);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = color;
+    ctx.fillStyle = selected ? '#ffffff' : color;
     ctx.font = '700 22px system-ui, -apple-system, Segoe UI, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -88,11 +119,29 @@ function createRoleSprite(THREERef, role, colorHex) {
 
     const texture = new THREERef.CanvasTexture(canvas);
     texture.colorSpace = THREERef.SRGBColorSpace;
+    return texture;
+}
+
+function createRoleSprite(THREERef, role, colorHex) {
+    const texture = createRoleTexture(THREERef, role, colorHex, false);
     const material = new THREERef.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
     const sprite = new THREERef.Sprite(material);
     sprite.scale.set(0.18, 0.072, 1);
     sprite.renderOrder = 20;
+    sprite.userData.baseScale = sprite.scale.clone();
+    sprite.userData.role = role;
+    sprite.userData.color = colorHex;
     return sprite;
+}
+
+function createBlueprintModelMaterial() {
+    return new THREE.ShaderMaterial({
+        vertexShader: FRESNEL_VERTEX_SHADER,
+        fragmentShader: FRESNEL_FRAGMENT_SHADER,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
 }
 
 class AnimalBlueprintViewerController {
@@ -105,9 +154,11 @@ class AnimalBlueprintViewerController {
         this.selectedEl = document.getElementById('blueprint-selected-node');
         this.coordsEl = document.getElementById('blueprint-coordinates');
         this.retargetBtn = document.getElementById('blueprint-retarget-btn');
+        this.addNodeBtn = document.getElementById('blueprint-add-node-btn');
         this.viewSelect = document.getElementById('blueprint-view-select');
         this.viewCube = document.getElementById('blueprint-view-cube');
         this.viewCubeLabel = document.getElementById('blueprint-view-cube-label');
+        this.heightTarget = document.getElementById('model-viewer-container');
         this.task = null;
         this.loadedTaskId = null;
         this.loadedSkeletonUrl = null;
@@ -115,19 +166,25 @@ class AnimalBlueprintViewerController {
         this.nodes = new Map();
         this.originalPositions = new Map();
         this.nodeMeshes = new Map();
+        this.labelSprites = new Map();
+        this.additionalParents = new Map();
         this.roleByNodeId = new Map();
         this.selectedNodeId = null;
         this.meshes = [];
         this.vertexCloud = [];
         this.activeView = 'right';
         this.draggingNodeId = null;
+        this.additionalNodeSeq = 0;
         this.dirty = false;
         this.initialized = false;
         this.loading = false;
 
         if (!this.card || !this.host) return;
         this.wireButtons();
+        this.wireStageHeight();
+        this.updateLocalizedUi();
         window.addEventListener('taskDataUpdated', (event) => this.syncTask(event.detail));
+        window.addEventListener('languageChanged', () => this.updateLocalizedUi());
     }
 
     syncTask(task) {
@@ -163,9 +220,66 @@ class AnimalBlueprintViewerController {
         this.card.querySelector('[data-blueprint-cycle]')?.addEventListener('click', () => this.cycleView());
         this.card.querySelector('[data-blueprint-action="fit"]')?.addEventListener('click', () => this.fitCamera());
         this.card.querySelector('[data-blueprint-action="reset"]')?.addEventListener('click', () => this.setView(this.activeView || 'right'));
-        this.card.querySelector('[data-blueprint-action="reset-node"]')?.addEventListener('click', () => this.resetSelectedNode());
-        this.card.querySelector('[data-blueprint-action="reset-all"]')?.addEventListener('click', () => this.resetAllNodes());
+        this.addNodeBtn?.addEventListener('click', () => this.addLinkedNode());
         this.retargetBtn?.addEventListener('click', () => this.retarget());
+    }
+
+    wireStageHeight() {
+        this.syncStageHeight();
+        if (!this.heightTarget || !this.card) return;
+        this.heightObserver = new ResizeObserver(() => this.syncStageHeight());
+        this.heightObserver.observe(this.heightTarget);
+        window.addEventListener('resize', () => this.syncStageHeight());
+    }
+
+    syncStageHeight() {
+        if (!this.card || !this.heightTarget) return;
+        const desktop = window.matchMedia('(min-width: 1201px)').matches;
+        if (!desktop) {
+            this.card.style.removeProperty('--blueprint-stage-height');
+            return;
+        }
+        const height = this.heightTarget.getBoundingClientRect().height;
+        if (height > 120) {
+            this.card.style.setProperty('--blueprint-stage-height', `${Math.round(height)}px`);
+            this.resize();
+        }
+    }
+
+    updateLocalizedUi() {
+        const retargetText = bpT('blueprint_retarget_label', 'Retarget Rig Animation');
+        const retargetTitle = bpT(
+            'blueprint_retarget_tooltip',
+            'Creates a new rig and animation task from edited points. Place points at limb tips, not in the middle.',
+        );
+        if (this.retargetBtn) {
+            this.retargetBtn.textContent = retargetText;
+            this.retargetBtn.title = retargetTitle;
+            this.retargetBtn.setAttribute('aria-label', retargetTitle);
+        }
+        if (this.addNodeBtn) {
+            this.addNodeBtn.textContent = bpT('blueprint_add_node_label', 'Add node');
+            const addTitle = bpT('blueprint_add_node_tooltip', 'Add a linked helper point near the selected node.');
+            this.addNodeBtn.title = addTitle;
+            this.addNodeBtn.setAttribute('aria-label', addTitle);
+        }
+        if (this.viewSelect) {
+            const selectTitle = bpT('blueprint_view_select_title', 'Blueprint camera view');
+            this.viewSelect.title = selectTitle;
+            this.viewSelect.setAttribute('aria-label', selectTitle);
+        }
+        const fitButton = this.card?.querySelector('[data-blueprint-action="fit"]');
+        if (fitButton) {
+            const fitTitle = bpT('blueprint_fit_title', 'Fit camera');
+            fitButton.title = fitTitle;
+            fitButton.setAttribute('aria-label', fitTitle);
+        }
+        const resetButton = this.card?.querySelector('[data-blueprint-action="reset"]');
+        if (resetButton) {
+            const resetTitle = bpT('blueprint_reset_title', 'Reset camera');
+            resetButton.title = resetTitle;
+            resetButton.setAttribute('aria-label', resetTitle);
+        }
     }
 
     async load(task) {
@@ -285,17 +399,11 @@ class AnimalBlueprintViewerController {
         this.modelGroup.add(this.model);
         this.meshes = [];
         this.vertexCloud = [];
+        const blueprintMaterial = createBlueprintModelMaterial();
         this.model.traverse((object) => {
             if (!object.isMesh || !object.geometry) return;
             this.meshes.push(object);
-            object.material = new THREE.MeshStandardMaterial({
-                color: 0x7dd3fc,
-                transparent: true,
-                opacity: 0.26,
-                roughness: 0.95,
-                metalness: 0.02,
-                side: THREE.DoubleSide,
-            });
+            object.material = blueprintMaterial;
             const pos = object.geometry.attributes.position;
             if (!pos) return;
             const stride = Math.max(1, Math.ceil(pos.count / 2500));
@@ -313,12 +421,16 @@ class AnimalBlueprintViewerController {
         this.nodes.clear();
         this.originalPositions.clear();
         this.nodeMeshes.clear();
+        this.labelSprites.clear();
+        this.additionalParents.clear();
         this.roleByNodeId.clear();
         this.lineGroup.clear();
         this.nodeGroup.clear();
         this.selectedNodeId = null;
+        this.additionalNodeSeq = 0;
         this.dirty = false;
         this.setRetargetVisible(false);
+        this.setAddNodeVisible(false);
 
         const lines = Array.isArray(this.skeleton?.semantic_lines) ? this.skeleton.semantic_lines : [];
         for (const line of lines) {
@@ -365,6 +477,10 @@ class AnimalBlueprintViewerController {
         sprite.userData.blueprintNodeId = id;
         this.nodeGroup.add(sprite);
         mesh.userData.labelSprite = sprite;
+        mesh.userData.role = role;
+        mesh.userData.color = color;
+        mesh.userData.baseScale = mesh.scale.clone();
+        this.labelSprites.set(id, sprite);
     }
 
     redrawLines() {
@@ -401,6 +517,24 @@ class AnimalBlueprintViewerController {
             });
             const line = new THREE.Line(geometry, material);
             line.renderOrder = 10;
+            this.lineGroup.add(line);
+        }
+        for (const [nodeId, parentId] of this.additionalParents.entries()) {
+            const parent = this.nodes.get(String(parentId));
+            const child = this.nodes.get(String(nodeId));
+            if (!parent || !child) continue;
+            const geometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(parent.position[0], parent.position[1], parent.position[2]),
+                new THREE.Vector3(child.position[0], child.position[1], child.position[2]),
+            ]);
+            const material = new THREE.LineBasicMaterial({
+                color: roleColor('accessory'),
+                transparent: true,
+                opacity: 0.78,
+                depthTest: false,
+            });
+            const line = new THREE.Line(geometry, material);
+            line.renderOrder = 11;
             this.lineGroup.add(line);
         }
     }
@@ -460,7 +594,7 @@ class AnimalBlueprintViewerController {
             this.viewCube.dataset.activeView = view;
         }
         if (this.viewCubeLabel) {
-            this.viewCubeLabel.textContent = VIEW_LABELS[view] || 'Right';
+            this.viewCubeLabel.textContent = bpT(`blueprint_view_${view}`, VIEW_LABELS[view] || 'Right');
         }
         this.card.querySelectorAll('[data-blueprint-cube-view]').forEach((button) => {
             button.setAttribute('aria-pressed', button.dataset.blueprintCubeView === view ? 'true' : 'false');
@@ -515,21 +649,27 @@ class AnimalBlueprintViewerController {
         if (!this.renderer || !this.skeleton) return;
         this.updatePointer(event);
         this.raycaster.setFromCamera(this.pointer, this.camera);
-        const hits = this.raycaster.intersectObjects([...this.nodeMeshes.values()], false);
+        const hits = this.raycaster.intersectObjects(this.pickableObjects(), false);
         if (!hits.length) return;
         const nodeId = hits[0].object.userData.blueprintNodeId;
         if (!nodeId) return;
         this.updateSelection(nodeId);
+        const mesh = this.nodeMeshes.get(String(nodeId));
+        if (!mesh) return;
         if (this.activeView === 'perspective') {
-            this.transformControls.attach(hits[0].object);
+            this.transformControls.attach(mesh);
             return;
         }
         this.draggingNodeId = nodeId;
         this.controls.enabled = false;
         const normal = new THREE.Vector3();
         this.camera.getWorldDirection(normal);
-        this.dragPlane.setFromNormalAndCoplanarPoint(normal, hits[0].object.position);
+        this.dragPlane.setFromNormalAndCoplanarPoint(normal, mesh.position);
         event.preventDefault();
+    }
+
+    pickableObjects() {
+        return [...this.nodeMeshes.values(), ...this.labelSprites.values()];
     }
 
     onPointerMove(event) {
@@ -605,20 +745,47 @@ class AnimalBlueprintViewerController {
     }
 
     updateSelection(nodeId) {
-        this.selectedNodeId = nodeId;
-        if (!nodeId) {
+        const nextNodeId = nodeId ? String(nodeId) : null;
+        const changed = this.selectedNodeId !== nextNodeId;
+        this.selectedNodeId = nextNodeId;
+        if (changed) this.refreshSelectionStyle();
+        if (!nextNodeId) {
             this.selectedEl.textContent = '';
             this.coordsEl.textContent = '';
             this.transformControls?.detach();
+            this.setAddNodeVisible(false);
             return;
         }
-        const node = this.nodes.get(String(nodeId));
+        const node = this.nodes.get(nextNodeId);
         if (!node) return;
         this.selectedEl.textContent = `${node.role} / ${node.id}`;
         this.coordsEl.textContent = node.position.map((v) => Number(v).toFixed(3)).join(' / ');
+        this.setAddNodeVisible(true);
         if (this.activeView === 'perspective') {
-            const mesh = this.nodeMeshes.get(String(nodeId));
+            const mesh = this.nodeMeshes.get(nextNodeId);
             if (mesh) this.transformControls.attach(mesh);
+        }
+    }
+
+    refreshSelectionStyle() {
+        for (const [id, mesh] of this.nodeMeshes.entries()) {
+            const selected = String(id) === String(this.selectedNodeId);
+            const baseScale = mesh.userData.baseScale || new THREE.Vector3(1, 1, 1);
+            mesh.scale.copy(baseScale).multiplyScalar(selected ? 1.6 : 1);
+            if (mesh.material?.emissiveIntensity !== undefined) {
+                mesh.material.emissiveIntensity = selected ? 0.95 : 0.28;
+            }
+            const sprite = this.labelSprites.get(String(id));
+            if (!sprite?.material) continue;
+            const role = sprite.userData.role || mesh.userData.role || 'node';
+            const color = sprite.userData.color || mesh.userData.color || roleColor(role);
+            const oldMap = sprite.material.map;
+            sprite.material.map = createRoleTexture(THREE, role, color, selected);
+            sprite.material.needsUpdate = true;
+            oldMap?.dispose?.();
+            const spriteBase = sprite.userData.baseScale || new THREE.Vector3(0.18, 0.072, 1);
+            sprite.scale.copy(spriteBase).multiplyScalar(selected ? 1.22 : 1);
+            sprite.renderOrder = selected ? 30 : 20;
         }
     }
 
@@ -638,6 +805,39 @@ class AnimalBlueprintViewerController {
         this.retargetBtn?.classList.toggle('is-visible', Boolean(visible));
     }
 
+    setAddNodeVisible(visible) {
+        this.addNodeBtn?.classList.toggle('is-visible', Boolean(visible));
+    }
+
+    addLinkedNode() {
+        if (!this.selectedNodeId) return;
+        const parent = this.nodes.get(String(this.selectedNodeId));
+        const parentMesh = this.nodeMeshes.get(String(this.selectedNodeId));
+        if (!parent || !parentMesh) return;
+        const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
+        const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
+        const offset = Math.max(this.modelDiag * 0.055, 0.035);
+        const proposed = parentMesh.position.clone()
+            .addScaledVector(cameraRight, offset)
+            .addScaledVector(cameraUp, offset * 0.35);
+        const snapped = this.nearestVertex(proposed) || proposed;
+        const id = `additional_${String(this.selectedNodeId).replace(/[^A-Za-z0-9_.-]+/g, '_')}_${++this.additionalNodeSeq}`;
+        const position = nodePositionToArray(snapped);
+        this.nodes.set(id, {
+            id,
+            type: 'additional',
+            role: 'additional',
+            position,
+            parentId: String(this.selectedNodeId),
+            additional: true,
+        });
+        this.additionalParents.set(id, String(this.selectedNodeId));
+        this.createNodeMesh(id, 'additional', position);
+        this.redrawLines();
+        this.updateSelection(id);
+        this.updateDirtyState();
+    }
+
     resetSelectedNode() {
         if (!this.selectedNodeId) return;
         const original = this.originalPositions.get(this.selectedNodeId);
@@ -647,6 +847,16 @@ class AnimalBlueprintViewerController {
     resetAllNodes() {
         for (const [id, original] of this.originalPositions.entries()) {
             this.moveNodeTo(id, original);
+        }
+        for (const id of [...this.additionalParents.keys()]) {
+            const mesh = this.nodeMeshes.get(String(id));
+            const sprite = this.labelSprites.get(String(id));
+            mesh?.parent?.remove(mesh);
+            sprite?.parent?.remove(sprite);
+            this.nodes.delete(String(id));
+            this.nodeMeshes.delete(String(id));
+            this.labelSprites.delete(String(id));
+            this.additionalParents.delete(String(id));
         }
         this.updateDirtyState();
     }
@@ -667,6 +877,11 @@ class AnimalBlueprintViewerController {
             counts[role] = (counts[role] || 0) + 1;
             const key = counts[role] === 1 ? role : `${role}_${nodeId || counts[role]}`;
             markers[key] = position.map(Number);
+        }
+        for (const [nodeId, parentId] of this.additionalParents.entries()) {
+            const node = this.nodes.get(String(nodeId));
+            if (!node) continue;
+            markers[`additional:${parentId}:${nodeId}`] = node.position.map(Number);
         }
         return markers;
     }

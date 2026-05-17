@@ -1180,16 +1180,13 @@
         .blueprint-viewer-card {
             width: 100%;
             min-width: 0;
-            align-self: start;
-            border: 1px solid rgba(56, 189, 248, 0.32);
-            background:
-                linear-gradient(rgba(56, 189, 248, 0.055) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(56, 189, 248, 0.055) 1px, transparent 1px),
-                radial-gradient(circle at 30% 0%, rgba(34, 211, 238, 0.16), transparent 34%),
-                linear-gradient(180deg, rgba(5, 25, 62, 0.98), rgba(4, 15, 39, 0.98));
-            background-size: 24px 24px, 24px 24px, auto, auto;
+            align-self: stretch;
+            padding: 0 !important;
+            border: 0 !important;
+            background: transparent !important;
             color: #e0f2fe;
-            box-shadow: 0 18px 48px rgba(3, 7, 18, 0.28);
+            box-shadow: none !important;
+            --blueprint-stage-height: auto;
         }
 
         .blueprint-viewer-card.hidden {
@@ -1208,9 +1205,9 @@
 
         .blueprint-stage-controls {
             top: 0.55rem;
-            right: 0.55rem;
+            left: 0.55rem;
             max-width: calc(100% - 1.1rem);
-            justify-content: flex-end;
+            justify-content: flex-start;
         }
 
         .blueprint-stage-hud {
@@ -1240,12 +1237,19 @@
         .blueprint-viewer-stage {
             position: relative;
             width: 100%;
+            height: var(--blueprint-stage-height, auto);
             aspect-ratio: 1 / 1;
             min-height: 320px;
             overflow: hidden;
             border-radius: 12px;
             border: 1px solid rgba(125, 211, 252, 0.28);
-            background: #061a3a;
+            background:
+                linear-gradient(rgba(56, 189, 248, 0.055) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(56, 189, 248, 0.055) 1px, transparent 1px),
+                radial-gradient(circle at 30% 0%, rgba(34, 211, 238, 0.16), transparent 34%),
+                linear-gradient(180deg, rgba(5, 25, 62, 0.98), rgba(4, 15, 39, 0.98));
+            background-size: 24px 24px, 24px 24px, auto, auto;
+            box-shadow: 0 18px 48px rgba(3, 7, 18, 0.28);
         }
 
         .blueprint-viewer-canvas {
@@ -1286,7 +1290,7 @@
         }
 
         .blueprint-view-select {
-            width: min(8.6rem, 34vw);
+            width: 7.4rem;
             height: 2rem;
             padding: 0 1.8rem 0 0.62rem;
             font-size: 0.7rem;
@@ -1318,107 +1322,79 @@
         }
 
         .blueprint-view-cube {
+            position: absolute;
+            top: 0.55rem;
+            right: 0.55rem;
+            z-index: 6;
+            width: 3.35rem;
+            height: 3.35rem;
+            perspective: 210px;
+            pointer-events: auto;
+        }
+
+        .blueprint-cube-shell {
             position: relative;
-            width: 3.9rem;
-            height: 3.1rem;
-            flex: 0 0 auto;
-            transform-style: preserve-3d;
-        }
-
-        .blueprint-cube-center,
-        .blueprint-cube-hit {
-            position: absolute;
-            border: 0;
-            padding: 0;
-            color: #e0f2fe;
-            cursor: pointer;
-            background: transparent;
-        }
-
-        .blueprint-cube-center {
-            left: 1.02rem;
-            top: 0.62rem;
-            width: 2.05rem;
-            height: 1.82rem;
-            border: 1px solid rgba(125, 211, 252, 0.52);
-            border-radius: 7px;
-            background: linear-gradient(145deg, rgba(14, 116, 144, 0.88), rgba(8, 47, 73, 0.88));
-            box-shadow: 9px -7px 0 rgba(8, 47, 73, 0.68), 0 10px 20px rgba(2, 6, 23, 0.28);
-            transform: skewY(-12deg);
-            z-index: 4;
-        }
-
-        .blueprint-cube-center::before {
-            content: "";
-            position: absolute;
-            left: 0.28rem;
-            right: -0.58rem;
-            top: -0.56rem;
-            height: 0.56rem;
-            border: 1px solid rgba(125, 211, 252, 0.38);
-            border-bottom: 0;
-            border-radius: 6px 6px 0 0;
-            background: rgba(14, 116, 144, 0.54);
-            transform: skewX(-42deg);
-            transform-origin: left bottom;
-        }
-
-        .blueprint-cube-center::after {
-            content: "";
-            position: absolute;
-            right: -0.58rem;
-            top: -0.02rem;
-            width: 0.58rem;
-            bottom: 0.28rem;
-            border: 1px solid rgba(125, 211, 252, 0.36);
-            border-left: 0;
-            border-radius: 0 6px 6px 0;
-            background: rgba(5, 25, 62, 0.74);
-            transform: skewY(-42deg);
-            transform-origin: left top;
-        }
-
-        .blueprint-cube-center span {
-            position: relative;
-            z-index: 1;
-            display: inline-flex;
             width: 100%;
             height: 100%;
+            transform-style: preserve-3d;
+            transition: transform 160ms ease;
+        }
+
+        .blueprint-view-cube[data-active-view="right"] .blueprint-cube-shell { transform: rotateX(-24deg) rotateY(-42deg); }
+        .blueprint-view-cube[data-active-view="left"] .blueprint-cube-shell { transform: rotateX(-24deg) rotateY(138deg); }
+        .blueprint-view-cube[data-active-view="front"] .blueprint-cube-shell { transform: rotateX(-24deg) rotateY(0deg); }
+        .blueprint-view-cube[data-active-view="back"] .blueprint-cube-shell { transform: rotateX(-24deg) rotateY(180deg); }
+        .blueprint-view-cube[data-active-view="top"] .blueprint-cube-shell { transform: rotateX(-86deg) rotateY(-24deg); }
+        .blueprint-view-cube[data-active-view="bottom"] .blueprint-cube-shell { transform: rotateX(86deg) rotateY(-24deg); }
+        .blueprint-view-cube[data-active-view="perspective"] .blueprint-cube-shell { transform: rotateX(-28deg) rotateY(-34deg) rotateZ(5deg); }
+
+        .blueprint-cube-face {
+            position: absolute;
+            z-index: 4;
+            left: 0.725rem;
+            top: 0.725rem;
+            width: 1.9rem;
+            height: 1.9rem;
+            border: 1px solid rgba(125, 211, 252, 0.52);
+            border-radius: 5px;
+            background: rgba(8, 47, 73, 0.82);
+            color: #e0f2fe;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.58rem;
+            padding: 0;
+            font-size: 0.52rem;
             font-weight: 800;
             letter-spacing: 0;
-            transform: skewY(12deg);
+            cursor: pointer;
+            transform-style: preserve-3d;
+            backface-visibility: visible;
         }
 
-        .blueprint-cube-hit {
-            z-index: 6;
-            opacity: 0;
+        .blueprint-cube-face:hover,
+        .blueprint-cube-face:focus,
+        .blueprint-cube-face[aria-pressed="true"] {
+            border-color: rgba(255, 255, 255, 0.86);
+            background: rgba(14, 116, 144, 0.92);
+            color: #fff;
         }
 
-        .blueprint-cube-hit:hover,
-        .blueprint-cube-hit:focus {
-            opacity: 0.22;
-            border-radius: 7px;
-            background: #22d3ee;
-        }
+        .blueprint-cube-face-front { transform: translateZ(0.95rem); }
+        .blueprint-cube-face-back { transform: rotateY(180deg) translateZ(0.95rem); }
+        .blueprint-cube-face-right { transform: rotateY(90deg) translateZ(0.95rem); }
+        .blueprint-cube-face-left { transform: rotateY(-90deg) translateZ(0.95rem); }
+        .blueprint-cube-face-top { transform: rotateX(90deg) translateZ(0.95rem); }
+        .blueprint-cube-face-bottom { transform: rotateX(-90deg) translateZ(0.95rem); }
 
-        .blueprint-cube-hit-top { left: 1.16rem; top: 0; width: 2.35rem; height: 0.62rem; }
-        .blueprint-cube-hit-bottom { left: 0.78rem; bottom: 0; width: 2.35rem; height: 0.62rem; }
-        .blueprint-cube-hit-left { left: 0; top: 0.66rem; width: 0.96rem; height: 1.78rem; }
-        .blueprint-cube-hit-right { right: 0; top: 0.58rem; width: 0.94rem; height: 1.76rem; }
-        .blueprint-cube-hit-front { left: 1.02rem; bottom: 0.62rem; width: 0.78rem; height: 0.64rem; }
-        .blueprint-cube-hit-back { right: 0.62rem; top: 0.2rem; width: 0.82rem; height: 0.64rem; }
-
-        .blueprint-cube-hit-front,
-        .blueprint-cube-hit-back {
+        .blueprint-cube-cycle {
+            position: absolute;
+            inset: 0.44rem;
             z-index: 3;
-        }
-
-        .blueprint-view-cube[data-active-view="perspective"] .blueprint-cube-center {
-            border-color: rgba(167, 139, 250, 0.76);
-            background: linear-gradient(145deg, rgba(99, 102, 241, 0.9), rgba(8, 47, 73, 0.88));
+            border: 0;
+            border-radius: 999px;
+            background: transparent;
+            color: transparent;
+            cursor: pointer;
         }
 
         .blueprint-selected-node {
@@ -1429,12 +1405,7 @@
 
         .blueprint-retarget-btn {
             display: none;
-            position: absolute;
-            left: 0.62rem;
-            right: 0.62rem;
-            bottom: 2.1rem;
-            z-index: 5;
-            width: auto;
+            width: 100%;
             justify-content: center;
             border: 0 !important;
             background: linear-gradient(135deg, #06b6d4, #6366f1) !important;
@@ -1442,11 +1413,48 @@
             box-shadow: 0 10px 24px rgba(6, 182, 212, 0.24);
             padding: 0.5rem 0.72rem;
             font-size: 0.74rem;
-            pointer-events: auto;
         }
 
         .blueprint-retarget-btn.is-visible {
             display: inline-flex;
+        }
+
+        .blueprint-add-node-btn {
+            display: none;
+        }
+
+        .blueprint-add-node-btn.is-visible {
+            display: inline-flex;
+        }
+
+        .blueprint-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: stretch;
+            margin-top: 0.55rem;
+        }
+
+        .blueprint-actions .blueprint-add-node-btn {
+            flex: 0 0 auto;
+            border: 1px solid rgba(125, 211, 252, 0.34);
+            border-radius: 8px;
+            background: rgba(8, 47, 73, 0.72);
+            color: #e0f2fe;
+            font-size: 0.74rem;
+            font-weight: 800;
+            padding: 0.5rem 0.72rem;
+            cursor: pointer;
+        }
+
+        .blueprint-actions .blueprint-retarget-btn {
+            flex: 1 1 auto;
+        }
+
+        .blueprint-legend {
+            margin-top: 0.45rem;
+            color: rgba(224, 242, 254, 0.76);
+            font-size: 0.74rem;
+            line-height: 1.35;
         }
 
         #admin-input-url-row summary {
@@ -1465,6 +1473,12 @@
             top: auto;
             max-height: none;
             overflow: visible;
+        }
+
+        @media (min-width: 1201px) {
+            .blueprint-viewer-stage {
+                aspect-ratio: auto;
+            }
         }
 
         .task-columns-layout {
@@ -2518,15 +2532,33 @@
                 box-sizing: border-box;
             }
 
-            #custom-animations-wrap,
-            #blueprint-viewer-card {
-                position: static !important;
-                margin-top: 0 !important;
-                z-index: auto;
-            }
+              #custom-animations-wrap,
+              #blueprint-viewer-card {
+                  position: static !important;
+                  margin-top: 0 !important;
+                  z-index: auto;
+              }
 
-            #model-viewer-container {
-                aspect-ratio: 1 / 1;
+              .blueprint-view-select {
+                  width: 7.1rem;
+                  max-width: calc(100vw - 11rem);
+              }
+
+              .blueprint-view-cube {
+                  width: 3rem;
+                  height: 3rem;
+              }
+
+              .blueprint-actions {
+                  flex-direction: column;
+              }
+
+              .blueprint-legend {
+                  font-size: 0.72rem;
+              }
+
+              #model-viewer-container {
+                  aspect-ratio: 1 / 1;
                 min-height: 300px;
             }
 
@@ -3730,16 +3762,16 @@
                     <div id="blueprint-viewer-empty" class="blueprint-viewer-empty">Blueprint data will appear when the worker publishes skeleton.json.</div>
                     <div class="blueprint-viewer-status" id="blueprint-viewer-status">Waiting for semantic skeleton...</div>
                     <div class="blueprint-stage-controls" aria-label="Blueprint camera controls">
-                        <select id="blueprint-view-select" class="blueprint-view-select" aria-label="Blueprint camera view">
-                            <option value="right" selected>Right</option>
-                            <option value="front">Front</option>
-                            <option value="left">Left</option>
-                            <option value="back">Back</option>
-                            <option value="top">Top</option>
-                            <option value="bottom">Bottom</option>
-                            <option value="perspective">Perspective</option>
+                        <select id="blueprint-view-select" class="blueprint-view-select" aria-label="Blueprint camera view" title="Blueprint camera view" data-i18n-title="blueprint_view_select_title">
+                            <option value="right" selected data-i18n="blueprint_view_right">Right</option>
+                            <option value="front" data-i18n="blueprint_view_front">Front</option>
+                            <option value="left" data-i18n="blueprint_view_left">Left</option>
+                            <option value="back" data-i18n="blueprint_view_back">Back</option>
+                            <option value="top" data-i18n="blueprint_view_top">Top</option>
+                            <option value="bottom" data-i18n="blueprint_view_bottom">Bottom</option>
+                            <option value="perspective" data-i18n="blueprint_view_perspective">Perspective</option>
                         </select>
-                        <button type="button" class="blueprint-icon-btn" data-blueprint-action="fit" aria-label="Fit blueprint camera" title="Fit">
+                        <button type="button" class="blueprint-icon-btn" data-blueprint-action="fit" aria-label="Fit blueprint camera" title="Fit" data-i18n-title="blueprint_fit_title">
                             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M8 3H5a2 2 0 0 0-2 2v3"></path>
                                 <path d="M16 3h3a2 2 0 0 1 2 2v3"></path>
@@ -3748,31 +3780,41 @@
                                 <path d="M9 9h6v6H9z"></path>
                             </svg>
                         </button>
-                        <button type="button" class="blueprint-icon-btn" data-blueprint-action="reset" aria-label="Reset blueprint camera" title="Reset camera">
+                        <button type="button" class="blueprint-icon-btn" data-blueprint-action="reset" aria-label="Reset blueprint camera" title="Reset camera" data-i18n-title="blueprint_reset_title">
                             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M3 12a9 9 0 1 0 3-6.7"></path>
                                 <path d="M3 3v6h6"></path>
                             </svg>
                         </button>
-                        <div class="blueprint-view-cube" id="blueprint-view-cube" data-active-view="right" aria-label="Blueprint view cube">
-                            <button type="button" class="blueprint-cube-center" data-blueprint-cycle aria-label="Next blueprint camera view">
-                                <span id="blueprint-view-cube-label">Right</span>
-                            </button>
-                            <button type="button" class="blueprint-cube-hit blueprint-cube-hit-front" data-blueprint-cube-view="front" aria-label="Front view"></button>
-                            <button type="button" class="blueprint-cube-hit blueprint-cube-hit-back" data-blueprint-cube-view="back" aria-label="Back view"></button>
-                            <button type="button" class="blueprint-cube-hit blueprint-cube-hit-left" data-blueprint-cube-view="left" aria-label="Left view"></button>
-                            <button type="button" class="blueprint-cube-hit blueprint-cube-hit-right" data-blueprint-cube-view="right" aria-label="Right view"></button>
-                            <button type="button" class="blueprint-cube-hit blueprint-cube-hit-top" data-blueprint-cube-view="top" aria-label="Top view"></button>
-                            <button type="button" class="blueprint-cube-hit blueprint-cube-hit-bottom" data-blueprint-cube-view="bottom" aria-label="Bottom view"></button>
-                        </div>
                     </div>
-                    <button type="button" id="blueprint-retarget-btn" class="blueprint-retarget-btn">
-                        Retarget Rig Animation
-                    </button>
+                    <div class="blueprint-view-cube" id="blueprint-view-cube" data-active-view="right" aria-label="Blueprint view cube">
+                        <div class="blueprint-cube-shell">
+                            <button type="button" class="blueprint-cube-face blueprint-cube-face-front" data-blueprint-cube-view="front" aria-label="Front view">F</button>
+                            <button type="button" class="blueprint-cube-face blueprint-cube-face-back" data-blueprint-cube-view="back" aria-label="Back view">B</button>
+                            <button type="button" class="blueprint-cube-face blueprint-cube-face-left" data-blueprint-cube-view="left" aria-label="Left view">L</button>
+                            <button type="button" class="blueprint-cube-face blueprint-cube-face-right" data-blueprint-cube-view="right" aria-label="Right view">R</button>
+                            <button type="button" class="blueprint-cube-face blueprint-cube-face-top" data-blueprint-cube-view="top" aria-label="Top view">T</button>
+                            <button type="button" class="blueprint-cube-face blueprint-cube-face-bottom" data-blueprint-cube-view="bottom" aria-label="Bottom view">D</button>
+                        </div>
+                        <button type="button" class="blueprint-cube-cycle" data-blueprint-cycle aria-label="Next blueprint camera view">
+                            <span id="blueprint-view-cube-label">Right</span>
+                        </button>
+                    </div>
                     <div class="blueprint-stage-hud" aria-live="polite">
                         <span class="blueprint-selected-node" id="blueprint-selected-node"></span>
                         <span class="blueprint-viewer-coordinates" id="blueprint-coordinates"></span>
                     </div>
+                </div>
+                <div class="blueprint-actions">
+                    <button type="button" id="blueprint-add-node-btn" class="blueprint-add-node-btn" data-i18n="blueprint_add_node_label" data-i18n-title="blueprint_add_node_tooltip">
+                        Add node
+                    </button>
+                    <button type="button" id="blueprint-retarget-btn" class="blueprint-retarget-btn" data-i18n="blueprint_retarget_label" data-i18n-title="blueprint_retarget_tooltip">
+                        Retarget Rig Animation
+                    </button>
+                </div>
+                <div class="blueprint-legend" data-i18n="blueprint_legend">
+                    Select limb tips you want to correct.
                 </div>
             </div>
 
@@ -7347,7 +7389,7 @@
           }
         }
     </script>
-    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=4"></script>
+    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=5"></script>
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
