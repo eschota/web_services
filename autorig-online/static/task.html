@@ -2142,8 +2142,8 @@
         }
         .manual-rig-type-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(154px, 1fr));
-            gap: 0.65rem;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.5rem;
         }
         .manual-rig-restart-actions {
             display: flex;
@@ -2170,15 +2170,15 @@
         .manual-rig-type-btn {
             display: flex;
             align-items: center;
-            gap: 0.6rem;
+            gap: 0.45rem;
             min-width: 0;
-            min-height: 58px;
-            padding: 0.55rem 0.7rem;
+            min-height: 52px;
+            padding: 0.28rem 0.5rem;
             border: 1px solid var(--border);
-            border-radius: 10px;
+            border-radius: 9px;
             background: rgba(255,255,255,0.06);
             color: var(--text-primary);
-            font-size: 0.84rem;
+            font-size: 0.82rem;
             font-weight: 700;
             cursor: pointer;
             transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
@@ -2198,9 +2198,12 @@
             transform: none;
         }
         .manual-rig-type-btn img {
-            width: 42px;
-            height: 42px;
+            width: 58px;
+            height: 58px;
+            margin: -7px -3px -7px -6px;
             object-fit: contain;
+            transform: scale(1.14);
+            transform-origin: center;
             flex: 0 0 auto;
         }
         .manual-rig-type-btn span {
@@ -2214,7 +2217,7 @@
 
         @media (max-width: 980px) {
             .manual-rig-type-grid {
-                grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
             }
 
             .face-rig-viewer-layout {
