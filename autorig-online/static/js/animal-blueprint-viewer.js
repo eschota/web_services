@@ -36,6 +36,13 @@ const VIEW_LABELS = {
     perspective: 'Perspective',
 };
 
+const GLTF_TO_SEMANTIC_AXIS_MATRIX = new THREE.Matrix4().set(
+    1, 0, 0, 0,
+    0, 0, -1, 0,
+    0, 1, 0, 0,
+    0, 0, 0, 1,
+);
+
 const FRESNEL_VERTEX_SHADER = `
     varying vec3 vNormalView;
     varying vec3 vViewDir;
@@ -436,7 +443,7 @@ class AnimalBlueprintViewerController {
         }
         if (!gltf) throw lastError || new Error('Blueprint model is unavailable');
         this.model = gltf.scene;
-        this.model.applyMatrix4(modelTransform);
+        this.model.applyMatrix4(modelTransform.clone().multiply(GLTF_TO_SEMANTIC_AXIS_MATRIX));
         this.model.updateMatrixWorld(true);
         this.modelGroup.clear();
         this.modelGroup.add(this.model);
