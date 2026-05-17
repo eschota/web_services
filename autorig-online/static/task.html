@@ -2145,6 +2145,28 @@
             grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
             gap: 0.5rem;
         }
+        .manual-rig-restart-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 0.65rem;
+        }
+        .manual-rig-create-btn {
+            min-height: 42px;
+            padding: 0.55rem 0.9rem;
+            border: 0;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #6d5dfc 0%, #8b5cf6 100%);
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 750;
+            cursor: pointer;
+            box-shadow: 0 8px 18px rgba(109, 93, 252, 0.22);
+        }
+        .manual-rig-create-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
         .manual-rig-type-btn {
             display: flex;
             align-items: center;
@@ -3310,12 +3332,15 @@
                         </div>
                     </div>
 
-                    <div id="manual-rig-restart-panel" class="manual-rig-restart-panel hidden" aria-label="Restart with another rig type">
+                    <div id="manual-rig-restart-panel" class="manual-rig-restart-panel hidden" aria-label="Create a new task with another rig type">
                         <div class="manual-rig-restart-head">
-                            <div class="manual-rig-restart-title">Restart with another rig type</div>
+                            <div class="manual-rig-restart-title">Create a new task with another rig type</div>
                             <div id="manual-rig-restart-status" class="manual-rig-restart-status">Choose rig type</div>
                         </div>
                         <div id="manual-rig-type-grid" class="manual-rig-type-grid"></div>
+                        <div class="manual-rig-restart-actions">
+                            <button id="manual-rig-create-btn" class="manual-rig-create-btn" type="button" disabled>Choose another rig type</button>
+                        </div>
                     </div>
             </div>
             </div>
@@ -11374,18 +11399,27 @@
                     const normalized = normalizeManualRigKey(key);
                     if (normalized === 'humanoid') {
                         return {
-                            rig_type: 'humanoid',
-                            input_type: 't_pose',
+                            type: 't_pose',
                             animal_type: null,
                             rig_v2_manual_selection: true,
                         };
                     }
                     return {
-                        rig_type: normalized,
-                        input_type: 'animal',
+                        type: 'animal',
                         animal_type: normalized,
                         mode: 'only_rig',
                         rig_v2_manual_selection: true,
+                        rig_v2_animal_detection: {
+                            type: 'animal',
+                            animal_type: normalized,
+                            animal_type_string: normalized,
+                            mode: 'only_rig',
+                            source: 'manual_task_create',
+                            accepted: true,
+                            manual_selection: true,
+                            user_selected_bool: true,
+                            animal_decision_accepted_bool: true,
+                        },
                     };
                 }
 
@@ -11393,7 +11427,8 @@
                     const panel = document.getElementById('manual-rig-restart-panel');
                     const grid = document.getElementById('manual-rig-type-grid');
                     const status = document.getElementById('manual-rig-restart-status');
-                    if (!panel || !grid || grid.dataset.wired === '1') return;
+                    const action = document.getElementById('manual-rig-create-btn');
+                    if (!panel || !grid || !status || !action || grid.dataset.wired === '1') return;
                     grid.dataset.wired = '1';
 
                     let taskState = null;
@@ -11404,7 +11439,34 @@
                     }
 
                     const activeKey = getCurrentManualRigKey(taskState);
-                    status.textContent = `Current: ${formatManualRigLabel(activeKey)}`;
+                    let selectedKey = activeKey;
+                    let restartBusy = false;
+
+                    function updateManualRigRestartControls() {
+                        const selectedLabel = formatManualRigLabel(selectedKey);
+                        const currentLabel = formatManualRigLabel(activeKey);
+                        const hasChange = selectedKey !== activeKey;
+                        for (const button of grid.querySelectorAll('button[data-rig-key]')) {
+                            const key = normalizeManualRigKey(button.dataset.rigKey);
+                            button.classList.toggle('is-active', key === selectedKey);
+                            button.setAttribute('aria-pressed', key === selectedKey ? 'true' : 'false');
+                            button.disabled = restartBusy;
+                        }
+                        if (restartBusy) {
+                            status.textContent = `Creating ${selectedLabel} rig task...`;
+                            action.textContent = `Creating ${selectedLabel} rig task...`;
+                            action.disabled = true;
+                        } else if (hasChange) {
+                            status.textContent = `Selected: ${selectedLabel} · current: ${currentLabel}`;
+                            action.textContent = `Create new ${selectedLabel} rig task`;
+                            action.disabled = false;
+                        } else {
+                            status.textContent = `Current: ${currentLabel}`;
+                            action.textContent = 'Choose another rig type';
+                            action.disabled = true;
+                        }
+                    }
+
                     grid.replaceChildren();
 
                     for (const key of MANUAL_RIG_RESTART_TYPES) {
@@ -11412,10 +11474,10 @@
                         btn.type = 'button';
                         btn.className = 'manual-rig-type-btn';
                         btn.dataset.rigKey = key;
-                        btn.classList.toggle('is-active', key === activeKey);
+                        btn.setAttribute('aria-pressed', key === selectedKey ? 'true' : 'false');
                         btn.title = key === activeKey
                             ? `Current rig type: ${formatManualRigLabel(key)}`
-                            : `Restart task as ${formatManualRigLabel(key)}`;
+                            : `Create a new task as ${formatManualRigLabel(key)}`;
 
                         const icon = document.createElement('img');
                         icon.alt = '';
@@ -11427,31 +11489,52 @@
                         btn.append(icon, label);
 
                         btn.addEventListener('click', async () => {
-                            const selectedKey = normalizeManualRigKey(btn.dataset.rigKey);
-                            if (selectedKey === activeKey) return;
-                            const buttons = [...grid.querySelectorAll('button')];
-                            buttons.forEach((b) => { b.disabled = true; });
-                            status.textContent = `Restarting as ${formatManualRigLabel(selectedKey)}...`;
-                            try {
-                                const resp = await fetch(`/api/task/${taskId}/restart`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(manualRigPayloadForKey(selectedKey)),
-                                });
-                                const data = await resp.json().catch(() => ({}));
-                                if (!resp.ok) throw new Error(data.detail || 'Restart failed');
-                                status.textContent = `Restarted as ${formatManualRigLabel(selectedKey)}. Reloading...`;
-                                window.setTimeout(() => window.location.reload(), 500);
-                            } catch (error) {
-                                console.error('[ManualRig] Restart failed', error);
-                                status.textContent = error?.message || 'Restart failed';
-                                buttons.forEach((b) => { b.disabled = false; });
-                            }
+                            if (restartBusy) return;
+                            selectedKey = normalizeManualRigKey(btn.dataset.rigKey);
+                            updateManualRigRestartControls();
                         });
 
                         grid.appendChild(btn);
                     }
 
+                    action.addEventListener('click', async () => {
+                        if (restartBusy || selectedKey === activeKey) return;
+                        restartBusy = true;
+                        updateManualRigRestartControls();
+                        const selectedLabel = formatManualRigLabel(selectedKey);
+                        try {
+                            const latestTask = await getLatestTaskState();
+                            const inputUrl = latestTask?.input_url || taskState?.input_url;
+                            if (!inputUrl) throw new Error('Original model URL is missing');
+                            const payload = {
+                                ...manualRigPayloadForKey(selectedKey),
+                                source: 'link',
+                                input_url: inputUrl,
+                            };
+                            const buttons = [...grid.querySelectorAll('button')];
+                            buttons.forEach((b) => { b.disabled = true; });
+                            const resp = await fetch('/api/task/create', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload),
+                            });
+                            const data = await resp.json().catch(() => ({}));
+                            if (!resp.ok) throw new Error(data.detail || 'Task creation failed');
+                            if (!data.task_id) throw new Error('Task creation did not return a task id');
+                            status.textContent = `Started new ${selectedLabel} rig task. Reloading...`;
+                            action.textContent = `Started ${selectedLabel} rig task`;
+                            window.setTimeout(() => {
+                                window.location.href = `/task?id=${encodeURIComponent(data.task_id)}`;
+                            }, 500);
+                        } catch (error) {
+                            console.error('[ManualRig] Task creation failed', error);
+                            restartBusy = false;
+                            updateManualRigRestartControls();
+                            status.textContent = error?.message || 'Task creation failed';
+                        }
+                    });
+
+                    updateManualRigRestartControls();
                     panel.classList.remove('hidden');
                     window.taskDbg('[ManualRig] Selector ready', { activeKey });
                 }

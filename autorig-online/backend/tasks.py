@@ -56,6 +56,12 @@ RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
 def _animal_detection_confident_enough(detection: Any) -> bool:
     if not isinstance(detection, dict):
         return False
+    if detection.get("manual_selection") is True:
+        return True
+    if str(detection.get("source") or "").strip().lower() == "manual_task_restart":
+        return True
+    if detection.get("accepted") is True:
+        return True
     if detection.get("user_selected_bool"):
         return True
     if detection.get("animal_decision_accepted_bool") is True:
@@ -1240,4 +1246,3 @@ def format_time_ago(dt: datetime) -> str:
     else:
         months = int(seconds / 2592000)
         return f"{months}mo ago"
-

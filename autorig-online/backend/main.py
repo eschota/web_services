@@ -2897,6 +2897,7 @@ async def api_create_task(
     animal_type: Optional[str] = None
     rig_mode: Optional[str] = None
     rig_v2_detection_meta: Optional[Dict[str, Any]] = None
+    rig_v2_manual_selection = False
     preflight_render_image_data_url: Optional[str] = None
 
     if "application/json" in content_type:
@@ -2928,6 +2929,7 @@ async def api_create_task(
         raw_mode = data.get("mode")
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
+        rig_v2_manual_selection = bool(data.get("rig_v2_manual_selection"))
         raw_detection = data.get("rig_v2_animal_detection")
         if isinstance(raw_detection, dict):
             rig_v2_detection_meta = raw_detection
@@ -2965,6 +2967,7 @@ async def api_create_task(
         raw_mode = form.get("mode")
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
+        rig_v2_manual_selection = str(form.get("rig_v2_manual_selection") or "").strip().lower() in ("1", "true", "yes", "on")
         raw_detection = form.get("rig_v2_animal_detection_json")
         if raw_detection is not None and str(raw_detection).strip():
             try:
@@ -3050,12 +3053,27 @@ async def api_create_task(
         rig_mode = rig_mode or "only_rig"
         if rig_v2_detection_meta is None:
             rig_v2_detection_meta = {}
+        manual_animal_selection = bool(
+            rig_v2_manual_selection
+            or rig_v2_detection_meta.get("manual_selection")
+            or rig_v2_detection_meta.get("user_selected_bool")
+            or not any(k in rig_v2_detection_meta for k in ("animal_decision_accepted_bool", "animal_decision_weight_float", "results", "scores"))
+        )
         rig_v2_detection_meta = {
             **rig_v2_detection_meta,
             "type": "animal",
             "animal_type": animal_type,
+            "animal_type_string": animal_type,
             "mode": rig_mode,
         }
+        if manual_animal_selection:
+            rig_v2_detection_meta.update({
+                "source": rig_v2_detection_meta.get("source") or "manual_task_create",
+                "accepted": True,
+                "manual_selection": True,
+                "user_selected_bool": True,
+                "animal_decision_accepted_bool": True,
+            })
 
     # Create task
     task, error = await create_conversion_task(
@@ -4387,6 +4405,8 @@ async def api_restart_task(
                 "source": "manual_task_restart",
                 "accepted": True,
                 "manual_selection": True,
+                "user_selected_bool": True,
+                "animal_decision_accepted_bool": True,
             }
         else:
             existing_detection = settings.get("rig_v2_animal_detection")
@@ -4400,6 +4420,7 @@ async def api_restart_task(
                     "source": "manual_task_restart",
                     "accepted": True,
                     "manual_selection": True,
+                    "user_selected_bool": True,
                 }
         task.viewer_settings = json.dumps(settings, ensure_ascii=False)
 
