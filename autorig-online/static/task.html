@@ -8580,7 +8580,7 @@
                 if (!model) return;
                 const reflect = Math.max(0, _themeNumber(viewerState?.reflectionIntensity, 1.0));
                 const sceneEnv = getSceneEnvironmentIntensity();
-                const materialEnvIntensity = scene && ('environmentIntensity' in scene) ? reflect : reflect * sceneEnv;
+                const materialEnvIntensity = reflect * sceneEnv;
                 forEachModelMaterial(model, (mat) => {
                     if (mat.envMapIntensity === undefined) return;
                     mat.envMapIntensity = materialEnvIntensity;
@@ -8590,7 +8590,10 @@
 
             function applySceneEnvironmentIntensity() {
                 if (scene && ('environmentIntensity' in scene)) {
-                    scene.environmentIntensity = getSceneEnvironmentIntensity();
+                    // Keep the material value as the single source of truth. In the deployed
+                    // Three.js build scene.environmentIntensity is not reliable across all
+                    // material paths, so applying both can either do nothing or double-count.
+                    scene.environmentIntensity = 1.0;
                 }
                 applyModelEnvironmentIntensity();
             }
@@ -8685,12 +8688,43 @@
                     if (serial !== backdropEnvironmentTextureLoadSerial) { disposeTextureSafe(tex); return; }
                     try {
                         tex.colorSpace = THREE.SRGBColorSpace;
-                        tex.mapping = THREE.EquirectangularReflectionMapping;
+                        tex.mapping = THREE.UVMapping;
+                        tex.minFilter = THREE.LinearFilter;
+                        tex.magFilter = THREE.LinearFilter;
+                        tex.wrapS = THREE.ClampToEdgeWrapping;
+                        tex.wrapT = THREE.ClampToEdgeWrapping;
                         tex.needsUpdate = true;
                         const pmremGenerator = new THREE.PMREMGenerator(renderer);
-                        const renderTarget = pmremGenerator.fromEquirectangular(tex);
+                        const envScene = new THREE.Scene();
+                        const imgW = Number(tex.image?.naturalWidth || tex.image?.width || 16);
+                        const imgH = Number(tex.image?.naturalHeight || tex.image?.height || 9);
+                        const aspect = Math.max(0.25, imgW / Math.max(1, imgH));
+                        const fill = new THREE.Mesh(
+                            new THREE.SphereGeometry(24, 32, 16),
+                            new THREE.MeshBasicMaterial({
+                                color: new THREE.Color(0.08, 0.11, 0.16),
+                                side: THREE.BackSide,
+                                toneMapped: false,
+                            }),
+                        );
+                        const panel = new THREE.Mesh(
+                            new THREE.PlaneGeometry(10 * aspect, 10),
+                            new THREE.MeshBasicMaterial({
+                                map: tex,
+                                color: new THREE.Color(1.65, 1.65, 1.65),
+                                side: THREE.DoubleSide,
+                                toneMapped: false,
+                            }),
+                        );
+                        panel.position.set(0, 0, -4);
+                        envScene.add(fill, panel);
+                        const renderTarget = pmremGenerator.fromScene(envScene, 0.08);
                         pmremGenerator.dispose();
                         disposeTextureSafe(tex);
+                        fill.geometry.dispose();
+                        fill.material.dispose();
+                        panel.geometry.dispose();
+                        panel.material.dispose();
                         if (serial !== backdropEnvironmentTextureLoadSerial) { disposeRenderTargetSafe(renderTarget); return; }
                         if (backdropEnvironmentRenderTarget && backdropEnvironmentRenderTarget !== renderTarget) {
                             disposeRenderTargetSafe(backdropEnvironmentRenderTarget);
@@ -8700,7 +8734,7 @@
                         scene.environment = backdropEnvironmentTexture;
                         activeEnvironmentSource = path;
                         applySceneEnvironmentIntensity();
-                        console.info('[ViewerIBL] image-based PMREM environment applied', { path, reason });
+                        console.info('[ViewerIBL] backdrop PMREM environment applied', { path, reason, aspect });
                     } catch (err) {
                         disposeTextureSafe(tex);
                         console.error('[ViewerIBL] image environment failed', path, err);
@@ -9473,17 +9507,8 @@
 
                 if (sunLight) {
                     sunLight.intensity = LIGHTING_CONFIG.sunIntensity * mainFactor;
-                    
-                    // Calculate sun position from angles
-                    const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
-                    const theta = (viewerState.sunRotation) * (Math.PI / 180);
-                    
-                    const r = 10;
-                    sunLight.position.set(
-                        r * Math.sin(phi) * Math.sin(theta),
-                        r * Math.cos(phi),
-                        r * Math.sin(phi) * Math.cos(theta)
-                    );
+                    const target = sunLight.target?.position || new THREE.Vector3();
+                    sunLight.position.copy(target).add(getViewerSunOffset(10));
                 }
                 updateSkyEnvironment(false);
                 updateSunShadowFocus(true);
@@ -9495,11 +9520,7 @@
                 
                 if (hemiLight) hemiLight.intensity = LIGHTING_CONFIG.hemiIntensity * (mainFactor > 0 ? mainFactor : 0.2);
                 
-                // Environment intensity (Scene-level)
-                const envVal = LIGHTING_CONFIG.envIntensity * viewerState.envIntensity;
-                if (scene && 'environmentIntensity' in scene) {
-                    scene.environmentIntensity = envVal;
-                }
+                applySceneEnvironmentIntensity();
                 
                 // Background color fallback / picker sync. The procedural sky owns the visible background.
                 if (scene) {
@@ -9588,15 +9609,6 @@
                             if (mainChanSelect) mainChanSelect.value = materialChan;
                         }
                     }
-                }
-
-                if (currentModel) {
-                    // Reflection intensity (env map)
-                    currentModel.traverse((child) => {
-                        if (child.isMesh && child.material && child.material.envMapIntensity !== undefined) {
-                            child.material.envMapIntensity = viewerState.reflectionIntensity;
-                        }
-                    });
                 }
 
                 // NOTE: Camera is NOT restored here - it's applied once after model loads
@@ -10151,6 +10163,27 @@
                 }
             }
 
+            function getViewerSunOffset(radius = 10) {
+                const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
+                const theta = viewerState.sunRotation * (Math.PI / 180);
+                const x = radius * Math.sin(phi) * Math.sin(theta);
+                const y = Math.max(3, radius * Math.cos(phi));
+                const z = radius * Math.sin(phi) * Math.cos(theta);
+                if (usingStaticBackdrop && camera) {
+                    camera.updateMatrixWorld?.();
+                    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+                    const towardCamera = new THREE.Vector3();
+                    camera.getWorldDirection(towardCamera);
+                    towardCamera.multiplyScalar(-1).normalize();
+                    return new THREE.Vector3()
+                        .addScaledVector(right, x)
+                        .addScaledVector(up, y)
+                        .addScaledVector(towardCamera, z);
+                }
+                return new THREE.Vector3(x, y, z);
+            }
+
             function updateSunShadowFocus(force = false) {
                 if (!sunLight || !sunLight.target || !THREE) return;
                 const focus = new THREE.Vector3();
@@ -10172,14 +10205,8 @@
                 }
                 if (!hasFocus) return;
 
-                const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
-                const theta = viewerState.sunRotation * (Math.PI / 180);
                 const r = Math.max(12, Number(viewerState.groundSize || 10) * 0.5);
-                const sunOffset = new THREE.Vector3(
-                    r * Math.sin(phi) * Math.sin(theta),
-                    Math.max(3, r * Math.cos(phi)),
-                    r * Math.sin(phi) * Math.cos(theta)
-                );
+                const sunOffset = getViewerSunOffset(r);
 
                 sunLight.target.position.copy(focus);
                 sunLight.position.copy(focus).add(sunOffset);
@@ -10253,6 +10280,18 @@
                     hasSky: !!skyObject,
                     backgroundType: scene?.background?.type || scene?.background?.constructor?.name || null,
                     hasEnvironment: !!scene?.environment,
+                    environmentSource: activeEnvironmentSource,
+                    envIntensity: roundViewerDebugNumber(getSceneEnvironmentIntensity?.()),
+                    sceneEnvironmentIntensity: roundViewerDebugNumber(scene?.environmentIntensity),
+                    materialEnvMapIntensity: (() => {
+                        let value = null;
+                        forEachModelMaterial(currentModel, (mat) => {
+                            if (value === null && mat.envMapIntensity !== undefined) {
+                                value = roundViewerDebugNumber(mat.envMapIntensity);
+                            }
+                        });
+                        return value;
+                    })(),
                     rendererShadowEnabled: !!renderer?.shadowMap?.enabled,
                     sunCastShadow: !!sunLight?.castShadow,
                     sunIntensity: Number(sunLight?.intensity || 0),
@@ -12832,7 +12871,12 @@
                             if (sunLight) sunLight.intensity = LIGHTING_CONFIG.sunIntensity * defaults.mainLightIntensity;
                             if (ambientLight) ambientLight.intensity = LIGHTING_CONFIG.ambientIntensity * defaults.mainLightIntensity;
                             if (hemiLight) hemiLight.intensity = LIGHTING_CONFIG.hemiIntensity * defaults.mainLightIntensity;
-                            if (scene && 'environmentIntensity' in scene) scene.environmentIntensity = defaults.envIntensity;
+                            if (scene && 'environmentIntensity' in scene) scene.environmentIntensity = 1.0;
+                            forEachModelMaterial(currentModel, (mat) => {
+                                if (mat.envMapIntensity === undefined) return;
+                                mat.envMapIntensity = defaults.envIntensity * defaults.reflectionIntensity;
+                                mat.needsUpdate = true;
+                            });
                             if (scene) scene.background = new THREE.Color(defaults.bgColor);
                             
                             // 2. Props
@@ -13349,6 +13393,7 @@
                 
                 // Apply improved materials for models without textures (darker, reflective)
                 applyImprovedMaterials(model);
+                applySceneEnvironmentIntensity();
                 
                 // Initialize rotation state from saved transform
                 if (window.initRotationFromState) {
@@ -13565,6 +13610,7 @@
                 
                 // Apply improved materials for models without textures (darker, reflective)
                 applyImprovedMaterials(model);
+                applySceneEnvironmentIntensity();
                 
                 // Initialize rotation state from saved transform
                 if (window.initRotationFromState) {
