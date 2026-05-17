@@ -2347,8 +2347,89 @@
         }
 
         @media (max-width: 980px) {
+            #task-main-card {
+                overflow: hidden;
+            }
+
+            #viewer-custom-layout {
+                display: flex;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1rem;
+            }
+
+            #model-viewer-wrap,
+            #custom-animations-wrap,
+            #blueprint-viewer-card {
+                width: 100%;
+                max-width: 100%;
+                min-width: 0;
+                box-sizing: border-box;
+            }
+
+            #custom-animations-wrap,
+            #blueprint-viewer-card {
+                position: static !important;
+                margin-top: 0 !important;
+                z-index: auto;
+            }
+
+            #model-viewer-container {
+                aspect-ratio: 1 / 1;
+                min-height: 300px;
+            }
+
+            #viewer-rigtype-wrap {
+                top: auto !important;
+                right: 0.5rem !important;
+                bottom: 0.5rem !important;
+                left: auto !important;
+                max-width: calc(100% - 1rem);
+                transform: none !important;
+                align-items: flex-end !important;
+            }
+
+            .view-mode-selector {
+                flex-direction: row;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+                max-width: 100%;
+            }
+
+            .view-mode-selector button {
+                min-width: 0;
+                padding: 0.36rem 0.44rem;
+                font-size: 0.62rem;
+            }
+
+            #custom-animations-wrap .card-header,
+            #custom-animations-wrap > div {
+                min-width: 0;
+            }
+
+            #custom-animations-wrap select {
+                max-width: 100% !important;
+                min-width: 0;
+            }
+
             .manual-rig-type-grid {
-                grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .manual-rig-restart-title {
+                overflow-wrap: anywhere;
+            }
+
+            .manual-rig-type-btn {
+                min-height: 48px;
+                padding: 0.25rem 0.42rem;
+                font-size: 0.76rem;
+            }
+
+            .manual-rig-type-btn img {
+                width: 46px;
+                height: 46px;
+                margin: -5px -3px -5px -5px;
             }
 
             .face-rig-viewer-layout {
