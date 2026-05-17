@@ -600,11 +600,15 @@ class AnimalBlueprintViewerController {
         const rect = event.currentTarget.getBoundingClientRect();
         const x = (event.clientX - rect.left) / Math.max(1, rect.width);
         const y = (event.clientY - rect.top) / Math.max(1, rect.height);
-        if (y < 0.26) return 'top';
-        if (y > 0.74) return 'bottom';
-        if (x < 0.31) return 'left';
-        if (x > 0.69) return 'right';
-        return y < 0.5 ? 'back' : 'front';
+        const dx = x - 0.5;
+        const dy = y - 0.5;
+        if (Math.abs(dx) < 0.18 && Math.abs(dy) < 0.22) {
+            return dy < 0 ? 'back' : 'front';
+        }
+        if (Math.abs(dx) > Math.abs(dy)) {
+            return dx < 0 ? 'left' : 'right';
+        }
+        return dy < 0 ? 'top' : 'bottom';
     }
 
     syncViewUi(view) {
