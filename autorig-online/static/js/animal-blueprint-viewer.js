@@ -37,6 +37,10 @@ const VIEW_LABELS = {
 };
 
 const CLASSIC_CAMERA_UP = new THREE.Vector3(0, 1, 0);
+const LABEL_SCREEN_HEIGHT_PX = 28;
+const LABEL_SELECTED_SCREEN_HEIGHT_PX = 34;
+const LABEL_MIN_SCALE_FACTOR = 0.04;
+const LABEL_MAX_SCALE_FACTOR = 1.4;
 
 const GLTF_TO_SEMANTIC_AXIS_MATRIX = new THREE.Matrix4().set(
     1, 0, 0, 0,
@@ -197,6 +201,7 @@ class AnimalBlueprintViewerController {
             minDist: 0.05,
             maxDist: 10,
         };
+        this._labelScaleSize = new THREE.Vector2();
 
         if (!this.card || !this.host) return;
         this.wireButtons();
@@ -923,10 +928,9 @@ class AnimalBlueprintViewerController {
             sprite.material.map = createRoleTexture(THREE, role, color, selected);
             sprite.material.needsUpdate = true;
             oldMap?.dispose?.();
-            const spriteBase = sprite.userData.baseScale || new THREE.Vector3(0.18, 0.072, 1);
-            sprite.scale.copy(spriteBase).multiplyScalar(selected ? 1.22 : 1);
             sprite.renderOrder = selected ? 30 : 20;
         }
+        this.updateLabelScales();
     }
 
     updateDirtyState() {
@@ -1097,7 +1101,39 @@ class AnimalBlueprintViewerController {
         requestAnimationFrame(() => this.animate());
         this.updatePerspectiveZoomInertia();
         this.controls?.update();
+        this.updateLabelScales();
         this.renderer.render(this.scene, this.camera);
+    }
+
+    updateLabelScales() {
+        if (!this.renderer || !this.camera || !this.labelSprites?.size) return;
+        this.renderer.getSize(this._labelScaleSize);
+        const viewportHeight = Math.max(1, this._labelScaleSize.y || this.renderer.domElement.clientHeight || 1);
+        const fovRadians = this.camera.isPerspectiveCamera
+            ? THREE.MathUtils.degToRad(this.camera.fov)
+            : 0;
+        for (const [id, sprite] of this.labelSprites.entries()) {
+            const baseScale = sprite.userData.baseScale || new THREE.Vector3(0.18, 0.072, 1);
+            const selected = String(id) === String(this.selectedNodeId);
+            let visibleWorldHeight = 1;
+            if (this.camera.isPerspectiveCamera) {
+                const distance = Math.max(0.001, this.camera.position.distanceTo(sprite.position));
+                visibleWorldHeight = 2 * Math.tan(fovRadians / 2) * distance;
+            } else if (this.camera.isOrthographicCamera) {
+                visibleWorldHeight = Math.max(
+                    0.001,
+                    (this.camera.top - this.camera.bottom) / Math.max(0.001, this.camera.zoom || 1),
+                );
+            }
+            const targetPx = selected ? LABEL_SELECTED_SCREEN_HEIGHT_PX : LABEL_SCREEN_HEIGHT_PX;
+            const targetWorldHeight = (targetPx / viewportHeight) * visibleWorldHeight;
+            const factor = THREE.MathUtils.clamp(
+                targetWorldHeight / Math.max(0.0001, baseScale.y),
+                LABEL_MIN_SCALE_FACTOR,
+                LABEL_MAX_SCALE_FACTOR,
+            );
+            sprite.scale.set(baseScale.x * factor, baseScale.y * factor, 1);
+        }
     }
 
     updatePerspectiveZoomInertia() {
