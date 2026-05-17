@@ -1056,51 +1056,125 @@ def _format_duration(seconds: int | None) -> str:
     return f"{sec}s"
 
 
-async def _download_video_from_worker(task_id: str) -> str | None:
-    """Download video from worker API and cache locally."""
-    try:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(select(Task).where(Task.id == task_id))
-            task = result.scalar_one_or_none()
-            if not task:
-                print(f"[Telegram] Cannot download video: task {task_id} not found")
-                return None
+async def _task_video_candidate_urls(task_id: str) -> list[str]:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Task).where(Task.id == task_id))
+        task = result.scalar_one_or_none()
+        if not task:
+            print(f"[Telegram] Cannot download video: task {task_id} not found")
+            return []
 
-            if task.video_ready and task.video_url:
-                video_urls = [str(task.video_url)]
-                if "_video_small.mp4" in str(task.video_url):
-                    video_urls.append(str(task.video_url).replace("_video_small.mp4", "_video.mp4"))
-            elif task.guid and task.worker_api:
-                parsed = urlparse(task.worker_api)
-                worker_base = f"{parsed.scheme}://{parsed.netloc}"
-                video_urls = [
-                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video_small.mp4",
-                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video.mp4",
-                ]
-            else:
-                print(f"[Telegram] Cannot download video: task {task_id} has no guid or worker_api")
-                return None
-        
-        # Download video
+        video_urls: list[str] = []
+
+        def add_url(url: str | None) -> None:
+            u = (url or "").strip()
+            if u and u not in video_urls:
+                video_urls.append(u)
+
+        task_video_url = str(task.video_url or "").strip()
+        add_url(task_video_url)
+        if "_video_small.mp4" in task_video_url:
+            add_url(task_video_url.replace("_video_small.mp4", "_video.mp4"))
+
+        if task.guid and task.worker_api:
+            worker_base = get_worker_base_url(task.worker_api)
+            if worker_base:
+                add_url(f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video_small.mp4")
+                add_url(f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video.mp4")
+
+        if not video_urls:
+            print(f"[Telegram] Cannot download video: task {task_id} has no video URL, guid, or worker_api")
+
+        return video_urls
+
+
+async def _download_video_from_worker(
+    task_id: str,
+    *,
+    wait_timeout_seconds: int = 180,
+    poll_interval_seconds: int = 5,
+) -> tuple[str | None, int, str | None]:
+    """Wait for a worker video, download it, and cache it locally."""
+    cache_dir = "/var/autorig/videos"
+    cache_path = f"{cache_dir}/{task_id}.mp4"
+    tmp_path = f"{cache_path}.tmp"
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    deadline = started + max(0, int(wait_timeout_seconds))
+    last_status: str | None = None
+    attempt = 0
+
+    def waited_seconds() -> int:
+        return int(max(0, loop.time() - started))
+
+    def cached_video_exists() -> bool:
+        return os.path.exists(cache_path) and os.path.getsize(cache_path) > 0
+
+    if cached_video_exists():
+        return cache_path, waited_seconds(), "cached"
+
+    try:
         async with httpx.AsyncClient() as client:
-            for video_url in video_urls:
-                print(f"[Telegram] Downloading video from {video_url}")
-                try:
-                    resp = await client.get(video_url, timeout=90.0, follow_redirects=True)
-                    if resp.status_code == 200:
-                        cache_dir = "/var/autorig/videos"
-                        os.makedirs(cache_dir, exist_ok=True)
-                        cache_path = f"{cache_dir}/{task_id}.mp4"
-                        with open(cache_path, "wb") as f:
-                            f.write(resp.content)
-                        print(f"[Telegram] Video cached at {cache_path} ({len(resp.content)} bytes)")
-                        return cache_path
-                    print(f"[Telegram] Failed to download video from {video_url}: HTTP {resp.status_code}")
-                except Exception as e:
-                    print(f"[Telegram] Failed to download video from {video_url}: {type(e).__name__}: {e}")
+            while True:
+                if cached_video_exists():
+                    return cache_path, waited_seconds(), last_status or "cached"
+
+                video_urls = await _task_video_candidate_urls(task_id)
+                if not video_urls:
+                    last_status = "no video candidates"
+
+                for video_url in video_urls:
+                    attempt += 1
+                    print(
+                        f"[Telegram] Downloading video attempt={attempt} "
+                        f"waited={waited_seconds()}s from {video_url}"
+                    )
+                    try:
+                        remaining = max(1.0, deadline - loop.time())
+                        resp = await client.get(
+                            video_url,
+                            timeout=min(15.0, remaining),
+                            follow_redirects=True,
+                        )
+                        last_status = f"HTTP {resp.status_code}"
+                        if resp.status_code == 200 and resp.content:
+                            os.makedirs(cache_dir, exist_ok=True)
+                            try:
+                                with open(tmp_path, "wb") as f:
+                                    f.write(resp.content)
+                                os.replace(tmp_path, cache_path)
+                            except Exception:
+                                try:
+                                    if os.path.exists(tmp_path):
+                                        os.remove(tmp_path)
+                                except Exception:
+                                    pass
+                                raise
+                            print(
+                                f"[Telegram] Video cached at {cache_path} "
+                                f"({len(resp.content)} bytes, wait={waited_seconds()}s)"
+                            )
+                            return cache_path, waited_seconds(), last_status
+                        print(f"[Telegram] Failed to download video from {video_url}: {last_status}")
+                    except Exception as e:
+                        last_status = f"{type(e).__name__}: {e}"
+                        print(f"[Telegram] Failed to download video from {video_url}: {last_status}")
+
+                if loop.time() >= deadline:
+                    break
+
+                sleep_for = min(float(poll_interval_seconds), max(0.0, deadline - loop.time()))
+                if sleep_for > 0:
+                    await asyncio.sleep(sleep_for)
     except Exception as e:
-        print(f"[Telegram] Failed to download video: {e}")
-    return None
+        last_status = f"{type(e).__name__}: {e}"
+        print(f"[Telegram] Failed to download video: {last_status}")
+
+    print(
+        f"[Telegram] Video wait exhausted for task {task_id}: "
+        f"video_wait_seconds={waited_seconds()} last_video_status={last_status}"
+    )
+    return None, waited_seconds(), last_status
 
 
 async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_email: str | None = None) -> None:
@@ -1344,17 +1418,23 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     # Try to find cached video
     mp4_path = f"/var/autorig/videos/{task_id}.mp4"
     video_path = mp4_path if (os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 0) else None
+    video_wait_seconds = 0
+    last_video_status = "cached" if video_path else None
 
     # If not cached, try to download from worker
     if not video_path:
-        video_path = await _download_video_from_worker(task_id)
+        video_path, video_wait_seconds, last_video_status = await _download_video_from_worker(task_id)
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:
         print("[Telegram] No active chats, skipping done notification")
         return
 
-    print(f"[Telegram] Sending done notification to {len(chat_ids)} chat(s), video={video_path is not None}")
+    print(
+        f"[Telegram] Sending done notification to {len(chat_ids)} chat(s), "
+        f"video={video_path is not None} video_wait_seconds={video_wait_seconds} "
+        f"video_path={video_path} last_video_status={last_video_status}"
+    )
 
     if not video_path:
         # Fallback: at least notify completion
@@ -1416,7 +1496,16 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
                             pass
                 return _inner()
 
-            await _send_with_retry(_send, retry_network=False)
+            result = await _send_with_retry(_send, retry_network=False)
+            if result is None:
+                print(f"[Telegram] send_video failed for chat={chat_id}, task={task_id}; sending text fallback")
+                return await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=False
+                ), retry_network=False)
+            return result
 
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
