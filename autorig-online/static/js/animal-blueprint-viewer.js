@@ -175,6 +175,8 @@ class AnimalBlueprintViewerController {
         this.vertexCloud = [];
         this.activeView = 'right';
         this.draggingNodeId = null;
+        this.dragStartPointer = null;
+        this.dragMoved = false;
         this.additionalNodeSeq = 0;
         this.dirty = false;
         this.initialized = false;
@@ -682,6 +684,8 @@ class AnimalBlueprintViewerController {
             return;
         }
         this.draggingNodeId = nodeId;
+        this.dragStartPointer = { x: event.clientX, y: event.clientY };
+        this.dragMoved = false;
         this.controls.enabled = false;
         const normal = new THREE.Vector3();
         this.camera.getWorldDirection(normal);
@@ -695,14 +699,22 @@ class AnimalBlueprintViewerController {
 
     onPointerMove(event) {
         if (!this.draggingNodeId || this.activeView === 'perspective') return;
+        if (!this.dragMoved && this.dragStartPointer) {
+            const dx = event.clientX - this.dragStartPointer.x;
+            const dy = event.clientY - this.dragStartPointer.y;
+            if ((dx * dx) + (dy * dy) < 16) return;
+        }
+        this.dragMoved = true;
         const target = this.dragPositionFromPointer(event);
         if (target) this.moveNodeTo(this.draggingNodeId, target);
     }
 
     onPointerUp() {
         if (this.draggingNodeId) {
-            this.snapSelectedNode();
+            if (this.dragMoved) this.snapSelectedNode();
             this.draggingNodeId = null;
+            this.dragStartPointer = null;
+            this.dragMoved = false;
         }
         if (this.controls) this.controls.enabled = true;
     }
