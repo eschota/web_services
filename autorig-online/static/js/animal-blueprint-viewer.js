@@ -187,6 +187,13 @@ class AnimalBlueprintViewerController {
         this.dirty = false;
         this.initialized = false;
         this.loading = false;
+        this.perspectiveZoom = {
+            velocity: 0,
+            damping: 0.92,
+            sensitivity: 0.08,
+            minDist: 0.05,
+            maxDist: 10,
+        };
 
         if (!this.card || !this.host) return;
         this.wireButtons();
@@ -355,6 +362,8 @@ class AnimalBlueprintViewerController {
         this.controls.enableRotate = false;
         this.controls.enablePan = true;
         this.controls.enableZoom = true;
+        this.controls.screenSpacePanning = true;
+        this.controls.maxPolarAngle = Math.PI * 0.9;
         this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
         this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
         this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
@@ -399,6 +408,7 @@ class AnimalBlueprintViewerController {
         this.resizeObserver = new ResizeObserver(() => this.resize());
         this.resizeObserver.observe(this.host);
         this.renderer.domElement.addEventListener('pointerdown', (event) => this.onPointerDown(event));
+        this.renderer.domElement.addEventListener('wheel', (event) => this.onWheel(event), { passive: false });
         window.addEventListener('pointermove', (event) => this.onPointerMove(event));
         window.addEventListener('pointerup', () => this.onPointerUp());
         this.resize();
@@ -616,7 +626,9 @@ class AnimalBlueprintViewerController {
             this.controls.enabled = true;
             this.controls.enableRotate = true;
             this.controls.enablePan = true;
-            this.controls.enableZoom = true;
+            this.controls.enableZoom = false;
+            this.controls.screenSpacePanning = true;
+            this.controls.maxPolarAngle = Math.PI * 0.9;
             this.fitPerspective();
             if (this.selectedNodeId) this.transformControls.attach(this.nodeMeshes.get(this.selectedNodeId));
             this.setStatus('Perspective edit mode');
@@ -630,6 +642,7 @@ class AnimalBlueprintViewerController {
         this.controls.enableRotate = false;
         this.controls.enablePan = true;
         this.controls.enableZoom = true;
+        this.controls.screenSpacePanning = true;
         this.fitOrthographic(view);
         this.setStatus(`${view[0].toUpperCase()}${view.slice(1)} orthographic edit mode`);
     }
@@ -715,6 +728,13 @@ class AnimalBlueprintViewerController {
         this.perspectiveCamera.up.set(0, 0, 1);
         this.perspectiveCamera.lookAt(center);
         this.perspectiveCamera.updateProjectionMatrix();
+        if (this.controls) {
+            this.controls.minDistance = Math.max(0.05, distance * 0.08);
+            this.controls.maxDistance = Math.max(10, distance * 8);
+            this.perspectiveZoom.minDist = this.controls.minDistance;
+            this.perspectiveZoom.maxDist = this.controls.maxDistance;
+            this.perspectiveZoom.velocity = 0;
+        }
         if (updateControls) {
             this.controls.target.copy(center);
             this.controls.update();
@@ -745,6 +765,14 @@ class AnimalBlueprintViewerController {
         this.camera.getWorldDirection(normal);
         this.dragPlane.setFromNormalAndCoplanarPoint(normal, mesh.position);
         event.preventDefault();
+    }
+
+    onWheel(event) {
+        if (this.activeView !== 'perspective' || !this.camera || !this.controls) return;
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? 1 : -1;
+        this.perspectiveZoom.velocity += delta * this.perspectiveZoom.sensitivity;
+        this.controls.autoRotate = false;
     }
 
     pickableObjects() {
@@ -1028,8 +1056,24 @@ class AnimalBlueprintViewerController {
     animate() {
         if (!this.renderer) return;
         requestAnimationFrame(() => this.animate());
+        this.updatePerspectiveZoomInertia();
         this.controls?.update();
         this.renderer.render(this.scene, this.camera);
+    }
+
+    updatePerspectiveZoomInertia() {
+        if (this.activeView !== 'perspective' || !this.camera || !this.controls) return;
+        const state = this.perspectiveZoom;
+        if (Math.abs(state.velocity) < 0.0001) {
+            state.velocity = 0;
+            return;
+        }
+        const direction = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
+        let distance = direction.length() + state.velocity;
+        distance = Math.max(state.minDist, Math.min(state.maxDist, distance));
+        direction.normalize().multiplyScalar(distance);
+        this.camera.position.copy(this.controls.target).add(direction);
+        state.velocity *= state.damping;
     }
 }
 
