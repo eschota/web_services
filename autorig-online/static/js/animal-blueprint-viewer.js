@@ -353,8 +353,11 @@ class AnimalBlueprintViewerController {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
         this.controls.enableRotate = false;
-        this.controls.enablePan = false;
+        this.controls.enablePan = true;
         this.controls.enableZoom = true;
+        this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+        this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+        this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
 
         this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
         this.transformControls.setMode('translate');
@@ -625,7 +628,7 @@ class AnimalBlueprintViewerController {
         this.controls.object = this.camera;
         this.controls.enabled = true;
         this.controls.enableRotate = false;
-        this.controls.enablePan = false;
+        this.controls.enablePan = true;
         this.controls.enableZoom = true;
         this.fitOrthographic(view);
         this.setStatus(`${view[0].toUpperCase()}${view.slice(1)} orthographic edit mode`);
@@ -720,6 +723,7 @@ class AnimalBlueprintViewerController {
 
     onPointerDown(event) {
         if (!this.renderer || !this.skeleton) return;
+        if (event.button === 2) return;
         this.updatePointer(event);
         this.raycaster.setFromCamera(this.pointer, this.camera);
         const hits = this.raycaster.intersectObjects(this.pickableObjects(), false);
