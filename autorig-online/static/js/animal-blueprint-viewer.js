@@ -602,10 +602,12 @@ class AnimalBlueprintViewerController {
         const rect = event.currentTarget.getBoundingClientRect();
         const x = (event.clientX - rect.left) / Math.max(1, rect.width);
         const y = (event.clientY - rect.top) / Math.max(1, rect.height);
-        if (x < 0.4) return 'left';
-        if (x > 0.6) return 'right';
-        if (y < 0.38) return 'top';
-        if (y > 0.62) return 'bottom';
+        if (y > 0.24 && y < 0.76) {
+            if (x < 0.42) return 'left';
+            if (x > 0.52) return 'right';
+        }
+        if (y < 0.45) return 'top';
+        if (y > 0.55) return 'bottom';
         return y < 0.5 ? 'back' : 'front';
     }
 
