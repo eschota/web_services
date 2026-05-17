@@ -36,6 +36,7 @@ from config import (
     YOUTUBE_UPLOAD_PRIVACY,
 )
 from database import AsyncSessionLocal, Task, YoutubeCredentials, YoutubeUploadedHash
+from workers import get_worker_base_url
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 
@@ -51,6 +52,42 @@ def youtube_source_video_url(site_video_url: str) -> str:
     if "_video_small.mp4" in u:
         return u.replace("_video_small.mp4", "_video.mp4")
     return u
+
+
+def _is_animal_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+
+
+def _task_youtube_video_candidates(task: Task) -> List[str]:
+    """Preferred upload sources. Animal tasks use rig preview before generic videos."""
+    urls: List[str] = []
+
+    def add(url: Optional[str]) -> None:
+        u = (url or "").strip()
+        if u and u not in urls:
+            urls.append(u)
+
+    source_urls = list(getattr(task, "ready_urls", None) or []) + list(getattr(task, "output_urls", None) or [])
+    if _is_animal_task(task):
+        for url in source_urls:
+            if str(url or "").lower().endswith("_rig_preview.mp4"):
+                add(str(url))
+        if task.guid and task.worker_api:
+            worker_base = get_worker_base_url(task.worker_api)
+            if worker_base:
+                add(f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_rig_preview.mp4")
+
+    site_video_url = (task.video_url or "").strip()
+    if site_video_url:
+        add(youtube_source_video_url(site_video_url))
+        add(site_video_url)
+
+    for url in source_urls:
+        low = str(url or "").lower()
+        if low.endswith("_video.mp4") or low.endswith("_video_small.mp4"):
+            add(youtube_source_video_url(str(url)))
+
+    return urls
 
 
 # Serialize uploads per SHA-256 so two tasks with identical bytes cannot double-upload.
@@ -355,6 +392,7 @@ def _upload_video_file_blocking(
 
 async def run_youtube_upload_for_task(task_id: str) -> None:
     video_url: Optional[str] = None
+    video_candidates: List[str] = []
     tid: Optional[str] = None
     refresh_token: Optional[str] = None
     upload_title: str = YOUTUBE_VIDEO_TITLE
@@ -387,7 +425,8 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
                 await db.commit()
             return
 
-        if not task.video_ready or not task.video_url:
+        video_candidates = _task_youtube_video_candidates(task)
+        if not video_candidates and (not task.video_ready or not task.video_url):
             return
 
         if OPENAI_API_KEY:
@@ -419,8 +458,7 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             print(f"[YouTube] No channel credentials (DB or YOUTUBE_REFRESH_TOKEN); skip task {task_id}")
             return
 
-        site_video_url = task.video_url.strip()
-        if not site_video_url:
+        if not video_candidates:
             return
 
         tid = task.id
@@ -428,14 +466,25 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
     title = upload_title
     desc = upload_desc if upload_desc else _build_youtube_description(tid)
 
-    video_url = youtube_source_video_url(site_video_url)
-
     tmp_path: Optional[str] = None
     try:
         async with httpx.AsyncClient(timeout=600.0, follow_redirects=True) as client:
-            resp = await client.get(video_url)
-            resp.raise_for_status()
-            data = resp.content
+            last_error: Optional[BaseException] = None
+            data: Optional[bytes] = None
+            for candidate_url in video_candidates:
+                video_url = candidate_url
+                try:
+                    resp = await client.get(candidate_url)
+                    resp.raise_for_status()
+                    data = resp.content
+                    break
+                except Exception as e:
+                    last_error = e
+                    print(f"[YouTube] Video source failed for task {task_id}: {candidate_url} ({e})")
+            if data is None:
+                if last_error:
+                    raise last_error
+                raise RuntimeError("No YouTube video source candidates")
 
         sha256_hex = hashlib.sha256(data).hexdigest()
         lock = await _lock_for_sha256(sha256_hex)

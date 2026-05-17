@@ -572,13 +572,19 @@ async def check_urls_batch(
     return newly_ready, len(already_ready)
 
 
-async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[bool, Optional[str]]:
+async def check_video_availability(
+    guid: str,
+    worker_base_url: str,
+    *,
+    prefer_rig_preview: bool = False,
+) -> Tuple[bool, Optional[str]]:
     """
     Check if a preview or full video is available on the worker.
     Returns: (is_ready, video_url)
 
-    Prefers ``{guid}_video_small.mp4`` for the site /api/video proxy; falls back to
-    ``{guid}_video.mp4`` for older tasks or before the small encode exists.
+    For animal rig tasks, prefer ``{guid}_rig_preview.mp4`` because it shows the
+    final rig result. Otherwise prefer ``{guid}_video_small.mp4`` for the site
+    /api/video proxy and fall back to ``{guid}_video.mp4``.
 
     worker_base_url is already without /api-converter-glb (e.g., http://5.129.157.224:5267)
     """
@@ -586,15 +592,20 @@ async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[boo
         return False, None
 
     base = worker_base_url.rstrip("/")
+    rig_preview_url = f"{base}/converter/glb/{guid}/{guid}_rig_preview.mp4"
     small_url = f"{base}/converter/glb/{guid}/{guid}_video_small.mp4"
     large_url = f"{base}/converter/glb/{guid}/{guid}_video.mp4"
 
     try:
         async with httpx.AsyncClient() as client:
+            if prefer_rig_preview and await probe_resource_available(rig_preview_url, client):
+                return True, rig_preview_url
             if await probe_resource_available(small_url, client):
                 return True, small_url
             if await probe_resource_available(large_url, client):
                 return True, large_url
+            if not prefer_rig_preview and await probe_resource_available(rig_preview_url, client):
+                return True, rig_preview_url
     except Exception:
         pass
 

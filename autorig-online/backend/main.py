@@ -4172,6 +4172,8 @@ async def api_get_task(
     is_admin_viewer = bool(user and is_admin_email(user.email))
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
     blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
+    response_video_ready = bool(task.video_ready or blueprint_rig_preview_url)
+    response_video_url = blueprint_rig_preview_url or task.video_url
     response_animal_type = _task_response_animal_type(rig_v2_animal_detection)
 
     return TaskStatusResponse(
@@ -4182,8 +4184,8 @@ async def api_get_task(
         total_count=task.total_count,
         output_urls=task.output_urls,
         ready_urls=task.ready_urls,
-        video_ready=task.video_ready,
-        video_url=task.video_url,
+        video_ready=response_video_ready,
+        video_url=response_video_url,
         blueprint_skeleton_ready=bool(blueprint_skeleton_url),
         blueprint_skeleton_url=blueprint_skeleton_url,
         blueprint_rig_preview_ready=bool(blueprint_rig_preview_url),
@@ -6732,7 +6734,8 @@ async def proxy_video(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.video_url:
+    source_video_url = await _resolve_task_video_source_url(task)
+    if not source_video_url:
         raise HTTPException(status_code=404, detail="Video not available")
 
     # Forward range headers so browser can seek to arbitrary frames.
@@ -6747,7 +6750,7 @@ async def proxy_video(
 
     client = httpx.AsyncClient(timeout=120.0)
     try:
-        req = client.build_request("GET", task.video_url, headers=upstream_headers)
+        req = client.build_request("GET", source_video_url, headers=upstream_headers)
         worker_resp = await client.send(req, stream=True)
     except Exception:
         await client.aclose()
@@ -6767,11 +6770,13 @@ async def proxy_video(
         finally:
             await client.aclose()
 
-    _vname = (
-        f"{task_id}_video_small.mp4"
-        if "_video_small.mp4" in (task.video_url or "")
-        else f"{task_id}_video.mp4"
-    )
+    _source_lower = source_video_url.lower()
+    if "_rig_preview.mp4" in _source_lower:
+        _vname = f"{task_id}_rig_preview.mp4"
+    elif "_video_small.mp4" in _source_lower:
+        _vname = f"{task_id}_video_small.mp4"
+    else:
+        _vname = f"{task_id}_video.mp4"
     response_headers: Dict[str, str] = {
         "Content-Disposition": f'inline; filename="{_vname}"',
         "Cache-Control": "public, max-age=86400",
@@ -7423,6 +7428,10 @@ BLUEPRINT_SKELETON_SUFFIX = "_skeleton.json"
 BLUEPRINT_RIG_PREVIEW_SUFFIX = "_rig_preview.mp4"
 
 
+def _is_animal_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+
+
 def _find_cached_blueprint_file(task_id: str, guid: Optional[str], suffix: str) -> Optional[Path]:
     cache_dir = TASK_CACHE_DIR / task_id
     if not cache_dir.exists():
@@ -7504,7 +7513,7 @@ async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str
 
 
 async def _resolve_task_blueprint_urls(task: Task) -> Tuple[Optional[str], Optional[str]]:
-    if str(task.input_type or "").strip().lower() != "animal":
+    if not _is_animal_task(task):
         return None, None
 
     skeleton_cached = _find_cached_blueprint_file(task.id, task.guid, BLUEPRINT_SKELETON_SUFFIX)
@@ -7521,6 +7530,15 @@ async def _resolve_task_blueprint_urls(task: Task) -> Tuple[Optional[str], Optio
         else None
     )
     return skeleton_url, rig_preview_url
+
+
+async def _resolve_task_video_source_url(task: Task) -> Optional[str]:
+    """Return the preferred upstream video source for public playback/upload flows."""
+    if _is_animal_task(task):
+        rig_preview_url = await _resolve_task_worker_file_url(task, BLUEPRINT_RIG_PREVIEW_SUFFIX)
+        if rig_preview_url:
+            return rig_preview_url
+    return (task.video_url or "").strip() or None
 
 
 async def _resolve_task_blueprint_model_url(task: Task) -> Optional[str]:
@@ -8901,7 +8919,8 @@ async def purge_gallery_upstream_dead_tasks(
                     await db.rollback()
                     print(f"[Gallery upstream purge] Failed {task.id} (dead poster): {e}")
                 continue
-            if task.video_url and not await _probe_http_asset_reachable(client, task.video_url):
+            video_url = await _resolve_task_video_source_url(task)
+            if video_url and not await _probe_http_asset_reachable(client, video_url):
                 _delete_task_artifacts(task)
                 try:
                     await _delete_task_record_and_related(db, task.id)
@@ -9201,7 +9220,7 @@ async def api_proxy_blueprint_model_glb(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if str(task.input_type or "").strip().lower() != "animal":
+    if not _is_animal_task(task):
         raise HTTPException(status_code=404, detail="Blueprint model is available for animal rig tasks only")
 
     cache_path = GLB_CACHE_DIR / f"{task_id}_blueprint.glb"

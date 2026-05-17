@@ -566,9 +566,18 @@ def _is_primary_worker_output(name: str) -> bool:
     )
 
 
+def _is_animal_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+
+
 def _worker_outputs_look_complete(urls: List[str]) -> bool:
     names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
-    has_video = any(n.endswith("_video.mp4") or n.endswith("_video_small.mp4") for n in names)
+    has_video = any(
+        n.endswith("_rig_preview.mp4")
+        or n.endswith("_video.mp4")
+        or n.endswith("_video_small.mp4")
+        for n in names
+    )
     has_poster = any(n.endswith("_video_poster.jpg") for n in names)
     has_download = any(
         n.endswith("_all_animations_unity.fbx")
@@ -656,13 +665,21 @@ async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> 
     return True
 
 
-def _preferred_video_url_from_outputs(urls: List[str]) -> Optional[str]:
+def _preferred_video_url_from_outputs(urls: List[str], *, prefer_rig_preview: bool = False) -> Optional[str]:
+    if prefer_rig_preview:
+        for url in urls or []:
+            if url.lower().endswith("_rig_preview.mp4"):
+                return url
     for url in urls or []:
         if url.lower().endswith("_video_small.mp4"):
             return url
     for url in urls or []:
         if url.lower().endswith("_video.mp4"):
             return url
+    if not prefer_rig_preview:
+        for url in urls or []:
+            if url.lower().endswith("_rig_preview.mp4"):
+                return url
     return None
 
 
@@ -675,6 +692,7 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     was_processing = task.status == "processing"
     previous_ready_count = task.ready_count
     video_was_ready = task.video_ready
+    previous_video_url = task.video_url
 
     # Get already ready URLs
     already_ready = set(task.ready_urls)
@@ -716,7 +734,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             task.ready_count = len(concrete_urls)
             task.status = "done"
             task.last_progress_at = datetime.utcnow()
-            preferred_video_url = _preferred_video_url_from_outputs(concrete_urls)
+            preferred_video_url = _preferred_video_url_from_outputs(
+                concrete_urls,
+                prefer_rig_preview=_is_animal_task(task),
+            )
             if preferred_video_url:
                 task.video_ready = True
                 task.video_url = preferred_video_url
@@ -727,16 +748,21 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             await db.refresh(task)
             return task
     
-    # Video: prefer _video_small.mp4 for site proxy; upgrade from large when small appears later.
+    # Video: animal tasks use the rig preview; other tasks use the lightweight site preview.
     if task.guid and task.worker_api:
         worker_base = get_worker_base_url(task.worker_api)
         if worker_base:
-            if task.video_url and "_video_small.mp4" in task.video_url:
+            preferred_current = "_rig_preview.mp4" if _is_animal_task(task) else "_video_small.mp4"
+            if task.video_url and preferred_current in task.video_url:
                 if not task.video_ready:
                     task.video_ready = True
                     task.updated_at = datetime.utcnow()
             else:
-                video_ready, video_url = await check_video_availability(task.guid, worker_base)
+                video_ready, video_url = await check_video_availability(
+                    task.guid,
+                    worker_base,
+                    prefer_rig_preview=_is_animal_task(task),
+                )
                 if video_ready and video_url:
                     changed = (not task.video_ready) or (task.video_url != video_url)
                     if changed:
@@ -750,7 +776,15 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     if (
         task.status == "done"
         and task.video_ready
-        and not video_was_ready
+        and (
+            not video_was_ready
+            or (
+                _is_animal_task(task)
+                and previous_video_url != task.video_url
+                and "_rig_preview.mp4" in str(task.video_url or "").lower()
+                and not getattr(task, "youtube_video_id", None)
+            )
+        )
     ):
         try:
             from youtube_upload import schedule_youtube_upload_if_eligible

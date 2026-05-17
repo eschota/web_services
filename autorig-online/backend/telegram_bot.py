@@ -1185,7 +1185,19 @@ async def _task_video_candidate_urls(task_id: str) -> list[str]:
             if u and u not in video_urls:
                 video_urls.append(u)
 
+        is_animal = str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+        source_urls = list(getattr(task, "ready_urls", None) or []) + list(getattr(task, "output_urls", None) or [])
+        if is_animal:
+            for url in source_urls:
+                if str(url or "").lower().endswith("_rig_preview.mp4"):
+                    add_url(str(url))
+
         task_video_url = str(task.video_url or "").strip()
+        if is_animal and task.guid and task.worker_api:
+            worker_base = get_worker_base_url(task.worker_api)
+            if worker_base:
+                add_url(f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_rig_preview.mp4")
+
         add_url(task_video_url)
         if "_video_small.mp4" in task_video_url:
             add_url(task_video_url.replace("_video_small.mp4", "_video.mp4"))
@@ -1193,6 +1205,8 @@ async def _task_video_candidate_urls(task_id: str) -> list[str]:
         if task.guid and task.worker_api:
             worker_base = get_worker_base_url(task.worker_api)
             if worker_base:
+                if is_animal:
+                    add_url(f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_rig_preview.mp4")
                 add_url(f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video_small.mp4")
                 add_url(f"{worker_base}/converter/glb/{task.guid}/{task.guid}_video.mp4")
 
