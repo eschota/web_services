@@ -13,9 +13,10 @@ import os
 import asyncio
 import hashlib
 import html
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from sqlalchemy import select, func, update, case
@@ -95,6 +96,108 @@ def _format_input_url(input_url: str | None) -> str:
         return f'📦 <a href="{html.escape(input_url)}">{html.escape(domain + path)}</a>'
     except Exception:
         return f'📦 <a href="{html.escape(input_url)}">Source</a>'
+
+
+def _is_http_url(url: str | None) -> bool:
+    try:
+        parsed = urlparse((url or "").strip())
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    except Exception:
+        return False
+
+
+def _extract_meta_image_url(page_html: str, base_url: str) -> str | None:
+    for tag in re.findall(r"<meta\b[^>]*>", page_html or "", flags=re.IGNORECASE):
+        if not re.search(
+            r"""(?:property|name)\s*=\s*["'](?:og:image|twitter:image)["']""",
+            tag,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        match = re.search(r"""content\s*=\s*["']([^"']+)["']""", tag, flags=re.IGNORECASE)
+        if not match:
+            continue
+        image_url = html.unescape(match.group(1)).strip()
+        if image_url:
+            return urljoin(base_url, image_url)
+    return None
+
+
+def _image_suffix_from_response(content_type: str, image_bytes: bytes) -> str | None:
+    ct = (content_type or "").lower()
+    if "jpeg" in ct or "jpg" in ct or image_bytes.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if "png" in ct or image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if "webp" in ct or image_bytes.startswith(b"RIFF"):
+        return ".webp"
+    return None
+
+
+async def _resolve_source_preview_url(input_url: str | None, source_preview_url: str | None) -> str | None:
+    explicit = (source_preview_url or "").strip()
+    if _is_http_url(explicit):
+        return explicit
+
+    source = (input_url or "").strip()
+    if not _is_http_url(source):
+        return None
+
+    path = (urlparse(source).path or "").lower()
+    if path.endswith((".glb", ".fbx", ".obj", ".zip", ".blend", ".mp4", ".png", ".jpg", ".jpeg", ".webp")):
+        return None
+
+    try:
+        async with httpx.AsyncClient(headers={"User-Agent": "AutoRigBot/1.0 (+https://autorig.online)"}) as client:
+            resp = await client.get(source, timeout=10.0, follow_redirects=True)
+        if resp.status_code != 200:
+            print(f"[Telegram] Source preview page fetch failed for {source}: HTTP {resp.status_code}")
+            return None
+        ctype = (resp.headers.get("content-type") or "").lower()
+        if "html" not in ctype and "<html" not in resp.text[:500].lower():
+            return None
+        return _extract_meta_image_url(resp.text, str(resp.url))
+    except Exception as e:
+        print(f"[Telegram] Source preview page fetch failed for {source}: {type(e).__name__}: {e}")
+        return None
+
+
+async def _download_source_preview_for_telegram(
+    task_id: str,
+    input_url: str | None,
+    source_preview_url: str | None = None,
+) -> Path | None:
+    image_url = await _resolve_source_preview_url(input_url, source_preview_url)
+    if not image_url:
+        return None
+    try:
+        async with httpx.AsyncClient(headers={"User-Agent": "AutoRigBot/1.0 (+https://autorig.online)"}) as client:
+            resp = await client.get(image_url, timeout=20.0, follow_redirects=True)
+        if resp.status_code != 200:
+            print(f"[Telegram] Source preview image fetch failed for {task_id}: HTTP {resp.status_code} {image_url}")
+            return None
+        image_bytes = resp.content or b""
+        if not image_bytes:
+            print(f"[Telegram] Source preview image empty for {task_id}: {image_url}")
+            return None
+        if len(image_bytes) > 6 * 1024 * 1024:
+            print(f"[Telegram] Source preview image too large for {task_id}: {len(image_bytes)} bytes")
+            return None
+        suffix = _image_suffix_from_response(resp.headers.get("content-type") or "", image_bytes)
+        if not suffix:
+            print(f"[Telegram] Source preview image unsupported for {task_id}: {resp.headers.get('content-type')}")
+            return None
+        cache_dir = Path("/var/autorig/preflight-renders")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        final_path = cache_dir / f"{task_id}_telegram_source{suffix}"
+        tmp_path = cache_dir / f"{task_id}_telegram_source.tmp"
+        tmp_path.write_bytes(image_bytes)
+        tmp_path.replace(final_path)
+        print(f"[Telegram] Source preview image cached for task {task_id}: {final_path} ({len(image_bytes)} bytes)")
+        return final_path
+    except Exception as e:
+        print(f"[Telegram] Source preview image fetch failed for {task_id}: {type(e).__name__}: {e}")
+        return None
 
 
 def _normalize_telegram_chat_type(raw) -> str | None:
@@ -475,6 +578,7 @@ async def broadcast_new_task(
     theme_name: str | None = None,
     poster_path: str | None = None,
     detector_text: str | None = None,
+    source_preview_url: str | None = None,
 ) -> None:
     print(f"[Telegram] broadcast_new_task called for task {task_id}")
     token = _get_token()
@@ -511,6 +615,20 @@ async def broadcast_new_task(
     if source_line:
         text += f"\n{source_line}"
 
+    notification_photo_file = Path(poster_path) if poster_path else None
+    if len(text) <= 1000:
+        if notification_photo_file and not notification_photo_file.is_file():
+            print(f"[Telegram] Poster file missing for task {task_id}: {notification_photo_file}")
+            notification_photo_file = None
+        if not notification_photo_file:
+            notification_photo_file = await _download_source_preview_for_telegram(
+                task_id,
+                input_url,
+                source_preview_url,
+            )
+    else:
+        print(f"[Telegram] Caption too long for photo task {task_id}: {len(text)} chars")
+
     chat_ids = await get_active_chat_ids()
     print(f"[Telegram] Sending new task notification to {len(chat_ids)} chat(s)")
     if not chat_ids:
@@ -524,7 +642,7 @@ async def broadcast_new_task(
             if not reserved:
                 print(f"[Telegram] Skip duplicate new-task notification for chat={chat_id}, task={task_id}")
                 return
-            photo_file = Path(poster_path) if poster_path else None
+            photo_file = notification_photo_file
             result = None
             sent_method = "text"
             if photo_file and photo_file.is_file() and len(text) <= 1000:
@@ -541,10 +659,6 @@ async def broadcast_new_task(
                     sent_method = "photo"
                 else:
                     print(f"[Telegram] Photo send failed for task {task_id}, chat {chat_id}; falling back to text")
-            elif photo_file and not photo_file.is_file():
-                print(f"[Telegram] Poster file missing for task {task_id}: {photo_file}")
-            elif photo_file and len(text) > 1000:
-                print(f"[Telegram] Caption too long for photo task {task_id}: {len(text)} chars")
             if not result:
                 result = await _send_with_retry(lambda cid=chat_id: bot.send_message(
                     chat_id=cid,

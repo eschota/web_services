@@ -134,6 +134,7 @@ def _task_notification_theme_meta(task: Task) -> dict:
         settings = {}
     detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
     theme = settings.get("viewer_theme_selection") if isinstance(settings, dict) else None
+    source_preview_url = str(settings.get("source_preview_url") or "").strip() if isinstance(settings, dict) else ""
     animal_type = ""
     detector_text = ""
     if isinstance(detection, dict):
@@ -198,6 +199,7 @@ def _task_notification_theme_meta(task: Task) -> dict:
         "theme_name": theme_names.get(theme_id, theme_id.replace("_", " ").title()) if theme_id else "",
         "poster_path": str(poster_path) if poster_path.is_file() else "",
         "detector_text": detector_text,
+        "source_preview_url": source_preview_url,
     }
 
 
@@ -517,6 +519,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
                     theme_name=notify_meta.get("theme_name") or None,
                     poster_path=notify_meta.get("poster_path") or None,
                     detector_text=notify_meta.get("detector_text") or None,
+                    source_preview_url=notify_meta.get("source_preview_url") or None,
                 )
             )
         else:

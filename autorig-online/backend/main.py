@@ -2899,6 +2899,7 @@ async def api_create_task(
     rig_v2_detection_meta: Optional[Dict[str, Any]] = None
     rig_v2_manual_selection = False
     preflight_render_image_data_url: Optional[str] = None
+    source_preview_url: Optional[str] = None
 
     if "application/json" in content_type:
         try:
@@ -2943,6 +2944,9 @@ async def api_create_task(
         raw_preflight_render = data.get("preflight_render_jpg_base64_string")
         if isinstance(raw_preflight_render, str) and raw_preflight_render.strip():
             preflight_render_image_data_url = raw_preflight_render.strip()
+        raw_source_preview = data.get("source_preview_url")
+        if isinstance(raw_source_preview, str) and raw_source_preview.strip():
+            source_preview_url = raw_source_preview.strip()
     else:
         form = await request.form()
         raw_source = form.get("source")
@@ -2979,6 +2983,9 @@ async def api_create_task(
         raw_preflight_render = form.get("preflight_render_jpg_base64_string")
         if raw_preflight_render is not None and str(raw_preflight_render).strip():
             preflight_render_image_data_url = str(raw_preflight_render).strip()
+        raw_source_preview = form.get("source_preview_url")
+        if raw_source_preview is not None and str(raw_source_preview).strip():
+            source_preview_url = str(raw_source_preview).strip()
         fu = form.get("file")
         # Accept any Starlette/FastAPI upload object (isinstance can fail across re-exports).
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
@@ -3101,6 +3108,11 @@ async def api_create_task(
 
     if rig_v2_detection_meta:
         settings["rig_v2_animal_detection"] = rig_v2_detection_meta
+
+    if source_preview_url:
+        parsed_source_preview = urlparse(source_preview_url)
+        if parsed_source_preview.scheme in ("http", "https") and parsed_source_preview.netloc:
+            settings["source_preview_url"] = source_preview_url
 
     if "viewer_theme_selection" not in settings:
         selected_theme = _select_viewer_theme_from_metadata(

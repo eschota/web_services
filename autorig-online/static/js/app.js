@@ -1877,6 +1877,7 @@ const App = {
             return `
                 <div class="free3d-item" 
                      data-glb-url="${glbUrl}" 
+                     data-preview-url="${previewUrl.replace(/"/g, '&quot;')}"
                      data-title="${title.replace(/"/g, '&quot;')}"
                      title="${title}">
                     <div class="free3d-item-inner">
@@ -1895,7 +1896,8 @@ const App = {
             item.addEventListener('click', () => {
                 const glbUrl = item.dataset.glbUrl;
                 const title = item.dataset.title;
-                this.createTaskFromFree3D(glbUrl, title);
+                const previewUrl = item.dataset.previewUrl;
+                this.createTaskFromFree3D(glbUrl, title, previewUrl);
             });
         });
     },
@@ -1903,7 +1905,7 @@ const App = {
     /**
      * Create a new AutoRig task from a Free3D model
      */
-    async createTaskFromFree3D(glbUrl, title) {
+    async createTaskFromFree3D(glbUrl, title, previewUrl = '') {
         if (!glbUrl) {
             alert(t('error_generic'));
             return;
@@ -1926,6 +1928,9 @@ const App = {
         formData.append('source', 'link');
         formData.append('input_url', glbUrl);
         formData.append('type', 't_pose');
+        if (previewUrl && !String(previewUrl).includes('placeholder-thumb.svg')) {
+            formData.append('source_preview_url', previewUrl);
+        }
 
         this.state.free3dCreateInFlight = true;
         this.showFree3DCreateOverlay(title);
