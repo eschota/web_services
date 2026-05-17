@@ -1148,6 +1148,10 @@
             grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
         }
 
+        .viewer-custom-layout:has(#blueprint-viewer-card:not(.hidden)) {
+            grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+        }
+
         #model-viewer-wrap {
             width: 100%;
             min-width: 0;
@@ -1171,6 +1175,127 @@
             width: 100% !important;
             height: 100% !important;
             border-radius: 12px;
+        }
+
+        .blueprint-viewer-card {
+            width: 100%;
+            min-width: 0;
+            align-self: start;
+            border: 1px solid rgba(56, 189, 248, 0.32);
+            background:
+                linear-gradient(rgba(56, 189, 248, 0.055) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(56, 189, 248, 0.055) 1px, transparent 1px),
+                radial-gradient(circle at 30% 0%, rgba(34, 211, 238, 0.16), transparent 34%),
+                linear-gradient(180deg, rgba(5, 25, 62, 0.98), rgba(4, 15, 39, 0.98));
+            background-size: 24px 24px, 24px 24px, auto, auto;
+            color: #e0f2fe;
+            box-shadow: 0 18px 48px rgba(3, 7, 18, 0.28);
+        }
+
+        .blueprint-viewer-card.hidden {
+            display: none !important;
+        }
+
+        .blueprint-viewer-head,
+        .blueprint-viewer-toolbar,
+        .blueprint-viewer-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .blueprint-viewer-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .blueprint-viewer-status {
+            color: rgba(224, 242, 254, 0.72);
+            font-size: 0.78rem;
+        }
+
+        .blueprint-viewer-stage {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            min-height: 320px;
+            margin: 0.75rem 0;
+            overflow: hidden;
+            border-radius: 12px;
+            border: 1px solid rgba(125, 211, 252, 0.28);
+            background: #061a3a;
+        }
+
+        .blueprint-viewer-canvas {
+            position: absolute;
+            inset: 0;
+        }
+
+        .blueprint-viewer-canvas canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        .blueprint-viewer-empty {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            text-align: center;
+            color: rgba(224, 242, 254, 0.78);
+            background: rgba(3, 7, 18, 0.18);
+            pointer-events: none;
+        }
+
+        .blueprint-viewer-toolbar button,
+        .blueprint-viewer-footer button {
+            border: 1px solid rgba(125, 211, 252, 0.28);
+            border-radius: 8px;
+            background: rgba(8, 47, 73, 0.74);
+            color: #e0f2fe;
+            font: inherit;
+            font-size: 0.72rem;
+            font-weight: 700;
+            line-height: 1;
+            padding: 0.45rem 0.56rem;
+            cursor: pointer;
+        }
+
+        .blueprint-viewer-toolbar button:hover,
+        .blueprint-viewer-toolbar button[aria-pressed="true"],
+        .blueprint-viewer-footer button:hover {
+            border-color: rgba(34, 211, 238, 0.72);
+            background: rgba(14, 116, 144, 0.58);
+        }
+
+        .blueprint-selected-node {
+            min-width: 0;
+            color: rgba(224, 242, 254, 0.78);
+            font-size: 0.76rem;
+            overflow-wrap: anywhere;
+        }
+
+        .blueprint-retarget-btn {
+            display: none;
+            width: 100%;
+            justify-content: center;
+            margin-top: 0.65rem;
+            border: 0 !important;
+            background: linear-gradient(135deg, #06b6d4, #6366f1) !important;
+            color: #fff !important;
+            box-shadow: 0 10px 24px rgba(6, 182, 212, 0.24);
+        }
+
+        .blueprint-retarget-btn.is-visible {
+            display: inline-flex;
         }
 
         #admin-input-url-row summary {
@@ -1450,6 +1575,12 @@
         @media (max-width: 1200px) {
             .viewer-custom-layout {
                 grid-template-columns: 1fr;
+            }
+            .viewer-custom-layout:has(#blueprint-viewer-card:not(.hidden)) {
+                grid-template-columns: 1fr;
+            }
+            .blueprint-viewer-stage {
+                min-height: 280px;
             }
             .viewer-side-panel {
                 position: static;
@@ -3361,6 +3492,39 @@
             </div>
             </div>
 
+            <div id="blueprint-viewer-card" class="card blueprint-viewer-card viewer-side-panel hidden" aria-label="Blueprint semantic skeleton editor">
+                <div class="blueprint-viewer-head">
+                    <div>
+                        <div class="blueprint-viewer-title">Blueprint</div>
+                        <div class="blueprint-viewer-status" id="blueprint-viewer-status">Waiting for semantic skeleton...</div>
+                    </div>
+                    <div class="blueprint-selected-node" id="blueprint-selected-node">No node selected</div>
+                </div>
+                <div class="blueprint-viewer-toolbar" role="toolbar" aria-label="Blueprint camera views">
+                    <button type="button" data-blueprint-view="front">Front</button>
+                    <button type="button" data-blueprint-view="back">Back</button>
+                    <button type="button" data-blueprint-view="left">Left</button>
+                    <button type="button" data-blueprint-view="right" aria-pressed="true">Right</button>
+                    <button type="button" data-blueprint-view="top">Top</button>
+                    <button type="button" data-blueprint-view="bottom">Bottom</button>
+                    <button type="button" data-blueprint-view="perspective">Perspective</button>
+                    <button type="button" data-blueprint-action="fit">Fit</button>
+                    <button type="button" data-blueprint-action="reset">Reset</button>
+                </div>
+                <div class="blueprint-viewer-stage">
+                    <div id="blueprint-viewer-canvas" class="blueprint-viewer-canvas"></div>
+                    <div id="blueprint-viewer-empty" class="blueprint-viewer-empty">Blueprint data will appear when the worker publishes skeleton.json.</div>
+                </div>
+                <div class="blueprint-viewer-footer">
+                    <button type="button" data-blueprint-action="reset-node">Reset node</button>
+                    <button type="button" data-blueprint-action="reset-all">Reset all</button>
+                    <span class="blueprint-viewer-status" id="blueprint-coordinates">x - y - z -</span>
+                </div>
+                <button type="button" id="blueprint-retarget-btn" class="blueprint-retarget-btn">
+                    Retarget Rig Animation
+                </button>
+            </div>
+
             <!-- Custom animations picker -->
             <div id="custom-animations-wrap" class="card hidden viewer-side-panel boot-deferred-section boot-reveal-surface">
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
@@ -5032,6 +5196,7 @@
                 // Use output_urls for Downloads (all expected files), fallback to ready_urls
                 const downloadUrls = (task.output_urls && task.output_urls.length > 0) ? task.output_urls : task.ready_urls;
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
+                window.AnimalBlueprintViewer?.syncTask?.(task);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
 
                 this.renderPosterMetadataSection();
@@ -6499,9 +6664,11 @@
 
                     // Hide video artifacts (video is already shown on page)
                     if (/_video(_small)?\.(mp4|mov)$/i.test(filename)) return;
+                    if (/_rig_preview\.mp4$/i.test(filename) || /^rig_preview\.mp4$/i.test(filename)) return;
                     if (/_video_poster\.jpe?g$/i.test(filename)) return;
                     if (/video\.(mp4|mov)$/i.test(filename)) return;
                     if (/video_poster\.jpe?g$/i.test(filename)) return;
+                    if (/_skeleton\.json$/i.test(filename) || /^skeleton\.json$/i.test(filename)) return;
 
                     // HDRP renders are shown as images under the video (not in file list)
                     if (/_Unity_HDRP_Render_[1-3]_view\.jpe?g$/i.test(filename)) return;
@@ -6922,6 +7089,7 @@
           }
         }
     </script>
+    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=1"></script>
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';

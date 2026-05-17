@@ -433,6 +433,8 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     task_type_for_worker = task.input_type or "t_pose"
     animal_type = None
     mode = None
+    transform_params = None
+    animal_semantic_markers = None
     if str(task_type_for_worker).strip().lower() == "animal":
         try:
             settings = json.loads(task.viewer_settings or "{}")
@@ -441,6 +443,12 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
                 if _animal_detection_confident_enough(detection):
                     animal_type = _animal_type_from_detection_meta(detection)
                     mode = str(detection.get("mode") or "").strip() or None
+                    local_rotation = detection.get("local_rotation")
+                    if isinstance(local_rotation, list) and len(local_rotation) == 3:
+                        transform_params = {"local_rotation": local_rotation}
+                    markers = detection.get("animal_semantic_markers")
+                    if isinstance(markers, dict):
+                        animal_semantic_markers = markers
                 else:
                     animal_type = None
                     mode = None
@@ -462,9 +470,11 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         worker_url,
         task.input_url,
         task_type_for_worker,
+        transform_params=transform_params,
         pipeline_kind=pk,
         animal_type=animal_type,
         mode=mode,
+        animal_semantic_markers=animal_semantic_markers,
     )
     if not result.success:
         task.status = "error"
@@ -548,6 +558,8 @@ def _is_primary_worker_output(name: str) -> bool:
         or n.endswith("_video.mp4")
         or n.endswith("_video_small.mp4")
         or n.endswith("_video_poster.jpg")
+        or n.endswith("_rig_preview.mp4")
+        or n.endswith("_skeleton.json")
         or n.endswith("_all_animations.blend")
         or n.endswith("_all_animations_unity.fbx")
         or n.endswith("_hdrp.unitypackage")

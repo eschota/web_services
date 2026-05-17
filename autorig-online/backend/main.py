@@ -2898,6 +2898,8 @@ async def api_create_task(
     rig_mode: Optional[str] = None
     rig_v2_detection_meta: Optional[Dict[str, Any]] = None
     rig_v2_manual_selection = False
+    local_rotation: Optional[List[float]] = None
+    animal_semantic_markers: Optional[Dict[str, List[float]]] = None
     preflight_render_image_data_url: Optional[str] = None
     source_preview_url: Optional[str] = None
 
@@ -2930,6 +2932,8 @@ async def api_create_task(
         raw_mode = data.get("mode")
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
+        local_rotation = _coerce_float_vec3(data.get("local_rotation"), "local_rotation")
+        animal_semantic_markers = _coerce_animal_semantic_markers(data.get("animal_semantic_markers"))
         rig_v2_manual_selection = bool(data.get("rig_v2_manual_selection"))
         raw_detection = data.get("rig_v2_animal_detection")
         if isinstance(raw_detection, dict):
@@ -2971,6 +2975,13 @@ async def api_create_task(
         raw_mode = form.get("mode")
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
+        local_rotation = _coerce_float_vec3(
+            form.get("local_rotation_json") or form.get("local_rotation"),
+            "local_rotation",
+        )
+        animal_semantic_markers = _coerce_animal_semantic_markers(
+            form.get("animal_semantic_markers_json") or form.get("animal_semantic_markers")
+        )
         rig_v2_manual_selection = str(form.get("rig_v2_manual_selection") or "").strip().lower() in ("1", "true", "yes", "on")
         raw_detection = form.get("rig_v2_animal_detection_json")
         if raw_detection is not None and str(raw_detection).strip():
@@ -3073,6 +3084,11 @@ async def api_create_task(
             "animal_type_string": animal_type,
             "mode": rig_mode,
         }
+        if local_rotation is not None:
+            rig_v2_detection_meta["local_rotation"] = local_rotation
+        if animal_semantic_markers:
+            rig_v2_detection_meta["animal_semantic_markers"] = animal_semantic_markers
+            rig_v2_detection_meta["source"] = "blueprint_retarget"
         if manual_animal_selection:
             rig_v2_detection_meta.update({
                 "source": rig_v2_detection_meta.get("source") or "manual_task_create",
@@ -3186,6 +3202,52 @@ RIG_V2_ALLOWED_ANIMAL_TYPES = [
 ]
 RIG_V2_DISCOVERED_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
 RIG_V2_OPENAI_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
+
+
+def _coerce_float_vec3(value: Any, field_name: str) -> Optional[List[float]]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{field_name} must be a JSON array [x,y,z]") from exc
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be an array of 3 numbers")
+    out: List[float] = []
+    for item in value:
+        try:
+            number = float(item)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{field_name} must contain only numbers") from exc
+        if number != number or abs(number) > 1_000_000:
+            raise HTTPException(status_code=400, detail=f"{field_name} contains an invalid number")
+        out.append(number)
+    return out
+
+
+def _coerce_animal_semantic_markers(value: Any) -> Optional[Dict[str, List[float]]]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="animal_semantic_markers must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="animal_semantic_markers must be an object")
+
+    markers: Dict[str, List[float]] = {}
+    for raw_key, raw_vec in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        if len(key) > 96 or not re.match(r"^[A-Za-z0-9_.:-]+$", key):
+            raise HTTPException(status_code=400, detail=f"Invalid semantic marker key: {key[:96]}")
+        markers[key] = _coerce_float_vec3(raw_vec, f"animal_semantic_markers.{key}") or [0.0, 0.0, 0.0]
+        if len(markers) > 256:
+            raise HTTPException(status_code=400, detail="Too many semantic markers")
+    return markers or None
 
 
 def _rig_v2_server_time() -> int:
@@ -4087,6 +4149,7 @@ async def api_get_task(
 
     is_admin_viewer = bool(user and is_admin_email(user.email))
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
+    blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
 
     return TaskStatusResponse(
         task_id=task.id,
@@ -4098,6 +4161,10 @@ async def api_get_task(
         ready_urls=task.ready_urls,
         video_ready=task.video_ready,
         video_url=task.video_url,
+        blueprint_skeleton_ready=bool(blueprint_skeleton_url),
+        blueprint_skeleton_url=blueprint_skeleton_url,
+        blueprint_rig_preview_ready=bool(blueprint_rig_preview_url),
+        blueprint_rig_preview_url=blueprint_rig_preview_url,
         input_url=task.input_url,
         input_type=task.input_type,
         rig_v2_animal_detection=rig_v2_animal_detection,
@@ -7327,6 +7394,110 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
     return None
 
 
+BLUEPRINT_SKELETON_SUFFIX = "_skeleton.json"
+BLUEPRINT_RIG_PREVIEW_SUFFIX = "_rig_preview.mp4"
+
+
+def _find_cached_blueprint_file(task_id: str, guid: Optional[str], suffix: str) -> Optional[Path]:
+    cache_dir = TASK_CACHE_DIR / task_id
+    if not cache_dir.exists():
+        return None
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        names = ["skeleton.json"]
+    elif suffix == BLUEPRINT_RIG_PREVIEW_SUFFIX:
+        names = ["rig_preview.mp4"]
+    else:
+        names = []
+    if guid:
+        names.append(f"{guid}{suffix}")
+    for name in names:
+        path = cache_dir / name
+        if path.exists() and path.is_file() and path.stat().st_size > 0:
+            return path
+    matches = sorted(cache_dir.glob(f"*{suffix}"))
+    for path in matches:
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+    return None
+
+
+async def _remote_file_exists(url: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+            resp = await client.head(url)
+            if 200 <= resp.status_code < 400:
+                return True
+            if resp.status_code not in (405, 501):
+                return False
+            resp = await client.get(url, headers={"Range": "bytes=0-0"})
+            return resp.status_code in (200, 206)
+    except Exception:
+        return False
+
+
+async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str]:
+    urls = list(task.ready_urls or []) + list(task.output_urls or [])
+    existing = _find_file_in_ready_urls(urls, suffix)
+    if existing:
+        return existing
+    if not task.guid or not task.worker_api:
+        return None
+
+    from workers import get_worker_base_url
+
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    worker_base = worker_base.rstrip("/")
+    worker_root = f"{worker_base}/converter/glb"
+
+    direct_url = f"{worker_root}/{task.guid}/{task.guid}{suffix}"
+    if await _remote_file_exists(direct_url):
+        return direct_url
+
+    files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(files_url)
+        if resp.status_code != 200:
+            return None
+        data = resp.json() if resp.content else {}
+    except Exception:
+        return None
+
+    for folder_data in (data.get("folders") or {}).values():
+        if not isinstance(folder_data, dict):
+            continue
+        for item in folder_data.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            rel_path = str(item.get("rel_path") or "")
+            if rel_path and name.lower().endswith(suffix):
+                return f"{worker_root}/{task.guid}/{rel_path}"
+    return None
+
+
+async def _resolve_task_blueprint_urls(task: Task) -> Tuple[Optional[str], Optional[str]]:
+    if str(task.input_type or "").strip().lower() != "animal":
+        return None, None
+
+    skeleton_cached = _find_cached_blueprint_file(task.id, task.guid, BLUEPRINT_SKELETON_SUFFIX)
+    rig_preview_cached = _find_cached_blueprint_file(task.id, task.guid, BLUEPRINT_RIG_PREVIEW_SUFFIX)
+
+    skeleton_url = (
+        f"/api/task/{task.id}/blueprint/skeleton.json"
+        if skeleton_cached or await _resolve_task_worker_file_url(task, BLUEPRINT_SKELETON_SUFFIX)
+        else None
+    )
+    rig_preview_url = (
+        f"/api/task/{task.id}/blueprint/rig-preview.mp4"
+        if rig_preview_cached or await _resolve_task_worker_file_url(task, BLUEPRINT_RIG_PREVIEW_SUFFIX)
+        else None
+    )
+    return skeleton_url, rig_preview_url
+
+
 def _task_has_poster(task: Task) -> bool:
     """True if ready_urls/output_urls contain a file usable as /api/thumb source (same rules as api_proxy_thumb)."""
     urls = list(task.ready_urls or []) + list(task.output_urls or [])
@@ -7916,6 +8087,8 @@ async def _proxy_model_file(
     content_types = {
         "glb": "model/gltf-binary",
         "fbx": "application/octet-stream",
+        "json": "application/json",
+        "mp4": "video/mp4",
         "zip": "application/zip",
     }
     content_type = content_types.get(ext, "application/octet-stream")
@@ -8873,6 +9046,66 @@ async def api_proxy_prepared_glb(
     # NOTE: Don't fall back to original model ({guid}.glb) as it's not "prepared" 
     # and would cause viewer to set preparedLoaded=true, skipping the actual prepared version
     raise HTTPException(status_code=404, detail="Prepared model not available yet")
+
+
+async def _blueprint_file_response(
+    task_id: str,
+    suffix: str,
+    public_filename: str,
+    media_type: str,
+    db: AsyncSession,
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(task.input_type or "").strip().lower() != "animal":
+        raise HTTPException(status_code=404, detail="Blueprint files are available for animal rig tasks only")
+
+    cached = _find_cached_blueprint_file(task_id, task.guid, suffix)
+    if cached:
+        return FileResponse(
+            path=str(cached),
+            media_type=media_type,
+            filename=public_filename,
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Encoding": "identity",
+            },
+        )
+
+    source_url = await _resolve_task_worker_file_url(task, suffix)
+    if not source_url:
+        raise HTTPException(status_code=404, detail="Blueprint file not available yet")
+    return await _proxy_model_file(source_url, public_filename, as_attachment=False)
+
+
+@app.get("/api/task/{task_id}/blueprint/skeleton.json")
+async def api_proxy_blueprint_skeleton(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _blueprint_file_response(
+        task_id,
+        BLUEPRINT_SKELETON_SUFFIX,
+        "skeleton.json",
+        "application/json",
+        db,
+    )
+
+
+@app.get("/api/task/{task_id}/blueprint/rig-preview.mp4")
+async def api_proxy_blueprint_rig_preview(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _blueprint_file_response(
+        task_id,
+        BLUEPRINT_RIG_PREVIEW_SUFFIX,
+        "rig_preview.mp4",
+        "video/mp4",
+        db,
+    )
 
 
 @app.head("/thumb/{task_id}")

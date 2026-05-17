@@ -351,6 +351,7 @@ async def send_task_to_worker(
     pipeline_kind: str = "rig",
     animal_type: Optional[str] = None,
     mode: Optional[str] = None,
+    animal_semantic_markers: Optional[Dict[str, List[float]]] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -384,6 +385,8 @@ async def send_task_to_worker(
                 }
                 if animal_type:
                     payload["animal_type"] = animal_type
+                if animal_semantic_markers:
+                    payload["animal_semantic_markers"] = animal_semantic_markers
                 if transform_params:
                     if transform_params.get("local_position"):
                         payload["local_position"] = transform_params["local_position"]
@@ -944,4 +947,3 @@ async def get_global_queue_status(db: Optional[AsyncSession] = None) -> GlobalQu
             estimated_wait_seconds=estimated_wait_seconds,
             estimated_wait_formatted=wait_formatted
         )
-

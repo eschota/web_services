@@ -22,6 +22,14 @@ class TaskCreateRequest(BaseModel):
         default="rig",
         description="``rig`` (default Auto Rig) or ``convert`` (GLB-only retopo/format pipeline; ``input_url`` must be ``.glb``)",
     )
+    local_rotation: Optional[List[float]] = Field(
+        None,
+        description="Optional animal rig retarget rotation [x,y,z] in worker degrees.",
+    )
+    animal_semantic_markers: Optional[Dict[str, List[float]]] = Field(
+        None,
+        description="Optional semantic marker overrides for animal rig retargeting.",
+    )
     ga_client_id: Optional[str] = Field(None, description="Google Analytics client ID")
 
 
@@ -46,6 +54,10 @@ class TaskStatusResponse(BaseModel):
     ready_urls: List[str]  # Files that are ready for download
     video_ready: bool
     video_url: Optional[str]
+    blueprint_skeleton_ready: bool = False
+    blueprint_skeleton_url: Optional[str] = None
+    blueprint_rig_preview_ready: bool = False
+    blueprint_rig_preview_url: Optional[str] = None
     # Input URL (for Free3D models viewer loads directly from this)
     input_url: Optional[str] = None
     input_type: Optional[str] = None
@@ -752,4 +764,3 @@ class SupportChatMessageItem(BaseModel):
 
 class SupportChatMessagesPollResponse(BaseModel):
     messages: List[SupportChatMessageItem]
-
