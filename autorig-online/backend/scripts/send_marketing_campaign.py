@@ -47,7 +47,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 @dataclass(frozen=True)
 class Recipient:
-    user_id: int
+    user_id: int | None
     email: str
     email_hash: str
 
@@ -178,13 +178,67 @@ async def run_dry(campaign_key: str, sample_count: int) -> int:
     return 0
 
 
-async def run_test(campaign_key: str, email: str, allow_missing_postal_address: bool) -> int:
+async def run_test(campaign_key: str, email: str, allow_missing_postal_address: bool, force_test: bool) -> int:
     await init_db()
+    normalized = normalize_email(email)
+    if not EMAIL_RE.match(normalized):
+        print(json.dumps({"recipient": mask_email(email), "ok": False, "error": "invalid email"}, indent=2, ensure_ascii=False))
+        return 2
+
+    email_hash = hash_email(normalized)
+    test_campaign_key = campaign_key + "-test"
+    async with AsyncSessionLocal() as db:
+        user_id = None
+        user_rs = await db.execute(
+            select(User.id)
+            .where(func.lower(func.trim(User.email)) == normalized)
+            .order_by(User.id.asc())
+            .limit(1)
+        )
+        user_id = user_rs.scalar_one_or_none()
+
+        if not force_test:
+            existing_rs = await db.execute(
+                select(EmailCampaignSend.campaign_key, EmailCampaignSend.status, EmailCampaignSend.sent_at)
+                .where(EmailCampaignSend.email_hash == email_hash)
+                .where(EmailCampaignSend.campaign_key.in_([campaign_key, test_campaign_key]))
+                .order_by(EmailCampaignSend.created_at.asc())
+            )
+            existing = existing_rs.first()
+            if existing:
+                print(json.dumps({
+                    "recipient": mask_email(normalized),
+                    "ok": True,
+                    "skipped": True,
+                    "reason": "already_logged_for_campaign",
+                    "existing_campaign_key": existing[0],
+                    "existing_status": existing[1],
+                    "existing_sent_at": existing[2].isoformat() if existing[2] else None,
+                    "hint": "Use --force-test only when an intentional duplicate test email is required.",
+                }, indent=2, ensure_ascii=False))
+                return 0
+
+        recipient = Recipient(user_id=user_id, email=normalized, email_hash=email_hash)
+        row = await insert_send_row(db, test_campaign_key, recipient)
+        if row is None:
+            print(json.dumps({
+                "recipient": mask_email(normalized),
+                "ok": True,
+                "skipped": True,
+                "reason": "test_send_already_logged",
+                "campaign_key": test_campaign_key,
+            }, indent=2, ensure_ascii=False))
+            return 0
+
     result = await send_marketing_campaign_email(
-        email,
-        campaign_key + "-test",
+        normalized,
+        test_campaign_key,
         allow_missing_postal_address=allow_missing_postal_address,
     )
+    async with AsyncSessionLocal() as db:
+        db_row = await db.get(EmailCampaignSend, row.id)
+        if db_row is not None:
+            await update_send_row(db, db_row, result)
     print(json.dumps({"recipient": mask_email(email), **result}, indent=2, ensure_ascii=False))
     return 0 if result.get("ok") else 1
 
@@ -259,6 +313,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--campaign", default=DEFAULT_CAMPAIGN_KEY)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--send-test", metavar="EMAIL")
+    parser.add_argument(
+        "--force-test",
+        action="store_true",
+        help="Allow an intentional duplicate test email to an address already logged for this campaign.",
+    )
     parser.add_argument("--yes-live", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument(
@@ -275,7 +334,7 @@ def parse_args() -> argparse.Namespace:
 async def async_main() -> int:
     args = parse_args()
     if args.send_test:
-        return await run_test(args.campaign, args.send_test, args.allow_missing_postal_address)
+        return await run_test(args.campaign, args.send_test, args.allow_missing_postal_address, args.force_test)
     if args.yes_live:
         return await run_live(args)
     return await run_dry(args.campaign, args.sample)
