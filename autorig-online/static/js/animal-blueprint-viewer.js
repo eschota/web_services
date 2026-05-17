@@ -879,9 +879,9 @@ class AnimalBlueprintViewerController {
         if (mesh?.userData.labelSprite) {
             mesh.userData.labelSprite.position.set(vec.x, vec.y, vec.z + Math.max(0.02, this.modelDiag * 0.035));
         }
-        this.redrawLines();
-        this.updateSelection(String(nodeId));
-        this.updateDirtyState();
+        if (!options.skipRedraw) this.redrawLines();
+        if (!options.skipSelection) this.updateSelection(String(nodeId));
+        if (!options.skipDirty) this.updateDirtyState();
     }
 
     updateSelection(nodeId) {
@@ -992,8 +992,13 @@ class AnimalBlueprintViewerController {
     }
 
     resetAllNodes() {
+        const selectedBeforeReset = this.selectedNodeId ? String(this.selectedNodeId) : null;
         for (const [id, original] of this.originalPositions.entries()) {
-            this.moveNodeTo(id, original);
+            this.moveNodeTo(id, original, {
+                skipSelection: true,
+                skipDirty: true,
+                skipRedraw: true,
+            });
         }
         for (const id of [...this.additionalParents.keys()]) {
             const mesh = this.nodeMeshes.get(String(id));
@@ -1005,12 +1010,8 @@ class AnimalBlueprintViewerController {
             this.labelSprites.delete(String(id));
             this.additionalParents.delete(String(id));
         }
-        if (this.selectedNodeId && !this.nodes.has(String(this.selectedNodeId))) {
-            this.updateSelection(null);
-        } else if (this.selectedNodeId) {
-            this.updateSelection(this.selectedNodeId);
-        }
         this.redrawLines();
+        this.updateSelection(selectedBeforeReset && this.nodes.has(selectedBeforeReset) ? selectedBeforeReset : null);
         this.updateDirtyState();
     }
 
