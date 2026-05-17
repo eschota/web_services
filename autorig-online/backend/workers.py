@@ -15,9 +15,9 @@ from urllib.parse import urlparse
 import httpx
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 
-from database import WorkerEndpoint
+from database import WorkerEndpoint, Task
 from config import (
     WORKERS, 
     PROGRESS_BATCH_SIZE, 
@@ -206,6 +206,41 @@ async def get_configured_workers(db: Optional[AsyncSession] = None) -> List[str]
     return [url for (url, _w) in await get_configured_workers_with_weight(db)]
 
 
+async def get_backend_worker_processing_counts(db: Optional[AsyncSession] = None) -> Dict[str, int]:
+    """
+    Count tasks already assigned by the backend per worker.
+    Worker APIs can lag for a few seconds after dispatch; these counts prevent
+    burst uploads from piling onto one worker while other workers are idle.
+    """
+    if not db:
+        return {}
+    try:
+        res = await db.execute(
+            select(Task.worker_api, func.count())
+            .where(Task.status == "processing")
+            .where(Task.worker_api.is_not(None))
+            .group_by(Task.worker_api)
+        )
+    except Exception as e:
+        print(f"[Workers] Could not read backend processing counts: {e}")
+        return {}
+
+    counts: Dict[str, int] = {}
+    for raw_url, count in res.all():
+        key = normalize_worker_url_key(raw_url or "")
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + int(count or 0)
+    return counts
+
+
+def get_worker_effective_active(worker: Any, backend_counts: Optional[Dict[str, int]] = None) -> int:
+    """Use the stricter of worker-reported active jobs and backend-assigned jobs."""
+    reported = _safe_worker_int(getattr(worker, "total_active", 0), 0)
+    backend = int((backend_counts or {}).get(normalize_worker_url_key(getattr(worker, "url", "")), 0) or 0)
+    return max(reported, backend)
+
+
 WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
 _worker_quarantine_until: Dict[str, datetime] = {}
 _worker_quarantine_reason: Dict[str, str] = {}
@@ -273,7 +308,9 @@ async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerI
         if response.status_code == 200:
             data = response.json()
             # Worker may return load info in different formats
-            load = data.get("load", data.get("queue_size", 0))
+            load = data.get("load")
+            if load is None:
+                load = _safe_worker_int(data.get("total_active"), 0) + _safe_worker_int(data.get("queue_size"), 0)
             if isinstance(load, (int, float)):
                 return WorkerInfo(url=worker_url, available=True, load=float(load))
             return WorkerInfo(url=worker_url, available=True, load=0.0)
@@ -315,6 +352,7 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
         return None
 
     statuses = await get_all_workers_status(worker_urls)
+    backend_processing = await get_backend_worker_processing_counts(db)
     available = [w for w in statuses if w.available]
     quarantine_safe_available = [w for w in available if not is_worker_quarantined(w.url)]
 
@@ -332,14 +370,18 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
 
     # For direct restart/admin dispatch, avoid piling new work onto a high-weight
     # worker that is already busy when lower-weight idle workers are available.
-    idle_candidates = [w for w in candidates_pool if (w.load or 0) <= 0]
-    dispatch_pool = idle_candidates or candidates_pool
+    effective_pool = [
+        (w, max(float(w.load or 0), float(backend_processing.get(normalize_worker_url_key(w.url), 0) or 0)))
+        for w in candidates_pool
+    ]
+    idle_candidates = [(w, load) for (w, load) in effective_pool if load <= 0]
+    dispatch_pool = idle_candidates or effective_pool
 
     weight_by_url: Dict[str, int] = {u: w for (u, w) in workers_with_weight}
-    max_weight = max(weight_by_url.get(w.url, 0) for w in dispatch_pool)
-    candidates = [w for w in dispatch_pool if weight_by_url.get(w.url, 0) == max_weight]
-    candidates.sort(key=lambda w: w.load)
-    return candidates[0].url
+    max_weight = max(weight_by_url.get(w.url, 0) for (w, _load) in dispatch_pool)
+    candidates = [(w, load) for (w, load) in dispatch_pool if weight_by_url.get(w.url, 0) == max_weight]
+    candidates.sort(key=lambda item: item[1])
+    return candidates[0][0].url
 
 
 async def send_task_to_worker(

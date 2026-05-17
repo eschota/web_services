@@ -124,6 +124,8 @@ from workers import (
     clear_worker_quarantine,
     is_worker_quarantined,
     normalize_task_type,
+    get_backend_worker_processing_counts,
+    get_worker_effective_active,
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from viewer_theme_vision import analyze_backdrop_theme_with_openai
@@ -158,6 +160,25 @@ _poster_recovery_throttle: Dict[str, float] = {}
 POSTER_RECOVERY_THROTTLE_SEC = 20.0
 PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
+
+
+async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quarantined: bool = False) -> List[Any]:
+    """
+    Return workers that are free according to both worker API and backend DB.
+    The DB overlay avoids burst dispatch races where several tasks pick the same
+    worker before its live /api-converter-glb counters update.
+    """
+    backend_processing = await get_backend_worker_processing_counts(db)
+    return [
+        w
+        for w in (queue_status.workers if queue_status else [])
+        if (
+            w.available
+            and (get_worker_effective_active(w, backend_processing) < w.max_concurrent)
+            and (w.queue_size <= 0)
+            and (allow_quarantined or not is_worker_quarantined(w.url))
+        )
+    ]
 
 
 def _pop_preflight_render_image_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -583,20 +604,9 @@ async def background_task_updater():
                         except Exception as e:
                             print(f"[Background Worker] Stuck-hour policy error: {e}")
 
-                    free_workers = [
-                        w for w in queue_status.workers
-                        if (
-                            w.available
-                            and (w.total_active < w.max_concurrent)
-                            and (w.queue_size <= 0)
-                            and not is_worker_quarantined(w.url)
-                        )
-                    ]
+                    free_workers = await get_dispatchable_workers(db, queue_status)
                     if not free_workers:
-                        fallback_workers = [
-                            w for w in queue_status.workers
-                            if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)
-                        ]
+                        fallback_workers = await get_dispatchable_workers(db, queue_status, allow_quarantined=True)
                         if fallback_workers:
                             free_workers = fallback_workers
                             print("[Background Worker] All free workers are quarantined, using degraded dispatch fallback")
@@ -622,11 +632,15 @@ async def background_task_updater():
                         )
                         n_created = int(c_q.scalar() or 0)
                         if n_created > 0:
+                            backend_processing = await get_backend_worker_processing_counts(db)
                             for w in queue_status.workers:
                                 print(
                                     f"[Background Worker] No free worker: url={w.url} "
                                     f"available={w.available} err={w.error!r} "
-                                    f"active={w.total_active} max={w.max_concurrent} "
+                                    f"active={w.total_active} "
+                                    f"backend_active={backend_processing.get(w.url.rstrip('/'), 0)} "
+                                    f"effective_active={get_worker_effective_active(w, backend_processing)} "
+                                    f"max={w.max_concurrent} "
                                     f"queue_size={w.queue_size} quarantined={is_worker_quarantined(w.url)}"
                                 )
                             print(
@@ -3158,11 +3172,8 @@ async def api_create_task(
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
     try:
         queue_status = await get_global_queue_status(db=db)
-        free_worker = next(
-            (w for w in queue_status.workers 
-             if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)),
-            None
-        )
+        free_workers = await get_dispatchable_workers(db, queue_status)
+        free_worker = free_workers[0] if free_workers else None
         if free_worker:
             # Refresh task from DB and dispatch
             await db.refresh(task)
@@ -3863,16 +3874,8 @@ async def api_create_convert_from_rig_task(
 
     try:
         queue_status = await get_global_queue_status(db=db)
-        free_worker = next(
-            (
-                w
-                for w in queue_status.workers
-                if w.available
-                and (w.total_active < w.max_concurrent)
-                and (w.queue_size <= 0)
-            ),
-            None,
-        )
+        free_workers = await get_dispatchable_workers(db, queue_status)
+        free_worker = free_workers[0] if free_workers else None
         if free_worker:
             await db.refresh(task)
             if task.status == "created":
