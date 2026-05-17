@@ -8201,6 +8201,75 @@
                 return _themeNumber(viewerState.shadow_y_offset_float, 0.005);
             }
 
+            const TASK_VIEWER_SHADOW_CATCHER_BASE_SIZE = 200;
+
+            function clampNumber(value, min, max) {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return min;
+                return Math.min(max, Math.max(min, n));
+            }
+
+            function getActiveShadowCasterRoot() {
+                return (playModeController?.active && playModeController.model) ? playModeController.model : currentModel;
+            }
+
+            function getShadowCatcherExtent(modelSize) {
+                const configured = Math.max(0, Number(viewerState.groundSize || 0));
+                const footprint = Math.max(
+                    Number(modelSize?.x || 0),
+                    Number(modelSize?.z || 0),
+                    Number(modelSize?.y || 0) * 0.9,
+                    1
+                );
+                return clampNumber(Math.max(configured * 4, footprint * 24, 260), 260, 1800);
+            }
+
+            function updateShadowCatcherPlaneFromBounds(box, focus, modelSize) {
+                if (!groundPlaneMesh || !box || !focus || !modelSize) return;
+                const extent = getShadowCatcherExtent(modelSize);
+                const scale = extent / TASK_VIEWER_SHADOW_CATCHER_BASE_SIZE;
+                groundPlaneMesh.position.set(
+                    Number.isFinite(focus.x) ? focus.x : 0,
+                    Number.isFinite(box.min?.y) ? box.min.y - getViewerShadowYOffset() : 0,
+                    Number.isFinite(focus.z) ? focus.z : 0
+                );
+                groundPlaneMesh.scale.set(scale, scale, 1);
+                groundPlaneMesh.userData.shadowCatcherExtent = extent;
+            }
+
+            function updateShadowCatcherPlaneForModel(model) {
+                if (!model || !THREE || !groundPlaneMesh) return false;
+                try {
+                    model.updateMatrixWorld?.(true);
+                    const box = new THREE.Box3().setFromObject(model);
+                    if (box.isEmpty()) return false;
+                    const focus = box.getCenter(new THREE.Vector3());
+                    const modelSize = box.getSize(new THREE.Vector3());
+                    updateShadowCatcherPlaneFromBounds(box, focus, modelSize);
+                    return true;
+                } catch (_) {
+                    return false;
+                }
+            }
+
+            function getShadowCameraHalfSize(modelSize) {
+                const maxDim = Math.max(
+                    Number(modelSize?.x || 0),
+                    Number(modelSize?.y || 0),
+                    Number(modelSize?.z || 0),
+                    2
+                );
+                const footprint = Math.max(Number(modelSize?.x || 0), Number(modelSize?.z || 0), 2);
+                const inclinationDeg = clampNumber(viewerState.sunInclination, 4, 88);
+                const reach = Number(modelSize?.y || 2) / Math.max(0.12, Math.tan(inclinationDeg * Math.PI / 180));
+                const configured = Math.max(0, Number(viewerState.groundSize || 0));
+                return clampNumber(
+                    Math.max(footprint * 6, maxDim * 4, reach * 2.25 + footprint * 2, configured * 0.9, 36),
+                    36,
+                    620
+                );
+            }
+
             function collectCurrentViewerThemeSettings() {
                 const active = window.__activeViewerTheme || activeViewerTheme || {};
                 const c = camera || {};
@@ -8814,7 +8883,7 @@
                 // 1.6 Ground Plane
                 if (viewerControls) {
                     if (groundPlaneMesh?.userData?.shadowCatcher) {
-                        viewerControls.setGroundParams({ size: viewerState.groundSize });
+                        updateShadowCatcherPlaneForModel(getActiveShadowCasterRoot());
                         if (groundPlaneMesh.material) {
                             groundPlaneMesh.material.color?.set?.(0x000000);
                             groundPlaneMesh.material.opacity = Math.max(0.02, Math.min(0.95, _themeNumber(viewerState.shadow_opacity_float ?? viewerState.shadowIntensity, 0.32)));
@@ -9061,10 +9130,7 @@
                         currentModel.position.z -= center.z;
                     }
                     currentModel.updateMatrixWorld(true);
-                    if (groundPlaneMesh) {
-                        const groundedBox = new THREE.Box3().setFromObject(currentModel);
-                        groundPlaneMesh.position.y = Number.isFinite(groundedBox.min.y) ? groundedBox.min.y - getViewerShadowYOffset() : 0;
-                    }
+                    updateShadowCatcherPlaneForModel(currentModel);
                 } catch (error) {
                     if (!window.__snapGroundWarningShown) {
                         window.__snapGroundWarningShown = true;
@@ -9442,17 +9508,14 @@
                 const modelSize = new THREE.Vector3(2, 2, 2);
                 let hasFocus = false;
 
-                if (playModeController?.active && playModeController.model) {
-                    focus.copy(playModeController.model.position);
-                    hasFocus = true;
-                } else if (currentModel) {
+                const casterRoot = getActiveShadowCasterRoot();
+                if (casterRoot) {
                     try {
-                        const box = new THREE.Box3().setFromObject(currentModel);
-                        box.getCenter(focus);
-                        box.getSize(modelSize);
-                        if (groundPlaneMesh) {
-                            groundPlaneMesh.position.y = Number.isFinite(box.min.y) ? box.min.y - getViewerShadowYOffset() : 0;
-                        }
+                        casterRoot.updateMatrixWorld?.(true);
+                        const casterBox = new THREE.Box3().setFromObject(casterRoot);
+                        casterBox.getCenter(focus);
+                        casterBox.getSize(modelSize);
+                        updateShadowCatcherPlaneFromBounds(casterBox, focus, modelSize);
                         hasFocus = true;
                     } catch (error) {
                         hasFocus = false;
@@ -9475,12 +9538,13 @@
                 sunLight.updateMatrixWorld();
 
                 if (sunLight.shadow) {
-                    const size = Math.max(4, Math.min(60, Math.max(modelSize.x, modelSize.z, 2) * 1.15 + 2));
+                    const size = getShadowCameraHalfSize(modelSize);
                     sunLight.shadow.camera.left = -size;
                     sunLight.shadow.camera.right = size;
                     sunLight.shadow.camera.top = size;
                     sunLight.shadow.camera.bottom = -size;
-                    sunLight.shadow.camera.far = Math.max(80, size * 3);
+                    sunLight.shadow.camera.near = 0.05;
+                    sunLight.shadow.camera.far = Math.max(160, size * 4 + Math.max(20, r * 2) + modelSize.y * 4);
                     sunLight.shadow.camera.updateProjectionMatrix();
                     if (force || playModeController?.active) {
                         sunLight.shadow.needsUpdate = true;
@@ -9560,6 +9624,11 @@
                         z: sunLight.target.position.z,
                     } : null,
                     groundReceiveShadow: !!groundPlaneMesh?.receiveShadow,
+                    shadowCatcher: groundPlaneMesh ? {
+                        extent: roundViewerDebugNumber(groundPlaneMesh.userData?.shadowCatcherExtent),
+                        position: vectorToDebugObject(groundPlaneMesh.position),
+                        scale: vectorToDebugObject(groundPlaneMesh.scale),
+                    } : null,
                 };
             }
 
@@ -9802,7 +9871,12 @@
                 document.getElementById('ground-size-slider')?.addEventListener('input', (e) => {
                     const val = parseFloat(e.target.value);
                     viewerState.groundSize = val;
-                    if (viewerControls) viewerControls.setGroundParams({ size: val });
+                    if (groundPlaneMesh?.userData?.shadowCatcher) {
+                        updateShadowCatcherPlaneForModel(getActiveShadowCasterRoot());
+                        updateSunShadowFocus(true);
+                    } else if (viewerControls) {
+                        viewerControls.setGroundParams({ size: val });
+                    }
                     document.getElementById('ground-size-val').textContent = val.toFixed(3);
                 });
 
@@ -11930,7 +12004,11 @@
                             
                             // 2. Props
                             viewerControls.setBloomSettings(defaults.bloom);
-                            viewerControls.setGroundParams({ color: defaults.groundColor, size: defaults.groundSize });
+                            if (groundPlaneMesh?.userData?.shadowCatcher) {
+                                updateShadowCatcherPlaneForModel(getActiveShadowCasterRoot());
+                            } else {
+                                viewerControls.setGroundParams({ color: defaults.groundColor, size: defaults.groundSize });
+                            }
 
                             // Fog
                             if (scene) {
