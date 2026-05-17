@@ -218,6 +218,10 @@ class AnimalBlueprintViewerController {
                 this.setView(button.dataset.blueprintCubeView);
             });
         });
+        this.card.querySelector('[data-blueprint-cube-plane]')?.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.setView(this.viewFromCubePoint(event));
+        });
         this.card.querySelector('[data-blueprint-cycle]')?.addEventListener('click', () => this.cycleView());
         this.card.querySelector('[data-blueprint-action="fit"]')?.addEventListener('click', () => this.fitCamera());
         this.card.querySelector('[data-blueprint-action="reset"]')?.addEventListener('click', () => this.setView(this.activeView || 'right'));
@@ -590,6 +594,17 @@ class AnimalBlueprintViewerController {
         const index = VIEW_ORDER.indexOf(this.activeView);
         const next = VIEW_ORDER[(index + 1) % VIEW_ORDER.length] || 'right';
         this.setView(next);
+    }
+
+    viewFromCubePoint(event) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const x = (event.clientX - rect.left) / Math.max(1, rect.width);
+        const y = (event.clientY - rect.top) / Math.max(1, rect.height);
+        if (y < 0.26) return 'top';
+        if (y > 0.74) return 'bottom';
+        if (x < 0.31) return 'left';
+        if (x > 0.69) return 'right';
+        return y < 0.5 ? 'back' : 'front';
     }
 
     syncViewUi(view) {

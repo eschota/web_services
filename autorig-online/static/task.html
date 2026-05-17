@@ -1390,27 +1390,21 @@
         .blueprint-cube-face-top { transform: rotateX(90deg) translateZ(0.95rem); }
         .blueprint-cube-face-bottom { transform: rotateX(-90deg) translateZ(0.95rem); }
 
-        .blueprint-cube-zone {
+        .blueprint-cube-plane {
             position: absolute;
+            inset: 0;
             z-index: 6;
             border: 0;
-            border-radius: 7px;
+            border-radius: 8px;
             background: transparent;
             padding: 0;
             cursor: pointer;
         }
 
-        .blueprint-cube-zone:focus-visible {
+        .blueprint-cube-plane:focus-visible {
             outline: 1px solid rgba(255, 255, 255, 0.86);
             outline-offset: 2px;
         }
-
-        .blueprint-cube-zone-front { left: 1.1rem; top: 1.35rem; width: 1.15rem; height: 1.1rem; }
-        .blueprint-cube-zone-back { left: 1.1rem; top: 0.45rem; width: 1.15rem; height: 0.72rem; }
-        .blueprint-cube-zone-left { left: 0.1rem; top: 0.95rem; width: 0.96rem; height: 1.42rem; }
-        .blueprint-cube-zone-right { right: 0.1rem; top: 0.95rem; width: 0.96rem; height: 1.42rem; }
-        .blueprint-cube-zone-top { left: 0.88rem; top: 0.05rem; width: 1.62rem; height: 0.82rem; }
-        .blueprint-cube-zone-bottom { left: 0.88rem; bottom: 0.05rem; width: 1.62rem; height: 0.82rem; }
 
         .blueprint-cube-cycle {
             position: absolute;
@@ -3827,12 +3821,7 @@
                             <div class="blueprint-cube-face blueprint-cube-face-top">T</div>
                             <div class="blueprint-cube-face blueprint-cube-face-bottom">D</div>
                         </div>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-front" data-blueprint-cube-view="front" aria-label="Front view"></button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-back" data-blueprint-cube-view="back" aria-label="Back view"></button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-left" data-blueprint-cube-view="left" aria-label="Left view"></button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-right" data-blueprint-cube-view="right" aria-label="Right view"></button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-top" data-blueprint-cube-view="top" aria-label="Top view"></button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-bottom" data-blueprint-cube-view="bottom" aria-label="Bottom view"></button>
+                        <button type="button" class="blueprint-cube-plane" data-blueprint-cube-plane aria-label="Change blueprint camera view"></button>
                         <button type="button" class="blueprint-cube-cycle" data-blueprint-cycle aria-label="Next blueprint camera view">
                             <span id="blueprint-view-cube-label">Right</span>
                         </button>
@@ -7426,7 +7415,7 @@
           }
         }
     </script>
-    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=6"></script>
+    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=7"></script>
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
