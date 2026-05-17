@@ -11429,8 +11429,6 @@
                         btn.addEventListener('click', async () => {
                             const selectedKey = normalizeManualRigKey(btn.dataset.rigKey);
                             if (selectedKey === activeKey) return;
-                            const ok = window.confirm(`Restart this task as ${formatManualRigLabel(selectedKey)} rig?`);
-                            if (!ok) return;
                             const buttons = [...grid.querySelectorAll('button')];
                             buttons.forEach((b) => { b.disabled = true; });
                             status.textContent = `Restarting as ${formatManualRigLabel(selectedKey)}...`;
