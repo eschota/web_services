@@ -6055,11 +6055,18 @@
             ensureDesktopViewerLayout() {
                 const layout = document.getElementById('viewer-custom-layout');
                 const modelViewerWrap = document.getElementById('model-viewer-wrap');
+                const blueprintWrap = document.getElementById('blueprint-viewer-card');
                 const customWrap = document.getElementById('custom-animations-wrap');
                 if (!layout || !modelViewerWrap || !customWrap) return;
 
                 if (modelViewerWrap.parentElement !== layout) {
                     layout.insertBefore(modelViewerWrap, layout.firstChild);
+                }
+                if (blueprintWrap && blueprintWrap.parentElement !== layout) {
+                    layout.appendChild(blueprintWrap);
+                }
+                if (blueprintWrap && blueprintWrap.parentElement === layout && blueprintWrap.previousElementSibling !== modelViewerWrap) {
+                    layout.insertBefore(blueprintWrap, customWrap.parentElement === layout ? customWrap : null);
                 }
                 if (customWrap.parentElement !== layout) {
                     layout.appendChild(customWrap);
