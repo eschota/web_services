@@ -1,4 +1,9 @@
-import RAPIER from 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.12.0/rapier.es.js';
+import {
+    RAGDOLL_BODY_SEGMENTS,
+    computeScreenSpaceDragTarget,
+    ensureRapierReady,
+    makeRapierVector,
+} from '/static/js/ragdoll-controller.js?v=1';
 
 const DEFAULTS = {
     walk_speed: 2.35,
@@ -117,28 +122,6 @@ const TRACKED_RAGDOLL_PARTS = [
     { key: 'rightFoot', radius: 0.065, parentKey: 'rightLowerLeg' },
 ];
 
-const RAGDOLL_BODY_SEGMENTS = [
-    { key: 'torso', fromKey: 'hips', toKey: 'spine', driveKey: 'hips', radius: 0.13, parentKey: null },
-    { key: 'head', fromKey: 'spine', toKey: 'head', driveKey: 'head', radius: 0.09, parentKey: 'torso' },
-    { key: 'leftUpperArm', fromKey: 'leftUpperArm', toKey: 'leftLowerArm', driveKey: 'leftUpperArm', radius: 0.055, parentKey: 'torso' },
-    { key: 'leftLowerArm', fromKey: 'leftLowerArm', toKey: 'leftHand', driveKey: 'leftLowerArm', radius: 0.045, parentKey: 'leftUpperArm' },
-    { key: 'rightUpperArm', fromKey: 'rightUpperArm', toKey: 'rightLowerArm', driveKey: 'rightUpperArm', radius: 0.055, parentKey: 'torso' },
-    { key: 'rightLowerArm', fromKey: 'rightLowerArm', toKey: 'rightHand', driveKey: 'rightLowerArm', radius: 0.045, parentKey: 'rightUpperArm' },
-    { key: 'leftUpperLeg', fromKey: 'leftUpperLeg', toKey: 'leftLowerLeg', driveKey: 'leftUpperLeg', radius: 0.07, parentKey: 'torso' },
-    { key: 'leftLowerLeg', fromKey: 'leftLowerLeg', toKey: 'leftFoot', driveKey: 'leftLowerLeg', radius: 0.055, parentKey: 'leftUpperLeg' },
-    { key: 'rightUpperLeg', fromKey: 'rightUpperLeg', toKey: 'rightLowerLeg', driveKey: 'rightUpperLeg', radius: 0.07, parentKey: 'torso' },
-    { key: 'rightLowerLeg', fromKey: 'rightLowerLeg', toKey: 'rightFoot', driveKey: 'rightLowerLeg', radius: 0.055, parentKey: 'rightUpperLeg' },
-];
-
-let rapierReadyPromise = null;
-
-async function ensureRapierReady() {
-    if (!rapierReadyPromise) {
-        rapierReadyPromise = RAPIER.init().then(() => RAPIER);
-    }
-    return rapierReadyPromise;
-}
-
 function normalizeKey(value) {
     return String(value || '')
         .toLowerCase()
@@ -167,10 +150,6 @@ function pickFirst(arr) {
 function safeClipDuration(clip) {
     const duration = Number(clip?.duration || 0);
     return Number.isFinite(duration) && duration > 0 ? duration : 0;
-}
-
-function makeRapierVector(R, x = 0, y = 0, z = 0) {
-    return new R.Vector3(Number(x) || 0, Number(y) || 0, Number(z) || 0);
 }
 
 function uniqueStrings(values) {
@@ -314,6 +293,7 @@ export class PlayModeController {
             active: false,
             node: null,
             pointerId: null,
+            startClientX: 0,
             startClientY: 0,
             startTranslation: null,
             target: null,
@@ -1197,6 +1177,7 @@ export class PlayModeController {
                 active: true,
                 node,
                 pointerId: event.pointerId ?? 'mouse',
+                startClientX: event.clientX,
                 startClientY: event.clientY,
                 startTranslation: { x: t.x, y: t.y, z: t.z },
                 target: { x: t.x, y: t.y, z: t.z },
@@ -1211,12 +1192,15 @@ export class PlayModeController {
             const pointerId = event.pointerId ?? 'mouse';
             if (!this.ragdollGrab.active || pointerId !== this.ragdollGrab.pointerId) return;
             event.preventDefault();
-            const lift = (this.ragdollGrab.startClientY - event.clientY) * 0.006;
-            this.ragdollGrab.target = {
-                x: this.ragdollGrab.startTranslation.x,
-                y: this.ragdollGrab.startTranslation.y + lift,
-                z: this.ragdollGrab.startTranslation.z,
-            };
+            this.ragdollGrab.target = computeScreenSpaceDragTarget({
+                THREE: this.THREE,
+                camera: this.camera,
+                domElement,
+                event,
+                startClientX: this.ragdollGrab.startClientX,
+                startClientY: this.ragdollGrab.startClientY,
+                startTranslation: this.ragdollGrab.startTranslation,
+            }) || this.ragdollGrab.target;
             this.applyRagdollGrabTarget();
         };
 

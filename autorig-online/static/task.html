@@ -2103,16 +2103,82 @@
             z-index: 32 !important;
         }
 
-        #viewer-version,
-        #viewer-fps {
-            font-size: 0.92rem !important;
-            color: #fff !important;
-            font-weight: 700 !important;
-            background: rgba(0, 0, 0, 0.82) !important;
-            border: 1px solid rgba(255,255,255,0.18) !important;
-            padding: 0.45rem 0.65rem !important;
-            border-radius: 10px !important;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+        #viewer-fullscreen-btn {
+            width: 42px !important;
+            height: 42px !important;
+            padding: 0 !important;
+            justify-content: center !important;
+        }
+
+        #viewer-settings-area,
+        #viewer-lighting-wrap,
+        #viewer-adjustments-wrap {
+            display: none !important;
+        }
+
+        .manual-rig-restart-panel {
+            margin-top: 0.75rem;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.035);
+        }
+        .manual-rig-restart-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.6rem;
+            flex-wrap: wrap;
+        }
+        .manual-rig-restart-title {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .manual-rig-restart-status {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+        .manual-rig-type-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+            gap: 0.5rem;
+        }
+        .manual-rig-type-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            min-height: 44px;
+            padding: 0.42rem 0.48rem;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+            font-size: 0.78rem;
+            font-weight: 650;
+            cursor: pointer;
+            transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+        }
+        .manual-rig-type-btn:hover {
+            border-color: rgba(124, 58, 237, 0.65);
+            background: rgba(124, 58, 237, 0.12);
+            transform: translateY(-1px);
+        }
+        .manual-rig-type-btn.is-active {
+            border-color: rgba(16, 185, 129, 0.75);
+            background: rgba(16, 185, 129, 0.12);
+        }
+        .manual-rig-type-btn[disabled] {
+            opacity: 0.55;
+            cursor: wait;
+            transform: none;
+        }
+        .manual-rig-type-btn img {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+            flex: 0 0 auto;
         }
 
         @media (max-width: 980px) {
@@ -2444,26 +2510,6 @@
                         
                         <!-- Viewer Overlay UI (above canvas) -->
                         <div id="viewer-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; border-radius: 12px;">
-                            <!-- Left side: Rotation Buttons XYZ (2x larger) -->
-                            <div id="rotation-buttons" class="rotation-buttons" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); pointer-events: auto;">
-                                <button id="rotate-x-btn" class="rotation-btn x large" title="Rotate X +90°">
-                                    <span class="axis">X</span><span>+90°</span>
-                                </button>
-                                <button id="rotate-y-btn" class="rotation-btn y large" title="Rotate Y +90°">
-                                    <span class="axis">Y</span><span>+90°</span>
-                                </button>
-                                <button id="rotate-z-btn" class="rotation-btn z large" title="Rotate Z +90°">
-                                    <span class="axis">Z</span><span>+90°</span>
-                                </button>
-                            </div>
-                            
-                            <!-- Bottom center: SAVE RIG T-POSE button -->
-                            <div id="save-rig-wrap" style="position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); pointer-events: auto;">
-                                <button id="save-rig-btn" class="save-rig-btn" title="Save orientation and restart rigging">
-                                    <span data-i18n="btn_save_rig_tpose">💾 SAVE RIG T-POSE</span>
-                                </button>
-                            </div>
-                            
                             <!-- HIDDEN: Top-left Channel Selector (kept for compatibility) -->
                             <div id="viewer-channel-wrap" style="position: absolute; top: 0.75rem; left: 0.75rem; pointer-events: auto; display: none; flex-direction: column; gap: 0.5rem;">
                                 <select id="viewer-channel-select" class="form-select" style="
@@ -2488,10 +2534,8 @@
 
             </div>
             
-                            <!-- Top-center: Version/FPS + Fullscreen only (camera/gizmos/wireframe/default hidden) -->
+                            <!-- Top-left: fullscreen icon only (camera/gizmos/wireframe/default hidden) -->
                             <div id="viewer-camera-wrap" style="position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%); pointer-events: auto; display: flex; gap: 0.5rem; align-items: center;">
-                                <div id="viewer-version" style="font-size: 0.6rem; color: rgba(79,70,229,0.8); font-family: monospace; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(79,70,229,0.3); white-space: nowrap;">v63</div>
-                                <div id="viewer-fps" style="font-size: 0.65rem; color: rgba(255,255,255,0.4); font-family: monospace; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); white-space: nowrap;">-- FPS</div>
                                 <!-- HIDDEN: Camera mode button -->
                                 <button id="viewer-camera-btn" class="btn btn-secondary" style="
                                     padding: 0.4rem 0.85rem;
@@ -2523,7 +2567,7 @@
                                     cursor: pointer;
                                 " title="Fullscreen (Space)">
                                     <span style="font-size: 1.1rem;">⛶</span>
-                                    <span>Fullscreen</span>
+                                    <span style="display:none;">Fullscreen</span>
                                 </button>
 
                                 <!-- HIDDEN: Gizmos button -->
@@ -2577,11 +2621,9 @@
             
                             <!-- Right side: View Mode Selector + Zoom (moved lower) -->
                             <div id="viewer-rigtype-wrap" style="position: absolute; top: 50%; right: 0.75rem; transform: translateY(-50%); pointer-events: auto; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
-                                <!-- View Mode Buttons: T-Pose / RIG / Animation -->
+                                <!-- View Mode Buttons: Animation / Play / Ragdoll -->
                                 <div class="view-mode-selector" id="view-mode-selector">
-                                    <button id="view-mode-tpose" class="active" title="T-Pose Mode">T-Pose</button>
-                                    <button id="view-mode-rig" title="RIG Mode (show spheres)">RIG</button>
-                                    <button id="view-mode-anim" title="Animation Mode">Anim</button>
+                                    <button id="view-mode-anim" class="active" title="Animation Mode">Anim</button>
                                     <button id="view-mode-play" title="Play Mode (WASD + Space + Shift, Alt ragdoll)">Play</button>
                                     <button id="view-mode-ragdoll" title="Ragdoll Mode (R reset, Space impulse)">Ragdoll</button>
                                 </div>
@@ -3268,7 +3310,13 @@
                         </div>
                     </div>
 
-                    <!-- Viewer Controls Row (removed - using SAVE RIG T-POSE button inside viewer) -->
+                    <div id="manual-rig-restart-panel" class="manual-rig-restart-panel hidden" aria-label="Restart with another rig type">
+                        <div class="manual-rig-restart-head">
+                            <div class="manual-rig-restart-title">Restart with another rig type</div>
+                            <div id="manual-rig-restart-status" class="manual-rig-restart-status">Choose rig type</div>
+                        </div>
+                        <div id="manual-rig-type-grid" class="manual-rig-type-grid"></div>
+                    </div>
             </div>
             </div>
 
@@ -3652,6 +3700,7 @@
     <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script>
         (function initTaskPageDebug() {
             try {
@@ -6851,7 +6900,7 @@
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
         } from '/static/js/rig-editor.js?v=64';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
-        import { PlayModeController } from '/static/js/task-play-mode.js?v=24';
+        import { PlayModeController } from '/static/js/task-play-mode.js?v=25';
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -8221,7 +8270,7 @@
                     Number(modelSize?.y || 0) * 0.9,
                     1
                 );
-                return clampNumber(Math.max(configured * 4, footprint * 24, 260), 260, 1800);
+                return clampNumber(Math.max(configured * 8, footprint * 60, 640), 640, 4200);
             }
 
             function updateShadowCatcherPlaneFromBounds(box, focus, modelSize) {
@@ -8264,9 +8313,9 @@
                 const reach = Number(modelSize?.y || 2) / Math.max(0.12, Math.tan(inclinationDeg * Math.PI / 180));
                 const configured = Math.max(0, Number(viewerState.groundSize || 0));
                 return clampNumber(
-                    Math.max(footprint * 6, maxDim * 4, reach * 2.25 + footprint * 2, configured * 0.9, 36),
-                    36,
-                    620
+                    Math.max(footprint * 12, maxDim * 8, reach * 4 + footprint * 4, configured * 1.6, 80),
+                    80,
+                    1400
                 );
             }
 
@@ -10396,6 +10445,7 @@
                 setupSnapSettings();
                 setupSettingsToggle();
                 setupViewModeSelector();
+                void setupManualRigRestartSelector();
                 setupContextPanels();
 
                 // Apply settings again now that viewerControls is ready
@@ -10949,7 +10999,7 @@
                                 <h3 style="margin:0 0 12px; font-size:1.05rem;">Ragdoll controls</h3>
                                 <div style="display:grid; gap:10px; font-size:0.9rem; line-height:1.45; color:rgba(255,255,255,0.82);">
                                     <div><b style="color:#fff;">R</b> resets the character to the base position.</div>
-                                    <div><b style="color:#fff;">Left mouse drag</b> grabs the body part under the cursor. Drag up/down to lift or lower it like a puppet.</div>
+                                    <div><b style="color:#fff;">Left mouse drag</b> grabs the body part under the cursor. Move in screen space to place it left/right/up/down like a puppet.</div>
                                     <div><b style="color:#fff;">Space</b> applies a small impulse.</div>
                                 </div>
                                 <button type="button" data-close-ragdoll-help style="margin-top:18px; width:100%; padding:0.72rem 1rem; border:0; border-radius:10px; color:#fff; background:linear-gradient(135deg,#4f46e5,#7c3aed); font-weight:700; cursor:pointer;">Got it</button>
@@ -11266,19 +11316,146 @@
                     // Expose for external use
                     window.setViewMode = setActiveMode;
                     
-                    // Initialize to T-Pose mode by default (don't load model yet, will be loaded by waitAndInitViewer)
-                    tposeBtn?.classList.add('active');
-                    setEditControlsVisible(true);
-                    if (viewerControls) viewerControls.setViewMode('tpose');
-                    
-                    // Enable T-Pose reference by default in T-Pose mode
+                    // Default public viewer mode is animation. T-pose/RIG editor controls are no longer exposed.
+                    animBtn?.classList.add('active');
+                    setEditControlsVisible(false);
+                    if (viewerControls) viewerControls.setViewMode('animation');
                     if (tPoseReference) {
-                        tPoseReference.setVisible(true);
+                        tPoseReference.setVisible(false);
                         const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
-                        if (tposeToggleBtn) tposeToggleBtn.classList.add('active');
+                        if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
                     }
                     
                     window.taskDbg('[Viewer] View mode selector setup complete');
+                }
+
+                const MANUAL_RIG_RESTART_TYPES = [
+                    'humanoid',
+                    'dog',
+                    'bear',
+                    'cat',
+                    'cow',
+                    'deer',
+                    'elephant',
+                    'giraffe',
+                    'horse',
+                    'mouse',
+                    'pig',
+                    'rabbit',
+                    'turtle',
+                ];
+
+                function normalizeManualRigKey(value) {
+                    const key = String(value || '').trim().toLowerCase();
+                    if (key === 'human' || key === 'character' || key === 't_pose' || key === 't-pose') return 'humanoid';
+                    return MANUAL_RIG_RESTART_TYPES.includes(key) ? key : 'humanoid';
+                }
+
+                function getCurrentManualRigKey(taskState) {
+                    const det = taskState?.rig_v2_animal_detection || {};
+                    const inputType = String(taskState?.input_type || '').trim().toLowerCase();
+                    if (inputType === 'animal') {
+                        return normalizeManualRigKey(
+                            det.animal_type ||
+                            det.animal_type_string ||
+                            det.candidate_animal_type_string ||
+                            det.selected_animal_type_string
+                        );
+                    }
+                    return 'humanoid';
+                }
+
+                function formatManualRigLabel(key) {
+                    if (key === 'humanoid') return 'Humanoid';
+                    return key.charAt(0).toUpperCase() + key.slice(1);
+                }
+
+                function manualRigPayloadForKey(key) {
+                    const normalized = normalizeManualRigKey(key);
+                    if (normalized === 'humanoid') {
+                        return {
+                            rig_type: 'humanoid',
+                            input_type: 't_pose',
+                            animal_type: null,
+                            rig_v2_manual_selection: true,
+                        };
+                    }
+                    return {
+                        rig_type: normalized,
+                        input_type: 'animal',
+                        animal_type: normalized,
+                        mode: 'only_rig',
+                        rig_v2_manual_selection: true,
+                    };
+                }
+
+                async function setupManualRigRestartSelector() {
+                    const panel = document.getElementById('manual-rig-restart-panel');
+                    const grid = document.getElementById('manual-rig-type-grid');
+                    const status = document.getElementById('manual-rig-restart-status');
+                    if (!panel || !grid || grid.dataset.wired === '1') return;
+                    grid.dataset.wired = '1';
+
+                    let taskState = null;
+                    try {
+                        taskState = await getLatestTaskState();
+                    } catch (error) {
+                        console.warn('[ManualRig] Could not load task state', error);
+                    }
+
+                    const activeKey = getCurrentManualRigKey(taskState);
+                    status.textContent = `Current: ${formatManualRigLabel(activeKey)}`;
+                    grid.replaceChildren();
+
+                    for (const key of MANUAL_RIG_RESTART_TYPES) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'manual-rig-type-btn';
+                        btn.dataset.rigKey = key;
+                        btn.classList.toggle('is-active', key === activeKey);
+                        btn.title = key === activeKey
+                            ? `Current rig type: ${formatManualRigLabel(key)}`
+                            : `Restart task as ${formatManualRigLabel(key)}`;
+
+                        const icon = document.createElement('img');
+                        icon.alt = '';
+                        icon.loading = 'lazy';
+                        icon.src = (window.resolveRigIconUrl ? window.resolveRigIconUrl(key) : `/static/Icons_png/${key === 'humanoid' ? 'Human' : formatManualRigLabel(key)}.png`);
+
+                        const label = document.createElement('span');
+                        label.textContent = formatManualRigLabel(key);
+                        btn.append(icon, label);
+
+                        btn.addEventListener('click', async () => {
+                            const selectedKey = normalizeManualRigKey(btn.dataset.rigKey);
+                            if (selectedKey === activeKey) return;
+                            const ok = window.confirm(`Restart this task as ${formatManualRigLabel(selectedKey)} rig?`);
+                            if (!ok) return;
+                            const buttons = [...grid.querySelectorAll('button')];
+                            buttons.forEach((b) => { b.disabled = true; });
+                            status.textContent = `Restarting as ${formatManualRigLabel(selectedKey)}...`;
+                            try {
+                                const resp = await fetch(`/api/task/${taskId}/restart`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(manualRigPayloadForKey(selectedKey)),
+                                });
+                                const data = await resp.json().catch(() => ({}));
+                                if (!resp.ok) throw new Error(data.detail || 'Restart failed');
+                                status.textContent = `Restarted as ${formatManualRigLabel(selectedKey)}. Reloading...`;
+                                window.setTimeout(() => window.location.reload(), 500);
+                            } catch (error) {
+                                console.error('[ManualRig] Restart failed', error);
+                                status.textContent = error?.message || 'Restart failed';
+                                buttons.forEach((b) => { b.disabled = false; });
+                            }
+                        });
+
+                        grid.appendChild(btn);
+                    }
+
+                    panel.classList.remove('hidden');
+                    window.taskDbg('[ManualRig] Selector ready', { activeKey });
                 }
                 
                 // Setup Context Panels for QWER modes

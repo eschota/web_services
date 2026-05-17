@@ -4312,6 +4312,97 @@ async def api_restart_task(
     if not task.input_url:
         raise HTTPException(status_code=400, detail="No input URL to restart")
 
+    restart_body_data: Dict[str, Any] = {}
+    try:
+        body = await request.body()
+        if body:
+            import json as json_module
+            parsed_body = json_module.loads(body)
+            if isinstance(parsed_body, dict):
+                restart_body_data = parsed_body
+    except Exception as e:
+        print(f"[Restart] Could not parse body: {e}")
+
+    animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
+    requested_rig_key = str(
+        restart_body_data.get("rig_type")
+        or restart_body_data.get("animal_type")
+        or restart_body_data.get("input_type")
+        or ""
+    ).strip().lower()
+    if requested_rig_key in ("human", "character", "humanoid", "t_pose", "t-pose"):
+        task.input_type = "t_pose"
+        restart_animal_type = None
+        restart_worker_mode = None
+    elif requested_rig_key in animal_allowed:
+        task.input_type = "animal"
+        restart_animal_type = requested_rig_key
+        restart_worker_mode = str(restart_body_data.get("mode") or "only_rig").strip() or "only_rig"
+    elif str(restart_body_data.get("input_type") or "").strip().lower() == "animal":
+        restart_animal_type = str(restart_body_data.get("animal_type") or "").strip().lower()
+        if restart_animal_type not in animal_allowed:
+            raise HTTPException(status_code=400, detail="animal_type is required for animal rig restart")
+        task.input_type = "animal"
+        restart_worker_mode = str(restart_body_data.get("mode") or "only_rig").strip() or "only_rig"
+    else:
+        restart_animal_type = None
+        restart_worker_mode = None
+
+    if not restart_animal_type and str(task.input_type or "").strip().lower() == "animal":
+        try:
+            settings_for_animal = json.loads(task.viewer_settings or "{}")
+            detection_for_animal = settings_for_animal.get("rig_v2_animal_detection") if isinstance(settings_for_animal, dict) else None
+            if isinstance(detection_for_animal, dict):
+                candidate = str(
+                    detection_for_animal.get("animal_type")
+                    or detection_for_animal.get("animal_type_string")
+                    or detection_for_animal.get("candidate_animal_type_string")
+                    or ""
+                ).strip().lower()
+                if candidate in animal_allowed:
+                    restart_animal_type = candidate
+                    restart_worker_mode = str(detection_for_animal.get("mode") or "only_rig").strip() or "only_rig"
+        except Exception as e:
+            print(f"[Restart] Could not read existing animal metadata: {e}")
+        if not restart_animal_type:
+            raise HTTPException(status_code=400, detail="animal_type is required for animal rig restart")
+
+    if restart_body_data.get("rig_v2_manual_selection") or restart_animal_type:
+        try:
+            settings = json.loads(task.viewer_settings or "{}")
+            if not isinstance(settings, dict):
+                settings = {}
+        except Exception:
+            settings = {}
+        if restart_animal_type:
+            existing_detection = settings.get("rig_v2_animal_detection")
+            if not isinstance(existing_detection, dict):
+                existing_detection = {}
+            settings["rig_v2_animal_detection"] = {
+                **existing_detection,
+                "type": "animal",
+                "animal_type": restart_animal_type,
+                "animal_type_string": restart_animal_type,
+                "mode": restart_worker_mode or "only_rig",
+                "source": "manual_task_restart",
+                "accepted": True,
+                "manual_selection": True,
+            }
+        else:
+            existing_detection = settings.get("rig_v2_animal_detection")
+            if isinstance(existing_detection, dict):
+                settings["rig_v2_animal_detection"] = {
+                    **existing_detection,
+                    "type": "humanoid",
+                    "animal_type": "",
+                    "animal_type_string": "",
+                    "mode": "t_pose",
+                    "source": "manual_task_restart",
+                    "accepted": True,
+                    "manual_selection": True,
+                }
+        task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+
     # Increment version (restart_count)
     task.restart_count = (task.restart_count or 0) + 1
 
@@ -4374,22 +4465,13 @@ async def api_restart_task(
     # Parse transform params from request body (rig pipeline only)
     transform_params = None
     if pk_restart == "rig":
-        try:
-            body = await request.body()
-            if body:
-                import json as json_module
-                body_data = json_module.loads(body)
-                if isinstance(body_data, dict):
-                    # Extract transform params if present
-                    if any(k in body_data for k in ("local_position", "local_rotation", "local_scale")):
-                        transform_params = {
-                            "local_position": body_data.get("local_position"),
-                            "local_rotation": body_data.get("local_rotation"),
-                            "local_scale": body_data.get("local_scale")
-                        }
-                        print(f"[Restart] Transform params from request: {transform_params}")
-        except Exception as e:
-            print(f"[Restart] Could not parse body: {e}")
+        if any(k in restart_body_data for k in ("local_position", "local_rotation", "local_scale")):
+            transform_params = {
+                "local_position": restart_body_data.get("local_position"),
+                "local_rotation": restart_body_data.get("local_rotation"),
+                "local_scale": restart_body_data.get("local_scale")
+            }
+            print(f"[Restart] Transform params from request: {transform_params}")
 
         # Fallback: read from saved viewer_settings if no transforms in request
         if not transform_params and task.viewer_settings:
@@ -4428,6 +4510,8 @@ async def api_restart_task(
         task.input_type or "t_pose",
         transform_params=transform_params,
         pipeline_kind=pk_restart,
+        animal_type=restart_animal_type,
+        mode=restart_worker_mode,
     )
     if not result.success:
         task.status = "error"
