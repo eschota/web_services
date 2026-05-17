@@ -24,6 +24,18 @@ const VIEW_DEFS = {
     bottom: { dir: [0, 0, -1], up: [0, -1, 0] },
 };
 
+const VIEW_ORDER = ['right', 'front', 'left', 'back', 'top', 'bottom', 'perspective'];
+
+const VIEW_LABELS = {
+    front: 'Front',
+    back: 'Back',
+    left: 'Left',
+    right: 'Right',
+    top: 'Top',
+    bottom: 'Bottom',
+    perspective: 'Perspective',
+};
+
 function getTaskId() {
     const raw = new URLSearchParams(window.location.search).get('id') || '';
     return raw.split('?')[0];
@@ -93,6 +105,9 @@ class AnimalBlueprintViewerController {
         this.selectedEl = document.getElementById('blueprint-selected-node');
         this.coordsEl = document.getElementById('blueprint-coordinates');
         this.retargetBtn = document.getElementById('blueprint-retarget-btn');
+        this.viewSelect = document.getElementById('blueprint-view-select');
+        this.viewCube = document.getElementById('blueprint-view-cube');
+        this.viewCubeLabel = document.getElementById('blueprint-view-cube-label');
         this.task = null;
         this.loadedTaskId = null;
         this.loadedSkeletonUrl = null;
@@ -138,9 +153,14 @@ class AnimalBlueprintViewerController {
     }
 
     wireButtons() {
-        this.card.querySelectorAll('[data-blueprint-view]').forEach((button) => {
-            button.addEventListener('click', () => this.setView(button.dataset.blueprintView));
+        this.viewSelect?.addEventListener('change', () => this.setView(this.viewSelect.value));
+        this.card.querySelectorAll('[data-blueprint-cube-view]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.setView(button.dataset.blueprintCubeView);
+            });
         });
+        this.card.querySelector('[data-blueprint-cycle]')?.addEventListener('click', () => this.cycleView());
         this.card.querySelector('[data-blueprint-action="fit"]')?.addEventListener('click', () => this.fitCamera());
         this.card.querySelector('[data-blueprint-action="reset"]')?.addEventListener('click', () => this.setView(this.activeView || 'right'));
         this.card.querySelector('[data-blueprint-action="reset-node"]')?.addEventListener('click', () => this.resetSelectedNode());
@@ -191,6 +211,9 @@ class AnimalBlueprintViewerController {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
+        this.controls.enableRotate = false;
+        this.controls.enablePan = false;
+        this.controls.enableZoom = true;
 
         this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
         this.transformControls.setMode('translate');
@@ -395,14 +418,17 @@ class AnimalBlueprintViewerController {
 
     setView(view) {
         if (!this.renderer || !this.bounds) return;
+        view = VIEW_ORDER.includes(view) ? view : 'right';
         this.activeView = view;
-        this.card.querySelectorAll('[data-blueprint-view]').forEach((button) => {
-            button.setAttribute('aria-pressed', button.dataset.blueprintView === view ? 'true' : 'false');
-        });
+        this.syncViewUi(view);
         if (view === 'perspective') {
             this.camera = this.perspectiveCamera;
             this.transformControls.camera = this.camera;
             this.controls.object = this.camera;
+            this.controls.enabled = true;
+            this.controls.enableRotate = true;
+            this.controls.enablePan = true;
+            this.controls.enableZoom = true;
             this.fitPerspective();
             if (this.selectedNodeId) this.transformControls.attach(this.nodeMeshes.get(this.selectedNodeId));
             this.setStatus('Perspective edit mode');
@@ -412,8 +438,33 @@ class AnimalBlueprintViewerController {
         this.camera = this.orthoCamera;
         this.transformControls.camera = this.camera;
         this.controls.object = this.camera;
+        this.controls.enabled = true;
+        this.controls.enableRotate = false;
+        this.controls.enablePan = false;
+        this.controls.enableZoom = true;
         this.fitOrthographic(view);
         this.setStatus(`${view[0].toUpperCase()}${view.slice(1)} orthographic edit mode`);
+    }
+
+    cycleView() {
+        const index = VIEW_ORDER.indexOf(this.activeView);
+        const next = VIEW_ORDER[(index + 1) % VIEW_ORDER.length] || 'right';
+        this.setView(next);
+    }
+
+    syncViewUi(view) {
+        if (this.viewSelect && this.viewSelect.value !== view) {
+            this.viewSelect.value = view;
+        }
+        if (this.viewCube) {
+            this.viewCube.dataset.activeView = view;
+        }
+        if (this.viewCubeLabel) {
+            this.viewCubeLabel.textContent = VIEW_LABELS[view] || 'Right';
+        }
+        this.card.querySelectorAll('[data-blueprint-cube-view]').forEach((button) => {
+            button.setAttribute('aria-pressed', button.dataset.blueprintCubeView === view ? 'true' : 'false');
+        });
     }
 
     fitCamera(updateControls = true) {
@@ -556,8 +607,8 @@ class AnimalBlueprintViewerController {
     updateSelection(nodeId) {
         this.selectedNodeId = nodeId;
         if (!nodeId) {
-            this.selectedEl.textContent = 'No node selected';
-            this.coordsEl.textContent = 'x - y - z -';
+            this.selectedEl.textContent = '';
+            this.coordsEl.textContent = '';
             this.transformControls?.detach();
             return;
         }
