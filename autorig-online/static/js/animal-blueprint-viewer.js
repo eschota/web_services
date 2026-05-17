@@ -310,14 +310,12 @@ class AnimalBlueprintViewerController {
         this.setStatus('Loading Blueprint...');
         try {
             this.ensureScene();
-            const [skeleton] = await Promise.all([
-                fetch(task.blueprint_skeleton_url, { cache: 'no-store' }).then((r) => {
-                    if (!r.ok) throw new Error(`skeleton.json HTTP ${r.status}`);
-                    return r.json();
-                }),
-                this.loadModel(),
-            ]);
+            const skeleton = await fetch(task.blueprint_skeleton_url, { cache: 'no-store' }).then((r) => {
+                if (!r.ok) throw new Error(`skeleton.json HTTP ${r.status}`);
+                return r.json();
+            });
             this.skeleton = skeleton;
+            await this.loadModel(this.getModelTransformMatrix(skeleton));
             this.buildSkeleton();
             this.loadedTaskId = task.task_id;
             this.loadedSkeletonUrl = task.blueprint_skeleton_url;
@@ -398,15 +396,36 @@ class AnimalBlueprintViewerController {
         this.initialized = true;
     }
 
-    async loadModel() {
+    getModelTransformMatrix(skeleton) {
+        const raw = skeleton?.model_transform?.matrix;
+        if (!Array.isArray(raw) || raw.length !== 4) return new THREE.Matrix4();
+        const values = [];
+        for (const row of raw) {
+            if (!Array.isArray(row) || row.length !== 4) return new THREE.Matrix4();
+            for (const value of row) {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return new THREE.Matrix4();
+                values.push(n);
+            }
+        }
+        const matrix = new THREE.Matrix4();
+        matrix.set(
+            values[0], values[1], values[2], values[3],
+            values[4], values[5], values[6], values[7],
+            values[8], values[9], values[10], values[11],
+            values[12], values[13], values[14], values[15],
+        );
+        return matrix;
+    }
+
+    async loadModel(modelTransform = new THREE.Matrix4()) {
         if (this.model) return;
         const loader = new GLTFLoader();
         let gltf = null;
         let lastError = null;
         for (const url of [
-            `/api/task/${this.taskId}/blueprint/model.glb`,
             `/api/task/${this.taskId}/prepared.glb`,
-            `/api/task/${this.taskId}/animations.glb`,
+            `/api/task/${this.taskId}/blueprint/model.glb`,
         ]) {
             try {
                 gltf = await loader.loadAsync(url);
@@ -417,8 +436,11 @@ class AnimalBlueprintViewerController {
         }
         if (!gltf) throw lastError || new Error('Blueprint model is unavailable');
         this.model = gltf.scene;
+        this.model.applyMatrix4(modelTransform);
+        this.model.updateMatrixWorld(true);
         this.modelGroup.clear();
         this.modelGroup.add(this.model);
+        this.model.updateMatrixWorld(true);
         this.meshes = [];
         this.vertexCloud = [];
         const blueprintMaterial = createBlueprintModelMaterial();
