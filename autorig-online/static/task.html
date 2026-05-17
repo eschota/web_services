@@ -1351,7 +1351,6 @@
 
         .blueprint-cube-face {
             position: absolute;
-            z-index: 4;
             left: 0.725rem;
             top: 0.725rem;
             width: 1.9rem;
@@ -1370,11 +1369,15 @@
             cursor: pointer;
             transform-style: preserve-3d;
             backface-visibility: visible;
+            pointer-events: none;
         }
 
-        .blueprint-cube-face:hover,
-        .blueprint-cube-face:focus,
-        .blueprint-cube-face[aria-pressed="true"] {
+        .blueprint-view-cube[data-active-view="front"] .blueprint-cube-face-front,
+        .blueprint-view-cube[data-active-view="back"] .blueprint-cube-face-back,
+        .blueprint-view-cube[data-active-view="left"] .blueprint-cube-face-left,
+        .blueprint-view-cube[data-active-view="right"] .blueprint-cube-face-right,
+        .blueprint-view-cube[data-active-view="top"] .blueprint-cube-face-top,
+        .blueprint-view-cube[data-active-view="bottom"] .blueprint-cube-face-bottom {
             border-color: rgba(255, 255, 255, 0.86);
             background: rgba(14, 116, 144, 0.92);
             color: #fff;
@@ -1387,10 +1390,32 @@
         .blueprint-cube-face-top { transform: rotateX(90deg) translateZ(0.95rem); }
         .blueprint-cube-face-bottom { transform: rotateX(-90deg) translateZ(0.95rem); }
 
+        .blueprint-cube-zone {
+            position: absolute;
+            z-index: 6;
+            border: 0;
+            border-radius: 7px;
+            background: transparent;
+            padding: 0;
+            cursor: pointer;
+        }
+
+        .blueprint-cube-zone:focus-visible {
+            outline: 1px solid rgba(255, 255, 255, 0.86);
+            outline-offset: 2px;
+        }
+
+        .blueprint-cube-zone-front { left: 1.1rem; top: 1.35rem; width: 1.15rem; height: 1.1rem; }
+        .blueprint-cube-zone-back { left: 1.1rem; top: 0.45rem; width: 1.15rem; height: 0.72rem; }
+        .blueprint-cube-zone-left { left: 0.1rem; top: 0.95rem; width: 0.96rem; height: 1.42rem; }
+        .blueprint-cube-zone-right { right: 0.1rem; top: 0.95rem; width: 0.96rem; height: 1.42rem; }
+        .blueprint-cube-zone-top { left: 0.88rem; top: 0.05rem; width: 1.62rem; height: 0.82rem; }
+        .blueprint-cube-zone-bottom { left: 0.88rem; bottom: 0.05rem; width: 1.62rem; height: 0.82rem; }
+
         .blueprint-cube-cycle {
             position: absolute;
-            inset: 0.44rem;
-            z-index: 3;
+            inset: 1.18rem;
+            z-index: 7;
             border: 0;
             border-radius: 999px;
             background: transparent;
@@ -3794,14 +3819,20 @@
                         </button>
                     </div>
                     <div class="blueprint-view-cube" id="blueprint-view-cube" data-active-view="right" aria-label="Blueprint view cube">
-                        <div class="blueprint-cube-shell">
-                            <button type="button" class="blueprint-cube-face blueprint-cube-face-front" data-blueprint-cube-view="front" aria-label="Front view">F</button>
-                            <button type="button" class="blueprint-cube-face blueprint-cube-face-back" data-blueprint-cube-view="back" aria-label="Back view">B</button>
-                            <button type="button" class="blueprint-cube-face blueprint-cube-face-left" data-blueprint-cube-view="left" aria-label="Left view">L</button>
-                            <button type="button" class="blueprint-cube-face blueprint-cube-face-right" data-blueprint-cube-view="right" aria-label="Right view">R</button>
-                            <button type="button" class="blueprint-cube-face blueprint-cube-face-top" data-blueprint-cube-view="top" aria-label="Top view">T</button>
-                            <button type="button" class="blueprint-cube-face blueprint-cube-face-bottom" data-blueprint-cube-view="bottom" aria-label="Bottom view">D</button>
+                        <div class="blueprint-cube-shell" aria-hidden="true">
+                            <div class="blueprint-cube-face blueprint-cube-face-front">F</div>
+                            <div class="blueprint-cube-face blueprint-cube-face-back">B</div>
+                            <div class="blueprint-cube-face blueprint-cube-face-left">L</div>
+                            <div class="blueprint-cube-face blueprint-cube-face-right">R</div>
+                            <div class="blueprint-cube-face blueprint-cube-face-top">T</div>
+                            <div class="blueprint-cube-face blueprint-cube-face-bottom">D</div>
                         </div>
+                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-front" data-blueprint-cube-view="front" aria-label="Front view"></button>
+                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-back" data-blueprint-cube-view="back" aria-label="Back view"></button>
+                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-left" data-blueprint-cube-view="left" aria-label="Left view"></button>
+                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-right" data-blueprint-cube-view="right" aria-label="Right view"></button>
+                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-top" data-blueprint-cube-view="top" aria-label="Top view"></button>
+                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-bottom" data-blueprint-cube-view="bottom" aria-label="Bottom view"></button>
                         <button type="button" class="blueprint-cube-cycle" data-blueprint-cycle aria-label="Next blueprint camera view">
                             <span id="blueprint-view-cube-label">Right</span>
                         </button>
