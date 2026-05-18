@@ -1241,11 +1241,11 @@ export class PlayModeController {
                     fitHeightDistance,
                     fitWidthDistance,
                     sphereDistance,
-                    maxDim * 2.2,
+                    maxDim * 5.5,
                     4.0
-                ) * 1.4;
+                ) * 2.4;
                 offset.y = Math.max(offset.y, clamp(maxDim * 0.35, 0.8, 8.0));
-                offset.z = -Math.max(Math.abs(offset.z), clamp(fitDistance, 4.0, 80.0));
+                offset.z = -Math.max(Math.abs(offset.z), clamp(fitDistance, 4.0, 160.0));
             }
         }
         return offset;
