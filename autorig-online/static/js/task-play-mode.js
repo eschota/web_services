@@ -638,6 +638,8 @@ export class PlayModeController {
         this.model = this.getCurrentModel();
         if (!this.model || !this.THREE) return;
 
+        this.captureGuardedLocalTransforms();
+        this.restoreGuardedLocalTransforms();
         const box = new this.THREE.Box3().setFromObject(this.model);
         const size = box.getSize(new this.THREE.Vector3());
         this._baseTransform = {
@@ -651,7 +653,6 @@ export class PlayModeController {
         // The physics capsule is built around the current Anim pose instead.
         this._baseGroundY = box.min.y;
         this._rootGroundOffset = this.model.position.y - this._baseGroundY;
-        this.captureGuardedLocalTransforms();
         this._tmpEuler.setFromQuaternion(this.model.quaternion, 'YXZ');
         this._baseYaw = this._tmpEuler.y;
     }
@@ -679,6 +680,20 @@ export class PlayModeController {
     captureGuardedLocalTransforms() {
         this._localTransformGuards = [];
         if (!this.model || !this.THREE) return;
+
+        const providedGuards = this.model.userData?.autorigPlayModeBindPose;
+        if (Array.isArray(providedGuards) && providedGuards.length) {
+            for (const provided of providedGuards) {
+                const object = provided?.object;
+                if (!object || object === this.model) continue;
+                const scale = provided.scale?.clone?.() || null;
+                const position = this.isRootLikeTrackObject(object) ? null : (provided.position?.clone?.() || null);
+                if (scale || position) {
+                    this._localTransformGuards.push({ object, scale, position });
+                }
+            }
+            return;
+        }
 
         this.model.traverse((object) => {
             if (!object || object === this.model) return;

@@ -7481,7 +7481,7 @@
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
         } from '/static/js/rig-editor.js?v=64';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
-        import { PlayModeController } from '/static/js/task-play-mode.js?v=27';
+        import { PlayModeController } from '/static/js/task-play-mode.js?v=28';
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -7729,7 +7729,19 @@
                 currentModel.userData = currentModel.userData || {};
                 currentModel.userData.autorigPlayModeOriginalClips = [...animations];
                 currentModel.userData.autorigPlayModeOriginalClipName = sel?.value || animations[0]?.name || null;
+                currentModel.userData.autorigPlayModeBindPose = captureAnimationPreviewBindPose(currentModel);
                 return currentModel.userData.autorigPlayModeOriginalClips;
+            }
+
+            function captureAnimationPreviewBindPose(model) {
+                const guards = [];
+                model?.traverse?.((object) => {
+                    if (!object || object === model) return;
+                    const scale = object.scale?.clone?.() || null;
+                    const position = object.position?.clone?.() || null;
+                    if (scale || position) guards.push({ object, scale, position });
+                });
+                return guards;
             }
 
             function restoreAnimationPreviewClipsAfterPlay() {
@@ -7740,6 +7752,7 @@
                 delete currentModel.userData.autorigPlayModeOriginalClips;
                 delete currentModel.userData.autorigPlayModeOriginalClipName;
                 delete currentModel.userData.autorigPlayControllerClipsActive;
+                delete currentModel.userData.autorigPlayModeBindPose;
                 const ok = applyAnimationClipsToCurrentModel(originalClips, preferred ? [preferred] : []);
                 if (ok) {
                     const modelCache = getSharedModelCache();
