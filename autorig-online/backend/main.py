@@ -8018,13 +8018,6 @@ def _rig_article_example_text(task: Task) -> str:
                 parts.append(str(raw_keywords))
         except Exception:
             parts.append(str(raw_keywords))
-    try:
-        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
-        det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
-        if isinstance(det, dict):
-            parts.extend(str(v) for v in det.values() if isinstance(v, str))
-    except Exception:
-        pass
     return " ".join(parts).lower()
 
 
