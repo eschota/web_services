@@ -261,6 +261,7 @@ export class PlayModeController {
         this._localTransformGuards = [];
         this._skeletalAnimationDisabled = false;
         this._skeletalDriftWarningShown = false;
+        this._lastCameraBounds = null;
         this._baseYaw = 0;
         this._baseGroundY = 0;
         this._rootGroundOffset = 0;
@@ -1165,8 +1166,34 @@ export class PlayModeController {
         this.camera.lookAt(this.controls.target);
     }
 
+    getCurrentCameraBounds() {
+        if (!this.model || !this.THREE) return null;
+        const box = new this.THREE.Box3().setFromObject(this.model);
+        if (!Number.isFinite(box.min.x) || !Number.isFinite(box.max.x)) return null;
+        const size = box.getSize(new this.THREE.Vector3());
+        const center = box.getCenter(new this.THREE.Vector3());
+        const maxDim = Math.max(
+            Number(size.x) || 0,
+            Number(size.y) || 0,
+            Number(size.z) || 0
+        );
+        if (!Number.isFinite(maxDim) || maxDim <= 0) return null;
+        return {
+            box,
+            size,
+            center,
+            maxDim,
+            radius: Math.max(size.length() * 0.5, maxDim * 0.5),
+        };
+    }
+
     getCameraAnchorPoint(target = null) {
         const out = target || new this.THREE.Vector3();
+        const liveBounds = this.getCurrentCameraBounds();
+        if (liveBounds) {
+            this._lastCameraBounds = liveBounds;
+            return out.copy(liveBounds.center);
+        }
         const centerOffset = this._baseTransform?.centerOffset;
         if (centerOffset && this.model?.position) {
             return out.copy(this.model.position).add(centerOffset);
@@ -1179,7 +1206,7 @@ export class PlayModeController {
 
     getCameraLookOffset() {
         const offset = new this.THREE.Vector3(...this.config.camera_look_offset);
-        const size = this._baseTransform?.size;
+        const size = this._lastCameraBounds?.size || this._baseTransform?.size;
         if (size && Number.isFinite(size.y) && size.y > 0) {
             const centeredTarget = !!this._baseTransform?.centerOffset;
             offset.y = centeredTarget
@@ -1191,7 +1218,8 @@ export class PlayModeController {
 
     getCameraFollowOffset() {
         const offset = new this.THREE.Vector3(...this.config.camera_offset);
-        const size = this._baseTransform?.size;
+        const bounds = this._lastCameraBounds || this.getCurrentCameraBounds();
+        const size = bounds?.size || this._baseTransform?.size;
         if (size) {
             const maxDim = Math.max(
                 Number(size.x) || 0,
@@ -1199,8 +1227,25 @@ export class PlayModeController {
                 Number(size.z) || 0
             );
             if (Number.isFinite(maxDim) && maxDim > 0) {
-                offset.y = Math.max(offset.y, clamp(maxDim * 0.75, 1.8, 8.0));
-                offset.z = -Math.max(Math.abs(offset.z), clamp(maxDim * 6.0, 8.0, 30.0));
+                const fov = this.camera?.fov
+                    ? this.THREE.MathUtils.degToRad(clamp(Number(this.camera.fov) || 45, 18, 80))
+                    : this.THREE.MathUtils.degToRad(45);
+                const aspect = Math.max(0.1, Number(this.camera?.aspect) || (16 / 9));
+                const halfTan = Math.max(0.001, Math.tan(fov * 0.5));
+                const hFov = 2 * Math.atan(halfTan * aspect);
+                const fitHeightDistance = (Math.max(size.y, 0.08) * 0.5) / halfTan;
+                const fitWidthDistance = (Math.max(size.x, size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(hFov * 0.5));
+                const radius = Number(bounds?.radius) || (Math.max(size.length?.() || 0, maxDim) * 0.5);
+                const sphereDistance = radius / Math.max(0.001, Math.sin(fov * 0.5));
+                const fitDistance = Math.max(
+                    fitHeightDistance,
+                    fitWidthDistance,
+                    sphereDistance,
+                    maxDim * 2.2,
+                    4.0
+                ) * 1.4;
+                offset.y = Math.max(offset.y, clamp(maxDim * 0.35, 0.8, 8.0));
+                offset.z = -Math.max(Math.abs(offset.z), clamp(fitDistance, 4.0, 80.0));
             }
         }
         return offset;
