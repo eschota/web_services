@@ -658,11 +658,14 @@ export class PlayModeController {
         this.restoreGuardedLocalTransforms({ includeRotation: true });
         const box = new this.THREE.Box3().setFromObject(this.model);
         const size = box.getSize(new this.THREE.Vector3());
+        const center = box.getCenter(new this.THREE.Vector3());
         this._baseTransform = {
             position: this.model.position.clone(),
             quaternion: this.model.quaternion.clone(),
             scale: this.model.scale.clone(),
             size,
+            center,
+            centerOffset: center.clone().sub(this.model.position),
         };
 
         // Play mode must not secretly re-ground the visible model on entry.
@@ -1129,10 +1132,9 @@ export class PlayModeController {
     updateCamera(dt) {
         if (!this.model || !this.controls || !this.THREE) return;
 
+        const anchor = this.getCameraAnchorPoint(this._tmpCamTarget);
         const lookOffset = this.getCameraLookOffset();
-        const desiredY = this.motion.grounded
-            ? this._baseGroundY + lookOffset.y
-            : this.model.position.y + lookOffset.y;
+        const desiredY = anchor.y + lookOffset.y;
         if (!Number.isFinite(this._cameraStableTargetY)) {
             this._cameraStableTargetY = desiredY;
         }
@@ -1142,9 +1144,9 @@ export class PlayModeController {
         this._cameraStableTargetY = damp(this._cameraStableTargetY, desiredY, yLerp, dt);
 
         this._tmpLookTarget.set(
-            this.model.position.x + lookOffset.x,
+            anchor.x + lookOffset.x,
             this._cameraStableTargetY,
-            this.model.position.z + lookOffset.z
+            anchor.z + lookOffset.z
         );
         this.controls.target.x = damp(this.controls.target.x, this._tmpLookTarget.x, this.config.camera_lerp, dt);
         this.controls.target.y = damp(this.controls.target.y, this._tmpLookTarget.y, this.config.camera_lerp, dt);
@@ -1153,20 +1155,34 @@ export class PlayModeController {
 
     snapCameraBehind() {
         if (!this.camera || !this.controls || !this.model || !this.THREE) return;
+        const anchor = this.getCameraAnchorPoint(this._tmpCamTarget);
         const offset = this.getCameraFollowOffset();
         offset.applyAxisAngle(new this.THREE.Vector3(0, 1, 0), this.motion.yaw);
-        this.camera.position.copy(this.model.position).add(offset);
-        this.controls.target.copy(
-            this.model.position.clone().add(this.getCameraLookOffset())
-        );
+        this.camera.position.copy(anchor).add(offset);
+        this.controls.target.copy(anchor).add(this.getCameraLookOffset());
         this.camera.lookAt(this.controls.target);
+    }
+
+    getCameraAnchorPoint(target = null) {
+        const out = target || new this.THREE.Vector3();
+        const centerOffset = this._baseTransform?.centerOffset;
+        if (centerOffset && this.model?.position) {
+            return out.copy(this.model.position).add(centerOffset);
+        }
+        if (this._baseTransform?.center) {
+            return out.copy(this._baseTransform.center);
+        }
+        return out.copy(this.model?.position || new this.THREE.Vector3());
     }
 
     getCameraLookOffset() {
         const offset = new this.THREE.Vector3(...this.config.camera_look_offset);
         const size = this._baseTransform?.size;
         if (size && Number.isFinite(size.y) && size.y > 0) {
-            offset.y = Math.max(offset.y, clamp(size.y * 0.48, 0.8, 4.2));
+            const centeredTarget = !!this._baseTransform?.centerOffset;
+            offset.y = centeredTarget
+                ? clamp(size.y * 0.08, 0.04, 0.45)
+                : Math.max(offset.y, clamp(size.y * 0.48, 0.8, 4.2));
         }
         return offset;
     }
