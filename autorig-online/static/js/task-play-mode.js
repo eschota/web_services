@@ -259,6 +259,8 @@ export class PlayModeController {
         this._previousControlsState = null;
         this._baseTransform = null;
         this._localTransformGuards = [];
+        this._skeletalAnimationDisabled = false;
+        this._skeletalDriftWarningShown = false;
         this._baseYaw = 0;
         this._baseGroundY = 0;
         this._rootGroundOffset = 0;
@@ -344,6 +346,8 @@ export class PlayModeController {
         this.active = true;
         this.mode = 'play';
         this.ragdollActive = false;
+        this._skeletalAnimationDisabled = false;
+        this._skeletalDriftWarningShown = false;
         this.state = 'idle';
         this.motion.moveSpeed = 0;
         this.motion.velocityY = 0;
@@ -358,8 +362,10 @@ export class PlayModeController {
         this.syncVisualFromCharacterBody(1 / 60);
         this.snapCameraBehind();
         this.applyStateAnimation(true);
-        this.restoreGuardedLocalTransforms();
-        this.setStatus(this.buildPlayReadyStatus());
+        this.restoreGuardedLocalTransforms({ includeRotation: false });
+        if (!this.disableSkeletalAnimationIfBoundsDrifted()) {
+            this.setStatus(this.buildPlayReadyStatus());
+        }
     }
 
     async exit() {
@@ -446,6 +452,8 @@ export class PlayModeController {
 
         this.active = true;
         this.mode = 'ragdoll';
+        this._skeletalAnimationDisabled = false;
+        this._skeletalDriftWarningShown = false;
         this.state = 'ragdoll';
         this.motion.moveSpeed = 0;
         this.motion.velocityY = 0;
@@ -525,7 +533,8 @@ export class PlayModeController {
         if (!this.active || !this.model || !this.THREE || !this.world) return;
         const clampedDt = clamp(Number(dt) || 0, 1 / 240, 1 / 20);
         this.world.timestep = clampedDt;
-        this.restoreGuardedLocalTransforms();
+        this.restoreGuardedLocalTransforms({ includeRotation: false });
+        this.disableSkeletalAnimationIfBoundsDrifted();
 
         if (this.ragdollActive) {
             try {
@@ -547,7 +556,11 @@ export class PlayModeController {
         this.world.step();
         this.syncVisualFromCharacterBody(clampedDt);
         this.updateStateMachine();
-        this.applyStateAnimation();
+        if (!this._skeletalAnimationDisabled) {
+            this.applyStateAnimation();
+        } else {
+            this.restoreGuardedLocalTransforms({ includeRotation: true });
+        }
         this.updateCamera(clampedDt);
     }
 
@@ -662,7 +675,7 @@ export class PlayModeController {
         this.model.position.copy(this._baseTransform.position);
         this.model.quaternion.copy(this._baseTransform.quaternion);
         this.model.scale.copy(this._baseTransform.scale);
-        this.restoreGuardedLocalTransforms();
+        this.restoreGuardedLocalTransforms({ includeRotation: true });
         this.restoreRagdollBoneSnapshots();
     }
 
@@ -688,8 +701,9 @@ export class PlayModeController {
                 if (!object || object === this.model) continue;
                 const scale = provided.scale?.clone?.() || null;
                 const position = this.isRootLikeTrackObject(object) ? null : (provided.position?.clone?.() || null);
-                if (scale || position) {
-                    this._localTransformGuards.push({ object, scale, position });
+                const quaternion = provided.quaternion?.clone?.() || null;
+                if (scale || position || quaternion) {
+                    this._localTransformGuards.push({ object, scale, position, quaternion });
                 }
             }
             return;
@@ -701,17 +715,18 @@ export class PlayModeController {
                 object,
                 scale: object.scale?.clone?.() || null,
                 position: null,
+                quaternion: object.quaternion?.clone?.() || null,
             };
             if (!this.isRootLikeTrackObject(object) && object.position?.clone) {
                 snapshot.position = object.position.clone();
             }
-            if (snapshot.scale || snapshot.position) {
+            if (snapshot.scale || snapshot.position || snapshot.quaternion) {
                 this._localTransformGuards.push(snapshot);
             }
         });
     }
 
-    restoreGuardedLocalTransforms() {
+    restoreGuardedLocalTransforms({ includeRotation = false } = {}) {
         if (!Array.isArray(this._localTransformGuards) || !this._localTransformGuards.length) return;
         for (const snapshot of this._localTransformGuards) {
             const object = snapshot?.object;
@@ -722,7 +737,43 @@ export class PlayModeController {
             if (snapshot.position && object.position?.copy) {
                 object.position.copy(snapshot.position);
             }
+            if (includeRotation && snapshot.quaternion && object.quaternion?.copy) {
+                object.quaternion.copy(snapshot.quaternion);
+            }
         }
+    }
+
+    disableSkeletalAnimationIfBoundsDrifted() {
+        if (this._skeletalAnimationDisabled || !this.model || !this._baseTransform || !this.THREE) return false;
+        const baseSize = this._baseTransform.size;
+        if (!baseSize || baseSize.lengthSq?.() === 0) return false;
+
+        const box = new this.THREE.Box3().setFromObject(this.model);
+        const size = box.getSize(new this.THREE.Vector3());
+        const ratioX = size.x / Math.max(baseSize.x, 1e-4);
+        const ratioY = size.y / Math.max(baseSize.y, 1e-4);
+        const ratioZ = size.z / Math.max(baseSize.z, 1e-4);
+        const drifted = ratioX > 2.2 || ratioY > 2.2 || ratioZ > 2.2;
+        if (!drifted) return false;
+
+        const mixer = this.getMixer();
+        try {
+            mixer?.stopAllAction?.();
+        } catch (_) {
+            // ignore stop errors
+        }
+        this._skeletalAnimationDisabled = true;
+        this.restoreGuardedLocalTransforms({ includeRotation: true });
+        if (!this._skeletalDriftWarningShown) {
+            this._skeletalDriftWarningShown = true;
+            console.warn('[PlayMode] Disabled incompatible skeletal animation tracks after bounds drift', {
+                base: baseSize.toArray?.() || baseSize,
+                current: size.toArray?.() || size,
+                ratio: [ratioX, ratioY, ratioZ],
+            });
+        }
+        this.setStatus(`${this.buildPlayReadyStatus()} · incompatible clip transforms ignored`);
+        return true;
     }
 
     resetInputState() {

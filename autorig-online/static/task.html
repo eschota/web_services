@@ -7481,7 +7481,7 @@
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
         } from '/static/js/rig-editor.js?v=64';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
-        import { PlayModeController } from '/static/js/task-play-mode.js?v=28';
+        import { PlayModeController } from '/static/js/task-play-mode.js?v=29';
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -7739,7 +7739,8 @@
                     if (!object || object === model) return;
                     const scale = object.scale?.clone?.() || null;
                     const position = object.position?.clone?.() || null;
-                    if (scale || position) guards.push({ object, scale, position });
+                    const quaternion = object.quaternion?.clone?.() || null;
+                    if (scale || position || quaternion) guards.push({ object, scale, position, quaternion });
                 });
                 return guards;
             }
