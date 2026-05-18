@@ -8004,7 +8004,7 @@ def _rig_article_example_matches(task: Task, rig_key: str) -> bool:
 
 def _rig_article_example_text(task: Task) -> str:
     parts: List[str] = []
-    for attr in ("poster_llm_title", "poster_llm_description", "input_url"):
+    for attr in ("poster_llm_title", "poster_llm_description"):
         value = str(getattr(task, attr, "") or "").strip()
         if value:
             parts.append(value)
