@@ -1129,7 +1129,7 @@ export class PlayModeController {
     updateCamera(dt) {
         if (!this.model || !this.controls || !this.THREE) return;
 
-        const lookOffset = new this.THREE.Vector3(...this.config.camera_look_offset);
+        const lookOffset = this.getCameraLookOffset();
         const desiredY = this.motion.grounded
             ? this._baseGroundY + lookOffset.y
             : this.model.position.y + lookOffset.y;
@@ -1153,13 +1153,39 @@ export class PlayModeController {
 
     snapCameraBehind() {
         if (!this.camera || !this.controls || !this.model || !this.THREE) return;
-        const offset = new this.THREE.Vector3(...this.config.camera_offset);
+        const offset = this.getCameraFollowOffset();
         offset.applyAxisAngle(new this.THREE.Vector3(0, 1, 0), this.motion.yaw);
         this.camera.position.copy(this.model.position).add(offset);
         this.controls.target.copy(
-            this.model.position.clone().add(new this.THREE.Vector3(...this.config.camera_look_offset))
+            this.model.position.clone().add(this.getCameraLookOffset())
         );
         this.camera.lookAt(this.controls.target);
+    }
+
+    getCameraLookOffset() {
+        const offset = new this.THREE.Vector3(...this.config.camera_look_offset);
+        const size = this._baseTransform?.size;
+        if (size && Number.isFinite(size.y) && size.y > 0) {
+            offset.y = Math.max(offset.y, clamp(size.y * 0.48, 0.8, 4.2));
+        }
+        return offset;
+    }
+
+    getCameraFollowOffset() {
+        const offset = new this.THREE.Vector3(...this.config.camera_offset);
+        const size = this._baseTransform?.size;
+        if (size) {
+            const maxDim = Math.max(
+                Number(size.x) || 0,
+                Number(size.y) || 0,
+                Number(size.z) || 0
+            );
+            if (Number.isFinite(maxDim) && maxDim > 0) {
+                offset.y = Math.max(offset.y, clamp(maxDim * 0.42, 1.4, 5.0));
+                offset.z = -Math.max(Math.abs(offset.z), clamp(maxDim * 2.35, 4.2, 14.0));
+            }
+        }
+        return offset;
     }
 
     toggleRagdoll() {
