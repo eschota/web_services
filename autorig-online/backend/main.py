@@ -12021,7 +12021,7 @@ async def indexnow_key_file():
     """Serve the IndexNow API key from the site root."""
     return FileResponse(
         str(STATIC_DIR / INDEXNOW_KEY_FILE),
-        media_type="text/plain; charset=utf-8",
+        media_type="text/plain",
     )
 
 
