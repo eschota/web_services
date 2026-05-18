@@ -362,8 +362,11 @@ export class PlayModeController {
         this.syncVisualFromCharacterBody(1 / 60);
         this.snapCameraBehind();
         this.applyStateAnimation(true);
+        if (this.model.userData?.autorigPlayModeBindPose) {
+            this.disableSkeletalAnimationPlayback('external controller clips are guarded for this rig');
+        }
         this.restoreGuardedLocalTransforms({ includeRotation: false });
-        if (!this.disableSkeletalAnimationIfBoundsDrifted()) {
+        if (!this._skeletalAnimationDisabled && !this.disableSkeletalAnimationIfBoundsDrifted()) {
             this.setStatus(this.buildPlayReadyStatus());
         }
     }
@@ -756,6 +759,10 @@ export class PlayModeController {
         const drifted = ratioX > 2.2 || ratioY > 2.2 || ratioZ > 2.2;
         if (!drifted) return false;
 
+        return this.disableSkeletalAnimationPlayback('bounds drift');
+    }
+
+    disableSkeletalAnimationPlayback(reason = '') {
         const mixer = this.getMixer();
         try {
             mixer?.stopAllAction?.();
@@ -766,10 +773,8 @@ export class PlayModeController {
         this.restoreGuardedLocalTransforms({ includeRotation: true });
         if (!this._skeletalDriftWarningShown) {
             this._skeletalDriftWarningShown = true;
-            console.warn('[PlayMode] Disabled incompatible skeletal animation tracks after bounds drift', {
-                base: baseSize.toArray?.() || baseSize,
-                current: size.toArray?.() || size,
-                ratio: [ratioX, ratioY, ratioZ],
+            console.warn('[PlayMode] Disabled incompatible skeletal animation tracks', {
+                reason,
             });
         }
         this.setStatus(`${this.buildPlayReadyStatus()} · incompatible clip transforms ignored`);
