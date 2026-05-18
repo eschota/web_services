@@ -63,6 +63,8 @@
     "task_meta_poster_err_classify": "इस पोस्टर के लिए सुरक्षा विश्लेषण विफल।",
     "task_meta_poster_err_openai": "शीर्षक और कीवर्ड नहीं बन सके (AI चरण विफल)।",
     "task_meta_poster_err_pipeline": "पोस्टर पाइपलाइन अप्रत्याशित रूप से विफल। पृष्ठ रीफ़्रेश करें।",
+    "viewer_play_humanoid_only": "Play मोड केवल humanoid rigs के लिए उपलब्ध है।",
+    "viewer_play_no_ready_animations": "Play मोड के लिए ready humanoid locomotion clips चाहिए।",
     "blueprint_view_select_title": "Blueprint कैमरा व्यू",
     "blueprint_view_right": "दायां",
     "blueprint_view_front": "सामने",

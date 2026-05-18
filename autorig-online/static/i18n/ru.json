@@ -65,6 +65,8 @@
     "task_video_ready": "Видео превью",
     "task_video_pending": "Видео генерируется...",
     "task_youtube_open": "Открыть на YouTube",
+    "viewer_play_humanoid_only": "Play доступен только для humanoid-ригов.",
+    "viewer_play_no_ready_animations": "Для Play нужны готовые humanoid locomotion-анимации.",
     "blueprint_view_select_title": "Вид камеры Blueprint",
     "blueprint_view_right": "Справа",
     "blueprint_view_front": "Спереди",

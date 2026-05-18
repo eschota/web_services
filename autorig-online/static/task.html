@@ -7481,7 +7481,7 @@
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
         } from '/static/js/rig-editor.js?v=64';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
-        import { PlayModeController } from '/static/js/task-play-mode.js?v=25';
+        import { PlayModeController } from '/static/js/task-play-mode.js?v=26';
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -7718,6 +7718,37 @@
                 rebuildAnimationControls(preferredClipName);
                 setStatus(`Ready (${animations.length} animations)`);
                 return true;
+            }
+
+            function rememberAnimationPreviewClipsBeforePlay() {
+                if (currentModelType !== 'animations' || !currentModel || !Array.isArray(animations) || !animations.length) {
+                    return null;
+                }
+                const existing = currentModel.userData?.autorigPlayModeOriginalClips;
+                if (Array.isArray(existing) && existing.length) return existing;
+                currentModel.userData = currentModel.userData || {};
+                currentModel.userData.autorigPlayModeOriginalClips = [...animations];
+                currentModel.userData.autorigPlayModeOriginalClipName = sel?.value || animations[0]?.name || null;
+                return currentModel.userData.autorigPlayModeOriginalClips;
+            }
+
+            function restoreAnimationPreviewClipsAfterPlay() {
+                if (currentModelType !== 'animations' || !currentModel) return false;
+                const originalClips = currentModel.userData?.autorigPlayModeOriginalClips;
+                if (!Array.isArray(originalClips) || !originalClips.length) return false;
+                const preferred = currentModel.userData?.autorigPlayModeOriginalClipName || originalClips[0]?.name || null;
+                delete currentModel.userData.autorigPlayModeOriginalClips;
+                delete currentModel.userData.autorigPlayModeOriginalClipName;
+                delete currentModel.userData.autorigPlayControllerClipsActive;
+                const ok = applyAnimationClipsToCurrentModel(originalClips, preferred ? [preferred] : []);
+                if (ok) {
+                    const modelCache = getSharedModelCache();
+                    modelCache.animations = currentModel;
+                    modelCache.animationsData = [...animations];
+                    stabilizeAnimationPreviewPose('restore animation clips after Play');
+                    window.taskDbg('[PlayMode] Restored original animation preview clips after Play mode');
+                }
+                return ok;
             }
 
             const customAnimationClipCache = new Map();
@@ -7961,45 +7992,159 @@
                     name.includes('mixamorighips');
             }
 
-            function makeControllerInPlaceClip(sourceClip, clipName) {
-                if (!sourceClip) return null;
-                const clip = sourceClip.clone();
-                clip.name = clipName || sourceClip.name;
+            function stripCommonRigPrefix(value) {
+                return String(value || '')
+                    .replace(/^mixamorig[:_]?/i, '')
+                    .replace(/^armature[:_]?/i, '')
+                    .replace(/^rig[:_]?/i, '');
+            }
 
-                const positionTracks = clip.tracks.filter((track) => {
-                    return String(track?.name || '').endsWith('.position') && track?.values?.length >= 3;
+            function addTrackTargetVariants(targets, rawValue) {
+                const raw = String(rawValue || '').trim();
+                if (!raw) return;
+                const probes = new Set([raw]);
+                probes.add(stripCommonRigPrefix(raw));
+                probes.add(raw.replace(/^.*[:|/]/, ''));
+                probes.add(stripCommonRigPrefix(raw.replace(/^.*[:|/]/, '')));
+                probes.add(raw.replace(/[^.]*\.bones\[(.*?)\].*/i, '$1'));
+                probes.add(stripCommonRigPrefix(raw.replace(/[^.]*\.bones\[(.*?)\].*/i, '$1')));
+                probes.forEach((probe) => {
+                    const normalized = normalizeClipKey(probe);
+                    if (normalized) targets.add(normalized);
                 });
-                let tracksToFlatten = positionTracks.filter(isLikelyRootPositionTrack);
-                if (!tracksToFlatten.length && positionTracks.length) {
-                    const sorted = [...positionTracks].sort((a, b) => {
-                        return horizontalDisplacementForTrack(b) - horizontalDisplacementForTrack(a);
-                    });
-                    if (horizontalDisplacementForTrack(sorted[0]) > 0.08) {
-                        tracksToFlatten = [sorted[0]];
+            }
+
+            function collectPlayableTrackTargets(model = currentModel) {
+                const targets = new Set();
+                model?.traverse?.((obj) => {
+                    addTrackTargetVariants(targets, obj?.name);
+                    if (obj?.isSkinnedMesh && obj.skeleton?.bones?.length) {
+                        obj.skeleton.bones.forEach((bone) => addTrackTargetVariants(targets, bone?.name));
                     }
+                });
+                return targets;
+            }
+
+            function trackTargetName(trackName) {
+                return String(trackName || '')
+                    .replace(/\.(position|quaternion|rotation|scale)$/i, '')
+                    .trim();
+            }
+
+            function trackTargetCandidates(trackName) {
+                const target = trackTargetName(trackName);
+                const candidates = new Set();
+                addTrackTargetVariants(candidates, target);
+                for (const match of target.matchAll(/\[(.*?)\]/g)) {
+                    addTrackTargetVariants(candidates, match[1]);
                 }
-                const flattenNames = new Set(tracksToFlatten.map((track) => track.name));
+                target.split(/[|/]/g).forEach((part) => addTrackTargetVariants(candidates, part));
+                return candidates;
+            }
 
-                clip.tracks = clip.tracks.map((track) => {
-                    if (!flattenNames.has(track?.name) || !track?.values || track.values.length < 3) {
-                        return track;
-                    }
+            function trackTargetExists(track, validTargets) {
+                if (!validTargets?.size) return true;
+                const candidates = trackTargetCandidates(track?.name);
+                for (const candidate of candidates) {
+                    if (validTargets.has(candidate)) return true;
+                }
+                return false;
+            }
 
-                    const next = track.clone();
-                    const baseX = Number(next.values[0]) || 0;
-                    const baseZ = Number(next.values[2]) || 0;
-                    for (let index = 0; index < next.values.length; index += 3) {
-                        next.values[index] = baseX;
-                        next.values[index + 2] = baseZ;
+            function clonePositionTrackInPlace(track, { keepVertical = false } = {}) {
+                const next = track.clone();
+                if (!next?.values || next.values.length < 3) return next;
+                const baseX = Number(next.values[0]) || 0;
+                const baseY = Number(next.values[1]) || 0;
+                const baseZ = Number(next.values[2]) || 0;
+                for (let index = 0; index < next.values.length; index += 3) {
+                    next.values[index] = baseX;
+                    if (!keepVertical) next.values[index + 1] = baseY;
+                    next.values[index + 2] = baseZ;
+                }
+                return next;
+            }
+
+            function sanitizeControllerClipTrack(track, roleConfig, validTargets, stats) {
+                const trackName = String(track?.name || '');
+                const isPosition = trackName.endsWith('.position');
+                const isScale = trackName.endsWith('.scale');
+                const isRotation = trackName.endsWith('.quaternion') || trackName.endsWith('.rotation');
+
+                if (isScale) {
+                    stats.scaleDropped += 1;
+                    stats.dropped += 1;
+                    return null;
+                }
+
+                if (isPosition) {
+                    const isRoot = isLikelyRootPositionTrack(track);
+                    if (!isRoot) {
+                        stats.nonRootPositionDropped += 1;
+                        stats.dropped += 1;
+                        return null;
                     }
-                    return next;
-                });
+                    const keepVertical = roleConfig?.allowRootY === true || ['jump', 'land', 'recover'].includes(String(roleConfig?.role || ''));
+                    stats.rootPositionNormalized += 1;
+                    stats.kept += 1;
+                    return clonePositionTrackInPlace(track, { keepVertical });
+                }
+
+                if (isRotation && !trackTargetExists(track, validTargets)) {
+                    stats.unmatchedRotationDropped += 1;
+                    stats.dropped += 1;
+                    return null;
+                }
+
+                stats.kept += 1;
+                return track;
+            }
+
+            function makeControllerInPlaceClip(sourceClip, roleConfig) {
+                if (!sourceClip) return null;
+                const validTargets = collectPlayableTrackTargets(currentModel);
+                const stats = {
+                    role: roleConfig?.role || '',
+                    clip: roleConfig?.clipName || sourceClip.name || '',
+                    sourceTracks: Array.isArray(sourceClip.tracks) ? sourceClip.tracks.length : 0,
+                    kept: 0,
+                    dropped: 0,
+                    scaleDropped: 0,
+                    nonRootPositionDropped: 0,
+                    rootPositionNormalized: 0,
+                    unmatchedRotationDropped: 0,
+                    validTargets: validTargets.size,
+                };
+                const sanitizedTracks = (Array.isArray(sourceClip.tracks) ? sourceClip.tracks : [])
+                    .map((track) => sanitizeControllerClipTrack(track, roleConfig, validTargets, stats))
+                    .filter(Boolean);
+                if (!sanitizedTracks.length) {
+                    console.warn('[PlayMode] Controller clip sanitized to zero tracks', stats);
+                    return null;
+                }
+
+                let clip;
+                try {
+                    clip = new THREE.AnimationClip(
+                        roleConfig?.clipName || sourceClip.name,
+                        sourceClip.duration,
+                        sanitizedTracks,
+                        sourceClip.blendMode
+                    );
+                } catch (_) {
+                    clip = sourceClip.clone();
+                    clip.name = roleConfig?.clipName || sourceClip.name;
+                    clip.tracks = sanitizedTracks;
+                }
 
                 try {
                     clip.optimize();
                 } catch (_) {
                     // keep unoptimized clip
                 }
+                window.__lastPlayModeSanitization = window.__lastPlayModeSanitization || [];
+                window.__lastPlayModeSanitization.push(stats);
+                console.info('[PlayMode] sanitized controller clip', stats);
                 return clip;
             }
 
@@ -8044,7 +8189,7 @@
                         continue;
                     }
 
-                    const controllerClip = makeControllerInPlaceClip(sourceClip, roleConfig.clipName);
+                    const controllerClip = makeControllerInPlaceClip(sourceClip, roleConfig);
                     if (controllerClip) {
                         clips.push(controllerClip);
                         diagnostics.push(`${roleConfig.role}: ${entry.id} -> ${controllerClip.name}`);
@@ -8072,6 +8217,7 @@
                 loadingManager?.show?.('Loading Play Mode');
                 loadingManager?.updateProgress?.(15, 'Preparing Play controller...');
                 setStatus('Loading Play controller clips...');
+                const originalClips = rememberAnimationPreviewClipsBeforePlay();
                 const clips = await buildPlayModeClipSetFromCatalog();
                 loadingManager?.updateProgress?.(85, 'Binding Play animations...');
                 const ok = applyAnimationClipsToCurrentModel(
@@ -8079,8 +8225,12 @@
                     PLAY_MODE_LOCOMOTION_ROLES.flatMap((role) => [role.clipName, ...(role.ids || [])])
                 );
                 if (ok) {
+                    currentModel.userData = currentModel.userData || {};
+                    currentModel.userData.autorigPlayControllerClipsActive = true;
                     modelCache.animations = currentModel;
-                    modelCache.animationsData = [...animations];
+                    if (Array.isArray(originalClips) && originalClips.length) {
+                        modelCache.animationsData = [...originalClips];
+                    }
                     setStatus(`Play controller ready (${animations.length} clips)`);
                     loadingManager?.updateProgress?.(100, 'Play mode ready');
                 }
@@ -11651,6 +11801,95 @@
                             saveRigWrap.classList.toggle('hidden', !visible);
                         }
                     };
+
+                    let playModeEligibility = {
+                        checked: false,
+                        allowed: true,
+                        hidden: false,
+                        reason: '',
+                    };
+
+                    const tr = (key, fallback) => {
+                        const value = window.t ? window.t(key) : '';
+                        return value && value !== key ? value : fallback;
+                    };
+
+                    const taskIsAnimalForPlayMode = (taskState) => {
+                        const state = taskState || window.TaskPage?.task || {};
+                        const inputType = String(state.input_type || '').trim().toLowerCase();
+                        const taskType = String(state.type || state.task_type || '').trim().toLowerCase();
+                        const rigType = String(state.rig_type || '').trim().toLowerCase();
+                        const animalType = String(state.animal_type || '').trim().toLowerCase();
+                        return inputType === 'animal' || taskType === 'animal' || (!!animalType && rigType !== 'humanoid');
+                    };
+
+                    const applyPlayModeButtonAvailability = (eligibility) => {
+                        const hidden = !!eligibility.hidden;
+                        const allowed = !!eligibility.allowed;
+                        [playModeBtn, ragdollModeBtn].forEach((button) => {
+                            if (!button) return;
+                            button.classList.toggle('hidden', hidden);
+                            button.disabled = !allowed;
+                            button.title = allowed
+                                ? (button.id === 'view-mode-play'
+                                    ? 'Play Mode (WASD + Space + Shift, Alt ragdoll)'
+                                    : 'Ragdoll Mode (R reset, Space impulse)')
+                                : eligibility.reason;
+                            button.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+                        });
+                    };
+
+                    const resolvePlayModeEligibility = async ({ force = false } = {}) => {
+                        if (playModeEligibility.checked && !force) return playModeEligibility;
+
+                        let taskState = window.TaskPage?.task || null;
+                        try {
+                            taskState = await getLatestTaskState({ force: false }) || taskState;
+                        } catch (_) {
+                            // Keep the cached TaskPage state if the transient poll fails.
+                        }
+
+                        if (taskIsAnimalForPlayMode(taskState)) {
+                            playModeEligibility = {
+                                checked: true,
+                                allowed: false,
+                                hidden: true,
+                                reason: tr('viewer_play_humanoid_only', 'Play mode is available for humanoid rigs only.'),
+                            };
+                            applyPlayModeButtonAvailability(playModeEligibility);
+                            return playModeEligibility;
+                        }
+
+                        try {
+                            const catalog = await ensureViewerAnimationCatalogLoaded();
+                            const readyEntries = catalogEntriesFromPayload(catalog);
+                            if (!readyEntries.length) {
+                                playModeEligibility = {
+                                    checked: true,
+                                    allowed: false,
+                                    hidden: false,
+                                    reason: tr('viewer_play_no_ready_animations', 'Play mode needs ready humanoid locomotion clips.'),
+                                };
+                            } else {
+                                playModeEligibility = {
+                                    checked: true,
+                                    allowed: true,
+                                    hidden: false,
+                                    reason: '',
+                                };
+                            }
+                        } catch (error) {
+                            console.warn('[PlayMode] Could not resolve Play mode availability:', error);
+                            playModeEligibility = {
+                                checked: true,
+                                allowed: false,
+                                hidden: false,
+                                reason: tr('viewer_play_no_ready_animations', 'Play mode needs ready humanoid locomotion clips.'),
+                            };
+                        }
+                        applyPlayModeButtonAvailability(playModeEligibility);
+                        return playModeEligibility;
+                    };
                     
                     const ensurePlayController = () => {
                         if (playModeController) return playModeController;
@@ -11674,6 +11913,9 @@
                     const stopPlayModeIfNeeded = async (nextMode) => {
                         if ((nextMode === 'play' || nextMode === 'ragdoll') || !playModeController?.active) return;
                         await playModeController.exit();
+                        if (nextMode === 'animation') {
+                            restoreAnimationPreviewClipsAfterPlay();
+                        }
                     };
 
                     const showRagdollHelpOnce = () => {
@@ -11853,6 +12095,16 @@
 
                             case 'play':
                                 setEditControlsVisible(false);
+                                {
+                                    const eligibility = await resolvePlayModeEligibility({ force: true });
+                                    if (!eligibility.allowed) {
+                                        animBtn?.classList.add('active');
+                                        playModeBtn?.classList.remove('active');
+                                        setStatus(eligibility.reason || tr('viewer_play_no_ready_animations', 'Play mode needs ready humanoid locomotion clips.'));
+                                        loadingManager?.hide?.();
+                                        return;
+                                    }
+                                }
                                 if (tPoseReference) {
                                     tPoseReference.setVisible(false);
                                     const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
@@ -11882,6 +12134,7 @@
                                     setStatus(`Play mode animation load failed: ${error?.message || error}`);
                                 }
                                 if (!playClipsReady) {
+                                    restoreAnimationPreviewClipsAfterPlay();
                                     playModeBtn?.classList.remove('active');
                                     animBtn?.classList.add('active');
                                     loadingManager?.hide?.();
@@ -11905,7 +12158,9 @@
                                 } catch (error) {
                                     console.error('[Viewer] Play mode init failed:', error);
                                     setStatus(`Play mode init failed: ${error?.message || error}`);
+                                    restoreAnimationPreviewClipsAfterPlay();
                                     playModeBtn?.classList.remove('active');
+                                    animBtn?.classList.add('active');
                                     loadingManager?.hide?.();
                                     return;
                                 }
@@ -11913,6 +12168,16 @@
 
                             case 'ragdoll':
                                 setEditControlsVisible(false);
+                                {
+                                    const eligibility = await resolvePlayModeEligibility({ force: true });
+                                    if (!eligibility.allowed) {
+                                        animBtn?.classList.add('active');
+                                        ragdollModeBtn?.classList.remove('active');
+                                        setStatus(eligibility.reason || tr('viewer_play_no_ready_animations', 'Play mode needs ready humanoid locomotion clips.'));
+                                        loadingManager?.hide?.();
+                                        return;
+                                    }
+                                }
                                 if (tPoseReference) {
                                     tPoseReference.setVisible(false);
                                     const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
@@ -12014,6 +12279,7 @@
                         const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
                         if (tposeToggleBtn) tposeToggleBtn.classList.remove('active');
                     }
+                    void resolvePlayModeEligibility({ force: true });
                     
                     window.taskDbg('[Viewer] View mode selector setup complete');
                 }

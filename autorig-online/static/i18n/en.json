@@ -65,6 +65,8 @@
     "task_video_ready": "Video Preview",
     "task_video_pending": "Video is being generated...",
     "task_youtube_open": "Open on YouTube",
+    "viewer_play_humanoid_only": "Play mode is available for humanoid rigs only.",
+    "viewer_play_no_ready_animations": "Play mode needs ready humanoid locomotion clips.",
     "blueprint_view_select_title": "Blueprint camera view",
     "blueprint_view_right": "Right",
     "blueprint_view_front": "Front",

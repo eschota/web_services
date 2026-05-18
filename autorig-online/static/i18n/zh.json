@@ -63,6 +63,8 @@
     "task_meta_poster_err_classify": "此海报的安全分析失败。",
     "task_meta_poster_err_openai": "无法生成标题和关键词（AI 步骤失败）。",
     "task_meta_poster_err_pipeline": "海报处理流程异常，请刷新页面重试。",
+    "viewer_play_humanoid_only": "Play 模式仅适用于 humanoid 绑定。",
+    "viewer_play_no_ready_animations": "Play 模式需要已就绪的 humanoid locomotion 动画。",
     "blueprint_view_select_title": "Blueprint 相机视图",
     "blueprint_view_right": "右视图",
     "blueprint_view_front": "前视图",

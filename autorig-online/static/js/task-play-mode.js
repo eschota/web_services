@@ -644,13 +644,9 @@ export class PlayModeController {
             size,
         };
 
-        const snapDelta = -box.min.y;
-        if (Number.isFinite(snapDelta) && Math.abs(snapDelta) > 1e-4) {
-            this.model.position.y += snapDelta;
-        }
-
-        const snappedBox = new this.THREE.Box3().setFromObject(this.model);
-        this._baseGroundY = snappedBox.min.y;
+        // Play mode must not secretly re-ground the visible model on entry.
+        // The physics capsule is built around the current Anim pose instead.
+        this._baseGroundY = box.min.y;
         this._rootGroundOffset = this.model.position.y - this._baseGroundY;
         this._tmpEuler.setFromQuaternion(this.model.quaternion, 'YXZ');
         this._baseYaw = this._tmpEuler.y;
