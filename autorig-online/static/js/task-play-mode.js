@@ -652,7 +652,7 @@ export class PlayModeController {
         if (!this.model || !this.THREE) return;
 
         this.captureGuardedLocalTransforms();
-        this.restoreGuardedLocalTransforms();
+        this.restoreGuardedLocalTransforms({ includeRotation: true });
         const box = new this.THREE.Box3().setFromObject(this.model);
         const size = box.getSize(new this.THREE.Vector3());
         this._baseTransform = {
