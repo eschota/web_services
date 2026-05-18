@@ -1181,8 +1181,8 @@ export class PlayModeController {
                 Number(size.z) || 0
             );
             if (Number.isFinite(maxDim) && maxDim > 0) {
-                offset.y = Math.max(offset.y, clamp(maxDim * 0.42, 1.4, 5.0));
-                offset.z = -Math.max(Math.abs(offset.z), clamp(maxDim * 2.35, 4.2, 14.0));
+                offset.y = Math.max(offset.y, clamp(maxDim * 0.75, 1.8, 8.0));
+                offset.z = -Math.max(Math.abs(offset.z), clamp(maxDim * 6.0, 8.0, 30.0));
             }
         }
         return offset;
