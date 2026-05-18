@@ -258,6 +258,7 @@ export class PlayModeController {
         this._previousControlsEnabled = null;
         this._previousControlsState = null;
         this._baseTransform = null;
+        this._localTransformGuards = [];
         this._baseYaw = 0;
         this._baseGroundY = 0;
         this._rootGroundOffset = 0;
@@ -357,6 +358,7 @@ export class PlayModeController {
         this.syncVisualFromCharacterBody(1 / 60);
         this.snapCameraBehind();
         this.applyStateAnimation(true);
+        this.restoreGuardedLocalTransforms();
         this.setStatus(this.buildPlayReadyStatus());
     }
 
@@ -523,6 +525,7 @@ export class PlayModeController {
         if (!this.active || !this.model || !this.THREE || !this.world) return;
         const clampedDt = clamp(Number(dt) || 0, 1 / 240, 1 / 20);
         this.world.timestep = clampedDt;
+        this.restoreGuardedLocalTransforms();
 
         if (this.ragdollActive) {
             try {
@@ -648,6 +651,7 @@ export class PlayModeController {
         // The physics capsule is built around the current Anim pose instead.
         this._baseGroundY = box.min.y;
         this._rootGroundOffset = this.model.position.y - this._baseGroundY;
+        this.captureGuardedLocalTransforms();
         this._tmpEuler.setFromQuaternion(this.model.quaternion, 'YXZ');
         this._baseYaw = this._tmpEuler.y;
     }
@@ -657,7 +661,53 @@ export class PlayModeController {
         this.model.position.copy(this._baseTransform.position);
         this.model.quaternion.copy(this._baseTransform.quaternion);
         this.model.scale.copy(this._baseTransform.scale);
+        this.restoreGuardedLocalTransforms();
         this.restoreRagdollBoneSnapshots();
+    }
+
+    isRootLikeTrackObject(object) {
+        if (!object) return false;
+        if (object === this.model) return true;
+        const key = normalizeKey(object.name);
+        return key === 'root' ||
+            key === 'hips' ||
+            key === 'armature' ||
+            key.includes('mixamorighips') ||
+            key.includes('rootnode');
+    }
+
+    captureGuardedLocalTransforms() {
+        this._localTransformGuards = [];
+        if (!this.model || !this.THREE) return;
+
+        this.model.traverse((object) => {
+            if (!object || object === this.model) return;
+            const snapshot = {
+                object,
+                scale: object.scale?.clone?.() || null,
+                position: null,
+            };
+            if (!this.isRootLikeTrackObject(object) && object.position?.clone) {
+                snapshot.position = object.position.clone();
+            }
+            if (snapshot.scale || snapshot.position) {
+                this._localTransformGuards.push(snapshot);
+            }
+        });
+    }
+
+    restoreGuardedLocalTransforms() {
+        if (!Array.isArray(this._localTransformGuards) || !this._localTransformGuards.length) return;
+        for (const snapshot of this._localTransformGuards) {
+            const object = snapshot?.object;
+            if (!object) continue;
+            if (snapshot.scale && object.scale?.copy) {
+                object.scale.copy(snapshot.scale);
+            }
+            if (snapshot.position && object.position?.copy) {
+                object.position.copy(snapshot.position);
+            }
+        }
     }
 
     resetInputState() {
