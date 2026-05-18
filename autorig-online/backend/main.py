@@ -12011,6 +12011,20 @@ async def robots():
 
 
 # Search engine verification files
+INDEXNOW_KEY = "793f81f63218433f87e43c0afd353c14"
+INDEXNOW_KEY_FILE = f"{INDEXNOW_KEY}.txt"
+
+
+@app.head(f"/{INDEXNOW_KEY_FILE}")
+@app.get(f"/{INDEXNOW_KEY_FILE}")
+async def indexnow_key_file():
+    """Serve the IndexNow API key from the site root."""
+    return FileResponse(
+        str(STATIC_DIR / INDEXNOW_KEY_FILE),
+        media_type="text/plain; charset=utf-8",
+    )
+
+
 @app.get("/yandex_7bb48a0ce446816a.html")
 async def yandex_verification():
     """Yandex Webmaster verification file"""
