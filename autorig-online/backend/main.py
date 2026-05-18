@@ -10773,6 +10773,50 @@ STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "auto-rig-obj-hi.html": "/auto-rig-obj-hi",
 }
 
+PUBLIC_QUERY_NOINDEX_PATHS = {"/", "/gallery"}
+
+
+def _response_without_body(response: Response) -> Response:
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    return Response(
+        content=b"",
+        status_code=response.status_code,
+        headers=headers,
+        media_type=getattr(response, "media_type", None),
+    )
+
+
+def _should_fallback_head_to_get(path: str) -> bool:
+    if path in {"/", "/task", "/dashboard", "/admin", "/admin/workers"}:
+        return True
+    return path in set(STATIC_PAGE_CANONICAL_PATHS.values())
+
+
+@app.middleware("http")
+async def seo_http_headers_and_head_fallback(request: Request, call_next):
+    original_method = request.scope.get("method", "").upper()
+    is_head_fallback = original_method == "HEAD" and _should_fallback_head_to_get(request.url.path)
+
+    if is_head_fallback:
+        request.scope["method"] = "GET"
+
+    response = await call_next(request)
+
+    path = request.url.path
+    if path == "/dashboard":
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    elif path.startswith("/m/"):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    elif path in PUBLIC_QUERY_NOINDEX_PATHS and request.url.query:
+        response.headers["X-Robots-Tag"] = "noindex, follow"
+
+    if is_head_fallback:
+        request.scope["method"] = original_method
+        return _response_without_body(response)
+
+    return response
+
 
 def _read_static_partial(name: str) -> str:
     path = STATIC_DIR / "partials" / name
