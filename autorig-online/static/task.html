@@ -7481,7 +7481,7 @@
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
         } from '/static/js/rig-editor.js?v=64';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
-        import { PlayModeController } from '/static/js/task-play-mode.js?v=35';
+        import { PlayModeController } from '/static/js/task-play-mode.js?v=36';
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -7725,11 +7725,13 @@
                     return null;
                 }
                 const existing = currentModel.userData?.autorigPlayModeOriginalClips;
-                if (Array.isArray(existing) && existing.length) return existing;
                 currentModel.userData = currentModel.userData || {};
+                if (!Array.isArray(currentModel.userData.autorigPlayModeBindPose) || !currentModel.userData.autorigPlayModeBindPose.length) {
+                    currentModel.userData.autorigPlayModeBindPose = captureAnimationPreviewBindPose(currentModel);
+                }
+                if (Array.isArray(existing) && existing.length) return existing;
                 currentModel.userData.autorigPlayModeOriginalClips = [...animations];
                 currentModel.userData.autorigPlayModeOriginalClipName = sel?.value || animations[0]?.name || null;
-                currentModel.userData.autorigPlayModeBindPose = captureAnimationPreviewBindPose(currentModel);
                 return currentModel.userData.autorigPlayModeOriginalClips;
             }
 
@@ -7753,6 +7755,7 @@
                 delete currentModel.userData.autorigPlayModeOriginalClips;
                 delete currentModel.userData.autorigPlayModeOriginalClipName;
                 delete currentModel.userData.autorigPlayControllerClipsActive;
+                delete currentModel.userData.autorigPlayControllerClipSet;
                 delete currentModel.userData.autorigPlayModeBindPose;
                 const ok = applyAnimationClipsToCurrentModel(originalClips, preferred ? [preferred] : []);
                 if (ok) {
@@ -8231,22 +8234,18 @@
                 setStatus('Loading Play controller clips...');
                 const originalClips = rememberAnimationPreviewClipsBeforePlay();
                 const clips = await buildPlayModeClipSetFromCatalog();
-                loadingManager?.updateProgress?.(85, 'Binding Play animations...');
-                const ok = applyAnimationClipsToCurrentModel(
-                    clips,
-                    PLAY_MODE_LOCOMOTION_ROLES.flatMap((role) => [role.clipName, ...(role.ids || [])])
-                );
-                if (ok) {
-                    currentModel.userData = currentModel.userData || {};
-                    currentModel.userData.autorigPlayControllerClipsActive = true;
-                    modelCache.animations = currentModel;
-                    if (Array.isArray(originalClips) && originalClips.length) {
-                        modelCache.animationsData = [...originalClips];
-                    }
-                    setStatus(`Play controller ready (${animations.length} clips)`);
-                    loadingManager?.updateProgress?.(100, 'Play mode ready');
+                loadingManager?.updateProgress?.(85, 'Preparing Play controller...');
+                if (!currentModel) return false;
+                currentModel.userData = currentModel.userData || {};
+                currentModel.userData.autorigPlayControllerClipsActive = true;
+                currentModel.userData.autorigPlayControllerClipSet = clips;
+                modelCache.animations = currentModel;
+                if (Array.isArray(originalClips) && originalClips.length) {
+                    modelCache.animationsData = [...originalClips];
                 }
-                return ok;
+                setStatus(`Play controller ready (${clips.length} clips)`);
+                loadingManager?.updateProgress?.(100, 'Play mode ready');
+                return true;
             }
 
             async function playAnimationByBestMatch(query) {
@@ -11913,7 +11912,12 @@
                             controls,
                             viewerControls,
                             getCurrentModel: () => currentModel,
-                            getAnimations: () => animations,
+                            getAnimations: () => {
+                                const controllerClips = currentModel?.userData?.autorigPlayControllerClipSet;
+                                return Array.isArray(controllerClips) && controllerClips.length
+                                    ? controllerClips
+                                    : animations;
+                            },
                             getMixer: () => mixer,
                             playClipByName: (name, options) => play(name, options),
                             setStatus: (msg) => setStatus(msg),

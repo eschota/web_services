@@ -361,9 +361,11 @@ export class PlayModeController {
         this._playingState = null;
         this.syncVisualFromCharacterBody(1 / 60);
         this.snapCameraBehind();
-        this.applyStateAnimation(true);
-        if (this.model.userData?.autorigPlayModeBindPose) {
+        if (this.model.userData?.autorigPlayControllerClipsActive || this.model.userData?.autorigPlayModeBindPose) {
             this.disableSkeletalAnimationPlayback('external controller clips are guarded for this rig');
+        }
+        if (!this._skeletalAnimationDisabled) {
+            this.applyStateAnimation(true);
         }
         this.restoreGuardedLocalTransforms({ includeRotation: false });
         if (!this._skeletalAnimationDisabled && !this.disableSkeletalAnimationIfBoundsDrifted()) {
