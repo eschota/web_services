@@ -7606,6 +7606,24 @@
                 mixer.timeScale = 1;
             }
 
+            function stabilizeAnimationPreviewPose(reason = 'animation preview') {
+                if (!currentModel || currentModelType !== 'animations') return;
+                try {
+                    if (mixer) {
+                        mixer.update(0);
+                    }
+                    currentModel.updateMatrixWorld(true);
+                    snapCurrentModelToGround({ centerXZ: true, force: true });
+                    currentModel.userData.autorigAnimationGroundLocked = true;
+                    updateShadowCatcherPlaneForModel(currentModel);
+                    window.taskDbg('[Viewer] Stabilized animation preview ground pose:', reason, {
+                        y: currentModel.position.y
+                    });
+                } catch (error) {
+                    console.warn('[Viewer] Failed to stabilize animation preview pose:', error);
+                }
+            }
+
             function normalizeClipKey(value) {
                 return String(value || '')
                     .toLowerCase()
@@ -7666,7 +7684,8 @@
                         sel.value = preferredClipName;
                     }
                     try {
-                        play(sel.value);
+                        play(sel.value, currentModelType === 'animations' ? { fade: 0 } : {});
+                        stabilizeAnimationPreviewPose('animation controls autoplay');
                     } catch (e) {
                         console.warn('[Viewer] Auto-play failed:', e);
                     }
@@ -11243,7 +11262,9 @@
                         }
                         if (mixer) {
                             mixer.update(dt);
-                            snapCurrentModelToGround({ force: false });
+                            if (currentModelType !== 'animations') {
+                                snapCurrentModelToGround({ force: false });
+                            }
                         }
                         if (viewerControls) viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
@@ -11750,7 +11771,8 @@
                                             
                                             // Auto-play first animation
                                             try {
-                                                play(sel.value);
+                                                play(sel.value, { fade: 0 });
+                                                stabilizeAnimationPreviewPose('cached animation swap');
                                                 window.taskDbg('[Viewer] ✓ Auto-playing animation after cache swap:', sel.value);
                                             } catch (e) {
                                                 console.warn('[Viewer] Auto-play after cache swap failed:', e);
@@ -13236,8 +13258,14 @@
             // Large prepared.glb + slow server TTFB may yield no XHR "progress" for a long time; 30s was too aggressive.
             const LOAD_MODEL_DEFAULT_TIMEOUT_MS = 120000;
 
+            function isAnimationModelSource(label = '', url = '') {
+                const value = `${label || ''} ${url || ''}`.toLowerCase();
+                return value.includes('animation') || value.includes('animations.glb') || value.includes('animations.fbx');
+            }
+
             async function loadModel(glbUrl, label = 'GLB', retryCount = 0, timeoutMs = LOAD_MODEL_DEFAULT_TIMEOUT_MS) {
                 if (!sceneInited) await initScene();
+                const isAnimationPreview = isAnimationModelSource(label, glbUrl);
 
                 setStatus(`Loading ${label}...`);
                 perfLogger?.measureStart('mainViewerLoadModel');
@@ -13320,6 +13348,9 @@
                 const model = gltf.scene;
                 scene.add(model);
                 currentModel = model;
+                if (isAnimationPreview) {
+                    currentModelType = 'animations';
+                }
                 syncMainViewerShadowQuality();
                     let vertexCount = 0;
                     currentModel.traverse((node) => {
@@ -13470,7 +13501,10 @@
                     
                     try {
                         window.taskDbg('[Viewer] Auto-playing first animation:', sel.value);
-                        play(sel.value);
+                        play(sel.value, isAnimationPreview ? { fade: 0 } : {});
+                        if (isAnimationPreview) {
+                            stabilizeAnimationPreviewPose(`initial ${label}`);
+                        }
                     } catch (e) {
                         console.warn('[Viewer] Auto-play failed:', e);
                     }
@@ -13492,6 +13526,7 @@
             // Load FBX model with animations
             async function loadFBX(fbxUrl, label = 'FBX', retryCount = 0) {
                 if (!sceneInited) await initScene();
+                const isAnimationPreview = isAnimationModelSource(label, fbxUrl);
 
                 setStatus(`Loading ${label}...`);
                 
@@ -13549,6 +13584,9 @@
 
                 scene.add(model);
                 currentModel = model;
+                if (isAnimationPreview) {
+                    currentModelType = 'animations';
+                }
                 syncMainViewerShadowQuality();
                 
                 // Set root model for transforms
@@ -13607,6 +13645,7 @@
                     viewerControls.setAOSettings(viewerState.aoSettings);
                     viewerControls.setModel(model);
                 }
+                snapCurrentModelToGround({ centerXZ: true, force: true });
                 
                 // Apply improved materials for models without textures (darker, reflective)
                 applyImprovedMaterials(model);
@@ -13688,7 +13727,10 @@
                     
                     try {
                         window.taskDbg('[Viewer] Auto-playing first animation:', sel.value);
-                        play(sel.value);
+                        play(sel.value, isAnimationPreview ? { fade: 0 } : {});
+                        if (isAnimationPreview) {
+                            stabilizeAnimationPreviewPose(`initial ${label}`);
+                        }
                     } catch (e) {
                         console.warn('[Viewer] Auto-play failed:', e);
                     }
@@ -13736,6 +13778,7 @@
             let animationsLoadingInBackground = false;
             /** True after loadAnimationsInBackground finished (success or failure), so viewer poll can stop. */
             let animationsBackgroundFinished = false;
+            let finalAnimationsLoadingInProgress = false;
 
             function markViewerUnavailableIfNoModel(reason = 'preview-unavailable') {
                 const modelCache = getSharedModelCache();
@@ -13843,11 +13886,12 @@
                 }
             }
 
-            async function getLatestTaskState() {
+            async function getLatestTaskState(options = {}) {
+                const force = options === true || !!options?.force;
                 const cachedTask = window.TaskUI?.task;
                 const cachedAt = Number(window.TaskUI?.taskFetchedAt || 0);
                 const taskAgeMs = Date.now() - cachedAt;
-                if (cachedTask && taskAgeMs >= 0 && taskAgeMs < 4500) {
+                if (!force && cachedTask && taskAgeMs >= 0 && taskAgeMs < 4500) {
                     return cachedTask;
                 }
 
@@ -13858,6 +13902,104 @@
                     window.TaskUI.taskFetchedAt = Date.now();
                 }
                 return t;
+            }
+
+            function taskHasReadyAnimations(taskState) {
+                return !!(taskState && Array.isArray(taskState.ready_urls) && taskState.ready_urls.some(url => {
+                    const value = String(url || '').toLowerCase();
+                    return value.includes('_all_animations') && (value.endsWith('.glb') || value.endsWith('.fbx'));
+                }));
+            }
+
+            function taskReadyAnimationFormats(taskState) {
+                const formats = { glb: false, fbx: false };
+                if (!taskState || !Array.isArray(taskState.ready_urls)) return formats;
+                for (const url of taskState.ready_urls) {
+                    const value = String(url || '').toLowerCase();
+                    if (!value.includes('_all_animations')) continue;
+                    if (value.endsWith('.glb')) formats.glb = true;
+                    if (value.endsWith('.fbx')) formats.fbx = true;
+                }
+                return formats;
+            }
+
+            function taskCanUseFinalAnimationPreview(taskState) {
+                return !!taskState && (taskState.status === 'done' || taskHasReadyAnimations(taskState));
+            }
+
+            function pageRenderedTaskDone() {
+                const badge = document.getElementById('status-badge');
+                const text = String(
+                    badge?.textContent ||
+                    document.getElementById('status-text')?.textContent ||
+                    ''
+                ).trim().toLowerCase();
+                return !!(
+                    badge?.classList?.contains('task-status-pill--done') ||
+                    text.includes('done') ||
+                    text.includes('completed') ||
+                    text.includes('заверш')
+                );
+            }
+
+            async function loadFinalAnimationPreviewDirectly(reason = 'task-ready', taskState = null) {
+                const modelCache = getSharedModelCache();
+                if (currentModelType === 'animations' && currentModel) {
+                    finalLoaded = true;
+                    return true;
+                }
+                if (finalAnimationsLoadingInProgress) {
+                    return false;
+                }
+
+                finalAnimationsLoadingInProgress = true;
+                animationsLoadingInBackground = true;
+                try {
+                    console.info('[ViewerBoot] Loading final animation preview directly before reveal', { reason });
+                    window.taskDbg('[Viewer] Loading final animation preview directly before reveal:', reason);
+                    if (typeof setActiveMode !== 'function') {
+                        if (!sceneInited) {
+                            await initScene();
+                        }
+                    }
+                    if (typeof setActiveMode !== 'function') {
+                        console.warn('[ViewerBoot] Final animation preview cannot start before view mode controller is ready', { reason });
+                        return false;
+                    }
+                    const formats = taskReadyAnimationFormats(taskState);
+                    if (formats.fbx && !formats.glb) {
+                        const ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                        if (ok) {
+                            currentModelType = 'animations';
+                            modelCache.animations = currentModel;
+                            modelCache.animationsData = [...animations];
+                        }
+                    } else {
+                        await setActiveMode('animation');
+                    }
+                    const ok = currentModelType === 'animations' && !!currentModel;
+                    if (ok) {
+                        console.info('[ViewerBoot] Final animation preview is active', {
+                            reason,
+                            animations: animations.length
+                        });
+                        finalLoaded = true;
+                        modelCache.animations = currentModel;
+                        modelCache.animationsData = [...animations];
+                        animationsLoaded = !!animations.length;
+                        animationsBackgroundFinished = true;
+                        showAnimationsReadyNotification();
+                        return true;
+                    }
+                    console.warn('[ViewerBoot] Final animation preview direct load did not produce an animation model', { reason });
+                    return false;
+                } catch (error) {
+                    console.warn('[Viewer] Final animation preview direct load failed:', error);
+                    return false;
+                } finally {
+                    finalAnimationsLoadingInProgress = false;
+                    animationsLoadingInBackground = false;
+                }
             }
 
             const FACE_RIG_UI_DISABLED = true;
@@ -15976,13 +16118,12 @@
                         return;
                     }
                     window.taskDbg('[Viewer] Polling task status...');
-                    const t = await getLatestTaskState();
+                    const t = await getLatestTaskState({
+                        force: !currentModel && !preparedLoaded && !free3dModelLoaded
+                    });
                     
                     // Check if animations are ready in ready_urls
-                    const animationsReady = t && t.ready_urls && t.ready_urls.some(url => 
-                        url.toLowerCase().includes('_all_animations') &&
-                        (url.toLowerCase().endsWith('.glb') || url.toLowerCase().endsWith('.fbx'))
-                    );
+                    const animationsReady = taskHasReadyAnimations(t);
                     
                     window.taskDbg('[Viewer] Task status:', t.status, 'prepared_glb_ready:', t.prepared_glb_ready, 'animationsReady:', animationsReady);
 
@@ -15999,6 +16140,14 @@
 
                     const isFree3DTask = t && t.input_url && t.input_url.includes('free3d.online');
                     window.currentTaskIsFree3D = isFree3DTask; // Global flag for loadModel to use
+                    let finalPreviewReady = !isFree3DTask && (taskCanUseFinalAnimationPreview(t) || pageRenderedTaskDone());
+                    if (finalPreviewReady && !currentModel && !preparedLoaded) {
+                        console.info('[ViewerBoot] Final preview path selected', {
+                            status: t?.status,
+                            animationsReady,
+                            pageDone: pageRenderedTaskDone()
+                        });
+                    }
 
                     if (!isFree3DTask && !currentModel && !modelCache.animations && !preparedLoaded && !preparedLoadingInProgress && !free3dModelLoaded) {
                         const taskProgress = Math.max(0, Math.min(100, Number(t?.progress || 0)));
@@ -16041,8 +16190,23 @@
                         }
                     }
 
-                    // 2. Load PREPARED model first for instant preview (non-blocking)
-                    if (!isFree3DTask && t && t.prepared_glb_ready && !preparedLoaded && !preparedLoadingInProgress) {
+                    // 2. If the task is already complete on page open, load the final animated
+                    // model directly and do not show prepared.glb first. This avoids duplicate
+                    // network/model work and prevents a visible T-pose -> animation jump.
+                    if (finalPreviewReady && !currentModel && !preparedLoaded && !preparedLoadingInProgress && !finalAnimationsLoadingInProgress) {
+                        const ok = await loadFinalAnimationPreviewDirectly('initial done task', t);
+                        if (ok) {
+                            if (rigEditor && t) rigEditor.setTaskStatus(t.status);
+                            window.taskDbg('[Viewer] Final animation preview loaded directly; skipping prepared preview.');
+                            return;
+                        }
+                        animationsBackgroundFinished = true;
+                        finalPreviewReady = false;
+                        window.taskDbg('[Viewer] Direct final animation preview failed; falling back to prepared preview if available.');
+                    }
+
+                    // 3. Load PREPARED model first for in-progress tasks only.
+                    if (!isFree3DTask && !finalPreviewReady && t && t.prepared_glb_ready && !preparedLoaded && !preparedLoadingInProgress) {
                         preparedLoadingInProgress = true;
                         window.taskDbg('[Viewer] Loading prepared model for instant preview...');
                         
@@ -16075,15 +16239,15 @@
                         }
                     }
                     
-                    // 3. Background animations: do not wait for prepared preview (prepared may fail while animations.glb is fine)
-                    if (t && (t.status === 'done' || animationsReady) && !modelCache.animations && !animationsLoadingInBackground) {
+                    // 4. Background animations: do not wait for prepared preview (prepared may fail while animations.glb is fine)
+                    if (t && (t.status === 'done' || animationsReady) && !modelCache.animations && !animationsLoadingInBackground && !animationsBackgroundFinished) {
                         window.taskDbg(
                             '[Viewer] Starting background animations.glb load (independent of prepared preview; verify in Network if clips stay empty).'
                         );
                         loadAnimationsInBackground();
                     }
                     
-                    // 4. If task is done or animations ready and animations are cached but not shown, we can auto-switch
+                    // 5. If task is done or animations ready and animations are cached but not shown, we can auto-switch
                     if (t && (t.status === 'done' || animationsReady) && modelCache.animations && !finalLoaded) {
                         finalLoaded = true;
                         window.taskDbg('[Viewer] ✓ Task complete or animations ready, animations ready in cache');
@@ -16139,8 +16303,13 @@
                     window.taskDbg('[Viewer] preparedModelReady event: already loaded/loading, skipping');
                     return;
                 }
+                if (pageRenderedTaskDone()) {
+                    console.info('[ViewerBoot] preparedModelReady ignored prepared preview because page is already done');
+                    await loadFinalAnimationPreviewDirectly('preparedModelReady rendered-done');
+                    return;
+                }
                 try {
-                    const ts = await getLatestTaskState();
+                    const ts = await getLatestTaskState({ force: true });
                     if (ts && ts.status === 'error') {
                         try {
                             if (typeof loadingManager !== 'undefined' && loadingManager && typeof loadingManager.hide === 'function') {
@@ -16148,6 +16317,11 @@
                             }
                         } catch (_) {}
                         window.taskDbg('[Viewer] preparedModelReady: task failed, skip early load');
+                        return;
+                    }
+                    if (taskCanUseFinalAnimationPreview(ts) || pageRenderedTaskDone()) {
+                        window.taskDbg('[Viewer] preparedModelReady: final animations are ready, skip prepared preview');
+                        await loadFinalAnimationPreviewDirectly('preparedModelReady final-ready', ts);
                         return;
                     }
                     if (!ts?.prepared_glb_ready) {
