@@ -7743,6 +7743,55 @@ RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
     },
 }
 
+# Generated rig-type pages are currently indexed in English first. The localized
+# variants stay routable, but are not advertised in sitemap/hreflang until their
+# copy is fully reviewed.
+RIG_ARTICLE_INDEXED_LANGS: Tuple[str, ...] = ("en",)
+
+RIG_ARTICLE_EXAMPLE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "dog": ("dog", "dogs", "wolf", "wolves", "canine", "puppy", "fox"),
+    "bear": ("bear", "bears", "cub", "grizzly", "panda"),
+    "cat": ("cat", "cats", "kitten", "feline", "panther", "tiger", "lion"),
+    "cow": ("cow", "cows", "bull", "cattle", "calf", "ox"),
+    "deer": ("deer", "stag", "elk", "antler", "antlers", "doe"),
+    "elephant": ("elephant", "elephants", "mammoth", "trunk"),
+    "giraffe": ("giraffe", "giraffes", "long neck", "long-necked"),
+    "horse": ("horse", "horses", "pony", "ponies", "equine", "unicorn", "mount"),
+    "mouse": ("mouse", "mice", "rat", "rats", "rodent", "hamster"),
+    "pig": ("pig", "pigs", "piglet", "boar", "hog", "swine"),
+    "rabbit": ("rabbit", "rabbits", "bunny", "bunnies", "hare"),
+    "turtle": ("turtle", "turtles", "tortoise", "tortoises", "shell", "reptile"),
+}
+
+RIG_ARTICLE_STATIC_EXAMPLES: Dict[str, Dict[str, str]] = {
+    "cat": {
+        "title": "Cat V2 animal rig animation example",
+        "image": "/static/videos/animal-rig/cat-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+    "horse": {
+        "title": "Quadruped animal rig animation example",
+        "image": "/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+    "rabbit": {
+        "title": "Rabbit V2 animal rig animation example",
+        "image": "/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+    "turtle": {
+        "title": "Turtle V2 low-body rig animation example",
+        "image": "/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+}
+
+DEFAULT_RIG_ARTICLE_STATIC_EXAMPLE: Dict[str, str] = {
+    "title": "AutoRig V2 animal rig presentation",
+    "image": "/static/videos/animal-rig/after-poster-20260516.png",
+    "url": "/animal-rig#presentation",
+}
+
 
 RIG_ARTICLE_TYPES: Dict[str, Dict[str, Any]] = {
     "humanoid": {
@@ -7933,11 +7982,50 @@ async def _rig_article_examples(db: AsyncSession, rig_key: str, limit: int = 6) 
     )
     out: List[Task] = []
     for task in result.scalars().all():
-        if _gallery_rig_icon_key(task) == rig_key:
+        if _gallery_rig_icon_key(task) == rig_key and _rig_article_example_matches(task, rig_key):
             out.append(task)
             if len(out) >= limit:
                 break
     return out
+
+
+def _rig_article_example_matches(task: Task, rig_key: str) -> bool:
+    if rig_key == "humanoid":
+        return True
+    keywords = RIG_ARTICLE_EXAMPLE_KEYWORDS.get(rig_key)
+    if not keywords:
+        return False
+    haystack = _rig_article_example_text(task)
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", haystack)
+        for keyword in keywords
+    )
+
+
+def _rig_article_example_text(task: Task) -> str:
+    parts: List[str] = []
+    for attr in ("poster_llm_title", "poster_llm_description", "input_url"):
+        value = str(getattr(task, attr, "") or "").strip()
+        if value:
+            parts.append(value)
+    raw_keywords = getattr(task, "poster_llm_keywords", None)
+    if raw_keywords:
+        try:
+            parsed = json.loads(raw_keywords)
+            if isinstance(parsed, list):
+                parts.extend(str(item) for item in parsed if item)
+            else:
+                parts.append(str(raw_keywords))
+        except Exception:
+            parts.append(str(raw_keywords))
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+        det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+        if isinstance(det, dict):
+            parts.extend(str(v) for v in det.values() if isinstance(v, str))
+    except Exception:
+        pass
+    return " ".join(parts).lower()
 
 
 def _task_public_title(task: Task, fallback: str) -> str:
@@ -7945,14 +8033,31 @@ def _task_public_title(task: Task, fallback: str) -> str:
     return title[:96] if title else fallback
 
 
+def _rig_article_static_example(rig_key: str) -> Dict[str, str]:
+    item = dict(DEFAULT_RIG_ARTICLE_STATIC_EXAMPLE)
+    item.update(RIG_ARTICLE_STATIC_EXAMPLES.get(rig_key, {}))
+    return item
+
+
 def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> str:
     base = (APP_URL or "https://autorig.online").rstrip("/")
     lang = lang if lang in RIG_ARTICLE_LANGS else "en"
     text = _rig_article_text(rig_key, lang)
     ui = text["ui"]
-    canonical = f"{base}{_rig_article_path(rig_key, lang)}"
+    is_indexed_lang = lang in RIG_ARTICLE_INDEXED_LANGS
+    canonical_lang = lang if is_indexed_lang else RIG_ARTICLE_INDEXED_LANGS[0]
+    canonical = f"{base}{_rig_article_path(rig_key, canonical_lang)}"
     localized_urls = _rig_article_localized_urls(base, rig_key)
-    first_image = f"{base}/thumb/{examples[0].id}" if examples else f"{base}/static/images/og-image.png"
+    advertised_localized_urls = {
+        hreflang: localized_urls[hreflang]
+        for hreflang in RIG_ARTICLE_INDEXED_LANGS
+        if hreflang in localized_urls
+    }
+    static_example = _rig_article_static_example(rig_key)
+    static_example_image = f"{base}{static_example['image']}"
+    static_example_url = f"{base}{static_example['url']}"
+    first_image = f"{base}/thumb/{examples[0].id}" if examples else static_example_image
+    robots_content = "index,follow" if is_indexed_lang else "noindex,follow"
     article_json = {
         "@context": "https://schema.org",
         "@type": "TechArticle",
@@ -8006,11 +8111,19 @@ def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> st
                 "image": f"{base}/thumb/{task.id}",
             }
             for idx, task in enumerate(examples)
+        ] if examples else [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "url": static_example_url,
+                "name": static_example["title"],
+                "image": static_example_image,
+            }
         ],
     }
     alt_links = "\n".join(
         f'    <link rel="alternate" hreflang="{hreflang}" href="{html.escape(url, quote=True)}">'
-        for hreflang, url in localized_urls.items()
+        for hreflang, url in advertised_localized_urls.items()
     )
     alt_links += f'\n    <link rel="alternate" hreflang="x-default" href="{html.escape(localized_urls["en"], quote=True)}">'
     examples_html = ""
@@ -8028,7 +8141,15 @@ def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> st
                     </a>""")
         examples_html = "\n".join(cards)
     else:
-        examples_html = f'<div class="rig-article-empty">{html.escape(ui["empty"])}</div>'
+        static_title = html.escape(static_example["title"], quote=True)
+        examples_html = f"""
+                    <a class="rig-article-example" href="{html.escape(static_example["url"], quote=True)}">
+                        <span class="rig-article-example-media">
+                            <img src="{html.escape(static_example["image"], quote=True)}" alt="{static_title}" loading="lazy" width="640" height="360">
+                        </span>
+                        <span class="rig-article-example-title">{static_title}</span>
+                        <span class="rig-article-example-link">Open V2 animal rig examples</span>
+                    </a>"""
 
     faq_html = "\n".join(
         f"""
@@ -8047,7 +8168,7 @@ def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> st
     <title>{html.escape(text["title"])}</title>
     <meta name="description" content="{html.escape(text["description"], quote=True)}">
     <meta name="keywords" content="{html.escape(", ".join(text["keywords"]), quote=True)}">
-    <meta name="robots" content="index,follow">
+    <meta name="robots" content="{robots_content}">
     <link rel="canonical" href="{html.escape(canonical, quote=True)}">
 {alt_links}
     <meta property="og:type" content="article">
