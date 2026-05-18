@@ -8587,8 +8587,22 @@
                 model.traverse((child) => {
                     if (!child?.isMesh || !child.material) return;
                     const mats = Array.isArray(child.material) ? child.material : [child.material];
-                    mats.forEach((mat) => { if (mat) callback(mat, child); });
+                    mats.forEach((mat, index) => { if (mat) callback(mat, child, index); });
                 });
+            }
+
+            function collectEnvironmentResponsiveMaterials(model = currentModel) {
+                const entries = [];
+                forEachModelMaterial(model, (mat, child, index) => {
+                    entries.push({ mat, child, index });
+                });
+                const originals = viewerControls?.originalMaterials;
+                if (originals && typeof originals.forEach === 'function') {
+                    originals.forEach((mat, key) => {
+                        if (mat) entries.push({ mat, child: null, index: key });
+                    });
+                }
+                return entries;
             }
 
             function getSceneEnvironmentIntensity() {
@@ -8596,15 +8610,29 @@
             }
 
             function applyModelEnvironmentIntensity(model = currentModel) {
-                if (!model) return;
+                if (!model) return 0;
                 const reflect = Math.max(0, _themeNumber(viewerState?.reflectionIntensity, 1.0));
                 const sceneEnv = getSceneEnvironmentIntensity();
                 const materialEnvIntensity = reflect * sceneEnv;
-                forEachModelMaterial(model, (mat) => {
-                    if (mat.envMapIntensity === undefined) return;
+                let changed = 0;
+                collectEnvironmentResponsiveMaterials(model).forEach(({ mat }) => {
+                    if (!mat || mat.envMapIntensity === undefined) return;
                     mat.envMapIntensity = materialEnvIntensity;
                     mat.needsUpdate = true;
+                    changed += 1;
                 });
+                window.__lastMainViewerEnvironmentApply = {
+                    changed,
+                    env: sceneEnv,
+                    reflect,
+                    materialEnvIntensity,
+                    hasEnvironment: !!scene?.environment,
+                    time: Date.now()
+                };
+                if (changed) {
+                    console.info('[ViewerIBL] material environment intensity applied', window.__lastMainViewerEnvironmentApply);
+                }
+                return changed;
             }
 
             function applySceneEnvironmentIntensity() {
@@ -13208,49 +13236,128 @@
              * Apply improved materials for models without textures
              * Makes them darker and more reflective for better visibility
              */
+            function createEnvironmentResponsiveMaterial(sourceMat) {
+                if (!sourceMat || sourceMat.isMeshStandardMaterial || sourceMat.isMeshPhysicalMaterial) {
+                    return sourceMat;
+                }
+                if (!THREE?.MeshStandardMaterial) return sourceMat;
+
+                const params = {
+                    name: sourceMat.name || '',
+                    color: sourceMat.color ? sourceMat.color.clone() : new THREE.Color(0.78, 0.78, 0.78),
+                    map: sourceMat.map || sourceMat.diffuseMap || null,
+                    normalMap: sourceMat.normalMap || null,
+                    aoMap: sourceMat.aoMap || null,
+                    alphaMap: sourceMat.alphaMap || null,
+                    emissiveMap: sourceMat.emissiveMap || null,
+                    emissive: sourceMat.emissive ? sourceMat.emissive.clone() : new THREE.Color(0, 0, 0),
+                    emissiveIntensity: Number.isFinite(sourceMat.emissiveIntensity) ? sourceMat.emissiveIntensity : 1,
+                    transparent: !!sourceMat.transparent || Number(sourceMat.opacity) < 1,
+                    opacity: Number.isFinite(sourceMat.opacity) ? sourceMat.opacity : 1,
+                    side: sourceMat.side,
+                    depthWrite: sourceMat.depthWrite,
+                    depthTest: sourceMat.depthTest,
+                    alphaTest: Number.isFinite(sourceMat.alphaTest) ? sourceMat.alphaTest : 0,
+                    vertexColors: !!sourceMat.vertexColors,
+                    metalness: Number.isFinite(sourceMat.metalness) ? sourceMat.metalness : 0.08,
+                    roughness: Number.isFinite(sourceMat.roughness) ? sourceMat.roughness : 0.62,
+                    envMapIntensity: 1,
+                };
+                if (sourceMat.specular?.isColor) {
+                    const specularStrength = Math.max(sourceMat.specular.r, sourceMat.specular.g, sourceMat.specular.b);
+                    params.metalness = Math.max(params.metalness, Math.min(0.35, specularStrength * 0.28));
+                    params.roughness = Math.min(params.roughness, Math.max(0.28, 1 - specularStrength * 0.55));
+                }
+                if (sourceMat.shininess !== undefined) {
+                    const shininess = Math.max(0, Math.min(100, Number(sourceMat.shininess) || 0));
+                    params.roughness = Math.min(params.roughness, Math.max(0.22, 1 - shininess / 115));
+                }
+
+                const converted = new THREE.MeshStandardMaterial(params);
+                converted.userData = {
+                    ...(sourceMat.userData || {}),
+                    autorigConvertedForEnvironment: true,
+                    autorigSourceMaterialType: sourceMat.type || sourceMat.constructor?.name || 'Material',
+                };
+                return converted;
+            }
+
+            function ensureEnvironmentResponsiveMaterials(model) {
+                if (!model) return 0;
+                let convertedCount = 0;
+                model.traverse((child) => {
+                    if (!child?.isMesh || !child.material) return;
+                    if (Array.isArray(child.material)) {
+                        child.material = child.material.map((mat, index) => {
+                            const converted = createEnvironmentResponsiveMaterial(mat);
+                            if (converted !== mat) convertedCount += 1;
+                            viewerControls?.originalMaterials?.set?.(`${child.uuid}_${index}`, converted);
+                            return converted;
+                        });
+                    } else {
+                        const converted = createEnvironmentResponsiveMaterial(child.material);
+                        if (converted !== child.material) {
+                            child.material = converted;
+                            convertedCount += 1;
+                        }
+                        viewerControls?.originalMaterials?.set?.(`${child.uuid}_0`, converted);
+                    }
+                });
+                if (convertedCount) {
+                    console.info('[ViewerIBL] converted materials for live Env IBL/Reflect controls', { convertedCount });
+                    window.taskDbg('[Materials] Converted non-PBR materials for live Env IBL/Reflect control:', convertedCount);
+                }
+                return convertedCount;
+            }
+
             function applyImprovedMaterials(model) {
                 if (!model) return;
+                ensureEnvironmentResponsiveMaterials(model);
                 
                 model.traverse((child) => {
                     if (child.isMesh && child.material) {
-                        const mat = child.material;
+                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                        materials.forEach((mat) => {
+                            if (!mat) return;
                         
-                        // Check if material has no albedo/diffuse texture
-                        const hasTexture = mat.map || mat.diffuseMap || mat.albedoMap;
-                        
-                        if (!hasTexture) {
-                            // Model without texture - apply improved material
-                            // Color: medium gray (#808080)
-                            // Metalness: ~0.22 (56/255)
-                            // Roughness: 0.88
-                            // Enhanced reflections
+                            // Check if material has no albedo/diffuse texture
+                            const hasTexture = mat.map || mat.diffuseMap || mat.albedoMap;
                             
-                            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-                                // Check if color is default white or unset
-                                const isDefaultColor = !mat.color || 
-                                    (mat.color.r > 0.9 && mat.color.g > 0.9 && mat.color.b > 0.9);
+                            if (!hasTexture) {
+                                // Model without texture - apply improved material
+                                // Color: medium gray (#808080)
+                                // Metalness: ~0.22 (56/255)
+                                // Roughness: 0.88
+                                // Enhanced reflections
                                 
-                                if (isDefaultColor) {
-                                    mat.color.setRGB(128/255, 128/255, 128/255);  // #808080
+                                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                                    // Check if color is default white or unset
+                                    const isDefaultColor = !mat.color ||
+                                        (mat.color.r > 0.9 && mat.color.g > 0.9 && mat.color.b > 0.9);
+
+                                    if (isDefaultColor) {
+                                        mat.color.setRGB(128/255, 128/255, 128/255);  // #808080
+                                    }
+                                    mat.metalness = 0.22;
+                                    mat.roughness = 0.88;
+                                    mat.envMapIntensity = 1.5;  // Enhanced reflections
+                                    mat.needsUpdate = true;
+
+                                    window.taskDbg('[Materials] Applied improved material (no texture):', child.name);
                                 }
-                                mat.metalness = 0.22;
-                                mat.roughness = 0.88;
-                                mat.envMapIntensity = 1.5;  // Enhanced reflections
-                                mat.needsUpdate = true;
-                                
-                                window.taskDbg('[Materials] Applied improved material (no texture):', child.name);
+                            } else {
+                                // Model with texture - make slightly darker and more reflective
+                                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                                    mat.metalness = Math.max(mat.metalness, 0.18);
+                                    mat.roughness = Math.min(mat.roughness, 0.72);
+                                    mat.envMapIntensity = Math.max(mat.envMapIntensity || 1, 1.2);
+                                    mat.needsUpdate = true;
+                                }
                             }
-                        } else {
-                            // Model with texture - make slightly darker and more reflective
-                            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-                                mat.metalness = Math.max(mat.metalness, 0.3);
-                                mat.roughness = Math.min(mat.roughness, 0.7);
-                                mat.envMapIntensity = Math.max(mat.envMapIntensity || 1, 1.2);
-                                mat.needsUpdate = true;
-                            }
-                        }
+                        });
                     }
                 });
+                applySceneEnvironmentIntensity();
                 
                 window.taskDbg('[Materials] Applied improved materials to model');
             }
