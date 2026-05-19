@@ -1195,6 +1195,13 @@
             flex-wrap: wrap;
         }
 
+        .idle-ltx-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
         .idle-ltx-subtitle,
         .idle-ltx-status,
         .idle-ltx-meta,
@@ -4258,7 +4265,10 @@
                         <h3 class="card-title" style="margin:0;" data-i18n="idle_ltx_title">Animation reference generator</h3>
                         <p class="idle-ltx-subtitle" style="margin:0.35rem 0 0;" data-i18n="idle_ltx_subtitle">Generate four motion reference videos for fitting real bone animation to this model.</p>
                     </div>
-                    <button type="button" id="idle-ltx-generate-btn" class="btn btn-primary" data-i18n="idle_ltx_generate_button">Generate video</button>
+                    <div class="idle-ltx-actions">
+                        <button type="button" id="idle-ltx-reset-btn" class="btn btn-secondary hidden" data-i18n="idle_ltx_reset_button">Discard generation</button>
+                        <button type="button" id="idle-ltx-generate-btn" class="btn btn-primary" data-i18n="idle_ltx_generate_button">Generate video</button>
+                    </div>
                 </div>
                 <div id="idle-ltx-video-below-viewer-wrap" class="hidden" aria-hidden="true">
                     <div class="idle-ltx-reference-grid">

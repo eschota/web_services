@@ -201,6 +201,7 @@ export function createIdleLtxGenerator(opts) {
     }
 
     const pageBtn = document.getElementById('idle-ltx-generate-btn');
+    const resetBtn = document.getElementById('idle-ltx-reset-btn');
     const modal = document.getElementById('idle-ltx-modal');
     const modalStart = document.getElementById('idle-ltx-modal-start');
     const modalClose = document.getElementById('idle-ltx-modal-close');
@@ -253,6 +254,12 @@ export function createIdleLtxGenerator(opts) {
     const setButtonsDisabled = (disabled) => {
         if (pageBtn) pageBtn.disabled = Boolean(disabled);
         if (modalStart) modalStart.disabled = Boolean(disabled);
+    };
+
+    const setResetVisible = (visible) => {
+        if (!resetBtn) return;
+        resetBtn.classList.toggle('hidden', !visible);
+        resetBtn.setAttribute('aria-hidden', visible ? 'false' : 'true');
     };
 
     const setStatus = (msg, isErr = false) => {
@@ -374,8 +381,26 @@ export function createIdleLtxGenerator(opts) {
         fittingBusy = false;
         closeFittingMode(true);
         clearLsJob(taskId);
+        setResetVisible(false);
         modal.classList.add('hidden');
         modal.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('idle-ltx-modal-open');
+        setButtonsDisabled(false);
+        setStatus(tt('idle_ltx_generation_dismissed', 'Generation dismissed.'), false);
+    };
+
+    const discardGeneration = () => {
+        stopPoll();
+        busy = false;
+        fittingBusy = false;
+        closeFittingMode(true);
+        clearLsJob(taskId);
+        resetVideos();
+        setResetVisible(false);
+        if (modal) {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+        }
         document.body.classList.remove('idle-ltx-modal-open');
         setButtonsDisabled(false);
         setStatus(tt('idle_ltx_generation_dismissed', 'Generation dismissed.'), false);
@@ -788,6 +813,7 @@ export function createIdleLtxGenerator(opts) {
                     clearLsJob(taskId);
                     busy = false;
                     setButtonsDisabled(false);
+                    setResetVisible(false);
                     const anyFailed = results.some((c) => c.failed);
                     setStatus(anyFailed ? tt('idle_ltx_done_with_errors', 'Some reference videos failed.') : tt('idle_ltx_all_ready', 'All reference videos are ready.'));
                     return;
@@ -799,6 +825,7 @@ export function createIdleLtxGenerator(opts) {
                 clearLsJob(taskId);
                 busy = false;
                 setButtonsDisabled(false);
+                setResetVisible(false);
                 setStatus(String(e.message || e), true);
             }
         };
@@ -811,6 +838,7 @@ export function createIdleLtxGenerator(opts) {
         if (busy) return;
         busy = true;
         setButtonsDisabled(true);
+        setResetVisible(true);
         stopPoll();
         hideVisionFatal();
         resetVideos();
@@ -837,6 +865,7 @@ export function createIdleLtxGenerator(opts) {
             setStatus(tt('idle_ltx_error_no_viewer', 'The 3D preview is not ready yet.'), true);
             busy = false;
             setButtonsDisabled(false);
+            setResetVisible(false);
             return;
         }
         showSnapshot(frame);
@@ -974,6 +1003,7 @@ export function createIdleLtxGenerator(opts) {
             );
             busy = false;
             setButtonsDisabled(false);
+            setResetVisible(false);
             return;
         }
 
@@ -1015,6 +1045,7 @@ export function createIdleLtxGenerator(opts) {
     }
 
     pageBtn?.addEventListener('click', () => openModal());
+    resetBtn?.addEventListener('click', discardGeneration);
     modalStart?.addEventListener('click', () => void runGenerate());
     modalClose?.addEventListener('click', dismissModal);
     modalCancel?.addEventListener('click', dismissModal);
@@ -1087,6 +1118,7 @@ export function createIdleLtxGenerator(opts) {
 
     applyDynamicLabels();
     resetVideos();
+    setResetVisible(false);
     const resume = readLsJob(taskId);
     const resumeClips = Array.isArray(resume?.idleClips) ? resume.idleClips : null;
     const resumeHasIds = Boolean(
@@ -1102,6 +1134,7 @@ export function createIdleLtxGenerator(opts) {
         setStatus(tt('idle_ltx_resume_polling', 'Restoring video generation status...'));
         busy = true;
         setButtonsDisabled(true);
+        setResetVisible(true);
         const clipStates = resumeClips.slice(0, VARIANT_COUNT).map((row, i) => ({
             index: Number(row.index_int ?? i),
             taskId: String(row.renderfin_task_id_string || '').trim(),
