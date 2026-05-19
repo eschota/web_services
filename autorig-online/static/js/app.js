@@ -1375,7 +1375,7 @@ const App = {
                     alert(t('error_login_required'));
                     window.location.href = '/auth/login';
                 } else if (status === 402) {
-                    window.location.href = '/buy';
+                    window.location.href = '/buy-credits';
                 } else {
                     alert(data.detail || t('error_generic'));
                 }
@@ -1955,7 +1955,7 @@ const App = {
                     window.location.href = '/auth/login';
                 } else if (response.status === 402) {
                     navigatingAway = true;
-                    window.location.href = '/buy';
+                    window.location.href = '/buy-credits';
                 } else {
                     alert(data.detail || t('error_generic'));
                 }

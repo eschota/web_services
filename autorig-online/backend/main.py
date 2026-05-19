@@ -1076,6 +1076,64 @@ def _validate_worker_url(url: str) -> str:
 ANIMATION_SINGLE_CREDITS = 1
 ANIMATION_BUNDLE_CREDITS = 10
 DOWNLOAD_ALL_FILES_CREDITS = 10
+ANIMAL_RIG_TASK_CREDITS = 15
+
+
+def _task_create_credit_cost(input_type: str, pipeline: str = "rig") -> int:
+    task_type = normalize_task_type(input_type)
+    task_pipeline = str(pipeline or "rig").strip().lower()
+    if task_pipeline == "rig" and task_type == "animal":
+        return ANIMAL_RIG_TASK_CREDITS
+    return 0
+
+
+def _task_credit_error(cost: int, balance: int = 0) -> Dict[str, Any]:
+    return {
+        "message": f"Animal rigging requires {cost} credits.",
+        "credits_required": cost,
+        "credits_balance": max(0, int(balance or 0)),
+        "purchase_url": "/buy-credits",
+        "task_type": "animal",
+    }
+
+
+async def _charge_user_task_create_credits(db: AsyncSession, user: Optional[User], cost: int) -> None:
+    if cost <= 0:
+        return
+    if not user:
+        raise HTTPException(status_code=402, detail=_task_credit_error(cost, 0))
+
+    result = await db.execute(
+        update(User)
+        .where(User.id == user.id, User.balance_credits >= cost)
+        .values(
+            balance_credits=User.balance_credits - cost,
+            total_tasks=func.coalesce(User.total_tasks, 0) + 1,
+        )
+    )
+    if (result.rowcount or 0) != 1:
+        await db.rollback()
+        await db.refresh(user)
+        raise HTTPException(
+            status_code=402,
+            detail=_task_credit_error(cost, int(user.balance_credits or 0)),
+        )
+    await db.commit()
+    await db.refresh(user)
+
+
+async def _refund_user_task_create_credits(db: AsyncSession, user: Optional[User], cost: int) -> None:
+    if cost <= 0 or not user:
+        return
+    try:
+        await db.refresh(user)
+        user.balance_credits = int(user.balance_credits or 0) + cost
+        user.total_tasks = max(0, int(user.total_tasks or 0) - 1)
+        await db.commit()
+        await db.refresh(user)
+    except Exception as exc:
+        await db.rollback()
+        print(f"[Billing] Failed to refund {cost} credits to {getattr(user, 'email', None)}: {exc}")
 
 ANIMATIONS_DIR = Path(__file__).resolve().parent.parent / "static" / "all_animations"
 ANIMATIONS_MANIFEST_PATH = ANIMATIONS_DIR / "manifest.json"
@@ -3027,6 +3085,19 @@ async def api_create_task(
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
             file = fu
 
+    if pipeline not in ("rig", "convert"):
+        pipeline = "rig"
+    input_type = normalize_task_type(input_type)
+    task_create_credit_cost = _task_create_credit_cost(input_type, pipeline)
+    if task_create_credit_cost > 0:
+        if not user:
+            raise HTTPException(status_code=402, detail=_task_credit_error(task_create_credit_cost, 0))
+        if int(user.balance_credits or 0) < task_create_credit_cost:
+            raise HTTPException(
+                status_code=402,
+                detail=_task_credit_error(task_create_credit_cost, int(user.balance_credits or 0)),
+            )
+
     # Handle file upload
     final_url = input_url
     if file is not None:
@@ -3075,16 +3146,12 @@ async def api_create_task(
         or _pop_preflight_render_image_from_meta(rig_v2_detection_meta)
     )
 
-    if pipeline not in ("rig", "convert"):
-        pipeline = "rig"
-
     if pipeline == "convert" and not _url_path_endswith_glb(final_url):
         raise HTTPException(
             status_code=400,
             detail="pipeline=convert requires a .glb input URL or .glb upload filename.",
         )
 
-    input_type = normalize_task_type(input_type)
     animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
     if input_type == "animal":
         if animal_type not in animal_allowed and isinstance(rig_v2_detection_meta, dict):
@@ -3124,18 +3191,30 @@ async def api_create_task(
             })
 
     # Create task
-    task, error = await create_conversion_task(
-        db,
-        final_url,
-        input_type,
-        owner_type,
-        owner_id,
-        created_via_api=via_api,
-        pipeline_kind=pipeline,
-        input_bytes=uploaded_bytes,
-    )
+    charged_task_create_credits = False
+    task = None
+    try:
+        await _charge_user_task_create_credits(db, user, task_create_credit_cost)
+        charged_task_create_credits = task_create_credit_cost > 0
+
+        task, error = await create_conversion_task(
+            db,
+            final_url,
+            input_type,
+            owner_type,
+            owner_id,
+            created_via_api=via_api,
+            pipeline_kind=pipeline,
+            input_bytes=uploaded_bytes,
+        )
+    except Exception:
+        if charged_task_create_credits:
+            await _refund_user_task_create_credits(db, user, task_create_credit_cost)
+        raise
     
     if error and not task:
+        if charged_task_create_credits:
+            await _refund_user_task_create_credits(db, user, task_create_credit_cost)
         raise HTTPException(status_code=500, detail=error)
 
     _save_preflight_render_image(task.id, preflight_render_image_data_url)
