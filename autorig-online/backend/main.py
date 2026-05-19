@@ -154,6 +154,7 @@ import re
 import httpx
 
 from namecheap_remote_api import router as namecheap_remote_router
+from idle_ltx_routes import register_idle_ltx_routes
 
 # Throttle poster-classification recovery triggers from GET /api/task (per task_id).
 _poster_recovery_throttle: Dict[str, float] = {}
@@ -966,6 +967,16 @@ async def get_current_user(
     request.state.api_key_anon_id = anon_id
     request.state.auth_via_api_key = bool(user is not None or anon_id is not None)
     return user
+
+
+register_idle_ltx_routes(
+    app,
+    limiter,
+    get_db=get_db,
+    get_current_user=get_current_user,
+    get_task_by_id=get_task_by_id,
+    app_url=APP_URL,
+)
 
 
 async def get_anon_session(
