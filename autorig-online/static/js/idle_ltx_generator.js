@@ -268,6 +268,17 @@ export function createIdleLtxGenerator(opts) {
         fitProgressBar.style.width = `${pct.toFixed(0)}%`;
     };
 
+    const fittingReadableVideoUrl = (videoUrl) => {
+        const url = String(videoUrl || '').trim();
+        if (!url) return '';
+        try {
+            if (new URL(url, window.location.href).origin === window.location.origin) return url;
+        } catch {
+            return url;
+        }
+        return `${apiOrigin}/api/task/${encodeURIComponent(taskId)}/idle-ltx/video-proxy?video_url_string=${encodeURIComponent(url)}`;
+    };
+
     const hideVisionFatal = () => {
         if (!visionFatalAlert) return;
         visionFatalAlert.textContent = '';
@@ -459,7 +470,8 @@ export function createIdleLtxGenerator(opts) {
         modal?.classList.add('is-fitting-mode');
         fitPanel.classList.remove('hidden');
         if (fitSelected) fitSelected.textContent = clip.variantName || `variant ${clip.index + 1}`;
-        fitVideo.src = clip.videoUrl;
+        fitVideo.src = fittingReadableVideoUrl(clip.videoUrl);
+        fitVideo.dataset.sourceVideoUrl = clip.videoUrl;
         fitVideo.muted = true;
         fitVideo.defaultMuted = true;
         fitVideo.loop = true;
@@ -922,7 +934,8 @@ export function createIdleLtxGenerator(opts) {
                 throw new Error(tt('idle_ltx_fit_no_viewer', 'The 3D animation fitter is not ready yet.'));
             }
             const result = await window.startAnimalAnimationFittingFromVideo({
-                videoUrl: selectedFitClip.videoUrl,
+                videoUrl: fittingReadableVideoUrl(selectedFitClip.videoUrl),
+                sourceVideoUrl: selectedFitClip.videoUrl,
                 variantName: selectedFitClip.variantName,
                 index: selectedFitClip.index,
                 onProgress: (pct, message) => {

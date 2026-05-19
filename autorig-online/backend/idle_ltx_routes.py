@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import httpx
-from fastapi import Depends, HTTPException, Query, Request
+from fastapi import Depends, HTTPException, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from idle_ltx_vision import (
@@ -295,6 +295,18 @@ def _idle_ltx_theme_context_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(tags, list):
         out["semantic_tags"] = [str(x).strip()[:60] for x in tags if str(x).strip()][:12]
     return out
+
+
+def _idle_ltx_validate_task_video_url(task_id: str, video_url: str) -> str:
+    url = str(video_url or "").strip()
+    if not url.startswith("https://free3d.online/render/"):
+        raise HTTPException(status_code=400, detail="Only AutoRig Renderfin MP4 URLs are supported")
+    expected_prefix = f"https://free3d.online/render/autorig_{task_id}/"
+    if not url.startswith(expected_prefix):
+        raise HTTPException(status_code=400, detail="Video URL does not belong to this task")
+    if not re.search(r"/[0-9a-fA-F-]{32,36}\.mp4(?:\?.*)?$", url):
+        raise HTTPException(status_code=400, detail="Expected Renderfin MP4 URL")
+    return url
 
 
 def _idle_ltx_clean_variant_prompt(value: Any) -> str:
@@ -647,6 +659,43 @@ def register_idle_ltx_routes(
                 "content_type_string": "",
                 "error_string": str(e)[:500],
             }
+
+    @app.get("/api/task/{task_id}/idle-ltx/video-proxy")
+    @limiter.limit("120/minute")
+    async def api_task_idle_ltx_video_proxy(
+        request: Request,
+        task_id: str,
+        video_url_string: str = Query(..., description="Renderfin MP4 URL"),
+        db: AsyncSession = Depends(get_db),
+    ):
+        await _ensure_animal_task(db, task_id, get_task_by_id)
+        url = _idle_ltx_validate_task_video_url(task_id, video_url_string)
+        headers: Dict[str, str] = {}
+        range_header = request.headers.get("range")
+        if range_header:
+            headers["Range"] = range_header
+        try:
+            async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
+                resp = await client.get(url, headers=headers)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Video proxy fetch failed: {e}") from e
+        if resp.status_code not in (200, 206):
+            raise HTTPException(status_code=resp.status_code, detail="Video file is not ready")
+        content_type = resp.headers.get("content-type") or "video/mp4"
+        out_headers = {
+            "Accept-Ranges": resp.headers.get("accept-ranges", "bytes"),
+            "Cache-Control": "no-store",
+        }
+        for key in ("content-length", "content-range"):
+            value = resp.headers.get(key)
+            if value:
+                out_headers[key.title()] = value
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=content_type,
+            headers=out_headers,
+        )
 
     @app.post("/api/task/{task_id}/idle-ltx/fitting-started")
     @limiter.limit("60/minute")
