@@ -6438,6 +6438,7 @@
                 is_owner: false,
                 login_required: false,
                 user_credits: 0,
+                all_files_credits: 10,
                 loaded: false
             },
 
@@ -6454,6 +6455,11 @@
                     return `📦 ${this.tSafe('btn_download_all', 'Download All')} ${fileCount} ${word}`;
                 }
                 return this.tSafe('preparing_downloads', 'Preparing downloads…');
+            },
+
+            getDownloadAllCredits() {
+                const value = Number(this.purchaseState?.all_files_credits || 10);
+                return Number.isFinite(value) && value > 0 ? value : 10;
             },
 
             async checkCachedFiles() {
@@ -6559,7 +6565,8 @@
                         window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
                         return;
                     }
-                    if (this.purchaseState.user_credits < 10) {
+                    const downloadAllCost = this.getDownloadAllCredits();
+                    if (this.purchaseState.user_credits < downloadAllCost) {
                         try {
                             await fetch(`/api/task/${this.taskId}/purchase-intent`, {
                                 method: 'POST',
@@ -6572,7 +6579,7 @@
                         window.location.href = '/buy-credits';
                         return;
                     }
-                    if (!confirm(`${t('purchase_confirm_all')} 10 credits?`)) return;
+                    if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) return;
 
                     try {
                         const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
@@ -6623,11 +6630,13 @@
                     window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
                     return;
                 }
-                if (this.purchaseState.user_credits < 1) {
+                const isAnimalTask = String(this.task?.input_type || '').toLowerCase() === 'animal';
+                const fileCost = isAnimalTask ? this.getDownloadAllCredits() : 1;
+                if (this.purchaseState.user_credits < fileCost) {
                     window.location.href = '/buy-credits';
                     return;
                 }
-                if (!confirm(`${t('purchase_confirm_file')} "${displayName}" for 1 credit?`)) return;
+                if (!confirm(`${t('purchase_confirm_file')} "${displayName}" for ${fileCost} credit${fileCost === 1 ? '' : 's'}?`)) return;
                 
                 try {
                     const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
@@ -6637,6 +6646,7 @@
                     });
                     const data = await resp.json();
                     if (resp.ok) {
+                        this.purchaseState.purchased_all = Boolean(data.purchased_all);
                         this.purchaseState.purchased_files = data.purchased_files;
                         this.purchaseState.user_credits = data.credits_remaining;
                         this.lastFileListHash = ''; // Force re-render
@@ -6656,11 +6666,12 @@
                     window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
                     return;
                 }
-                if (this.purchaseState.user_credits < 10) {
+                const downloadAllCost = this.getDownloadAllCredits();
+                if (this.purchaseState.user_credits < downloadAllCost) {
                     window.location.href = '/buy-credits';
                     return;
                 }
-                if (!confirm(`${t('purchase_confirm_all')} 10 credits?`)) return;
+                if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) return;
                 
                 try {
                     const resp = await fetch(`/api/task/${this.taskId}/purchases`, {

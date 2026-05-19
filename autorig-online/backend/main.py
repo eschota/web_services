@@ -1076,64 +1076,15 @@ def _validate_worker_url(url: str) -> str:
 ANIMATION_SINGLE_CREDITS = 1
 ANIMATION_BUNDLE_CREDITS = 10
 DOWNLOAD_ALL_FILES_CREDITS = 10
-ANIMAL_RIG_TASK_CREDITS = 15
+ANIMAL_RIG_DOWNLOAD_CREDITS = 15
 
 
-def _task_create_credit_cost(input_type: str, pipeline: str = "rig") -> int:
-    task_type = normalize_task_type(input_type)
-    task_pipeline = str(pipeline or "rig").strip().lower()
-    if task_pipeline == "rig" and task_type == "animal":
-        return ANIMAL_RIG_TASK_CREDITS
-    return 0
+def _is_animal_download_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
 
 
-def _task_credit_error(cost: int, balance: int = 0) -> Dict[str, Any]:
-    return {
-        "message": f"Animal rigging requires {cost} credits.",
-        "credits_required": cost,
-        "credits_balance": max(0, int(balance or 0)),
-        "purchase_url": "/buy-credits",
-        "task_type": "animal",
-    }
-
-
-async def _charge_user_task_create_credits(db: AsyncSession, user: Optional[User], cost: int) -> None:
-    if cost <= 0:
-        return
-    if not user:
-        raise HTTPException(status_code=402, detail=_task_credit_error(cost, 0))
-
-    result = await db.execute(
-        update(User)
-        .where(User.id == user.id, User.balance_credits >= cost)
-        .values(
-            balance_credits=User.balance_credits - cost,
-            total_tasks=func.coalesce(User.total_tasks, 0) + 1,
-        )
-    )
-    if (result.rowcount or 0) != 1:
-        await db.rollback()
-        await db.refresh(user)
-        raise HTTPException(
-            status_code=402,
-            detail=_task_credit_error(cost, int(user.balance_credits or 0)),
-        )
-    await db.commit()
-    await db.refresh(user)
-
-
-async def _refund_user_task_create_credits(db: AsyncSession, user: Optional[User], cost: int) -> None:
-    if cost <= 0 or not user:
-        return
-    try:
-        await db.refresh(user)
-        user.balance_credits = int(user.balance_credits or 0) + cost
-        user.total_tasks = max(0, int(user.total_tasks or 0) - 1)
-        await db.commit()
-        await db.refresh(user)
-    except Exception as exc:
-        await db.rollback()
-        print(f"[Billing] Failed to refund {cost} credits to {getattr(user, 'email', None)}: {exc}")
+def _download_all_files_cost(task: Task) -> int:
+    return ANIMAL_RIG_DOWNLOAD_CREDITS if _is_animal_download_task(task) else DOWNLOAD_ALL_FILES_CREDITS
 
 ANIMATIONS_DIR = Path(__file__).resolve().parent.parent / "static" / "all_animations"
 ANIMATIONS_MANIFEST_PATH = ANIMATIONS_DIR / "manifest.json"
@@ -3088,15 +3039,6 @@ async def api_create_task(
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
-    task_create_credit_cost = _task_create_credit_cost(input_type, pipeline)
-    if task_create_credit_cost > 0:
-        if not user:
-            raise HTTPException(status_code=402, detail=_task_credit_error(task_create_credit_cost, 0))
-        if int(user.balance_credits or 0) < task_create_credit_cost:
-            raise HTTPException(
-                status_code=402,
-                detail=_task_credit_error(task_create_credit_cost, int(user.balance_credits or 0)),
-            )
 
     # Handle file upload
     final_url = input_url
@@ -3191,30 +3133,18 @@ async def api_create_task(
             })
 
     # Create task
-    charged_task_create_credits = False
-    task = None
-    try:
-        await _charge_user_task_create_credits(db, user, task_create_credit_cost)
-        charged_task_create_credits = task_create_credit_cost > 0
-
-        task, error = await create_conversion_task(
-            db,
-            final_url,
-            input_type,
-            owner_type,
-            owner_id,
-            created_via_api=via_api,
-            pipeline_kind=pipeline,
-            input_bytes=uploaded_bytes,
-        )
-    except Exception:
-        if charged_task_create_credits:
-            await _refund_user_task_create_credits(db, user, task_create_credit_cost)
-        raise
+    task, error = await create_conversion_task(
+        db,
+        final_url,
+        input_type,
+        owner_type,
+        owner_id,
+        created_via_api=via_api,
+        pipeline_kind=pipeline,
+        input_bytes=uploaded_bytes,
+    )
     
     if error and not task:
-        if charged_task_create_credits:
-            await _refund_user_task_create_credits(db, user, task_create_credit_cost)
         raise HTTPException(status_code=500, detail=error)
 
     _save_preflight_render_image(task.id, preflight_render_image_data_url)
@@ -4784,7 +4714,8 @@ async def api_get_purchase_state(
             purchased_files=[],
             is_owner=False,
             login_required=True,
-            user_credits=0
+            user_credits=0,
+            all_files_credits=_download_all_files_cost(task),
         )
     
     # Get user's purchases for this task
@@ -4805,7 +4736,8 @@ async def api_get_purchase_state(
         purchased_files=purchased_indices,
         is_owner=is_owner,
         login_required=False,
-        user_credits=user.balance_credits
+        user_credits=user.balance_credits,
+        all_files_credits=_download_all_files_cost(task),
     )
 
 
@@ -4853,9 +4785,11 @@ async def api_purchase_files(
             credits_remaining=user.balance_credits
         )
     
+    animal_full_access_required = _is_animal_download_task(task)
+
     # Handle "buy all" request (full-task access)
-    if purchase_req.all:
-        cost = DOWNLOAD_ALL_FILES_CREDITS
+    if purchase_req.all or (animal_full_access_required and purchase_req.file_indices):
+        cost = _download_all_files_cost(task)
         if user.balance_credits < cost:
             raise HTTPException(status_code=402, detail="Insufficient credits")
         
@@ -6927,6 +6861,9 @@ async def _has_paid_access(
     purchases = result.scalars().all()
     if any(p.file_index is None for p in purchases):
         return True
+    task = await get_task_by_id(db, task_id)
+    if task and _is_animal_download_task(task):
+        return False
     if file_index is None:
         return False
     purchased_indices = {p.file_index for p in purchases if p.file_index is not None}
