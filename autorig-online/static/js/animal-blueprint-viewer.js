@@ -36,6 +36,21 @@ const VIEW_LABELS = {
     perspective: 'Perspective',
 };
 
+const ANIMAL_RIG_TYPES = new Set([
+    'dog',
+    'bear',
+    'cat',
+    'cow',
+    'deer',
+    'elephant',
+    'giraffe',
+    'horse',
+    'mouse',
+    'pig',
+    'rabbit',
+    'turtle',
+]);
+
 const CLASSIC_CAMERA_UP = new THREE.Vector3(0, 1, 0);
 const LABEL_SCREEN_HEIGHT_PX = 28;
 const LABEL_SELECTED_SCREEN_HEIGHT_PX = 34;
@@ -108,6 +123,31 @@ function bpT(key, fallback) {
     if (!key) return fallback || '';
     const translated = window.t ? window.t(key) : key;
     return translated && translated !== key ? translated : (fallback || key);
+}
+
+function normalizeAnimalRigType(value) {
+    const key = String(value || '').trim().toLowerCase();
+    return ANIMAL_RIG_TYPES.has(key) ? key : '';
+}
+
+function resolveAnimalRigType(task) {
+    const detection = task?.rig_v2_animal_detection || {};
+    return normalizeAnimalRigType(task?.animal_type)
+        || normalizeAnimalRigType(task?.rig_type)
+        || normalizeAnimalRigType(detection.animal_type)
+        || normalizeAnimalRigType(detection.animal_type_string)
+        || normalizeAnimalRigType(detection.selected_type_string)
+        || normalizeAnimalRigType(detection.selected_animal_type)
+        || normalizeAnimalRigType(detection.selected_animal_type_string)
+        || normalizeAnimalRigType(detection.candidate_animal_type_string)
+        || normalizeAnimalRigType(detection.first_result?.animal_type)
+        || normalizeAnimalRigType(detection.first_result?.animal_type_string);
+}
+
+function isAnimalBlueprintTask(task) {
+    const inputType = String(task?.input_type || '').trim().toLowerCase();
+    const taskType = String(task?.type || task?.task_type || '').trim().toLowerCase();
+    return inputType === 'animal' || taskType === 'animal' || Boolean(resolveAnimalRigType(task));
 }
 
 function createRoleTexture(THREERef, role, colorHex, selected = false) {
@@ -214,7 +254,7 @@ class AnimalBlueprintViewerController {
     syncTask(task) {
         if (!this.card || !task) return;
         this.task = task;
-        const isAnimal = String(task.input_type || '').toLowerCase() === 'animal';
+        const isAnimal = isAnimalBlueprintTask(task);
         const hasSkeleton = Boolean(task.blueprint_skeleton_ready && task.blueprint_skeleton_url);
         const showPending = isAnimal && task.status === 'processing';
         if (!isAnimal || (!hasSkeleton && !showPending)) {
@@ -947,7 +987,10 @@ class AnimalBlueprintViewerController {
     }
 
     setRetargetVisible(visible) {
-        this.retargetBtn?.classList.toggle('is-visible', Boolean(visible));
+        if (!this.retargetBtn) return;
+        this.retargetBtn.classList.add('is-visible');
+        this.retargetBtn.disabled = !visible;
+        this.retargetBtn.setAttribute('aria-disabled', visible ? 'false' : 'true');
     }
 
     setAddNodeVisible(visible) {
@@ -1047,12 +1090,7 @@ class AnimalBlueprintViewerController {
     async retarget() {
         if (!this.task || !this.dirty || !this.retargetBtn) return;
         const detection = this.task.rig_v2_animal_detection || {};
-        const animalType = this.task.animal_type
-            || this.task.rig_type
-            || detection.animal_type
-            || detection.animal_type_string
-            || detection.selected_type_string
-            || detection.candidate_animal_type_string;
+        const animalType = resolveAnimalRigType(this.task);
         if (!this.task.input_url || !animalType) {
             this.setStatus('Retarget requires input URL and animal type');
             return;
