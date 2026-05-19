@@ -24,6 +24,7 @@ RENDERFIN_ANIMATION_UPLOAD_URL = "https://free3d.online/renderfin/api/animation/
 RENDERFIN_GENERATE_VIDEO_URL = "https://free3d.online/renderfin/api/generate_video"
 RENDERFIN_ANIMATION_TASK_STATUS_URL = "https://free3d.online/renderfin/api/animation/task_status"
 RENDERFIN_API_RENDER_GET_TASK_BY_URL = "https://free3d.online/api-render-get-task-by-url"
+IDLE_LTX_STATIC_LORA_WORKFLOW = "gen_animation_by_url_ltx_19b_static_lora.json"
 
 IDLE_LTX_VARIANT_KEYS = ("idle", "walk", "run", "die")
 IDLE_LTX_STATIC_CAMERA_SENTENCE = (
@@ -564,6 +565,7 @@ def register_idle_ltx_routes(
             "main_size_height": 448,
             "frame_count": frame_count,
             "user_name": user_slug,
+            "work_flow": IDLE_LTX_STATIC_LORA_WORKFLOW,
             "negative_prompt": neg_base,
         }
         try:

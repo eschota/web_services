@@ -8,6 +8,7 @@ const LS_PREFIX = 'idleLtxGen:';
 const LS_VARIANT_PROMPT_PREFIX = 'idleLtxVariantPrompt:';
 const LS_TTL_MS = 900000;
 const POLL_MS = 5000;
+const STATIC_LORA_FRAME_COUNT = 41;
 const VARIANT_KEYS = ['idle', 'walk', 'run', 'die'];
 const VARIANT_COUNT = VARIANT_KEYS.length;
 
@@ -217,6 +218,7 @@ export function createIdleLtxGenerator(opts) {
     const fitSelected = document.getElementById('idle-ltx-fit-selected');
     const fitStatus = document.getElementById('idle-ltx-fitting-status');
     const fitProgressBar = document.getElementById('idle-ltx-fitting-progress-bar');
+    const fitMetricsCanvas = document.getElementById('idle-ltx-fitting-metrics');
     const promptEls = new Map();
 
     for (const key of VARIANT_KEYS) {
@@ -266,6 +268,51 @@ export function createIdleLtxGenerator(opts) {
         if (!fitProgressBar) return;
         const pct = Math.max(0, Math.min(100, Number(value) || 0));
         fitProgressBar.style.width = `${pct.toFixed(0)}%`;
+    };
+
+    const drawFitMetrics = (metrics = []) => {
+        if (!fitMetricsCanvas) return;
+        const ctx = fitMetricsCanvas.getContext('2d');
+        if (!ctx) return;
+        const width = fitMetricsCanvas.width || 520;
+        const height = fitMetricsCanvas.height || 120;
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#020617';
+        ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 4; i++) {
+            const y = (height * i) / 4;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+            ctx.stroke();
+        }
+        const values = Array.isArray(metrics) ? metrics : [];
+        if (!values.length) {
+            ctx.fillStyle = 'rgba(226, 232, 240, 0.72)';
+            ctx.font = '12px sans-serif';
+            ctx.fillText('Divergence graph will appear after fitting starts', 12, 24);
+            return;
+        }
+        const drawLine = (key, color) => {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            values.forEach((row, i) => {
+                const x = values.length <= 1 ? 0 : (i / (values.length - 1)) * width;
+                const y = height - Math.max(0, Math.min(1, Number(row?.[key]) || 0)) * height;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        };
+        drawLine('target01', '#60a5fa');
+        drawLine('fitted01', '#22c55e');
+        drawLine('divergence01', '#f97316');
+        ctx.fillStyle = 'rgba(226, 232, 240, 0.82)';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('blue: reference motion   green: fitted skeleton   orange: divergence', 10, height - 8);
     };
 
     const fittingReadableVideoUrl = (videoUrl) => {
@@ -479,6 +526,7 @@ export function createIdleLtxGenerator(opts) {
         void fitVideo.play().catch(() => {});
         setFitStatus(tt('idle_ltx_fit_ready', 'Ready to fit a bone animation from this reference.'));
         setFitProgress(0);
+        drawFitMetrics([]);
         if (modalDialog) {
             const top = Math.max(0, fitPanel.offsetTop - 12);
             modalDialog.scrollTo({ top, behavior: 'smooth' });
@@ -764,7 +812,7 @@ export function createIdleLtxGenerator(opts) {
                     user_prompt_string: variantPrompts[key],
                 })),
                 theme_context_object: themeContext,
-                frame_count_int: 129,
+                frame_count_int: STATIC_LORA_FRAME_COUNT,
             };
             const vResp = await fetch(`${apiOrigin}/api/task/${encodeURIComponent(taskId)}/idle-ltx/vision-start`, {
                 method: 'POST',
@@ -807,7 +855,7 @@ export function createIdleLtxGenerator(opts) {
                             index_int: i,
                             image_url_string: phase.image_url_string,
                             user_name_string: phase.user_name_string,
-                            frame_count_int: phase.frame_count_int || 129,
+                            frame_count_int: phase.frame_count_int || STATIC_LORA_FRAME_COUNT,
                             prompt_string: promptClip,
                             user_variant_prompt_string: variantPrompts[key],
                             negative_prompt_string: phase.negative_prompt_string,
@@ -942,6 +990,7 @@ export function createIdleLtxGenerator(opts) {
                     setFitProgress(pct);
                     if (message) setFitStatus(message);
                 },
+                onMetrics: drawFitMetrics,
             });
             setFitProgress(100);
             const clipName = result?.clip_name_string || selectedFitClip.variantName || 'fitted animation';

@@ -12,7 +12,7 @@ import httpx
 
 IDLE_LTX_VISION_PROMPT_JSON = Path(__file__).resolve().parent / "idle_ltx_vision_prompt.json"
 
-IDLE_LTX_FRAME_COUNT_DEFAULT = 129
+IDLE_LTX_FRAME_COUNT_DEFAULT = 41
 IDLE_LTX_VARIANT_COUNT = 4
 
 IDLE_LTX_DEFAULT_NEGATIVE_PROMPT = (
