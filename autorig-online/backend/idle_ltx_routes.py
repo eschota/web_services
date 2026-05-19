@@ -288,7 +288,7 @@ def _idle_ltx_load_reference_store(task_id: str) -> Dict[str, Any]:
     if not path.is_file():
         return {"task_id_string": task_id, "clips_array": []}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception:
         return {"task_id_string": task_id, "clips_array": []}
     if not isinstance(data, dict):
