@@ -41,19 +41,25 @@ IDLE_LTX_STATIC_CAMERA_SENTENCE = (
 )
 IDLE_LTX_FIRST_FRAME_SENTENCE = (
     "Use the provided first frame as the visual source and preserve its subject, environment, props, lighting, "
-    "materials, framing, and background layout."
+    "materials, body pose, silhouette, framing, and background layout."
+)
+IDLE_LTX_NO_TEXT_SENTENCE = (
+    "Do not add random letters, alphabet walls, unreadable text, fake signage, posters, watermarks, logos, "
+    "or any typography that is not already visible in the provided first frame."
 )
 
 
 def _with_hard_camera_lock(prompt: str) -> str:
     body = _as_str(prompt)
     if not body:
-        return f"{IDLE_LTX_FIRST_FRAME_SENTENCE} {IDLE_LTX_STATIC_CAMERA_SENTENCE}"
+        return f"{IDLE_LTX_FIRST_FRAME_SENTENCE} {IDLE_LTX_NO_TEXT_SENTENCE} {IDLE_LTX_STATIC_CAMERA_SENTENCE}"
     lock = IDLE_LTX_STATIC_CAMERA_SENTENCE
     first = IDLE_LTX_FIRST_FRAME_SENTENCE
     pieces: List[str] = []
     if first.lower() not in body.lower():
         pieces.append(first)
+    if IDLE_LTX_NO_TEXT_SENTENCE.lower() not in body.lower():
+        pieces.append(IDLE_LTX_NO_TEXT_SENTENCE)
     if lock.lower() not in body.lower():
         pieces.append(lock)
     pieces.append(body)
