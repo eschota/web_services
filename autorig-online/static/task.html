@@ -8151,6 +8151,19 @@
                 return guards;
             }
 
+            function restoreAnimationPreviewBindPose(guards) {
+                if (!Array.isArray(guards) || !guards.length) return false;
+                guards.forEach((guard) => {
+                    const object = guard?.object;
+                    if (!object) return;
+                    if (guard.position && object.position?.copy) object.position.copy(guard.position);
+                    if (guard.quaternion && object.quaternion?.copy) object.quaternion.copy(guard.quaternion);
+                    if (guard.scale && object.scale?.copy) object.scale.copy(guard.scale);
+                });
+                currentModel?.updateMatrixWorld?.(true);
+                return true;
+            }
+
             function restoreAnimationPreviewClipsAfterPlay() {
                 if (currentModelType !== 'animations' || !currentModel) return false;
                 const originalClips = currentModel.userData?.autorigPlayModeOriginalClips;
@@ -8726,11 +8739,10 @@
                     } catch (_) {}
                 }
                 currentAction = null;
-                currentModel?.traverse?.((object) => {
-                    if (object?.isSkinnedMesh && object.skeleton && typeof object.skeleton.pose === 'function') {
-                        object.skeleton.pose();
-                    }
-                });
+                const storedBasePose = currentModel?.userData?.autorigLtxBasePose;
+                if (!restoreAnimationPreviewBindPose(storedBasePose)) {
+                    console.warn('[IdleLTX] stored animation base pose is unavailable; using stopped current skeleton state');
+                }
                 currentModel?.updateMatrixWorld?.(true);
                 try {
                     snapCurrentModelToGround({ centerXZ: true, force: true });
@@ -14692,6 +14704,10 @@
                 }
                 
                 mixer = animations.length ? new THREE.AnimationMixer(model) : null;
+                if (isAnimationPreview && currentModel) {
+                    currentModel.userData = currentModel.userData || {};
+                    currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
+                }
 
                 // UI for animations
                 if (sel && playBtn && pauseBtn && animations.length) {
@@ -14918,6 +14934,10 @@
                 }
                 
                 mixer = animations.length ? new THREE.AnimationMixer(model) : null;
+                if (isAnimationPreview && currentModel) {
+                    currentModel.userData = currentModel.userData || {};
+                    currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
+                }
 
                 // UI for animations
                 if (sel && playBtn && pauseBtn && animations.length) {
