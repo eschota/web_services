@@ -4142,11 +4142,11 @@
                     </div>
                 </div>
 
-                <p class="animation-fitting-summary" data-i18n="animation_fitting_summary">Generated video preview is on this page. Blueprint retarget below lets you move semantic points and create a new fitted rig and animation task.</p>
+                <p class="animation-fitting-summary" data-i18n="animation_fitting_summary">Generate motion reference videos, then fit the current animal skeleton frame by frame to create a custom bone animation clip.</p>
 
                 <div class="animation-fitting-links" aria-label="Video and animation fitting links">
-                    <a class="animation-fitting-link" href="#video-container" data-i18n="animation_fitting_video_link">Video preview</a>
-                    <a class="animation-fitting-link" href="#blueprint-viewer-card" data-i18n="animation_fitting_blueprint_link">Blueprint retarget</a>
+                    <a class="animation-fitting-link" href="#idle-ltx-generator-island" data-i18n="animation_fitting_generator_link">Reference video generator</a>
+                    <a class="animation-fitting-link" href="#model-viewer-wrap" data-i18n="animation_fitting_viewer_link">3D bone preview</a>
                 </div>
 
                 <div class="custom-anim-section-label" data-i18n="animation_fitting_downloads_label">Fitted animation downloads</div>
@@ -6746,7 +6746,7 @@
                         window.__taskPageBoot?.revealElement(wrap, 0);
                         const grid = document.getElementById('custom-anim-grid');
                         if (grid) {
-                            grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No fitted custom animation files are ready for this task yet. The generated video preview is available, and Blueprint retarget can create a new fitted task after you edit points.')}</div>`;
+                            grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No fitted custom animation files are ready for this task yet. Generate reference videos below, then fit a ready reference to the current rig.')}</div>`;
                         }
                         this.selectedAnimationId = null;
                         this.updateCustomAnimationActions();
@@ -6801,7 +6801,7 @@
                     typeSelect.innerHTML = '';
                     stats.textContent = '';
                     this.selectedAnimationId = null;
-                    const emptyMsg = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No fitted custom animation files are ready for this task yet. The generated video preview is available, and Blueprint retarget can create a new fitted task after you edit points.')}</div>`;
+                    const emptyMsg = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No fitted custom animation files are ready for this task yet. Generate reference videos below, then fit a ready reference to the current rig.')}</div>`;
                     grid.innerHTML = emptyMsg;
                     this.updateCustomAnimationActions();
                     return;
@@ -7774,7 +7774,7 @@
         }
     </script>
     <script>
-        window.IDLE_LTX_UI_ENABLED = false;
+        window.IDLE_LTX_UI_ENABLED = true;
     </script>
     <script type="module" src="/static/js/animal-blueprint-viewer.js?v=23"></script>
     <script type="module">
@@ -8702,7 +8702,7 @@
                 if (idleLtxInitStarted || !isAnimalTaskForIdleLtx(taskState)) return;
                 idleLtxInitStarted = true;
                 try {
-                    const module = await import('/static/js/idle_ltx_generator.js?v=1');
+                    const module = await import('/static/js/idle_ltx_generator.js?v=2');
                     if (typeof module.createIdleLtxGenerator !== 'function') {
                         throw new Error('idle_ltx_generator export missing');
                     }
