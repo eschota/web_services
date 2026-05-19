@@ -23,7 +23,7 @@ IDLE_LTX_DEFAULT_NEGATIVE_PROMPT = (
     "camera backward movement, changing camera distance, parallax shift, background drift, lens zoom, "
     "rack focus, subject rotation, body turning, scene change, "
     "background movement, morphing, melting, extra legs, extra head, distorted anatomy, broken face, "
-    "text, watermark, logo"
+    "random letters, alphabet wall, unreadable text, fake signage, posters, text, watermark, logo"
 )
 
 IDLE_LTX_USER_PROMPT_DEFAULT = (
@@ -39,16 +39,25 @@ IDLE_LTX_STATIC_CAMERA_SENTENCE = (
     "no handheld shake, no reframing. The distance between camera and subject never changes. "
     "The entire frame, including the selected theme backdrop, stays pixel-locked with zero parallax."
 )
+IDLE_LTX_FIRST_FRAME_SENTENCE = (
+    "Use the provided first frame as the visual source and preserve its subject, environment, props, lighting, "
+    "materials, framing, and background layout."
+)
 
 
 def _with_hard_camera_lock(prompt: str) -> str:
     body = _as_str(prompt)
     if not body:
-        return IDLE_LTX_STATIC_CAMERA_SENTENCE
+        return f"{IDLE_LTX_FIRST_FRAME_SENTENCE} {IDLE_LTX_STATIC_CAMERA_SENTENCE}"
     lock = IDLE_LTX_STATIC_CAMERA_SENTENCE
-    if lock.lower() in body.lower():
-        return body
-    return f"{lock} {body} Final camera rule: {lock}"
+    first = IDLE_LTX_FIRST_FRAME_SENTENCE
+    pieces: List[str] = []
+    if first.lower() not in body.lower():
+        pieces.append(first)
+    if lock.lower() not in body.lower():
+        pieces.append(lock)
+    pieces.append(body)
+    return " ".join(pieces)
 
 
 def load_vision_json_task() -> str:
@@ -204,17 +213,15 @@ def coerce_vision_result(raw: Dict[str, Any]) -> Dict[str, Any]:
     motions_joined = ", ".join(safe[:8])
     if not base:
         base = (
-            f"A full-body {species} 3D character exactly matching the provided reference image: {model_desc}. "
-            f"Locked-off tripod camera. The camera is completely static for the entire video. Fixed viewpoint. "
-            f"Fixed background. No camera movement of any kind. The {species} performs a very subtle idle loop in place: "
-            f"{motions_joined}. The feet, hooves, paws, or body contact points stay planted. "
-            "The body remains centered in the same screen position. "
-            "The silhouette, proportions, colors, materials, and 3D model shape remain consistent with the input image. "
-            "No walking. No stepping. No body turn. No camera orbit. No pan. No tilt. No zoom. No dolly. No tracking shot. "
-            "No viewpoint change. No scene change. No morphing. No extra limbs. No text. No watermark."
+            f"Use the provided first frame as the visual source. A full-body {species} 3D character is visible: {model_desc}. "
+            f"Preserve the same environment, props, lighting, shadows, materials, framing, and background layout from the first frame. "
+            f"Single locked-off tripod shot. Static frame. Fixed viewpoint. The camera is bolted down and never moves. "
+            f"The {species} performs a very subtle idle loop in place: {motions_joined}. "
+            "The feet, hooves, paws, or body contact points stay planted and the root stays anchored. "
+            "No camera movement, no subject travel, no scene change, no invented text, and no new background objects."
         )
     base = _with_hard_camera_lock(base)
-    base = base[:1200]
+    base = base[:2400]
 
     variants_in = raw.get("ltx_variants_array")
     default_names = ["idle", "walk", "run", "die"]
@@ -239,7 +246,7 @@ def coerce_vision_result(raw: Dict[str, Any]) -> Dict[str, Any]:
         if not _as_str(variants[i]["prompt_string"]):
             variants[i]["prompt_string"] = f"{base} {sf}"
         variants[i]["variant_name_string"] = default_names[i]
-        variants[i]["prompt_string"] = _with_hard_camera_lock(variants[i]["prompt_string"])[:1600]
+        variants[i]["prompt_string"] = _with_hard_camera_lock(variants[i]["prompt_string"])[:2400]
 
     return {
         "detected_species_string": species,

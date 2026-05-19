@@ -33,12 +33,16 @@ IDLE_LTX_STATIC_CAMERA_SENTENCE = (
     "no handheld shake, no reframing. The distance between camera and subject never changes. "
     "The entire frame, including the selected theme backdrop, stays pixel-locked with zero parallax."
 )
+IDLE_LTX_FIRST_FRAME_SENTENCE = (
+    "Use the provided first frame as the visual source and preserve its subject, environment, props, lighting, "
+    "materials, framing, and background layout."
+)
 IDLE_LTX_CAMERA_LOCK_NEGATIVE = (
     "camera movement, moving camera, orbit camera, rotating camera, camera pan, camera tilt, camera zoom, "
     "dolly shot, tracking shot, handheld camera, camera shake, viewpoint change, reframing, dynamic camera, "
     "cinematic camera move, push in, pull out, push-in, pull-back, dolly in, dolly out, moving closer, "
     "moving away, camera forward movement, camera backward movement, changing camera distance, parallax shift, "
-    "background drift, lens zoom, rack focus"
+    "background drift, lens zoom, rack focus, random letters, alphabet wall, unreadable text, fake signage, posters"
 )
 
 
@@ -263,10 +267,14 @@ def _idle_ltx_user_slug_for_task(task_id: str) -> str:
 def _idle_ltx_with_hard_camera_lock(prompt: str) -> str:
     body = str(prompt or "").strip()
     if not body:
-        return IDLE_LTX_STATIC_CAMERA_SENTENCE
-    if IDLE_LTX_STATIC_CAMERA_SENTENCE.lower() in body.lower():
-        return body
-    return f"{IDLE_LTX_STATIC_CAMERA_SENTENCE} {body} Final camera rule: {IDLE_LTX_STATIC_CAMERA_SENTENCE}"
+        return f"{IDLE_LTX_FIRST_FRAME_SENTENCE} {IDLE_LTX_STATIC_CAMERA_SENTENCE}"
+    pieces: List[str] = []
+    if IDLE_LTX_FIRST_FRAME_SENTENCE.lower() not in body.lower():
+        pieces.append(IDLE_LTX_FIRST_FRAME_SENTENCE)
+    if IDLE_LTX_STATIC_CAMERA_SENTENCE.lower() not in body.lower():
+        pieces.append(IDLE_LTX_STATIC_CAMERA_SENTENCE)
+    pieces.append(body)
+    return " ".join(pieces)
 
 
 def _idle_ltx_merge_negative_prompt(value: str) -> str:
@@ -351,6 +359,9 @@ def _idle_ltx_build_user_prompt(
     lines = [
         base,
         "",
+        "The uploaded image is the first frame and the visual source for image-to-video. The final LTX prompt must describe that exact first-frame scene, then add only the requested motion.",
+        "Preserve all visible subject identity, environment, props, lighting, shadows, material appearance, framing, and background layout from the first frame.",
+        "",
         "Backdrop/theme context from the current 3D viewer must be preserved as a fixed static plate:",
     ]
     if theme_context.get("theme_name"):
@@ -361,8 +372,9 @@ def _idle_ltx_build_user_prompt(
         lines.append(f"tags: {', '.join(theme_context['semantic_tags'])}")
     lines.extend([
         "The full input frame includes both the model and the selected theme background. Do not crop, push toward, pull away from, or reframe around the model.",
+        "Do not invent new signage, alphabet walls, posters, random letters, logos, or unrelated background objects. If a real prop is visible in the uploaded first frame, describe it normally.",
         "",
-        "User editable variant prompts. These are mandatory motion intents for the four generated videos:",
+        "User editable variant prompts. These are mandatory motion intents only, not full scene prompts:",
     ])
     for key in IDLE_LTX_VARIANT_KEYS:
         if variant_prompts.get(key):
@@ -393,11 +405,11 @@ def _idle_ltx_apply_variant_prompts_to_vision(
         out.append({
             **row,
             "variant_name_string": key,
-            "prompt_string": _idle_ltx_with_hard_camera_lock(prompt)[:1800],
+            "prompt_string": _idle_ltx_with_hard_camera_lock(prompt)[:2400],
             "user_variant_prompt_string": user_part,
         })
     vision_json["ltx_variants_array"] = out
-    vision_json["ltx_base_prompt_string"] = _idle_ltx_with_hard_camera_lock(base)[:1800]
+    vision_json["ltx_base_prompt_string"] = _idle_ltx_with_hard_camera_lock(base)[:2400]
     return vision_json
 
 
@@ -550,7 +562,7 @@ def register_idle_ltx_routes(
         if user_slug != _idle_ltx_user_slug_for_task(task_id):
             raise HTTPException(status_code=400, detail="user_name_string does not match this task")
 
-        prompt_clip = _idle_ltx_with_hard_camera_lock(str(body.get("prompt_string") or "").strip())[:1800]
+        prompt_clip = _idle_ltx_with_hard_camera_lock(str(body.get("prompt_string") or "").strip())[:2400]
         if not prompt_clip:
             raise HTTPException(status_code=400, detail="prompt_string is required")
         neg_base = _idle_ltx_merge_negative_prompt(str(body.get("negative_prompt_string") or "").strip())

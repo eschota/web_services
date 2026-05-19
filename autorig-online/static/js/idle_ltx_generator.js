@@ -152,7 +152,7 @@ function normalizeVariantPrompts(prompts) {
     const out = {};
     for (const key of VARIANT_KEYS) {
         const text = String(prompts?.[key] || VARIANT_DEFAULT_PROMPTS[key] || '').trim();
-        out[key] = `${text} ${STATIC_CAMERA_POSITIVE}`.trim();
+        out[key] = text;
     }
     return out;
 }
@@ -168,10 +168,12 @@ function buildVisionUserPrompt(variantPrompts, themeContext = {}) {
         }
     }
     return [
-        'Create four LTX image-to-video prompts from this reference frame.',
+        'Create four complete LTX image-to-video prompts from this reference frame.',
         'The generated videos are motion references for browser-side inverse animation fitting of this rigged skeletal mesh.',
-        'Use the user variant instructions below as mandatory motion intent.',
+        'Use the user variant instructions below as mandatory motion intent only; they are not complete scene prompts.',
+        'The final LTX prompt must describe the whole first-frame scene: animal identity and appearance, visible environment, backdrop, props, ground surface, lighting, shadows, material look, framing, and then the requested motion.',
         'The reference frame includes the selected 3D viewer theme/background image. Treat the entire frame as a locked static plate, not a camera target around the model.',
+        'Do not invent new signage, alphabet walls, random letters, posters, logos, or unrelated background objects.',
         ...themeLines,
         'Keep motion clean, centered, loop/fitting friendly, and suitable for later bone transform optimization.',
         STATIC_CAMERA_POSITIVE,
@@ -219,6 +221,7 @@ export function createIdleLtxGenerator(opts) {
     const fitStatus = document.getElementById('idle-ltx-fitting-status');
     const fitProgressBar = document.getElementById('idle-ltx-fitting-progress-bar');
     const fitMetricsCanvas = document.getElementById('idle-ltx-fitting-metrics');
+    const fitGallery = document.getElementById('idle-ltx-fitting-gallery');
     const promptEls = new Map();
 
     for (const key of VARIANT_KEYS) {
@@ -383,6 +386,8 @@ export function createIdleLtxGenerator(opts) {
         if (force) fittingBusy = false;
         modal?.classList.remove('is-fitting-mode');
         fitPanel?.classList.add('hidden');
+        document.querySelectorAll('.idle-ltx-reference-card.is-selected, .idle-ltx-fitting-thumb.is-selected')
+            .forEach((el) => el.classList.remove('is-selected'));
         if (fitVideo) {
             fitVideo.pause();
             fitVideo.removeAttribute('src');
@@ -392,6 +397,47 @@ export function createIdleLtxGenerator(opts) {
         setFitStatus('');
         setFitProgress(0);
     }
+
+    const setSelectedReferenceIndex = (index) => {
+        document.querySelectorAll('.idle-ltx-reference-card.is-selected, .idle-ltx-fitting-thumb.is-selected')
+            .forEach((el) => el.classList.remove('is-selected'));
+        const idx = Number(index);
+        const pageBtn = document.getElementById(`idle-ltx-fit-btn-${idx}`);
+        pageBtn?.closest?.('.idle-ltx-reference-card')?.classList.add('is-selected');
+        fitGallery?.querySelector?.(`[data-fit-index="${idx}"]`)?.classList.add('is-selected');
+    };
+
+    const renderFitGallery = () => {
+        if (!fitGallery) return;
+        fitGallery.replaceChildren();
+        for (let i = 0; i < VARIANT_COUNT; i++) {
+            const clip = readyFitClips.get(i);
+            if (!clip?.videoUrl) continue;
+            const thumb = document.createElement('button');
+            thumb.type = 'button';
+            thumb.className = 'idle-ltx-fitting-thumb';
+            thumb.dataset.fitIndex = String(i);
+            thumb.setAttribute('aria-label', `Select ${clip.variantName || VARIANT_KEYS[i]} reference`);
+
+            const title = document.createElement('span');
+            title.className = 'idle-ltx-fitting-thumb-title';
+            title.textContent = clip.variantName || VARIANT_KEYS[i] || `variant ${i + 1}`;
+            thumb.appendChild(title);
+
+            const video = document.createElement('video');
+            video.muted = true;
+            video.defaultMuted = true;
+            video.playsInline = true;
+            video.loop = true;
+            video.preload = 'metadata';
+            video.src = fittingReadableVideoUrl(clip.videoUrl);
+            thumb.appendChild(video);
+            void video.play().catch(() => {});
+
+            thumb.addEventListener('click', () => openFittingMode(clip));
+            fitGallery.appendChild(thumb);
+        }
+    };
 
     const stopPoll = () => {
         if (pollTimer) {
@@ -508,14 +554,20 @@ export function createIdleLtxGenerator(opts) {
             btn.dataset.videoUrl = payload.videoUrl;
             btn.dataset.variantName = payload.variantName;
         }
+        renderFitGallery();
     };
 
     const openFittingMode = (clip) => {
         if (!clip?.videoUrl || !fitPanel || !fitVideo) return;
         selectedFitClip = clip;
-        openModal();
-        modal?.classList.add('is-fitting-mode');
+        if (modal && !modal.classList.contains('hidden')) {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('idle-ltx-modal-open');
+        }
+        renderFitGallery();
         fitPanel.classList.remove('hidden');
+        setSelectedReferenceIndex(clip.index);
         if (fitSelected) fitSelected.textContent = clip.variantName || `variant ${clip.index + 1}`;
         fitVideo.src = fittingReadableVideoUrl(clip.videoUrl);
         fitVideo.dataset.sourceVideoUrl = clip.videoUrl;
@@ -527,12 +579,7 @@ export function createIdleLtxGenerator(opts) {
         setFitStatus(tt('idle_ltx_fit_ready', 'Ready to fit a bone animation from this reference.'));
         setFitProgress(0);
         drawFitMetrics([]);
-        if (modalDialog) {
-            const top = Math.max(0, fitPanel.offsetTop - 12);
-            modalDialog.scrollTo({ top, behavior: 'smooth' });
-        } else {
-            fitPanel.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
+        fitPanel.scrollIntoView({ block: 'center', behavior: 'smooth' });
     };
 
     const updateGeneratePreview = (startJson) => {
@@ -770,9 +817,12 @@ export function createIdleLtxGenerator(opts) {
         openModal();
 
         setStatus(tt('idle_ltx_status_base_pose', 'Preparing base pose...'));
+        let restorePreviewAfterCapture = null;
         try {
             if (typeof prepareBasePose === 'function') {
-                await prepareBasePose();
+                const prepared = await prepareBasePose();
+                if (typeof prepared === 'function') restorePreviewAfterCapture = prepared;
+                else if (prepared && typeof prepared.restore === 'function') restorePreviewAfterCapture = prepared.restore;
             } else if (typeof window.setCurrentModelBasePose === 'function') {
                 window.setCurrentModelBasePose();
             }
@@ -790,6 +840,13 @@ export function createIdleLtxGenerator(opts) {
             return;
         }
         showSnapshot(frame);
+        if (restorePreviewAfterCapture) {
+            try {
+                await restorePreviewAfterCapture();
+            } catch (error) {
+                console.warn('[IdleLTX] preview restore after base-pose capture failed', error);
+            }
+        }
 
         const variantPrompts = readVariantPromptsFromUi();
         const themeContext = (() => {
@@ -961,7 +1018,7 @@ export function createIdleLtxGenerator(opts) {
     modalStart?.addEventListener('click', () => void runGenerate());
     modalClose?.addEventListener('click', dismissModal);
     modalCancel?.addEventListener('click', dismissModal);
-    fitExit?.addEventListener('click', closeFittingMode);
+    fitExit?.addEventListener('click', () => closeFittingMode(false));
     fitStart?.addEventListener('click', async () => {
         if (fittingBusy || !selectedFitClip) return;
         fittingBusy = true;
