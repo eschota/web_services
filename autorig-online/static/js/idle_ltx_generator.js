@@ -455,6 +455,7 @@ export function createIdleLtxGenerator(opts) {
     const openFittingMode = (clip) => {
         if (!clip?.videoUrl || !fitPanel || !fitVideo) return;
         selectedFitClip = clip;
+        openModal();
         modal?.classList.add('is-fitting-mode');
         fitPanel.classList.remove('hidden');
         if (fitSelected) fitSelected.textContent = clip.variantName || `variant ${clip.index + 1}`;
