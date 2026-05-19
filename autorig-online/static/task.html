@@ -8843,7 +8843,7 @@
                 if (idleLtxInitStarted || !isAnimalTaskForIdleLtx(taskState)) return;
                 idleLtxInitStarted = true;
                 try {
-                    const module = await import('/static/js/idle_ltx_generator.js?v=8');
+                    const module = await import('/static/js/idle_ltx_generator.js?v=9');
                     if (typeof module.createIdleLtxGenerator !== 'function') {
                         throw new Error('idle_ltx_generator export missing');
                     }

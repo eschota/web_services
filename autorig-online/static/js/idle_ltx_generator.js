@@ -395,6 +395,7 @@ export function createIdleLtxGenerator(opts) {
         fittingBusy = false;
         closeFittingMode(true);
         clearLsJob(taskId);
+        void deleteSavedReferences();
         resetVideos();
         setResetVisible(false);
         if (modal) {
@@ -405,6 +406,16 @@ export function createIdleLtxGenerator(opts) {
         setButtonsDisabled(false);
         setStatus(tt('idle_ltx_generation_dismissed', 'Generation dismissed.'), false);
     };
+
+    async function deleteSavedReferences() {
+        try {
+            await fetch(`${apiOrigin}/api/task/${encodeURIComponent(taskId)}/idle-ltx/references`, {
+                method: 'DELETE',
+                cache: 'no-store',
+                credentials: 'same-origin',
+            });
+        } catch (_) {}
+    }
 
     function closeFittingMode(force = false) {
         if (fittingBusy && !force) return;
@@ -711,6 +722,92 @@ export function createIdleLtxGenerator(opts) {
         setVariantStatus(idx, tt('idle_ltx_ready', 'Ready.'));
         registerFitClip(idx, u, clipMeta);
         return 'ok';
+    }
+
+    async function restoreSavedReferencesFromServer() {
+        let payload = {};
+        try {
+            const r = await fetch(`${apiOrigin}/api/task/${encodeURIComponent(taskId)}/idle-ltx/references`, {
+                cache: 'no-store',
+                credentials: 'same-origin',
+            });
+            payload = await r.json().catch(() => ({}));
+            if (!r.ok) return false;
+        } catch (_) {
+            return false;
+        }
+        const rows = Array.isArray(payload?.clips_array) ? payload.clips_array : [];
+        if (!rows.length) return false;
+
+        resetVideos();
+        vidWrap?.classList.remove('hidden');
+        vidWrap?.setAttribute('aria-hidden', 'false');
+        setResetVisible(true);
+
+        const clipStates = [];
+        for (const row of rows.slice(0, VARIANT_COUNT)) {
+            const idx = Number(row?.index_int);
+            if (!Number.isInteger(idx) || idx < 0 || idx >= VARIANT_COUNT) continue;
+            const variantName = String(row?.variant_name_string || VARIANT_KEYS[idx] || `clip_${idx}`);
+            const nameEl = document.getElementById(`idle-ltx-v-name-${idx}`);
+            if (nameEl) nameEl.textContent = tt(`idle_ltx_variant_${VARIANT_KEYS[idx]}`, variantName);
+            const metaEl = document.getElementById(`idle-ltx-v-meta-${idx}`);
+            if (metaEl) {
+                const species = String(row?.detected_species_string || 'model');
+                const conf = Number(row?.species_confidence_float);
+                metaEl.textContent = tt('idle_ltx_variant_meta', 'Vision: {species} · confidence {confidence}', {
+                    species,
+                    confidence: Number.isFinite(conf) ? conf.toFixed(2) : '-',
+                });
+            }
+            const videoUrl = idleLtxPickMp4Url(row?.video_url_string, row?.playback_url_string, row?.output_url_string);
+            const state = {
+                index: idx,
+                taskId: String(row?.renderfin_task_id_string || '').trim(),
+                outUrl: String(row?.output_url_string || '').trim(),
+                variantName,
+                finalized: false,
+                videoUrl: '',
+            };
+            const statusInt = Number(row?.status_int);
+            if (statusInt === 4) {
+                state.finalized = true;
+                state.failed = true;
+                setVariantErr(idx, String(row?.error_string || 'Render failed'), true);
+                setVariantLoading(idx, '', true);
+                clipStates.push(state);
+                continue;
+            }
+            if (statusInt === 3 && videoUrl) {
+                const attached = await attachVideoIfReady(idx, videoUrl, state);
+                if (attached === 'ok') {
+                    state.finalized = true;
+                    state.videoUrl = videoUrl;
+                    setVariantLoading(idx, '', true);
+                } else {
+                    setVariantLoading(idx, tt('idle_ltx_restoring', 'Restoring...'), false);
+                }
+            } else {
+                setVariantLoading(idx, tt('idle_ltx_restoring', 'Restoring...'), false);
+                if (row?.phase_string) setVariantStatus(idx, String(row.phase_string));
+            }
+            clipStates.push(state);
+        }
+
+        if (!clipStates.length) return false;
+        const doneN = clipStates.filter((c) => c.finalized).length;
+        const pending = clipStates.some((c) => !c.finalized);
+        if (pending) {
+            busy = true;
+            setButtonsDisabled(true);
+            setStatus(tt('idle_ltx_resume_background', 'Resuming video generation in the background…'), false);
+            startPollingClipStates(clipStates);
+        } else {
+            busy = false;
+            setButtonsDisabled(false);
+            setStatus(tt('idle_ltx_all_ready', 'All reference videos are ready.'));
+        }
+        return doneN > 0 || pending;
     }
 
     function startPollingClipStates(clipStates) {
@@ -1126,6 +1223,7 @@ export function createIdleLtxGenerator(opts) {
     );
     if (resumeClips && resumeClips.length > 0 && !resumeHasIds) {
         clearLsJob(taskId);
+        void restoreSavedReferencesFromServer();
     } else if (resumeClips && resumeClips.length > 0 && resumeHasIds) {
         restoreVisionPreviewFromLs(resume);
         if (resume.visionSnapshot && Array.isArray(resume.clipsMeta)) {
@@ -1152,6 +1250,8 @@ export function createIdleLtxGenerator(opts) {
             if (nameEl && !resume.clipsMeta) nameEl.textContent = tt(`idle_ltx_variant_${VARIANT_KEYS[c.index]}`, c.variantName);
         });
         startPollingClipStates(clipStates);
+    } else {
+        void restoreSavedReferencesFromServer();
     }
 
     console.log('[IdleLTX] production module ready for task', taskId);

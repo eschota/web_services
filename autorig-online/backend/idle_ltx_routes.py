@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import re
+import time
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -25,6 +28,8 @@ RENDERFIN_GENERATE_VIDEO_URL = "https://free3d.online/renderfin/api/generate_vid
 RENDERFIN_ANIMATION_TASK_STATUS_URL = "https://free3d.online/renderfin/api/animation/task_status"
 RENDERFIN_API_RENDER_GET_TASK_BY_URL = "https://free3d.online/api-render-get-task-by-url"
 IDLE_LTX_STATIC_LORA_WORKFLOW = "gen_animation_by_url_ltx_19b_static_lora.json"
+IDLE_LTX_REFERENCE_STORE_ROOT = Path(__file__).resolve().parent.parent / "static" / "tasks"
+IDLE_LTX_REFERENCE_FILE_NAME = "idle_ltx_references.json"
 
 IDLE_LTX_VARIANT_KEYS = ("idle", "walk", "run", "die")
 IDLE_LTX_STATIC_CAMERA_SENTENCE = (
@@ -266,6 +271,104 @@ async def _idle_ltx_post_one_generate_video(
 
 def _idle_ltx_user_slug_for_task(task_id: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_\-]", "_", f"autorig_{task_id}")[:56] or "autorig"
+
+
+def _idle_ltx_reference_file_path(task_id: str) -> Path:
+    if not re.match(r"^[0-9a-fA-F-]{8,80}$", str(task_id or "")):
+        raise HTTPException(status_code=400, detail="Invalid task_id")
+    root = IDLE_LTX_REFERENCE_STORE_ROOT.resolve()
+    path = (root / task_id / IDLE_LTX_REFERENCE_FILE_NAME).resolve()
+    if root not in path.parents:
+        raise HTTPException(status_code=400, detail="Invalid task_id path")
+    return path
+
+
+def _idle_ltx_load_reference_store(task_id: str) -> Dict[str, Any]:
+    path = _idle_ltx_reference_file_path(task_id)
+    if not path.is_file():
+        return {"task_id_string": task_id, "clips_array": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"task_id_string": task_id, "clips_array": []}
+    if not isinstance(data, dict):
+        return {"task_id_string": task_id, "clips_array": []}
+    clips = data.get("clips_array")
+    if not isinstance(clips, list):
+        data["clips_array"] = []
+    data["task_id_string"] = task_id
+    return data
+
+
+def _idle_ltx_save_reference_store(task_id: str, data: Dict[str, Any]) -> None:
+    path = _idle_ltx_reference_file_path(task_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        **(data if isinstance(data, dict) else {}),
+        "task_id_string": task_id,
+        "updated_at_unix_float": time.time(),
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _idle_ltx_delete_reference_store(task_id: str) -> None:
+    path = _idle_ltx_reference_file_path(task_id)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _idle_ltx_reference_sort_key(item: Dict[str, Any]) -> int:
+    try:
+        return int(item.get("index_int", 99))
+    except Exception:
+        return 99
+
+
+def _idle_ltx_upsert_reference_clip(task_id: str, clip: Dict[str, Any]) -> None:
+    if not isinstance(clip, dict):
+        return
+    try:
+        idx = int(clip.get("index_int"))
+    except Exception:
+        return
+    if idx < 0 or idx >= IDLE_LTX_VARIANT_COUNT:
+        return
+    store = _idle_ltx_load_reference_store(task_id)
+    clips: List[Dict[str, Any]] = []
+    for existing in store.get("clips_array", []):
+        if not isinstance(existing, dict):
+            continue
+        try:
+            existing_idx = int(existing.get("index_int", -1))
+        except Exception:
+            continue
+        if existing_idx != idx:
+            clips.append(existing)
+    row = {
+        "index_int": idx,
+        "variant_name_string": str(clip.get("variant_name_string") or IDLE_LTX_VARIANT_KEYS[idx])[:80],
+        "detected_species_string": str(clip.get("detected_species_string") or "")[:120],
+        "species_confidence_float": clip.get("species_confidence_float"),
+        "prompt_string": str(clip.get("prompt_string") or "")[:2400],
+        "negative_prompt_string": str(clip.get("negative_prompt_string") or "")[:2400],
+        "user_variant_prompt_string": str(clip.get("user_variant_prompt_string") or "")[:700],
+        "renderfin_task_id_string": str(clip.get("renderfin_task_id_string") or "").strip(),
+        "output_url_string": str(clip.get("output_url_string") or "").strip() or None,
+        "video_url_string": str(clip.get("video_url_string") or clip.get("output_url_string") or "").strip() or None,
+        "workflow_string": IDLE_LTX_STATIC_LORA_WORKFLOW,
+        "width_int": 768,
+        "height_int": 448,
+        "frame_count_int": IDLE_LTX_FRAME_COUNT_DEFAULT,
+        "saved_at_unix_float": time.time(),
+    }
+    clips.append(row)
+    clips.sort(key=_idle_ltx_reference_sort_key)
+    store["clips_array"] = clips[:IDLE_LTX_VARIANT_COUNT]
+    _idle_ltx_save_reference_store(task_id, store)
 
 
 def _idle_ltx_with_hard_camera_lock(prompt: str) -> str:
@@ -602,24 +705,87 @@ def register_idle_ltx_routes(
         if not renderfin_task_id:
             raise HTTPException(status_code=502, detail="Renderfin did not return task_id")
 
+        clip_object = {
+            "index_int": idx,
+            "variant_name_string": variant_name,
+            "detected_species_string": body.get("detected_species_string"),
+            "species_confidence_float": body.get("species_confidence_float"),
+            "prompt_string": prompt_clip,
+            "negative_prompt_string": neg_base,
+            "user_variant_prompt_string": str(body.get("user_variant_prompt_string") or "").strip()[:700],
+            "renderfin_task_id_string": renderfin_task_id,
+            "output_url_string": output_url or None,
+            "generate_video_request_object": request_body,
+            "generate_video_response_object": gen_obj,
+            "generate_video_http_status_int": gen_http_status,
+        }
+        try:
+            _idle_ltx_upsert_reference_clip(task_id, clip_object)
+        except Exception as e:
+            print(f"[IdleLTX] failed to persist reference clip task={task_id} index={idx}: {e}")
+
         return {
             "success_bool": True,
             "index_int": idx,
-            "clip_object": {
-                "index_int": idx,
-                "variant_name_string": variant_name,
-                "detected_species_string": body.get("detected_species_string"),
-                "species_confidence_float": body.get("species_confidence_float"),
-                "prompt_string": prompt_clip,
-                "negative_prompt_string": neg_base,
-                "user_variant_prompt_string": str(body.get("user_variant_prompt_string") or "").strip()[:700],
-                "renderfin_task_id_string": renderfin_task_id,
-                "output_url_string": output_url or None,
-                "generate_video_request_object": request_body,
-                "generate_video_response_object": gen_obj,
-                "generate_video_http_status_int": gen_http_status,
-            },
+            "clip_object": clip_object,
         }
+
+    @app.get("/api/task/{task_id}/idle-ltx/references")
+    @limiter.limit("80/minute")
+    async def api_task_idle_ltx_references(
+        request: Request,
+        task_id: str,
+        db: AsyncSession = Depends(get_db),
+    ):
+        await _ensure_animal_task(db, task_id, get_task_by_id)
+        store = _idle_ltx_load_reference_store(task_id)
+        clips = [row for row in store.get("clips_array", []) if isinstance(row, dict)]
+        if not clips:
+            return {"success_bool": True, "task_id_string": task_id, "clips_array": []}
+
+        updated: List[Dict[str, Any]] = []
+        try:
+            async with httpx.AsyncClient(timeout=50.0, follow_redirects=True) as client:
+                for row in clips[:IDLE_LTX_VARIANT_COUNT]:
+                    merged = dict(row)
+                    try:
+                        status_obj = await _idle_ltx_clip_status_resolve(
+                            client,
+                            output_url_string=str(row.get("output_url_string") or ""),
+                            renderfin_task_id=str(row.get("renderfin_task_id_string") or ""),
+                        )
+                        merged.update({
+                            "status_int": status_obj.get("status_int"),
+                            "phase_string": status_obj.get("phase_string"),
+                            "output_url_string": status_obj.get("output_url_string") or row.get("output_url_string"),
+                            "playback_url_string": status_obj.get("playback_url_string"),
+                            "video_url_string": status_obj.get("video_url_string") or row.get("video_url_string"),
+                            "error_string": status_obj.get("error_string"),
+                        })
+                    except Exception as e:
+                        merged["error_string"] = str(e)[:500]
+                    updated.append(merged)
+        except Exception:
+            updated = clips[:IDLE_LTX_VARIANT_COUNT]
+
+        updated.sort(key=_idle_ltx_reference_sort_key)
+        store["clips_array"] = updated
+        try:
+            _idle_ltx_save_reference_store(task_id, store)
+        except Exception as e:
+            print(f"[IdleLTX] failed to update reference store task={task_id}: {e}")
+        return {"success_bool": True, "task_id_string": task_id, "clips_array": updated}
+
+    @app.delete("/api/task/{task_id}/idle-ltx/references")
+    @limiter.limit("20/minute")
+    async def api_task_idle_ltx_delete_references(
+        request: Request,
+        task_id: str,
+        db: AsyncSession = Depends(get_db),
+    ):
+        await _ensure_animal_task(db, task_id, get_task_by_id)
+        _idle_ltx_delete_reference_store(task_id)
+        return {"success_bool": True, "task_id_string": task_id}
 
     @app.get("/api/task/{task_id}/idle-ltx/clip-status")
     @limiter.limit("120/minute")
