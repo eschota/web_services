@@ -98,6 +98,7 @@ from models import (
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse, LikeResponse, TaskCardInfo,
     PurchaseStateResponse, PurchaseRequest, PurchaseResponse,
+    AnimalRigVariantsResponse, AnimalRigVariantItem, AnimalVariantFileState,
     AnimationCatalogItem, AnimationCatalogResponse,
     AnimationPurchaseRequest, AnimationPurchaseResponse,
     # Scene models
@@ -1077,6 +1078,21 @@ ANIMATION_SINGLE_CREDITS = 1
 ANIMATION_BUNDLE_CREDITS = 10
 DOWNLOAD_ALL_FILES_CREDITS = 10
 ANIMAL_RIG_DOWNLOAD_CREDITS = 15
+ANIMAL_VARIANT_TYPES = [
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+]
+ANIMAL_VARIANT_ORIENTATIONS = ("front", "back")
 
 
 def _is_animal_download_task(task: Task) -> bool:
@@ -1085,6 +1101,35 @@ def _is_animal_download_task(task: Task) -> bool:
 
 def _download_all_files_cost(task: Task) -> int:
     return ANIMAL_RIG_DOWNLOAD_CREDITS if _is_animal_download_task(task) else DOWNLOAD_ALL_FILES_CREDITS
+
+
+def _task_animal_type_from_settings(task: Task) -> Optional[str]:
+    """Return the selected/detected animal slug stored in viewer_settings."""
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+    except Exception:
+        settings = {}
+    detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+    if not isinstance(detection, dict):
+        return None
+    for key in (
+        "animal_type",
+        "animal_type_string",
+        "selected_type_string",
+        "candidate_animal_type_string",
+        "selected_animal_type",
+        "selected_animal_type_string",
+    ):
+        value = str(detection.get(key) or "").strip().lower()
+        if value in ANIMAL_VARIANT_TYPES:
+            return value
+    first_result = detection.get("first_result")
+    if isinstance(first_result, dict):
+        for key in ("animal_type", "animal_type_string"):
+            value = str(first_result.get(key) or "").strip().lower()
+            if value in ANIMAL_VARIANT_TYPES:
+                return value
+    return None
 
 ANIMATIONS_DIR = Path(__file__).resolve().parent.parent / "static" / "all_animations"
 ANIMATIONS_MANIFEST_PATH = ANIMATIONS_DIR / "manifest.json"
@@ -1552,6 +1597,47 @@ def _resolve_worker_files_api_context(task) -> tuple[Optional[str], Optional[str
         return None, None
     api_base = worker_root.replace("/converter/glb", "")
     return api_base, guid
+
+
+async def _fetch_worker_model_files(task: Task) -> Tuple[bool, List[Dict[str, Any]], Dict[str, Any], Optional[str]]:
+    """Return flattened worker model-files entries for a task."""
+    api_base, guid = _resolve_worker_files_api_context(task)
+    if not api_base or not guid:
+        return False, [], {}, None
+
+    worker_root = f"{api_base}/converter/glb"
+    files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(files_url)
+        if resp.status_code != 200:
+            return False, [], {}, f"HTTP {resp.status_code}"
+        data = resp.json() if resp.content else {}
+    except Exception as e:
+        return False, [], {}, str(e)
+
+    all_files: List[Dict[str, Any]] = []
+    for folder_name, folder_data in (data.get("folders") or {}).items():
+        if not isinstance(folder_data, dict):
+            continue
+        for f in folder_data.get("files") or []:
+            if not isinstance(f, dict):
+                continue
+            rel_path = str(f.get("rel_path") or "")
+            name = str(f.get("name") or "")
+            if not rel_path or not name:
+                continue
+            all_files.append({
+                "name": name,
+                "folder": folder_name,
+                "type": f.get("type"),
+                "size": f.get("size"),
+                "rel_path": rel_path,
+                "url": f"{worker_root}/{guid}/{rel_path}",
+            })
+
+    return True, all_files, data, None
 
 
 async def _get_animation_purchase_state(db: AsyncSession, user: Optional[User], task_id: str) -> tuple[set, bool]:
@@ -4309,46 +4395,329 @@ async def api_task_worker_files(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
-    api_base, guid = _resolve_worker_files_api_context(task)
-    if not api_base or not guid:
-        return {"available": False, "files": []}
 
-    worker_root = f"{api_base}/converter/glb"
-    files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
-    
-    try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(files_url, timeout=5.0)
-            
+    available, all_files, data, error = await _fetch_worker_model_files(task)
+    if not available:
+        return {"available": False, "files": [], "error": error} if error else {"available": False, "files": []}
+
+    return {
+        "available": True,
+        "exists": data.get("exists", False),
+        "files": all_files,
+        "totals": data.get("totals", {}),
+    }
+
+
+def _animal_variant_filename(guid: str, animal_type: str, orientation: str, kind: str, *, is_primary: bool) -> str:
+    if is_primary:
+        if kind == "blend":
+            return f"{guid}_rigged.blend"
+        if kind == "fbx":
+            return f"{guid}_all_animations_unity.fbx"
+        if kind == "skeleton":
+            return f"{guid}_skeleton.json"
+    suffix = f"{animal_type}_{orientation}"
+    if kind == "blend":
+        return f"{guid}_{suffix}_rigged.blend"
+    if kind == "fbx":
+        return f"{guid}_{suffix}_all_animations_unity.fbx"
+    if kind == "skeleton":
+        return f"{guid}_{suffix}_skeleton.json"
+    raise ValueError(f"Unknown animal variant kind: {kind}")
+
+
+def _animal_variant_candidate_filenames(guid: str, animal_type: str, orientation: str, kind: str, *, is_primary: bool) -> List[str]:
+    primary = _animal_variant_filename(guid, animal_type, orientation, kind, is_primary=is_primary)
+    if not is_primary:
+        return [primary]
+    if kind == "blend":
+        return [primary, f"{guid}_model_prepared_rigged.blend"]
+    if kind == "fbx":
+        return [primary, f"{guid}_all_animations.fbx"]
+    return [primary]
+
+
+def _animal_variant_public_url(task_id: str, animal_type: str, orientation: str, kind: str, *, preview: bool = False) -> str:
+    a = quote(animal_type)
+    o = quote(orientation)
+    if preview:
+        return f"/api/task/{task_id}/animal-variants/{a}/{o}/preview.fbx"
+    if kind == "skeleton":
+        return f"/api/task/{task_id}/animal-variants/{a}/{o}/skeleton.json"
+    return f"/api/task/{task_id}/animal-variants/{a}/{o}/download/{quote(kind)}"
+
+
+def _animal_variant_file_state(
+    item: Optional[Dict[str, Any]],
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    kind: str,
+) -> AnimalVariantFileState:
+    if not item:
+        return AnimalVariantFileState(ready=False)
+    return AnimalVariantFileState(
+        ready=True,
+        url=_animal_variant_public_url(task_id, animal_type, orientation, kind),
+        size=item.get("size") if isinstance(item.get("size"), int) else None,
+        filename=str(item.get("name") or "") or None,
+    )
+
+
+async def _fetch_animal_variant_matrix(task: Task, file_map: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    matrix_item = file_map.get("animal_variant_matrix.json")
+    candidate_urls: List[str] = []
+    if matrix_item and matrix_item.get("url"):
+        candidate_urls.append(str(matrix_item["url"]))
+
+    worker_root, guid = _infer_worker_root_and_guid(task)
+    if worker_root and guid:
+        candidate_urls.append(f"{worker_root}/{guid}/logs/animal_variant_matrix.json")
+
+    for url in dict.fromkeys(candidate_urls):
+        try:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+                resp = await client.get(url)
             if resp.status_code != 200:
-                return {"available": False, "files": [], "error": f"HTTP {resp.status_code}"}
-            
-            data = resp.json()
-            
-            # Flatten files from all folders
-            all_files = []
-            for folder_name, folder_data in data.get('folders', {}).items():
-                for f in folder_data.get('files', []):
-                    rel_path = f.get('rel_path', '')
-                    all_files.append({
-                        "name": f.get('name'),
-                        "folder": folder_name,
-                        "type": f.get('type'),
-                        "size": f.get('size'),
-                        "url": f"{worker_root}/{guid}/{rel_path}"
-                    })
-            
-            return {
-                "available": True,
-                "exists": data.get('exists', False),
-                "files": all_files,
-                "totals": data.get('totals', {})
-            }
-    except Exception as e:
-        print(f"[Worker Files] Error fetching files for task {task_id}: {e}")
-        return {"available": False, "files": [], "error": str(e)}
+                continue
+            payload = resp.json() if resp.content else {}
+        except Exception:
+            continue
+
+        rows = payload.get("variants") if isinstance(payload, dict) else None
+        if rows is None and isinstance(payload, list):
+            rows = payload
+        if not isinstance(rows, list):
+            continue
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            animal = str(row.get("animal_slug") or row.get("animal_type") or row.get("animal") or "").strip().lower()
+            orientation = str(row.get("orientation") or row.get("direction") or "").strip().lower()
+            suffix = str(row.get("suffix") or "").strip().lower()
+            if (not animal or not orientation) and suffix:
+                for known in ANIMAL_VARIANT_TYPES:
+                    if suffix.startswith(f"{known}_"):
+                        animal = known
+                        orientation = suffix.rsplit("_", 1)[-1]
+                        break
+            if animal in ANIMAL_VARIANT_TYPES and orientation in ANIMAL_VARIANT_ORIENTATIONS:
+                out[f"{animal}:{orientation}"] = row
+        return out
+    return {}
+
+
+async def _fetch_animal_variant_progress_line(task: Task) -> Optional[str]:
+    if not task.guid or not task.worker_api:
+        return None
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(log_url)
+        if resp.status_code != 200:
+            return None
+        lines = [ln.strip() for ln in resp.text.replace("\r\n", "\n").replace("\r", "\n").split("\n") if ln.strip()]
+    except Exception:
+        return None
+    for line in reversed(lines):
+        if "Animal rigging variants" in line:
+            return line[:500]
+    return None
+
+
+async def _build_animal_variants_response(
+    task: Task,
+    db: AsyncSession,
+    user: Optional[User],
+) -> AnimalRigVariantsResponse:
+    selected_animal = _task_animal_type_from_settings(task)
+    if not _is_animal_task(task) or not task.guid or not selected_animal:
+        return AnimalRigVariantsResponse(
+            available=False,
+            task_id=task.id,
+            current_animal_type=selected_animal,
+            selected_animal_type=selected_animal,
+            login_required=not bool(user),
+            all_files_credits=_download_all_files_cost(task),
+        )
+
+    available, files, _data, _error = await _fetch_worker_model_files(task)
+    file_map: Dict[str, Dict[str, Any]] = {}
+    if available:
+        for item in files:
+            name = str(item.get("name") or "").strip()
+            if name:
+                file_map[name.lower()] = item
+
+    matrix = await _fetch_animal_variant_matrix(task, file_map) if file_map else {}
+    progress_text = await _fetch_animal_variant_progress_line(task)
+    purchased_all = await _has_full_task_download_purchase(db, user, task.id) if user else False
+
+    variants: List[AnimalRigVariantItem] = []
+    for animal_type in ANIMAL_VARIANT_TYPES:
+        for orientation in ANIMAL_VARIANT_ORIENTATIONS:
+            is_primary = animal_type == selected_animal and orientation == "front"
+            blend_item = next((
+                file_map.get(name.lower())
+                for name in _animal_variant_candidate_filenames(task.guid, animal_type, orientation, "blend", is_primary=is_primary)
+                if file_map.get(name.lower())
+            ), None)
+            fbx_item = next((
+                file_map.get(name.lower())
+                for name in _animal_variant_candidate_filenames(task.guid, animal_type, orientation, "fbx", is_primary=is_primary)
+                if file_map.get(name.lower())
+            ), None)
+            skeleton_item = next((
+                file_map.get(name.lower())
+                for name in _animal_variant_candidate_filenames(task.guid, animal_type, orientation, "skeleton", is_primary=is_primary)
+                if file_map.get(name.lower())
+            ), None)
+
+            row = matrix.get(f"{animal_type}:{orientation}") or {}
+            matrix_status = str(row.get("status") or row.get("state") or "").strip().lower()
+            error = str(row.get("error") or row.get("message") or "").strip() or None
+
+            if blend_item and fbx_item:
+                status = "ready"
+            elif matrix_status in ("failed", "error", "skipped"):
+                status = "skipped" if matrix_status == "skipped" else "failed"
+            elif task.status == "done":
+                status = "missing"
+            else:
+                status = "pending"
+
+            variants.append(AnimalRigVariantItem(
+                animal_type=animal_type,
+                orientation=orientation,
+                label=f"{animal_type} {orientation}",
+                is_primary=is_primary,
+                status=status,
+                error=error,
+                preview_url=_animal_variant_public_url(task.id, animal_type, orientation, "fbx", preview=True) if fbx_item else None,
+                blend=_animal_variant_file_state(blend_item, task.id, animal_type, orientation, "blend"),
+                fbx=_animal_variant_file_state(fbx_item, task.id, animal_type, orientation, "fbx"),
+                skeleton=_animal_variant_file_state(skeleton_item, task.id, animal_type, orientation, "skeleton"),
+            ))
+
+    return AnimalRigVariantsResponse(
+        available=True,
+        task_id=task.id,
+        current_animal_type=selected_animal,
+        selected_animal_type=selected_animal,
+        selected_orientation="front",
+        progress_text=progress_text,
+        purchased_all=purchased_all,
+        login_required=not bool(user),
+        all_files_credits=_download_all_files_cost(task),
+        variants=variants,
+    )
+
+
+@app.get("/api/task/{task_id}/animal-variants", response_model=AnimalRigVariantsResponse)
+async def api_task_animal_variants(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return await _build_animal_variants_response(task, db, user)
+
+
+async def _resolve_animal_variant_source(
+    task: Task,
+    animal_type: str,
+    orientation: str,
+    kind: str,
+) -> Tuple[str, str]:
+    animal_type = str(animal_type or "").strip().lower()
+    orientation = str(orientation or "").strip().lower()
+    kind = str(kind or "").strip().lower()
+    if not _is_animal_task(task):
+        raise HTTPException(status_code=404, detail="Animal variants are available for animal rig tasks only")
+    if animal_type not in ANIMAL_VARIANT_TYPES or orientation not in ANIMAL_VARIANT_ORIENTATIONS or kind not in ("blend", "fbx", "skeleton"):
+        raise HTTPException(status_code=400, detail="Invalid animal variant request")
+    if not task.guid:
+        raise HTTPException(status_code=404, detail="Variant files are not available yet")
+
+    selected_animal = _task_animal_type_from_settings(task)
+    is_primary = animal_type == selected_animal and orientation == "front"
+    filenames = _animal_variant_candidate_filenames(task.guid, animal_type, orientation, kind, is_primary=is_primary)
+
+    available, files, _data, _error = await _fetch_worker_model_files(task)
+    if available:
+        for item in files:
+            item_name = str(item.get("name") or "").strip().lower()
+            for filename in filenames:
+                if item_name == filename.lower() and item.get("url"):
+                    return str(item["url"]), filename
+
+    worker_root, guid = _infer_worker_root_and_guid(task)
+    if worker_root and guid:
+        for filename in filenames:
+            url = f"{worker_root}/{guid}/{filename}"
+            if await _remote_file_exists(url):
+                return url, filename
+
+    raise HTTPException(status_code=404, detail="Variant file not available yet")
+
+
+@app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/preview.fbx")
+async def api_animal_variant_preview_fbx(
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "fbx")
+    return await _proxy_model_file(source_url, filename, as_attachment=False)
+
+
+@app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/skeleton.json")
+async def api_animal_variant_skeleton(
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "skeleton")
+    return await _proxy_model_file(source_url, filename, as_attachment=False)
+
+
+@app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/download/{kind}")
+async def api_animal_variant_download(
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    kind: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    kind = str(kind or "").strip().lower()
+    if kind not in ("blend", "fbx"):
+        raise HTTPException(status_code=400, detail="Unsupported variant download kind")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required to download files")
+    if not await _has_full_task_download_purchase(db, user, task_id):
+        raise HTTPException(status_code=402, detail="Full download purchase required")
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, kind)
+    return await _proxy_model_file(source_url, filename, as_attachment=True)
 
 
 @app.post("/api/task/{task_id}/retry", response_model=TaskCreateResponse)
@@ -8331,6 +8700,7 @@ async def _proxy_model_file(
     content_types = {
         "glb": "model/gltf-binary",
         "fbx": "application/octet-stream",
+        "blend": "application/x-blender",
         "json": "application/json",
         "mp4": "video/mp4",
         "zip": "application/zip",

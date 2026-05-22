@@ -554,6 +554,7 @@ def _is_primary_worker_output(name: str) -> bool:
     return (
         n.endswith("_model_prepared.glb")
         or n.endswith("_model_prepared_rigged.blend")
+        or n.endswith("_rigged.blend")
         or n.endswith(".zip")
         or n.endswith("_video.mp4")
         or n.endswith("_video_small.mp4")
@@ -653,6 +654,25 @@ async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
     return None
 
 
+async def _worker_conversion_completed(task: Task) -> bool:
+    """True when worker progress log says final collection/verification finished."""
+    if not task.guid or not task.worker_api:
+        return False
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return False
+    log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(log_url)
+        if resp.status_code != 200:
+            return False
+        text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+    except Exception:
+        return False
+    return "Conversion completed" in text
+
+
 async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> bool:
     failure = await _fetch_worker_failure_message(task)
     if not failure:
@@ -719,7 +739,11 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
-            task.status = "done"
+            if _is_animal_task(task) and not await _worker_conversion_completed(task):
+                task.status = "processing"
+                task.progress = min(int(task.progress or 0), 99)
+            else:
+                task.status = "done"
 
     # Some worker modes (notably animal-only-rig and newer exporters) write the
     # final files into concrete folders such as {guid}_100k or root, while the
@@ -732,7 +756,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             task.ready_urls = concrete_urls
             task.total_count = len(concrete_urls)
             task.ready_count = len(concrete_urls)
-            task.status = "done"
+            conversion_completed = (not _is_animal_task(task)) or await _worker_conversion_completed(task)
+            task.status = "done" if conversion_completed else "processing"
+            if not conversion_completed:
+                task.progress = min(int(task.progress or 0), 99)
             task.last_progress_at = datetime.utcnow()
             preferred_video_url = _preferred_video_url_from_outputs(
                 concrete_urls,

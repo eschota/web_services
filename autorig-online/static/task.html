@@ -3149,6 +3149,131 @@
         #download-all-btn.hidden {
             display: none !important;
         }
+        .animal-variants-panel {
+            display: none;
+            margin: 0 0 1rem;
+            padding: 1rem;
+            border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+            border-radius: 14px;
+            background: color-mix(in srgb, var(--bg-card) 86%, var(--accent) 7%);
+        }
+        .animal-variants-panel.is-visible {
+            display: grid;
+            gap: 0.9rem;
+        }
+        .animal-variants-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+        .animal-variants-title {
+            font-weight: 800;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+        .animal-variants-subtitle {
+            margin-top: 0.25rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            line-height: 1.35;
+        }
+        .animal-variants-status {
+            flex-shrink: 0;
+            padding: 0.35rem 0.55rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            white-space: nowrap;
+        }
+        .animal-variants-controls {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.75rem;
+            align-items: end;
+        }
+        .animal-variant-field {
+            display: grid;
+            gap: 0.35rem;
+            min-width: 0;
+        }
+        .animal-variant-field label {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+        .animal-variant-select {
+            width: 100%;
+            min-width: 0;
+            padding: 0.62rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-input);
+            color: var(--text-primary);
+            font: inherit;
+        }
+        .animal-orientation-toggle {
+            display: inline-grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.25rem;
+            padding: 0.25rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--bg-input);
+        }
+        .animal-orientation-toggle button {
+            border: 0;
+            border-radius: 999px;
+            padding: 0.55rem 0.72rem;
+            background: transparent;
+            color: var(--text-secondary);
+            font: inherit;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .animal-orientation-toggle button.is-active {
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary, var(--accent)));
+            color: #fff;
+        }
+        .animal-variant-card {
+            display: grid;
+            gap: 0.75rem;
+            padding: 0.85rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: color-mix(in srgb, var(--bg-input) 78%, transparent);
+        }
+        .animal-variant-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            line-height: 1.35;
+        }
+        .animal-variant-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .animal-variant-actions .btn {
+            flex: 1 1 150px;
+            min-width: 0;
+            justify-content: center;
+        }
+        @media (max-width: 640px) {
+            .animal-variants-controls,
+            .animal-variants-head {
+                grid-template-columns: 1fr;
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .animal-orientation-toggle {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body data-layout-free3d-ribbon="1" data-layout-free3d-init="task">
@@ -4576,6 +4701,29 @@
                     <a id="video-youtube-link" class="video-youtube-link" href="#" target="_blank" rel="noopener noreferrer" data-i18n="task_youtube_open">Open on YouTube</a>
                 </div>
             </div>
+            <section id="animal-variants-panel" class="animal-variants-panel" aria-live="polite">
+                <div class="animal-variants-head">
+                    <div>
+                        <div class="animal-variants-title" data-i18n="animal_variants_title">Animal rig variants</div>
+                        <div class="animal-variants-subtitle" data-i18n="animal_variants_subtitle">Choose another animal preset or invert orientation, then preview or download the ready files.</div>
+                    </div>
+                    <div id="animal-variants-status" class="animal-variants-status">Checking variants...</div>
+                </div>
+                <div class="animal-variants-controls">
+                    <div class="animal-variant-field">
+                        <label for="animal-variant-type" data-i18n="animal_variants_animal_label">Animal</label>
+                        <select id="animal-variant-type" class="animal-variant-select" aria-label="Animal variant type"></select>
+                    </div>
+                    <div class="animal-variant-field">
+                        <label data-i18n="animal_variants_orientation_label">Orientation</label>
+                        <div class="animal-orientation-toggle" role="group" aria-label="Animal variant orientation">
+                            <button type="button" data-animal-orientation="front" class="is-active" data-i18n="animal_variants_front">Front</button>
+                            <button type="button" data-animal-orientation="back" data-i18n="animal_variants_back">Back 180°</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="animal-variant-card" class="animal-variant-card"></div>
+            </section>
             <ul class="file-list" id="file-list"
                 style="max-height: none; overflow: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem;">
                 <!-- Skeleton loading -->
@@ -5159,6 +5307,7 @@
                     window.addEventListener('languageChanged', () => {
                         this.renderAnimationCatalog();
                         this.updateCustomAnimationActions();
+                        this.renderAnimalVariantsPanel();
                     });
                 }
 
@@ -5970,6 +6119,7 @@
                 // Use output_urls for Downloads (all expected files), fallback to ready_urls
                 const downloadUrls = (task.output_urls && task.output_urls.length > 0) ? task.output_urls : task.ready_urls;
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
+                this.updateAnimalVariantsPanel(task);
                 window.AnimalBlueprintViewer?.syncTask?.(task);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
 
@@ -6445,6 +6595,11 @@
             // Cached files for download (replaces ZIP)
             cachedFilesData: null,
             isDownloadingAll: false,
+            animalVariantsData: null,
+            animalVariantsLoading: false,
+            animalVariantsLastFetchAt: 0,
+            animalVariantSelected: '',
+            animalVariantOrientation: 'front',
             /** Count for "Download All N files" — cached file list, else task.total_count, else manifest items */
             downloadBundleLabelCount: 0,
 
@@ -6622,6 +6777,225 @@
                     }
                 } catch (e) {
                     console.warn('Failed to load purchase state:', e);
+                }
+            },
+
+            isAnimalTask(task = this.task) {
+                return String(task?.input_type || '').toLowerCase() === 'animal';
+            },
+
+            animalVariantTypes() {
+                return (window.RIG_ICON_ANIMAL_KEYS || [
+                    'dog', 'bear', 'cat', 'cow', 'deer', 'elephant',
+                    'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'
+                ]);
+            },
+
+            animalVariantLabel(key) {
+                const slug = String(key || '').toLowerCase();
+                const fallback = slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : '';
+                return this.tSafe(`upload_rig_type_${slug}`, fallback);
+            },
+
+            setupAnimalVariantControls() {
+                const select = document.getElementById('animal-variant-type');
+                if (select && !select.__animalVariantsWired) {
+                    select.__animalVariantsWired = true;
+                    select.addEventListener('change', () => {
+                        this.animalVariantSelected = String(select.value || '').toLowerCase();
+                        this.renderAnimalVariantsPanel();
+                    });
+                }
+                document.querySelectorAll('[data-animal-orientation]').forEach((btn) => {
+                    if (btn.__animalVariantsWired) return;
+                    btn.__animalVariantsWired = true;
+                    btn.addEventListener('click', () => {
+                        this.animalVariantOrientation = String(btn.dataset.animalOrientation || 'front').toLowerCase();
+                        this.renderAnimalVariantsPanel();
+                    });
+                });
+            },
+
+            updateAnimalVariantsPanel(task) {
+                const panel = document.getElementById('animal-variants-panel');
+                if (!panel) return;
+                if (!this.isAnimalTask(task)) {
+                    panel.classList.remove('is-visible');
+                    return;
+                }
+                panel.classList.add('is-visible');
+                this.setupAnimalVariantControls();
+                const defaultAnimal = String(task?.animal_type || task?.rig_type || '').toLowerCase();
+                if (!this.animalVariantSelected && defaultAnimal) this.animalVariantSelected = defaultAnimal;
+                this.renderAnimalVariantsPanel();
+
+                const now = Date.now();
+                const shouldRefresh =
+                    !this.animalVariantsData ||
+                    (task?.status !== 'done' && now - this.animalVariantsLastFetchAt > 5000) ||
+                    (now - this.animalVariantsLastFetchAt > 15000);
+                if (shouldRefresh) {
+                    void this.loadAnimalVariants();
+                }
+            },
+
+            async loadAnimalVariants() {
+                if (this.animalVariantsLoading) return;
+                this.animalVariantsLoading = true;
+                this.animalVariantsLastFetchAt = Date.now();
+                try {
+                    const resp = await fetch(`/api/task/${this.taskId}/animal-variants`, {
+                        credentials: 'same-origin',
+                        headers: { Accept: 'application/json' },
+                    });
+                    if (resp.ok) {
+                        this.animalVariantsData = await resp.json();
+                        if (!this.animalVariantSelected) {
+                            this.animalVariantSelected = String(this.animalVariantsData?.selected_animal_type || this.animalVariantsData?.current_animal_type || '').toLowerCase();
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Animal variants load failed:', e);
+                } finally {
+                    this.animalVariantsLoading = false;
+                    this.renderAnimalVariantsPanel();
+                }
+            },
+
+            getSelectedAnimalVariant() {
+                const animal = String(this.animalVariantSelected || this.animalVariantsData?.selected_animal_type || '').toLowerCase();
+                const orientation = String(this.animalVariantOrientation || 'front').toLowerCase();
+                return (this.animalVariantsData?.variants || []).find((v) =>
+                    String(v.animal_type || '').toLowerCase() === animal &&
+                    String(v.orientation || '').toLowerCase() === orientation
+                ) || null;
+            },
+
+            renderAnimalVariantsPanel() {
+                const panel = document.getElementById('animal-variants-panel');
+                const select = document.getElementById('animal-variant-type');
+                const statusEl = document.getElementById('animal-variants-status');
+                const card = document.getElementById('animal-variant-card');
+                if (!panel || !select || !statusEl || !card || !panel.classList.contains('is-visible')) return;
+
+                const types = this.animalVariantTypes();
+                const selected = this.animalVariantSelected || this.animalVariantsData?.selected_animal_type || this.task?.animal_type || types[0] || 'dog';
+                const langSig = String(window.I18n?.currentLang || 'en');
+                if (select.options.length !== types.length || select.dataset.langSig !== langSig) {
+                    select.innerHTML = types.map((key) => `<option value="${key}">${this.animalVariantLabel(key)}</option>`).join('');
+                    select.dataset.langSig = langSig;
+                }
+                select.value = selected;
+                this.animalVariantSelected = selected;
+
+                document.querySelectorAll('[data-animal-orientation]').forEach((btn) => {
+                    btn.classList.toggle('is-active', String(btn.dataset.animalOrientation) === this.animalVariantOrientation);
+                });
+
+                const variant = this.getSelectedAnimalVariant();
+                const progressText = this.animalVariantsData?.progress_text || '';
+                if (!this.animalVariantsData) {
+                    statusEl.textContent = this.tSafe('animal_variants_checking', 'Checking variants...');
+                    card.innerHTML = `<div class="animal-variant-meta">${this.tSafe('animal_variants_loading', 'Loading variant availability...')}</div>`;
+                    return;
+                }
+                if (!variant) {
+                    statusEl.textContent = this.tSafe('animal_variants_unavailable', 'Unavailable');
+                    card.innerHTML = `<div class="animal-variant-meta">${this.tSafe('animal_variants_missing', 'This variant is not available yet.')}</div>`;
+                    return;
+                }
+
+                const statusKey = `animal_variants_status_${variant.status || 'pending'}`;
+                statusEl.textContent = this.tSafe(statusKey, variant.status || 'pending');
+                const title = `${this.animalVariantLabel(variant.animal_type)} · ${this.tSafe(`animal_variants_${variant.orientation}`, variant.orientation)}`;
+                const primaryBadge = variant.is_primary ? ` · ${this.tSafe('animal_variants_primary', 'Primary')}` : '';
+                const ready = variant.status === 'ready';
+                const details = ready
+                    ? this.tSafe('animal_variants_ready_desc', 'Ready for full preview and download.')
+                    : (variant.error || progressText || this.tSafe('animal_variants_pending_desc', 'Skinning is still running; files appear here as soon as worker writes them.'));
+
+                const previewDisabled = !variant.preview_url ? 'disabled' : '';
+                const downloadDisabled = ready ? '' : 'disabled';
+                const unlockText = this.tSafe('animal_variants_unlock', 'Unlock downloads');
+                const fbxText = this.tSafe('animal_variants_download_fbx', 'Download FBX');
+                const blendText = this.tSafe('animal_variants_download_blend', 'Download Blend');
+                const previewText = this.tSafe('animal_variants_preview', 'Preview variant');
+                const skeletonText = this.tSafe('animal_variants_skeleton', 'Skeleton JSON');
+                const downloadLabel = this.purchaseState?.purchased_all ? '' : ` (${this.getDownloadAllCredits()} credits)`;
+
+                card.innerHTML = `
+                    <div class="animal-variant-meta">
+                        <strong>${title}${primaryBadge}</strong>
+                        <span>${this.tSafe(statusKey, variant.status || 'pending')}</span>
+                    </div>
+                    <div class="animal-variants-subtitle">${details}</div>
+                    <div class="animal-variant-actions">
+                        <button type="button" class="btn btn-secondary" ${previewDisabled} onclick="TaskUI.previewAnimalVariant()">${previewText}</button>
+                        <button type="button" class="btn btn-primary" ${downloadDisabled} onclick="TaskUI.downloadAnimalVariant('fbx')">${this.purchaseState?.purchased_all ? fbxText : unlockText + downloadLabel}</button>
+                        <button type="button" class="btn btn-secondary" ${downloadDisabled} onclick="TaskUI.downloadAnimalVariant('blend')">${this.purchaseState?.purchased_all ? blendText : blendText}</button>
+                        <button type="button" class="btn btn-secondary" ${variant.skeleton?.ready ? '' : 'disabled'} onclick="TaskUI.openAnimalVariantSkeleton()">${skeletonText}</button>
+                    </div>
+                `;
+            },
+
+            async ensureAnimalVariantPurchase() {
+                if (this.purchaseState?.purchased_all) return true;
+                if (this.purchaseState?.login_required) {
+                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    return false;
+                }
+                const cost = this.getDownloadAllCredits();
+                if (Number(this.purchaseState?.user_credits || 0) < cost) {
+                    window.location.href = '/buy-credits';
+                    return false;
+                }
+                if (!confirm(`${this.tSafe('purchase_confirm_all', 'Purchase all files for')} ${cost} credits?`)) return false;
+                try {
+                    const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ all: true }),
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok) {
+                        alert(data.detail || this.tSafe('error_generic', 'Something went wrong'));
+                        return false;
+                    }
+                    this.purchaseState.purchased_all = true;
+                    this.purchaseState.user_credits = data.credits_remaining;
+                    await this.loadAnimalVariants();
+                    return true;
+                } catch (e) {
+                    console.error('Animal variant purchase failed:', e);
+                    alert(this.tSafe('error_generic', 'Something went wrong'));
+                    return false;
+                }
+            },
+
+            async previewAnimalVariant() {
+                const variant = this.getSelectedAnimalVariant();
+                if (!variant?.preview_url) return;
+                const label = `${this.animalVariantLabel(variant.animal_type)} ${variant.orientation} Variant FBX`;
+                if (!window.TaskVariantPreviewBridge || typeof window.TaskVariantPreviewBridge.loadFbx !== 'function') {
+                    alert(this.tSafe('animal_variants_preview_unavailable', 'Variant preview is not ready yet.'));
+                    return;
+                }
+                const ok = await window.TaskVariantPreviewBridge.loadFbx(variant.preview_url, label);
+                if (!ok) alert(this.tSafe('animal_variants_preview_failed', 'Could not load this variant preview.'));
+            },
+
+            async downloadAnimalVariant(kind) {
+                const variant = this.getSelectedAnimalVariant();
+                const file = variant?.[kind];
+                if (!file?.ready || !file?.url) return;
+                if (!await this.ensureAnimalVariantPurchase()) return;
+                window.location.href = file.url;
+            },
+
+            openAnimalVariantSkeleton() {
+                const variant = this.getSelectedAnimalVariant();
+                if (variant?.skeleton?.ready && variant.skeleton.url) {
+                    window.open(variant.skeleton.url, '_blank', 'noopener');
                 }
             },
 
@@ -15017,6 +15391,29 @@
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
                 return true;
             }
+
+            window.TaskVariantPreviewBridge = {
+                async loadFbx(url, label = 'Animal Variant FBX') {
+                    try {
+                        if (playModeController?.active) {
+                            await playModeController.exit();
+                        }
+                    } catch (_) {}
+                    const ok = await loadFBX(url, label);
+                    if (ok) {
+                        currentModelType = 'variant';
+                        finalLoaded = true;
+                    }
+                    return ok;
+                },
+                async restorePrimaryAnimation() {
+                    if (typeof setActiveMode === 'function') {
+                        await setActiveMode('animation');
+                        return currentModelType === 'animations';
+                    }
+                    return false;
+                }
+            };
 
             // Track which models are loaded
             let animationsLoaded = false;

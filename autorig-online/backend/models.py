@@ -107,6 +107,42 @@ class TaskStatusResponse(BaseModel):
     viewer_theme_selection: Optional[dict] = None
 
 
+class AnimalVariantFileState(BaseModel):
+    """Availability for one animal variant artifact."""
+    ready: bool = False
+    url: Optional[str] = None
+    size: Optional[int] = None
+    filename: Optional[str] = None
+
+
+class AnimalRigVariantItem(BaseModel):
+    """One selectable animal rig variant."""
+    animal_type: str
+    orientation: str
+    label: str
+    is_primary: bool = False
+    status: str = "pending"
+    error: Optional[str] = None
+    preview_url: Optional[str] = None
+    blend: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
+    fbx: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
+    skeleton: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
+
+
+class AnimalRigVariantsResponse(BaseModel):
+    """Selectable animal rig variants for a task."""
+    available: bool = False
+    task_id: str
+    current_animal_type: Optional[str] = None
+    selected_animal_type: Optional[str] = None
+    selected_orientation: str = "front"
+    progress_text: Optional[str] = None
+    purchased_all: bool = False
+    login_required: bool = False
+    all_files_credits: int = 15
+    variants: List[AnimalRigVariantItem] = []
+
+
 class TaskHistoryItem(BaseModel):
     """Task item for history list"""
     task_id: str
