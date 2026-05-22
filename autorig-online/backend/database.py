@@ -59,6 +59,13 @@ class User(Base):
     youtube_bonus_received = Column(Boolean, default=False)
     email_task_completed = Column(Boolean, default=True, nullable=False)  # task-ready emails; False = unsubscribed
     email_marketing_unsubscribed_at = Column(DateTime, nullable=True)
+    # Global suppression: hard bounces/complaints must not receive marketing or transactional email.
+    email_invalid_at = Column(DateTime, nullable=True)
+    email_invalid_reason = Column(Text, nullable=True)
+    email_invalid_source = Column(String(64), nullable=True)
+    email_last_bounce_at = Column(DateTime, nullable=True)
+    email_last_bounce_type = Column(String(32), nullable=True)
+    email_transient_bounce_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, default=datetime.utcnow)
     
@@ -106,6 +113,28 @@ class EmailCampaignClick(Base):
     user_agent = Column(String(512), nullable=True)
     clicked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+
+class EmailDeliveryEvent(Base):
+    """Resend delivery/bounce/complaint webhook event log."""
+    __tablename__ = "email_delivery_events"
+    __table_args__ = (
+        Index("ix_email_delivery_events_message", "provider_message_id"),
+        Index("ix_email_delivery_events_email_hash", "email_hash"),
+        Index("ix_email_delivery_events_event_type", "event_type"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    svix_id = Column(String(128), unique=True, nullable=True)
+    provider_message_id = Column(String(128), nullable=True)
+    campaign_key = Column(String(128), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    email_hash = Column(String(64), nullable=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    bounce_type = Column(String(32), nullable=True)
+    bounce_subtype = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    raw_event_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class AnonSession(Base):
     """Anonymous user session (tracked by cookie)"""
@@ -755,6 +784,12 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_marketing_unsubscribed_at DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_invalid_at DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_invalid_reason TEXT")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_invalid_source VARCHAR(64)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_last_bounce_at DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_last_bounce_type VARCHAR(32)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_transient_bounce_count INTEGER DEFAULT 0")
             await _try_add_column("ALTER TABLE feedback ADD COLUMN parent_id INTEGER")
 
             try:
@@ -1097,6 +1132,12 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_marketing_unsubscribed_at TIMESTAMP"
             )
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_invalid_at TIMESTAMP")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_invalid_reason TEXT")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_invalid_source VARCHAR(64)")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_last_bounce_at TIMESTAMP")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_last_bounce_type VARCHAR(32)")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_transient_bounce_count INTEGER DEFAULT 0")
             try:
                 await conn.exec_driver_sql(
                     """

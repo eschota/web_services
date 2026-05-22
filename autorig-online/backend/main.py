@@ -67,6 +67,7 @@ from config import (
     RATE_LIMIT_CRYPTO_SUBMIT,
     YOUTUBE_REFRESH_TOKEN,
     SUPPORT_CHAT_MESSAGE_MAX_CHARS,
+    RESEND_WEBHOOK_SECRET,
     RATE_LIMIT_SUPPORT_CHAT_SESSION,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
@@ -75,7 +76,7 @@ from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
     TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
-    CryptoPaymentReport, EmailCampaignClick,
+    CryptoPaymentReport, EmailCampaignClick, EmailCampaignSend, EmailDeliveryEvent,
     SupportChatSession,
     SupportChatMessage,
     reset_admin_overlay_counters,
@@ -2081,6 +2082,129 @@ async def marketing_unsubscribe_page(
 </body>
 </html>"""
     return HTMLResponse(content=html_content)
+
+
+def _verify_resend_webhook_signature(payload: bytes, request: Request) -> None:
+    """Verify Resend/Svix webhook signature using RESEND_WEBHOOK_SECRET."""
+    if not RESEND_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="RESEND_WEBHOOK_SECRET is not configured")
+    svix_id = request.headers.get("svix-id") or ""
+    svix_timestamp = request.headers.get("svix-timestamp") or ""
+    svix_signature = request.headers.get("svix-signature") or ""
+    if not svix_id or not svix_timestamp or not svix_signature:
+        raise HTTPException(status_code=400, detail="Missing webhook signature headers")
+    secret = RESEND_WEBHOOK_SECRET
+    if secret.startswith("whsec_"):
+        secret = secret.split("_", 1)[1]
+    try:
+        key = base64.b64decode(secret)
+    except Exception:
+        key = RESEND_WEBHOOK_SECRET.encode("utf-8")
+    signed_payload = f"{svix_id}.{svix_timestamp}.".encode("utf-8") + payload
+    expected = base64.b64encode(hmac.new(key, signed_payload, hashlib.sha256).digest()).decode("ascii")
+    candidates = []
+    for part in svix_signature.split():
+        if part.startswith("v1,"):
+            candidates.append(part.split(",", 1)[1])
+    if not any(hmac.compare_digest(expected, candidate) for candidate in candidates):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+
+def _event_email_hash(email: str) -> str:
+    return hashlib.sha256((email or "").strip().lower().encode("utf-8")).hexdigest()
+
+
+@app.post("/api/webhooks/resend")
+async def api_resend_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist Resend delivery events and suppress hard-bounced/complained users."""
+    raw_body = await request.body()
+    _verify_resend_webhook_signature(raw_body, request)
+    try:
+        event = json.loads(raw_body.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    svix_id = request.headers.get("svix-id") or None
+    if svix_id:
+        existing = await db.execute(select(EmailDeliveryEvent.id).where(EmailDeliveryEvent.svix_id == svix_id))
+        if existing.scalar_one_or_none() is not None:
+            return {"ok": True, "duplicate": True}
+
+    event_type = str(event.get("type") or "unknown")[:64]
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    provider_message_id = data.get("email_id") or data.get("id")
+    recipients = data.get("to") if isinstance(data.get("to"), list) else []
+    recipient_email = str(recipients[0]).strip().lower() if recipients else ""
+    bounce = data.get("bounce") if isinstance(data.get("bounce"), dict) else {}
+    bounce_type = str(bounce.get("type") or "")[:32] or None
+    bounce_subtype = str(bounce.get("subType") or bounce.get("subtype") or "")[:64] or None
+    error_message = str(bounce.get("message") or data.get("error") or "")[:4000] or None
+
+    send_row = None
+    if provider_message_id:
+        send_rs = await db.execute(
+            select(EmailCampaignSend).where(EmailCampaignSend.provider_message_id == str(provider_message_id)).limit(1)
+        )
+        send_row = send_rs.scalar_one_or_none()
+
+    user = None
+    if recipient_email:
+        user_rs = await db.execute(select(User).where(func.lower(func.trim(User.email)) == recipient_email).limit(1))
+        user = user_rs.scalar_one_or_none()
+    if user is None and send_row and send_row.user_id:
+        user = await db.get(User, send_row.user_id)
+
+    email_hash = send_row.email_hash if send_row else (_event_email_hash(recipient_email) if recipient_email else None)
+    now = datetime.utcnow()
+    db.add(
+        EmailDeliveryEvent(
+            svix_id=svix_id,
+            provider_message_id=str(provider_message_id)[:128] if provider_message_id else None,
+            campaign_key=send_row.campaign_key if send_row else None,
+            user_id=user.id if user else (send_row.user_id if send_row else None),
+            email_hash=email_hash,
+            event_type=event_type,
+            bounce_type=bounce_type,
+            bounce_subtype=bounce_subtype,
+            error_message=error_message,
+            raw_event_json=json.dumps(event, ensure_ascii=False)[:12000],
+            created_at=now,
+        )
+    )
+
+    suppress = False
+    reason = None
+    if event_type == "email.complained":
+        suppress = True
+        reason = "complaint"
+    elif event_type == "email.suppressed":
+        suppress = True
+        reason = f"suppressed:{bounce_subtype or bounce_type or 'unknown'}"
+    elif event_type == "email.bounced":
+        # Resend's email.bounced event is for permanent rejection; keep Transient/Undetermined as retryable.
+        if not bounce_type or bounce_type.lower() == "permanent":
+            suppress = True
+            reason = f"permanent_bounce:{bounce_subtype or 'unknown'}"
+
+    if user is not None:
+        if event_type in {"email.bounced", "email.delivery_delayed", "email.suppressed", "email.failed"}:
+            user.email_last_bounce_at = now
+            user.email_last_bounce_type = bounce_type or event_type
+        if event_type == "email.delivery_delayed" or (bounce_type and bounce_type.lower() in {"transient", "undetermined"}):
+            user.email_transient_bounce_count = int(user.email_transient_bounce_count or 0) + 1
+        if suppress and not user.email_invalid_at:
+            user.email_invalid_at = now
+            user.email_invalid_reason = reason or event_type
+            user.email_invalid_source = "resend_webhook"
+            user.email_task_completed = False
+            if not user.email_marketing_unsubscribed_at:
+                user.email_marketing_unsubscribed_at = now
+
+    await db.commit()
+    return {"ok": True, "event_type": event_type, "suppressed": bool(suppress and user is not None)}
 
 
 def _campaign_click_destination(campaign_key: str, link_key: str) -> Optional[str]:

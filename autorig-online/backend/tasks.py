@@ -827,7 +827,11 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
 
             rs_owner = await db.execute(select(User).where(User.email == task.owner_id))
             owner_user = rs_owner.scalar_one_or_none()
-            if owner_user is not None and not owner_user.email_task_completed:
+            if owner_user is not None and owner_user.email_invalid_at:
+                print(
+                    f"[Tasks] Skipping completion email for task {task.id}: email marked invalid after bounce/complaint"
+                )
+            elif owner_user is not None and not owner_user.email_task_completed:
                 print(
                     f"[Tasks] Skipping completion email for task {task.id}: user opted out of task-ready emails"
                 )

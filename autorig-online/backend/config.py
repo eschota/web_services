@@ -162,6 +162,7 @@ RATE_LIMIT_AGENT_REGISTER = os.getenv("RATE_LIMIT_AGENT_REGISTER", "15/hour")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@autorig.online")
 MARKETING_POSTAL_ADDRESS = os.getenv("MARKETING_POSTAL_ADDRESS", "").strip()
+RESEND_WEBHOOK_SECRET = os.getenv("RESEND_WEBHOOK_SECRET", "").strip()
 
 # =============================================================================
 # Gumroad

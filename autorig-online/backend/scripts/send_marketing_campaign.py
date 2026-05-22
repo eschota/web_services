@@ -84,6 +84,7 @@ async def load_recipients(db, campaign_key: str) -> tuple[list[Recipient], dict[
         .where(User.email != "")
         .where(User.email_task_completed.is_(True))
         .where(User.email_marketing_unsubscribed_at.is_(None))
+        .where(User.email_invalid_at.is_(None))
         .order_by(User.id.asc())
     )
     seen: set[str] = set()
@@ -112,6 +113,11 @@ async def load_recipients(db, campaign_key: str) -> tuple[list[Recipient], dict[
         for email_hash, status in ers.all():
             existing[email_hash] = status
 
+    invalid_suppressed_rs = await db.execute(
+        select(func.count(User.id)).where(User.email_invalid_at.is_not(None))
+    )
+    invalid_suppressed = int(invalid_suppressed_rs.scalar_one() or 0)
+
     status_rs = await db.execute(
         select(EmailCampaignSend.status, func.count(EmailCampaignSend.id))
         .where(EmailCampaignSend.campaign_key == campaign_key)
@@ -122,6 +128,7 @@ async def load_recipients(db, campaign_key: str) -> tuple[list[Recipient], dict[
     stats = {
         "eligible_total": len(all_recipients),
         "invalid_email_skipped": invalid_count,
+        "invalid_suppressed": invalid_suppressed,
         "already_logged": len(existing),
         "already_sent": sum(1 for v in existing.values() if v == "sent"),
         "remaining": len(remaining),
