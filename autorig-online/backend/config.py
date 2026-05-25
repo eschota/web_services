@@ -174,6 +174,7 @@ GUMROAD_PRODUCT_CREDITS = {
     "free3d-unlimitedsubscription": 999999,
     "free3d-unlimited": 999999,
     # Legacy AutoRig products (kept for backward compatibility)
+    "oneclick-30-credits": 30,
     "autorig-100": 100,
     "autorig-500": 500,
     "autorig-1000": 1000,
@@ -181,7 +182,10 @@ GUMROAD_PRODUCT_CREDITS = {
 
 # Gumroad product_permalinks (lowercase) that count toward /buy-credits donation progress
 AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
-    k.strip().lower() for k in GUMROAD_PRODUCT_CREDITS if str(k).strip().lower().startswith("autorig-")
+    k.strip().lower()
+    for k in GUMROAD_PRODUCT_CREDITS
+    if str(k).strip().lower().startswith("autorig-")
+    or str(k).strip().lower() == "oneclick-30-credits"
 )
 
 # Public donation thermometer on buy-credits (USD)
@@ -195,7 +199,8 @@ CRYPTO_DISCOUNT_FRACTION = float(os.getenv("CRYPTO_DISCOUNT_FRACTION", "0.2"))
 CRYPTO_BTC_USD_RATE = float(os.getenv("CRYPTO_BTC_USD_RATE", "95000"))
 # (gumroad_permalink_key, credits, list_price_usd)
 AUTORIG_CRYPTO_TIERS: list[tuple[str, int, float]] = [
-    ("autorig-100", 100, 20.0),
+    ("oneclick-30-credits", 30, 3.0),
+    ("autorig-100", 100, 10.0),
     ("autorig-500", 500, 50.0),
     ("autorig-1000", 1000, 100.0),
 ]

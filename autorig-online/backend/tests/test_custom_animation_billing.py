@@ -1,9 +1,10 @@
 import importlib
+import asyncio
 import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from sqlalchemy import delete
@@ -34,6 +35,10 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
 
     @classmethod
     def tearDownClass(cls):
+        try:
+            asyncio.run(cls.database.engine.dispose())
+        except Exception:
+            pass
         cls._tmp.cleanup()
 
     async def asyncSetUp(self):
@@ -47,7 +52,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 id=self.task_id,
                 owner_type="user",
                 owner_id="owner@example.com",
-                created_at=datetime.now(UTC).replace(tzinfo=None),
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 status="done",
             )
             guid = self.task_id
@@ -140,6 +145,57 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             await db.refresh(owner)
             self.assertEqual(owner.balance_credits, 21)  # 1 + 10 + 10
 
+    async def test_gumroad_mapping_animal_cost_and_bonus_disabled(self):
+        self.assertEqual(self.main.GUMROAD_PRODUCT_CREDITS.get("oneclick-30-credits"), 30)
+        self.assertEqual(self.main.GUMROAD_PRODUCT_CREDITS.get("autorig-100"), 100)
+
+        animal_task_id = "22222222-3333-4444-5555-666666666666"
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            animal_task = self.database.Task(
+                id=animal_task_id,
+                owner_type="user",
+                owner_id="owner@example.com",
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                status="done",
+                input_type="animal",
+            )
+            animal_task.output_urls = [f"http://example.com/{animal_task_id}_animal_rig.fbx"]
+            animal_task.ready_urls = list(animal_task.output_urls)
+            db.add(animal_task)
+            await db.commit()
+
+            state = await self.main.api_get_purchase_state(
+                animal_task_id,
+                request=self._fake_request(),
+                response=Response(),
+                user=buyer,
+                db=db,
+            )
+            self.assertEqual(state.all_files_credits, 10)
+
+            c0 = buyer.balance_credits
+            purchased = await self.main.api_purchase_files(
+                animal_task_id,
+                self.models.PurchaseRequest(all=True),
+                request=self._fake_request(),
+                response=Response(),
+                user=buyer,
+                db=db,
+            )
+            self.assertTrue(purchased.success)
+            self.assertEqual(buyer.balance_credits, c0 - 10)
+
+            before_bonus = buyer.balance_credits
+            bonus = await self.main.grant_youtube_bonus(user=buyer, db=db)
+            self.assertFalse(bonus["ok"])
+            self.assertTrue(bonus["disabled"])
+            self.assertEqual(buyer.balance_credits, before_bonus)
+
     async def test_zz_catalog_synthesizes_when_only_all_animations_glb_and_worker_list_empty(self):
         """Regression: many tasks list *_all_animations.glb but not *_all_animations_unity.fbx."""
         task_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -152,7 +208,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 id=task_id,
                 owner_type="user",
                 owner_id="owner@example.com",
-                created_at=datetime.now(UTC).replace(tzinfo=None),
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 status="done",
                 guid=guid,
                 worker_api=f"{worker}/converter/glb/{guid}/",
@@ -182,7 +238,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 id=task_id,
                 owner_type="user",
                 owner_id="owner@example.com",
-                created_at=datetime.now(UTC).replace(tzinfo=None),
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 status="done",
                 guid=guid,
                 worker_api=f"{worker}/converter/glb/{guid}/",

@@ -1078,7 +1078,7 @@ def _validate_worker_url(url: str) -> str:
 ANIMATION_SINGLE_CREDITS = 1
 ANIMATION_BUNDLE_CREDITS = 10
 DOWNLOAD_ALL_FILES_CREDITS = 10
-ANIMAL_RIG_DOWNLOAD_CREDITS = 15
+ANIMAL_RIG_DOWNLOAD_CREDITS = 10
 ANIMAL_VARIANT_TYPES = [
     "dog",
     "bear",
@@ -2644,18 +2644,13 @@ async def grant_youtube_bonus(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Grant 10 credits for YouTube link click (once per user)"""
-    if user.youtube_bonus_received:
-        return {"ok": False, "already_received": True}
-
-    user.balance_credits += 10
-    user.youtube_bonus_received = True
-    await db.commit()
-
-    from telegram_bot import broadcast_youtube_bonus_click
-    asyncio.create_task(broadcast_youtube_bonus_click(user.email))
-
-    return {"ok": True, "new_balance": user.balance_credits}
+    """Compatibility endpoint for the retired YouTube credit bonus."""
+    return {
+        "ok": False,
+        "disabled": True,
+        "detail": "Free credit bonuses are no longer available.",
+        "new_balance": user.balance_credits if user else 0,
+    }
 
 
 @app.post("/api/user/feedback")

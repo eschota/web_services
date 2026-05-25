@@ -390,6 +390,132 @@
             font-size: 0.78rem;
         }
 
+        .task-paywall-dialog {
+            position: fixed;
+            inset: 0;
+            width: min(760px, calc(100vw - 1.5rem));
+            max-width: min(760px, calc(100vw - 1.5rem));
+            height: fit-content;
+            max-height: 92vh;
+            margin: auto;
+            border: none;
+            border-radius: 12px;
+            padding: 0;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            box-shadow: var(--shadow-lg);
+            font-family: inherit;
+            overflow: hidden;
+        }
+        .task-paywall-dialog::backdrop {
+            background: rgba(6, 8, 18, 0.68);
+            backdrop-filter: blur(6px);
+        }
+        .task-paywall-dialog__inner {
+            padding: 1.15rem;
+            max-height: 92vh;
+            overflow-y: auto;
+        }
+        .task-paywall-dialog__head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.9rem;
+        }
+        .task-paywall-dialog__head h2 {
+            margin: 0 0 0.35rem;
+            font-size: 1.25rem;
+            line-height: 1.2;
+        }
+        .task-paywall-dialog__head p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.45;
+        }
+        .task-paywall-dialog__close {
+            flex: 0 0 auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            line-height: 1;
+            padding: 0.4rem 0.55rem;
+            cursor: pointer;
+        }
+        .task-paywall-dialog__close:hover {
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+        .task-paywall-login {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.8rem;
+            margin-bottom: 0.9rem;
+            padding: 0.75rem;
+            border: 1px solid rgba(var(--accent-rgb), 0.35);
+            border-radius: 8px;
+            background: rgba(var(--accent-rgb), 0.08);
+        }
+        .task-paywall-login p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            line-height: 1.35;
+        }
+        .task-paywall-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+        .task-paywall-card {
+            display: flex;
+            flex-direction: column;
+            gap: 0.55rem;
+            min-width: 0;
+            padding: 0.9rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.045);
+        }
+        .task-paywall-card[data-featured="true"] {
+            border-color: rgba(var(--accent-rgb), 0.55);
+            background: rgba(var(--accent-rgb), 0.08);
+        }
+        .task-paywall-card h3 {
+            margin: 0;
+            font-size: 1rem;
+            line-height: 1.25;
+        }
+        .task-paywall-price {
+            color: var(--accent);
+            font-size: 1.45rem;
+            font-weight: 800;
+            line-height: 1;
+        }
+        .task-paywall-note {
+            min-height: 2.4em;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            line-height: 1.35;
+        }
+        .task-paywall-card .btn {
+            width: 100%;
+            margin-top: auto;
+        }
+        @media (max-width: 640px) {
+            .task-paywall-grid {
+                grid-template-columns: 1fr;
+            }
+            .task-paywall-login {
+                align-items: stretch;
+                flex-direction: column;
+            }
+        }
+
         .param-tile {
             background: rgba(255,255,255,0.04);
             border: 1px solid rgba(255,255,255,0.06);
@@ -4768,6 +4894,23 @@
         </div>
     </dialog>
 
+    <dialog id="task-paywall-dialog" class="task-paywall-dialog" aria-labelledby="task-paywall-dialog-title">
+        <div class="task-paywall-dialog__inner">
+            <div class="task-paywall-dialog__head">
+                <div>
+                    <h2 id="task-paywall-dialog-title">Unlock downloads</h2>
+                    <p id="task-paywall-dialog-copy">Credits unlock finished model ZIP downloads, animal variant files, and custom animation FBX downloads.</p>
+                </div>
+                <button type="button" class="task-paywall-dialog__close" id="task-paywall-dialog-close" aria-label="Close">&times;</button>
+            </div>
+            <div id="task-paywall-login" class="task-paywall-login hidden">
+                <p>Sign in before buying credits so Gumroad can attach the purchase to your AutoRig.online account.</p>
+                <button type="button" class="btn btn-primary" id="task-paywall-login-btn">Sign in</button>
+            </div>
+            <div id="task-paywall-grid" class="task-paywall-grid"></div>
+        </div>
+    </dialog>
+
     <!-- Owner Tasks Modal -->
     <div id="owner-tasks-modal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 2rem;">
         <div class="card" style="min-width: 900px; max-width: 1100px; max-height: 90vh; display: flex; flex-direction: column;">
@@ -6591,6 +6734,49 @@
                 all_files_credits: 10,
                 loaded: false
             },
+            authUser: null,
+            paywallProducts: [
+                {
+                    kind: 'credits',
+                    permalink: 'oneclick-30-credits',
+                    title: '30 credits',
+                    price: '$3+',
+                    credits: 30,
+                    note: 'Starter pack for custom animation downloads and one-off ZIP unlocks.'
+                },
+                {
+                    kind: 'credits',
+                    permalink: 'autorig-100',
+                    title: '100 credits',
+                    price: '$10+',
+                    credits: 100,
+                    note: 'Best entry pack for regular AutoRig.online downloads.',
+                    featured: true
+                },
+                {
+                    kind: 'credits',
+                    permalink: 'autorig-500',
+                    title: '500 credits',
+                    price: '$50+',
+                    credits: 500,
+                    note: 'For repeated web rigging download workflows.'
+                },
+                {
+                    kind: 'credits',
+                    permalink: 'autorig-1000',
+                    title: '1000 credits',
+                    price: '$100+',
+                    credits: 1000,
+                    note: 'Production pack for larger batches and teams.'
+                },
+                {
+                    kind: 'plugin',
+                    permalink: 'blender-plugin',
+                    title: 'Blender Standalone Plugin',
+                    price: '$199+',
+                    note: 'Native Blender add-on for AutoRig.online workflows.'
+                }
+            ],
 
             // Cached files for download (replaces ZIP)
             cachedFilesData: null,
@@ -6615,6 +6801,142 @@
             getDownloadAllCredits() {
                 const value = Number(this.purchaseState?.all_files_credits || 10);
                 return Number.isFinite(value) && value > 0 ? value : 10;
+            },
+
+            paywallLoginUrl() {
+                return '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+            },
+
+            gumroadPaywallUrl(permalink) {
+                const base = `https://u3d.gumroad.com/l/${encodeURIComponent(permalink)}`;
+                const email = String(this.authUser?.email || '').trim();
+                if (!email) return base;
+                const params = new URLSearchParams();
+                params.set('userid', email);
+                return `${base}?${params.toString()}`;
+            },
+
+            paywallEscape(value) {
+                return String(value || '')
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;')
+                    .replaceAll("'", '&#039;');
+            },
+
+            paywallRequiredCopy(context = {}) {
+                const requiredCredits = Number(context.requiredCredits || 0);
+                const balance = Number(this.purchaseState?.user_credits || 0);
+                if (this.purchaseState?.login_required) {
+                    return 'Sign in before buying credits so your Gumroad payment is credited to your AutoRig.online account.';
+                }
+                if (requiredCredits > 0) {
+                    return `This download requires ${requiredCredits} credits. Your current balance is ${balance} credits.`;
+                }
+                return 'Choose a credit pack to unlock finished model ZIPs, animal variant files, and custom animation FBX downloads.';
+            },
+
+            async refreshAuthForPaywall() {
+                try {
+                    const authResp = await fetch('/auth/me', { credentials: 'same-origin' });
+                    if (!authResp.ok) return;
+                    const authData = await authResp.json();
+                    this.authUser = authData?.authenticated ? (authData.user || null) : null;
+                    this.purchaseState.user_credits = authData.credits_remaining || 0;
+                    this.purchaseState.login_required = !authData.authenticated;
+                } catch (e) {
+                    console.warn('Paywall auth refresh failed:', e);
+                }
+            },
+
+            async notifyPaywallProductClick(product) {
+                if (!product || product.kind !== 'credits') return;
+                try {
+                    await fetch('/api/notify/credits-click', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            package: `${product.credits} credits`,
+                            price: String(product.price || '').replace('+', '')
+                        })
+                    });
+                } catch (_) {
+                    // Notification is best-effort only.
+                }
+            },
+
+            renderPaywallModal(context = {}) {
+                const dialog = document.getElementById('task-paywall-dialog');
+                const copy = document.getElementById('task-paywall-dialog-copy');
+                const login = document.getElementById('task-paywall-login');
+                const grid = document.getElementById('task-paywall-grid');
+                if (!dialog || !copy || !login || !grid) return;
+
+                copy.textContent = this.paywallRequiredCopy(context);
+                const needsLogin = Boolean(this.purchaseState?.login_required || !this.authUser?.email);
+                login.classList.toggle('hidden', !needsLogin);
+
+                grid.innerHTML = this.paywallProducts.map((product, idx) => {
+                    const btnText = needsLogin
+                        ? 'Sign in to buy'
+                        : (product.kind === 'plugin' ? 'Buy plugin' : 'Buy credits');
+                    return `
+                        <article class="task-paywall-card" data-featured="${product.featured ? 'true' : 'false'}">
+                            <h3>${this.paywallEscape(product.title)}</h3>
+                            <div class="task-paywall-price">${this.paywallEscape(product.price)}</div>
+                            <div class="task-paywall-note">${this.paywallEscape(product.note)}</div>
+                            <button type="button" class="btn ${product.featured ? 'btn-primary' : 'btn-secondary'}" data-paywall-product="${idx}">
+                                ${this.paywallEscape(btnText)}
+                            </button>
+                        </article>
+                    `;
+                }).join('');
+
+                grid.querySelectorAll('[data-paywall-product]').forEach((btn) => {
+                    btn.addEventListener('click', async () => {
+                        const idx = Number(btn.getAttribute('data-paywall-product'));
+                        const product = this.paywallProducts[idx];
+                        if (!product) return;
+                        if (this.purchaseState?.login_required || !this.authUser?.email) {
+                            window.location.href = this.paywallLoginUrl();
+                            return;
+                        }
+                        await this.notifyPaywallProductClick(product);
+                        window.location.href = this.gumroadPaywallUrl(product.permalink);
+                    });
+                });
+            },
+
+            async openPaywallModal(context = {}) {
+                await this.refreshAuthForPaywall();
+                this.renderPaywallModal(context);
+                const dialog = document.getElementById('task-paywall-dialog');
+                if (!dialog) {
+                    window.location.href = '/buy-credits';
+                    return;
+                }
+                if (!dialog.__paywallWired) {
+                    dialog.__paywallWired = true;
+                    document.getElementById('task-paywall-dialog-close')?.addEventListener('click', () => {
+                        if (typeof dialog.close === 'function') dialog.close();
+                        else dialog.removeAttribute('open');
+                    });
+                    document.getElementById('task-paywall-login-btn')?.addEventListener('click', () => {
+                        window.location.href = this.paywallLoginUrl();
+                    });
+                    dialog.addEventListener('click', (event) => {
+                        if (event.target === dialog) {
+                            if (typeof dialog.close === 'function') dialog.close();
+                            else dialog.removeAttribute('open');
+                        }
+                    });
+                }
+                if (typeof dialog.showModal === 'function') {
+                    if (!dialog.open) dialog.showModal();
+                } else {
+                    dialog.setAttribute('open', '');
+                }
             },
 
             async checkCachedFiles() {
@@ -6675,7 +6997,7 @@
                     });
                     if (resp.status === 401) {
                         await releaseDownloadAllUi(false);
-                        window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                        await this.openPaywallModal({ source: 'download_all', requiredCredits: this.getDownloadAllCredits() });
                         return;
                     }
                     if (!resp.ok) {
@@ -6717,7 +7039,7 @@
 
                 if (!this.purchaseState.purchased_all) {
                     if (this.purchaseState.login_required) {
-                        window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                        await this.openPaywallModal({ source: 'download_all', requiredCredits: this.getDownloadAllCredits() });
                         return;
                     }
                     const downloadAllCost = this.getDownloadAllCredits();
@@ -6731,7 +7053,7 @@
                         } catch (e) {
                             console.warn('Purchase intent notify failed:', e);
                         }
-                        window.location.href = '/buy-credits';
+                        await this.openPaywallModal({ source: 'download_all', requiredCredits: downloadAllCost });
                         return;
                     }
                     if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) return;
@@ -6772,6 +7094,7 @@
                     const authResp = await fetch('/auth/me');
                     if (authResp.ok) {
                         const authData = await authResp.json();
+                        this.authUser = authData?.authenticated ? (authData.user || null) : null;
                         this.purchaseState.user_credits = authData.credits_remaining || 0;
                         this.purchaseState.login_required = !authData.authenticated;
                     }
@@ -6941,12 +7264,12 @@
             async ensureAnimalVariantPurchase() {
                 if (this.purchaseState?.purchased_all) return true;
                 if (this.purchaseState?.login_required) {
-                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    await this.openPaywallModal({ source: 'animal_variant', requiredCredits: this.getDownloadAllCredits() });
                     return false;
                 }
                 const cost = this.getDownloadAllCredits();
                 if (Number(this.purchaseState?.user_credits || 0) < cost) {
-                    window.location.href = '/buy-credits';
+                    await this.openPaywallModal({ source: 'animal_variant', requiredCredits: cost });
                     return false;
                 }
                 if (!confirm(`${this.tSafe('purchase_confirm_all', 'Purchase all files for')} ${cost} credits?`)) return false;
@@ -7001,13 +7324,13 @@
 
             async purchaseFile(fileIndex, displayName) {
                 if (this.purchaseState.login_required) {
-                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    await this.openPaywallModal({ source: 'file_download', requiredCredits: 1 });
                     return;
                 }
                 const isAnimalTask = String(this.task?.input_type || '').toLowerCase() === 'animal';
                 const fileCost = isAnimalTask ? this.getDownloadAllCredits() : 1;
                 if (this.purchaseState.user_credits < fileCost) {
-                    window.location.href = '/buy-credits';
+                    await this.openPaywallModal({ source: 'file_download', requiredCredits: fileCost });
                     return;
                 }
                 if (!confirm(`${t('purchase_confirm_file')} "${displayName}" for ${fileCost} credit${fileCost === 1 ? '' : 's'}?`)) return;
@@ -7037,12 +7360,12 @@
 
             async purchaseAll() {
                 if (this.purchaseState.login_required) {
-                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    await this.openPaywallModal({ source: 'download_all', requiredCredits: this.getDownloadAllCredits() });
                     return;
                 }
                 const downloadAllCost = this.getDownloadAllCredits();
                 if (this.purchaseState.user_credits < downloadAllCost) {
-                    window.location.href = '/buy-credits';
+                    await this.openPaywallModal({ source: 'download_all', requiredCredits: downloadAllCost });
                     return;
                 }
                 if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) return;
@@ -7464,7 +7787,7 @@
                 await this.notifyCustomAnimationIntent('custom_animation_download', selectedId, selected.name);
 
                 if (this.animationCatalog?.login_required) {
-                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: 1 });
                     return;
                 }
 
@@ -7475,7 +7798,7 @@
 
                 if (!hasAccess) {
                     if (credits < singleCost) {
-                        window.location.href = '/buy-credits';
+                        await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: singleCost });
                         return;
                     }
 
@@ -7517,15 +7840,15 @@
                     return;
                 }
 
+                const singleCost = Number(this.animationCatalog?.pricing?.single_animation_credits || 1);
                 if (this.animationCatalog?.login_required) {
-                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: singleCost });
                     return;
                 }
 
-                const singleCost = Number(this.animationCatalog?.pricing?.single_animation_credits || 1);
                 const credits = Number(this.animationCatalog?.user_credits || 0);
                 if (credits < singleCost) {
-                    window.location.href = '/buy-credits';
+                    await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: singleCost });
                     return;
                 }
 
@@ -7552,7 +7875,7 @@
 
             async purchaseAllAnimations() {
                 if (this.animationCatalog?.login_required) {
-                    window.location.href = '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    await this.openPaywallModal({ source: 'custom_animation_bundle', requiredCredits: Number(this.animationCatalog?.pricing?.all_animations_credits || 10) });
                     return;
                 }
                 const purchasedAll = Boolean(this.animationCatalog?.purchased_all);
@@ -7561,7 +7884,7 @@
                 const allCost = Number(this.animationCatalog?.pricing?.all_animations_credits || 10);
                 const credits = Number(this.animationCatalog?.user_credits || 0);
                 if (credits < allCost) {
-                    window.location.href = '/buy-credits';
+                    await this.openPaywallModal({ source: 'custom_animation_bundle', requiredCredits: allCost });
                     return;
                 }
                 if (!confirm(`Unlock all animations for ${allCost} credits?`)) return;

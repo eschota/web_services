@@ -129,7 +129,7 @@ class EmailDeliveryEvent(Base):
     campaign_key = Column(String(128), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     email_hash = Column(String(64), nullable=True)
-    event_type = Column(String(64), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False)
     bounce_type = Column(String(32), nullable=True)
     bounce_subtype = Column(String(64), nullable=True)
     error_message = Column(Text, nullable=True)
@@ -1345,4 +1345,3 @@ async def get_db():
             yield session
         finally:
             await session.close()
-
