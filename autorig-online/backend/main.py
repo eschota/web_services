@@ -10202,7 +10202,7 @@ def validate_telegram_init_data(init_data: str) -> Optional[dict]:
 @app.post("/api/notify/credits-click")
 async def notify_credits_click(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    user: Optional[User] = Depends(get_current_user),
 ):
     """Notify Telegram about a purchase button click."""
     try:
@@ -10214,26 +10214,8 @@ async def notify_credits_click(
         source = str(body.get('source') or '')[:80]
         page_url = str(body.get('page_url') or '')[:500]
         
-        # Get user info from session
-        user_email = None
-        anon_id = None
-        
-        session_id = request.cookies.get("session_id")
-        if session_id:
-            result = await db.execute(
-                select(UserSession).where(UserSession.session_id == session_id)
-            )
-            sess = result.scalar_one_or_none()
-            if sess:
-                user_result = await db.execute(
-                    select(User).where(User.id == sess.user_id)
-                )
-                user = user_result.scalar_one_or_none()
-                if user:
-                    user_email = user.email
-        
-        if not user_email:
-            anon_id = request.cookies.get("anon_id")
+        user_email = user.email if user else None
+        anon_id = None if user_email else _effective_anon_id(request)
         
         # Fire-and-forget notification
         from telegram_bot import broadcast_credits_purchase_click
