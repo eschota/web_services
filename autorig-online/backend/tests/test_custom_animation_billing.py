@@ -148,6 +148,23 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
     async def test_gumroad_mapping_animal_cost_and_bonus_disabled(self):
         self.assertEqual(self.main.GUMROAD_PRODUCT_CREDITS.get("oneclick-30-credits"), 30)
         self.assertEqual(self.main.GUMROAD_PRODUCT_CREDITS.get("autorig-100"), 100)
+        self.assertTrue(self.main._is_autorig_credit_product("oneclick-30-credits"))
+        self.assertTrue(self.main._is_autorig_credit_product("autorig-100"))
+        self.assertFalse(self.main._is_autorig_credit_product("free3d-10credits"))
+        self.assertFalse(self.main._is_autorig_credit_product("blender-plugin"))
+        self.assertEqual(
+            self.main._gumroad_credit_target_email(
+                {
+                    "email": "merchant-checkout@example.com",
+                    "url_params[userid]": "Buyer@Example.com",
+                }
+            ),
+            "buyer@example.com",
+        )
+        self.assertEqual(
+            self.main._gumroad_credit_target_email({"email": "checkout@example.com"}),
+            "checkout@example.com",
+        )
 
         animal_task_id = "22222222-3333-4444-5555-666666666666"
         async with self.database.AsyncSessionLocal() as db:

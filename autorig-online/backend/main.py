@@ -4148,6 +4148,33 @@ def _normalize_gumroad_product_key(raw_value: str | None) -> str:
     return value.strip().lower()
 
 
+def _gumroad_clean_email(value: Optional[str]) -> str:
+    email = (str(value or "").strip()).lower()
+    if not email or len(email) > 255:
+        return ""
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return ""
+    return email
+
+
+def _gumroad_credit_target_email(parsed_form: Dict[str, Any]) -> str:
+    for key in (
+        "url_params[userid]",
+        "userid",
+        "user_id",
+        "custom_fields[userid]",
+        "custom_fields[user_id]",
+    ):
+        email = _gumroad_clean_email(parsed_form.get(key))
+        if email:
+            return email
+    return _gumroad_clean_email(parsed_form.get("email")) or "unknown"
+
+
+def _is_autorig_credit_product(product_key: str) -> bool:
+    return (product_key or "").strip().lower() in AUTORIG_DONATION_PRODUCT_KEYS
+
+
 @app.post("/api-gumroad")
 @app.post("/webhook/gumroad")
 @app.post("/gumroad")
@@ -4165,8 +4192,9 @@ async def api_gumroad_ping(
     parsed_form = dict(parse_qsl(raw_body.decode("utf-8", errors="ignore"), keep_blank_values=True))
 
     sale_id = (parsed_form.get("sale_id") or "").strip()
-    email = (parsed_form.get("email") or "").strip() or "unknown"
-    product = (parsed_form.get("product_permalink") or "").strip() or "unknown"
+    checkout_email = _gumroad_clean_email(parsed_form.get("email")) or "unknown"
+    email = _gumroad_credit_target_email(parsed_form)
+    product = (parsed_form.get("product_permalink") or parsed_form.get("permalink") or "").strip() or "unknown"
     product_name = (parsed_form.get("product_name") or "").strip() or None
     price_raw = (parsed_form.get("price") or "").strip() or "0"
     is_test = str(parsed_form.get("test") or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -4187,7 +4215,7 @@ async def api_gumroad_ping(
     known_product = product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
     should_notify_purchase = False
 
-    if product_key.startswith("autorig-") and email and email != "unknown":
+    if _is_autorig_credit_product(product_key) and email and email != "unknown":
         try:
             async with AsyncSessionLocal() as db:
                 purchase = GumroadPurchase(
@@ -4220,7 +4248,7 @@ async def api_gumroad_ping(
                     user = user_result.scalar_one_or_none()
                     if user and credits_to_add > 0:
                         user.balance_credits = max(0, int(user.balance_credits or 0) + credits_to_add)
-                        user.gumroad_email = email
+                        user.gumroad_email = checkout_email if checkout_email != "unknown" else email
                         purchase.credited = True
                         purchase.credits_added = credits_to_add
                         local_credits_added = credits_to_add
