@@ -1077,8 +1077,8 @@ def _validate_worker_url(url: str) -> str:
 # =============================================================================
 ANIMATION_SINGLE_CREDITS = 1
 ANIMATION_BUNDLE_CREDITS = 10
-DOWNLOAD_ALL_FILES_CREDITS = 10
-ANIMAL_RIG_DOWNLOAD_CREDITS = 10
+DOWNLOAD_ALL_FILES_CREDITS = 30
+ANIMAL_RIG_DOWNLOAD_CREDITS = 30
 ANIMAL_VARIANT_TYPES = [
     "dog",
     "bear",

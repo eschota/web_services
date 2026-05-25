@@ -201,8 +201,8 @@ CRYPTO_BTC_USD_RATE = float(os.getenv("CRYPTO_BTC_USD_RATE", "95000"))
 AUTORIG_CRYPTO_TIERS: list[tuple[str, int, float]] = [
     ("oneclick-30-credits", 30, 3.0),
     ("autorig-100", 100, 10.0),
-    ("autorig-500", 500, 50.0),
-    ("autorig-1000", 1000, 100.0),
+    ("autorig-500", 500, 39.0),
+    ("autorig-1000", 1000, 69.0),
 ]
 CRYPTO_ALLOWED_TIER_KEYS = frozenset(t[0] for t in AUTORIG_CRYPTO_TIERS)
 

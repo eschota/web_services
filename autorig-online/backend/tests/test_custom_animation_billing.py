@@ -47,7 +47,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
 
         async with self.database.AsyncSessionLocal() as db:
             owner = self.database.User(email="owner@example.com", name="Owner", balance_credits=0)
-            buyer = self.database.User(email="buyer@example.com", name="Buyer", balance_credits=35)
+            buyer = self.database.User(email="buyer@example.com", name="Buyer", balance_credits=75)
             task = self.database.Task(
                 id=self.task_id,
                 owner_type="user",
@@ -129,7 +129,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(r3.success)
             self.assertEqual(buyer.balance_credits, c2 - 10)
 
-            # Legacy "download all files" endpoint now charges 10 credits.
+            # Full ZIP download costs one $3 entry pack.
             c3 = buyer.balance_credits
             r4 = await self.main.api_purchase_files(
                 self.task_id,
@@ -140,10 +140,10 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
             self.assertTrue(r4.success)
-            self.assertEqual(buyer.balance_credits, c3 - 10)
+            self.assertEqual(buyer.balance_credits, c3 - 30)
 
             await db.refresh(owner)
-            self.assertEqual(owner.balance_credits, 21)  # 1 + 10 + 10
+            self.assertEqual(owner.balance_credits, 41)  # 1 + 10 + 30
 
     async def test_gumroad_mapping_animal_cost_and_bonus_disabled(self):
         self.assertEqual(self.main.GUMROAD_PRODUCT_CREDITS.get("oneclick-30-credits"), 30)
@@ -176,7 +176,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 user=buyer,
                 db=db,
             )
-            self.assertEqual(state.all_files_credits, 10)
+            self.assertEqual(state.all_files_credits, 30)
 
             c0 = buyer.balance_credits
             purchased = await self.main.api_purchase_files(
@@ -188,7 +188,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
             self.assertTrue(purchased.success)
-            self.assertEqual(buyer.balance_credits, c0 - 10)
+            self.assertEqual(buyer.balance_credits, c0 - 30)
 
             before_bonus = buyer.balance_credits
             bonus = await self.main.grant_youtube_bonus(user=buyer, db=db)
