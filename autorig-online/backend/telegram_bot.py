@@ -874,10 +874,14 @@ async def broadcast_credits_purchase_click(
     package: str,
     price: str,
     user_email: str | None = None,
-    anon_id: str | None = None
+    anon_id: str | None = None,
+    product_kind: str = "credits",
+    permalink: str = "",
+    source: str = "",
+    page_url: str = "",
 ) -> None:
-    """Notify when user clicks buy credits button."""
-    print(f"[Telegram] broadcast_credits_purchase_click: package={package}, price={price}")
+    """Notify when user clicks a Gumroad purchase button."""
+    print(f"[Telegram] broadcast_credits_purchase_click: kind={product_kind}, package={package}, price={price}")
     token = _get_token()
     if not token:
         print("[Telegram] No token, skipping credits purchase notification")
@@ -888,7 +892,19 @@ async def broadcast_credits_purchase_click(
 
     bot = Bot(token=token)
     actor = user_email or (f"anon:{anon_id}" if anon_id else "anonymous")
-    text = f"💰 <b>Credits purchase click</b>\nPackage: {html.escape(package)} | Price: {html.escape(price)} | User: {html.escape(actor)}"
+    details = [
+        f"Kind: {html.escape(product_kind or 'unknown')}",
+        f"Package: {html.escape(package)}",
+        f"Price: {html.escape(price)}",
+        f"User: {html.escape(actor)}",
+    ]
+    if permalink:
+        details.append(f"Permalink: <code>{html.escape(permalink)}</code>")
+    if source:
+        details.append(f"Source: <code>{html.escape(source)}</code>")
+    text = "💰 <b>Purchase click</b>\n" + " | ".join(details)
+    if page_url:
+        text += f'\nPage: <a href="{html.escape(page_url)}">open</a>'
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:

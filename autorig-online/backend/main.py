@@ -10176,11 +10176,15 @@ async def notify_credits_click(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Notify Telegram about credits purchase click"""
+    """Notify Telegram about a purchase button click."""
     try:
         body = await request.json()
-        package = body.get('package', 'unknown')
-        price = body.get('price', 'unknown')
+        package = str(body.get('package') or 'unknown')[:120]
+        price = str(body.get('price') or 'unknown')[:80]
+        product_kind = str(body.get('product_kind') or 'credits')[:40]
+        permalink = str(body.get('permalink') or '')[:120]
+        source = str(body.get('source') or '')[:80]
+        page_url = str(body.get('page_url') or '')[:500]
         
         # Get user info from session
         user_email = None
@@ -10209,7 +10213,11 @@ async def notify_credits_click(
             package=package,
             price=price,
             user_email=user_email,
-            anon_id=anon_id
+            anon_id=anon_id,
+            product_kind=product_kind,
+            permalink=permalink,
+            source=source,
+            page_url=page_url,
         ))
         
         return {"ok": True}

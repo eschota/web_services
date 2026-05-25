@@ -6740,7 +6740,7 @@
                     kind: 'credits',
                     permalink: 'oneclick-30-credits',
                     title: '30 credits',
-                    price: '$3+',
+                    price: '$3',
                     credits: 30,
                     note: 'One full ZIP unlock, or custom animation downloads.'
                 },
@@ -6748,7 +6748,7 @@
                     kind: 'credits',
                     permalink: 'autorig-100',
                     title: '100 credits',
-                    price: '$10+',
+                    price: '$10',
                     credits: 100,
                     note: 'Recommended: 3 full ZIP unlocks plus animation buffer.',
                     featured: true
@@ -6757,7 +6757,7 @@
                     kind: 'credits',
                     permalink: 'autorig-500',
                     title: '500 credits',
-                    price: '$39+',
+                    price: '$39',
                     credits: 500,
                     note: 'For repeat batches when you know you will download more.'
                 },
@@ -6765,7 +6765,7 @@
                     kind: 'credits',
                     permalink: 'autorig-1000',
                     title: '1000 credits',
-                    price: '$69+',
+                    price: '$69',
                     credits: 1000,
                     note: 'Best volume price for heavier one-time batches.'
                 },
@@ -6773,7 +6773,7 @@
                     kind: 'plugin',
                     permalink: 'blender-plugin',
                     title: 'Blender Standalone Plugin',
-                    price: '$199+',
+                    price: '$199',
                     note: 'Native Blender add-on for AutoRig.online workflows.'
                 }
             ],
@@ -6851,14 +6851,18 @@
             },
 
             async notifyPaywallProductClick(product) {
-                if (!product || product.kind !== 'credits') return;
+                if (!product) return;
                 try {
                     await fetch('/api/notify/credits-click', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            package: `${product.credits} credits`,
-                            price: String(product.price || '').replace('+', '')
+                            product_kind: product.kind || 'unknown',
+                            permalink: product.permalink || '',
+                            package: product.kind === 'credits' ? `${product.credits} credits` : product.title,
+                            price: String(product.price || ''),
+                            source: 'task_paywall_modal',
+                            page_url: window.location.href
                         })
                     });
                 } catch (_) {

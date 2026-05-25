@@ -392,7 +392,7 @@
                     </ul>
                     <div class="buy-product-actions">
                         <a href="/blender-plugin" class="btn btn-ghost" data-i18n="buy_product_plugin_learn">Learn more</a>
-                        <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" data-i18n="buy_product_plugin_cta">Buy Blender Plugin</a>
+                        <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" id="buy-plugin-main" data-i18n="buy_product_plugin_cta">Buy Blender Plugin</a>
                     </div>
                 </article>
             </section>
@@ -1104,10 +1104,11 @@
             const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
             
             const packageInfo = {
-                'oneclick-30-credits': { credits: '30', price: '$3' },
-                'autorig-100': { credits: '100', price: '$10' },
-                'autorig-500': { credits: '500', price: '$39' },
-                'autorig-1000': { credits: '1000', price: '$69' }
+                'oneclick-30-credits': { credits: '30', price: '$3', product_kind: 'credits' },
+                'autorig-100': { credits: '100', price: '$10', product_kind: 'credits' },
+                'autorig-500': { credits: '500', price: '$39', product_kind: 'credits' },
+                'autorig-1000': { credits: '1000', price: '$69', product_kind: 'credits' },
+                'blender-plugin': { credits: '', price: '$199', product_kind: 'plugin', package: 'Blender Standalone Plugin' }
             };
             
             const go = (p) => {
@@ -1123,7 +1124,14 @@
                 fetch('/api/notify/credits-click', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ package: `${info.credits} credits`, price: info.price })
+                    body: JSON.stringify({
+                        product_kind: info.product_kind || 'credits',
+                        permalink: p,
+                        package: info.package || `${info.credits} credits`,
+                        price: info.price,
+                        source: 'buy_credits_page',
+                        page_url: window.location.href
+                    })
                 }).catch(() => {}); // ignore errors
                 
                 window.location.href = gumroadUrl(p, uid);
@@ -1132,6 +1140,10 @@
             document.getElementById('buy-100')?.addEventListener('click', () => go('autorig-100'));
             document.getElementById('buy-500')?.addEventListener('click', () => go('autorig-500'));
             document.getElementById('buy-1000')?.addEventListener('click', () => go('autorig-1000'));
+            document.getElementById('buy-plugin-main')?.addEventListener('click', (event) => {
+                event.preventDefault();
+                go('blender-plugin');
+            });
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
