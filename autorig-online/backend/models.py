@@ -538,6 +538,13 @@ class AnimationCatalogItem(BaseModel):
     purchased: bool = False
     file_name: Optional[str] = None
     preview_url: Optional[str] = None
+    source_kind: Optional[str] = None
+    animal_type: Optional[str] = None
+    orientation: Optional[str] = None
+    action_name: Optional[str] = None
+    download_scope: Optional[str] = None
+    pack_credits: Optional[int] = None
+    pack_purchased: Optional[bool] = None
 
 
 class AnimationCatalogResponse(BaseModel):
@@ -553,6 +560,8 @@ class AnimationCatalogResponse(BaseModel):
 class AnimationPurchaseRequest(BaseModel):
     animation_id: Optional[str] = None
     all: Optional[bool] = None
+    animal_type: Optional[str] = None
+    orientation: Optional[str] = None
 
 
 class AnimationPurchaseResponse(BaseModel):

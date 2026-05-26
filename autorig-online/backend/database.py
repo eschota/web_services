@@ -200,6 +200,28 @@ class TaskAnimationBundlePurchase(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TaskAnimalAnimationPackPurchase(Base):
+    """Purchase of one animal variant animation pack for a task."""
+    __tablename__ = "task_animal_animation_pack_purchases"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id",
+            "user_email",
+            "animal_type",
+            "orientation",
+            name="uq_task_animal_animation_pack_purchase",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    animal_type = Column(String(32), nullable=False, index=True)
+    orientation = Column(String(16), nullable=False, index=True)
+    credits_spent = Column(Integer, nullable=False, default=10)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Task(Base):
     """Conversion task"""
     __tablename__ = "tasks"
@@ -1113,6 +1135,25 @@ async def init_db():
                     """
                     CREATE UNIQUE INDEX IF NOT EXISTS uq_task_animation_bundle_purchase
                     ON task_animation_bundle_purchases (task_id, user_email)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS task_animal_animation_pack_purchases (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id VARCHAR(36) NOT NULL,
+                        user_email VARCHAR(255) NOT NULL,
+                        animal_type VARCHAR(32) NOT NULL,
+                        orientation VARCHAR(16) NOT NULL,
+                        credits_spent INTEGER NOT NULL DEFAULT 10,
+                        created_at DATETIME
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_task_animal_animation_pack_purchase
+                    ON task_animal_animation_pack_purchases (task_id, user_email, animal_type, orientation)
                     """
                 )
             except Exception:

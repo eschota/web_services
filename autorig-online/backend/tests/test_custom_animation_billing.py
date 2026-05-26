@@ -70,6 +70,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             await db.execute(delete(self.database.TaskFilePurchase))
             await db.execute(delete(self.database.TaskAnimationPurchase))
             await db.execute(delete(self.database.TaskAnimationBundlePurchase))
+            await db.execute(delete(self.database.TaskAnimalAnimationPackPurchase))
             await db.execute(delete(self.database.Task))
             await db.execute(delete(self.database.User))
             await db.commit()
@@ -212,6 +213,126 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(bonus["ok"])
             self.assertTrue(bonus["disabled"])
             self.assertEqual(buyer.balance_credits, before_bonus)
+
+    async def test_animal_animation_catalog_pack_purchase_and_download(self):
+        task_id = "33333333-4444-5555-6666-777777777777"
+        guid = "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
+        fbx_name = f"{guid}_dog_front_all_animations_unity.fbx"
+        fbx_url = f"http://worker.example/converter/glb/{guid}/{fbx_name}"
+        worker_files = [
+            {"name": fbx_name, "url": fbx_url, "size": 1234},
+        ]
+        matrix = {
+            "dog:front": {
+                "animal_slug": "dog",
+                "orientation": "front",
+                "status": "succeeded",
+                "stage4_finalize": {
+                    "after_actions": [
+                        "Dog_default",
+                        "Dog_dig",
+                        "Dog_idle",
+                        "Dog_run",
+                        "Dog_trot",
+                    ]
+                },
+            }
+        }
+
+        async with self.database.AsyncSessionLocal() as db:
+            task = self.database.Task(
+                id=task_id,
+                owner_type="user",
+                owner_id="owner@example.com",
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                status="done",
+                input_type="animal",
+                guid=guid,
+                worker_api=f"http://worker.example/converter/glb/{guid}/",
+                viewer_settings='{"rig_v2_animal_detection":{"animal_type":"horse"}}',
+            )
+            db.add(task)
+            await db.commit()
+
+        with (
+            patch.object(self.main, "_fetch_worker_model_files", new=AsyncMock(return_value=(True, worker_files, {}, None))),
+            patch.object(self.main, "_fetch_animal_variant_matrix", new=AsyncMock(return_value=matrix)),
+        ):
+            async with self.database.AsyncSessionLocal() as db:
+                buyer = (
+                    await db.execute(
+                        self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                    )
+                ).scalar_one()
+
+                catalog = await self.main.api_get_animation_catalog(
+                    task_id,
+                    animal_type="dog",
+                    orientation="front",
+                    user=buyer,
+                    db=db,
+                )
+                self.assertEqual(catalog.pricing["animal_animation_pack_credits"], 10)
+                self.assertFalse(catalog.pricing["animal_animation_pack_purchased"])
+                self.assertEqual(len(catalog.animations), 5)
+                self.assertEqual(catalog.animations[3].action_name, "Dog_run")
+                self.assertEqual(catalog.animations[3].source_kind, "animal_variant_pack")
+                self.assertEqual(catalog.animations[3].download_scope, "variant_pack")
+                self.assertTrue(catalog.animations[3].preview_url.endswith("/animal_dog_front_dog_run"))
+
+                with patch.object(self.main, "_proxy_model_file", new=AsyncMock(return_value="preview-ok")) as proxy:
+                    preview = await self.main.api_preview_animation(
+                        task_id,
+                        "animal_dog_front_dog_run",
+                        request=self._fake_request(),
+                        response=Response(),
+                        user=buyer,
+                        db=db,
+                    )
+                self.assertEqual(preview, "preview-ok")
+                proxy.assert_awaited_once()
+
+                with self.assertRaises(self.main.HTTPException) as denied:
+                    await self.main.api_download_animal_animation_pack(
+                        task_id,
+                        animal_type="dog",
+                        orientation="front",
+                        user=buyer,
+                        db=db,
+                    )
+                self.assertEqual(denied.exception.status_code, 402)
+
+                c0 = buyer.balance_credits
+                purchased = await self.main.api_purchase_animation(
+                    task_id,
+                    self.models.AnimationPurchaseRequest(all=True, animal_type="dog", orientation="front"),
+                    user=buyer,
+                    db=db,
+                )
+                self.assertTrue(purchased.success)
+                self.assertTrue(purchased.purchased_all)
+                self.assertEqual(buyer.balance_credits, c0 - 10)
+
+                c1 = buyer.balance_credits
+                duplicate = await self.main.api_purchase_animation(
+                    task_id,
+                    self.models.AnimationPurchaseRequest(animation_id="animal_dog_front_dog_run"),
+                    user=buyer,
+                    db=db,
+                )
+                self.assertTrue(duplicate.success)
+                self.assertEqual(buyer.balance_credits, c1)
+
+                with patch.object(self.main, "_download_worker_file_bytes", new=AsyncMock(return_value=b"fbx bytes")):
+                    response = await self.main.api_download_animal_animation_pack(
+                        task_id,
+                        animal_type="dog",
+                        orientation="front",
+                        user=buyer,
+                        db=db,
+                    )
+                self.assertEqual(response.media_type, "application/zip")
+                Path(response.path).unlink(missing_ok=True)
 
     async def test_zz_catalog_synthesizes_when_only_all_animations_glb_and_worker_list_empty(self):
         """Regression: many tasks list *_all_animations.glb but not *_all_animations_unity.fbx."""

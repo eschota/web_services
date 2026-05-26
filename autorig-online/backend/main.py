@@ -9,7 +9,7 @@ import shutil
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Set
 import hashlib
 import hmac
 import secrets
@@ -75,7 +75,8 @@ from config import (
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
-    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
+    TaskAnimationPurchase, TaskAnimationBundlePurchase, TaskAnimalAnimationPackPurchase,
+    GumroadPurchase, RoadmapVote,
     CryptoPaymentReport, EmailCampaignClick, EmailCampaignSend, EmailDeliveryEvent,
     SupportChatSession,
     SupportChatMessage,
@@ -1077,6 +1078,7 @@ def _validate_worker_url(url: str) -> str:
 # =============================================================================
 ANIMATION_SINGLE_CREDITS = 1
 ANIMATION_BUNDLE_CREDITS = 10
+ANIMAL_ANIMATION_PACK_CREDITS = 10
 DOWNLOAD_ALL_FILES_CREDITS = 30
 ANIMAL_RIG_DOWNLOAD_CREDITS = 30
 ANIMAL_VARIANT_TYPES = [
@@ -4656,6 +4658,263 @@ async def _fetch_animal_variant_matrix(task: Task, file_map: Dict[str, Dict[str,
     return {}
 
 
+def _animal_animation_id(animal_type: str, orientation: str, action_name: str) -> str:
+    action_key = _normalize_animation_key(action_name)
+    return f"animal_{animal_type}_{orientation}_{action_key}"
+
+
+def _parse_animal_animation_id(animation_id: str) -> Optional[Tuple[str, str, str]]:
+    anim_id = _normalize_animation_key(animation_id)
+    if not anim_id.startswith("animal_"):
+        return None
+    for animal_type in ANIMAL_VARIANT_TYPES:
+        for orientation in ANIMAL_VARIANT_ORIENTATIONS:
+            prefix = f"animal_{animal_type}_{orientation}_"
+            if anim_id.startswith(prefix):
+                action_key = anim_id[len(prefix):].strip("_")
+                if action_key:
+                    return animal_type, orientation, action_key
+    return None
+
+
+def _clean_animal_action_name(value: Any) -> Optional[str]:
+    name = str(value or "").strip()
+    if not name:
+        return None
+    if name.endswith("__LD_STAGE4_TUNED"):
+        return None
+    return name[:128]
+
+
+def _extract_animal_variant_actions(row: Dict[str, Any], animal_type: str) -> List[str]:
+    candidates: List[Any] = []
+    if isinstance(row, dict):
+        stage4 = row.get("stage4_finalize")
+        if isinstance(stage4, dict):
+            for key in ("after_actions", "actions_after", "actions"):
+                raw = stage4.get(key)
+                if isinstance(raw, list):
+                    candidates.extend(raw)
+                    break
+            if not candidates:
+                raw_before = stage4.get("before_actions")
+                if isinstance(raw_before, list):
+                    candidates.extend(raw_before)
+        for key in ("after_actions", "actions_after", "actions"):
+            raw = row.get(key)
+            if isinstance(raw, list):
+                candidates.extend(raw)
+                break
+
+    actions: List[str] = []
+    seen: Set[str] = set()
+    for raw in candidates:
+        clean = _clean_animal_action_name(raw)
+        if not clean:
+            continue
+        key = _normalize_animation_key(clean)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        actions.append(clean)
+
+    if not actions:
+        label = animal_type.capitalize()
+        actions.append(f"{label}_default")
+    return actions
+
+
+async def _has_animal_animation_pack_purchase(
+    db: AsyncSession,
+    user: Optional[User],
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+) -> bool:
+    if not user:
+        return False
+    result = await db.execute(
+        select(TaskAnimalAnimationPackPurchase).where(
+            TaskAnimalAnimationPackPurchase.task_id == task_id,
+            TaskAnimalAnimationPackPurchase.user_email == user.email,
+            TaskAnimalAnimationPackPurchase.animal_type == animal_type,
+            TaskAnimalAnimationPackPurchase.orientation == orientation,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _build_animal_animation_catalog_response(
+    task: Task,
+    db: AsyncSession,
+    user: Optional[User],
+    animal_type: Optional[str] = None,
+    orientation: Optional[str] = None,
+) -> AnimationCatalogResponse:
+    selected_animal = _task_animal_type_from_settings(task)
+    normalized_animal = str(animal_type or selected_animal or "").strip().lower()
+    normalized_orientation = str(orientation or "front").strip().lower()
+    if normalized_animal not in ANIMAL_VARIANT_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid animal type")
+    if normalized_orientation not in ANIMAL_VARIANT_ORIENTATIONS:
+        raise HTTPException(status_code=400, detail="Invalid animal orientation")
+
+    file_name: Optional[str] = None
+    ready = False
+    try:
+        _source_url, file_name = await _resolve_animal_variant_source(
+            task,
+            normalized_animal,
+            normalized_orientation,
+            "fbx",
+        )
+        ready = True
+    except HTTPException as exc:
+        if exc.status_code not in (404,):
+            raise
+
+    available, files, _data, _error = await _fetch_worker_model_files(task)
+    file_map: Dict[str, Dict[str, Any]] = {}
+    if available:
+        for item in files:
+            name = str(item.get("name") or "").strip()
+            if name:
+                file_map[name.lower()] = item
+    matrix = await _fetch_animal_variant_matrix(task, file_map)
+    row = matrix.get(f"{normalized_animal}:{normalized_orientation}") or {}
+    actions = _extract_animal_variant_actions(row, normalized_animal)
+    pack_purchased = await _has_animal_animation_pack_purchase(
+        db,
+        user,
+        task.id,
+        normalized_animal,
+        normalized_orientation,
+    )
+
+    items: List[AnimationCatalogItem] = []
+    purchased_ids: List[str] = []
+    for action_name in actions:
+        item_id = _animal_animation_id(normalized_animal, normalized_orientation, action_name)
+        if pack_purchased:
+            purchased_ids.append(item_id)
+        items.append(AnimationCatalogItem(
+            id=item_id,
+            name=action_name,
+            type="animal",
+            type_label="Animal actions",
+            tags=["animal", normalized_animal, normalized_orientation],
+            credits=ANIMAL_ANIMATION_PACK_CREDITS,
+            format="fbx",
+            available=ready,
+            ready=ready,
+            purchased=pack_purchased,
+            file_name=file_name,
+            preview_url=f"/api/task/{task.id}/animations/preview/{quote(item_id)}" if ready else None,
+            source_kind="animal_variant_pack",
+            animal_type=normalized_animal,
+            orientation=normalized_orientation,
+            action_name=action_name,
+            download_scope="variant_pack",
+            pack_credits=ANIMAL_ANIMATION_PACK_CREDITS,
+            pack_purchased=pack_purchased,
+        ))
+
+    return AnimationCatalogResponse(
+        types=[{"id": "animal", "label": "Animal actions", "count": len(items)}],
+        animations=items,
+        purchased_all=pack_purchased,
+        purchased_ids=sorted(purchased_ids),
+        login_required=(user is None),
+        user_credits=(user.balance_credits if user else 0),
+        pricing={
+            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
+            "all_animations_credits": ANIMAL_ANIMATION_PACK_CREDITS,
+            "animal_animation_pack_credits": ANIMAL_ANIMATION_PACK_CREDITS,
+            "animal_animation_pack_purchased": pack_purchased,
+            "download_format": "fbx",
+            "download_scope": "variant_pack",
+            "animal_type": normalized_animal,
+            "orientation": normalized_orientation,
+            "animal_animation_pack_download_url": (
+                f"/api/task/{task.id}/animations/download-pack"
+                f"?animal_type={quote(normalized_animal)}&orientation={quote(normalized_orientation)}"
+            ),
+        },
+    )
+
+
+async def _purchase_animal_animation_pack(
+    task: Task,
+    db: AsyncSession,
+    user: User,
+    animal_type: Optional[str],
+    orientation: Optional[str],
+) -> AnimationPurchaseResponse:
+    selected_animal = _task_animal_type_from_settings(task)
+    normalized_animal = str(animal_type or selected_animal or "").strip().lower()
+    normalized_orientation = str(orientation or "front").strip().lower()
+    if normalized_animal not in ANIMAL_VARIANT_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid animal type")
+    if normalized_orientation not in ANIMAL_VARIANT_ORIENTATIONS:
+        raise HTTPException(status_code=400, detail="Invalid animal orientation")
+
+    await _resolve_animal_variant_source(task, normalized_animal, normalized_orientation, "fbx")
+    already = await _has_animal_animation_pack_purchase(
+        db,
+        user,
+        task.id,
+        normalized_animal,
+        normalized_orientation,
+    )
+    if already:
+        catalog = await _build_animal_animation_catalog_response(
+            task,
+            db,
+            user,
+            animal_type=normalized_animal,
+            orientation=normalized_orientation,
+        )
+        return AnimationPurchaseResponse(
+            success=True,
+            purchased_animation_ids=sorted(catalog.purchased_ids),
+            purchased_all=catalog.purchased_all,
+            credits_remaining=user.balance_credits,
+        )
+
+    cost = ANIMAL_ANIMATION_PACK_CREDITS
+    if user.balance_credits < cost:
+        raise HTTPException(status_code=402, detail="Insufficient credits")
+
+    user.balance_credits -= cost
+    await _credit_task_owner_for_sale(db, task, user, cost)
+    db.add(TaskAnimalAnimationPackPurchase(
+        task_id=task.id,
+        user_email=user.email,
+        animal_type=normalized_animal,
+        orientation=normalized_orientation,
+        credits_spent=cost,
+    ))
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+
+    catalog = await _build_animal_animation_catalog_response(
+        task,
+        db,
+        user,
+        animal_type=normalized_animal,
+        orientation=normalized_orientation,
+    )
+    return AnimationPurchaseResponse(
+        success=True,
+        purchased_animation_ids=sorted(catalog.purchased_ids),
+        purchased_all=catalog.purchased_all,
+        credits_remaining=user.balance_credits,
+    )
+
+
 async def _fetch_animal_variant_progress_line(task: Task) -> Optional[str]:
     if not task.guid or not task.worker_api:
         return None
@@ -4865,6 +5124,85 @@ async def api_animal_variant_download(
         raise HTTPException(status_code=402, detail="Full download purchase required")
     source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, kind)
     return await _proxy_model_file(source_url, filename, as_attachment=True)
+
+
+async def _animal_animation_pack_download_response(
+    task: Task,
+    user: Optional[User],
+    db: AsyncSession,
+    animal_type: str,
+    orientation: str,
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    animal_type = str(animal_type or "").strip().lower()
+    orientation = str(orientation or "").strip().lower()
+    if animal_type not in ANIMAL_VARIANT_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid animal type")
+    if orientation not in ANIMAL_VARIANT_ORIENTATIONS:
+        raise HTTPException(status_code=400, detail="Invalid animal orientation")
+
+    if not await _has_animal_animation_pack_purchase(db, user, task.id, animal_type, orientation):
+        raise HTTPException(status_code=402, detail="Payment required to download this animal animation pack")
+
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "fbx")
+    fbx_bytes = await _download_worker_file_bytes(
+        source_url,
+        "Animal animation pack FBX",
+        max_bytes=250 * 1024 * 1024,
+    )
+
+    safe_variant = re.sub(r"[^a-zA-Z0-9_.-]+", "_", f"{animal_type}_{orientation}").strip("_")
+    zip_path = Path(tempfile.gettempdir()) / f"autorig_{task.id}_{safe_variant}_animal_animations_{uuid.uuid4().hex}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(filename, fbx_bytes)
+        zf.writestr(
+            "README.txt",
+            (
+                "This animal animation pack contains one rigged FBX file.\n\n"
+                "The FBX includes the selected animal variant rig and all animation clips generated by AutoRig.online for this variant.\n"
+                "Use the animation/action list inside your DCC or game engine to select the clip you need.\n"
+                "Blend files and full task archives remain separate downloads.\n"
+            ),
+        )
+
+    if task.ga_client_id:
+        asyncio.create_task(send_ga4_event(
+            task.ga_client_id,
+            "animal_animation_pack_downloaded",
+            {
+                "task_id": task.id,
+                "animal_type": animal_type,
+                "orientation": orientation,
+                "filename": filename,
+            },
+        ))
+
+    bundle_name = f"{task.id}_{safe_variant}_animal_animations.zip"
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=bundle_name,
+        headers={"Cache-Control": "private, max-age=0"},
+        background=BackgroundTask(lambda: zip_path.unlink(missing_ok=True)),
+    )
+
+
+@app.get("/api/task/{task_id}/animations/download-pack")
+async def api_download_animal_animation_pack(
+    task_id: str,
+    animal_type: str,
+    orientation: str = "front",
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _is_animal_task(task):
+        raise HTTPException(status_code=404, detail="Animal animation packs are available for animal rig tasks only")
+    return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
 
 
 @app.post("/api/task/{task_id}/retry", response_model=TaskCreateResponse)
@@ -5385,6 +5723,8 @@ async def api_purchase_files(
 @app.get("/api/task/{task_id}/animations/catalog", response_model=AnimationCatalogResponse)
 async def api_get_animation_catalog(
     task_id: str,
+    animal_type: Optional[str] = None,
+    orientation: Optional[str] = None,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -5392,6 +5732,15 @@ async def api_get_animation_catalog(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    if _is_animal_task(task):
+        return await _build_animal_animation_catalog_response(
+            task,
+            db,
+            user,
+            animal_type=animal_type,
+            orientation=orientation,
+        )
 
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
@@ -5477,6 +5826,22 @@ async def api_purchase_animation(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    if _is_animal_task(task):
+        parsed_animal = _parse_animal_animation_id(str(purchase_req.animation_id or ""))
+        if parsed_animal:
+            animal_type, orientation, _action_key = parsed_animal
+        else:
+            animal_type = purchase_req.animal_type
+            orientation = purchase_req.orientation
+        if purchase_req.all or parsed_animal or animal_type or orientation:
+            return await _purchase_animal_animation_pack(
+                task,
+                db,
+                user,
+                animal_type=animal_type,
+                orientation=orientation,
+            )
 
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
@@ -5605,6 +5970,12 @@ async def api_preview_animation(
         raise HTTPException(status_code=403, detail="Not authorized to preview this animation")
 
     anim_id = _normalize_animation_key(animation_id)
+    parsed_animal = _parse_animal_animation_id(anim_id)
+    if parsed_animal and _is_animal_task(task):
+        animal_type, orientation, _action_key = parsed_animal
+        source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "fbx")
+        return await _proxy_model_file(source_url, filename, as_attachment=False)
+
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
     catalog_by_id: Dict[str, dict] = {}
@@ -5669,6 +6040,11 @@ async def api_download_animation(
         raise HTTPException(status_code=404, detail="Task not found")
 
     anim_id = _normalize_animation_key(animation_id)
+    parsed_animal = _parse_animal_animation_id(anim_id)
+    if parsed_animal and _is_animal_task(task):
+        animal_type, orientation, _action_key = parsed_animal
+        return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
+
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
     catalog_by_id: Dict[str, dict] = {}
@@ -5751,6 +6127,11 @@ async def api_download_animation_with_base(
         raise HTTPException(status_code=404, detail="Task not found")
 
     anim_id = _normalize_animation_key(animation_id)
+    parsed_animal = _parse_animal_animation_id(anim_id)
+    if parsed_animal and _is_animal_task(task):
+        animal_type, orientation, _action_key = parsed_animal
+        return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
+
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
     catalog_by_id: Dict[str, dict] = {}
