@@ -29,6 +29,7 @@ from workers import (
     lookup_worker_queue_entry,
     task_visible_on_worker_refs,
     find_worker_queue_status_for_task,
+    quarantine_worker,
 )
 
 
@@ -51,6 +52,27 @@ RIG_V2_WORKER_ANIMAL_TYPES = {
     "turtle",
 }
 RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
+
+
+def _is_transient_worker_dispatch_error(error: Optional[str]) -> bool:
+    msg = (error or "").strip().lower()
+    if not msg:
+        return False
+    if re.search(r"http\s+(429|5\d\d)\b", msg):
+        return True
+    return any(
+        marker in msg
+        for marker in (
+            "timeout",
+            "timed out",
+            "connection",
+            "connect",
+            "network",
+            "temporar",
+            "read error",
+            "server disconnected",
+        )
+    )
 
 
 def _animal_detection_confident_enough(detection: Any) -> bool:
@@ -477,12 +499,33 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         animal_semantic_markers=animal_semantic_markers,
     )
     if not result.success:
+        error = result.error or "Worker dispatch failed"
+        if _is_transient_worker_dispatch_error(error):
+            quarantine_worker(worker_url, reason=f"dispatch_failed:{error[:120]}")
+            task.status = "created"
+            task.worker_api = None
+            task.worker_task_id = None
+            task.progress_page = None
+            task.guid = None
+            task.output_urls = []
+            task.ready_urls = []
+            task.ready_count = 0
+            task.total_count = 0
+            task.video_ready = False
+            task.video_url = None
+            task.error_message = None
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            print(f"[Tasks] Requeued {task.id} after transient worker dispatch failure on {worker_url}: {error}")
+            return task, error
+
         task.status = "error"
-        task.error_message = result.error
+        task.error_message = error
         task.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(task)
-        return task, result.error
+        return task, error
 
     task.worker_task_id = result.task_id
     task.progress_page = result.progress_page

@@ -309,11 +309,15 @@ async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerI
             data = response.json()
             # Worker may return load info in different formats
             load = data.get("load")
+            active = _safe_worker_int(data.get("total_active"), 0)
+            pending = _safe_worker_int(data.get("total_pending"), 0)
+            queue_size = _safe_worker_int(data.get("queue_size"), 0)
+            counter_load = active + pending + queue_size
             if load is None:
-                load = _safe_worker_int(data.get("total_active"), 0) + _safe_worker_int(data.get("queue_size"), 0)
+                load = counter_load
             if isinstance(load, (int, float)):
-                return WorkerInfo(url=worker_url, available=True, load=float(load))
-            return WorkerInfo(url=worker_url, available=True, load=0.0)
+                return WorkerInfo(url=worker_url, available=True, load=max(float(load), float(counter_load)))
+            return WorkerInfo(url=worker_url, available=True, load=float(counter_load))
         return WorkerInfo(url=worker_url, available=False, error=f"HTTP {response.status_code}")
     except Exception as e:
         return WorkerInfo(url=worker_url, available=False, error=str(e))

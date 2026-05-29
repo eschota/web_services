@@ -179,6 +179,7 @@ async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quar
         if (
             w.available
             and (get_worker_effective_active(w, backend_processing) < w.max_concurrent)
+            and ((w.total_pending or 0) <= 0)
             and (w.queue_size <= 0)
             and (allow_quarantined or not is_worker_quarantined(w.url))
         )
