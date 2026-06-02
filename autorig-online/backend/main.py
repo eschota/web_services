@@ -661,6 +661,7 @@ async def background_task_updater():
                 if background_worker_cycle_count % CLEANUP_CHECK_INTERVAL_CYCLES == 0:
                     try:
                         from main import cleanup_disk_space
+                        await enforce_task_cache_max_size(db)
                         result = await cleanup_disk_space(
                             min_free_gb=MIN_FREE_SPACE_GB,
                             db=db,
@@ -809,6 +810,22 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    try:
+        async with AsyncSessionLocal() as startup_db:
+            await enforce_task_cache_max_size(startup_db)
+            startup_cleanup = await cleanup_disk_space(
+                min_free_gb=MIN_FREE_SPACE_GB,
+                db=startup_db,
+                delete_task_rows=AUTOMATIC_TASK_DB_DELETION,
+            )
+            if startup_cleanup.get("deleted_count", 0) > 0:
+                print(
+                    f"[Startup Disk] Cleanup freed {startup_cleanup.get('freed_gb', 0):.2f} GB, "
+                    f"deleted {startup_cleanup.get('deleted_count', 0)} item(s)"
+                )
+    except Exception as e:
+        print(f"[Startup Disk] Cleanup failed: {e}")
     
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
@@ -3247,12 +3264,16 @@ async def api_create_task(
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
+    disk_headroom_checked = False
 
     # Handle file upload
     final_url = input_url
     if file is not None:
         source = "upload"
     if source == "upload" and file:
+        await ensure_request_disk_headroom(db, context="task_create_upload")
+        disk_headroom_checked = True
+
         # Save uploaded file
         upload_token = str(uuid.uuid4())
         upload_dir = os.path.join(UPLOAD_DIR, upload_token)
@@ -3290,6 +3311,9 @@ async def api_create_task(
     
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
+
+    if not disk_headroom_checked:
+        await ensure_request_disk_headroom(db, context="task_create")
 
     preflight_render_image_data_url = (
         preflight_render_image_data_url
@@ -4085,6 +4109,8 @@ async def api_create_convert_from_rig_task(
             status_code=400,
             detail="Prepared GLB is not available for this task",
         )
+
+    await ensure_request_disk_headroom(db, context="convert_from_rig")
 
     task, error = await create_conversion_task(
         db,
@@ -9625,7 +9651,11 @@ async def purge_terminal_upload_dirs(
     return deleted, freed
 
 
-async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
+async def ensure_disk_headroom_for_new_task(
+    db: AsyncSession,
+    *,
+    delete_task_rows: bool = AUTOMATIC_TASK_DB_DELETION,
+) -> dict:
     """
     Run when creating a new task: if free space on / is below NEW_TASK_MIN_FREE_GB,
     first delete bundle ZIPs, then old terminal-task upload originals; if still low,
@@ -9676,6 +9706,25 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
                 f"[NewTask Disk] Upload purge: removed {ud} folder(s), "
                 f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB)"
             )
+        return summary
+
+    if not delete_task_rows:
+        print(
+            f"[NewTask Disk] Still low after non-DB cleanup: "
+            f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB); "
+            "skipping task DB row purge"
+        )
+        try:
+            from telegram_bot import broadcast_disk_space_low
+
+            await broadcast_disk_space_low(
+                free_gb=summary["final_free_gb"],
+                target_gb=NEW_TASK_MIN_FREE_GB,
+                zips_deleted=summary["zips_deleted"],
+                tasks_purged=0,
+            )
+        except Exception as e:
+            print(f"[NewTask Disk] Telegram disk-low notify failed: {e}")
         return summary
 
     task_phase_freed = 0
@@ -9734,6 +9783,37 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
         except Exception as e:
             print(f"[NewTask Disk] Telegram disk-low notify failed: {e}")
     return summary
+
+
+async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dict[str, Any]:
+    """
+    Request-path disk guard. It may remove regenerable bundle ZIPs, stale terminal
+    upload originals, and orphan cache files, but it never deletes task DB rows.
+    """
+    try:
+        await enforce_task_cache_max_size(db)
+        result = await cleanup_disk_space(
+            min_free_gb=NEW_TASK_MIN_FREE_GB,
+            db=db,
+            delete_task_rows=False,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[Request Disk] Cleanup failed before {context}: {exc}")
+        result = {}
+
+    free_gb = shutil.disk_usage("/").free / (1024**3)
+    if free_gb < NEW_TASK_MIN_FREE_GB:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Server disk is under pressure. "
+                f"{free_gb:.2f}GB free, target is {NEW_TASK_MIN_FREE_GB:.2f}GB. "
+                "Please try again later."
+            ),
+        )
+    return result
 
 
 def _parse_uuid_dirname(name: str) -> Optional[uuid.UUID]:
