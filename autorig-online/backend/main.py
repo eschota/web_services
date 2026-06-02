@@ -5586,7 +5586,7 @@ async def api_get_purchase_state(
     )
     
     # Check if user is owner
-    is_owner = (
+    is_owner = bool(
         (user and task.owner_type == "user" and task.owner_id == user.email) or
         (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
@@ -5648,7 +5648,7 @@ async def api_purchase_files(
     )
     
     # Check if user is owner (owners must still purchase to download)
-    is_owner = (
+    is_owner = bool(
         (user and task.owner_type == "user" and task.owner_id == user.email) or
         (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
