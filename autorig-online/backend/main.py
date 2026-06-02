@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, or_, update
+from sqlalchemy import select, func, delete, or_, update, text
 from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -5580,12 +5580,15 @@ async def api_get_purchase_state(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    anon_session = await get_anon_session(request, response, db)
+    anon_id = (
+        getattr(request.state, "api_key_anon_id", None)
+        or request.cookies.get(ANON_COOKIE)
+    )
     
     # Check if user is owner
     is_owner = (
         (user and task.owner_type == "user" and task.owner_id == user.email) or
-        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+        (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
     
     # For non-owners, check purchases
@@ -5639,12 +5642,15 @@ async def api_purchase_files(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    anon_session = await get_anon_session(request, response, db)
+    anon_id = (
+        getattr(request.state, "api_key_anon_id", None)
+        or request.cookies.get(ANON_COOKIE)
+    )
     
     # Check if user is owner (owners must still purchase to download)
     is_owner = (
         (user and task.owner_type == "user" and task.owner_id == user.email) or
-        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+        (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
     
     # Check existing purchases
@@ -5673,21 +5679,45 @@ async def api_purchase_files(
         cost = _download_all_files_cost(task)
         if user.balance_credits < cost:
             raise HTTPException(status_code=402, detail="Insufficient credits")
-        
-        # Deduct credits from buyer
+
+        insert_result = await db.execute(
+            text(
+                """
+                INSERT INTO task_file_purchases
+                    (task_id, user_email, file_index, credits_spent, created_at)
+                SELECT
+                    :task_id, :user_email, NULL, :credits_spent, :created_at
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM task_file_purchases
+                    WHERE task_id = :task_id
+                      AND user_email = :user_email
+                      AND file_index IS NULL
+                )
+                """
+            ),
+            {
+                "task_id": task_id,
+                "user_email": user.email,
+                "credits_spent": cost,
+                "created_at": datetime.utcnow(),
+            },
+        )
+        if insert_result.rowcount == 0:
+            await db.rollback()
+            await db.refresh(user)
+            return PurchaseResponse(
+                success=True,
+                purchased_files=list(already_indices),
+                purchased_all=True,
+                credits_remaining=user.balance_credits,
+            )
+
+        # Deduct credits from buyer only after a new unlock row was reserved.
         user.balance_credits -= cost
         
         # Credit task owner (if they have a user account)
         await _credit_task_owner_for_sale(db, task, user, cost)
-        
-        # Create purchase record for "all files"
-        purchase = TaskFilePurchase(
-            task_id=task_id,
-            user_email=user.email,
-            file_index=None,  # NULL means all files
-            credits_spent=cost
-        )
-        db.add(purchase)
         await db.commit()
         
         return PurchaseResponse(
@@ -8101,6 +8131,34 @@ async def _ensure_purchased_worker_bundle_zip_url(
     return task, zip_url
 
 
+async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
+    urls_to_cache = list(dict.fromkeys((task.ready_urls or []) + (task.output_urls or [])))
+    cache_dir = TASK_CACHE_DIR / task.id
+    if urls_to_cache:
+        await cache_task_files(task.id, urls_to_cache, task.guid)
+
+    files = [
+        p for p in sorted(cache_dir.iterdir())
+        if p.is_file() and not p.name.endswith(".tmp") and not p.name.startswith(".")
+    ] if cache_dir.exists() else []
+    if not files:
+        raise HTTPException(status_code=404, detail="No downloadable task files are available")
+
+    safe_guid = (task.guid or task.id).strip()
+    zip_path = Path(tempfile.gettempdir()) / f"autorig_{task.id}_{uuid.uuid4().hex}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for file_path in files:
+            zf.write(file_path, arcname=file_path.name)
+
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"{safe_guid}.zip",
+        headers={"Cache-Control": "private, max-age=0"},
+        background=BackgroundTask(lambda: zip_path.unlink(missing_ok=True)),
+    )
+
+
 @app.get("/api/task/{task_id}/downloads/bundle-url")
 async def api_task_worker_bundle_url(
     task_id: str,
@@ -8134,7 +8192,11 @@ async def _stream_purchased_task_bundle_zip(
 
     safe_guid = (task.guid or task_id).strip()
     filename = f"{safe_guid}.zip"
-    return await _proxy_model_file(zip_url, filename, as_attachment=True)
+    try:
+        return await _proxy_model_file(zip_url, filename, as_attachment=True)
+    except HTTPException as exc:
+        print(f"[Bundle] Worker ZIP unavailable for task {task_id}: {exc.detail}; building fallback")
+        return await _build_task_bundle_zip_from_cache(task)
 
 
 @app.get("/api/task/{task_id}/downloads/bundle")
@@ -11974,9 +12036,9 @@ async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> 
                 async with client.stream("GET", url, follow_redirects=True) as response:
                     if response.status_code == 200:
                         # Write to temp file first, then rename (atomic)
-                        temp_path = filepath.with_suffix('.tmp')
+                        temp_path = filepath.with_name(f".{filename}.{uuid.uuid4().hex}.tmp")
                         size_bytes = await _stream_httpx_response_to_file(response, temp_path)
-                        temp_path.rename(filepath)
+                        os.replace(temp_path, filepath)
                         
                         cached_files.append({
                             "name": filename,

@@ -7,7 +7,7 @@ import json
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
-    UniqueConstraint, ForeignKey, create_engine, event, Index,
+    UniqueConstraint, ForeignKey, create_engine, event, Index, text,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -697,15 +697,33 @@ async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlay
 
 async def bump_admin_overlay_task_completed(db: AsyncSession, task: Task) -> None:
     """Счётчик периода: +1 done и сумма длительностей (created→updated)."""
-    from sqlalchemy import select, update
+    from sqlalchemy import update
 
     await get_or_create_admin_overlay_counters(db)
-    existing_event = await db.execute(
-        select(RigCompletionEvent.id).where(RigCompletionEvent.task_id == task.id)
-    )
-    is_new_public_event = existing_event.scalar_one_or_none() is None
-    if is_new_public_event:
-        db.add(RigCompletionEvent(task_id=task.id, completed_at=datetime.utcnow()))
+    completed_at = datetime.utcnow()
+    if "sqlite" in DATABASE_URL:
+        insert_result = await db.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO rig_completion_events (task_id, completed_at)
+                VALUES (:task_id, :completed_at)
+                """
+            ),
+            {"task_id": task.id, "completed_at": completed_at},
+        )
+    else:
+        insert_result = await db.execute(
+            text(
+                """
+                INSERT INTO rig_completion_events (task_id, completed_at)
+                VALUES (:task_id, :completed_at)
+                ON CONFLICT (task_id) DO NOTHING
+                """
+            ),
+            {"task_id": task.id, "completed_at": completed_at},
+        )
+    if insert_result.rowcount == 0:
+        return
 
     dur = 0.0
     if task.created_at and task.updated_at:
@@ -714,9 +732,8 @@ async def bump_admin_overlay_task_completed(db: AsyncSession, task: Task) -> Non
         "completed_count": AdminOverlayCounters.completed_count + 1,
         "total_duration_seconds": AdminOverlayCounters.total_duration_seconds + dur,
         "updated_at": datetime.utcnow(),
+        "public_completed_total": AdminOverlayCounters.public_completed_total + 1,
     }
-    if is_new_public_event:
-        values["public_completed_total"] = AdminOverlayCounters.public_completed_total + 1
     await db.execute(
         update(AdminOverlayCounters)
         .where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
