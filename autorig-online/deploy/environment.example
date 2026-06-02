@@ -4,7 +4,8 @@
 # Disk (optional): free-space targets and purge caps — see backend/config.py
 # NEW_TASK_MIN_FREE_GB=2.1
 # NEW_TASK_PURGE_TASKS_MAX_FREED_GB=8
-# MIN_FREE_SPACE_GB=10
+# MIN_FREE_SPACE_GB=2.5
+# UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS=1
 # AUTOMATIC_TASK_DB_DELETION=0
 
 RESEND_API_KEY=

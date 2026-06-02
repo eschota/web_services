@@ -1,0 +1,11 @@
+[Unit]
+Description=Run AutoRig pressure-only disk cleanup periodically
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -278,7 +278,7 @@ MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "2.5"))  # Critical fre
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
 UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS = float(
-    os.getenv("UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS", "24")
+    os.getenv("UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS", "1")
 )  # Under disk pressure, terminal-task upload originals older than this may be removed
 
 # Before each new task: try to reach at least this much free space on /
