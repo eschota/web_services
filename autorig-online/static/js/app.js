@@ -262,9 +262,10 @@ const App = {
                 this.setConvertFormBusyMessage('upload_progress_creating_task');
             });
             xhr.onload = () => {
+                const text = xhr.responseText || '';
                 let data = {};
                 try {
-                    data = JSON.parse(xhr.responseText || '{}');
+                    data = JSON.parse(text || '{}');
                 } catch (err) {
                     data = {};
                 }
@@ -272,11 +273,54 @@ const App = {
                     ok: xhr.status >= 200 && xhr.status < 300,
                     status: xhr.status,
                     data,
+                    text,
                 });
             };
             xhr.onerror = () => reject(new Error('network'));
             xhr.send(formData);
         });
+    },
+
+    parseTaskCreateResponseText(text) {
+        try {
+            const data = JSON.parse(text || '{}');
+            return data && typeof data === 'object' ? data : {};
+        } catch (err) {
+            return {};
+        }
+    },
+
+    taskCreateErrorMessage(status, data, text) {
+        const detail = data && typeof data.detail === 'string' ? data.detail.trim() : '';
+        if (detail) return detail;
+
+        const translatedOr = (key, fallback) => {
+            const value = typeof t === 'function' ? t(key) : '';
+            return value && value !== key ? value : fallback;
+        };
+
+        if (status === 413) {
+            return translatedOr(
+                'error_upload_too_large',
+                'This file is too large. Upload a GLB, FBX, or OBJ file up to 100MB.'
+            );
+        }
+        if (status === 429) {
+            return translatedOr(
+                'error_rate_limited',
+                'Too many upload attempts. Please wait a minute and try again.'
+            );
+        }
+        if (status === 502 || status === 503 || status === 504) {
+            return translatedOr(
+                'error_service_unavailable',
+                'The rigging service is temporarily unavailable. Please try again in a few minutes.'
+            );
+        }
+        if (status > 0 && text && !String(text).trim().startsWith('{')) {
+            return `${translatedOr('error_generic', 'Something went wrong. Please try again.')} (HTTP ${status})`;
+        }
+        return translatedOr('error_generic', 'Something went wrong. Please try again.');
     },
 
     async loadRigV2VisionDeps() {
@@ -1350,6 +1394,7 @@ const App = {
             let ok;
             let status;
             let data;
+            let responseText = '';
 
             if (isUpload) {
                 const result = await this.postTaskCreateMultipart(formData, (pct) =>
@@ -1358,13 +1403,15 @@ const App = {
                 ok = result.ok;
                 status = result.status;
                 data = result.data;
+                responseText = result.text;
             } else {
                 const response = await fetch('/api/task/create', {
                     method: 'POST',
                     body: formData,
                 });
                 status = response.status;
-                data = await response.json();
+                responseText = await response.text();
+                data = this.parseTaskCreateResponseText(responseText);
                 ok = response.ok;
             }
 
@@ -1377,7 +1424,7 @@ const App = {
                 } else if (status === 402) {
                     window.location.href = '/buy-credits';
                 } else {
-                    alert(data.detail || t('error_generic'));
+                    alert(this.taskCreateErrorMessage(status, data, responseText));
                 }
             }
         } catch (error) {
