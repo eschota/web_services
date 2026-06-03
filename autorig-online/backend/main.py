@@ -10007,6 +10007,82 @@ async def enforce_task_cache_max_size(db: AsyncSession) -> Dict[str, Any]:
     return summary
 
 
+async def evict_task_cache_until_free_space(
+    db: AsyncSession,
+    *,
+    min_free_gb: float,
+    record_items: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Pressure-only task cache eviction.
+
+    This removes oldest static/tasks/<task_id> directories until root free space
+    reaches min_free_gb. It does not delete task DB rows and skips active tasks.
+    """
+    target_bytes = int(float(min_free_gb) * 1024 * 1024 * 1024)
+    free_bytes = shutil.disk_usage("/").free
+    summary: Dict[str, Any] = {
+        "target_free_gb": float(min_free_gb),
+        "initial_free_gb": free_bytes / (1024**3),
+        "initial_task_cache_gb": _dir_size_bytes(TASK_CACHE_DIR) / (1024**3),
+        "dirs_removed": 0,
+        "bytes_freed": 0,
+        "final_free_gb": free_bytes / (1024**3),
+        "final_task_cache_gb": _dir_size_bytes(TASK_CACHE_DIR) / (1024**3),
+    }
+    if free_bytes >= target_bytes:
+        return summary
+
+    safety = 0
+    while shutil.disk_usage("/").free < target_bytes:
+        safety += 1
+        if safety > 50000:
+            print("[TaskCachePressure] Safety stop: too many iterations")
+            break
+
+        candidates = await _task_cache_eviction_candidates(db)
+        if not candidates:
+            break
+
+        _ts, dirname = candidates[0]
+        target = TASK_CACHE_DIR / dirname
+        if not target.is_dir():
+            continue
+
+        try:
+            before = _dir_size_bytes(target)
+            shutil.rmtree(target)
+            summary["dirs_removed"] += 1
+            summary["bytes_freed"] += before
+            if record_items is not None:
+                record_items.append(
+                    {
+                        "path": dirname,
+                        "type": "task_cache_pressure",
+                        "size_mb": before / (1024**2),
+                    }
+                )
+            print(
+                f"[TaskCachePressure] Removed {dirname} (~{before / (1024**2):.1f} MB), "
+                f"free now {shutil.disk_usage('/').free / (1024**3):.2f} GB "
+                f"(target {min_free_gb} GB)"
+            )
+        except OSError as e:
+            print(f"[TaskCachePressure] Failed to remove {target}: {e}")
+            break
+
+    final_free = shutil.disk_usage("/").free
+    summary["final_free_gb"] = final_free / (1024**3)
+    summary["final_task_cache_gb"] = _dir_size_bytes(TASK_CACHE_DIR) / (1024**3)
+    if summary["dirs_removed"] > 0:
+        print(
+            f"[TaskCachePressure] Complete: removed {summary['dirs_removed']} dir(s), "
+            f"freed {summary['bytes_freed'] / (1024**3):.2f} GB, "
+            f"free now {summary['final_free_gb']:.2f} GB"
+        )
+    return summary
+
+
 async def purge_tasks_without_poster_and_video(db: AsyncSession) -> dict:
     """
     Delete terminal tasks (done/error) with no poster-like URL in ready_urls/output_urls.
@@ -12198,6 +12274,26 @@ async def cleanup_disk_space(
                 if ud > 0:
                     print(
                         f"[Disk Cleanup] Target reached after terminal upload purge: "
+                        f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
+                    )
+                return result
+
+            cd = await evict_task_cache_until_free_space(
+                cleanup_db,
+                min_free_gb=min_free_gb,
+                record_items=result["deleted_items"],
+            )
+            result["deleted_count"] += int(cd.get("dirs_removed") or 0)
+            result["freed_bytes"] += int(cd.get("bytes_freed") or 0)
+
+            disk_usage = shutil.disk_usage("/")
+            free_bytes = disk_usage.free
+            if free_bytes >= min_free_bytes:
+                result["freed_gb"] = result["freed_bytes"] / (1024**3)
+                result["final_free_gb"] = free_bytes / (1024**3)
+                if cd.get("dirs_removed"):
+                    print(
+                        f"[Disk Cleanup] Target reached after task cache pressure eviction: "
                         f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
                     )
                 return result

@@ -342,7 +342,7 @@ class AdminOverlayCounters(Base):
     # Public all-time completed rig count; not reset by admin overlay metrics.
     public_completed_total = Column(Integer, nullable=False, default=7124)
     # Upper bound for total size of static/tasks (GB); evict oldest cache dirs when exceeded
-    task_cache_max_gb = Column(Float, nullable=False, default=30.0)
+    task_cache_max_gb = Column(Float, nullable=False, default=22.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -934,7 +934,7 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN stuck_hour_requeue_count INTEGER DEFAULT 0")
             await _try_add_column(
-                "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 30"
+                "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 22"
             )
             await _try_add_column(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN public_completed_total INTEGER DEFAULT 7124"
@@ -1313,7 +1313,7 @@ async def init_db():
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stuck_hour_requeue_count INTEGER NOT NULL DEFAULT 0"
             )
             await _try_add_column_any(
-                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 30"
+                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 22"
             )
             await _try_add_column_any(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS public_completed_total INTEGER NOT NULL DEFAULT 7124"
