@@ -4177,6 +4177,23 @@ def _normalize_gumroad_product_key(raw_value: str | None) -> str:
     return value.strip().lower()
 
 
+def _gumroad_product_key_from_payload(product: str | None, product_name: str | None) -> str:
+    product_key = _normalize_gumroad_product_key(product)
+    if product_key in GUMROAD_PRODUCT_CREDITS:
+        return product_key
+
+    name = (product_name or "").strip().lower()
+    if "autorig" not in name or "credit" not in name:
+        return product_key
+    if re.search(r"\b1000\b", name):
+        return "autorig-1000"
+    if re.search(r"\b100\b", name):
+        return "autorig-100"
+    if re.search(r"\b30\b", name):
+        return "oneclick-30-credits"
+    return product_key
+
+
 def _gumroad_clean_email(value: Optional[str]) -> str:
     email = (str(value or "").strip()).lower()
     if not email or len(email) > 255:
@@ -4239,7 +4256,7 @@ async def api_gumroad_ping(
     except Exception:
         price_cents = 0
 
-    product_key = _normalize_gumroad_product_key(product)
+    product_key = _gumroad_product_key_from_payload(product, product_name)
     local_credits_added = 0
     known_product = product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
     should_notify_purchase = False

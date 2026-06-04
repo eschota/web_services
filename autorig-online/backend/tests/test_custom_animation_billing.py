@@ -154,6 +154,18 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.main._is_autorig_credit_product("free3d-10credits"))
         self.assertFalse(self.main._is_autorig_credit_product("blender-plugin"))
         self.assertEqual(
+            self.main._gumroad_product_key_from_payload("", "Autorig - 100 Credits"),
+            "autorig-100",
+        )
+        self.assertEqual(
+            self.main._gumroad_product_key_from_payload("unexpected-product", "Autorig - 1000 Credits"),
+            "autorig-1000",
+        )
+        self.assertEqual(
+            self.main._gumroad_product_key_from_payload("unexpected-product", "Autorig - 30 Credits"),
+            "oneclick-30-credits",
+        )
+        self.assertEqual(
             self.main._gumroad_credit_target_email(
                 {
                     "email": "merchant-checkout@example.com",
