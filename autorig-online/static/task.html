@@ -7016,6 +7016,21 @@
                         await this.openPaywallModal({ source: 'download_all', requiredCredits: this.getDownloadAllCredits() });
                         return;
                     }
+                    if (resp.status === 402) {
+                        await releaseDownloadAllUi(false);
+                        if (this._bundleUnlockRecoveryActive) {
+                            alert(tPrep('download_unlock_required', 'Unlock this task with credits before downloading.'));
+                            return;
+                        }
+                        this._bundleUnlockRecoveryActive = true;
+                        try {
+                            await this.loadPurchaseState();
+                            await this.downloadAllOrPurchase();
+                        } finally {
+                            this._bundleUnlockRecoveryActive = false;
+                        }
+                        return;
+                    }
                     if (!resp.ok) {
                         let detail = tPrep('archive_failed', 'Download failed');
                         try {
