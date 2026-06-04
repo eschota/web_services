@@ -5439,6 +5439,7 @@
                 
                 // Start polling
                 await this.fetchTask();
+                await this.resumePendingDownloadUnlockIfNeeded(params);
                 this.startTaskPolling();
                 
                 // Load task card info (likes, sales, author)
@@ -6815,6 +6816,59 @@
                 return Number.isFinite(value) && value > 0 ? value : 10;
             },
 
+            pendingDownloadUnlockKey: 'autorigPendingDownloadUnlock',
+            pendingDownloadUnlockMaxAgeMs: 24 * 60 * 60 * 1000,
+
+            getPendingDownloadUnlock() {
+                try {
+                    const raw = localStorage.getItem(this.pendingDownloadUnlockKey);
+                    if (!raw) return null;
+                    const intent = JSON.parse(raw);
+                    if (!intent || typeof intent !== 'object') return null;
+                    const createdAt = Number(intent.createdAt || 0);
+                    if (!createdAt || Date.now() - createdAt > this.pendingDownloadUnlockMaxAgeMs) {
+                        this.clearPendingDownloadUnlock();
+                        return null;
+                    }
+                    return intent;
+                } catch (e) {
+                    this.clearPendingDownloadUnlock();
+                    return null;
+                }
+            },
+
+            savePendingDownloadUnlock(context = {}) {
+                if (!this.taskId) return;
+                const requiredCredits = Number(context.requiredCredits || this.getDownloadAllCredits());
+                const intent = {
+                    taskId: String(this.taskId),
+                    requiredCredits: Number.isFinite(requiredCredits) && requiredCredits > 0 ? requiredCredits : this.getDownloadAllCredits(),
+                    balanceBefore: Number(this.purchaseState?.user_credits || 0),
+                    source: context.source || 'download_all',
+                    createdAt: Date.now()
+                };
+                try {
+                    localStorage.setItem(this.pendingDownloadUnlockKey, JSON.stringify(intent));
+                } catch (e) {
+                    console.warn('Failed to save pending download unlock:', e);
+                }
+            },
+
+            clearPendingDownloadUnlock() {
+                try {
+                    localStorage.removeItem(this.pendingDownloadUnlockKey);
+                } catch (_) {
+                    /* ignore */
+                }
+            },
+
+            clearResumeDownloadUnlockParam() {
+                const url = new URL(window.location.href);
+                if (!url.searchParams.has('resume_download_unlock')) return;
+                url.searchParams.delete('resume_download_unlock');
+                window.history.replaceState({}, '', url.toString());
+            },
+
             paywallLoginUrl() {
                 return '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
             },
@@ -6919,6 +6973,9 @@
                             return;
                         }
                         await this.notifyPaywallProductClick(product);
+                        if (product.kind === 'credits') {
+                            this.savePendingDownloadUnlock(context);
+                        }
                         window.location.href = this.gumroadPaywallUrl(product.permalink);
                     });
                 });
@@ -7025,7 +7082,7 @@
                         this._bundleUnlockRecoveryActive = true;
                         try {
                             await this.loadPurchaseState();
-                            await this.downloadAllOrPurchase();
+                            await this.downloadAllOrPurchase({ source: 'bundle_402_recovery' });
                         } finally {
                             this._bundleUnlockRecoveryActive = false;
                         }
@@ -7059,19 +7116,68 @@
                 }
             },
 
-            async downloadAllOrPurchase() {
-                if (this.isDownloadingAll) return;
+            async resumePendingDownloadUnlockIfNeeded(params = new URLSearchParams(window.location.search)) {
+                if (params.get('resume_download_unlock') !== '1') return false;
+                let pending = this.getPendingDownloadUnlock();
+                if (!pending && params.get('autorig_unlock_dry_run') === '1') {
+                    pending = {
+                        taskId: String(this.taskId || ''),
+                        requiredCredits: Number(params.get('required_credits') || this.getDownloadAllCredits()),
+                        balanceBefore: 0,
+                        source: 'download_all',
+                        createdAt: Date.now()
+                    };
+                }
+                if (!pending || String(pending.taskId || '') !== String(this.taskId || '')) {
+                    this.clearResumeDownloadUnlockParam();
+                    return false;
+                }
+
+                if (params.get('autorig_unlock_dry_run') === '1') {
+                    const requiredCredits = Number(pending.requiredCredits || this.getDownloadAllCredits());
+                    confirm(`[DRY RUN] ${t('purchase_confirm_all')} ${requiredCredits} credits?`);
+                    alert('Dry-run only: no credits were spent and no download unlock was created.');
+                    this.clearPendingDownloadUnlock();
+                    this.clearResumeDownloadUnlockParam();
+                    return false;
+                }
+
+                await this.loadPurchaseState();
+                if (this.purchaseState.purchased_all) {
+                    this.clearPendingDownloadUnlock();
+                    this.clearResumeDownloadUnlockParam();
+                    return true;
+                }
+
+                const requiredCredits = Number(pending.requiredCredits || this.getDownloadAllCredits());
+                const balance = Number(this.purchaseState?.user_credits || 0);
+                if (this.purchaseState.login_required || balance < requiredCredits) {
+                    return false;
+                }
+
+                const unlocked = await this.downloadAllOrPurchase({
+                    source: 'resume_download_unlock',
+                    clearPendingOnCancel: true,
+                });
+                if (!unlocked) {
+                    this.clearResumeDownloadUnlockParam();
+                }
+                return unlocked;
+            },
+
+            async downloadAllOrPurchase(options = {}) {
+                if (this.isDownloadingAll) return false;
                 const total = Number(this.task?.total_count || 0);
                 const readyN = (this.downloadItems || []).length;
                 if (this.task?.status !== 'done' || (readyN === 0 && total === 0)) {
                     alert(t('error_generic'));
-                    return;
+                    return false;
                 }
 
                 if (!this.purchaseState.purchased_all) {
                     if (this.purchaseState.login_required) {
                         await this.openPaywallModal({ source: 'download_all', requiredCredits: this.getDownloadAllCredits() });
-                        return;
+                        return false;
                     }
                     const downloadAllCost = this.getDownloadAllCredits();
                     if (this.purchaseState.user_credits < downloadAllCost) {
@@ -7085,9 +7191,14 @@
                             console.warn('Purchase intent notify failed:', e);
                         }
                         await this.openPaywallModal({ source: 'download_all', requiredCredits: downloadAllCost });
-                        return;
+                        return false;
                     }
-                    if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) return;
+                    if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) {
+                        if (options.clearPendingOnCancel) {
+                            this.clearPendingDownloadUnlock();
+                        }
+                        return false;
+                    }
 
                     try {
                         const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
@@ -7099,19 +7210,22 @@
                         if (resp.ok) {
                             this.purchaseState.purchased_all = true;
                             this.purchaseState.user_credits = data.credits_remaining;
+                            this.clearPendingDownloadUnlock();
+                            this.clearResumeDownloadUnlockParam();
                             await this.loadAnimationCatalog(true);
                         } else {
                             alert(data.detail || t('error_generic'));
-                            return;
+                            return false;
                         }
                     } catch (e) {
                         console.error('Purchase error:', e);
                         alert(t('error_generic'));
-                        return;
+                        return false;
                     }
                 }
 
                 await this.downloadAllFiles();
+                return true;
             },
 
             async loadPurchaseState() {
