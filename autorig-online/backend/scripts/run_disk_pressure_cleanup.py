@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 
@@ -60,11 +61,16 @@ def _target_free_gb(*, min_free_gb: float, used_percent_threshold: float, buffer
     return max(float(min_free_gb), threshold_free_gb + float(buffer_gb))
 
 
+def _age_cutoff_timestamp(min_age_hours: float) -> float:
+    return time.time() - max(0.0, float(min_age_hours)) * 3600.0
+
+
 def _purge_oldest_glb_cache_until(
     *,
     glb_cache_dir: Path,
     target_free_gb: float,
     max_cache_gb: float,
+    min_age_hours: float,
 ) -> tuple[int, int]:
     removed = 0
     freed = 0
@@ -72,10 +78,13 @@ def _purge_oldest_glb_cache_until(
         return removed, freed
 
     candidates: list[tuple[float, int, Path]] = []
+    cutoff_ts = _age_cutoff_timestamp(min_age_hours)
     for path in glb_cache_dir.glob("*.glb"):
         try:
             stat = path.stat()
         except FileNotFoundError:
+            continue
+        if stat.st_mtime > cutoff_ts:
             continue
         candidates.append((stat.st_mtime, stat.st_size, path))
 
@@ -100,7 +109,12 @@ def _purge_oldest_glb_cache_until(
     return removed, freed
 
 
-def _filesystem_prepass(*, target_free_gb: float, glb_cache_max_gb: float) -> dict:
+def _filesystem_prepass(
+    *,
+    target_free_gb: float,
+    glb_cache_max_gb: float,
+    glb_cache_min_age_hours: float,
+) -> dict:
     from main import GLB_CACHE_DIR, purge_task_cache_bundle_zips
 
     summary = {
@@ -139,6 +153,7 @@ def _filesystem_prepass(*, target_free_gb: float, glb_cache_max_gb: float) -> di
         glb_cache_dir=GLB_CACHE_DIR,
         target_free_gb=target_free_gb,
         max_cache_gb=float(glb_cache_max_gb),
+        min_age_hours=float(glb_cache_min_age_hours),
     )
     summary["prepass_glb_deleted"] = int(gd)
     summary["prepass_freed_gb"] += float(gb) / (1024**3)
@@ -147,7 +162,7 @@ def _filesystem_prepass(*, target_free_gb: float, glb_cache_max_gb: float) -> di
     return summary
 
 
-async def _enforce_periodic_task_cache_max_size(db, *, max_gb: float) -> dict:
+async def _enforce_periodic_task_cache_max_size(db, *, max_gb: float, min_age_hours: float) -> dict:
     from main import TASK_CACHE_DIR, _task_cache_eviction_candidates, purge_task_cache_bundle_zips
 
     if max_gb <= 0:
@@ -167,6 +182,7 @@ async def _enforce_periodic_task_cache_max_size(db, *, max_gb: float) -> dict:
     if total <= cap_bytes:
         return summary
 
+    cutoff_ts = _age_cutoff_timestamp(min_age_hours)
     safety = 0
     while _dir_size_bytes(TASK_CACHE_DIR) > cap_bytes:
         safety += 1
@@ -176,7 +192,14 @@ async def _enforce_periodic_task_cache_max_size(db, *, max_gb: float) -> dict:
         candidates = await _task_cache_eviction_candidates(db)
         if not candidates:
             break
-        _ts, dirname = candidates[0]
+        eligible = [item for item in candidates if item[0] <= cutoff_ts]
+        if not eligible:
+            print(
+                f"[TaskCacheCapPeriodic] No terminal task-cache dirs older than "
+                f"{float(min_age_hours):.1f}h; stop at {_dir_size_bytes(TASK_CACHE_DIR) / (1024**3):.2f} GB"
+            )
+            break
+        _ts, dirname = eligible[0]
         target = TASK_CACHE_DIR / dirname
         if not target.is_dir():
             continue
@@ -211,7 +234,9 @@ async def run() -> None:
         DISK_CLEANUP_TARGET_BUFFER_GB,
         DISK_CLEANUP_USED_PERCENT,
         GLB_CACHE_MAX_GB,
+        GLB_CACHE_MIN_AGE_HOURS,
         MIN_FREE_SPACE_GB,
+        PERIODIC_TASK_CACHE_MIN_AGE_HOURS,
         PERIODIC_TASK_CACHE_MAX_GB,
     )
     from database import AsyncSessionLocal, init_db
@@ -231,6 +256,7 @@ async def run() -> None:
     prepass = _filesystem_prepass(
         target_free_gb=target_free_gb,
         glb_cache_max_gb=float(GLB_CACHE_MAX_GB),
+        glb_cache_min_age_hours=float(GLB_CACHE_MIN_AGE_HOURS),
     )
     after_prepass = _disk_snapshot()
 
@@ -239,6 +265,7 @@ async def run() -> None:
         task_cache_summary = await _enforce_periodic_task_cache_max_size(
             db,
             max_gb=float(PERIODIC_TASK_CACHE_MAX_GB),
+            min_age_hours=float(PERIODIC_TASK_CACHE_MIN_AGE_HOURS),
         )
         result = await cleanup_disk_space(
             min_free_gb=target_free_gb,
@@ -278,7 +305,9 @@ async def run() -> None:
         "task_cache_gb": round(float(task_cache_gb), 4),
         "glb_cache_gb": round(float(glb_cache_gb), 4),
         "periodic_task_cache_cap_gb": round(float(PERIODIC_TASK_CACHE_MAX_GB), 4),
+        "periodic_task_cache_min_age_hours": round(float(PERIODIC_TASK_CACHE_MIN_AGE_HOURS), 2),
         "glb_cache_cap_gb": round(float(GLB_CACHE_MAX_GB), 4),
+        "glb_cache_min_age_hours": round(float(GLB_CACHE_MIN_AGE_HOURS), 2),
         "task_cache_dirs_removed": int(task_cache_summary.get("dirs_removed", 0) or 0),
         "task_cache_dirs_freed_gb": round(
             float(task_cache_summary.get("bytes_freed_dirs", 0) or 0) / (1024**3),

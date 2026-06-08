@@ -295,6 +295,12 @@ GLB_CACHE_MAX_GB = float(
 PERIODIC_TASK_CACHE_MAX_GB = float(
     os.getenv("PERIODIC_TASK_CACHE_MAX_GB", "14.0")
 )  # Periodic hard ceiling for static/tasks even if the admin UI cap is higher
+PERIODIC_TASK_CACHE_MIN_AGE_HOURS = float(
+    os.getenv("PERIODIC_TASK_CACHE_MIN_AGE_HOURS", "24")
+)  # Under pressure, evict static/tasks only for terminal tasks older than this
+GLB_CACHE_MIN_AGE_HOURS = float(
+    os.getenv("GLB_CACHE_MIN_AGE_HOURS", "24")
+)  # Under pressure, evict glb_cache only for files older than this
 
 # Before each new task: try to reach at least this much free space on /
 NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
