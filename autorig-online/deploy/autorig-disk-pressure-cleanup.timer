@@ -2,9 +2,9 @@
 Description=Run AutoRig pressure-only disk cleanup periodically
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=30min
-RandomizedDelaySec=5min
+OnBootSec=1min
+OnUnitActiveSec=1min
+RandomizedDelaySec=0
 Persistent=true
 
 [Install]

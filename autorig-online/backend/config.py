@@ -280,6 +280,21 @@ CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for pr
 UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS = float(
     os.getenv("UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS", "1")
 )  # Under disk pressure, terminal-task upload originals older than this may be removed
+DISK_ALERT_USED_PERCENT = float(
+    os.getenv("DISK_ALERT_USED_PERCENT", "90")
+)  # Send Telegram alerts while / stays at or above this used-percent threshold
+DISK_CLEANUP_USED_PERCENT = float(
+    os.getenv("DISK_CLEANUP_USED_PERCENT", "90")
+)  # Start periodic pressure cleanup before free space reaches the hard outage floor
+DISK_CLEANUP_TARGET_BUFFER_GB = float(
+    os.getenv("DISK_CLEANUP_TARGET_BUFFER_GB", "0.75")
+)  # Extra free-space margin above the used-percent threshold after cleanup
+GLB_CACHE_MAX_GB = float(
+    os.getenv("GLB_CACHE_MAX_GB", "6.0")
+)  # Hard cap for regenerable static/glb_cache during periodic cleanup
+PERIODIC_TASK_CACHE_MAX_GB = float(
+    os.getenv("PERIODIC_TASK_CACHE_MAX_GB", "14.0")
+)  # Periodic hard ceiling for static/tasks even if the admin UI cap is higher
 
 # Before each new task: try to reach at least this much free space on /
 NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))

@@ -1040,6 +1040,61 @@ async def broadcast_disk_space_low(
     await asyncio.gather(*[_one(cid) for cid in chat_ids])
 
 
+async def broadcast_disk_usage_warning(
+    *,
+    free_gb: float,
+    total_gb: float,
+    used_percent: float,
+    target_free_gb: float,
+    task_cache_gb: float,
+    glb_cache_gb: float,
+    periodic_task_cache_cap_gb: float,
+    glb_cache_cap_gb: float,
+) -> None:
+    """
+    Send a live disk-pressure warning every timer run while the root filesystem
+    remains above the configured used-percent threshold.
+    """
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping disk usage warning")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    text = (
+        "🚨 <b>AutoRig disk pressure</b>\n"
+        f"Root usage: <b>{used_percent:.1f}%</b> of <code>/</code>\n"
+        f"Free: <b>{free_gb:.2f} GB</b> / <b>{total_gb:.2f} GB</b>\n"
+        f"Cleanup target: <b>{target_free_gb:.2f} GB free</b>\n"
+        f"Task cache: <code>{task_cache_gb:.2f} GB</code> (cap <code>{periodic_task_cache_cap_gb:.2f} GB</code>)\n"
+        f"GLB cache: <code>{glb_cache_gb:.2f} GB</code> (cap <code>{glb_cache_cap_gb:.2f} GB</code>)"
+    )
+
+    bot = Bot(token=token)
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def _one(chat_id: int):
+        async with sem:
+            result = await _send_with_retry(
+                lambda cid=chat_id: bot.send_message(
+                    chat_id=cid,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            )
+            if result:
+                print(f"[Telegram] Disk usage warning sent to chat {chat_id}")
+
+    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+
+
 async def broadcast_feedback_submitted(
     user_email: str,
     text_content: str
