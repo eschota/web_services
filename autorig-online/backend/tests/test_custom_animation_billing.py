@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
+from urllib.parse import urlencode
 from unittest.mock import AsyncMock, patch
 from sqlalchemy import delete
 
@@ -71,6 +73,8 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             await db.execute(delete(self.database.TaskAnimationPurchase))
             await db.execute(delete(self.database.TaskAnimationBundlePurchase))
             await db.execute(delete(self.database.TaskAnimalAnimationPackPurchase))
+            await db.execute(delete(self.database.PurchaseCheckoutIntent))
+            await db.execute(delete(self.database.GumroadPurchase))
             await db.execute(delete(self.database.Task))
             await db.execute(delete(self.database.User))
             await db.commit()
@@ -225,6 +229,176 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(bonus["ok"])
             self.assertTrue(bonus["disabled"])
             self.assertEqual(buyer.balance_credits, before_bonus)
+
+    async def test_credit_checkout_route_records_intent_and_redirects(self):
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            req = self._fake_request(
+                method="GET",
+                path="/buy-credits/checkout/autorig-100",
+                query_string=f"source=task_paywall_modal&task_id={self.task_id}&required_credits=30".encode(),
+                headers=[(b"referer", b"https://autorig.test/task?id=111")],
+            )
+
+            with patch("telegram_bot.broadcast_credits_purchase_click", new=AsyncMock()) as tg:
+                resp = await self.main.buy_credits_checkout(
+                    "autorig-100",
+                    request=req,
+                    source="task_paywall_modal",
+                    task_id=self.task_id,
+                    required_credits=30,
+                    user=buyer,
+                    db=db,
+                )
+                await asyncio.sleep(0)
+
+            self.assertEqual(resp.status_code, 303)
+            self.assertEqual(
+                resp.headers["location"],
+                "https://u3d.gumroad.com/l/autorig-100?userid=buyer%40example.com",
+            )
+            tg.assert_called_once()
+
+            rows = (
+                await db.execute(
+                    self.main.select(self.database.PurchaseCheckoutIntent).where(
+                        self.database.PurchaseCheckoutIntent.user_email == "buyer@example.com"
+                    )
+                )
+            ).scalars().all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].product_permalink, "autorig-100")
+            self.assertEqual(rows[0].source, "task_paywall_modal")
+            self.assertEqual(rows[0].task_id, self.task_id)
+            self.assertEqual(rows[0].required_credits, 30)
+
+    async def test_credit_checkout_route_rejects_unknown_and_requires_login(self):
+        async with self.database.AsyncSessionLocal() as db:
+            req = self._fake_request(method="GET", path="/buy-credits/checkout/autorig-100")
+            resp = await self.main.buy_credits_checkout(
+                "autorig-100",
+                request=req,
+                user=None,
+                db=db,
+            )
+            self.assertEqual(resp.status_code, 303)
+            self.assertTrue(resp.headers["location"].startswith("/auth/login?next="))
+
+            with self.assertRaises(self.main.HTTPException) as denied:
+                await self.main.buy_credits_checkout(
+                    "free3d-10credits",
+                    request=req,
+                    user=None,
+                    db=db,
+                )
+            self.assertEqual(denied.exception.status_code, 404)
+
+    async def test_gumroad_webhook_auto_unlocks_recent_task_checkout_intent(self):
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, *args, **kwargs):
+                class Resp:
+                    status_code = 200
+
+                return Resp()
+
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            buyer.balance_credits = 0
+            db.add(
+                self.database.PurchaseCheckoutIntent(
+                    user_email="buyer@example.com",
+                    product_permalink="oneclick-30-credits",
+                    product_kind="credits",
+                    source="task_paywall_modal",
+                    task_id=self.task_id,
+                    required_credits=30,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                )
+            )
+            await db.commit()
+
+        body = urlencode(
+            {
+                "sale_id": "checkout-auto-unlock-sale",
+                "email": "checkout@example.com",
+                "url_params[userid]": "buyer@example.com",
+                "product_permalink": "oneclick-30-credits",
+                "product_name": "Autorig - 30 Credits",
+                "price": "300",
+            }
+        ).encode()
+        req = self._fake_request(
+            method="POST",
+            path="/api-gumroad",
+            headers=[(b"content-type", b"application/x-www-form-urlencoded")],
+            body=body,
+        )
+
+        with (
+            patch.object(self.main.httpx, "AsyncClient", return_value=DummyClient()),
+            patch("telegram_bot.broadcast_credits_purchased", new=AsyncMock()),
+        ):
+            resp = await self.main.api_gumroad_ping(req)
+            await asyncio.sleep(0)
+
+        self.assertEqual(resp.status_code, 200)
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            owner = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "owner@example.com")
+                )
+            ).scalar_one()
+            purchase = (
+                await db.execute(
+                    self.main.select(self.database.GumroadPurchase).where(
+                        self.database.GumroadPurchase.sale_id == "checkout-auto-unlock-sale"
+                    )
+                )
+            ).scalar_one()
+            unlock = (
+                await db.execute(
+                    self.main.select(self.database.TaskFilePurchase).where(
+                        self.database.TaskFilePurchase.task_id == self.task_id,
+                        self.database.TaskFilePurchase.user_email == "buyer@example.com",
+                        self.database.TaskFilePurchase.file_index.is_(None),
+                    )
+                )
+            ).scalar_one()
+            intent = (
+                await db.execute(
+                    self.main.select(self.database.PurchaseCheckoutIntent).where(
+                        self.database.PurchaseCheckoutIntent.user_email == "buyer@example.com"
+                    )
+                )
+            ).scalar_one()
+
+            self.assertTrue(purchase.credited)
+            self.assertEqual(purchase.credits_added, 30)
+            self.assertEqual(unlock.credits_spent, 30)
+            self.assertEqual(buyer.balance_credits, 0)
+            self.assertEqual(owner.balance_credits, 30)
+            self.assertEqual(intent.gumroad_sale_id, "checkout-auto-unlock-sale")
+            self.assertEqual(intent.auto_unlock_status, "unlocked")
+            self.assertIsNotNone(intent.used_at)
 
     async def test_animal_animation_catalog_pack_purchase_and_download(self):
         task_id = "33333333-4444-5555-6666-777777777777"
@@ -408,18 +582,35 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(hit)
                 self.assertIn("_100k", hit["url"])
 
-    def _fake_request(self) -> Request:
+    def _fake_request(
+        self,
+        method: str = "POST",
+        path: Optional[str] = None,
+        query_string: bytes = b"",
+        headers: Optional[list[tuple[bytes, bytes]]] = None,
+        body: bytes = b"",
+    ) -> Request:
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            if sent:
+                return {"type": "http.disconnect"}
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
         return Request(
             {
                 "type": "http",
-                "method": "POST",
-                "path": f"/api/task/{self.task_id}/purchases",
-                "headers": [],
-                "query_string": b"",
+                "method": method,
+                "path": path or f"/api/task/{self.task_id}/purchases",
+                "headers": headers or [],
+                "query_string": query_string,
                 "client": ("127.0.0.1", 12345),
                 "scheme": "http",
                 "server": ("testserver", 80),
-            }
+            },
+            receive=receive,
         )
 
 

@@ -6882,6 +6882,21 @@
                 return `${base}?${params.toString()}`;
             },
 
+            paywallCheckoutUrl(product, context = {}) {
+                if (!product || product.kind !== 'credits') {
+                    return this.gumroadPaywallUrl(product?.permalink || '');
+                }
+                const params = new URLSearchParams();
+                params.set('source', 'task_paywall_modal');
+                if (this.taskId) params.set('task_id', String(this.taskId));
+                const requiredCredits = Number(context.requiredCredits || this.getDownloadAllCredits());
+                if (Number.isFinite(requiredCredits) && requiredCredits > 0) {
+                    params.set('required_credits', String(requiredCredits));
+                }
+                params.set('page_url', window.location.href);
+                return `/buy-credits/checkout/${encodeURIComponent(product.permalink)}?${params.toString()}`;
+            },
+
             paywallEscape(value) {
                 return String(value || '')
                     .replaceAll('&', '&amp;')
@@ -6951,32 +6966,29 @@
                     const btnText = needsLogin
                         ? 'Sign in to buy'
                         : (product.kind === 'plugin' ? 'Buy plugin' : 'Buy credits');
+                    const href = needsLogin && product.kind !== 'credits'
+                        ? this.paywallLoginUrl()
+                        : this.paywallCheckoutUrl(product, context);
                     return `
                         <article class="task-paywall-card" data-featured="${product.featured ? 'true' : 'false'}">
                             <h3>${this.paywallEscape(product.title)}</h3>
                             <div class="task-paywall-price">${this.paywallEscape(product.price)}</div>
                             <div class="task-paywall-note">${this.paywallEscape(product.note)}</div>
-                            <button type="button" class="btn ${product.featured ? 'btn-primary' : 'btn-secondary'}" data-paywall-product="${idx}">
+                            <a href="${this.paywallEscape(href)}" class="btn ${product.featured ? 'btn-primary' : 'btn-secondary'}" data-paywall-product="${idx}">
                                 ${this.paywallEscape(btnText)}
-                            </button>
+                            </a>
                         </article>
                     `;
                 }).join('');
 
                 grid.querySelectorAll('[data-paywall-product]').forEach((btn) => {
-                    btn.addEventListener('click', async () => {
+                    btn.addEventListener('click', () => {
                         const idx = Number(btn.getAttribute('data-paywall-product'));
                         const product = this.paywallProducts[idx];
                         if (!product) return;
-                        if (this.purchaseState?.login_required || !this.authUser?.email) {
-                            window.location.href = this.paywallLoginUrl();
-                            return;
-                        }
-                        await this.notifyPaywallProductClick(product);
                         if (product.kind === 'credits') {
                             this.savePendingDownloadUnlock(context);
                         }
-                        window.location.href = this.gumroadPaywallUrl(product.permalink);
                     });
                 });
             },

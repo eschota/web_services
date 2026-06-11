@@ -436,6 +436,29 @@ class GumroadPurchase(Base):
     credits_added = Column(Integer, default=0)
 
 
+class PurchaseCheckoutIntent(Base):
+    """Server-side checkout click/pending task-unlock intent."""
+    __tablename__ = "purchase_checkout_intents"
+    __table_args__ = (
+        Index("ix_purchase_checkout_intents_user_created", "user_email", "created_at"),
+        Index("ix_purchase_checkout_intents_task", "task_id"),
+        Index("ix_purchase_checkout_intents_sale", "gumroad_sale_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    product_permalink = Column(String(255), nullable=False, index=True)
+    product_kind = Column(String(40), nullable=False, default="credits")
+    source = Column(String(80), nullable=True)
+    task_id = Column(String(36), nullable=True, index=True)
+    required_credits = Column(Integer, nullable=True)
+    page_url = Column(String(1024), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    gumroad_sale_id = Column(String(255), nullable=True)
+    auto_unlock_status = Column(String(64), nullable=True)
+
+
 class ApiKey(Base):
     """API keys (stored hashed): either bound to a registered user or an anonymous session."""
     __tablename__ = "api_keys"
@@ -1073,6 +1096,52 @@ async def init_db():
                     """
                     CREATE INDEX IF NOT EXISTS idx_gumroad_purchases_product
                     ON gumroad_purchases (product_permalink)
+                    """
+                )
+            except Exception:
+                pass
+
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS purchase_checkout_intents (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_email VARCHAR(255) NOT NULL,
+                        product_permalink VARCHAR(255) NOT NULL,
+                        product_kind VARCHAR(40) NOT NULL DEFAULT 'credits',
+                        source VARCHAR(80),
+                        task_id VARCHAR(36),
+                        required_credits INTEGER,
+                        page_url VARCHAR(1024),
+                        created_at DATETIME NOT NULL,
+                        used_at DATETIME,
+                        gumroad_sale_id VARCHAR(255),
+                        auto_unlock_status VARCHAR(64)
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_user_created
+                    ON purchase_checkout_intents (user_email, created_at)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_product
+                    ON purchase_checkout_intents (product_permalink)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_task
+                    ON purchase_checkout_intents (task_id)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_sale
+                    ON purchase_checkout_intents (gumroad_sale_id)
                     """
                 )
             except Exception:

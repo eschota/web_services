@@ -21,7 +21,7 @@ import re
 import html
 from pathlib import Path
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse, quote, unquote, parse_qsl
+from urllib.parse import urlparse, quote, unquote, parse_qsl, urlencode
 from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form, Query
@@ -76,7 +76,7 @@ from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
     TaskAnimationPurchase, TaskAnimationBundlePurchase, TaskAnimalAnimationPackPurchase,
-    GumroadPurchase, RoadmapVote,
+    GumroadPurchase, PurchaseCheckoutIntent, RoadmapVote,
     CryptoPaymentReport, EmailCampaignClick, EmailCampaignSend, EmailDeliveryEvent,
     SupportChatSession,
     SupportChatMessage,
@@ -1099,6 +1099,7 @@ ANIMATION_BUNDLE_CREDITS = 10
 ANIMAL_ANIMATION_PACK_CREDITS = 10
 DOWNLOAD_ALL_FILES_CREDITS = 30
 ANIMAL_RIG_DOWNLOAD_CREDITS = 30
+PURCHASE_CHECKOUT_INTENT_MAX_AGE = timedelta(hours=72)
 ANIMAL_VARIANT_TYPES = [
     "dog",
     "bear",
@@ -1122,6 +1123,38 @@ def _is_animal_download_task(task: Task) -> bool:
 
 def _download_all_files_cost(task: Task) -> int:
     return ANIMAL_RIG_DOWNLOAD_CREDITS if _is_animal_download_task(task) else DOWNLOAD_ALL_FILES_CREDITS
+
+
+def _clamp_text(value: Any, max_len: int, *, default: str = "") -> str:
+    text_value = str(value or "").strip()
+    return (text_value or default)[:max_len]
+
+
+def _safe_checkout_task_id(value: Any) -> Optional[str]:
+    task_id = _clamp_text(value, 64)
+    if re.fullmatch(r"[A-Za-z0-9_-]{8,64}", task_id):
+        return task_id
+    return None
+
+
+def _checkout_pack_price_label(product_key: str) -> str:
+    key = _normalize_gumroad_product_key(product_key)
+    for tier_key, _credits, usd in AUTORIG_CRYPTO_TIERS:
+        if _normalize_gumroad_product_key(tier_key) == key:
+            if float(usd).is_integer():
+                return f"${int(usd)}"
+            return f"${usd:.2f}".rstrip("0").rstrip(".")
+    return "unknown"
+
+
+def _checkout_pack_label(product_key: str) -> str:
+    credits = int(GUMROAD_PRODUCT_CREDITS.get(_normalize_gumroad_product_key(product_key), 0) or 0)
+    return f"{credits} credits" if credits > 0 else "credits"
+
+
+def _gumroad_checkout_url(product_key: str, user_email: str) -> str:
+    base = f"https://u3d.gumroad.com/l/{quote(_normalize_gumroad_product_key(product_key))}"
+    return f"{base}?{urlencode({'userid': user_email})}"
 
 
 def _task_animal_type_from_settings(task: Task) -> Optional[str]:
@@ -1740,6 +1773,120 @@ async def _credit_task_owner_for_sale(db: AsyncSession, task, buyer_user: User, 
     task_owner = owner_result.scalar_one_or_none()
     if task_owner and task_owner.id != buyer_user.id:
         task_owner.balance_credits += amount
+
+
+async def _try_auto_unlock_pending_checkout(
+    db: AsyncSession,
+    buyer_user: User,
+    sale_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Convert the newest recent task-paywall checkout intent into a full-task unlock."""
+    if not buyer_user or not sale_id:
+        return None
+
+    email = _gumroad_clean_email(getattr(buyer_user, "email", None))
+    if not email:
+        return None
+
+    cutoff = datetime.utcnow() - PURCHASE_CHECKOUT_INTENT_MAX_AGE
+    result = await db.execute(
+        select(PurchaseCheckoutIntent)
+        .where(
+            func.lower(PurchaseCheckoutIntent.user_email) == email.lower(),
+            PurchaseCheckoutIntent.product_kind == "credits",
+            PurchaseCheckoutIntent.task_id.is_not(None),
+            PurchaseCheckoutIntent.used_at.is_(None),
+            PurchaseCheckoutIntent.created_at >= cutoff,
+        )
+        .order_by(PurchaseCheckoutIntent.created_at.desc(), PurchaseCheckoutIntent.id.desc())
+        .limit(5)
+    )
+
+    now = datetime.utcnow()
+    for intent in result.scalars().all():
+        task_id = _safe_checkout_task_id(intent.task_id)
+        if not task_id:
+            intent.auto_unlock_status = "invalid_task_id"
+            continue
+
+        task = await get_task_by_id(db, task_id)
+        if not task:
+            intent.auto_unlock_status = "task_not_found"
+            continue
+
+        cost = _download_all_files_cost(task)
+        already = await db.execute(
+            select(TaskFilePurchase.id).where(
+                TaskFilePurchase.task_id == task_id,
+                TaskFilePurchase.user_email == buyer_user.email,
+                TaskFilePurchase.file_index.is_(None),
+            ).limit(1)
+        )
+        if already.scalar_one_or_none() is not None:
+            intent.used_at = now
+            intent.gumroad_sale_id = sale_id
+            intent.auto_unlock_status = "already_unlocked"
+            await db.flush()
+            print(
+                f"[Checkout] Pending intent already unlocked task={task_id} sale={sale_id}",
+                flush=True,
+            )
+            return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0}
+
+        if int(buyer_user.balance_credits or 0) < cost:
+            intent.auto_unlock_status = "insufficient_credits"
+            await db.flush()
+            print(
+                f"[Checkout] Pending intent has insufficient credits task={task_id} "
+                f"sale={sale_id} balance={buyer_user.balance_credits} cost={cost}",
+                flush=True,
+            )
+            continue
+
+        insert_result = await db.execute(
+            text(
+                """
+                INSERT INTO task_file_purchases
+                    (task_id, user_email, file_index, credits_spent, created_at)
+                SELECT
+                    :task_id, :user_email, NULL, :credits_spent, :created_at
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM task_file_purchases
+                    WHERE task_id = :task_id
+                      AND user_email = :user_email
+                      AND file_index IS NULL
+                )
+                """
+            ),
+            {
+                "task_id": task_id,
+                "user_email": buyer_user.email,
+                "credits_spent": cost,
+                "created_at": now,
+            },
+        )
+        if insert_result.rowcount == 0:
+            intent.used_at = now
+            intent.gumroad_sale_id = sale_id
+            intent.auto_unlock_status = "already_unlocked"
+            await db.flush()
+            return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0}
+
+        buyer_user.balance_credits = int(buyer_user.balance_credits or 0) - cost
+        await _credit_task_owner_for_sale(db, task, buyer_user, cost)
+        intent.used_at = now
+        intent.gumroad_sale_id = sale_id
+        intent.auto_unlock_status = "unlocked"
+        await db.flush()
+        print(
+            f"[Checkout] Auto-unlocked task={task_id} sale={sale_id} "
+            f"user={buyer_user.email} credits_spent={cost}",
+            flush=True,
+        )
+        return {"status": "unlocked", "task_id": task_id, "credits_spent": cost}
+
+    return None
 
 
 # =============================================================================
@@ -2501,6 +2648,82 @@ async def api_buy_credits_donation_stats(db: AsyncSession = Depends(get_db)):
         currency="USD",
         purchase_count=purchase_count,
     )
+
+
+@app.get("/buy-credits/checkout/{permalink}")
+async def buy_credits_checkout(
+    permalink: str,
+    request: Request,
+    source: Optional[str] = Query(None),
+    task_id: Optional[str] = Query(None),
+    required_credits: Optional[int] = Query(None),
+    page_url: Optional[str] = Query(None),
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-owned checkout redirect so payment clicks do not depend on JS fetches."""
+    product_key = _normalize_gumroad_product_key(permalink)
+    if product_key not in AUTORIG_DONATION_PRODUCT_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown AutoRig credit product")
+
+    if not user:
+        next_path = request.url.path
+        if request.url.query:
+            next_path += f"?{request.url.query}"
+        login_url = f"/auth/login?next={quote(next_path, safe='')}"
+        return RedirectResponse(url=login_url, status_code=303)
+
+    source_clean = _clamp_text(source, 80, default="buy_credits_checkout")
+    task_id_clean = _safe_checkout_task_id(task_id)
+    if required_credits is not None and required_credits <= 0:
+        required_credits = None
+    page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
+    package_label = _checkout_pack_label(product_key)
+    price_label = _checkout_pack_price_label(product_key)
+    intent_id = None
+
+    try:
+        intent = PurchaseCheckoutIntent(
+            user_email=user.email,
+            product_permalink=product_key,
+            product_kind="credits",
+            source=source_clean,
+            task_id=task_id_clean,
+            required_credits=required_credits,
+            page_url=page_url_clean,
+            created_at=datetime.utcnow(),
+        )
+        db.add(intent)
+        await db.flush()
+        intent_id = intent.id
+        await db.commit()
+        print(
+            f"[Checkout] Credit checkout intent id={intent_id} product={product_key} "
+            f"source={source_clean} task_id={task_id_clean or '-'}",
+            flush=True,
+        )
+    except Exception as e:
+        await db.rollback()
+        print(f"[Checkout] Failed to persist checkout intent product={product_key}: {e}", flush=True)
+
+    try:
+        from telegram_bot import broadcast_credits_purchase_click
+        asyncio.create_task(
+            broadcast_credits_purchase_click(
+                package=package_label,
+                price=price_label,
+                user_email=user.email,
+                anon_id=None,
+                product_kind="credits",
+                permalink=product_key,
+                source=source_clean,
+                page_url=page_url_clean,
+            )
+        )
+    except Exception as e:
+        print(f"[Checkout] Failed to schedule checkout notification id={intent_id}: {e}", flush=True)
+
+    return RedirectResponse(url=_gumroad_checkout_url(product_key, user.email), status_code=303)
 
 
 def _build_crypto_buy_config_response() -> CryptoBuyConfigResponse:
@@ -4298,6 +4521,14 @@ async def api_gumroad_ping(
                         purchase.credited = True
                         purchase.credits_added = credits_to_add
                         local_credits_added = credits_to_add
+                        auto_unlock = await _try_auto_unlock_pending_checkout(db, user, sale_id)
+                        if auto_unlock:
+                            print(
+                                f"[Gumroad] Checkout auto-unlock result sale={sale_id} "
+                                f"status={auto_unlock.get('status')} task={auto_unlock.get('task_id')} "
+                                f"credits_spent={auto_unlock.get('credits_spent')}",
+                                flush=True,
+                            )
                     await db.commit()
                     should_notify_purchase = True
         except Exception as e:
