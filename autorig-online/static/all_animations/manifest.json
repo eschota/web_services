@@ -49,7 +49,7 @@
     }
   ],
   "pricing": {
-    "single_animation_credits": 1,
+    "single_animation_credits": 10,
     "all_animations_credits": 10,
     "download_format": "fbx"
   },
@@ -62,7 +62,7 @@
       "tags": [
         "dance"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Breakdance Uprock Var 1.glb",
       "output_file_hint": "{guid}_Breakdance Uprock Var 1.fbx",
@@ -82,7 +82,7 @@
       "tags": [
         "dance"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Chicken_Dance.glb",
       "output_file_hint": "{guid}_Chicken_Dance.fbx",
@@ -102,7 +102,7 @@
       "tags": [
         "dance"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Hip Hop Dancing.glb",
       "output_file_hint": "{guid}_Hip Hop Dancing.fbx",
@@ -122,7 +122,7 @@
       "tags": [
         "dance"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Northern Soul Spin.glb",
       "output_file_hint": "{guid}_Northern Soul Spin.fbx",
@@ -142,7 +142,7 @@
       "tags": [
         "dance"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Twist Dance.glb",
       "output_file_hint": "{guid}_Twist Dance.fbx",
@@ -162,7 +162,7 @@
       "tags": [
         "die"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Defeat2.glb",
       "output_file_hint": "{guid}_Defeat2.fbx",
@@ -182,7 +182,7 @@
       "tags": [
         "die"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Dying.glb",
       "output_file_hint": "{guid}_Dying.fbx",
@@ -202,7 +202,7 @@
       "tags": [
         "die"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Getting Up.glb",
       "output_file_hint": "{guid}_Getting Up.fbx",
@@ -222,7 +222,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Agreeing.glb",
       "output_file_hint": "{guid}_Agreeing.fbx",
@@ -242,7 +242,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Cheering.glb",
       "output_file_hint": "{guid}_Cheering.fbx",
@@ -262,7 +262,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Crazy Gesture.glb",
       "output_file_hint": "{guid}_Crazy Gesture.fbx",
@@ -282,7 +282,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Hand Raising.glb",
       "output_file_hint": "{guid}_Hand Raising.fbx",
@@ -302,7 +302,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Look Around.glb",
       "output_file_hint": "{guid}_Look Around.fbx",
@@ -322,7 +322,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Look Over Shoulder.glb",
       "output_file_hint": "{guid}_Look Over Shoulder.fbx",
@@ -342,7 +342,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Pointing Gesture.glb",
       "output_file_hint": "{guid}_Pointing Gesture.fbx",
@@ -362,7 +362,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Shake Fist.glb",
       "output_file_hint": "{guid}_Shake Fist.fbx",
@@ -382,7 +382,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Thoughtful Head Shake.glb",
       "output_file_hint": "{guid}_Thoughtful Head Shake.fbx",
@@ -402,7 +402,7 @@
       "tags": [
         "emote"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Yelling.glb",
       "output_file_hint": "{guid}_Yelling.fbx",
@@ -422,7 +422,7 @@
       "tags": [
         "fight"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Fist Fight A.glb",
       "output_file_hint": "{guid}_Fist Fight A.fbx",
@@ -442,7 +442,7 @@
       "tags": [
         "fight"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Head Hit.glb",
       "output_file_hint": "{guid}_Head Hit.fbx",
@@ -462,7 +462,7 @@
       "tags": [
         "fight"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle_bouncing_fight.glb",
       "output_file_hint": "{guid}_Idle_bouncing_fight.fbx",
@@ -482,7 +482,7 @@
       "tags": [
         "fight"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle_combat_stance.glb",
       "output_file_hint": "{guid}_Idle_combat_stance.fbx",
@@ -502,7 +502,7 @@
       "tags": [
         "fight"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle_fighting.glb",
       "output_file_hint": "{guid}_Idle_fighting.fbx",
@@ -523,7 +523,7 @@
         "fight",
         "punch"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Illegal Elbow Punch.glb",
       "output_file_hint": "{guid}_Illegal Elbow Punch.fbx",
@@ -544,7 +544,7 @@
         "fight",
         "kick"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Kick To The Groin.glb",
       "output_file_hint": "{guid}_Kick To The Groin.fbx",
@@ -565,7 +565,7 @@
         "fight",
         "kick"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Kicking.glb",
       "output_file_hint": "{guid}_Kicking.fbx",
@@ -586,7 +586,7 @@
         "fight",
         "punch"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Punching.glb",
       "output_file_hint": "{guid}_Punching.fbx",
@@ -607,7 +607,7 @@
         "fight",
         "kick"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Side Kick.glb",
       "output_file_hint": "{guid}_Side Kick.fbx",
@@ -628,7 +628,7 @@
         "fight",
         "magic"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Standing 2H Magic Attack 02.glb",
       "output_file_hint": "{guid}_Standing 2H Magic Attack 02.fbx",
@@ -649,7 +649,7 @@
         "fight",
         "magic"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Standing 2H Magic Attack 04.glb",
       "output_file_hint": "{guid}_Standing 2H Magic Attack 04.fbx",
@@ -669,7 +669,7 @@
       "tags": [
         "idle"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle.glb",
       "output_file_hint": "{guid}_Idle.fbx",
@@ -689,7 +689,7 @@
       "tags": [
         "idle"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle2.glb",
       "output_file_hint": "{guid}_Idle2.fbx",
@@ -709,7 +709,7 @@
       "tags": [
         "idle"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle_dwarf.glb",
       "output_file_hint": "{guid}_Idle_dwarf.fbx",
@@ -729,7 +729,7 @@
       "tags": [
         "idle"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle_glance_around.glb",
       "output_file_hint": "{guid}_Idle_glance_around.fbx",
@@ -750,7 +750,7 @@
         "idle",
         "mood_positive"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle_happy.glb",
       "output_file_hint": "{guid}_Idle_happy.fbx",
@@ -770,7 +770,7 @@
       "tags": [
         "idle"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Idle_sad.glb",
       "output_file_hint": "{guid}_Idle_sad.fbx",
@@ -791,7 +791,7 @@
         "jump",
         "mood_positive"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Joyful Jump.glb",
       "output_file_hint": "{guid}_Joyful Jump.fbx",
@@ -811,7 +811,7 @@
       "tags": [
         "jump"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Jump.glb",
       "output_file_hint": "{guid}_Jump.fbx",
@@ -832,7 +832,7 @@
         "jump",
         "directional"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Jump_forward.glb",
       "output_file_hint": "{guid}_Jump_forward.fbx",
@@ -853,7 +853,7 @@
         "jump",
         "mood_scared"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Jump_hunched.glb",
       "output_file_hint": "{guid}_Jump_hunched.fbx",
@@ -873,7 +873,7 @@
       "tags": [
         "other"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Silly Dancing.glb",
       "output_file_hint": "{guid}_Silly Dancing.fbx",
@@ -894,7 +894,7 @@
         "other",
         "mood_positive"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Victory.glb",
       "output_file_hint": "{guid}_Victory.fbx",
@@ -914,7 +914,7 @@
       "tags": [
         "other"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Waving1.glb",
       "output_file_hint": "{guid}_Waving1.fbx",
@@ -934,7 +934,7 @@
       "tags": [
         "other"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Waving2.glb",
       "output_file_hint": "{guid}_Waving2.fbx",
@@ -956,7 +956,7 @@
         "directional",
         "style_drunk"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Drunk Run Forward.glb",
       "output_file_hint": "{guid}_Drunk Run Forward.fbx",
@@ -977,7 +977,7 @@
         "run",
         "injured"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Injured Run.glb",
       "output_file_hint": "{guid}_Injured Run.fbx",
@@ -997,7 +997,7 @@
       "tags": [
         "run"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Jogging Stumble.glb",
       "output_file_hint": "{guid}_Jogging Stumble.fbx",
@@ -1018,7 +1018,7 @@
         "run",
         "directional"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Jump_forward_run.glb",
       "output_file_hint": "{guid}_Jump_forward_run.fbx",
@@ -1038,7 +1038,7 @@
       "tags": [
         "run"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Running.glb",
       "output_file_hint": "{guid}_Running.fbx",
@@ -1058,7 +1058,7 @@
       "tags": [
         "run"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Running2.glb",
       "output_file_hint": "{guid}_Running2.fbx",
@@ -1078,7 +1078,7 @@
       "tags": [
         "run"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Running3.glb",
       "output_file_hint": "{guid}_Running3.fbx",
@@ -1099,7 +1099,7 @@
         "run",
         "mood_scared"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Running_scared.glb",
       "output_file_hint": "{guid}_Running_scared.fbx",
@@ -1120,7 +1120,7 @@
         "walk",
         "mood_positive"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Happy Walk.glb",
       "output_file_hint": "{guid}_Happy Walk.fbx",
@@ -1140,7 +1140,7 @@
       "tags": [
         "walk"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Strut Walking.glb",
       "output_file_hint": "{guid}_Strut Walking.fbx",
@@ -1160,7 +1160,7 @@
       "tags": [
         "walk"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking.glb",
       "output_file_hint": "{guid}_Walking.fbx",
@@ -1180,7 +1180,7 @@
       "tags": [
         "walk"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking2.glb",
       "output_file_hint": "{guid}_Walking2.fbx",
@@ -1201,7 +1201,7 @@
         "walk",
         "directional"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_backwards.glb",
       "output_file_hint": "{guid}_Walking_backwards.fbx",
@@ -1223,7 +1223,7 @@
         "directional",
         "mood_positive"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_backwards_happy.glb",
       "output_file_hint": "{guid}_Walking_backwards_happy.fbx",
@@ -1244,7 +1244,7 @@
         "walk",
         "stance_crouched"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_crouched.glb",
       "output_file_hint": "{guid}_Walking_crouched.fbx",
@@ -1265,7 +1265,7 @@
         "walk",
         "style_drunk"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_drunk.glb",
       "output_file_hint": "{guid}_Walking_drunk.fbx",
@@ -1286,7 +1286,7 @@
         "walk",
         "injured"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_limp.glb",
       "output_file_hint": "{guid}_Walking_limp.fbx",
@@ -1306,7 +1306,7 @@
       "tags": [
         "walk"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_lumber.glb",
       "output_file_hint": "{guid}_Walking_lumber.fbx",
@@ -1327,7 +1327,7 @@
         "walk",
         "style_tiptoe"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_tiptoe.glb",
       "output_file_hint": "{guid}_Walking_tiptoe.fbx",
@@ -1348,7 +1348,7 @@
         "walk",
         "style_zombie"
       ],
-      "credits": 1,
+      "credits": 10,
       "format": "fbx",
       "source_file": "Walking_zombie.glb",
       "output_file_hint": "{guid}_Walking_zombie.fbx",

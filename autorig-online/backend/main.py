@@ -1094,11 +1094,12 @@ def _validate_worker_url(url: str) -> str:
 # =============================================================================
 # Custom Animations Catalog / Pricing
 # =============================================================================
+TASK_UNLOCK_CREDITS = 10
 ANIMATION_SINGLE_CREDITS = 1
-ANIMATION_BUNDLE_CREDITS = 10
-ANIMAL_ANIMATION_PACK_CREDITS = 10
-DOWNLOAD_ALL_FILES_CREDITS = 30
-ANIMAL_RIG_DOWNLOAD_CREDITS = 30
+ANIMATION_BUNDLE_CREDITS = TASK_UNLOCK_CREDITS
+ANIMAL_ANIMATION_PACK_CREDITS = TASK_UNLOCK_CREDITS
+DOWNLOAD_ALL_FILES_CREDITS = TASK_UNLOCK_CREDITS
+ANIMAL_RIG_DOWNLOAD_CREDITS = TASK_UNLOCK_CREDITS
 PURCHASE_CHECKOUT_INTENT_MAX_AGE = timedelta(hours=72)
 ANIMAL_VARIANT_TYPES = [
     "dog",
@@ -1470,8 +1471,10 @@ def _load_animation_manifest() -> dict:
                 "version": 1,
                 "types": [],
                 "pricing": {
-                    "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-                    "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+                    "single_animation_credits": TASK_UNLOCK_CREDITS,
+                    "all_animations_credits": TASK_UNLOCK_CREDITS,
+                    "task_unlock_credits": TASK_UNLOCK_CREDITS,
+                    "purchase_scope": "task",
                     "download_format": "fbx",
                 },
                 "animations": [],
@@ -1489,8 +1492,10 @@ def _load_animation_manifest() -> dict:
         data.setdefault("types", [])
         data.setdefault("animations", [])
         data.setdefault("pricing", {
-            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-            "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+            "single_animation_credits": TASK_UNLOCK_CREDITS,
+            "all_animations_credits": TASK_UNLOCK_CREDITS,
+            "task_unlock_credits": TASK_UNLOCK_CREDITS,
+            "purchase_scope": "task",
             "download_format": "fbx",
         })
 
@@ -1503,8 +1508,10 @@ def _load_animation_manifest() -> dict:
             "version": 1,
             "types": [],
             "pricing": {
-                "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-                "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+                "single_animation_credits": TASK_UNLOCK_CREDITS,
+                "all_animations_credits": TASK_UNLOCK_CREDITS,
+                "task_unlock_credits": TASK_UNLOCK_CREDITS,
+                "purchase_scope": "task",
                 "download_format": "fbx",
             },
             "animations": [],
@@ -1751,6 +1758,65 @@ async def _has_full_task_download_purchase(db: AsyncSession, user: Optional[User
     return row.scalar_one_or_none() is not None
 
 
+async def _ensure_full_task_unlock(
+    db: AsyncSession,
+    task: Task,
+    buyer_user: User,
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Create the single paid entitlement for a task, charging credits only once."""
+    if not task or not buyer_user:
+        return {"status": "invalid", "credits_spent": 0, "cost": 0}
+
+    task_id = str(task.id)
+    existing = await db.execute(
+        select(TaskFilePurchase.id).where(
+            TaskFilePurchase.task_id == task_id,
+            TaskFilePurchase.user_email == buyer_user.email,
+            TaskFilePurchase.file_index.is_(None),
+        ).limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0, "cost": 0}
+
+    cost = _download_all_files_cost(task)
+    if int(buyer_user.balance_credits or 0) < cost:
+        return {"status": "insufficient_credits", "task_id": task_id, "credits_spent": 0, "cost": cost}
+
+    created_at = now or datetime.utcnow()
+    insert_result = await db.execute(
+        text(
+            """
+            INSERT INTO task_file_purchases
+                (task_id, user_email, file_index, credits_spent, created_at)
+            SELECT
+                :task_id, :user_email, NULL, :credits_spent, :created_at
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM task_file_purchases
+                WHERE task_id = :task_id
+                  AND user_email = :user_email
+                  AND file_index IS NULL
+            )
+            """
+        ),
+        {
+            "task_id": task_id,
+            "user_email": buyer_user.email,
+            "credits_spent": cost,
+            "created_at": created_at,
+        },
+    )
+    if insert_result.rowcount == 0:
+        return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0, "cost": 0}
+
+    buyer_user.balance_credits = int(buyer_user.balance_credits or 0) - cost
+    await _credit_task_owner_for_sale(db, task, buyer_user, cost)
+    await db.flush()
+    return {"status": "unlocked", "task_id": task_id, "credits_spent": cost, "cost": cost}
+
+
 def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
     """
     Absolute URL to the worker-built full bundle: {worker_root}/{guid}.zip
@@ -1814,15 +1880,9 @@ async def _try_auto_unlock_pending_checkout(
             intent.auto_unlock_status = "task_not_found"
             continue
 
-        cost = _download_all_files_cost(task)
-        already = await db.execute(
-            select(TaskFilePurchase.id).where(
-                TaskFilePurchase.task_id == task_id,
-                TaskFilePurchase.user_email == buyer_user.email,
-                TaskFilePurchase.file_index.is_(None),
-            ).limit(1)
-        )
-        if already.scalar_one_or_none() is not None:
+        unlock = await _ensure_full_task_unlock(db, task, buyer_user, now=now)
+        status = unlock.get("status")
+        if status == "already_unlocked":
             intent.used_at = now
             intent.gumroad_sale_id = sale_id
             intent.auto_unlock_status = "already_unlocked"
@@ -1833,58 +1893,27 @@ async def _try_auto_unlock_pending_checkout(
             )
             return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0}
 
-        if int(buyer_user.balance_credits or 0) < cost:
+        if status == "insufficient_credits":
             intent.auto_unlock_status = "insufficient_credits"
             await db.flush()
             print(
                 f"[Checkout] Pending intent has insufficient credits task={task_id} "
-                f"sale={sale_id} balance={buyer_user.balance_credits} cost={cost}",
+                f"sale={sale_id} balance={buyer_user.balance_credits} cost={unlock.get('cost')}",
                 flush=True,
             )
             continue
 
-        insert_result = await db.execute(
-            text(
-                """
-                INSERT INTO task_file_purchases
-                    (task_id, user_email, file_index, credits_spent, created_at)
-                SELECT
-                    :task_id, :user_email, NULL, :credits_spent, :created_at
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM task_file_purchases
-                    WHERE task_id = :task_id
-                      AND user_email = :user_email
-                      AND file_index IS NULL
-                )
-                """
-            ),
-            {
-                "task_id": task_id,
-                "user_email": buyer_user.email,
-                "credits_spent": cost,
-                "created_at": now,
-            },
-        )
-        if insert_result.rowcount == 0:
-            intent.used_at = now
-            intent.gumroad_sale_id = sale_id
-            intent.auto_unlock_status = "already_unlocked"
-            await db.flush()
-            return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0}
-
-        buyer_user.balance_credits = int(buyer_user.balance_credits or 0) - cost
-        await _credit_task_owner_for_sale(db, task, buyer_user, cost)
         intent.used_at = now
         intent.gumroad_sale_id = sale_id
-        intent.auto_unlock_status = "unlocked"
+        intent.auto_unlock_status = str(status or "unlocked")
         await db.flush()
+        credits_spent = int(unlock.get("credits_spent") or 0)
         print(
             f"[Checkout] Auto-unlocked task={task_id} sale={sale_id} "
-            f"user={buyer_user.email} credits_spent={cost}",
+            f"user={buyer_user.email} credits_spent={credits_spent}",
             flush=True,
         )
-        return {"status": "unlocked", "task_id": task_id, "credits_spent": cost}
+        return {"status": status or "unlocked", "task_id": task_id, "credits_spent": credits_spent}
 
     return None
 
@@ -5008,6 +5037,8 @@ async def _has_animal_animation_pack_purchase(
 ) -> bool:
     if not user:
         return False
+    if await _has_full_task_download_purchase(db, user, task_id):
+        return True
     result = await db.execute(
         select(TaskAnimalAnimationPackPurchase).where(
             TaskAnimalAnimationPackPurchase.task_id == task_id,
@@ -5078,7 +5109,7 @@ async def _build_animal_animation_catalog_response(
             type="animal",
             type_label="Animal actions",
             tags=["animal", normalized_animal, normalized_orientation],
-            credits=ANIMAL_ANIMATION_PACK_CREDITS,
+            credits=TASK_UNLOCK_CREDITS,
             format="fbx",
             available=ready,
             ready=ready,
@@ -5090,7 +5121,7 @@ async def _build_animal_animation_catalog_response(
             orientation=normalized_orientation,
             action_name=action_name,
             download_scope="variant_pack",
-            pack_credits=ANIMAL_ANIMATION_PACK_CREDITS,
+            pack_credits=TASK_UNLOCK_CREDITS,
             pack_purchased=pack_purchased,
         ))
 
@@ -5102,9 +5133,11 @@ async def _build_animal_animation_catalog_response(
         login_required=(user is None),
         user_credits=(user.balance_credits if user else 0),
         pricing={
-            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-            "all_animations_credits": ANIMAL_ANIMATION_PACK_CREDITS,
-            "animal_animation_pack_credits": ANIMAL_ANIMATION_PACK_CREDITS,
+            "single_animation_credits": TASK_UNLOCK_CREDITS,
+            "all_animations_credits": TASK_UNLOCK_CREDITS,
+            "animal_animation_pack_credits": TASK_UNLOCK_CREDITS,
+            "task_unlock_credits": TASK_UNLOCK_CREDITS,
+            "purchase_scope": "task",
             "animal_animation_pack_purchased": pack_purchased,
             "download_format": "fbx",
             "download_scope": "variant_pack",
@@ -5156,19 +5189,9 @@ async def _purchase_animal_animation_pack(
             credits_remaining=user.balance_credits,
         )
 
-    cost = ANIMAL_ANIMATION_PACK_CREDITS
-    if user.balance_credits < cost:
+    unlock = await _ensure_full_task_unlock(db, task, user)
+    if unlock.get("status") == "insufficient_credits":
         raise HTTPException(status_code=402, detail="Insufficient credits")
-
-    user.balance_credits -= cost
-    await _credit_task_owner_for_sale(db, task, user, cost)
-    db.add(TaskAnimalAnimationPackPurchase(
-        task_id=task.id,
-        user_email=user.email,
-        animal_type=normalized_animal,
-        orientation=normalized_orientation,
-        credits_spent=cost,
-    ))
 
     try:
         await db.commit()
@@ -5920,109 +5943,21 @@ async def api_purchase_files(
             credits_remaining=user.balance_credits
         )
     
-    animal_full_access_required = _is_animal_download_task(task)
+    if not purchase_req.all and not purchase_req.file_indices:
+        raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
 
-    # Handle "buy all" request (full-task access)
-    if purchase_req.all or (animal_full_access_required and purchase_req.file_indices):
-        cost = _download_all_files_cost(task)
-        if user.balance_credits < cost:
-            raise HTTPException(status_code=402, detail="Insufficient credits")
+    unlock = await _ensure_full_task_unlock(db, task, user)
+    if unlock.get("status") == "insufficient_credits":
+        raise HTTPException(status_code=402, detail="Insufficient credits")
 
-        insert_result = await db.execute(
-            text(
-                """
-                INSERT INTO task_file_purchases
-                    (task_id, user_email, file_index, credits_spent, created_at)
-                SELECT
-                    :task_id, :user_email, NULL, :credits_spent, :created_at
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM task_file_purchases
-                    WHERE task_id = :task_id
-                      AND user_email = :user_email
-                      AND file_index IS NULL
-                )
-                """
-            ),
-            {
-                "task_id": task_id,
-                "user_email": user.email,
-                "credits_spent": cost,
-                "created_at": datetime.utcnow(),
-            },
-        )
-        if insert_result.rowcount == 0:
-            await db.rollback()
-            await db.refresh(user)
-            return PurchaseResponse(
-                success=True,
-                purchased_files=list(already_indices),
-                purchased_all=True,
-                credits_remaining=user.balance_credits,
-            )
+    await db.commit()
 
-        # Deduct credits from buyer only after a new unlock row was reserved.
-        user.balance_credits -= cost
-        
-        # Credit task owner (if they have a user account)
-        await _credit_task_owner_for_sale(db, task, user, cost)
-        await db.commit()
-        
-        return PurchaseResponse(
-            success=True,
-            purchased_files=list(already_indices),
-            purchased_all=True,
-            credits_remaining=user.balance_credits
-        )
-    
-    # Handle individual file purchase
-    if purchase_req.file_indices:
-        new_indices = [i for i in purchase_req.file_indices if i not in already_indices]
-        
-        if not new_indices:
-            return PurchaseResponse(
-                success=True,
-                purchased_files=list(already_indices),
-                purchased_all=False,
-                credits_remaining=user.balance_credits
-            )
-        
-        cost = len(new_indices)  # 1 credit per file
-        if user.balance_credits < cost:
-            raise HTTPException(status_code=402, detail="Insufficient credits")
-        
-        # Deduct credits from buyer
-        user.balance_credits -= cost
-        
-        # Credit task owner (if they have a user account)
-        if task.owner_type == "user" and task.owner_id:
-            owner_result = await db.execute(
-                select(User).where(User.email == task.owner_id)
-            )
-            task_owner = owner_result.scalar_one_or_none()
-            if task_owner and task_owner.id != user.id:  # Don't credit yourself
-                task_owner.balance_credits += cost  # Same amount as buyer spent
-        
-        # Create purchase records
-        for idx in new_indices:
-            purchase = TaskFilePurchase(
-                task_id=task_id,
-                user_email=user.email,
-                file_index=idx,
-                credits_spent=1
-            )
-            db.add(purchase)
-        
-        await db.commit()
-        
-        return PurchaseResponse(
-            success=True,
-            purchased_files=list(already_indices | set(new_indices)),
-            purchased_all=False,
-            credits_remaining=user.balance_credits
-        )
-    
-    raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
+    return PurchaseResponse(
+        success=True,
+        purchased_files=list(already_indices),
+        purchased_all=True,
+        credits_remaining=user.balance_credits
+    )
 
 
 @app.get("/api/task/{task_id}/animations/catalog", response_model=AnimationCatalogResponse)
@@ -6079,7 +6014,7 @@ async def api_get_animation_catalog(
             type=str(item.get("type") or "other"),
             type_label=str(item.get("type_label") or str(item.get("type") or "other").title()),
             tags=[str(t) for t in tags if isinstance(t, str)],
-            credits=int(item.get("credits", ANIMATION_SINGLE_CREDITS) or ANIMATION_SINGLE_CREDITS),
+            credits=TASK_UNLOCK_CREDITS,
             format=str(item.get("format") or "fbx"),
             preview_gif=item.get("preview_gif"),
             available=available,
@@ -6109,8 +6044,10 @@ async def api_get_animation_catalog(
         login_required=(user is None),
         user_credits=(user.balance_credits if user else 0),
         pricing={
-            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-            "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+            "single_animation_credits": TASK_UNLOCK_CREDITS,
+            "all_animations_credits": TASK_UNLOCK_CREDITS,
+            "task_unlock_credits": TASK_UNLOCK_CREDITS,
+            "purchase_scope": "task",
             "download_format": "fbx",
             "all_animations_fbx_url": f"/api/task/{task_id}/animations.fbx",
         }
@@ -6124,7 +6061,7 @@ async def api_purchase_animation(
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Purchase one custom animation (1 credit) or unlock all custom animations (10 credits)."""
+    """Legacy animation purchase endpoint; new purchases unlock the whole task."""
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -6171,22 +6108,10 @@ async def api_purchase_animation(
                 credits_remaining=user.balance_credits
             )
 
-        cost = ANIMATION_BUNDLE_CREDITS
-        if user.balance_credits < cost:
+        unlock = await _ensure_full_task_unlock(db, task, user)
+        if unlock.get("status") == "insufficient_credits":
             raise HTTPException(status_code=402, detail="Insufficient credits")
-
-        user.balance_credits -= cost
-        await _credit_task_owner_for_sale(db, task, user, cost)
-        db.add(TaskAnimationBundlePurchase(
-            task_id=task_id,
-            user_email=user.email,
-            credits_spent=cost,
-        ))
-
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
+        await db.commit()
 
         purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
         return AnimationPurchaseResponse(
@@ -6216,23 +6141,10 @@ async def api_purchase_animation(
     if not resolved:
         raise HTTPException(status_code=409, detail="Animation is not available for this task yet")
 
-    cost = ANIMATION_SINGLE_CREDITS
-    if user.balance_credits < cost:
+    unlock = await _ensure_full_task_unlock(db, task, user)
+    if unlock.get("status") == "insufficient_credits":
         raise HTTPException(status_code=402, detail="Insufficient credits")
-
-    user.balance_credits -= cost
-    await _credit_task_owner_for_sale(db, task, user, cost)
-    db.add(TaskAnimationPurchase(
-        task_id=task_id,
-        user_email=user.email,
-        animation_id=animation_id,
-        credits_spent=cost
-    ))
-
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
+    await db.commit()
 
     purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
     return AnimationPurchaseResponse(

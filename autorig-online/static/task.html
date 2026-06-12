@@ -4469,7 +4469,7 @@
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
                     <h3 class="card-title" style="margin:0; font-size:1rem;" data-i18n="animation_fitting_title">Video &amp; Animation Fitting</h3>
                     <div style="font-size:0.72rem; color:var(--text-muted);" data-i18n="animation_fitting_price">
-                        1 fitted animation = 1 credit
+                        Task unlock includes all fitted animation downloads
                     </div>
                 </div>
 
@@ -4907,7 +4907,7 @@
             <div class="task-paywall-dialog__head">
                 <div>
                     <h2 id="task-paywall-dialog-title">Unlock downloads</h2>
-                    <p id="task-paywall-dialog-copy">Credits unlock finished model ZIP downloads, animal variant files, and custom animation FBX downloads.</p>
+                    <p id="task-paywall-dialog-copy">Unlock this task once to download the ZIP, protected files, animal variants, and all custom animation FBX files.</p>
                 </div>
                 <button type="button" class="task-paywall-dialog__close" id="task-paywall-dialog-close" aria-label="Close">&times;</button>
             </div>
@@ -6755,7 +6755,7 @@
                     title: '30 credits',
                     price: '$3',
                     credits: 30,
-                    note: 'One full ZIP unlock, or custom animation downloads.'
+                    note: '3 task unlocks. Each task unlock costs 10 credits.'
                 },
                 {
                     kind: 'credits',
@@ -6763,7 +6763,7 @@
                     title: '100 credits',
                     price: '$10',
                     credits: 100,
-                    note: 'Recommended: 3 full ZIP unlocks plus animation buffer.',
+                    note: '10 task unlocks. Recommended for repeat downloads.',
                     featured: true
                 },
                 {
@@ -6772,7 +6772,7 @@
                     title: '500 credits',
                     price: '$50',
                     credits: 500,
-                    note: 'For repeat batches at the same per-credit price.'
+                    note: '50 task unlocks at the same per-credit price.'
                 },
                 {
                     kind: 'credits',
@@ -6780,7 +6780,7 @@
                     title: '1000 credits',
                     price: '$100',
                     credits: 1000,
-                    note: 'For heavier one-time batches at the same per-credit price.'
+                    note: '100 task unlocks for heavier one-time batches.'
                 },
                 {
                     kind: 'plugin',
@@ -6913,9 +6913,9 @@
                     return 'Sign in before buying credits so your Gumroad payment is credited to your AutoRig.online account.';
                 }
                 if (requiredCredits > 0) {
-                    return `This download requires ${requiredCredits} credits. Your current balance is ${balance} credits.`;
+                    return `Unlock this task for ${requiredCredits} credits. Your current balance is ${balance} credits.`;
                 }
-                return 'Choose a credit pack to unlock finished model ZIPs, animal variant files, and custom animation FBX downloads.';
+                return 'One task unlock gives access to the ZIP, protected files, animal variants, and all custom animation downloads.';
             },
 
             async refreshAuthForPaywall() {
@@ -7148,7 +7148,7 @@
                 if (params.get('autorig_unlock_dry_run') === '1') {
                     const requiredCredits = Number(pending.requiredCredits || this.getDownloadAllCredits());
                     confirm(`[DRY RUN] ${t('purchase_confirm_all')} ${requiredCredits} credits?`);
-                    alert('Dry-run only: no credits were spent and no download unlock was created.');
+                    alert('Dry-run only: no credits were spent and no task unlock was created.');
                     this.clearPendingDownloadUnlock();
                     this.clearResumeDownloadUnlockParam();
                     return false;
@@ -7158,6 +7158,7 @@
                 if (this.purchaseState.purchased_all) {
                     this.clearPendingDownloadUnlock();
                     this.clearResumeDownloadUnlockParam();
+                    await this.refreshUnlockedTaskUi();
                     return true;
                 }
 
@@ -7177,6 +7178,78 @@
                 return unlocked;
             },
 
+            async refreshUnlockedTaskUi() {
+                this.lastFileListHash = '';
+                this.animationCatalogHash = null;
+                this.animationCatalogLoaded = false;
+                if (this.task) {
+                    this.updateFileList(this.task.output_urls || [], this.task, this.task.ready_urls || []);
+                }
+                await this.loadAnimationCatalog(true);
+                if (this.isAnimalTask()) {
+                    await this.loadAnimalVariants();
+                }
+            },
+
+            async ensureTaskUnlock(context = {}) {
+                await this.loadPurchaseState();
+                if (this.purchaseState.purchased_all) {
+                    await this.refreshUnlockedTaskUi();
+                    return true;
+                }
+
+                const source = context.source || 'task_unlock';
+                const unlockCost = this.getDownloadAllCredits();
+                if (this.purchaseState.login_required) {
+                    await this.openPaywallModal({ source, requiredCredits: unlockCost });
+                    return false;
+                }
+
+                if (Number(this.purchaseState.user_credits || 0) < unlockCost) {
+                    try {
+                        await fetch(`/api/task/${this.taskId}/purchase-intent`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source })
+                        });
+                    } catch (e) {
+                        console.warn('Purchase intent notify failed:', e);
+                    }
+                    await this.openPaywallModal({ source, requiredCredits: unlockCost });
+                    return false;
+                }
+
+                if (!confirm(`${this.tSafe('purchase_confirm_all', 'Unlock this task for')} ${unlockCost} credits?`)) {
+                    if (context.clearPendingOnCancel) {
+                        this.clearPendingDownloadUnlock();
+                    }
+                    return false;
+                }
+
+                try {
+                    const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ all: true })
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok) {
+                        alert(data.detail || this.tSafe('error_generic', 'Something went wrong'));
+                        return false;
+                    }
+                    this.purchaseState.purchased_all = true;
+                    this.purchaseState.user_credits = data.credits_remaining;
+                    this.clearPendingDownloadUnlock();
+                    this.clearResumeDownloadUnlockParam();
+                    await this.refreshUnlockedTaskUi();
+                    return true;
+                } catch (e) {
+                    console.error('Task unlock failed:', e);
+                    alert(this.tSafe('error_generic', 'Something went wrong'));
+                    return false;
+                }
+            },
+
             async downloadAllOrPurchase(options = {}) {
                 if (this.isDownloadingAll) return false;
                 const total = Number(this.task?.total_count || 0);
@@ -7187,51 +7260,11 @@
                 }
 
                 if (!this.purchaseState.purchased_all) {
-                    if (this.purchaseState.login_required) {
-                        await this.openPaywallModal({ source: 'download_all', requiredCredits: this.getDownloadAllCredits() });
-                        return false;
-                    }
-                    const downloadAllCost = this.getDownloadAllCredits();
-                    if (this.purchaseState.user_credits < downloadAllCost) {
-                        try {
-                            await fetch(`/api/task/${this.taskId}/purchase-intent`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ source: 'download_all' })
-                            });
-                        } catch (e) {
-                            console.warn('Purchase intent notify failed:', e);
-                        }
-                        await this.openPaywallModal({ source: 'download_all', requiredCredits: downloadAllCost });
-                        return false;
-                    }
-                    if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) {
-                        if (options.clearPendingOnCancel) {
-                            this.clearPendingDownloadUnlock();
-                        }
-                        return false;
-                    }
-
-                    try {
-                        const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ all: true })
-                        });
-                        const data = await resp.json();
-                        if (resp.ok) {
-                            this.purchaseState.purchased_all = true;
-                            this.purchaseState.user_credits = data.credits_remaining;
-                            this.clearPendingDownloadUnlock();
-                            this.clearResumeDownloadUnlockParam();
-                            await this.loadAnimationCatalog(true);
-                        } else {
-                            alert(data.detail || t('error_generic'));
-                            return false;
-                        }
-                    } catch (e) {
-                        console.error('Purchase error:', e);
-                        alert(t('error_generic'));
+                    const unlocked = await this.ensureTaskUnlock({
+                        source: options.source || 'download_all',
+                        clearPendingOnCancel: options.clearPendingOnCancel,
+                    });
+                    if (!unlocked) {
                         return false;
                     }
                 }
@@ -7430,37 +7463,7 @@
             },
 
             async ensureAnimalVariantPurchase() {
-                if (this.purchaseState?.purchased_all) return true;
-                if (this.purchaseState?.login_required) {
-                    await this.openPaywallModal({ source: 'animal_variant', requiredCredits: this.getDownloadAllCredits() });
-                    return false;
-                }
-                const cost = this.getDownloadAllCredits();
-                if (Number(this.purchaseState?.user_credits || 0) < cost) {
-                    await this.openPaywallModal({ source: 'animal_variant', requiredCredits: cost });
-                    return false;
-                }
-                if (!confirm(`${this.tSafe('purchase_confirm_all', 'Purchase all files for')} ${cost} credits?`)) return false;
-                try {
-                    const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ all: true }),
-                    });
-                    const data = await resp.json();
-                    if (!resp.ok) {
-                        alert(data.detail || this.tSafe('error_generic', 'Something went wrong'));
-                        return false;
-                    }
-                    this.purchaseState.purchased_all = true;
-                    this.purchaseState.user_credits = data.credits_remaining;
-                    await this.loadAnimalVariants();
-                    return true;
-                } catch (e) {
-                    console.error('Animal variant purchase failed:', e);
-                    alert(this.tSafe('error_generic', 'Something went wrong'));
-                    return false;
-                }
+                return await this.ensureTaskUnlock({ source: 'animal_variant' });
             },
 
             async previewAnimalVariant() {
@@ -7491,73 +7494,11 @@
             },
 
             async purchaseFile(fileIndex, displayName) {
-                if (this.purchaseState.login_required) {
-                    await this.openPaywallModal({ source: 'file_download', requiredCredits: 1 });
-                    return;
-                }
-                const isAnimalTask = String(this.task?.input_type || '').toLowerCase() === 'animal';
-                const fileCost = isAnimalTask ? this.getDownloadAllCredits() : 1;
-                if (this.purchaseState.user_credits < fileCost) {
-                    await this.openPaywallModal({ source: 'file_download', requiredCredits: fileCost });
-                    return;
-                }
-                if (!confirm(`${t('purchase_confirm_file')} "${displayName}" for ${fileCost} credit${fileCost === 1 ? '' : 's'}?`)) return;
-                
-                try {
-                    const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ file_indices: [fileIndex] })
-                    });
-                    const data = await resp.json();
-                    if (resp.ok) {
-                        this.purchaseState.purchased_all = Boolean(data.purchased_all);
-                        this.purchaseState.purchased_files = data.purchased_files;
-                        this.purchaseState.user_credits = data.credits_remaining;
-                        this.lastFileListHash = ''; // Force re-render
-                        await this.fetchTask(); // Refresh file list
-                        await this.loadAnimationCatalog(true);
-                    } else {
-                        alert(data.detail || t('error_generic'));
-                    }
-                } catch (e) {
-                    console.error('Purchase error:', e);
-                    alert(t('error_generic'));
-                }
+                await this.ensureTaskUnlock({ source: 'file_download' });
             },
 
             async purchaseAll() {
-                if (this.purchaseState.login_required) {
-                    await this.openPaywallModal({ source: 'download_all', requiredCredits: this.getDownloadAllCredits() });
-                    return;
-                }
-                const downloadAllCost = this.getDownloadAllCredits();
-                if (this.purchaseState.user_credits < downloadAllCost) {
-                    await this.openPaywallModal({ source: 'download_all', requiredCredits: downloadAllCost });
-                    return;
-                }
-                if (!confirm(`${t('purchase_confirm_all')} ${downloadAllCost} credits?`)) return;
-                
-                try {
-                    const resp = await fetch(`/api/task/${this.taskId}/purchases`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ all: true })
-                    });
-                    const data = await resp.json();
-                    if (resp.ok) {
-                        this.purchaseState.purchased_all = true;
-                        this.purchaseState.user_credits = data.credits_remaining;
-                        this.lastFileListHash = ''; // Force re-render
-                        await this.fetchTask(); // Refresh file list
-                        await this.loadAnimationCatalog(true);
-                    } else {
-                        alert(data.detail || t('error_generic'));
-                    }
-                } catch (e) {
-                    console.error('Purchase error:', e);
-                    alert(t('error_generic'));
-                }
+                await this.ensureTaskUnlock({ source: 'download_all' });
             },
 
             setupCustomAnimationPicker() {
@@ -7769,7 +7710,8 @@
                 }
 
                 const stateHash = this.taskCatalogTaskKey(this.task)
-                    + `|${this.purchaseState?.user_credits || 0}`;
+                    + `|${this.purchaseState?.user_credits || 0}`
+                    + `|${this.purchaseState?.purchased_all ? 'unlocked' : 'locked'}`;
 
                 if (!force && this.animationCatalogLoaded && this.animationCatalogHash === stateHash) {
                     return;
@@ -7843,10 +7785,10 @@
                 const priceEl = wrap.querySelector('[data-i18n="animation_fitting_price"]');
                 if (priceEl) {
                     if (String(this.animationCatalog?.pricing?.download_scope || '') === 'variant_pack') {
-                        const cost = Number(this.animationCatalog?.pricing?.animal_animation_pack_credits || 10);
-                        priceEl.textContent = `Animal animation pack = ${cost} credits`;
+                        const cost = this.getDownloadAllCredits();
+                        priceEl.textContent = `Task unlock includes this animal animation pack (${cost} credits)`;
                     } else {
-                        priceEl.textContent = this.tSafe('animation_fitting_price', '1 fitted animation = 1 credit');
+                        priceEl.textContent = this.tSafe('animation_fitting_price', 'Task unlock includes all fitted animation downloads');
                     }
                 }
 
@@ -8016,8 +7958,9 @@
                 if (packBtn) {
                     const packTextEl = packBtn.querySelector('.custom-anim-download-pack-btn-text');
                     if (packTextEl) {
-                        const cost = Number(this.animationCatalog?.pricing?.animal_animation_pack_credits || selected?.pack_credits || 10);
-                        packTextEl.textContent = `Download all animations (${cost} credits)`;
+                        packTextEl.textContent = this.purchaseState?.purchased_all
+                            ? 'Download all animations'
+                            : `Unlock task (${this.getDownloadAllCredits()} credits)`;
                     }
                     packBtn.classList.toggle('hidden', !isAnimalPack);
                     packBtn.disabled = !(selected && selected.available && selected.ready);
@@ -8061,45 +8004,9 @@
                 if (!selected || !selected.available || !selected.ready || !params) return;
                 await this.notifyCustomAnimationIntent('animal_animation_pack_download', selected.id, selected.name);
 
-                const cost = Number(this.animationCatalog?.pricing?.animal_animation_pack_credits || selected.pack_credits || 10);
-                if (this.animationCatalog?.login_required) {
-                    await this.openPaywallModal({ source: 'animal_animation_pack', requiredCredits: cost });
-                    return;
-                }
-
-                const packPurchased = Boolean(
-                    this.animationCatalog?.pricing?.animal_animation_pack_purchased
-                    || selected.pack_purchased
-                    || this.animationCatalog?.purchased_all
-                );
-                const credits = Number(this.animationCatalog?.user_credits || 0);
-                if (!packPurchased) {
-                    if (credits < cost) {
-                        await this.openPaywallModal({ source: 'animal_animation_pack', requiredCredits: cost });
-                        return;
-                    }
-                    try {
-                        const resp = await fetch(`/api/task/${this.taskId}/animations/purchase`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                all: true,
-                                animal_type: params.animal_type,
-                                orientation: params.orientation,
-                            })
-                        });
-                        const data = await resp.json();
-                        if (!resp.ok) {
-                            alert(data.detail || this.tSafe('custom_anim_purchase_failed', this.tSafe('error_generic', 'Unable to process download.')));
-                            return;
-                        }
-                        this.purchaseState.user_credits = data.credits_remaining;
-                        await this.loadAnimationCatalog(true);
-                    } catch (e) {
-                        console.error('Animal animation pack purchase failed:', e);
-                        alert(this.tSafe('custom_anim_purchase_failed', this.tSafe('error_generic', 'Unable to process download.')));
-                        return;
-                    }
+                if (!this.purchaseState?.purchased_all) {
+                    const unlocked = await this.ensureTaskUnlock({ source: 'animal_animation_pack' });
+                    if (!unlocked) return;
                 }
 
                 const downloadUrl = this.animationCatalog?.pricing?.animal_animation_pack_download_url
@@ -8119,40 +8026,12 @@
                 const selectedId = this.normalizeAnimationKey(selected.id);
                 await this.notifyCustomAnimationIntent('custom_animation_download', selectedId, selected.name);
 
-                if (this.animationCatalog?.login_required) {
-                    await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: 1 });
-                    return;
-                }
-
                 const purchasedAll = Boolean(this.animationCatalog?.purchased_all);
                 const hasAccess = purchasedAll || Boolean(selected.purchased);
-                const singleCost = Number(this.animationCatalog?.pricing?.single_animation_credits || 1);
-                const credits = Number(this.animationCatalog?.user_credits || 0);
 
                 if (!hasAccess) {
-                    if (credits < singleCost) {
-                        await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: singleCost });
-                        return;
-                    }
-
-                    try {
-                        const resp = await fetch(`/api/task/${this.taskId}/animations/purchase`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ animation_id: selectedId })
-                        });
-                        const data = await resp.json();
-                        if (!resp.ok) {
-                            alert(data.detail || this.tSafe('custom_anim_purchase_failed', this.tSafe('error_generic', 'Unable to process download.')));
-                            return;
-                        }
-                        this.purchaseState.user_credits = data.credits_remaining;
-                        await this.loadAnimationCatalog(true);
-                    } catch (e) {
-                        console.error('Animation purchase failed:', e);
-                        alert(this.tSafe('custom_anim_purchase_failed', this.tSafe('error_generic', 'Unable to process download.')));
-                        return;
-                    }
+                    const unlocked = await this.ensureTaskUnlock({ source: 'custom_animation_download' });
+                    if (!unlocked) return;
                 }
 
                 await this.downloadSelectedAnimation(selectedId);
@@ -8177,37 +8056,7 @@
                     return;
                 }
 
-                const singleCost = Number(this.animationCatalog?.pricing?.single_animation_credits || 1);
-                if (this.animationCatalog?.login_required) {
-                    await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: singleCost });
-                    return;
-                }
-
-                const credits = Number(this.animationCatalog?.user_credits || 0);
-                if (credits < singleCost) {
-                    await this.openPaywallModal({ source: 'custom_animation_download', requiredCredits: singleCost });
-                    return;
-                }
-
-                if (!confirm(`Buy "${selected.name}" for ${singleCost} credit?`)) return;
-
-                try {
-                    const resp = await fetch(`/api/task/${this.taskId}/animations/purchase`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ animation_id: selected.id })
-                    });
-                    const data = await resp.json();
-                    if (!resp.ok) {
-                        alert(data.detail || 'Purchase failed');
-                        return;
-                    }
-                    this.purchaseState.user_credits = data.credits_remaining;
-                    await this.loadAnimationCatalog(true);
-                } catch (e) {
-                    console.error('Animation purchase failed:', e);
-                    alert('Purchase failed');
-                }
+                await this.ensureTaskUnlock({ source: 'custom_animation_download' });
             },
 
             async purchaseAllAnimations() {
@@ -8215,38 +8064,10 @@
                     await this.downloadAnimalAnimationPackAction();
                     return;
                 }
-                if (this.animationCatalog?.login_required) {
-                    await this.openPaywallModal({ source: 'custom_animation_bundle', requiredCredits: Number(this.animationCatalog?.pricing?.all_animations_credits || 10) });
-                    return;
-                }
                 const purchasedAll = Boolean(this.animationCatalog?.purchased_all);
                 if (purchasedAll) return;
 
-                const allCost = Number(this.animationCatalog?.pricing?.all_animations_credits || 10);
-                const credits = Number(this.animationCatalog?.user_credits || 0);
-                if (credits < allCost) {
-                    await this.openPaywallModal({ source: 'custom_animation_bundle', requiredCredits: allCost });
-                    return;
-                }
-                if (!confirm(`Unlock all animations for ${allCost} credits?`)) return;
-
-                try {
-                    const resp = await fetch(`/api/task/${this.taskId}/animations/purchase`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ all: true })
-                    });
-                    const data = await resp.json();
-                    if (!resp.ok) {
-                        alert(data.detail || 'Purchase failed');
-                        return;
-                    }
-                    this.purchaseState.user_credits = data.credits_remaining;
-                    await this.loadAnimationCatalog(true);
-                } catch (e) {
-                    console.error('Animation bundle purchase failed:', e);
-                    alert('Purchase failed');
-                }
+                await this.ensureTaskUnlock({ source: 'custom_animation_bundle' });
             },
 
             customAnimationBaseFbxUrl() {

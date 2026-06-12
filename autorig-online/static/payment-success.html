@@ -17,7 +17,7 @@
                     Payment successful. Credits will appear shortly (usually within 1–2 minutes).
                 </p>
                 <div id="payment-unlock-recovery" class="hidden" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(var(--accent-rgb), 0.08);">
-                    <h2 style="font-size: 1.25rem; margin: 0 0 0.5rem;">Finish unlocking your download</h2>
+                    <h2 style="font-size: 1.25rem; margin: 0 0 0.5rem;">Finish unlocking your task</h2>
                     <p id="payment-unlock-status" style="color: var(--text-secondary); margin: 0 0 1rem;">
                         Checking your credit balance...
                     </p>
@@ -78,7 +78,7 @@
                     if (params.get('autorig_unlock_dry_run') === '1' && params.get('task_id')) {
                         return {
                             taskId: params.get('task_id'),
-                            requiredCredits: Number(params.get('required_credits') || 30),
+                            requiredCredits: Number(params.get('required_credits') || 10),
                             balanceBefore: 0,
                             source: 'download_all',
                             createdAt: Date.now()
@@ -108,7 +108,7 @@
         }
 
         function showUnlockReturn(intent, balance) {
-            const required = Number(intent.requiredCredits || 30);
+            const required = Number(intent.requiredCredits || 10);
             const status = document.getElementById('payment-unlock-status');
             const link = document.getElementById('payment-unlock-task-link');
             const params = new URLSearchParams();
@@ -118,7 +118,7 @@
                 params.set('autorig_unlock_dry_run', '1');
             }
             if (status) {
-                status.textContent = `Your credits are available. Return to the task to confirm the ${required}-credit download unlock. Current balance: ${balance} credits.`;
+                status.textContent = `Your credits are available. Return to confirm the ${required}-credit task unlock. Current balance: ${balance} credits.`;
             }
             if (link) {
                 link.href = `/task?${params.toString()}`;
@@ -137,10 +137,10 @@
             if (recovery) recovery.classList.remove('hidden');
             if (actions) actions.classList.add('hidden');
             if (desc) {
-                desc.textContent = 'Payment successful. We are checking your credit balance so you can return and confirm your task download unlock.';
+                desc.textContent = 'Payment successful. We are checking your credit balance so you can return and confirm your task unlock.';
             }
 
-            const required = Number(intent.requiredCredits || 30);
+            const required = Number(intent.requiredCredits || 10);
             const startedAt = Date.now();
             while (Date.now() - startedAt < AUTH_POLL_MAX_MS) {
                 try {

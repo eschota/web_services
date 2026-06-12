@@ -139,7 +139,7 @@ class AnimalRigVariantsResponse(BaseModel):
     progress_text: Optional[str] = None
     purchased_all: bool = False
     login_required: bool = False
-    all_files_credits: int = 30
+    all_files_credits: int = 10
     variants: List[AnimalRigVariantItem] = []
 
 
@@ -504,7 +504,7 @@ class PurchaseStateResponse(BaseModel):
     is_owner: bool = False
     login_required: bool = False
     user_credits: int = 0
-    all_files_credits: int = 30
+    all_files_credits: int = 10
 
 
 class PurchaseRequest(BaseModel):

@@ -92,16 +92,19 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 )
             ).scalar_one()
 
-            # Catalog pricing rules.
+            # Catalog pricing rules: any new animation purchase unlocks the whole task.
             catalog = await self.main.api_get_animation_catalog(self.task_id, user=buyer, db=db)
-            self.assertEqual(catalog.pricing["single_animation_credits"], 1)
+            self.assertEqual(catalog.pricing["purchase_scope"], "task")
+            self.assertEqual(catalog.pricing["task_unlock_credits"], 10)
+            self.assertEqual(catalog.pricing["single_animation_credits"], 10)
             self.assertEqual(catalog.pricing["all_animations_credits"], 10)
 
             walking = next((a for a in catalog.animations if a.id == "walking"), None)
             self.assertIsNotNone(walking)
             self.assertTrue(walking.available)
+            self.assertEqual(walking.credits, 10)
 
-            # Single animation purchase: -1 credit.
+            # Legacy single-animation purchase creates the full task unlock: -10 credits.
             c0 = buyer.balance_credits
             r1 = await self.main.api_purchase_animation(
                 self.task_id,
@@ -110,7 +113,30 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
             self.assertTrue(r1.success)
-            self.assertEqual(buyer.balance_credits, c0 - 1)
+            self.assertTrue(r1.purchased_all)
+            self.assertEqual(buyer.balance_credits, c0 - 10)
+
+            full_unlocks = (
+                await db.execute(
+                    self.main.select(self.database.TaskFilePurchase).where(
+                        self.database.TaskFilePurchase.task_id == self.task_id,
+                        self.database.TaskFilePurchase.user_email == "buyer@example.com",
+                        self.database.TaskFilePurchase.file_index.is_(None),
+                    )
+                )
+            ).scalars().all()
+            self.assertEqual(len(full_unlocks), 1)
+            self.assertEqual(full_unlocks[0].credits_spent, 10)
+
+            single_rows = (
+                await db.execute(
+                    self.main.select(self.database.TaskAnimationPurchase).where(
+                        self.database.TaskAnimationPurchase.task_id == self.task_id,
+                        self.database.TaskAnimationPurchase.user_email == "buyer@example.com",
+                    )
+                )
+            ).scalars().all()
+            self.assertEqual(single_rows, [])
 
             # Duplicate purchase is idempotent.
             c1 = buyer.balance_credits
@@ -123,7 +149,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(r2.success)
             self.assertEqual(buyer.balance_credits, c1)
 
-            # Unlock all custom animations: -10 credits.
+            # Legacy animation-bundle purchase is also idempotent after task unlock.
             c2 = buyer.balance_credits
             r3 = await self.main.api_purchase_animation(
                 self.task_id,
@@ -132,9 +158,9 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
             self.assertTrue(r3.success)
-            self.assertEqual(buyer.balance_credits, c2 - 10)
+            self.assertEqual(buyer.balance_credits, c2)
 
-            # Full ZIP download costs one $3 entry pack.
+            # Task ZIP purchase is idempotent after the same task unlock.
             c3 = buyer.balance_credits
             r4 = await self.main.api_purchase_files(
                 self.task_id,
@@ -145,10 +171,83 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
             self.assertTrue(r4.success)
-            self.assertEqual(buyer.balance_credits, c3 - 30)
+            self.assertEqual(buyer.balance_credits, c3)
 
             await db.refresh(owner)
-            self.assertEqual(owner.balance_credits, 41)  # 1 + 10 + 30
+            self.assertEqual(owner.balance_credits, 10)
+
+    async def test_legacy_file_index_purchase_creates_task_unlock(self):
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+
+            c0 = buyer.balance_credits
+            purchased = await self.main.api_purchase_files(
+                self.task_id,
+                self.models.PurchaseRequest(file_indices=[0]),
+                request=self._fake_request(),
+                response=Response(),
+                user=buyer,
+                db=db,
+            )
+
+            self.assertTrue(purchased.success)
+            self.assertTrue(purchased.purchased_all)
+            self.assertEqual(buyer.balance_credits, c0 - 10)
+
+            rows = (
+                await db.execute(
+                    self.main.select(self.database.TaskFilePurchase).where(
+                        self.database.TaskFilePurchase.task_id == self.task_id,
+                        self.database.TaskFilePurchase.user_email == "buyer@example.com",
+                    )
+                )
+            ).scalars().all()
+            self.assertEqual(len(rows), 1)
+            self.assertIsNone(rows[0].file_index)
+            self.assertEqual(rows[0].credits_spent, 10)
+
+    async def test_existing_legacy_animation_entitlements_still_grant_access(self):
+        async with self.database.AsyncSessionLocal() as db:
+            db.add(
+                self.database.TaskAnimationPurchase(
+                    task_id=self.task_id,
+                    user_email="buyer@example.com",
+                    animation_id="walking",
+                    credits_spent=1,
+                )
+            )
+            db.add(
+                self.database.TaskAnimalAnimationPackPurchase(
+                    task_id=self.task_id,
+                    user_email="buyer@example.com",
+                    animal_type="dog",
+                    orientation="front",
+                    credits_spent=10,
+                )
+            )
+            await db.commit()
+
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            purchased_ids, purchased_all = await self.main._get_animation_purchase_state(db, buyer, self.task_id)
+            self.assertIn("walking", purchased_ids)
+            self.assertFalse(purchased_all)
+            self.assertTrue(
+                await self.main._has_animal_animation_pack_purchase(
+                    db,
+                    buyer,
+                    self.task_id,
+                    "dog",
+                    "front",
+                )
+            )
 
     async def test_gumroad_mapping_animal_cost_and_bonus_disabled(self):
         self.assertEqual(self.main.GUMROAD_PRODUCT_CREDITS.get("oneclick-30-credits"), 30)
@@ -210,7 +309,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 user=buyer,
                 db=db,
             )
-            self.assertEqual(state.all_files_credits, 30)
+            self.assertEqual(state.all_files_credits, 10)
 
             c0 = buyer.balance_credits
             purchased = await self.main.api_purchase_files(
@@ -222,7 +321,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
             self.assertTrue(purchased.success)
-            self.assertEqual(buyer.balance_credits, c0 - 30)
+            self.assertEqual(buyer.balance_credits, c0 - 10)
 
             before_bonus = buyer.balance_credits
             bonus = await self.main.grant_youtube_bonus(user=buyer, db=db)
@@ -240,7 +339,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             req = self._fake_request(
                 method="GET",
                 path="/buy-credits/checkout/autorig-100",
-                query_string=f"source=task_paywall_modal&task_id={self.task_id}&required_credits=30".encode(),
+                query_string=f"source=task_paywall_modal&task_id={self.task_id}&required_credits=10".encode(),
                 headers=[(b"referer", b"https://autorig.test/task?id=111")],
             )
 
@@ -250,7 +349,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                     request=req,
                     source="task_paywall_modal",
                     task_id=self.task_id,
-                    required_credits=30,
+                    required_credits=10,
                     user=buyer,
                     db=db,
                 )
@@ -274,7 +373,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rows[0].product_permalink, "autorig-100")
             self.assertEqual(rows[0].source, "task_paywall_modal")
             self.assertEqual(rows[0].task_id, self.task_id)
-            self.assertEqual(rows[0].required_credits, 30)
+            self.assertEqual(rows[0].required_credits, 10)
 
     async def test_credit_checkout_route_rejects_unknown_and_requires_login(self):
         async with self.database.AsyncSessionLocal() as db:
@@ -325,7 +424,7 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                     product_kind="credits",
                     source="task_paywall_modal",
                     task_id=self.task_id,
-                    required_credits=30,
+                    required_credits=10,
                     created_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 )
             )
@@ -393,9 +492,9 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(purchase.credited)
             self.assertEqual(purchase.credits_added, 30)
-            self.assertEqual(unlock.credits_spent, 30)
-            self.assertEqual(buyer.balance_credits, 0)
-            self.assertEqual(owner.balance_credits, 30)
+            self.assertEqual(unlock.credits_spent, 10)
+            self.assertEqual(buyer.balance_credits, 20)
+            self.assertEqual(owner.balance_credits, 10)
             self.assertEqual(intent.gumroad_sale_id, "checkout-auto-unlock-sale")
             self.assertEqual(intent.auto_unlock_status, "unlocked")
             self.assertIsNotNone(intent.used_at)
@@ -498,6 +597,25 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(purchased.success)
                 self.assertTrue(purchased.purchased_all)
                 self.assertEqual(buyer.balance_credits, c0 - 10)
+                unlock = (
+                    await db.execute(
+                        self.main.select(self.database.TaskFilePurchase).where(
+                            self.database.TaskFilePurchase.task_id == task_id,
+                            self.database.TaskFilePurchase.user_email == "buyer@example.com",
+                            self.database.TaskFilePurchase.file_index.is_(None),
+                        )
+                    )
+                ).scalar_one()
+                self.assertEqual(unlock.credits_spent, 10)
+                animal_rows = (
+                    await db.execute(
+                        self.main.select(self.database.TaskAnimalAnimationPackPurchase).where(
+                            self.database.TaskAnimalAnimationPackPurchase.task_id == task_id,
+                            self.database.TaskAnimalAnimationPackPurchase.user_email == "buyer@example.com",
+                        )
+                    )
+                ).scalars().all()
+                self.assertEqual(animal_rows, [])
 
                 c1 = buyer.balance_credits
                 duplicate = await self.main.api_purchase_animation(
