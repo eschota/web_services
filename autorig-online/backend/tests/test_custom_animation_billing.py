@@ -512,6 +512,18 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                 )
             ).scalar_one()
             self.assertEqual(buyer.balance_credits, start_balance)
+            purchase = (
+                await db.execute(
+                    self.main.select(self.database.GumroadPurchase).where(
+                        self.database.GumroadPurchase.sale_id == "plugin-sale-10"
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(purchase.email, "buyer@example.com")
+            self.assertEqual(purchase.product_permalink, "blender-plugin-10")
+            self.assertEqual(purchase.price, 1000)
+            self.assertFalse(purchase.credited)
+            self.assertEqual(purchase.credits_added, 0)
 
     async def test_gumroad_webhook_auto_unlocks_recent_task_checkout_intent(self):
         class DummyClient:

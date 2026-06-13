@@ -4705,6 +4705,34 @@ async def api_gumroad_ping(
         except Exception as e:
             print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
 
+    if is_plugin_product:
+        try:
+            async with AsyncSessionLocal() as db:
+                purchase = GumroadPurchase(
+                    sale_id=sale_id,
+                    email=email or "unknown",
+                    product_permalink=product_key,
+                    product_name=product_name,
+                    price=price_cents,
+                    refunded=refunded,
+                    is_recurring_charge=is_recurring_charge,
+                    subscription_id=subscription_id,
+                    license_key=license_key,
+                    test=is_test,
+                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                    credited=False,
+                    credits_added=0,
+                )
+                db.add(purchase)
+                try:
+                    await db.flush()
+                    await db.commit()
+                    should_notify_purchase = True
+                except IntegrityError:
+                    await db.rollback()
+        except Exception as e:
+            print(f"[Gumroad] Plugin purchase audit failed for {sale_id}: {e}", flush=True)
+
     if not should_notify_purchase:
         if known_product or price_cents > 0 or refunded or is_test:
             should_notify_purchase = True
