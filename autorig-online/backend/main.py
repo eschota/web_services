@@ -55,6 +55,7 @@ from config import (
     TASK_CACHE_MAX_GB,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
+    BLENDER_PLUGIN_AB_VARIANTS,
     AUTORIG_DONATION_PRODUCT_KEYS,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
@@ -1151,6 +1152,51 @@ def _checkout_pack_price_label(product_key: str) -> str:
 def _checkout_pack_label(product_key: str) -> str:
     credits = int(GUMROAD_PRODUCT_CREDITS.get(_normalize_gumroad_product_key(product_key), 0) or 0)
     return f"{credits} credits" if credits > 0 else "credits"
+
+
+def _format_usd_price(value: int | float) -> str:
+    amount = float(value)
+    if amount.is_integer():
+        return f"${int(amount)}"
+    return f"${amount:.2f}".rstrip("0").rstrip(".")
+
+
+def _plugin_variant_items() -> List[Tuple[str, int]]:
+    return [
+        (key, int(price))
+        for key, price in BLENDER_PLUGIN_AB_VARIANTS.items()
+        if _normalize_gumroad_product_key(key) and int(price) > 0
+    ]
+
+
+def _select_blender_plugin_variant(user: Optional[User]) -> Tuple[str, int]:
+    variants = _plugin_variant_items()
+    if not variants:
+        return ("blender-plugin", 100)
+    if user and getattr(user, "id", None):
+        index = max(0, int(user.id) - 1) % len(variants)
+    else:
+        email = (getattr(user, "email", "") or "").strip().lower()
+        digest = hashlib.sha256(email.encode("utf-8")).hexdigest() if email else "0"
+        index = int(digest[:8], 16) % len(variants)
+    return variants[index]
+
+
+def _is_blender_plugin_product(product_key: str, product_name: Optional[str] = None) -> bool:
+    key = _normalize_gumroad_product_key(product_key)
+    if key in {_normalize_gumroad_product_key(k) for k in BLENDER_PLUGIN_AB_VARIANTS}:
+        return True
+    name = (product_name or "").strip().lower()
+    return "blender" in name and "plugin" in name and "auto" in name and "rig" in name
+
+
+def _blender_plugin_price_label(product_key: str, price_cents: int = 0) -> str:
+    key = _normalize_gumroad_product_key(product_key)
+    if key in BLENDER_PLUGIN_AB_VARIANTS:
+        return _format_usd_price(int(BLENDER_PLUGIN_AB_VARIANTS[key]))
+    if price_cents > 0:
+        return _format_usd_price(price_cents / 100.0)
+    return "unknown"
 
 
 def _gumroad_checkout_url(product_key: str, user_email: str) -> str:
@@ -2751,6 +2797,98 @@ async def buy_credits_checkout(
         )
     except Exception as e:
         print(f"[Checkout] Failed to schedule checkout notification id={intent_id}: {e}", flush=True)
+
+    return RedirectResponse(url=_gumroad_checkout_url(product_key, user.email), status_code=303)
+
+
+@app.get("/api/blender-plugin/offer")
+async def blender_plugin_offer(
+    user: Optional[User] = Depends(get_current_user),
+):
+    if not user:
+        return {
+            "product_kind": "plugin",
+            "authenticated": False,
+            "checkout_url": "/blender-plugin/checkout",
+        }
+
+    product_key, price_usd = _select_blender_plugin_variant(user)
+    price_label = _format_usd_price(price_usd)
+    return {
+        "product_kind": "plugin",
+        "authenticated": True,
+        "permalink": product_key,
+        "price_usd": price_usd,
+        "price_label": price_label,
+        "display_price": f"{price_label}+",
+        "package": f"Blender Plugin ABCD {price_label}",
+        "checkout_url": "/blender-plugin/checkout",
+    }
+
+
+@app.get("/blender-plugin/checkout")
+async def blender_plugin_checkout(
+    request: Request,
+    source: Optional[str] = Query(None),
+    page_url: Optional[str] = Query(None),
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-owned Blender plugin checkout with ABCD price assignment and click telemetry."""
+    if not user:
+        next_path = request.url.path
+        if request.url.query:
+            next_path += f"?{request.url.query}"
+        login_url = f"/auth/login?next={quote(next_path, safe='')}"
+        return RedirectResponse(url=login_url, status_code=303)
+
+    product_key, price_usd = _select_blender_plugin_variant(user)
+    price_label = _format_usd_price(price_usd)
+    source_clean = _clamp_text(source, 80, default="blender_plugin_checkout")
+    page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
+    package_label = f"Blender Plugin ABCD {price_label}"
+    intent_id = None
+
+    try:
+        intent = PurchaseCheckoutIntent(
+            user_email=user.email,
+            product_permalink=product_key,
+            product_kind="plugin",
+            source=source_clean,
+            task_id=None,
+            required_credits=None,
+            page_url=page_url_clean,
+            created_at=datetime.utcnow(),
+        )
+        db.add(intent)
+        await db.flush()
+        intent_id = intent.id
+        await db.commit()
+        print(
+            f"[Checkout] Plugin checkout intent id={intent_id} product={product_key} "
+            f"price={price_label} source={source_clean}",
+            flush=True,
+        )
+    except Exception as e:
+        await db.rollback()
+        print(f"[Checkout] Failed to persist plugin checkout intent product={product_key}: {e}", flush=True)
+
+    try:
+        from telegram_bot import broadcast_credits_purchase_click
+        asyncio.create_task(
+            broadcast_credits_purchase_click(
+                package=package_label,
+                price=price_label,
+                user_email=user.email,
+                anon_id=None,
+                product_kind="plugin",
+                permalink=product_key,
+                source=source_clean,
+                page_url=page_url_clean,
+            )
+        )
+    except Exception as e:
+        print(f"[Checkout] Failed to schedule plugin checkout notification id={intent_id}: {e}", flush=True)
 
     return RedirectResponse(url=_gumroad_checkout_url(product_key, user.email), status_code=303)
 
@@ -4510,7 +4648,11 @@ async def api_gumroad_ping(
 
     product_key = _gumroad_product_key_from_payload(product, product_name)
     local_credits_added = 0
-    known_product = product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
+    is_plugin_product = _is_blender_plugin_product(product_key, product_name)
+    known_product = (
+        product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
+        or is_plugin_product
+    )
     should_notify_purchase = False
 
     if _is_autorig_credit_product(product_key) and email and email != "unknown":
@@ -4574,16 +4716,23 @@ async def api_gumroad_ping(
 
     from telegram_bot import broadcast_credits_purchased
     if should_notify_purchase:
+        notice_kind = "plugin" if is_plugin_product else "credits"
+        notice_price = _blender_plugin_price_label(product_key, price_cents) if is_plugin_product else str(price_raw)
+        notice_package = (
+            f"Blender Plugin ABCD {notice_price}" if is_plugin_product else _checkout_pack_label(product_key)
+        )
         asyncio.create_task(
             broadcast_credits_purchased(
-                credits=local_credits_added if local_credits_added > 0 else max(price_cents, 0),
-                price=str(price_raw),
+                credits=0 if is_plugin_product else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
+                price=notice_price,
                 user_email=email,
-                product=product,
+                product=product_key or product,
                 sale_id=sale_id,
                 is_test=is_test,
                 is_recurring_charge=is_recurring_charge,
                 refunded=refunded,
+                product_kind=notice_kind,
+                package=notice_package,
             )
         )
 

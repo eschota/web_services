@@ -1177,9 +1177,14 @@ async def broadcast_credits_purchased(
     is_test: bool = False,
     is_recurring_charge: bool = False,
     refunded: bool = False,
+    product_kind: str = "credits",
+    package: str = "",
 ) -> None:
     """Notify when credits are successfully purchased via Gumroad."""
-    print(f"[Telegram] broadcast_credits_purchased: {credits} credits for {user_email} (test={is_test})")
+    print(
+        f"[Telegram] broadcast_credits_purchased: kind={product_kind} credits={credits} "
+        f"user={user_email} (test={is_test})"
+    )
     token = _get_token()
     if not token:
         print("[Telegram] No token, skipping credits purchased notification")
@@ -1196,6 +1201,15 @@ async def broadcast_credits_purchased(
         f"👤 User: {html.escape(user_email)} | 📦 Product: {html.escape(product)}\n"
         f"🆔 Sale: {html.escape(sale_id)}"
     )
+
+    if (product_kind or "").strip().lower() == "plugin":
+        package_label = package or "Blender Plugin"
+        text = (
+            f"<b>Plugin purchased!</b>{test_label}\n"
+            f"Package: {html.escape(package_label)} | Price: {html.escape(price)}\n"
+            f"User: {html.escape(user_email)} | Product: {html.escape(product)}\n"
+            f"Sale: {html.escape(sale_id)}"
+        )
 
     chat_ids = await get_active_chat_ids()
     if not chat_ids:

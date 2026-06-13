@@ -6786,7 +6786,7 @@
                     kind: 'plugin',
                     permalink: 'blender-plugin',
                     title: 'Blender Standalone Plugin',
-                    price: '$199',
+                    price: '$100+',
                     note: 'Native Blender add-on for AutoRig.online workflows.'
                 }
             ],
@@ -6883,8 +6883,17 @@
             },
 
             paywallCheckoutUrl(product, context = {}) {
-                if (!product || product.kind !== 'credits') {
-                    return this.gumroadPaywallUrl(product?.permalink || '');
+                if (!product) {
+                    return '#';
+                }
+                if (product.kind === 'plugin') {
+                    const params = new URLSearchParams();
+                    params.set('source', 'task_paywall_modal_plugin');
+                    params.set('page_url', window.location.href);
+                    return `/blender-plugin/checkout?${params.toString()}`;
+                }
+                if (product.kind !== 'credits') {
+                    return this.gumroadPaywallUrl(product.permalink || '');
                 }
                 const params = new URLSearchParams();
                 params.set('source', 'task_paywall_modal');
@@ -6929,6 +6938,18 @@
                 } catch (e) {
                     console.warn('Paywall auth refresh failed:', e);
                 }
+                try {
+                    const offerResp = await fetch('/api/blender-plugin/offer', { credentials: 'same-origin' });
+                    if (!offerResp.ok) return;
+                    const offer = await offerResp.json();
+                    const plugin = this.paywallProducts.find((item) => item.kind === 'plugin');
+                    if (plugin && offer?.display_price) {
+                        plugin.permalink = offer.permalink || plugin.permalink;
+                        plugin.price = offer.display_price;
+                    }
+                } catch (e) {
+                    console.warn('Plugin offer refresh failed:', e);
+                }
             },
 
             async notifyPaywallProductClick(product) {
@@ -6966,9 +6987,7 @@
                     const btnText = needsLogin
                         ? 'Sign in to buy'
                         : (product.kind === 'plugin' ? 'Buy plugin' : 'Buy credits');
-                    const href = needsLogin && product.kind !== 'credits'
-                        ? this.paywallLoginUrl()
-                        : this.paywallCheckoutUrl(product, context);
+                    const href = this.paywallCheckoutUrl(product, context);
                     return `
                         <article class="task-paywall-card" data-featured="${product.featured ? 'true' : 'false'}">
                             <h3>${this.paywallEscape(product.title)}</h3>

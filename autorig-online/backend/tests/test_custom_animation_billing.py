@@ -393,8 +393,125 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
                     request=req,
                     user=None,
                     db=db,
-                )
+            )
             self.assertEqual(denied.exception.status_code, 404)
+
+    async def test_blender_plugin_ab_selection_and_checkout_records_intent(self):
+        fake_user = lambda user_id: type("FakeUser", (), {"id": user_id, "email": f"u{user_id}@example.com"})()
+        self.assertEqual(self.main._select_blender_plugin_variant(fake_user(1)), ("blender-plugin-10", 10))
+        self.assertEqual(self.main._select_blender_plugin_variant(fake_user(2)), ("blender-plugin-30", 30))
+        self.assertEqual(self.main._select_blender_plugin_variant(fake_user(3)), ("blender-plugin-50", 50))
+        self.assertEqual(self.main._select_blender_plugin_variant(fake_user(4)), ("blender-plugin", 100))
+
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            expected_key, expected_price = self.main._select_blender_plugin_variant(buyer)
+
+            req = self._fake_request(
+                method="GET",
+                path="/blender-plugin/checkout",
+                query_string=b"source=buy_credits_page",
+                headers=[(b"referer", b"https://autorig.test/buy-credits")],
+            )
+            with patch("telegram_bot.broadcast_credits_purchase_click", new=AsyncMock()) as tg:
+                resp = await self.main.blender_plugin_checkout(
+                    request=req,
+                    source="buy_credits_page",
+                    user=buyer,
+                    db=db,
+                )
+                await asyncio.sleep(0)
+
+            self.assertEqual(resp.status_code, 303)
+            self.assertEqual(
+                resp.headers["location"],
+                f"https://u3d.gumroad.com/l/{expected_key}?userid=buyer%40example.com",
+            )
+            tg.assert_called_once()
+            self.assertEqual(tg.call_args.kwargs["product_kind"], "plugin")
+            self.assertEqual(tg.call_args.kwargs["price"], self.main._format_usd_price(expected_price))
+            self.assertEqual(tg.call_args.kwargs["permalink"], expected_key)
+
+            rows = (
+                await db.execute(
+                    self.main.select(self.database.PurchaseCheckoutIntent).where(
+                        self.database.PurchaseCheckoutIntent.user_email == "buyer@example.com",
+                        self.database.PurchaseCheckoutIntent.product_kind == "plugin",
+                    )
+                )
+            ).scalars().all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].product_permalink, expected_key)
+            self.assertEqual(rows[0].source, "buy_credits_page")
+            self.assertIsNone(rows[0].task_id)
+            self.assertIsNone(rows[0].required_credits)
+
+    async def test_gumroad_plugin_webhook_notifies_without_crediting(self):
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, *args, **kwargs):
+                class Resp:
+                    status_code = 200
+
+                return Resp()
+
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            start_balance = buyer.balance_credits
+
+        body = urlencode(
+            {
+                "sale_id": "plugin-sale-10",
+                "email": "checkout@example.com",
+                "url_params[userid]": "buyer@example.com",
+                "product_permalink": "blender-plugin-10",
+                "product_name": "Auto Animal Rig - Blender Plugin - $10",
+                "price": "1000",
+            }
+        ).encode()
+        req = self._fake_request(
+            method="POST",
+            path="/api-gumroad",
+            headers=[(b"content-type", b"application/x-www-form-urlencoded")],
+            body=body,
+        )
+
+        with (
+            patch.object(self.main.httpx, "AsyncClient", return_value=DummyClient()),
+            patch("telegram_bot.broadcast_credits_purchased", new=AsyncMock()) as tg,
+        ):
+            resp = await self.main.api_gumroad_ping(req)
+            await asyncio.sleep(0)
+
+        self.assertEqual(resp.status_code, 200)
+        tg.assert_called_once()
+        kwargs = tg.call_args.kwargs
+        self.assertEqual(kwargs["product_kind"], "plugin")
+        self.assertEqual(kwargs["package"], "Blender Plugin ABCD $10")
+        self.assertEqual(kwargs["price"], "$10")
+        self.assertEqual(kwargs["product"], "blender-plugin-10")
+        self.assertEqual(kwargs["credits"], 0)
+
+        async with self.database.AsyncSessionLocal() as db:
+            buyer = (
+                await db.execute(
+                    self.main.select(self.database.User).where(self.database.User.email == "buyer@example.com")
+                )
+            ).scalar_one()
+            self.assertEqual(buyer.balance_credits, start_balance)
 
     async def test_gumroad_webhook_auto_unlocks_recent_task_checkout_intent(self):
         class DummyClient:

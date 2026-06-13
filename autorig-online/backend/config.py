@@ -180,6 +180,15 @@ GUMROAD_PRODUCT_CREDITS = {
     "autorig-1000": 1000,
 }
 
+# Gumroad product_permalink -> USD minimum price for the Blender plugin ABCD test.
+BLENDER_PLUGIN_AB_VARIANTS = {
+    "blender-plugin-10": 10,
+    "blender-plugin-30": 30,
+    "blender-plugin-50": 50,
+    # Keep the original public Gumroad URL as the $100 variant.
+    "blender-plugin": 100,
+}
+
 # Gumroad product_permalinks (lowercase) that count toward /buy-credits donation progress
 AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
     k.strip().lower()

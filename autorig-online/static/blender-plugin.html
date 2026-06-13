@@ -98,6 +98,12 @@
             gap: 0.75rem;
             margin-top: 1.75rem;
         }
+        .plugin-offer-note {
+            width: 100%;
+            color: rgba(238, 238, 255, 0.78);
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
         .plugin-proof-row {
             display: flex;
             flex-wrap: wrap;
@@ -344,13 +350,13 @@
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "Blender",
         "url": "https://autorig.online/blender-plugin",
-        "downloadUrl": "https://u3d.gumroad.com/l/blender-plugin",
+        "downloadUrl": "https://autorig.online/blender-plugin/checkout",
         "image": "https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp",
         "screenshot": "https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp",
         "description": "Native Blender plugin for AutoRig.online automatic 3D character, animal and non-humanoid rigging.",
         "offers": {
             "@type": "Offer",
-            "url": "https://u3d.gumroad.com/l/blender-plugin",
+            "url": "https://autorig.online/blender-plugin/checkout",
             "priceCurrency": "USD",
             "availability": "https://schema.org/InStock"
         },
@@ -378,8 +384,9 @@
                         generate rigs, use presets, work with humanoid and non-humanoid models, and prepare animation-ready characters without switching tools.
                     </p>
                     <div class="plugin-actions">
-                        <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Buy Blender Plugin</a>
+                        <a href="/blender-plugin/checkout?source=blender_plugin_page" class="btn btn-primary plugin-buy-link">Buy Blender Plugin</a>
                         <a href="https://www.youtube.com/shorts/vEn7laZijOI" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">Watch presentation</a>
+                        <span class="plugin-offer-note" id="plugin-offer-price">Assigned test price loads at checkout.</span>
                     </div>
                     <div class="plugin-proof-row" aria-label="Plugin highlights">
                         <span class="plugin-pill">Blender-native panel</span>
@@ -519,7 +526,7 @@
                     <h2>Buy the native Blender plugin</h2>
                     <p>Use AutoRig.online in the browser, or buy the Blender add-on when you want the rigging workflow inside Blender.</p>
                 </div>
-                <a href="https://u3d.gumroad.com/l/blender-plugin" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Buy on Gumroad</a>
+                <a href="/blender-plugin/checkout?source=blender_plugin_page_cta" class="btn btn-primary plugin-buy-link">Buy on Gumroad</a>
             </section>
 
             <section class="plugin-section plugin-link-grid" aria-label="External links">
@@ -541,5 +548,28 @@
     <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const updateLinks = (offer) => {
+                const displayPrice = offer && offer.display_price;
+                const priceEl = document.getElementById('plugin-offer-price');
+                document.querySelectorAll('.plugin-buy-link').forEach((link) => {
+                    const base = link.getAttribute('href') || '/blender-plugin/checkout';
+                    const separator = base.includes('?') ? '&' : '?';
+                    link.href = `${base}${separator}page_url=${encodeURIComponent(window.location.href)}`;
+                    if (displayPrice && link.textContent.includes('Blender Plugin')) {
+                        link.textContent = `Buy Blender Plugin ${displayPrice}`;
+                    }
+                });
+                if (priceEl && displayPrice) {
+                    priceEl.textContent = `Your assigned test price: ${displayPrice}`;
+                }
+            };
+            fetch('/api/blender-plugin/offer')
+                .then((resp) => resp.ok ? resp.json() : null)
+                .then(updateLinks)
+                .catch(() => updateLinks(null));
+        });
+    </script>
 </body>
 </html>
