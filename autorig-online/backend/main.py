@@ -3790,7 +3790,13 @@ async def api_create_task(
         if parsed_source_preview.scheme in ("http", "https") and parsed_source_preview.netloc:
             settings["source_preview_url"] = source_preview_url
 
-    if "viewer_theme_selection" not in settings:
+    existing_theme_selection = settings.get("viewer_theme_selection")
+    existing_theme_id = ""
+    if isinstance(existing_theme_selection, dict):
+        existing_theme_id = str(
+            existing_theme_selection.get("theme_id") or existing_theme_selection.get("id") or ""
+        ).strip()
+    if not existing_theme_id:
         selected_theme = _select_viewer_theme_from_metadata(
             input_url=final_url,
             input_type=input_type,
