@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.01.004 - Default site rig orientation
+
+- Defaulted browser-created rig tasks to an authoritative identity orientation when the user does not rotate the model manually.
+- Preserved legacy worker orientation sweep for API payloads without `local_rotation_authoritative`.
+- Ensured task restarts dispatch saved `rig_orientation` even when no separate model transform is present.
+
 ## v0.01.003 - Site-authoritative rig orientation
 
 - Added manual face-direction controls to rig task creation and manual restart flows.

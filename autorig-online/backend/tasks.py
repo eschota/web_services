@@ -90,6 +90,17 @@ def _as_bool(value: Any) -> bool:
     return False
 
 
+def _site_authoritative_identity_orientation(source: str) -> Dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "source": source,
+        "local_rotation": [0.0, 0.0, 0.0],
+        "local_rotation_authoritative": True,
+        "quarter_turns": {"x": 0, "y": 0, "z": 0},
+        "user_interacted_bool": False,
+    }
+
+
 def _transform_params_from_viewer_settings(settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(settings, dict):
         return None
@@ -558,6 +569,17 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             await db.commit()
             await db.refresh(task)
             return task, task.error_message
+    if pk == "rig" and not transform_params and not bool(getattr(task, "created_via_api", False)):
+        orientation = _site_authoritative_identity_orientation("site_auto")
+        viewer_settings["rig_orientation"] = orientation
+        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
+        await db.commit()
+        await db.refresh(task)
+        transform_params = {
+            "local_rotation": orientation["local_rotation"],
+            "local_rotation_authoritative": True,
+            "rig_orientation": orientation,
+        }
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,

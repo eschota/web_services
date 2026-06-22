@@ -3730,6 +3730,16 @@ async def api_create_task(
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
+    if pipeline == "rig" and not via_api:
+        rig_orientation = _ensure_site_authoritative_rig_orientation(
+            rig_orientation,
+            local_rotation=local_rotation,
+            local_rotation_authoritative=local_rotation_authoritative,
+            default_source="site_auto",
+        )
+        if rig_orientation:
+            local_rotation = rig_orientation["local_rotation"]
+            local_rotation_authoritative = bool(rig_orientation.get("local_rotation_authoritative"))
     disk_headroom_checked = False
 
     # Handle file upload
@@ -4052,6 +4062,38 @@ def _coerce_rig_orientation(
     }
     orientation["user_interacted_bool"] = bool(orientation.get("user_interacted_bool", False))
     return orientation
+
+
+def _is_nonzero_rotation(local_rotation: Optional[List[float]]) -> bool:
+    if local_rotation is None:
+        return False
+    return any(abs(float(value or 0.0)) > 0.0001 for value in local_rotation)
+
+
+def _ensure_site_authoritative_rig_orientation(
+    rig_orientation: Optional[Dict[str, Any]],
+    *,
+    local_rotation: Optional[List[float]],
+    local_rotation_authoritative: Optional[bool],
+    default_source: str,
+) -> Optional[Dict[str, Any]]:
+    if rig_orientation is not None:
+        return rig_orientation
+    if local_rotation_authoritative is False:
+        return None
+
+    rotation = local_rotation if local_rotation is not None else [0.0, 0.0, 0.0]
+    user_interacted = _is_nonzero_rotation(rotation)
+    source = "site_manual" if user_interacted and default_source == "site_auto" else default_source
+    return _coerce_rig_orientation(
+        {
+            "source": source,
+            "user_interacted_bool": user_interacted,
+        },
+        local_rotation=rotation,
+        local_rotation_authoritative=True,
+        default_source=source,
+    )
 
 
 def _coerce_animal_semantic_markers(value: Any) -> Optional[Dict[str, List[float]]]:
@@ -5938,6 +5980,7 @@ async def api_restart_task(
     """Restart task with the same task_id (available after 1 minute)"""
     from datetime import timedelta
     from workers import select_best_worker, send_task_to_worker
+    via_api = bool(getattr(request.state, "auth_via_api_key", False))
 
     task = await get_task_by_id(db, task_id)
     if not task:
@@ -5997,6 +6040,20 @@ async def api_restart_task(
     if restart_rig_orientation:
         restart_local_rotation = restart_rig_orientation["local_rotation"]
         restart_local_rotation_authoritative = bool(restart_rig_orientation.get("local_rotation_authoritative"))
+
+    restart_pipeline_kind_for_orientation = getattr(task, "pipeline_kind", None) or "rig"
+    if restart_pipeline_kind_for_orientation not in ("rig", "convert"):
+        restart_pipeline_kind_for_orientation = "rig"
+    if restart_pipeline_kind_for_orientation == "rig" and not via_api:
+        restart_rig_orientation = _ensure_site_authoritative_rig_orientation(
+            restart_rig_orientation,
+            local_rotation=restart_local_rotation,
+            local_rotation_authoritative=restart_local_rotation_authoritative,
+            default_source="task_restart",
+        )
+        if restart_rig_orientation:
+            restart_local_rotation = restart_rig_orientation["local_rotation"]
+            restart_local_rotation_authoritative = bool(restart_rig_orientation.get("local_rotation_authoritative"))
 
     animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
     requested_rig_key = str(
@@ -6177,6 +6234,16 @@ async def api_restart_task(
             if restart_rig_orientation:
                 transform_params["rig_orientation"] = restart_rig_orientation
             print(f"[Restart] Transform params from request: {transform_params}")
+
+        if not transform_params and restart_rig_orientation:
+            transform_params = {
+                "local_rotation": restart_rig_orientation["local_rotation"],
+                "local_rotation_authoritative": bool(
+                    restart_rig_orientation.get("local_rotation_authoritative", True)
+                ),
+                "rig_orientation": restart_rig_orientation,
+            }
+            print(f"[Restart] Transform params from rig_orientation: {transform_params}")
 
         # Fallback: read from saved viewer_settings if no transforms in request
         if not transform_params and task.viewer_settings:
