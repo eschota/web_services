@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.01.008 - Task viewer GLB-first final preview
+
+- Fixed done-task viewer boot so it always tries `/api/task/{id}/animations.glb` before `animations.fbx`.
+- Stopped using `ready_urls` as proof that no viewer GLB exists; the backend can synthesize the preview GLB from worker files that are not public outputs.
+
 ## v0.01.007 - Animated viewer GLB source priority
 
 - Prefer task viewer `<guid>_all_animations_threejs_preview.glb` over legacy `<guid>_all_animations.glb` when serving `/api/task/{id}/animations.glb`.

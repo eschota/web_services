@@ -16265,17 +16265,11 @@
                         console.warn('[ViewerBoot] Final animation preview cannot start before view mode controller is ready', { reason });
                         return false;
                     }
-                    const formats = taskReadyAnimationFormats(taskState);
-                    if (formats.fbx && !formats.glb) {
-                        const ok = await loadFBX(taskAssetUrl('animations.fbx'), 'Animations FBX');
-                        if (ok) {
-                            currentModelType = 'animations';
-                            modelCache.animations = currentModel;
-                            modelCache.animationsData = [...animations];
-                        }
-                    } else {
-                        await setActiveMode('animation');
-                    }
+                    // Do not infer GLB availability from ready_urls: the backend
+                    // may synthesize /animations.glb from a worker preview GLB that
+                    // is intentionally not listed as a public output. Always let the
+                    // normal animation mode try GLB first and fall back to FBX.
+                    await setActiveMode('animation');
                     const ok = currentModelType === 'animations' && !!currentModel;
                     if (ok) {
                         console.info('[ViewerBoot] Final animation preview is active', {
