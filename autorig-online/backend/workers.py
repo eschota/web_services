@@ -699,6 +699,8 @@ class WorkerQueueStatus:
     max_concurrent: int = 1
     avg_task_time: float = 900.0  # Default 15 min in seconds
     error: Optional[str] = None
+    server_version: Optional[str] = None
+    feature_flags: Dict[str, Any] = field(default_factory=dict)
     # Flattened strings from worker JSON (active_tasks / similar) for matching Task.worker_task_id / guid / URLs
     active_refs: List[str] = field(default_factory=list)
     # True if JSON contained a non-null active_tasks (or alias) key — enables "lost on worker" detection
@@ -930,6 +932,8 @@ async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) ->
                 queue_size=_safe_worker_int(data.get("queue_size"), 0),
                 max_concurrent=max_c,
                 avg_task_time=_safe_worker_float(data.get("average_time_converting_task"), 900.0),
+                server_version=str(data.get("server_version") or "") or None,
+                feature_flags=dict(data.get("feature_flags")) if isinstance(data.get("feature_flags"), dict) else {},
                 active_refs=active_refs,
                 has_active_tasks_payload=has_active_payload,
             )

@@ -171,7 +171,31 @@ PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
 
 
-async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quarantined: bool = False) -> List[Any]:
+def _worker_has_threejs_publish(worker: Any) -> bool:
+    flags = getattr(worker, "feature_flags", None)
+    return isinstance(flags, dict) and bool(flags.get("threejs_preview_publish_enabled"))
+
+
+def _task_requires_threejs_publish(task: Task) -> bool:
+    if (getattr(task, "pipeline_kind", None) or "rig") != "rig":
+        return False
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+        if not isinstance(settings, dict):
+            settings = {}
+    except Exception:
+        settings = {}
+    ensure_viewer_environment_in_settings(settings)
+    return bool(get_viewer_environment_from_settings(settings))
+
+
+async def get_dispatchable_workers(
+    db: AsyncSession,
+    queue_status,
+    *,
+    allow_quarantined: bool = False,
+    require_threejs_publish: bool = False,
+) -> List[Any]:
     """
     Return workers that are free according to both worker API and backend DB.
     The DB overlay avoids burst dispatch races where several tasks pick the same
@@ -187,6 +211,7 @@ async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quar
             and ((w.total_pending or 0) <= 0)
             and (w.queue_size <= 0)
             and (allow_quarantined or not is_worker_quarantined(w.url))
+            and (not require_threejs_publish or _worker_has_threejs_publish(w))
         )
     ]
 
@@ -622,7 +647,8 @@ async def background_task_updater():
                             print("[Background Worker] All free workers are quarantined, using degraded dispatch fallback")
 
                     if free_workers:
-                        # Pull up to N queued tasks
+                        # Pull up to N queued tasks. Assign per task so viewer-environment jobs only
+                        # land on workers that publish the Three.js renderer output.
                         queued_result = await db.execute(
                             select(Task)
                             .where(Task.status == "created")
@@ -630,8 +656,26 @@ async def background_task_updater():
                             .limit(len(free_workers))
                         )
                         queued_tasks = queued_result.scalars().all()
+                        remaining_workers = list(free_workers)
 
-                        for task, worker in zip(queued_tasks, free_workers):
+                        for task in queued_tasks:
+                            require_threejs = _task_requires_threejs_publish(task)
+                            worker_index = next(
+                                (
+                                    i
+                                    for i, candidate in enumerate(remaining_workers)
+                                    if (not require_threejs or _worker_has_threejs_publish(candidate))
+                                ),
+                                None,
+                            )
+                            if worker_index is None:
+                                if require_threejs:
+                                    print(
+                                        f"[Background Worker] Task {task.id} waits for a "
+                                        "threejs_preview_publish_enabled worker"
+                                    )
+                                continue
+                            worker = remaining_workers.pop(worker_index)
                             try:
                                 await start_task_on_worker(db, task, worker.url)
                             except Exception as e:
@@ -3825,7 +3869,14 @@ async def api_create_task(
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
     try:
         queue_status = await get_global_queue_status(db=db)
-        free_workers = await get_dispatchable_workers(db, queue_status)
+        viewer_environment_for_dispatch = (
+            get_viewer_environment_from_settings(settings) if pipeline == "rig" else None
+        )
+        free_workers = await get_dispatchable_workers(
+            db,
+            queue_status,
+            require_threejs_publish=bool(viewer_environment_for_dispatch),
+        )
         free_worker = free_workers[0] if free_workers else None
         if free_worker:
             # Refresh task from DB and dispatch
