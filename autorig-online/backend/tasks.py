@@ -3,10 +3,11 @@ Task management for AutoRig Online
 """
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict, Any
 from urllib.parse import urlparse
 import httpx
 
@@ -28,6 +29,11 @@ from workers import (
     lookup_worker_queue_entry,
     task_visible_on_worker_refs,
     find_worker_queue_status_for_task,
+    quarantine_worker,
+)
+from viewer_environment_contract import (
+    ensure_viewer_environment_in_settings,
+    get_viewer_environment_from_settings,
 )
 
 
@@ -35,6 +41,122 @@ from workers import (
 # Helper Functions
 # =============================================================================
 PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
+RIG_V2_WORKER_ANIMAL_TYPES = {
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+}
+
+
+def _load_task_viewer_settings(task: Task) -> Dict[str, Any]:
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        return settings if isinstance(settings, dict) else {}
+    except Exception:
+        return {}
+RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
+
+
+def _is_transient_worker_dispatch_error(error: Optional[str]) -> bool:
+    msg = (error or "").strip().lower()
+    if not msg:
+        return False
+    if re.search(r"http\s+(429|5\d\d)\b", msg):
+        return True
+    return any(
+        marker in msg
+        for marker in (
+            "timeout",
+            "timed out",
+            "connection",
+            "connect",
+            "network",
+            "temporar",
+            "read error",
+            "server disconnected",
+        )
+    )
+
+
+def _animal_detection_confident_enough(detection: Any) -> bool:
+    if not isinstance(detection, dict):
+        return False
+    if detection.get("manual_selection") is True:
+        return True
+    if str(detection.get("source") or "").strip().lower() == "manual_task_restart":
+        return True
+    if detection.get("accepted") is True:
+        return True
+    if detection.get("user_selected_bool"):
+        return True
+    if detection.get("animal_decision_accepted_bool") is True:
+        return True
+    if "animal_decision_accepted_bool" in detection:
+        return False
+    try:
+        weight = float(detection.get("animal_decision_weight_float") or 0.0)
+    except Exception:
+        weight = 0.0
+    try:
+        threshold = float(detection.get("animal_decision_threshold_float") or RIG_V2_ANIMAL_DECISION_THRESHOLD)
+    except Exception:
+        threshold = RIG_V2_ANIMAL_DECISION_THRESHOLD
+    return weight >= threshold
+
+
+def _animal_type_from_detection_meta(detection: Any) -> Optional[str]:
+    if not isinstance(detection, dict):
+        return None
+    for key in ("animal_type", "animal_type_string", "selected_animal_type", "selected_animal_type_string"):
+        animal = str(detection.get(key) or "").strip().lower()
+        if animal in RIG_V2_WORKER_ANIMAL_TYPES:
+            return animal
+
+    best_type = ""
+    best_score = 0.0
+    scores = detection.get("scores")
+    if isinstance(scores, dict):
+        for key, raw_score in scores.items():
+            animal = str(key or "").strip().lower()
+            if animal not in RIG_V2_WORKER_ANIMAL_TYPES:
+                continue
+            try:
+                score = float(raw_score)
+            except Exception:
+                score = 0.0
+            if score > best_score:
+                best_type = animal
+                best_score = score
+
+    results = detection.get("results")
+    if isinstance(results, list):
+        tally: Dict[str, float] = {}
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            animal = str(result.get("animal_type_string") or result.get("animal_type") or "").strip().lower()
+            if animal not in RIG_V2_WORKER_ANIMAL_TYPES:
+                continue
+            try:
+                confidence = float(result.get("confidence_float") or result.get("confidence") or 0.5)
+            except Exception:
+                confidence = 0.5
+            tally[animal] = tally.get(animal, 0.0) + max(0.05, min(1.0, confidence))
+        for animal, score in tally.items():
+            if score > best_score:
+                best_type = animal
+                best_score = score
+
+    return best_type or None
 
 
 def _task_notification_theme_meta(task: Task) -> dict:
@@ -46,14 +168,44 @@ def _task_notification_theme_meta(task: Task) -> dict:
         settings = {}
     detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
     theme = settings.get("viewer_theme_selection") if isinstance(settings, dict) else None
+    source_preview_url = str(settings.get("source_preview_url") or "").strip() if isinstance(settings, dict) else ""
     animal_type = ""
+    detector_text = ""
     if isinstance(detection, dict):
-        animal_type = str(
-            detection.get("animal_type")
+        accepted = _animal_detection_confident_enough(detection)
+        candidate = str(
+            detection.get("candidate_animal_type_string")
+            or detection.get("selected_type_string")
+            or detection.get("animal_type")
             or detection.get("animal_type_string")
             or (detection.get("first_result") or {}).get("animal_type_string")
             or ""
         ).strip().lower()
+        try:
+            weight = float(detection.get("animal_decision_weight_float") or 0.0)
+        except Exception:
+            weight = 0.0
+        try:
+            threshold = float(detection.get("animal_decision_threshold_float") or RIG_V2_ANIMAL_DECISION_THRESHOLD)
+        except Exception:
+            threshold = RIG_V2_ANIMAL_DECISION_THRESHOLD
+        votes = detection.get("selected_votes_int")
+        views = detection.get("view_count_int")
+        if candidate or "animal_decision_weight_float" in detection:
+            vote_suffix = ""
+            try:
+                if votes is not None and views is not None:
+                    vote_suffix = f" v={int(votes)}/{int(views)}"
+            except Exception:
+                vote_suffix = ""
+            verdict = "accepted" if accepted else "rejected"
+            detector_text = f"AI {candidate or '?'} w={weight:.2f}/{threshold:.2f}{vote_suffix} {verdict}"
+        if accepted:
+            animal_type = str(
+                detection.get("animal_type")
+                or detection.get("animal_type_string")
+                or ""
+            ).strip().lower()
     theme_id = str(theme.get("theme_id") or "").strip() if isinstance(theme, dict) else ""
     theme_names = {
         "dog_park_yard": "Pet Park Yard",
@@ -80,6 +232,8 @@ def _task_notification_theme_meta(task: Task) -> dict:
         "theme_id": theme_id,
         "theme_name": theme_names.get(theme_id, theme_id.replace("_", " ").title()) if theme_id else "",
         "poster_path": str(poster_path) if poster_path.is_file() else "",
+        "detector_text": detector_text,
+        "source_preview_url": source_preview_url,
     }
 
 
@@ -203,11 +357,13 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
 
                 # Start main pipeline immediately (do not wait for next poll).
                 if not task.worker_task_id and task.fbx_glb_output_url:
+                    viewer_environment = get_viewer_environment_from_settings(_load_task_viewer_settings(task))
                     result = await send_task_to_worker(
                         task.worker_api,
                         task.fbx_glb_output_url,
                         task.input_type or "t_pose",
                         pipeline_kind="rig",
+                        viewer_environment=viewer_environment,
                     )
                     if not result.success:
                         task.status = "error"
@@ -313,32 +469,85 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     task_type_for_worker = task.input_type or "t_pose"
     animal_type = None
     mode = None
+    transform_params = None
+    animal_semantic_markers = None
+    viewer_settings = _load_task_viewer_settings(task)
+    viewer_environment = None
+    if pk == "rig":
+        if ensure_viewer_environment_in_settings(viewer_settings):
+            task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
+            await db.commit()
+            await db.refresh(task)
+        viewer_environment = get_viewer_environment_from_settings(viewer_settings)
     if str(task_type_for_worker).strip().lower() == "animal":
         try:
-            settings = json.loads(task.viewer_settings or "{}")
-            detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+            detection = viewer_settings.get("rig_v2_animal_detection") if isinstance(viewer_settings, dict) else None
             if isinstance(detection, dict):
-                animal_type = str(detection.get("animal_type") or "").strip().lower() or None
-                mode = str(detection.get("mode") or "").strip() or None
+                if _animal_detection_confident_enough(detection):
+                    animal_type = _animal_type_from_detection_meta(detection)
+                    mode = str(detection.get("mode") or "").strip() or None
+                    local_rotation = detection.get("local_rotation")
+                    if isinstance(local_rotation, list) and len(local_rotation) == 3:
+                        transform_params = {"local_rotation": local_rotation}
+                    markers = detection.get("animal_semantic_markers")
+                    if isinstance(markers, dict):
+                        animal_semantic_markers = markers
+                else:
+                    animal_type = None
+                    mode = None
         except Exception:
             animal_type = None
             mode = None
+        if not animal_type:
+            task.status = "error"
+            task.error_message = (
+                "Animal rig task is missing animal_type metadata. "
+                "Please retry the upload so AI animal detection can finish."
+            )
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            return task, task.error_message
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,
         task.input_url,
         task_type_for_worker,
+        transform_params=transform_params,
         pipeline_kind=pk,
         animal_type=animal_type,
         mode=mode,
+        animal_semantic_markers=animal_semantic_markers,
+        viewer_environment=viewer_environment,
     )
     if not result.success:
+        error = result.error or "Worker dispatch failed"
+        if _is_transient_worker_dispatch_error(error):
+            quarantine_worker(worker_url, reason=f"dispatch_failed:{error[:120]}")
+            task.status = "created"
+            task.worker_api = None
+            task.worker_task_id = None
+            task.progress_page = None
+            task.guid = None
+            task.output_urls = []
+            task.ready_urls = []
+            task.ready_count = 0
+            task.total_count = 0
+            task.video_ready = False
+            task.video_url = None
+            task.error_message = None
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
+            print(f"[Tasks] Requeued {task.id} after transient worker dispatch failure on {worker_url}: {error}")
+            return task, error
+
         task.status = "error"
-        task.error_message = result.error
+        task.error_message = error
         task.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(task)
-        return task, result.error
+        return task, error
 
     task.worker_task_id = result.task_id
     task.progress_page = result.progress_page
@@ -384,6 +593,8 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
                     title=notify_meta.get("title") or None,
                     theme_name=notify_meta.get("theme_name") or None,
                     poster_path=notify_meta.get("poster_path") or None,
+                    detector_text=notify_meta.get("detector_text") or None,
+                    source_preview_url=notify_meta.get("source_preview_url") or None,
                 )
             )
         else:
@@ -408,19 +619,31 @@ def _is_primary_worker_output(name: str) -> bool:
     return (
         n.endswith("_model_prepared.glb")
         or n.endswith("_model_prepared_rigged.blend")
+        or n.endswith("_rigged.blend")
         or n.endswith(".zip")
         or n.endswith("_video.mp4")
         or n.endswith("_video_small.mp4")
         or n.endswith("_video_poster.jpg")
+        or n.endswith("_rig_preview.mp4")
+        or n.endswith("_skeleton.json")
         or n.endswith("_all_animations.blend")
         or n.endswith("_all_animations_unity.fbx")
         or n.endswith("_hdrp.unitypackage")
     )
 
 
+def _is_animal_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+
+
 def _worker_outputs_look_complete(urls: List[str]) -> bool:
     names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
-    has_video = any(n.endswith("_video.mp4") or n.endswith("_video_small.mp4") for n in names)
+    has_video = any(
+        n.endswith("_rig_preview.mp4")
+        or n.endswith("_video.mp4")
+        or n.endswith("_video_small.mp4")
+        for n in names
+    )
     has_poster = any(n.endswith("_video_poster.jpg") for n in names)
     has_download = any(
         n.endswith("_all_animations_unity.fbx")
@@ -469,13 +692,79 @@ async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
     return urls
 
 
-def _preferred_video_url_from_outputs(urls: List[str]) -> Optional[str]:
+async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
+    """Return terminal worker failure text from {guid}_progress.txt, if present."""
+    if not task.guid or not task.worker_api:
+        return None
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(log_url)
+        if resp.status_code != 200:
+            return None
+        text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+    except Exception:
+        return None
+
+    failure_re = re.compile(r"\b(FAILURE|FATAL|ERROR)\s*:\s*(.+)", re.IGNORECASE)
+    for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
+        match = failure_re.search(line)
+        if not match:
+            continue
+        message = match.group(2).strip() or line
+        return message[:500]
+    return None
+
+
+async def _worker_conversion_completed(task: Task) -> bool:
+    """True when worker progress log says final collection/verification finished."""
+    if not task.guid or not task.worker_api:
+        return False
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return False
+    log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(log_url)
+        if resp.status_code != 200:
+            return False
+        text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+    except Exception:
+        return False
+    return "Conversion completed" in text
+
+
+async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> bool:
+    failure = await _fetch_worker_failure_message(task)
+    if not failure:
+        return False
+    task.status = "error"
+    task.error_message = f"Worker failed: {failure}"
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    print(f"[Tasks] Worker reported terminal failure for {task.id}: {failure}")
+    return True
+
+
+def _preferred_video_url_from_outputs(urls: List[str], *, prefer_rig_preview: bool = False) -> Optional[str]:
+    if prefer_rig_preview:
+        for url in urls or []:
+            if url.lower().endswith("_rig_preview.mp4"):
+                return url
     for url in urls or []:
         if url.lower().endswith("_video_small.mp4"):
             return url
     for url in urls or []:
         if url.lower().endswith("_video.mp4"):
             return url
+    if not prefer_rig_preview:
+        for url in urls or []:
+            if url.lower().endswith("_rig_preview.mp4"):
+                return url
     return None
 
 
@@ -488,6 +777,7 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     was_processing = task.status == "processing"
     previous_ready_count = task.ready_count
     video_was_ready = task.video_ready
+    previous_video_url = task.video_url
 
     # Get already ready URLs
     already_ready = set(task.ready_urls)
@@ -514,7 +804,11 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
-            task.status = "done"
+            if _is_animal_task(task) and not await _worker_conversion_completed(task):
+                task.status = "processing"
+                task.progress = min(int(task.progress or 0), 99)
+            else:
+                task.status = "done"
 
     # Some worker modes (notably animal-only-rig and newer exporters) write the
     # final files into concrete folders such as {guid}_100k or root, while the
@@ -527,24 +821,40 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             task.ready_urls = concrete_urls
             task.total_count = len(concrete_urls)
             task.ready_count = len(concrete_urls)
-            task.status = "done"
+            conversion_completed = (not _is_animal_task(task)) or await _worker_conversion_completed(task)
+            task.status = "done" if conversion_completed else "processing"
+            if not conversion_completed:
+                task.progress = min(int(task.progress or 0), 99)
             task.last_progress_at = datetime.utcnow()
-            preferred_video_url = _preferred_video_url_from_outputs(concrete_urls)
+            preferred_video_url = _preferred_video_url_from_outputs(
+                concrete_urls,
+                prefer_rig_preview=_is_animal_task(task),
+            )
             if preferred_video_url:
                 task.video_ready = True
                 task.video_url = preferred_video_url
             task.updated_at = datetime.utcnow()
+
+    if task.status not in ("done", "error") and task.guid and task.worker_api:
+        if await _mark_task_worker_failed_if_reported(db, task):
+            await db.refresh(task)
+            return task
     
-    # Video: prefer _video_small.mp4 for site proxy; upgrade from large when small appears later.
+    # Video: animal tasks use the rig preview; other tasks use the lightweight site preview.
     if task.guid and task.worker_api:
         worker_base = get_worker_base_url(task.worker_api)
         if worker_base:
-            if task.video_url and "_video_small.mp4" in task.video_url:
+            preferred_current = "_rig_preview.mp4" if _is_animal_task(task) else "_video_small.mp4"
+            if task.video_url and preferred_current in task.video_url:
                 if not task.video_ready:
                     task.video_ready = True
                     task.updated_at = datetime.utcnow()
             else:
-                video_ready, video_url = await check_video_availability(task.guid, worker_base)
+                video_ready, video_url = await check_video_availability(
+                    task.guid,
+                    worker_base,
+                    prefer_rig_preview=_is_animal_task(task),
+                )
                 if video_ready and video_url:
                     changed = (not task.video_ready) or (task.video_url != video_url)
                     if changed:
@@ -558,7 +868,15 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     if (
         task.status == "done"
         and task.video_ready
-        and not video_was_ready
+        and (
+            not video_was_ready
+            or (
+                _is_animal_task(task)
+                and previous_video_url != task.video_url
+                and "_rig_preview.mp4" in str(task.video_url or "").lower()
+                and not getattr(task, "youtube_video_id", None)
+            )
+        )
     ):
         try:
             from youtube_upload import schedule_youtube_upload_if_eligible
@@ -574,7 +892,11 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
 
             rs_owner = await db.execute(select(User).where(User.email == task.owner_id))
             owner_user = rs_owner.scalar_one_or_none()
-            if owner_user is not None and not owner_user.email_task_completed:
+            if owner_user is not None and owner_user.email_invalid_at:
+                print(
+                    f"[Tasks] Skipping completion email for task {task.id}: email marked invalid after bounce/complaint"
+                )
+            elif owner_user is not None and not owner_user.email_task_completed:
                 print(
                     f"[Tasks] Skipping completion email for task {task.id}: user opted out of task-ready emails"
                 )
@@ -802,6 +1124,9 @@ async def find_and_reset_stale_tasks(
             reason = "partial_progress_stale"
 
         if should_reset:
+            if await _mark_task_worker_failed_if_reported(db, task):
+                action_count += 1
+                continue
             no_progress_min = get_task_no_progress_minutes(task, now=now)
             print(
                 f"[Stale Task] Detected stale task {task.id} ({reason}): "
@@ -1066,4 +1391,3 @@ def format_time_ago(dt: datetime) -> str:
     else:
         months = int(seconds / 2592000)
         return f"{months}mo ago"
-

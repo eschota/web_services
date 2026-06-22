@@ -9,21 +9,19 @@ import shutil
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Set
 import hashlib
 import hmac
 import secrets
 import json
 import base64
-import random
 import tempfile
 import zipfile
 import re
 import html
-import math
 from pathlib import Path
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse, quote, unquote, parse_qsl
+from urllib.parse import urlparse, quote, unquote, parse_qsl, urlencode
 from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form, Query
@@ -31,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse, FileResponse, HTMLResponse, Response
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, or_, update
+from sqlalchemy import select, func, delete, or_, update, text
 from sqlalchemy.exc import IntegrityError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -46,6 +44,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME,
     VIEWER_DEFAULT_SETTINGS_PATH,
     MIN_FREE_SPACE_GB, CLEANUP_CHECK_INTERVAL_CYCLES, CLEANUP_MIN_AGE_HOURS,
+    UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS,
     NEW_TASK_MIN_FREE_GB, NEW_TASK_PURGE_TASKS_MAX_FREED_GB,
     AUTOMATIC_TASK_DB_DELETION,
     STUCK_HOUR_MINUTES,
@@ -56,8 +55,7 @@ from config import (
     TASK_CACHE_MAX_GB,
     GA_MEASUREMENT_ID, GA_API_SECRET,
     GUMROAD_PRODUCT_CREDITS,
-    FREESTOCK_GUMROAD_PROXY_TARGET,
-    is_freestock_gumroad_product,
+    BLENDER_PLUGIN_AB_VARIANTS,
     AUTORIG_DONATION_PRODUCT_KEYS,
     DONATION_GOAL_USD,
     DONATION_BASELINE_USD,
@@ -70,6 +68,7 @@ from config import (
     RATE_LIMIT_CRYPTO_SUBMIT,
     YOUTUBE_REFRESH_TOKEN,
     SUPPORT_CHAT_MESSAGE_MAX_CHARS,
+    RESEND_WEBHOOK_SECRET,
     RATE_LIMIT_SUPPORT_CHAT_SESSION,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
@@ -77,12 +76,14 @@ from config import (
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
-    TaskAnimationPurchase, TaskAnimationBundlePurchase, GumroadPurchase, RoadmapVote,
-    CryptoPaymentReport,
+    TaskAnimationPurchase, TaskAnimationBundlePurchase, TaskAnimalAnimationPackPurchase,
+    GumroadPurchase, PurchaseCheckoutIntent, RoadmapVote,
+    CryptoPaymentReport, EmailCampaignClick, EmailCampaignSend, EmailDeliveryEvent,
     SupportChatSession,
     SupportChatMessage,
     reset_admin_overlay_counters,
     get_or_create_admin_overlay_counters,
+    get_public_gallery_stats,
 )
 from models import (
     TaskCreateResponse, TaskStatusResponse,
@@ -100,6 +101,7 @@ from models import (
     WorkerQueueInfo, QueueStatusResponse,
     GalleryItem, GalleryResponse, LikeResponse, TaskCardInfo,
     PurchaseStateResponse, PurchaseRequest, PurchaseResponse,
+    AnimalRigVariantsResponse, AnimalRigVariantItem, AnimalVariantFileState,
     AnimationCatalogItem, AnimationCatalogResponse,
     AnimationPurchaseRequest, AnimationPurchaseResponse,
     # Scene models
@@ -126,16 +128,15 @@ from workers import (
     clear_worker_quarantine,
     is_worker_quarantined,
     normalize_task_type,
+    get_backend_worker_processing_counts,
+    get_worker_effective_active,
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
-from idle_ltx_vision import (
-    VisionPromptAnalyzer,
-    IDLE_LTX_DEFAULT_NEGATIVE_PROMPT,
-    IDLE_LTX_FRAME_COUNT_DEFAULT,
-    IDLE_LTX_USER_PROMPT_DEFAULT,
-    IDLE_LTX_VARIANT_COUNT,
-)
 from viewer_theme_vision import analyze_backdrop_theme_with_openai
+from viewer_environment_contract import (
+    ensure_viewer_environment_in_settings,
+    get_viewer_environment_from_settings,
+)
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -161,12 +162,33 @@ import re
 import httpx
 
 from namecheap_remote_api import router as namecheap_remote_router
+from idle_ltx_routes import register_idle_ltx_routes
 
 # Throttle poster-classification recovery triggers from GET /api/task (per task_id).
 _poster_recovery_throttle: Dict[str, float] = {}
 POSTER_RECOVERY_THROTTLE_SEC = 20.0
 PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
+
+
+async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quarantined: bool = False) -> List[Any]:
+    """
+    Return workers that are free according to both worker API and backend DB.
+    The DB overlay avoids burst dispatch races where several tasks pick the same
+    worker before its live /api-converter-glb counters update.
+    """
+    backend_processing = await get_backend_worker_processing_counts(db)
+    return [
+        w
+        for w in (queue_status.workers if queue_status else [])
+        if (
+            w.available
+            and (get_worker_effective_active(w, backend_processing) < w.max_concurrent)
+            and ((w.total_pending or 0) <= 0)
+            and (w.queue_size <= 0)
+            and (allow_quarantined or not is_worker_quarantined(w.url))
+        )
+    ]
 
 
 def _pop_preflight_render_image_from_meta(meta: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -187,10 +209,21 @@ def _decode_preflight_render_image(data_url_or_b64: str) -> bytes:
     raw = (data_url_or_b64 or "").strip()
     if "," in raw and raw.lower().startswith("data:image/"):
         raw = raw.split(",", 1)[1]
-    raw = re.sub(r"\s+", "", raw)
     if not raw:
         raise ValueError("empty preflight render image")
-    data = base64.b64decode(raw, validate=True)
+
+    def _decode_candidate(candidate: str) -> bytes:
+        return base64.b64decode(candidate, validate=True)
+
+    compact = re.sub(r"\s+", "", raw)
+    try:
+        data = _decode_candidate(compact)
+    except Exception:
+        # Multipart form parsing can turn literal '+' characters in a data URL
+        # into spaces. Try that repair only after strict decoding fails.
+        repaired = re.sub(r"\s+", "+", raw)
+        data = _decode_candidate(repaired)
+
     if len(data) > PREFLIGHT_RENDER_MAX_BYTES:
         raise ValueError("preflight render image too large")
     if not (data.startswith(b"\xff\xd8\xff") or data.startswith(b"\x89PNG\r\n\x1a\n") or data.startswith(b"RIFF")):
@@ -208,8 +241,10 @@ def _save_preflight_render_image(task_id: str, data_url_or_b64: Optional[str]) -
         final_path = PREFLIGHT_RENDER_DIR / f"{task_id}.jpg"
         tmp_path.write_bytes(image_bytes)
         tmp_path.replace(final_path)
+        print(f"[PreflightRender] Saved render image for task {task_id}: {final_path} ({len(image_bytes)} bytes)")
     except Exception as e:
         print(f"[PreflightRender] Failed to save render image for task {task_id}: {e}")
+
 
 
 def _task_needs_poster_classification(task) -> bool:
@@ -218,7 +253,7 @@ def _task_needs_poster_classification(task) -> bool:
     if getattr(task, "content_classified_at", None) is None:
         return True
     cv = getattr(task, "content_classifier_version", None) or ""
-    return ":pipeline_error" in cv or ":fetch_error" in cv
+    return ":pipeline_error" in cv or ":fetch_error" in cv or ":poster_pending" in cv
 
 
 def _schedule_poster_recovery_throttled(task_id: str) -> None:
@@ -489,7 +524,6 @@ async def _monitor_stalled_workers(db: AsyncSession, queue_status=None) -> bool:
             or (now - last_alert_at).total_seconds() >= STALLED_ALERT_REPEAT_SECONDS
         )
         if should_alert:
-            tasks.sort(key=lambda t: get_task_no_progress_minutes(t, now=now), reverse=True)
             sample_ids = [t.id for t in tasks[:3]]
             asyncio.create_task(
                 broadcast_worker_stalled(
@@ -580,20 +614,9 @@ async def background_task_updater():
                         except Exception as e:
                             print(f"[Background Worker] Stuck-hour policy error: {e}")
 
-                    free_workers = [
-                        w for w in queue_status.workers
-                        if (
-                            w.available
-                            and (w.total_active < w.max_concurrent)
-                            and (w.queue_size <= 0)
-                            and not is_worker_quarantined(w.url)
-                        )
-                    ]
+                    free_workers = await get_dispatchable_workers(db, queue_status)
                     if not free_workers:
-                        fallback_workers = [
-                            w for w in queue_status.workers
-                            if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)
-                        ]
+                        fallback_workers = await get_dispatchable_workers(db, queue_status, allow_quarantined=True)
                         if fallback_workers:
                             free_workers = fallback_workers
                             print("[Background Worker] All free workers are quarantined, using degraded dispatch fallback")
@@ -619,11 +642,15 @@ async def background_task_updater():
                         )
                         n_created = int(c_q.scalar() or 0)
                         if n_created > 0:
+                            backend_processing = await get_backend_worker_processing_counts(db)
                             for w in queue_status.workers:
                                 print(
                                     f"[Background Worker] No free worker: url={w.url} "
                                     f"available={w.available} err={w.error!r} "
-                                    f"active={w.total_active} max={w.max_concurrent} "
+                                    f"active={w.total_active} "
+                                    f"backend_active={backend_processing.get(w.url.rstrip('/'), 0)} "
+                                    f"effective_active={get_worker_effective_active(w, backend_processing)} "
+                                    f"max={w.max_concurrent} "
                                     f"queue_size={w.queue_size} quarantined={is_worker_quarantined(w.url)}"
                                 )
                             print(
@@ -639,6 +666,7 @@ async def background_task_updater():
                 if background_worker_cycle_count % CLEANUP_CHECK_INTERVAL_CYCLES == 0:
                     try:
                         from main import cleanup_disk_space
+                        await enforce_task_cache_max_size(db)
                         result = await cleanup_disk_space(
                             min_free_gb=MIN_FREE_SPACE_GB,
                             db=db,
@@ -724,14 +752,18 @@ async def background_task_updater():
                     await asyncio.gather(*[_update_one(tid) for tid in task_ids])
 
                 # =============================================================
-                # 4. Poster classification recovery (done but content_classified_at never set)
+                # 4. Poster classification recovery (pending or transient poster fetch errors)
                 # =============================================================
                 try:
                     async with AsyncSessionLocal() as db:
                         r2 = await db.execute(
                             select(Task.id).where(
                                 Task.status == "done",
-                                Task.content_classified_at.is_(None),
+                                or_(
+                                    Task.content_classified_at.is_(None),
+                                    Task.content_classifier_version.like("%:fetch_error%"),
+                                    Task.content_classifier_version.like("%:poster_pending%"),
+                                ),
                             ).limit(25)
                         )
                         pending_poster = list(r2.scalars().all())
@@ -783,6 +815,22 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    try:
+        async with AsyncSessionLocal() as startup_db:
+            await enforce_task_cache_max_size(startup_db)
+            startup_cleanup = await cleanup_disk_space(
+                min_free_gb=MIN_FREE_SPACE_GB,
+                db=startup_db,
+                delete_task_rows=AUTOMATIC_TASK_DB_DELETION,
+            )
+            if startup_cleanup.get("deleted_count", 0) > 0:
+                print(
+                    f"[Startup Disk] Cleanup freed {startup_cleanup.get('freed_gb', 0):.2f} GB, "
+                    f"deleted {startup_cleanup.get('deleted_count', 0)} item(s)"
+                )
+    except Exception as e:
+        print(f"[Startup Disk] Cleanup failed: {e}")
     
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
@@ -947,6 +995,16 @@ async def get_current_user(
     return user
 
 
+register_idle_ltx_routes(
+    app,
+    limiter,
+    get_db=get_db,
+    get_current_user=get_current_user,
+    get_task_by_id=get_task_by_id,
+    app_url=APP_URL,
+)
+
+
 async def get_anon_session(
     request: Request,
     response: Response,
@@ -1041,9 +1099,142 @@ def _validate_worker_url(url: str) -> str:
 # =============================================================================
 # Custom Animations Catalog / Pricing
 # =============================================================================
+TASK_UNLOCK_CREDITS = 10
 ANIMATION_SINGLE_CREDITS = 1
-ANIMATION_BUNDLE_CREDITS = 10
-DOWNLOAD_ALL_FILES_CREDITS = 10
+ANIMATION_BUNDLE_CREDITS = TASK_UNLOCK_CREDITS
+ANIMAL_ANIMATION_PACK_CREDITS = TASK_UNLOCK_CREDITS
+DOWNLOAD_ALL_FILES_CREDITS = TASK_UNLOCK_CREDITS
+ANIMAL_RIG_DOWNLOAD_CREDITS = TASK_UNLOCK_CREDITS
+PURCHASE_CHECKOUT_INTENT_MAX_AGE = timedelta(hours=72)
+ANIMAL_VARIANT_TYPES = [
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+]
+ANIMAL_VARIANT_ORIENTATIONS = ("front", "back")
+
+
+def _is_animal_download_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+
+
+def _download_all_files_cost(task: Task) -> int:
+    return ANIMAL_RIG_DOWNLOAD_CREDITS if _is_animal_download_task(task) else DOWNLOAD_ALL_FILES_CREDITS
+
+
+def _clamp_text(value: Any, max_len: int, *, default: str = "") -> str:
+    text_value = str(value or "").strip()
+    return (text_value or default)[:max_len]
+
+
+def _safe_checkout_task_id(value: Any) -> Optional[str]:
+    task_id = _clamp_text(value, 64)
+    if re.fullmatch(r"[A-Za-z0-9_-]{8,64}", task_id):
+        return task_id
+    return None
+
+
+def _checkout_pack_price_label(product_key: str) -> str:
+    key = _normalize_gumroad_product_key(product_key)
+    for tier_key, _credits, usd in AUTORIG_CRYPTO_TIERS:
+        if _normalize_gumroad_product_key(tier_key) == key:
+            if float(usd).is_integer():
+                return f"${int(usd)}"
+            return f"${usd:.2f}".rstrip("0").rstrip(".")
+    return "unknown"
+
+
+def _checkout_pack_label(product_key: str) -> str:
+    credits = int(GUMROAD_PRODUCT_CREDITS.get(_normalize_gumroad_product_key(product_key), 0) or 0)
+    return f"{credits} credits" if credits > 0 else "credits"
+
+
+def _format_usd_price(value: int | float) -> str:
+    amount = float(value)
+    if amount.is_integer():
+        return f"${int(amount)}"
+    return f"${amount:.2f}".rstrip("0").rstrip(".")
+
+
+def _plugin_variant_items() -> List[Tuple[str, int]]:
+    return [
+        (key, int(price))
+        for key, price in BLENDER_PLUGIN_AB_VARIANTS.items()
+        if _normalize_gumroad_product_key(key) and int(price) > 0
+    ]
+
+
+def _select_blender_plugin_variant(user: Optional[User]) -> Tuple[str, int]:
+    variants = _plugin_variant_items()
+    if not variants:
+        return ("blender-plugin", 100)
+    if user and getattr(user, "id", None):
+        index = max(0, int(user.id) - 1) % len(variants)
+    else:
+        email = (getattr(user, "email", "") or "").strip().lower()
+        digest = hashlib.sha256(email.encode("utf-8")).hexdigest() if email else "0"
+        index = int(digest[:8], 16) % len(variants)
+    return variants[index]
+
+
+def _is_blender_plugin_product(product_key: str, product_name: Optional[str] = None) -> bool:
+    key = _normalize_gumroad_product_key(product_key)
+    if key in {_normalize_gumroad_product_key(k) for k in BLENDER_PLUGIN_AB_VARIANTS}:
+        return True
+    name = (product_name or "").strip().lower()
+    return "blender" in name and "plugin" in name and "auto" in name and "rig" in name
+
+
+def _blender_plugin_price_label(product_key: str, price_cents: int = 0) -> str:
+    key = _normalize_gumroad_product_key(product_key)
+    if key in BLENDER_PLUGIN_AB_VARIANTS:
+        return _format_usd_price(int(BLENDER_PLUGIN_AB_VARIANTS[key]))
+    if price_cents > 0:
+        return _format_usd_price(price_cents / 100.0)
+    return "unknown"
+
+
+def _gumroad_checkout_url(product_key: str, user_email: str) -> str:
+    base = f"https://u3d.gumroad.com/l/{quote(_normalize_gumroad_product_key(product_key))}"
+    return f"{base}?{urlencode({'userid': user_email})}"
+
+
+def _task_animal_type_from_settings(task: Task) -> Optional[str]:
+    """Return the selected/detected animal slug stored in viewer_settings."""
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+    except Exception:
+        settings = {}
+    detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+    if not isinstance(detection, dict):
+        return None
+    for key in (
+        "animal_type",
+        "animal_type_string",
+        "selected_type_string",
+        "candidate_animal_type_string",
+        "selected_animal_type",
+        "selected_animal_type_string",
+    ):
+        value = str(detection.get(key) or "").strip().lower()
+        if value in ANIMAL_VARIANT_TYPES:
+            return value
+    first_result = detection.get("first_result")
+    if isinstance(first_result, dict):
+        for key in ("animal_type", "animal_type_string"):
+            value = str(first_result.get(key) or "").strip().lower()
+            if value in ANIMAL_VARIANT_TYPES:
+                return value
+    return None
 
 ANIMATIONS_DIR = Path(__file__).resolve().parent.parent / "static" / "all_animations"
 ANIMATIONS_MANIFEST_PATH = ANIMATIONS_DIR / "manifest.json"
@@ -1172,55 +1363,31 @@ def _task_urls_suggest_100k_animation_layout(combined_urls: List[str]) -> bool:
     return False
 
 
-def _resolve_all_animations_fbx_candidates(task) -> list[tuple[str, str]]:
-    """
-    Candidate package-level FBX animation files for a task.
-
-    Workers have emitted the animal bundle in both layouts:
-    - /converter/glb/{guid}/{guid}_all_animations_unity.fbx
-    - /converter/glb/{guid}/{guid}_100k/{guid}_all_animations_unity.fbx
-    """
-    candidates: list[tuple[str, str]] = []
-    seen: set[str] = set()
-
-    def add(url: Optional[str], filename: Optional[str] = None) -> None:
-        clean_url = (url or "").strip()
-        if not clean_url or clean_url in seen:
-            return
-        seen.add(clean_url)
-        clean_filename = filename or unquote(clean_url.split("/")[-1]) or f"{task.id}_all_animations.fbx"
-        candidates.append((clean_url, clean_filename))
-
-    known_urls = list(task.ready_urls or []) + list(task.output_urls or [])
-    for pattern in ("_all_animations_unity.fbx", "_all_animations.fbx"):
-        animations_url = _find_file_in_ready_urls(known_urls, pattern)
-        if animations_url:
-            add(animations_url)
-
-    worker_root, guid = _infer_worker_root_and_guid(task)
-    if worker_root and guid:
-        filename = f"{guid}_all_animations_unity.fbx"
-        add(f"{worker_root}/{guid}/{filename}", filename)
-        add(f"{worker_root}/{guid}/{guid}_100k/{filename}", filename)
-
-    return candidates
-
-
 def _resolve_all_animations_fbx_url(task) -> tuple[Optional[str], Optional[str]]:
     """
-    Return the first package-level FBX animation candidate for a task.
-    Callers that need existence checks should use _resolve_available_all_animations_fbx_url.
+    Return the package-level FBX animation file for a task.
+    Prefer real ready_urls, then synthesize the standard worker path used by current workers.
     """
-    candidates = _resolve_all_animations_fbx_candidates(task)
-    return candidates[0] if candidates else (None, None)
+    ready_urls = task.ready_urls or []
 
+    animations_url = _find_file_in_ready_urls(ready_urls, "_all_animations_unity.fbx")
+    if animations_url:
+        return animations_url, unquote(animations_url.split("/")[-1]) or f"{task.id}_all_animations.fbx"
 
-async def _resolve_available_all_animations_fbx_url(task) -> tuple[Optional[str], Optional[str]]:
-    """Return the first package-level FBX animation candidate that is currently reachable."""
-    for url, filename in _resolve_all_animations_fbx_candidates(task):
-        if await _worker_file_available(url):
-            return url, filename
-    return None, None
+    animations_url = _find_file_in_ready_urls(ready_urls, "_all_animations.fbx")
+    if animations_url:
+        return animations_url, unquote(animations_url.split("/")[-1]) or f"{task.id}_all_animations.fbx"
+
+    if not task.guid or not task.worker_api:
+        return None, None
+
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    filename = f"{task.guid}_all_animations_unity.fbx"
+    return (
+        f"{worker_base}/converter/glb/{task.guid}/{task.guid}_100k/{filename}",
+        filename,
+    )
 
 
 async def _worker_file_available(url: str) -> bool:
@@ -1354,8 +1521,10 @@ def _load_animation_manifest() -> dict:
                 "version": 1,
                 "types": [],
                 "pricing": {
-                    "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-                    "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+                    "single_animation_credits": TASK_UNLOCK_CREDITS,
+                    "all_animations_credits": TASK_UNLOCK_CREDITS,
+                    "task_unlock_credits": TASK_UNLOCK_CREDITS,
+                    "purchase_scope": "task",
                     "download_format": "fbx",
                 },
                 "animations": [],
@@ -1373,8 +1542,10 @@ def _load_animation_manifest() -> dict:
         data.setdefault("types", [])
         data.setdefault("animations", [])
         data.setdefault("pricing", {
-            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-            "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+            "single_animation_credits": TASK_UNLOCK_CREDITS,
+            "all_animations_credits": TASK_UNLOCK_CREDITS,
+            "task_unlock_credits": TASK_UNLOCK_CREDITS,
+            "purchase_scope": "task",
             "download_format": "fbx",
         })
 
@@ -1387,8 +1558,10 @@ def _load_animation_manifest() -> dict:
             "version": 1,
             "types": [],
             "pricing": {
-                "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-                "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+                "single_animation_credits": TASK_UNLOCK_CREDITS,
+                "all_animations_credits": TASK_UNLOCK_CREDITS,
+                "task_unlock_credits": TASK_UNLOCK_CREDITS,
+                "purchase_scope": "task",
                 "download_format": "fbx",
             },
             "animations": [],
@@ -1537,6 +1710,47 @@ def _resolve_worker_files_api_context(task) -> tuple[Optional[str], Optional[str
     return api_base, guid
 
 
+async def _fetch_worker_model_files(task: Task) -> Tuple[bool, List[Dict[str, Any]], Dict[str, Any], Optional[str]]:
+    """Return flattened worker model-files entries for a task."""
+    api_base, guid = _resolve_worker_files_api_context(task)
+    if not api_base or not guid:
+        return False, [], {}, None
+
+    worker_root = f"{api_base}/converter/glb"
+    files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(files_url)
+        if resp.status_code != 200:
+            return False, [], {}, f"HTTP {resp.status_code}"
+        data = resp.json() if resp.content else {}
+    except Exception as e:
+        return False, [], {}, str(e)
+
+    all_files: List[Dict[str, Any]] = []
+    for folder_name, folder_data in (data.get("folders") or {}).items():
+        if not isinstance(folder_data, dict):
+            continue
+        for f in folder_data.get("files") or []:
+            if not isinstance(f, dict):
+                continue
+            rel_path = str(f.get("rel_path") or "")
+            name = str(f.get("name") or "")
+            if not rel_path or not name:
+                continue
+            all_files.append({
+                "name": name,
+                "folder": folder_name,
+                "type": f.get("type"),
+                "size": f.get("size"),
+                "rel_path": rel_path,
+                "url": f"{worker_root}/{guid}/{rel_path}",
+            })
+
+    return True, all_files, data, None
+
+
 async def _get_animation_purchase_state(db: AsyncSession, user: Optional[User], task_id: str) -> tuple[set, bool]:
     """Return (purchased_ids, purchased_all) for custom animations."""
     if not user:
@@ -1594,6 +1808,65 @@ async def _has_full_task_download_purchase(db: AsyncSession, user: Optional[User
     return row.scalar_one_or_none() is not None
 
 
+async def _ensure_full_task_unlock(
+    db: AsyncSession,
+    task: Task,
+    buyer_user: User,
+    *,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Create the single paid entitlement for a task, charging credits only once."""
+    if not task or not buyer_user:
+        return {"status": "invalid", "credits_spent": 0, "cost": 0}
+
+    task_id = str(task.id)
+    existing = await db.execute(
+        select(TaskFilePurchase.id).where(
+            TaskFilePurchase.task_id == task_id,
+            TaskFilePurchase.user_email == buyer_user.email,
+            TaskFilePurchase.file_index.is_(None),
+        ).limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0, "cost": 0}
+
+    cost = _download_all_files_cost(task)
+    if int(buyer_user.balance_credits or 0) < cost:
+        return {"status": "insufficient_credits", "task_id": task_id, "credits_spent": 0, "cost": cost}
+
+    created_at = now or datetime.utcnow()
+    insert_result = await db.execute(
+        text(
+            """
+            INSERT INTO task_file_purchases
+                (task_id, user_email, file_index, credits_spent, created_at)
+            SELECT
+                :task_id, :user_email, NULL, :credits_spent, :created_at
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM task_file_purchases
+                WHERE task_id = :task_id
+                  AND user_email = :user_email
+                  AND file_index IS NULL
+            )
+            """
+        ),
+        {
+            "task_id": task_id,
+            "user_email": buyer_user.email,
+            "credits_spent": cost,
+            "created_at": created_at,
+        },
+    )
+    if insert_result.rowcount == 0:
+        return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0, "cost": 0}
+
+    buyer_user.balance_credits = int(buyer_user.balance_credits or 0) - cost
+    await _credit_task_owner_for_sale(db, task, buyer_user, cost)
+    await db.flush()
+    return {"status": "unlocked", "task_id": task_id, "credits_spent": cost, "cost": cost}
+
+
 def resolve_worker_full_bundle_zip_url(task: Task) -> Optional[str]:
     """
     Absolute URL to the worker-built full bundle: {worker_root}/{guid}.zip
@@ -1616,6 +1889,83 @@ async def _credit_task_owner_for_sale(db: AsyncSession, task, buyer_user: User, 
     task_owner = owner_result.scalar_one_or_none()
     if task_owner and task_owner.id != buyer_user.id:
         task_owner.balance_credits += amount
+
+
+async def _try_auto_unlock_pending_checkout(
+    db: AsyncSession,
+    buyer_user: User,
+    sale_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Convert the newest recent task-paywall checkout intent into a full-task unlock."""
+    if not buyer_user or not sale_id:
+        return None
+
+    email = _gumroad_clean_email(getattr(buyer_user, "email", None))
+    if not email:
+        return None
+
+    cutoff = datetime.utcnow() - PURCHASE_CHECKOUT_INTENT_MAX_AGE
+    result = await db.execute(
+        select(PurchaseCheckoutIntent)
+        .where(
+            func.lower(PurchaseCheckoutIntent.user_email) == email.lower(),
+            PurchaseCheckoutIntent.product_kind == "credits",
+            PurchaseCheckoutIntent.task_id.is_not(None),
+            PurchaseCheckoutIntent.used_at.is_(None),
+            PurchaseCheckoutIntent.created_at >= cutoff,
+        )
+        .order_by(PurchaseCheckoutIntent.created_at.desc(), PurchaseCheckoutIntent.id.desc())
+        .limit(5)
+    )
+
+    now = datetime.utcnow()
+    for intent in result.scalars().all():
+        task_id = _safe_checkout_task_id(intent.task_id)
+        if not task_id:
+            intent.auto_unlock_status = "invalid_task_id"
+            continue
+
+        task = await get_task_by_id(db, task_id)
+        if not task:
+            intent.auto_unlock_status = "task_not_found"
+            continue
+
+        unlock = await _ensure_full_task_unlock(db, task, buyer_user, now=now)
+        status = unlock.get("status")
+        if status == "already_unlocked":
+            intent.used_at = now
+            intent.gumroad_sale_id = sale_id
+            intent.auto_unlock_status = "already_unlocked"
+            await db.flush()
+            print(
+                f"[Checkout] Pending intent already unlocked task={task_id} sale={sale_id}",
+                flush=True,
+            )
+            return {"status": "already_unlocked", "task_id": task_id, "credits_spent": 0}
+
+        if status == "insufficient_credits":
+            intent.auto_unlock_status = "insufficient_credits"
+            await db.flush()
+            print(
+                f"[Checkout] Pending intent has insufficient credits task={task_id} "
+                f"sale={sale_id} balance={buyer_user.balance_credits} cost={unlock.get('cost')}",
+                flush=True,
+            )
+            continue
+
+        intent.used_at = now
+        intent.gumroad_sale_id = sale_id
+        intent.auto_unlock_status = str(status or "unlocked")
+        await db.flush()
+        credits_spent = int(unlock.get("credits_spent") or 0)
+        print(
+            f"[Checkout] Auto-unlocked task={task_id} sale={sale_id} "
+            f"user={buyer_user.email} credits_spent={credits_spent}",
+            flush=True,
+        )
+        return {"status": status or "unlocked", "task_id": task_id, "credits_spent": credits_spent}
+
+    return None
 
 
 # =============================================================================
@@ -1912,6 +2262,265 @@ async def unsubscribe_email(
     return HTMLResponse(content=html)
 
 
+@app.post("/api/email/marketing-unsubscribe")
+async def api_marketing_unsubscribe(
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """RFC 8058 one-click unsubscribe for marketing emails."""
+    from unsubscribe_tokens import verify_marketing_unsubscribe_token
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    email = verify_marketing_unsubscribe_token(token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    rs = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
+    row = rs.scalar_one_or_none()
+    if row and not row.email_marketing_unsubscribed_at:
+        row.email_marketing_unsubscribed_at = datetime.utcnow()
+        await db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/unsubscribe/marketing", response_class=HTMLResponse)
+async def marketing_unsubscribe_page(
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Visible unsubscribe page for marketing emails."""
+    from unsubscribe_tokens import verify_marketing_unsubscribe_token
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    email = verify_marketing_unsubscribe_token(token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    rs = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
+    row = rs.scalar_one_or_none()
+    if row and not row.email_marketing_unsubscribed_at:
+        row.email_marketing_unsubscribed_at = datetime.utcnow()
+        await db.commit()
+
+    safe_email = html.escape(email)
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marketing emails unsubscribed - AutoRig.online</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body style="margin:0;padding:2rem;font-family:system-ui,sans-serif;background:var(--bg,#0a0a0f);color:var(--text,#f0f0f5);">
+  <div style="max-width:560px;margin:0 auto;">
+    <h1 style="font-size:1.35rem;margin-top:0;">You are unsubscribed</h1>
+    <p style="color:var(--text-secondary,#a0a0b0);line-height:1.5;">
+      Marketing emails for {safe_email} have been turned off. Task-ready notifications are unchanged.
+    </p>
+    <p style="margin-top:1.5rem;">
+      <a href="{APP_URL}/dashboard" style="color:#6366f1;">Notification settings</a>
+      &nbsp;-&nbsp;
+      <a href="{APP_URL}" style="color:#6366f1;">Home</a>
+    </p>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+
+def _verify_resend_webhook_signature(payload: bytes, request: Request) -> None:
+    """Verify Resend/Svix webhook signature using RESEND_WEBHOOK_SECRET."""
+    if not RESEND_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="RESEND_WEBHOOK_SECRET is not configured")
+    svix_id = request.headers.get("svix-id") or ""
+    svix_timestamp = request.headers.get("svix-timestamp") or ""
+    svix_signature = request.headers.get("svix-signature") or ""
+    if not svix_id or not svix_timestamp or not svix_signature:
+        raise HTTPException(status_code=400, detail="Missing webhook signature headers")
+    secret = RESEND_WEBHOOK_SECRET
+    if secret.startswith("whsec_"):
+        secret = secret.split("_", 1)[1]
+    try:
+        key = base64.b64decode(secret)
+    except Exception:
+        key = RESEND_WEBHOOK_SECRET.encode("utf-8")
+    signed_payload = f"{svix_id}.{svix_timestamp}.".encode("utf-8") + payload
+    expected = base64.b64encode(hmac.new(key, signed_payload, hashlib.sha256).digest()).decode("ascii")
+    candidates = []
+    for part in svix_signature.split():
+        if part.startswith("v1,"):
+            candidates.append(part.split(",", 1)[1])
+    if not any(hmac.compare_digest(expected, candidate) for candidate in candidates):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+
+def _event_email_hash(email: str) -> str:
+    return hashlib.sha256((email or "").strip().lower().encode("utf-8")).hexdigest()
+
+
+@app.post("/api/webhooks/resend")
+async def api_resend_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist Resend delivery events and suppress hard-bounced/complained users."""
+    raw_body = await request.body()
+    _verify_resend_webhook_signature(raw_body, request)
+    try:
+        event = json.loads(raw_body.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    svix_id = request.headers.get("svix-id") or None
+    if svix_id:
+        existing = await db.execute(select(EmailDeliveryEvent.id).where(EmailDeliveryEvent.svix_id == svix_id))
+        if existing.scalar_one_or_none() is not None:
+            return {"ok": True, "duplicate": True}
+
+    event_type = str(event.get("type") or "unknown")[:64]
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    provider_message_id = data.get("email_id") or data.get("id")
+    recipients = data.get("to") if isinstance(data.get("to"), list) else []
+    recipient_email = str(recipients[0]).strip().lower() if recipients else ""
+    bounce = data.get("bounce") if isinstance(data.get("bounce"), dict) else {}
+    bounce_type = str(bounce.get("type") or "")[:32] or None
+    bounce_subtype = str(bounce.get("subType") or bounce.get("subtype") or "")[:64] or None
+    error_message = str(bounce.get("message") or data.get("error") or "")[:4000] or None
+
+    send_row = None
+    if provider_message_id:
+        send_rs = await db.execute(
+            select(EmailCampaignSend).where(EmailCampaignSend.provider_message_id == str(provider_message_id)).limit(1)
+        )
+        send_row = send_rs.scalar_one_or_none()
+
+    user = None
+    if recipient_email:
+        user_rs = await db.execute(select(User).where(func.lower(func.trim(User.email)) == recipient_email).limit(1))
+        user = user_rs.scalar_one_or_none()
+    if user is None and send_row and send_row.user_id:
+        user = await db.get(User, send_row.user_id)
+
+    email_hash = send_row.email_hash if send_row else (_event_email_hash(recipient_email) if recipient_email else None)
+    now = datetime.utcnow()
+    db.add(
+        EmailDeliveryEvent(
+            svix_id=svix_id,
+            provider_message_id=str(provider_message_id)[:128] if provider_message_id else None,
+            campaign_key=send_row.campaign_key if send_row else None,
+            user_id=user.id if user else (send_row.user_id if send_row else None),
+            email_hash=email_hash,
+            event_type=event_type,
+            bounce_type=bounce_type,
+            bounce_subtype=bounce_subtype,
+            error_message=error_message,
+            raw_event_json=json.dumps(event, ensure_ascii=False)[:12000],
+            created_at=now,
+        )
+    )
+
+    suppress = False
+    reason = None
+    if event_type == "email.complained":
+        suppress = True
+        reason = "complaint"
+    elif event_type == "email.suppressed":
+        suppress = True
+        reason = f"suppressed:{bounce_subtype or bounce_type or 'unknown'}"
+    elif event_type == "email.bounced":
+        # Resend's email.bounced event is for permanent rejection; keep Transient/Undetermined as retryable.
+        if not bounce_type or bounce_type.lower() == "permanent":
+            suppress = True
+            reason = f"permanent_bounce:{bounce_subtype or 'unknown'}"
+
+    if user is not None:
+        if event_type in {"email.bounced", "email.delivery_delayed", "email.suppressed", "email.failed"}:
+            user.email_last_bounce_at = now
+            user.email_last_bounce_type = bounce_type or event_type
+        if event_type == "email.delivery_delayed" or (bounce_type and bounce_type.lower() in {"transient", "undetermined"}):
+            user.email_transient_bounce_count = int(user.email_transient_bounce_count or 0) + 1
+        if suppress and not user.email_invalid_at:
+            user.email_invalid_at = now
+            user.email_invalid_reason = reason or event_type
+            user.email_invalid_source = "resend_webhook"
+            user.email_task_completed = False
+            if not user.email_marketing_unsubscribed_at:
+                user.email_marketing_unsubscribed_at = now
+
+    await db.commit()
+    return {"ok": True, "event_type": event_type, "suppressed": bool(suppress and user is not None)}
+
+
+def _campaign_click_destination(campaign_key: str, link_key: str) -> Optional[str]:
+    from urllib.parse import urlencode
+
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    campaign = (campaign_key or "email-campaign")[:128]
+    content = (link_key or "link")[:64]
+    utm = urlencode(
+        {
+            "utm_source": "email",
+            "utm_medium": "campaign",
+            "utm_campaign": campaign,
+            "utm_content": content,
+        }
+    )
+    if link_key == "animal_rig":
+        return f"{base}/animal-rig?{utm}"
+    if link_key == "home":
+        return f"{base}/?{utm}"
+    if link_key == "youtube_short":
+        return f"https://www.youtube.com/shorts/vEn7laZijOI?{utm}"
+    return None
+
+
+@app.get("/email/click")
+async def email_campaign_click(
+    request: Request,
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tracked redirect for signed marketing campaign links."""
+    from unsubscribe_tokens import verify_campaign_click_token
+
+    payload = verify_campaign_click_token(token or "")
+    if not payload:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    campaign_key = payload["campaign_key"]
+    email = payload["email"]
+    link_key = payload["link_key"]
+    destination_url = _campaign_click_destination(campaign_key, link_key)
+    if not destination_url:
+        raise HTTPException(status_code=400, detail="Unknown link")
+
+    rs = await db.execute(select(User).where(func.lower(User.email) == email.lower()))
+    user = rs.scalar_one_or_none()
+    email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()
+    client_ip = request.client.host if request.client else ""
+    ip_hash = (
+        hmac.new(SECRET_KEY.encode("utf-8"), client_ip.encode("utf-8"), hashlib.sha256).hexdigest()
+        if client_ip else None
+    )
+    user_agent = (request.headers.get("user-agent") or "")[:512] or None
+    db.add(
+        EmailCampaignClick(
+            campaign_key=campaign_key,
+            user_id=user.id if user else None,
+            email_hash=email_hash,
+            link_key=link_key,
+            destination_url=destination_url,
+            ip_hash=ip_hash,
+            user_agent=user_agent,
+            clicked_at=datetime.utcnow(),
+        )
+    )
+    await db.commit()
+    return RedirectResponse(url=destination_url, status_code=302)
+
+
 # =============================================================================
 # API Keys (User)
 # =============================================================================
@@ -2027,7 +2636,7 @@ async def api_revoke_api_key(
 def _skill_md_candidate_paths() -> List[Path]:
     """Primary: autorig-online/skill.md next to backend/; fallback: parent of repo root."""
     here = Path(__file__).resolve().parent
-    return [here.parent.parent / "skill.md", here.parent.parent.parent / "skill.md"]
+    return [here.parent / "skill.md", here.parent.parent / "skill.md", here.parent.parent.parent / "skill.md"]
 
 
 @app.post("/api/agents/register", response_model=AgentRegisterResponse)
@@ -2118,6 +2727,174 @@ async def api_buy_credits_donation_stats(db: AsyncSession = Depends(get_db)):
         currency="USD",
         purchase_count=purchase_count,
     )
+
+
+@app.get("/buy-credits/checkout/{permalink}")
+async def buy_credits_checkout(
+    permalink: str,
+    request: Request,
+    source: Optional[str] = Query(None),
+    task_id: Optional[str] = Query(None),
+    required_credits: Optional[int] = Query(None),
+    page_url: Optional[str] = Query(None),
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-owned checkout redirect so payment clicks do not depend on JS fetches."""
+    product_key = _normalize_gumroad_product_key(permalink)
+    if product_key not in AUTORIG_DONATION_PRODUCT_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown AutoRig credit product")
+
+    if not user:
+        next_path = request.url.path
+        if request.url.query:
+            next_path += f"?{request.url.query}"
+        login_url = f"/auth/login?next={quote(next_path, safe='')}"
+        return RedirectResponse(url=login_url, status_code=303)
+
+    source_clean = _clamp_text(source, 80, default="buy_credits_checkout")
+    task_id_clean = _safe_checkout_task_id(task_id)
+    if required_credits is not None and required_credits <= 0:
+        required_credits = None
+    page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
+    package_label = _checkout_pack_label(product_key)
+    price_label = _checkout_pack_price_label(product_key)
+    intent_id = None
+
+    try:
+        intent = PurchaseCheckoutIntent(
+            user_email=user.email,
+            product_permalink=product_key,
+            product_kind="credits",
+            source=source_clean,
+            task_id=task_id_clean,
+            required_credits=required_credits,
+            page_url=page_url_clean,
+            created_at=datetime.utcnow(),
+        )
+        db.add(intent)
+        await db.flush()
+        intent_id = intent.id
+        await db.commit()
+        print(
+            f"[Checkout] Credit checkout intent id={intent_id} product={product_key} "
+            f"source={source_clean} task_id={task_id_clean or '-'}",
+            flush=True,
+        )
+    except Exception as e:
+        await db.rollback()
+        print(f"[Checkout] Failed to persist checkout intent product={product_key}: {e}", flush=True)
+
+    try:
+        from telegram_bot import broadcast_credits_purchase_click
+        asyncio.create_task(
+            broadcast_credits_purchase_click(
+                package=package_label,
+                price=price_label,
+                user_email=user.email,
+                anon_id=None,
+                product_kind="credits",
+                permalink=product_key,
+                source=source_clean,
+                page_url=page_url_clean,
+            )
+        )
+    except Exception as e:
+        print(f"[Checkout] Failed to schedule checkout notification id={intent_id}: {e}", flush=True)
+
+    return RedirectResponse(url=_gumroad_checkout_url(product_key, user.email), status_code=303)
+
+
+@app.get("/api/blender-plugin/offer")
+async def blender_plugin_offer(
+    user: Optional[User] = Depends(get_current_user),
+):
+    if not user:
+        return {
+            "product_kind": "plugin",
+            "authenticated": False,
+            "checkout_url": "/blender-plugin/checkout",
+        }
+
+    product_key, price_usd = _select_blender_plugin_variant(user)
+    price_label = _format_usd_price(price_usd)
+    return {
+        "product_kind": "plugin",
+        "authenticated": True,
+        "permalink": product_key,
+        "price_usd": price_usd,
+        "price_label": price_label,
+        "display_price": f"{price_label}+",
+        "package": f"Blender Plugin ABCD {price_label}",
+        "checkout_url": "/blender-plugin/checkout",
+    }
+
+
+@app.get("/blender-plugin/checkout")
+async def blender_plugin_checkout(
+    request: Request,
+    source: Optional[str] = Query(None),
+    page_url: Optional[str] = Query(None),
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-owned Blender plugin checkout with ABCD price assignment and click telemetry."""
+    if not user:
+        next_path = request.url.path
+        if request.url.query:
+            next_path += f"?{request.url.query}"
+        login_url = f"/auth/login?next={quote(next_path, safe='')}"
+        return RedirectResponse(url=login_url, status_code=303)
+
+    product_key, price_usd = _select_blender_plugin_variant(user)
+    price_label = _format_usd_price(price_usd)
+    source_clean = _clamp_text(source, 80, default="blender_plugin_checkout")
+    page_url_clean = _clamp_text(page_url or request.headers.get("referer") or str(request.url), 1024)
+    package_label = f"Blender Plugin ABCD {price_label}"
+    intent_id = None
+
+    try:
+        intent = PurchaseCheckoutIntent(
+            user_email=user.email,
+            product_permalink=product_key,
+            product_kind="plugin",
+            source=source_clean,
+            task_id=None,
+            required_credits=None,
+            page_url=page_url_clean,
+            created_at=datetime.utcnow(),
+        )
+        db.add(intent)
+        await db.flush()
+        intent_id = intent.id
+        await db.commit()
+        print(
+            f"[Checkout] Plugin checkout intent id={intent_id} product={product_key} "
+            f"price={price_label} source={source_clean}",
+            flush=True,
+        )
+    except Exception as e:
+        await db.rollback()
+        print(f"[Checkout] Failed to persist plugin checkout intent product={product_key}: {e}", flush=True)
+
+    try:
+        from telegram_bot import broadcast_credits_purchase_click
+        asyncio.create_task(
+            broadcast_credits_purchase_click(
+                package=package_label,
+                price=price_label,
+                user_email=user.email,
+                anon_id=None,
+                product_kind="plugin",
+                permalink=product_key,
+                source=source_clean,
+                page_url=page_url_clean,
+            )
+        )
+    except Exception as e:
+        print(f"[Checkout] Failed to schedule plugin checkout notification id={intent_id}: {e}", flush=True)
+
+    return RedirectResponse(url=_gumroad_checkout_url(product_key, user.email), status_code=303)
 
 
 def _build_crypto_buy_config_response() -> CryptoBuyConfigResponse:
@@ -2274,13 +3051,20 @@ async def api_roadmap_vote_post(
 
 
 # =============================================================================
-# Feedback
+# YouTube Bonus & Feedback
 # =============================================================================
 @app.post("/api/user/grant-youtube-bonus")
-async def deprecated_youtube_bonus_removed(
+async def grant_youtube_bonus(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    """Deprecated route kept only to prevent old clients from silently granting credits."""
-    raise HTTPException(status_code=410, detail="Free credit grants have been removed.")
+    """Compatibility endpoint for the retired YouTube credit bonus."""
+    return {
+        "ok": False,
+        "disabled": True,
+        "detail": "Free credit bonuses are no longer available.",
+        "new_balance": user.balance_credits if user else 0,
+    }
 
 
 @app.post("/api/user/feedback")
@@ -2766,7 +3550,11 @@ async def api_create_task(
     animal_type: Optional[str] = None
     rig_mode: Optional[str] = None
     rig_v2_detection_meta: Optional[Dict[str, Any]] = None
+    rig_v2_manual_selection = False
+    local_rotation: Optional[List[float]] = None
+    animal_semantic_markers: Optional[Dict[str, List[float]]] = None
     preflight_render_image_data_url: Optional[str] = None
+    source_preview_url: Optional[str] = None
 
     if "application/json" in content_type:
         try:
@@ -2797,6 +3585,9 @@ async def api_create_task(
         raw_mode = data.get("mode")
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
+        local_rotation = _coerce_float_vec3(data.get("local_rotation"), "local_rotation")
+        animal_semantic_markers = _coerce_animal_semantic_markers(data.get("animal_semantic_markers"))
+        rig_v2_manual_selection = bool(data.get("rig_v2_manual_selection"))
         raw_detection = data.get("rig_v2_animal_detection")
         if isinstance(raw_detection, dict):
             rig_v2_detection_meta = raw_detection
@@ -2810,6 +3601,9 @@ async def api_create_task(
         raw_preflight_render = data.get("preflight_render_jpg_base64_string")
         if isinstance(raw_preflight_render, str) and raw_preflight_render.strip():
             preflight_render_image_data_url = raw_preflight_render.strip()
+        raw_source_preview = data.get("source_preview_url")
+        if isinstance(raw_source_preview, str) and raw_source_preview.strip():
+            source_preview_url = raw_source_preview.strip()
     else:
         form = await request.form()
         raw_source = form.get("source")
@@ -2834,6 +3628,14 @@ async def api_create_task(
         raw_mode = form.get("mode")
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
+        local_rotation = _coerce_float_vec3(
+            form.get("local_rotation_json") or form.get("local_rotation"),
+            "local_rotation",
+        )
+        animal_semantic_markers = _coerce_animal_semantic_markers(
+            form.get("animal_semantic_markers_json") or form.get("animal_semantic_markers")
+        )
+        rig_v2_manual_selection = str(form.get("rig_v2_manual_selection") or "").strip().lower() in ("1", "true", "yes", "on")
         raw_detection = form.get("rig_v2_animal_detection_json")
         if raw_detection is not None and str(raw_detection).strip():
             try:
@@ -2845,16 +3647,27 @@ async def api_create_task(
         raw_preflight_render = form.get("preflight_render_jpg_base64_string")
         if raw_preflight_render is not None and str(raw_preflight_render).strip():
             preflight_render_image_data_url = str(raw_preflight_render).strip()
+        raw_source_preview = form.get("source_preview_url")
+        if raw_source_preview is not None and str(raw_source_preview).strip():
+            source_preview_url = str(raw_source_preview).strip()
         fu = form.get("file")
         # Accept any Starlette/FastAPI upload object (isinstance can fail across re-exports).
         if fu is not None and hasattr(fu, "read") and hasattr(fu, "filename"):
             file = fu
+
+    if pipeline not in ("rig", "convert"):
+        pipeline = "rig"
+    input_type = normalize_task_type(input_type)
+    disk_headroom_checked = False
 
     # Handle file upload
     final_url = input_url
     if file is not None:
         source = "upload"
     if source == "upload" and file:
+        await ensure_request_disk_headroom(db, context="task_create_upload")
+        disk_headroom_checked = True
+
         # Save uploaded file
         upload_token = str(uuid.uuid4())
         upload_dir = os.path.join(UPLOAD_DIR, upload_token)
@@ -2893,13 +3706,13 @@ async def api_create_task(
     if not final_url:
         raise HTTPException(status_code=400, detail="No input URL provided")
 
+    if not disk_headroom_checked:
+        await ensure_request_disk_headroom(db, context="task_create")
+
     preflight_render_image_data_url = (
         preflight_render_image_data_url
         or _pop_preflight_render_image_from_meta(rig_v2_detection_meta)
     )
-
-    if pipeline not in ("rig", "convert"):
-        pipeline = "rig"
 
     if pipeline == "convert" and not _url_path_endswith_glb(final_url):
         raise HTTPException(
@@ -2907,75 +3720,43 @@ async def api_create_task(
             detail="pipeline=convert requires a .glb input URL or .glb upload filename.",
         )
 
-    input_type = normalize_task_type(input_type).strip().lower()
     animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
-    animal_decision = _rig_v2_animal_decision_from_detection_meta(
-        rig_v2_detection_meta,
-        animal_allowed,
-    ) if rig_v2_detection_meta else None
-    if isinstance(rig_v2_detection_meta, dict) and animal_decision:
-        candidate_animal = str(animal_decision.get("candidate_animal_type_string") or "").strip().lower()
-        rig_v2_detection_meta = {
-            **rig_v2_detection_meta,
-            "animal_decision_accepted_bool": bool(animal_decision.get("accepted_bool")),
-            "animal_decision_weight_float": round(float(animal_decision.get("decision_weight_float") or 0.0), 4),
-            "animal_decision_threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
-            "animal_decision_margin_float": round(float(animal_decision.get("margin_float") or 0.0), 4),
-            "animal_decision_min_margin_float": RIG_V2_ANIMAL_DECISION_MIN_MARGIN,
-            "animal_decision_min_votes_int": RIG_V2_ANIMAL_DECISION_MIN_VOTES,
-            "selected_votes_int": int(animal_decision.get("selected_votes_int") or 0),
-            "view_count_int": int(animal_decision.get("view_count_int") or 0),
-            "selected_type_string": str(animal_decision.get("selected_type_string") or "").strip().lower(),
-            "candidate_animal_type_string": candidate_animal,
-            "animal_decision_rejected_reason_string": str(animal_decision.get("reason_string") or "").strip(),
-        }
-
     if input_type == "animal":
-        if not animal_decision or not bool(animal_decision.get("accepted_bool")):
-            # If detector is not confident, use the regular rigging pipeline instead of guessing an animal rig.
-            print(
-                "[RigV2Preflight] animal pipeline rejected; falling back to t_pose "
-                f"weight={animal_decision.get('decision_weight_float') if animal_decision else 0} "
-                f"threshold={RIG_V2_ANIMAL_DECISION_THRESHOLD} "
-                f"reason={animal_decision.get('reason_string') if animal_decision else 'missing_detection'}",
-                flush=True,
-            )
-            input_type = "t_pose"
-            animal_type = None
-            rig_mode = None
-            if isinstance(rig_v2_detection_meta, dict):
-                rig_v2_detection_meta = {
-                    **rig_v2_detection_meta,
-                    "type": "humanoid",
-                    "animal_type": "",
-                    "mode": "",
-                }
-        else:
-            decided_animal = str(animal_decision.get("animal_type_string") or "").strip().lower()
-            if decided_animal in animal_allowed:
-                animal_type = decided_animal
-    if input_type == "animal":
+        if animal_type not in animal_allowed and isinstance(rig_v2_detection_meta, dict):
+            candidate = str(rig_v2_detection_meta.get("animal_type") or "").strip().lower()
+            if candidate in animal_allowed:
+                animal_type = candidate
         if animal_type not in animal_allowed:
-            inferred_animal_type = _rig_v2_animal_type_from_detection_meta(
-                rig_v2_detection_meta,
-                animal_allowed,
-            )
-            if inferred_animal_type:
-                animal_type = inferred_animal_type
-        if animal_type not in animal_allowed:
-            raise HTTPException(
-                status_code=400,
-                detail="Animal rig requires a detected animal_type. Please retry the upload so AI animal detection can finish.",
-            )
+            raise HTTPException(status_code=400, detail="animal_type is required for animal rig tasks")
         rig_mode = rig_mode or "only_rig"
         if rig_v2_detection_meta is None:
             rig_v2_detection_meta = {}
+        manual_animal_selection = bool(
+            rig_v2_manual_selection
+            or rig_v2_detection_meta.get("manual_selection")
+            or rig_v2_detection_meta.get("user_selected_bool")
+            or not any(k in rig_v2_detection_meta for k in ("animal_decision_accepted_bool", "animal_decision_weight_float", "results", "scores"))
+        )
         rig_v2_detection_meta = {
             **rig_v2_detection_meta,
             "type": "animal",
             "animal_type": animal_type,
+            "animal_type_string": animal_type,
             "mode": rig_mode,
         }
+        if local_rotation is not None:
+            rig_v2_detection_meta["local_rotation"] = local_rotation
+        if animal_semantic_markers:
+            rig_v2_detection_meta["animal_semantic_markers"] = animal_semantic_markers
+            rig_v2_detection_meta["source"] = "blueprint_retarget"
+        if manual_animal_selection:
+            rig_v2_detection_meta.update({
+                "source": rig_v2_detection_meta.get("source") or "manual_task_create",
+                "accepted": True,
+                "manual_selection": True,
+                "user_selected_bool": True,
+                "animal_decision_accepted_bool": True,
+            })
 
     # Create task
     task, error = await create_conversion_task(
@@ -2994,22 +3775,32 @@ async def api_create_task(
 
     _save_preflight_render_image(task.id, preflight_render_image_data_url)
 
-    if rig_v2_detection_meta:
-        try:
-            settings = json.loads(task.viewer_settings or "{}")
-            if not isinstance(settings, dict):
-                settings = {}
-        except Exception:
+    try:
+        settings = json.loads(task.viewer_settings or "{}")
+        if not isinstance(settings, dict):
             settings = {}
+    except Exception:
+        settings = {}
+
+    if rig_v2_detection_meta:
         settings["rig_v2_animal_detection"] = rig_v2_detection_meta
-        if "viewer_theme_selection" not in settings:
-            selected_theme = _select_viewer_theme_from_metadata(
-                input_url=final_url,
-                input_type=input_type,
-                rig_v2_detection_meta=rig_v2_detection_meta if input_type == "animal" else None,
-            )
-            if selected_theme:
-                settings["viewer_theme_selection"] = selected_theme
+
+    if source_preview_url:
+        parsed_source_preview = urlparse(source_preview_url)
+        if parsed_source_preview.scheme in ("http", "https") and parsed_source_preview.netloc:
+            settings["source_preview_url"] = source_preview_url
+
+    if "viewer_theme_selection" not in settings:
+        selected_theme = _select_viewer_theme_from_metadata(
+            input_url=final_url,
+            input_type=input_type,
+            rig_v2_detection_meta=rig_v2_detection_meta if isinstance(rig_v2_detection_meta, dict) else None,
+        )
+        if selected_theme:
+            settings["viewer_theme_selection"] = selected_theme
+    ensure_viewer_environment_in_settings(settings)
+
+    if settings:
         task.viewer_settings = json.dumps(settings, ensure_ascii=False)
         await db.commit()
     
@@ -3028,11 +3819,8 @@ async def api_create_task(
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
     try:
         queue_status = await get_global_queue_status(db=db)
-        free_worker = next(
-            (w for w in queue_status.workers 
-             if w.available and (w.total_active < w.max_concurrent) and (w.queue_size <= 0)),
-            None
-        )
+        free_workers = await get_dispatchable_workers(db, queue_status)
+        free_worker = free_workers[0] if free_workers else None
         if free_worker:
             # Refresh task from DB and dispatch
             await db.refresh(task)
@@ -3050,7 +3838,6 @@ async def api_create_task(
         status=task.status,
         message=error,
     )
-
 
 RIG_V2_ALLOWED_EXTS = {".fbx", ".glb", ".obj"}
 RIG_V2_ALLOWED_SUPPORT_EXTS = {".mtl"}
@@ -3071,218 +3858,54 @@ RIG_V2_ALLOWED_ANIMAL_TYPES = [
     "rabbit",
     "turtle",
 ]
-
-
-def _gallery_rig_icon_key(task: Task) -> str:
-    """Humanoid vs animal rig key for gallery UI icons (matches frontend resolveRigIconUrl)."""
-    it = str(getattr(task, "input_type", "") or "").strip().lower()
-    if it != "animal":
-        return "humanoid"
-    allowed = {x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"}
-    try:
-        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
-    except Exception:
-        settings = {}
-    det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
-    if not isinstance(det, dict):
-        return "humanoid"
-    animal = str(
-        det.get("animal_type")
-        or det.get("animal_type_string")
-        or ""
-    ).strip().lower()
-    if animal in allowed:
-        return animal
-    return "humanoid"
-
-
-RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
-RIG_V2_ANIMAL_DECISION_MIN_MARGIN = 0.14
-RIG_V2_ANIMAL_DECISION_MIN_VOTES = 3
 RIG_V2_DISCOVERED_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
 RIG_V2_OPENAI_MODELS_CACHE: Dict[str, Any] = {"expires_at": 0.0, "models": []}
 
 
-def _rig_v2_animal_type_from_detection_meta(
-    meta: Optional[Dict[str, Any]],
-    allowed_animals: List[str],
-) -> Optional[str]:
-    if not isinstance(meta, dict):
+def _coerce_float_vec3(value: Any, field_name: str) -> Optional[List[float]]:
+    if value in (None, ""):
         return None
-    allowed = {str(x).strip().lower() for x in allowed_animals if str(x).strip()}
-
-    direct_keys = (
-        "animal_type",
-        "animal_type_string",
-        "selected_animal_type",
-        "selected_animal_type_string",
-    )
-    for key in direct_keys:
-        value = str(meta.get(key) or "").strip().lower()
-        if value in allowed:
-            return value
-
-    best_type = ""
-    best_score = 0.0
-    scores = meta.get("scores")
-    if isinstance(scores, dict):
-        for key, raw_score in scores.items():
-            animal = str(key or "").strip().lower()
-            if animal not in allowed:
-                continue
-            try:
-                score = float(raw_score)
-            except Exception:
-                score = 0.0
-            if score > best_score:
-                best_type = animal
-                best_score = score
-
-    results = meta.get("results")
-    if isinstance(results, list):
-        tally: Dict[str, float] = {}
-        for result in results:
-            if not isinstance(result, dict):
-                continue
-            animal = str(result.get("animal_type_string") or result.get("animal_type") or "").strip().lower()
-            if animal not in allowed:
-                continue
-            try:
-                confidence = float(result.get("confidence_float") or result.get("confidence") or 0.5)
-            except Exception:
-                confidence = 0.5
-            tally[animal] = tally.get(animal, 0.0) + max(0.05, min(1.0, confidence))
-        for animal, score in tally.items():
-            if score > best_score:
-                best_type = animal
-                best_score = score
-
-    return best_type or None
-
-
-def _rig_v2_float(value: Any, default: float = 0.0) -> float:
-    try:
-        out = float(value)
-    except Exception:
-        out = default
-    if not math.isfinite(out):
-        return default
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{field_name} must be a JSON array [x,y,z]") from exc
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be an array of 3 numbers")
+    out: List[float] = []
+    for item in value:
+        try:
+            number = float(item)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{field_name} must contain only numbers") from exc
+        if number != number or abs(number) > 1_000_000:
+            raise HTTPException(status_code=400, detail=f"{field_name} contains an invalid number")
+        out.append(number)
     return out
 
 
-def _rig_v2_animal_decision_from_detection_meta(
-    meta: Optional[Dict[str, Any]],
-    allowed_animals: List[str],
-) -> Dict[str, Any]:
-    allowed = {str(x).strip().lower() for x in allowed_animals if str(x).strip()}
-    if not isinstance(meta, dict):
-        return {
-            "accepted_bool": False,
-            "animal_type_string": "",
-            "candidate_animal_type_string": "",
-            "decision_weight_float": 0.0,
-            "threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
-            "margin_float": 0.0,
-            "reason_string": "missing_detection_meta",
-        }
+def _coerce_animal_semantic_markers(value: Any) -> Optional[Dict[str, List[float]]]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="animal_semantic_markers must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="animal_semantic_markers must be an object")
 
-    user_selected = bool(meta.get("user_selected_bool"))
-    direct = str(
-        meta.get("animal_type")
-        or meta.get("animal_type_string")
-        or meta.get("selected_animal_type")
-        or meta.get("selected_animal_type_string")
-        or ""
-    ).strip().lower()
-    if user_selected and direct in allowed:
-        return {
-            "accepted_bool": True,
-            "animal_type_string": direct,
-            "candidate_animal_type_string": direct,
-            "decision_weight_float": 1.0,
-            "threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
-            "margin_float": 1.0,
-            "reason_string": "user_selected",
-        }
-
-    scores: Dict[str, float] = {}
-    votes: Dict[str, int] = {}
-    raw_scores = meta.get("scores")
-    if isinstance(raw_scores, dict):
-        for key, raw_score in raw_scores.items():
-            label = str(key or "").strip().lower()
-            if label not in allowed and label != "humanoid":
-                continue
-            score = max(0.0, min(99.0, _rig_v2_float(raw_score, 0.0)))
-            if score <= 0:
-                continue
-            scores[label] = max(scores.get(label, 0.0), score)
-
-    results = meta.get("results")
-    if isinstance(results, list):
-        for result in results:
-            if not isinstance(result, dict):
-                continue
-            label = str(result.get("animal_type_string") or result.get("animal_type") or "").strip().lower()
-            if label not in allowed and label != "humanoid":
-                continue
-            confidence = max(0.05, min(1.0, _rig_v2_float(result.get("confidence_float") or result.get("confidence"), 0.5)))
-            votes[label] = votes.get(label, 0) + 1
-            # Prefer client-provided aggregate when present, but rebuild missing labels from raw view results.
-            if label not in scores:
-                scores[label] = 0.0
-            scores[label] += confidence if not isinstance(raw_scores, dict) else 0.0
-
-    if not scores and direct:
-        label = direct if direct in allowed else "humanoid"
-        scores[label] = _rig_v2_float(meta.get("animal_decision_weight_float"), 0.0)
-
-    sorted_scores = sorted(scores.items(), key=lambda item: float(item[1] or 0.0), reverse=True)
-    best, best_score = (sorted_scores[0] if sorted_scores else ("", 0.0))
-    runner, runner_score = (sorted_scores[1] if len(sorted_scores) > 1 else ("", 0.0))
-    view_count = int(_rig_v2_float(meta.get("view_count_int"), 0.0))
-    if view_count <= 0:
-        view_count = len(results) if isinstance(results, list) and results else max(sum(votes.values()), 1)
-    view_count = max(1, view_count)
-    best_votes = int(meta.get("selected_votes_int") or votes.get(best, 0) or 0)
-    decision_weight = max(0.0, min(1.0, _rig_v2_float(meta.get("animal_decision_weight_float"), best_score / view_count)))
-    margin = max(0.0, min(1.0, _rig_v2_float(meta.get("animal_decision_margin_float"), (float(best_score or 0.0) - float(runner_score or 0.0)) / view_count)))
-
-    best_is_allowed_animal = best in allowed
-    accepted = (
-        best_is_allowed_animal
-        and decision_weight >= RIG_V2_ANIMAL_DECISION_THRESHOLD
-        and margin >= RIG_V2_ANIMAL_DECISION_MIN_MARGIN
-        and best_votes >= RIG_V2_ANIMAL_DECISION_MIN_VOTES
-    )
-    if accepted:
-        reason = "accepted"
-    elif not best_is_allowed_animal:
-        reason = "best_is_humanoid" if best == "humanoid" else "best_is_not_allowed_animal"
-    elif decision_weight < RIG_V2_ANIMAL_DECISION_THRESHOLD:
-        reason = "decision_weight_below_threshold"
-    elif margin < RIG_V2_ANIMAL_DECISION_MIN_MARGIN:
-        reason = "decision_margin_below_threshold"
-    elif best_votes < RIG_V2_ANIMAL_DECISION_MIN_VOTES:
-        reason = "not_enough_consistent_views"
-    else:
-        reason = "animal_decision_rejected"
-
-    return {
-        "accepted_bool": bool(accepted),
-        "animal_type_string": best if accepted else "",
-        "candidate_animal_type_string": best if best_is_allowed_animal else "",
-        "selected_type_string": best,
-        "runner_up_type_string": runner,
-        "decision_weight_float": decision_weight,
-        "threshold_float": RIG_V2_ANIMAL_DECISION_THRESHOLD,
-        "margin_float": margin,
-        "min_margin_float": RIG_V2_ANIMAL_DECISION_MIN_MARGIN,
-        "selected_votes_int": best_votes,
-        "min_votes_int": RIG_V2_ANIMAL_DECISION_MIN_VOTES,
-        "view_count_int": view_count,
-        "reason_string": reason,
-    }
+    markers: Dict[str, List[float]] = {}
+    for raw_key, raw_vec in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        if len(key) > 96 or not re.match(r"^[A-Za-z0-9_.:-]+$", key):
+            raise HTTPException(status_code=400, detail=f"Invalid semantic marker key: {key[:96]}")
+        markers[key] = _coerce_float_vec3(raw_vec, f"animal_semantic_markers.{key}") or [0.0, 0.0, 0.0]
+        if len(markers) > 256:
+            raise HTTPException(status_code=400, detail="Too many semantic markers")
+    return markers or None
 
 
 def _rig_v2_server_time() -> int:
@@ -3312,10 +3935,10 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
             + ", ".join(RIG_V2_ALLOWED_ANIMAL_TYPES)
             + '. Return only valid JSON: {"animal_type":"<one_allowed_value>","confidence_float":0.0}. '
             "confidence_float must be between 0 and 1 and should reflect visual certainty for this single view. "
-            "Choose humanoid for a human-like character in any pose, including standing, sitting, crouching, lying, falling, rotated, armored, clothed, or holding weapons/tools. "
-            "Do not choose turtle or another animal just because a human-like model is horizontal, low in frame, or seen from an unusual angle. "
-            "Do not choose humanoid for clearly non-human robots, spider/mech robots, vehicles, drones, or low multi-legged mechanical bodies. "
-            "If uncertain between humanoid and animal, choose humanoid and lower confidence. If uncertain between animal classes, choose the closest animal type and lower confidence."
+            "Choose humanoid only for a clearly upright human-like biped with a head, torso, two arms, and two legs. "
+            "Do not choose humanoid for robots, spider/mech robots, vehicles, drones, or low multi-legged bodies. "
+            "For spider-like or multi-legged mechanical models, choose the closest non-humanoid quadruped/low-body animal type, often turtle, dog, cat, or mouse depending on silhouette. "
+            "If uncertain, choose the closest visual body type and lower confidence."
         ),
     )
     cfg.setdefault(
@@ -3327,10 +3950,6 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
             "meta-llama/llama-3.2-11b-vision-instruct:free",
         ],
     )
-    cfg.setdefault("open_router_idle_ltx_model_string", "openai/gpt-4o-mini")
-    cfg.setdefault("open_ai_idle_ltx_model_string", "gpt-4o-mini")
-    cfg.setdefault("open_ai_idle_ltx_vision_model_string", "gpt-4o-mini")
-    cfg.setdefault("open_router_idle_ltx_vision_model_string", "openai/gpt-4o-mini")
     return cfg
 
 
@@ -3731,127 +4350,6 @@ async def _rig_v2_call_openai_vision(
         }
 
 
-@app.post("/api/rig-v2/task/create")
-@limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
-async def api_rig_v2_create_preview_task(
-    request: Request,
-    response: Response,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Prototype upload endpoint: create a non-dispatched preview task for rig-v2.html."""
-    if user:
-        owner_type = "user"
-        owner_id = user.email
-    else:
-        anon_session = await get_anon_session(request, response, db)
-        owner_type = "anon"
-        owner_id = anon_session.anon_id
-
-    form = await request.form()
-    incoming_files: List[UploadFile] = []
-    for field_name in ("files", "file"):
-        for upload in form.getlist(field_name):
-            if getattr(upload, "filename", None) and hasattr(upload, "read"):
-                incoming_files.append(upload)
-    if not incoming_files:
-        raise HTTPException(status_code=400, detail="Upload at least one .fbx, .glb, or .obj file")
-
-    model_file: Optional[UploadFile] = None
-    model_filename = ""
-    model_ext = ""
-    for upload in incoming_files:
-        candidate_name = os.path.basename(upload.filename or "").strip()
-        candidate_ext = os.path.splitext(candidate_name)[1].lower()
-        if candidate_ext in RIG_V2_ALLOWED_EXTS:
-            model_file = upload
-            model_filename = candidate_name or f"model{candidate_ext}"
-            model_ext = candidate_ext
-            break
-    if model_file is None:
-        raise HTTPException(status_code=400, detail="Only .fbx, .glb, and .obj model uploads are supported in rig-v2 prototype")
-
-    for upload in incoming_files:
-        filename_check = os.path.basename(upload.filename or "").strip()
-        ext_check = os.path.splitext(filename_check)[1].lower()
-        if ext_check not in RIG_V2_ALLOWED_EXTS and ext_check not in RIG_V2_ALLOWED_SUPPORT_EXTS:
-            raise HTTPException(status_code=400, detail="Only .fbx, .glb, .obj, and .mtl uploads are supported in rig-v2 prototype")
-
-    upload_token = str(uuid.uuid4())
-    upload_dir = os.path.join(UPLOAD_DIR, upload_token)
-    os.makedirs(upload_dir, exist_ok=True)
-
-    max_upload_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
-    uploaded_bytes = 0
-    saved_filenames: List[str] = []
-    try:
-        for upload in incoming_files:
-            filename = os.path.basename(upload.filename or "").strip()
-            if not filename:
-                continue
-            filepath = os.path.join(upload_dir, filename)
-            with open(filepath, "wb") as f:
-                while True:
-                    chunk = await upload.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    uploaded_bytes += len(chunk)
-                    if uploaded_bytes > max_upload_bytes:
-                        raise HTTPException(
-                            status_code=413,
-                            detail=f"Files are too large. Maximum total size is {MAX_UPLOAD_SIZE_MB}MB.",
-                        )
-                    f.write(chunk)
-            saved_filenames.append(filename)
-    except Exception:
-        for filename in saved_filenames:
-            try:
-                os.unlink(os.path.join(upload_dir, filename))
-            except OSError:
-                pass
-        raise
-
-    app_url = (APP_URL or "https://autorig.online").rstrip("/")
-    input_url = f"{app_url}/u/{upload_token}/{quote(model_filename)}"
-    support_file_urls = {
-        filename: f"{app_url}/u/{upload_token}/{quote(filename)}"
-        for filename in saved_filenames
-        if filename != model_filename
-    }
-    model_stem = os.path.splitext(model_filename)[0].lower()
-    material_url = ""
-    for filename, url in support_file_urls.items():
-        if os.path.splitext(filename)[1].lower() == ".mtl" and os.path.splitext(filename)[0].lower() == model_stem:
-            material_url = url
-            break
-    task = Task(
-        id=str(uuid.uuid4()),
-        owner_type=owner_type,
-        owner_id=owner_id,
-        input_url=input_url,
-        input_type="rig_v2_preview",
-        status=RIG_V2_PREVIEW_STATUS,
-        ready_count=0,
-        total_count=0,
-        created_via_api=False,
-        pipeline_kind="rig_v2",
-        input_bytes=uploaded_bytes,
-    )
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
-
-    return {
-        "success_bool": True,
-        "status_string": RIG_V2_PREVIEW_STATUS,
-        "task_id_string": task.id,
-        "input_url_string": input_url,
-        "file_ext_string": model_ext.lstrip("."),
-        "material_url_string": material_url,
-        "support_file_urls_object": support_file_urls,
-        "uploaded_bytes_int": int(uploaded_bytes),
-        "server_time_unix_int": _rig_v2_server_time(),
-    }
 
 
 @app.get("/api/rig-v2/vision/animal-type")
@@ -3948,933 +4446,6 @@ async def api_rig_v2_vision_animal_type(request: Request):
         )
     return openrouter_result
 
-
-# =============================================================================
-# Idle LTX — Renderfin image-to-video (reference clip for animal viewer)
-# =============================================================================
-RENDERFIN_ANIMATION_UPLOAD_URL = "https://free3d.online/renderfin/api/animation/upload_image"
-RENDERFIN_GENERATE_VIDEO_URL = "https://free3d.online/renderfin/api/generate_video"
-RENDERFIN_ANIMATION_TASK_STATUS_URL = "https://free3d.online/renderfin/api/animation/task_status"
-RENDERFIN_API_RENDER_GET_TASK_BY_URL = "https://free3d.online/api-render-get-task-by-url"
-
-
-def _idle_ltx_status_word_to_int(word: Optional[str]) -> int:
-    x = str(word or "").strip().lower()
-    if x in ("completed", "complete", "done", "success", "succeeded"):
-        return 3
-    if x in ("failed", "error", "cancelled", "canceled"):
-        return 4
-    if x in ("pending", "queued", "accepting", "waiting"):
-        return 1
-    if x in ("inprogress", "in_progress", "processing", "running", "working"):
-        return 2
-    return 2
-
-
-def _idle_ltx_normalize_url_task_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
-    st = entry.get("status_int")
-    if st is None:
-        st = entry.get("status")
-    try:
-        status_int = int(st)
-    except Exception:
-        status_int = _idle_ltx_status_word_to_int(
-            str(entry.get("status_string") or entry.get("status") or entry.get("phase_string") or "")
-        )
-    out = str(entry.get("output_url_string") or entry.get("output_url") or "").strip()
-    playback = str(entry.get("playback_url_string") or entry.get("playback_url") or "").strip()
-    err = str(entry.get("error_string") or entry.get("error") or entry.get("message") or "").strip()
-    rsn = str(entry.get("render_server_name_string") or entry.get("render_server_name") or "").strip()
-    pid = str(entry.get("prompt_id_string") or entry.get("prompt_id") or "").strip()
-    phase = "pending_or_processing"
-    if status_int == 3:
-        phase = "completed"
-    elif status_int == 4:
-        phase = "failed"
-    play_url = playback or out
-    return {
-        "status_int": status_int,
-        "phase_string": phase,
-        "output_url_string": out or None,
-        "playback_url_string": playback or None,
-        "video_url_string": play_url or None,
-        "error_string": err or None,
-        "render_server_name_string": rsn or None,
-        "prompt_id_string": pid or None,
-        "raw_object": entry,
-    }
-
-
-async def _idle_ltx_fetch_task_by_output_url(client: httpx.AsyncClient, output_url: str) -> Optional[List[Any]]:
-    if not output_url.startswith("https://"):
-        return None
-    url = f"{RENDERFIN_API_RENDER_GET_TASK_BY_URL}?url={quote(output_url, safe='')}"
-    resp = await client.get(url, timeout=45.0, follow_redirects=True)
-    if resp.status_code != 200:
-        return None
-    try:
-        data = resp.json()
-    except Exception:
-        return None
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return [data]
-    return None
-
-
-async def _idle_ltx_clip_status_resolve(
-    client: httpx.AsyncClient,
-    *,
-    output_url_string: Optional[str],
-    renderfin_task_id: Optional[str],
-) -> Dict[str, Any]:
-    """Prefer api-render-get-task-by-url when output_url is known; fall back to animation/task_status."""
-    parsed_url: Optional[Dict[str, Any]] = None
-    ou = (output_url_string or "").strip()
-    if ou.startswith("https://"):
-        rows = await _idle_ltx_fetch_task_by_output_url(client, ou)
-        if rows and isinstance(rows[0], dict):
-            parsed_url = _idle_ltx_normalize_url_task_entry(rows[0])
-        elif rows == []:
-            parsed_url = {
-                "status_int": 2,
-                "phase_string": "pending_or_processing",
-                "output_url_string": ou,
-                "playback_url_string": None,
-                "video_url_string": None,
-                "error_string": None,
-                "render_server_name_string": None,
-                "prompt_id_string": None,
-                "raw_object": [],
-            }
-
-    if parsed_url and int(parsed_url.get("status_int") or 0) in (3, 4):
-        return {"success_bool": True, "source_string": "output_url", **parsed_url}
-
-    tid = (renderfin_task_id or "").strip()
-    if tid and re.match(r"^[0-9a-fA-F-]{32,36}$", tid):
-        status_url = f"{RENDERFIN_ANIMATION_TASK_STATUS_URL}?task_ids_string={quote(tid)}"
-        resp = await client.get(status_url, timeout=45.0, follow_redirects=True)
-        if resp.status_code == 200:
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
-            items = data.get("items_array") or data.get("items") or []
-            entry: Dict[str, Any] = (
-                items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
-            )
-            status_int = entry.get("status_int")
-            if status_int is None:
-                status_int = entry.get("status")
-            try:
-                status_int = int(status_int)
-            except Exception:
-                status_int = -1
-            out = str(entry.get("output_url_string") or entry.get("output_url") or "").strip()
-            playback = str(entry.get("playback_url_string") or entry.get("playback_url") or "").strip()
-            err = str(entry.get("error_string") or entry.get("error") or "").strip()
-            phase = "unknown"
-            if status_int in (0, 1, 2):
-                phase = "pending_or_processing"
-            elif status_int == 3:
-                phase = "completed"
-            elif status_int == 4:
-                phase = "failed"
-            play_url = playback or out
-            return {
-                "success_bool": True,
-                "source_string": "task_id",
-                "status_int": status_int,
-                "phase_string": phase,
-                "output_url_string": out or None,
-                "playback_url_string": playback or None,
-                "video_url_string": play_url or None,
-                "error_string": err or None,
-                "render_server_name_string": None,
-                "prompt_id_string": None,
-                "renderfin_raw_object": data,
-            }
-
-    if parsed_url:
-        return {"success_bool": True, "source_string": "output_url", **parsed_url}
-
-    if ou or tid:
-        return {
-            "success_bool": True,
-            "source_string": "pending_fallback",
-            "status_int": 2,
-            "phase_string": "pending_or_processing",
-            "output_url_string": ou or None,
-            "playback_url_string": None,
-            "video_url_string": ou or None,
-            "error_string": "Renderfin status is temporarily unavailable; retrying.",
-            "render_server_name_string": None,
-            "prompt_id_string": None,
-            "raw_object": None,
-        }
-
-    raise HTTPException(status_code=502, detail="Unable to resolve clip status (no valid output_url or task_id)")
-
-
-def _idle_ltx_normalize_jpeg_base64(value: str) -> bytes:
-    raw = (value or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail="frame_jpeg_base64_string is required")
-    if raw.startswith("data:image/"):
-        _, _, b64 = raw.partition(",")
-        if not b64:
-            raise HTTPException(status_code=400, detail="Invalid image data URL")
-    else:
-        b64 = raw
-    try:
-        decoded = base64.b64decode(b64, validate=True)
-    except Exception:
-        raise HTTPException(status_code=400, detail="frame_jpeg_base64_string must be valid base64")
-    if not decoded:
-        raise HTTPException(status_code=400, detail="frame_jpeg_base64_string is empty")
-    if len(decoded) > 3_500_000:
-        raise HTTPException(status_code=413, detail="Idle LTX frame image is too large")
-    if not decoded.startswith(b"\xff\xd8"):
-        raise HTTPException(status_code=400, detail="Idle LTX frame must be JPEG")
-    return decoded
-
-
-async def _idle_ltx_renderfin_upload_jpeg(*, user_name: str, image_bytes: bytes) -> Dict[str, Any]:
-    safe_user = re.sub(r"[^a-zA-Z0-9_\-]", "_", (user_name or "autorig_user").strip())[:64] or "autorig_user"
-    try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            resp = await client.post(
-                RENDERFIN_ANIMATION_UPLOAD_URL,
-                data={"user_name_string": safe_user},
-                files={"file": ("idle_frame.jpg", image_bytes, "image/jpeg")},
-            )
-        body_text = resp.text
-        try:
-            data = resp.json()
-        except Exception:
-            data = {"raw_string": body_text[:2000]}
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Renderfin upload_image failed: HTTP {resp.status_code} {body_text[:500]}",
-            )
-        if not isinstance(data, dict):
-            raise HTTPException(status_code=502, detail="Renderfin upload_image returned non-JSON object")
-        return {"ok_bool": True, "data_object": data, "http_status_int": resp.status_code}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Renderfin upload_image error: {e}") from e
-
-
-async def _idle_ltx_post_one_generate_video(
-    client: httpx.AsyncClient,
-    generate_body: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
-    """POST generate_video; returns (request_body_copy, response_json, http_status)."""
-    gb = dict(generate_body)
-    resp = await client.post(
-        RENDERFIN_GENERATE_VIDEO_URL,
-        headers={"Content-Type": "application/json"},
-        json=gb,
-    )
-    gen_http_status = resp.status_code
-    try:
-        gen_obj = resp.json()
-    except Exception:
-        gen_obj = {"raw_string": resp.text[:2500]}
-    return gb, gen_obj, gen_http_status
-
-
-def _idle_ltx_user_slug_for_task(task_id: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_\-]", "_", f"autorig_{task_id}")[:56] or "autorig"
-
-
-IDLE_LTX_VARIANT_KEYS = ("idle", "walk", "run", "die")
-IDLE_LTX_STATIC_CAMERA_SENTENCE = (
-    "Single locked-off tripod shot. Static frame. Fixed viewpoint. The camera is bolted down and never moves. "
-    "No push-in, no pull-back, no dolly in, no dolly out, no zoom, no pan, no tilt, no orbit, no tracking, "
-    "no handheld shake, no reframing. The distance between camera and subject never changes. "
-    "The entire frame, including the selected theme backdrop, stays pixel-locked with zero parallax."
-)
-IDLE_LTX_CAMERA_LOCK_NEGATIVE = (
-    "camera movement, moving camera, orbit camera, rotating camera, camera pan, camera tilt, camera zoom, "
-    "dolly shot, tracking shot, handheld camera, camera shake, viewpoint change, reframing, dynamic camera, "
-    "cinematic camera move, push in, pull out, push-in, pull-back, dolly in, dolly out, moving closer, "
-    "moving away, camera forward movement, camera backward movement, changing camera distance, parallax shift, "
-    "background drift, lens zoom, rack focus"
-)
-
-
-def _idle_ltx_with_hard_camera_lock(prompt: str) -> str:
-    body = str(prompt or "").strip()
-    lock = IDLE_LTX_STATIC_CAMERA_SENTENCE
-    if not body:
-        return lock
-    if lock.lower() in body.lower():
-        return body
-    return f"{lock} {body} Final camera rule: {lock}"
-
-
-def _idle_ltx_merge_negative_prompt(value: str) -> str:
-    neg = str(value or "").strip() or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
-    merged = f"{neg}, {IDLE_LTX_DEFAULT_NEGATIVE_PROMPT}, {IDLE_LTX_CAMERA_LOCK_NEGATIVE}"
-    parts: List[str] = []
-    seen = set()
-    for raw in merged.split(","):
-        item = raw.strip()
-        key = item.lower()
-        if item and key not in seen:
-            seen.add(key)
-            parts.append(item)
-    return ", ".join(parts)[:2400]
-
-
-def _idle_ltx_theme_context_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
-    raw = body.get("theme_context_object")
-    if not isinstance(raw, dict):
-        return {}
-    out: Dict[str, Any] = {}
-    for key in ("theme_name", "theme_short_description", "theme_id", "background_src"):
-        val = str(raw.get(key) or "").strip()
-        if val:
-            out[key] = val[:240]
-    tags = raw.get("semantic_tags")
-    if isinstance(tags, list):
-        out["semantic_tags"] = [str(x).strip()[:60] for x in tags if str(x).strip()][:12]
-    return out
-
-
-def _idle_ltx_clean_variant_prompt(value: Any) -> str:
-    text = str(value or "").strip()
-    text = re.sub(r"\s+", " ", text)
-    return text[:700]
-
-
-def _idle_ltx_variant_prompts_from_body(body: Dict[str, Any]) -> Dict[str, str]:
-    prompts: Dict[str, str] = {}
-    raw_obj = body.get("variant_prompts_object")
-    if isinstance(raw_obj, dict):
-        for key in IDLE_LTX_VARIANT_KEYS:
-            value = raw_obj.get(key) or raw_obj.get(f"{key}_prompt_string")
-            cleaned = _idle_ltx_clean_variant_prompt(value)
-            if cleaned:
-                prompts[key] = cleaned
-
-    raw_array = body.get("variant_prompts_array")
-    if isinstance(raw_array, list):
-        for i, item in enumerate(raw_array):
-            if not isinstance(item, dict):
-                continue
-            key = str(item.get("variant_name_string") or item.get("key_string") or "").strip().lower()
-            if not key and i < len(IDLE_LTX_VARIANT_KEYS):
-                key = IDLE_LTX_VARIANT_KEYS[i]
-            if key not in IDLE_LTX_VARIANT_KEYS:
-                continue
-            value = item.get("user_prompt_string") or item.get("prompt_string") or item.get("text_string")
-            cleaned = _idle_ltx_clean_variant_prompt(value)
-            if cleaned:
-                prompts[key] = cleaned
-    return prompts
-
-
-def _idle_ltx_build_user_prompt(
-    base_prompt: str,
-    variant_prompts: Dict[str, str],
-    theme_context: Optional[Dict[str, Any]] = None,
-) -> str:
-    base = (base_prompt or "").strip() or IDLE_LTX_USER_PROMPT_DEFAULT
-    theme_context = theme_context or {}
-    if not variant_prompts and not theme_context:
-        return base
-    lines = [
-        base,
-        "",
-        "Backdrop/theme context from the current 3D viewer must be preserved as a fixed static plate:",
-    ]
-    if theme_context:
-        if theme_context.get("theme_name"):
-            lines.append(f"theme: {theme_context['theme_name']}")
-        if theme_context.get("theme_short_description"):
-            lines.append(f"description: {theme_context['theme_short_description']}")
-        if theme_context.get("semantic_tags"):
-            lines.append(f"tags: {', '.join(theme_context['semantic_tags'])}")
-    lines.extend([
-        "The full input frame includes both the model and the selected theme background. Do not crop, push toward, pull away from, or reframe around the model.",
-        "",
-        "User editable variant prompts. These are mandatory motion intents for the four generated videos:",
-    ])
-    for key in IDLE_LTX_VARIANT_KEYS:
-        if variant_prompts.get(key):
-            lines.append(f"{key}: {variant_prompts[key]}")
-    lines.extend(
-        [
-            "",
-            IDLE_LTX_STATIC_CAMERA_SENTENCE,
-            "Do not invent camera movement. Keep every video locked to the exact same viewpoint as the input frame.",
-            "The generated subject may animate, but the camera must not move closer, move farther, pan, tilt, orbit, zoom, or reframe.",
-        ]
-    )
-    return "\n".join(lines)[:4000]
-
-
-def _idle_ltx_apply_variant_prompts_to_vision(
-    vision_json: Dict[str, Any],
-    variant_prompts: Dict[str, str],
-) -> Dict[str, Any]:
-    if not variant_prompts and isinstance(vision_json.get("ltx_variants_array"), list):
-        for i, item in enumerate(vision_json["ltx_variants_array"][: len(IDLE_LTX_VARIANT_KEYS)]):
-            if isinstance(item, dict):
-                item["variant_name_string"] = IDLE_LTX_VARIANT_KEYS[i]
-                item["prompt_string"] = _idle_ltx_with_hard_camera_lock(str(item.get("prompt_string") or ""))[:1800]
-        vision_json["ltx_base_prompt_string"] = _idle_ltx_with_hard_camera_lock(
-            str(vision_json.get("ltx_base_prompt_string") or "")
-        )[:1800]
-        return vision_json
-
-    variants = vision_json.get("ltx_variants_array")
-    if not isinstance(variants, list):
-        variants = []
-    out: List[Dict[str, Any]] = []
-    base = str(vision_json.get("ltx_base_prompt_string") or "").strip()
-    for i, key in enumerate(IDLE_LTX_VARIANT_KEYS):
-        row = variants[i] if i < len(variants) and isinstance(variants[i], dict) else {}
-        prompt = str(row.get("prompt_string") or base or "").strip()
-        user_part = variant_prompts.get(key, "")
-        if user_part and user_part.lower() not in prompt.lower():
-            prompt = f"{prompt} Motion intent: {user_part}."
-        prompt = _idle_ltx_with_hard_camera_lock(prompt)
-        out.append(
-            {
-                **row,
-                "variant_name_string": key,
-                "prompt_string": prompt.strip()[:1800],
-                "user_variant_prompt_string": user_part,
-            }
-        )
-    vision_json["ltx_variants_array"] = out
-    vision_json["ltx_base_prompt_string"] = _idle_ltx_with_hard_camera_lock(base)[:1800]
-    return vision_json
-
-
-async def _idle_ltx_vision_upload_and_analyze(
-    task_id: str,
-    db: AsyncSession,
-    body: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Upload frame → Renderfin URL → Vision JSON. Used by vision-start and monolithic start."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
-        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
-
-    image_bytes = _idle_ltx_normalize_jpeg_base64(str(body.get("frame_jpeg_base64_string") or ""))
-    user_prompt = str(body.get("user_prompt_string") or body.get("base_prompt_string") or "").strip()
-    variant_prompts = _idle_ltx_variant_prompts_from_body(body)
-    theme_context = _idle_ltx_theme_context_from_body(body)
-    user_prompt = _idle_ltx_build_user_prompt(user_prompt, variant_prompts, theme_context)
-
-    user_slug = _idle_ltx_user_slug_for_task(task_id)
-
-    upload_wrap = await _idle_ltx_renderfin_upload_jpeg(user_name=user_slug, image_bytes=image_bytes)
-    upload_obj = upload_wrap.get("data_object") or {}
-    image_url = str(
-        upload_obj.get("image_url_string")
-        or upload_obj.get("image_url")
-        or ""
-    ).strip()
-    if not image_url or not image_url.startswith("https://"):
-        raise HTTPException(
-            status_code=502,
-            detail=f"Renderfin upload did not return image_url_string: {upload_obj!r}"[:500],
-        )
-
-    cfg = _rig_v2_load_vision_config()
-    try:
-        vision_json, vision_provider = await VisionPromptAnalyzer.analyze(
-            cfg=cfg,
-            app_url=APP_URL or "https://autorig.online",
-            image_url_string=image_url,
-            user_prompt_string=user_prompt,
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=f"Vision analysis failed: {e}") from e
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Vision analysis error: {e}") from e
-
-    vision_json = _idle_ltx_apply_variant_prompts_to_vision(vision_json, variant_prompts)
-    variants = vision_json.get("ltx_variants_array")
-    if not isinstance(variants, list) or len(variants) < 1:
-        raise HTTPException(status_code=502, detail="Vision JSON missing ltx_variants_array")
-
-    fc = int(body.get("frame_count_int") or IDLE_LTX_FRAME_COUNT_DEFAULT)
-    if fc < 1:
-        fc = IDLE_LTX_FRAME_COUNT_DEFAULT
-    if fc > 375:
-        fc = 375
-
-    neg_base = str(vision_json.get("ltx_negative_prompt_string") or "").strip() or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
-    extra_neg = str(body.get("negative_prompt_string") or "").strip()
-    if extra_neg:
-        neg_base = f"{neg_base}, {extra_neg}"
-    neg_base = _idle_ltx_merge_negative_prompt(neg_base)
-
-    return {
-        "user_prompt_string": user_prompt,
-        "user_name_string": user_slug,
-        "upload_response_object": upload_obj,
-        "vision_analysis_object": vision_json,
-        "vision_provider_string": vision_provider,
-        "image_url_string": image_url,
-        "negative_prompt_string": neg_base,
-        "frame_count_int": fc,
-        "variant_prompts_object": variant_prompts,
-        "theme_context_object": theme_context,
-    }
-
-
-@app.get("/api/task/{task_id}/idle-ltx/clip-status")
-@limiter.limit("120/minute")
-async def api_task_idle_ltx_clip_status(
-    request: Request,
-    task_id: str,
-    renderfin_task_id: Optional[str] = Query(None, description="Renderfin task UUID"),
-    output_url_string: Optional[str] = Query(None, description="Output URL from generate_video"),
-    db: AsyncSession = Depends(get_db),
-):
-    """Resolve clip status via api-render-get-task-by-url when possible, else animation/task_status."""
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
-        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
-    if not (renderfin_task_id or "").strip() and not (output_url_string or "").strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Provide renderfin_task_id and/or output_url_string",
-        )
-    try:
-        async with httpx.AsyncClient(timeout=50.0, follow_redirects=True) as client:
-            return await _idle_ltx_clip_status_resolve(
-                client,
-                output_url_string=output_url_string,
-                renderfin_task_id=renderfin_task_id,
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Idle LTX clip-status error: {e}") from e
-
-
-@app.get("/api/task/{task_id}/idle-ltx/verify-mp4")
-@limiter.limit("120/minute")
-async def api_task_idle_ltx_verify_mp4(
-    request: Request,
-    task_id: str,
-    video_url_string: str = Query(..., description="Final mp4 or playback URL"),
-    db: AsyncSession = Depends(get_db),
-):
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
-        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
-    u = (video_url_string or "").strip()
-    if not (u.startswith("https://") or u.startswith("http://")):
-        raise HTTPException(status_code=400, detail="video_url_string must be http(s)")
-    try:
-        async with httpx.AsyncClient(timeout=35.0, follow_redirects=True) as client:
-            head = await client.head(u)
-            resp = head
-            if head.status_code >= 400:
-                resp = await client.get(u, headers={"Range": "bytes=0-1023"})
-        ct = (resp.headers.get("content-type") or "").lower()
-        ok = resp.status_code in (200, 206) and (
-            "video" in ct or "octet-stream" in ct or u.lower().split("?", 1)[0].endswith(".mp4")
-        )
-        return {
-            "success_bool": True,
-            "ok_bool": ok,
-            "http_status_int": resp.status_code,
-            "content_type_string": ct,
-        }
-    except Exception as e:
-        return {
-            "success_bool": True,
-            "ok_bool": False,
-            "http_status_int": 0,
-            "content_type_string": "",
-            "error_string": str(e)[:500],
-        }
-
-
-@app.post("/api/task/{task_id}/idle-ltx/vision-start")
-@limiter.limit("20/minute")
-async def api_task_idle_ltx_vision_start(
-    task_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
-):
-    """Upload frame → Vision only. UI then calls /idle-ltx/render-variant four times (smaller responses)."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON body must be an object")
-    phase = await _idle_ltx_vision_upload_and_analyze(task_id, db, body)
-    try:
-        from telegram_bot import broadcast_ltx_video_generation_started
-        theme_context = phase.get("theme_context_object") or {}
-        asyncio.create_task(broadcast_ltx_video_generation_started(
-            task_id=task_id,
-            user_email=getattr(user, "email", None),
-            theme_name=str(theme_context.get("theme_name") or ""),
-            background_hint=str(theme_context.get("theme_short_description") or ""),
-            variant_count=IDLE_LTX_VARIANT_COUNT,
-        ))
-    except Exception as e:
-        print(f"[Telegram] LTX generation notification enqueue failed: {e}")
-    return {"success_bool": True, **phase}
-
-
-@app.post("/api/task/{task_id}/idle-ltx/fitting-started")
-@limiter.limit("60/minute")
-async def api_task_idle_ltx_fitting_started(
-    task_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user: Optional[User] = Depends(get_current_user),
-):
-    """Record/notify that the user started fitting a bone animation from a selected LTX reference video."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON body must be an object")
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
-        raise HTTPException(status_code=400, detail="Animation fitting is only available for animal tasks")
-    variant_name = str(body.get("variant_name_string") or "").strip()[:80]
-    video_url = str(body.get("video_url_string") or "").strip()
-    if video_url and not (video_url.startswith("https://") or video_url.startswith("http://")):
-        raise HTTPException(status_code=400, detail="video_url_string must be http(s)")
-    try:
-        from telegram_bot import broadcast_animation_fitting_started
-        asyncio.create_task(broadcast_animation_fitting_started(
-            task_id=task_id,
-            variant_name=variant_name or "selected reference",
-            video_url=video_url,
-            user_email=getattr(user, "email", None),
-        ))
-    except Exception as e:
-        print(f"[Telegram] animation fitting notification enqueue failed: {e}")
-    return {
-        "success_bool": True,
-        "task_id_string": task_id,
-        "variant_name_string": variant_name,
-    }
-
-
-@app.post("/api/task/{task_id}/idle-ltx/render-variant")
-@limiter.limit("40/minute")
-async def api_task_idle_ltx_render_variant(
-    task_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """One Renderfin generate_video call for a single variant index (0..3)."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON body must be an object")
-
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
-        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
-
-    try:
-        idx = int(body.get("index_int"))
-    except Exception:
-        raise HTTPException(status_code=400, detail="index_int is required (0..3)")
-    if idx < 0 or idx >= IDLE_LTX_VARIANT_COUNT:
-        raise HTTPException(status_code=400, detail="index_int must be 0..3")
-
-    image_url = str(body.get("image_url_string") or "").strip()
-    if not image_url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="image_url_string must be https")
-    if task_id not in image_url:
-        raise HTTPException(status_code=400, detail="image_url_string must contain this task_id")
-
-    expected_slug = _idle_ltx_user_slug_for_task(task_id)
-    user_slug = str(body.get("user_name_string") or "").strip()
-    if user_slug != expected_slug:
-        raise HTTPException(status_code=400, detail="user_name_string does not match this task")
-
-    prompt_clip = str(body.get("prompt_string") or "").strip()
-    if not prompt_clip:
-        raise HTTPException(status_code=400, detail="prompt_string is required")
-    prompt_clip = _idle_ltx_with_hard_camera_lock(prompt_clip)[:1800]
-
-    neg_base = str(body.get("negative_prompt_string") or "").strip() or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
-    neg_base = _idle_ltx_merge_negative_prompt(neg_base)
-
-    vn = str(body.get("variant_name_string") or f"variant_{idx}").strip()
-    fc = int(body.get("frame_count_int") or IDLE_LTX_FRAME_COUNT_DEFAULT)
-    if fc < 1:
-        fc = IDLE_LTX_FRAME_COUNT_DEFAULT
-    if fc > 375:
-        fc = 375
-
-    species = body.get("detected_species_string")
-    conf = body.get("species_confidence_float")
-    user_variant_prompt = str(body.get("user_variant_prompt_string") or "").strip()[:700]
-
-    gb: Dict[str, Any] = {
-        "prompt": prompt_clip,
-        "image_url": image_url,
-        "main_size_width": 768,
-        "main_size_height": 448,
-        "frame_count": fc,
-        "user_name": user_slug,
-        "negative_prompt": neg_base,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            gbo, gen_obj, gen_http_status = await _idle_ltx_post_one_generate_video(client, gb)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Renderfin generate_video error: {e}") from e
-
-    if gen_http_status != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Renderfin generate_video failed: HTTP {gen_http_status} {str(gen_obj)[:600]}",
-        )
-    rf_task = str(gen_obj.get("task_id") or gen_obj.get("task_id_string") or "").strip()
-    out_url = str(gen_obj.get("output_url") or gen_obj.get("output_url_string") or "").strip()
-    if not rf_task:
-        raise HTTPException(status_code=502, detail="Renderfin did not return task_id")
-
-    clip: Dict[str, Any] = {
-        "index_int": idx,
-        "variant_name_string": vn,
-        "detected_species_string": species,
-        "species_confidence_float": conf,
-        "prompt_string": prompt_clip,
-        "negative_prompt_string": neg_base,
-        "user_variant_prompt_string": user_variant_prompt,
-        "renderfin_task_id_string": rf_task,
-        "output_url_string": out_url or None,
-        "generate_video_request_object": gbo,
-        "generate_video_response_object": gen_obj,
-        "generate_video_http_status_int": gen_http_status,
-    }
-    return {"success_bool": True, "clip_object": clip, "index_int": idx}
-
-
-@app.post("/api/task/{task_id}/idle-ltx/start")
-@limiter.limit("20/minute")
-async def api_task_idle_ltx_start(
-    task_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Upload frame → Renderfin image URL → Vision JSON (species-specific LTX prompts) →
-    4× generate_video (variants). See idle_ltx_vision.py and Renderfin skill.
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="JSON body must be an object")
-
-    phase = await _idle_ltx_vision_upload_and_analyze(task_id, db, body)
-    vision_json = phase["vision_analysis_object"]
-    vision_provider = phase["vision_provider_string"]
-    user_prompt = phase["user_prompt_string"]
-    user_slug = phase["user_name_string"]
-    upload_obj = phase["upload_response_object"]
-    image_url = phase["image_url_string"]
-    neg_base = phase["negative_prompt_string"]
-    fc = int(phase["frame_count_int"])
-
-    variants = vision_json.get("ltx_variants_array")
-    if not isinstance(variants, list) or len(variants) < 1:
-        raise HTTPException(status_code=502, detail="Vision JSON missing ltx_variants_array")
-
-    clip_n = min(IDLE_LTX_VARIANT_COUNT, len(variants))
-    if clip_n < 1:
-        raise HTTPException(status_code=502, detail="Idle LTX: no variants to render (clip_n=0)")
-
-    clips_out: List[Dict[str, Any]] = []
-    try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-
-            async def run_variant(idx: int) -> Dict[str, Any]:
-                var = variants[idx] if isinstance(variants[idx], dict) else {}
-                vn = str(var.get("variant_name_string") or f"variant_{idx}").strip()
-                prompt_clip = str(var.get("prompt_string") or vision_json.get("ltx_base_prompt_string") or "").strip()
-                if not prompt_clip:
-                    raise HTTPException(status_code=502, detail=f"Vision variant {idx} has empty prompt_string")
-                prompt_clip = _idle_ltx_with_hard_camera_lock(prompt_clip)[:1800]
-                gb: Dict[str, Any] = {
-                    "prompt": prompt_clip,
-                    "image_url": image_url,
-                    "main_size_width": 768,
-                    "main_size_height": 448,
-                    "frame_count": fc,
-                    "user_name": user_slug,
-                    "negative_prompt": neg_base,
-                }
-                gbo, gen_obj, gen_http_status = await _idle_ltx_post_one_generate_video(client, gb)
-                if gen_http_status != 200:
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"Renderfin generate_video variant {idx + 1}/{clip_n} failed: HTTP {gen_http_status} {str(gen_obj)[:600]}",
-                    )
-                rf_task = str(gen_obj.get("task_id") or gen_obj.get("task_id_string") or "").strip()
-                out_url = str(gen_obj.get("output_url") or gen_obj.get("output_url_string") or "").strip()
-                return {
-                    "index_int": idx,
-                    "variant_name_string": vn,
-                    "detected_species_string": vision_json.get("detected_species_string"),
-                    "species_confidence_float": vision_json.get("species_confidence_float"),
-                    "prompt_string": prompt_clip,
-                    "negative_prompt_string": neg_base,
-                    "renderfin_task_id_string": rf_task,
-                    "output_url_string": out_url or None,
-                    "generate_video_request_object": gbo,
-                    "generate_video_response_object": gen_obj,
-                    "generate_video_http_status_int": gen_http_status,
-                }
-
-            clips_out = await asyncio.gather(*[run_variant(i) for i in range(clip_n)])
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Renderfin generate_video error: {e}") from e
-
-    if len(clips_out) != clip_n:
-        raise HTTPException(status_code=502, detail="Idle LTX internal error: clips_out size mismatch")
-    task_ids = [str(c.get("renderfin_task_id_string") or "").strip() for c in clips_out]
-    if not task_ids or not all(task_ids):
-        raise HTTPException(status_code=502, detail="Renderfin did not return task_id for one or more clips")
-
-    return {
-        "success_bool": True,
-        "clip_count_int": clip_n,
-        "renderfin_task_ids_array": task_ids,
-        "renderfin_task_id_string": task_ids[0],
-        "clips_array": clips_out,
-        "user_prompt_string": user_prompt,
-        "image_url_string": image_url,
-        "vision_provider_string": vision_provider,
-        "vision_analysis_object": vision_json,
-        "variant_prompts_object": phase.get("variant_prompts_object") or {},
-        "user_name_string": user_slug,
-        "upload_response_object": upload_obj,
-        "generate_video_request_object": clips_out[0]["generate_video_request_object"],
-        "generate_video_request_objects_array": [c["generate_video_request_object"] for c in clips_out],
-        "generate_video_response_object": clips_out[0]["generate_video_response_object"],
-        "generate_video_http_status_int": clips_out[0]["generate_video_http_status_int"],
-    }
-
-
-@app.get("/api/task/{task_id}/idle-ltx/status")
-@limiter.limit("120/minute")
-async def api_task_idle_ltx_status(
-    request: Request,
-    task_id: str,
-    renderfin_task_id: str = Query(..., description="Renderfin task UUID"),
-    db: AsyncSession = Depends(get_db),
-):
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if str(getattr(task, "input_type", "") or "").strip().lower() != "animal":
-        raise HTTPException(status_code=400, detail="Idle LTX is only available for animal tasks")
-
-    tid = (renderfin_task_id or "").strip()
-    if not re.match(r"^[0-9a-fA-F-]{32,36}$", tid):
-        raise HTTPException(status_code=400, detail="Invalid renderfin_task_id")
-
-    status_url = f"{RENDERFIN_ANIMATION_TASK_STATUS_URL}?task_ids_string={quote(tid)}"
-    try:
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-            resp = await client.get(status_url)
-        try:
-            data = resp.json()
-        except Exception:
-            data = {"raw_string": resp.text[:2500]}
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Renderfin task_status failed: HTTP {resp.status_code}",
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Renderfin task_status error: {e}") from e
-
-    items = data.get("items_array") or data.get("items") or []
-    entry: Dict[str, Any] = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
-    status_int = entry.get("status_int")
-    if status_int is None:
-        status_int = entry.get("status")
-    try:
-        status_int = int(status_int)
-    except Exception:
-        status_int = -1
-
-    out = str(
-        entry.get("output_url_string") or entry.get("output_url") or ""
-    ).strip()
-    playback = str(entry.get("playback_url_string") or entry.get("playback_url") or "").strip()
-    err = str(entry.get("error_string") or entry.get("error") or "").strip()
-    rsv = str(entry.get("render_server_name_string") or entry.get("render_server_name") or "").strip()
-    pid = str(entry.get("prompt_id_string") or entry.get("prompt_id") or "").strip()
-
-    phase = "unknown"
-    if status_int in (0, 1, 2):
-        phase = "pending_or_processing"
-    elif status_int == 3:
-        phase = "completed"
-    elif status_int == 4:
-        phase = "failed"
-
-    # Для <video> предпочитаем playback_url_string (удобный URL просмотра); иначе канонический MP4.
-    play_url = playback or out
-
-    return {
-        "success_bool": True,
-        "renderfin_task_id_string": tid,
-        "status_int": status_int,
-        "phase_string": phase,
-        "output_url_string": out or None,
-        "playback_url_string": playback or None,
-        "video_url_string": play_url,
-        "error_string": err or None,
-        "render_server_name_string": rsv or None,
-        "prompt_id_string": pid or None,
-        "renderfin_raw_object": data,
-    }
-
-
 @app.post("/api/task/{parent_task_id}/create-convert", response_model=TaskCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_TASKS_PER_MINUTE}/minute")
 async def api_create_convert_from_rig_task(
@@ -4934,6 +4505,8 @@ async def api_create_convert_from_rig_task(
             detail="Prepared GLB is not available for this task",
         )
 
+    await ensure_request_disk_headroom(db, context="convert_from_rig")
+
     task, error = await create_conversion_task(
         db,
         prepared_url,
@@ -4950,16 +4523,8 @@ async def api_create_convert_from_rig_task(
 
     try:
         queue_status = await get_global_queue_status(db=db)
-        free_worker = next(
-            (
-                w
-                for w in queue_status.workers
-                if w.available
-                and (w.total_active < w.max_concurrent)
-                and (w.queue_size <= 0)
-            ),
-            None,
-        )
+        free_workers = await get_dispatchable_workers(db, queue_status)
+        free_worker = free_workers[0] if free_workers else None
         if free_worker:
             await db.refresh(task)
             if task.status == "created":
@@ -5007,6 +4572,50 @@ def _normalize_gumroad_product_key(raw_value: str | None) -> str:
     return value.strip().lower()
 
 
+def _gumroad_product_key_from_payload(product: str | None, product_name: str | None) -> str:
+    product_key = _normalize_gumroad_product_key(product)
+    if product_key in GUMROAD_PRODUCT_CREDITS:
+        return product_key
+
+    name = (product_name or "").strip().lower()
+    if "autorig" not in name or "credit" not in name:
+        return product_key
+    if re.search(r"\b1000\b", name):
+        return "autorig-1000"
+    if re.search(r"\b100\b", name):
+        return "autorig-100"
+    if re.search(r"\b30\b", name):
+        return "oneclick-30-credits"
+    return product_key
+
+
+def _gumroad_clean_email(value: Optional[str]) -> str:
+    email = (str(value or "").strip()).lower()
+    if not email or len(email) > 255:
+        return ""
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return ""
+    return email
+
+
+def _gumroad_credit_target_email(parsed_form: Dict[str, Any]) -> str:
+    for key in (
+        "url_params[userid]",
+        "userid",
+        "user_id",
+        "custom_fields[userid]",
+        "custom_fields[user_id]",
+    ):
+        email = _gumroad_clean_email(parsed_form.get(key))
+        if email:
+            return email
+    return _gumroad_clean_email(parsed_form.get("email")) or "unknown"
+
+
+def _is_autorig_credit_product(product_key: str) -> bool:
+    return (product_key or "").strip().lower() in AUTORIG_DONATION_PRODUCT_KEYS
+
+
 @app.post("/api-gumroad")
 @app.post("/webhook/gumroad")
 @app.post("/gumroad")
@@ -5015,18 +4624,18 @@ async def api_gumroad_ping(
     request: Request
 ):
     """
-    Gumroad webhook hub.
-    Local crediting only for ``autorig-*`` (see GUMROAD_PRODUCT_CREDITS).
-    Forwards raw body AS-IS: ``freestock-*`` products → FREESTOCK_GUMROAD_PROXY_TARGET;
-    all other sales → free3d.online. Always responds 200 "ok" so Gumroad does not spam retries.
+    Proxy-tunnel for Gumroad webhook.
+    Accepts payload from Gumroad and forwards it AS-IS to free3d.online.
+    Always returns 200 "ok" (fallback mode) to avoid Gumroad retries.
     """
     raw_body = await request.body()
     content_type = request.headers.get("content-type", "application/x-www-form-urlencoded")
     parsed_form = dict(parse_qsl(raw_body.decode("utf-8", errors="ignore"), keep_blank_values=True))
 
     sale_id = (parsed_form.get("sale_id") or "").strip()
-    email = (parsed_form.get("email") or "").strip() or "unknown"
-    product = (parsed_form.get("product_permalink") or "").strip() or "unknown"
+    checkout_email = _gumroad_clean_email(parsed_form.get("email")) or "unknown"
+    email = _gumroad_credit_target_email(parsed_form)
+    product = (parsed_form.get("product_permalink") or parsed_form.get("permalink") or "").strip() or "unknown"
     product_name = (parsed_form.get("product_name") or "").strip() or None
     price_raw = (parsed_form.get("price") or "").strip() or "0"
     is_test = str(parsed_form.get("test") or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -5042,14 +4651,16 @@ async def api_gumroad_ping(
     except Exception:
         price_cents = 0
 
-    product_key = _normalize_gumroad_product_key(product)
+    product_key = _gumroad_product_key_from_payload(product, product_name)
     local_credits_added = 0
-    known_product = product_key in {
-        str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()
-    } or is_freestock_gumroad_product(product_key)
+    is_plugin_product = _is_blender_plugin_product(product_key, product_name)
+    known_product = (
+        product_key in {str(k).strip().lower() for k in GUMROAD_PRODUCT_CREDITS.keys()}
+        or is_plugin_product
+    )
     should_notify_purchase = False
 
-    if product_key.startswith("autorig-") and email and email != "unknown":
+    if _is_autorig_credit_product(product_key) and email and email != "unknown":
         try:
             async with AsyncSessionLocal() as db:
                 purchase = GumroadPurchase(
@@ -5082,14 +4693,50 @@ async def api_gumroad_ping(
                     user = user_result.scalar_one_or_none()
                     if user and credits_to_add > 0:
                         user.balance_credits = max(0, int(user.balance_credits or 0) + credits_to_add)
-                        user.gumroad_email = email
+                        user.gumroad_email = checkout_email if checkout_email != "unknown" else email
                         purchase.credited = True
                         purchase.credits_added = credits_to_add
                         local_credits_added = credits_to_add
+                        auto_unlock = await _try_auto_unlock_pending_checkout(db, user, sale_id)
+                        if auto_unlock:
+                            print(
+                                f"[Gumroad] Checkout auto-unlock result sale={sale_id} "
+                                f"status={auto_unlock.get('status')} task={auto_unlock.get('task_id')} "
+                                f"credits_spent={auto_unlock.get('credits_spent')}",
+                                flush=True,
+                            )
                     await db.commit()
                     should_notify_purchase = True
         except Exception as e:
             print(f"[Gumroad] Local autorig crediting failed for {sale_id}: {e}", flush=True)
+
+    if is_plugin_product:
+        try:
+            async with AsyncSessionLocal() as db:
+                purchase = GumroadPurchase(
+                    sale_id=sale_id,
+                    email=email or "unknown",
+                    product_permalink=product_key,
+                    product_name=product_name,
+                    price=price_cents,
+                    refunded=refunded,
+                    is_recurring_charge=is_recurring_charge,
+                    subscription_id=subscription_id,
+                    license_key=license_key,
+                    test=is_test,
+                    raw_payload=raw_body.decode("utf-8", errors="ignore"),
+                    credited=False,
+                    credits_added=0,
+                )
+                db.add(purchase)
+                try:
+                    await db.flush()
+                    await db.commit()
+                    should_notify_purchase = True
+                except IntegrityError:
+                    await db.rollback()
+        except Exception as e:
+            print(f"[Gumroad] Plugin purchase audit failed for {sale_id}: {e}", flush=True)
 
     if not should_notify_purchase:
         if known_product or price_cents > 0 or refunded or is_test:
@@ -5102,41 +4749,37 @@ async def api_gumroad_ping(
 
     from telegram_bot import broadcast_credits_purchased
     if should_notify_purchase:
+        notice_kind = "plugin" if is_plugin_product else "credits"
+        notice_price = _blender_plugin_price_label(product_key, price_cents) if is_plugin_product else str(price_raw)
+        notice_package = (
+            f"Blender Plugin ABCD {notice_price}" if is_plugin_product else _checkout_pack_label(product_key)
+        )
         asyncio.create_task(
             broadcast_credits_purchased(
-                credits=local_credits_added if local_credits_added > 0 else max(price_cents, 0),
-                price=str(price_raw),
+                credits=0 if is_plugin_product else (local_credits_added if local_credits_added > 0 else max(price_cents, 0)),
+                price=notice_price,
                 user_email=email,
-                product=product,
+                product=product_key or product,
                 sale_id=sale_id,
                 is_test=is_test,
                 is_recurring_charge=is_recurring_charge,
                 refunded=refunded,
+                product_kind=notice_kind,
+                package=notice_package,
             )
         )
 
-    if is_freestock_gumroad_product(product_key):
-        proxy_targets: List[str] = (
-            [FREESTOCK_GUMROAD_PROXY_TARGET] if FREESTOCK_GUMROAD_PROXY_TARGET else []
-        )
-    else:
-        proxy_targets = [GUMROAD_PROXY_TARGET]
-
-    for proxy_target in proxy_targets:
-        try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                upstream = await client.post(
-                    proxy_target,
-                    content=raw_body,
-                    headers={"Content-Type": content_type},
-                )
-            if upstream.status_code != 200:
-                print(
-                    f"[GumroadProxy] {proxy_target} non-200: {upstream.status_code}",
-                    flush=True,
-                )
-        except Exception as e:
-            print(f"[GumroadProxy] {proxy_target} request failed: {e}", flush=True)
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            upstream = await client.post(
+                GUMROAD_PROXY_TARGET,
+                content=raw_body,
+                headers={"Content-Type": content_type},
+            )
+        if upstream.status_code != 200:
+            print(f"[GumroadProxy] Upstream non-200: {upstream.status_code}", flush=True)
+    except Exception as e:
+        print(f"[GumroadProxy] Upstream request failed: {e}", flush=True)
 
     return Response(content="ok", media_type="text/plain")
 
@@ -5232,20 +4875,53 @@ async def api_get_task(
         getattr(task, "poster_llm_title", None),
         kw_list,
     )
+
     rig_v2_animal_detection = None
     viewer_theme_selection = None
+    viewer_environment = None
     try:
         settings = json.loads(task.viewer_settings or "{}")
-        if isinstance(settings, dict) and isinstance(settings.get("rig_v2_animal_detection"), dict):
-            rig_v2_animal_detection = settings.get("rig_v2_animal_detection")
-        if isinstance(settings, dict) and isinstance(settings.get("viewer_theme_selection"), dict):
-            viewer_theme_selection = settings.get("viewer_theme_selection")
+        if isinstance(settings, dict):
+            detection = settings.get("rig_v2_animal_detection")
+            if isinstance(detection, dict):
+                rig_v2_animal_detection = detection
+            theme = settings.get("viewer_theme_selection")
+            if isinstance(theme, dict):
+                viewer_theme_selection = theme
+            viewer_environment = get_viewer_environment_from_settings(settings)
     except Exception:
         rig_v2_animal_detection = None
         viewer_theme_selection = None
+        viewer_environment = None
+
+    def _task_response_animal_type(detection: Optional[dict]) -> Optional[str]:
+        if not isinstance(detection, dict):
+            return None
+        for key in (
+            "animal_type",
+            "animal_type_string",
+            "selected_type_string",
+            "candidate_animal_type_string",
+            "selected_animal_type",
+            "selected_animal_type_string",
+        ):
+            value = str(detection.get(key) or "").strip().lower()
+            if value:
+                return value
+        first_result = detection.get("first_result")
+        if isinstance(first_result, dict):
+            for key in ("animal_type", "animal_type_string"):
+                value = str(first_result.get(key) or "").strip().lower()
+                if value:
+                    return value
+        return None
 
     is_admin_viewer = bool(user and is_admin_email(user.email))
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
+    blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
+    response_video_ready = bool(task.video_ready or blueprint_rig_preview_url)
+    response_video_url = blueprint_rig_preview_url or task.video_url
+    response_animal_type = _task_response_animal_type(rig_v2_animal_detection)
 
     return TaskStatusResponse(
         task_id=task.id,
@@ -5255,10 +4931,19 @@ async def api_get_task(
         total_count=task.total_count,
         output_urls=task.output_urls,
         ready_urls=task.ready_urls,
-        video_ready=task.video_ready,
-        video_url=task.video_url,
+        video_ready=response_video_ready,
+        video_url=response_video_url,
+        blueprint_skeleton_ready=bool(blueprint_skeleton_url),
+        blueprint_skeleton_url=blueprint_skeleton_url,
+        blueprint_rig_preview_ready=bool(blueprint_rig_preview_url),
+        blueprint_rig_preview_url=blueprint_rig_preview_url,
         input_url=task.input_url,
-        input_type=getattr(task, "input_type", None),
+        input_type=task.input_type,
+        animal_type=response_animal_type,
+        rig_type=response_animal_type,
+        rig_v2_animal_detection=rig_v2_animal_detection,
+        viewer_theme_selection=viewer_theme_selection,
+        viewer_environment=viewer_environment,
         fbx_glb_output_url=task.fbx_glb_output_url,
         fbx_glb_model_name=task.fbx_glb_model_name,
         fbx_glb_ready=task.fbx_glb_ready,
@@ -5284,8 +4969,6 @@ async def api_get_task(
         pipeline=getattr(task, "pipeline_kind", None) or "rig",
         youtube_video_id=getattr(task, "youtube_video_id", None),
         youtube_upload_status=getattr(task, "youtube_upload_status", None),
-        rig_v2_animal_detection=rig_v2_animal_detection,
-        viewer_theme_selection=viewer_theme_selection,
     )
 
 
@@ -5351,46 +5034,659 @@ async def api_task_worker_files(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
-    api_base, guid = _resolve_worker_files_api_context(task)
-    if not api_base or not guid:
-        return {"available": False, "files": []}
 
-    worker_root = f"{api_base}/converter/glb"
-    files_url = f"{api_base}/api-converter-glb/model-files/{guid}"
-    
-    try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(files_url, timeout=5.0)
-            
+    available, all_files, data, error = await _fetch_worker_model_files(task)
+    if not available:
+        return {"available": False, "files": [], "error": error} if error else {"available": False, "files": []}
+
+    return {
+        "available": True,
+        "exists": data.get("exists", False),
+        "files": all_files,
+        "totals": data.get("totals", {}),
+    }
+
+
+def _animal_variant_filename(guid: str, animal_type: str, orientation: str, kind: str, *, is_primary: bool) -> str:
+    if is_primary:
+        if kind == "blend":
+            return f"{guid}_rigged.blend"
+        if kind == "fbx":
+            return f"{guid}_all_animations_unity.fbx"
+        if kind == "skeleton":
+            return f"{guid}_skeleton.json"
+    suffix = f"{animal_type}_{orientation}"
+    if kind == "blend":
+        return f"{guid}_{suffix}_rigged.blend"
+    if kind == "fbx":
+        return f"{guid}_{suffix}_all_animations_unity.fbx"
+    if kind == "skeleton":
+        return f"{guid}_{suffix}_skeleton.json"
+    raise ValueError(f"Unknown animal variant kind: {kind}")
+
+
+def _animal_variant_candidate_filenames(guid: str, animal_type: str, orientation: str, kind: str, *, is_primary: bool) -> List[str]:
+    primary = _animal_variant_filename(guid, animal_type, orientation, kind, is_primary=is_primary)
+    if not is_primary:
+        return [primary]
+    if kind == "blend":
+        return [primary, f"{guid}_model_prepared_rigged.blend"]
+    if kind == "fbx":
+        return [primary, f"{guid}_all_animations.fbx"]
+    return [primary]
+
+
+def _animal_variant_public_url(task_id: str, animal_type: str, orientation: str, kind: str, *, preview: bool = False) -> str:
+    a = quote(animal_type)
+    o = quote(orientation)
+    if preview:
+        return f"/api/task/{task_id}/animal-variants/{a}/{o}/preview.fbx"
+    if kind == "skeleton":
+        return f"/api/task/{task_id}/animal-variants/{a}/{o}/skeleton.json"
+    return f"/api/task/{task_id}/animal-variants/{a}/{o}/download/{quote(kind)}"
+
+
+def _animal_variant_file_state(
+    item: Optional[Dict[str, Any]],
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    kind: str,
+) -> AnimalVariantFileState:
+    if not item:
+        return AnimalVariantFileState(ready=False)
+    return AnimalVariantFileState(
+        ready=True,
+        url=_animal_variant_public_url(task_id, animal_type, orientation, kind),
+        size=item.get("size") if isinstance(item.get("size"), int) else None,
+        filename=str(item.get("name") or "") or None,
+    )
+
+
+async def _fetch_animal_variant_matrix(task: Task, file_map: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    matrix_item = file_map.get("animal_variant_matrix.json")
+    candidate_urls: List[str] = []
+    if matrix_item and matrix_item.get("url"):
+        candidate_urls.append(str(matrix_item["url"]))
+
+    worker_root, guid = _infer_worker_root_and_guid(task)
+    if worker_root and guid:
+        candidate_urls.append(f"{worker_root}/{guid}/logs/animal_variant_matrix.json")
+
+    for url in dict.fromkeys(candidate_urls):
+        try:
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+                resp = await client.get(url)
             if resp.status_code != 200:
-                return {"available": False, "files": [], "error": f"HTTP {resp.status_code}"}
-            
-            data = resp.json()
-            
-            # Flatten files from all folders
-            all_files = []
-            for folder_name, folder_data in data.get('folders', {}).items():
-                for f in folder_data.get('files', []):
-                    rel_path = f.get('rel_path', '')
-                    all_files.append({
-                        "name": f.get('name'),
-                        "folder": folder_name,
-                        "type": f.get('type'),
-                        "size": f.get('size'),
-                        "url": f"{worker_root}/{guid}/{rel_path}"
-                    })
-            
-            return {
-                "available": True,
-                "exists": data.get('exists', False),
-                "files": all_files,
-                "totals": data.get('totals', {})
-            }
-    except Exception as e:
-        print(f"[Worker Files] Error fetching files for task {task_id}: {e}")
-        return {"available": False, "files": [], "error": str(e)}
+                continue
+            payload = resp.json() if resp.content else {}
+        except Exception:
+            continue
+
+        rows = payload.get("variants") if isinstance(payload, dict) else None
+        if rows is None and isinstance(payload, list):
+            rows = payload
+        if not isinstance(rows, list):
+            continue
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            animal = str(row.get("animal_slug") or row.get("animal_type") or row.get("animal") or "").strip().lower()
+            orientation = str(row.get("orientation") or row.get("direction") or "").strip().lower()
+            suffix = str(row.get("suffix") or "").strip().lower()
+            if (not animal or not orientation) and suffix:
+                for known in ANIMAL_VARIANT_TYPES:
+                    if suffix.startswith(f"{known}_"):
+                        animal = known
+                        orientation = suffix.rsplit("_", 1)[-1]
+                        break
+            if animal in ANIMAL_VARIANT_TYPES and orientation in ANIMAL_VARIANT_ORIENTATIONS:
+                out[f"{animal}:{orientation}"] = row
+        return out
+    return {}
+
+
+def _animal_animation_id(animal_type: str, orientation: str, action_name: str) -> str:
+    action_key = _normalize_animation_key(action_name)
+    return f"animal_{animal_type}_{orientation}_{action_key}"
+
+
+def _parse_animal_animation_id(animation_id: str) -> Optional[Tuple[str, str, str]]:
+    anim_id = _normalize_animation_key(animation_id)
+    if not anim_id.startswith("animal_"):
+        return None
+    for animal_type in ANIMAL_VARIANT_TYPES:
+        for orientation in ANIMAL_VARIANT_ORIENTATIONS:
+            prefix = f"animal_{animal_type}_{orientation}_"
+            if anim_id.startswith(prefix):
+                action_key = anim_id[len(prefix):].strip("_")
+                if action_key:
+                    return animal_type, orientation, action_key
+    return None
+
+
+def _clean_animal_action_name(value: Any) -> Optional[str]:
+    name = str(value or "").strip()
+    if not name:
+        return None
+    if name.endswith("__LD_STAGE4_TUNED"):
+        return None
+    return name[:128]
+
+
+def _extract_animal_variant_actions(row: Dict[str, Any], animal_type: str) -> List[str]:
+    candidates: List[Any] = []
+    if isinstance(row, dict):
+        stage4 = row.get("stage4_finalize")
+        if isinstance(stage4, dict):
+            for key in ("after_actions", "actions_after", "actions"):
+                raw = stage4.get(key)
+                if isinstance(raw, list):
+                    candidates.extend(raw)
+                    break
+            if not candidates:
+                raw_before = stage4.get("before_actions")
+                if isinstance(raw_before, list):
+                    candidates.extend(raw_before)
+        for key in ("after_actions", "actions_after", "actions"):
+            raw = row.get(key)
+            if isinstance(raw, list):
+                candidates.extend(raw)
+                break
+
+    actions: List[str] = []
+    seen: Set[str] = set()
+    for raw in candidates:
+        clean = _clean_animal_action_name(raw)
+        if not clean:
+            continue
+        key = _normalize_animation_key(clean)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        actions.append(clean)
+
+    if not actions:
+        label = animal_type.capitalize()
+        actions.append(f"{label}_default")
+    return actions
+
+
+async def _has_animal_animation_pack_purchase(
+    db: AsyncSession,
+    user: Optional[User],
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+) -> bool:
+    if not user:
+        return False
+    if await _has_full_task_download_purchase(db, user, task_id):
+        return True
+    result = await db.execute(
+        select(TaskAnimalAnimationPackPurchase).where(
+            TaskAnimalAnimationPackPurchase.task_id == task_id,
+            TaskAnimalAnimationPackPurchase.user_email == user.email,
+            TaskAnimalAnimationPackPurchase.animal_type == animal_type,
+            TaskAnimalAnimationPackPurchase.orientation == orientation,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _build_animal_animation_catalog_response(
+    task: Task,
+    db: AsyncSession,
+    user: Optional[User],
+    animal_type: Optional[str] = None,
+    orientation: Optional[str] = None,
+) -> AnimationCatalogResponse:
+    selected_animal = _task_animal_type_from_settings(task)
+    normalized_animal = str(animal_type or selected_animal or "").strip().lower()
+    normalized_orientation = str(orientation or "front").strip().lower()
+    if normalized_animal not in ANIMAL_VARIANT_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid animal type")
+    if normalized_orientation not in ANIMAL_VARIANT_ORIENTATIONS:
+        raise HTTPException(status_code=400, detail="Invalid animal orientation")
+
+    file_name: Optional[str] = None
+    ready = False
+    try:
+        _source_url, file_name = await _resolve_animal_variant_source(
+            task,
+            normalized_animal,
+            normalized_orientation,
+            "fbx",
+        )
+        ready = True
+    except HTTPException as exc:
+        if exc.status_code not in (404,):
+            raise
+
+    available, files, _data, _error = await _fetch_worker_model_files(task)
+    file_map: Dict[str, Dict[str, Any]] = {}
+    if available:
+        for item in files:
+            name = str(item.get("name") or "").strip()
+            if name:
+                file_map[name.lower()] = item
+    matrix = await _fetch_animal_variant_matrix(task, file_map)
+    row = matrix.get(f"{normalized_animal}:{normalized_orientation}") or {}
+    actions = _extract_animal_variant_actions(row, normalized_animal)
+    pack_purchased = await _has_animal_animation_pack_purchase(
+        db,
+        user,
+        task.id,
+        normalized_animal,
+        normalized_orientation,
+    )
+
+    items: List[AnimationCatalogItem] = []
+    purchased_ids: List[str] = []
+    for action_name in actions:
+        item_id = _animal_animation_id(normalized_animal, normalized_orientation, action_name)
+        if pack_purchased:
+            purchased_ids.append(item_id)
+        items.append(AnimationCatalogItem(
+            id=item_id,
+            name=action_name,
+            type="animal",
+            type_label="Animal actions",
+            tags=["animal", normalized_animal, normalized_orientation],
+            credits=TASK_UNLOCK_CREDITS,
+            format="fbx",
+            available=ready,
+            ready=ready,
+            purchased=pack_purchased,
+            file_name=file_name,
+            preview_url=f"/api/task/{task.id}/animations/preview/{quote(item_id)}" if ready else None,
+            source_kind="animal_variant_pack",
+            animal_type=normalized_animal,
+            orientation=normalized_orientation,
+            action_name=action_name,
+            download_scope="variant_pack",
+            pack_credits=TASK_UNLOCK_CREDITS,
+            pack_purchased=pack_purchased,
+        ))
+
+    return AnimationCatalogResponse(
+        types=[{"id": "animal", "label": "Animal actions", "count": len(items)}],
+        animations=items,
+        purchased_all=pack_purchased,
+        purchased_ids=sorted(purchased_ids),
+        login_required=(user is None),
+        user_credits=(user.balance_credits if user else 0),
+        pricing={
+            "single_animation_credits": TASK_UNLOCK_CREDITS,
+            "all_animations_credits": TASK_UNLOCK_CREDITS,
+            "animal_animation_pack_credits": TASK_UNLOCK_CREDITS,
+            "task_unlock_credits": TASK_UNLOCK_CREDITS,
+            "purchase_scope": "task",
+            "animal_animation_pack_purchased": pack_purchased,
+            "download_format": "fbx",
+            "download_scope": "variant_pack",
+            "animal_type": normalized_animal,
+            "orientation": normalized_orientation,
+            "animal_animation_pack_download_url": (
+                f"/api/task/{task.id}/animations/download-pack"
+                f"?animal_type={quote(normalized_animal)}&orientation={quote(normalized_orientation)}"
+            ),
+        },
+    )
+
+
+async def _purchase_animal_animation_pack(
+    task: Task,
+    db: AsyncSession,
+    user: User,
+    animal_type: Optional[str],
+    orientation: Optional[str],
+) -> AnimationPurchaseResponse:
+    selected_animal = _task_animal_type_from_settings(task)
+    normalized_animal = str(animal_type or selected_animal or "").strip().lower()
+    normalized_orientation = str(orientation or "front").strip().lower()
+    if normalized_animal not in ANIMAL_VARIANT_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid animal type")
+    if normalized_orientation not in ANIMAL_VARIANT_ORIENTATIONS:
+        raise HTTPException(status_code=400, detail="Invalid animal orientation")
+
+    await _resolve_animal_variant_source(task, normalized_animal, normalized_orientation, "fbx")
+    already = await _has_animal_animation_pack_purchase(
+        db,
+        user,
+        task.id,
+        normalized_animal,
+        normalized_orientation,
+    )
+    if already:
+        catalog = await _build_animal_animation_catalog_response(
+            task,
+            db,
+            user,
+            animal_type=normalized_animal,
+            orientation=normalized_orientation,
+        )
+        return AnimationPurchaseResponse(
+            success=True,
+            purchased_animation_ids=sorted(catalog.purchased_ids),
+            purchased_all=catalog.purchased_all,
+            credits_remaining=user.balance_credits,
+        )
+
+    unlock = await _ensure_full_task_unlock(db, task, user)
+    if unlock.get("status") == "insufficient_credits":
+        raise HTTPException(status_code=402, detail="Insufficient credits")
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+
+    catalog = await _build_animal_animation_catalog_response(
+        task,
+        db,
+        user,
+        animal_type=normalized_animal,
+        orientation=normalized_orientation,
+    )
+    return AnimationPurchaseResponse(
+        success=True,
+        purchased_animation_ids=sorted(catalog.purchased_ids),
+        purchased_all=catalog.purchased_all,
+        credits_remaining=user.balance_credits,
+    )
+
+
+async def _fetch_animal_variant_progress_line(task: Task) -> Optional[str]:
+    if not task.guid or not task.worker_api:
+        return None
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    log_url = f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_progress.txt"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(log_url)
+        if resp.status_code != 200:
+            return None
+        lines = [ln.strip() for ln in resp.text.replace("\r\n", "\n").replace("\r", "\n").split("\n") if ln.strip()]
+    except Exception:
+        return None
+    for line in reversed(lines):
+        if "Animal rigging variants" in line:
+            return line[:500]
+    return None
+
+
+async def _build_animal_variants_response(
+    task: Task,
+    db: AsyncSession,
+    user: Optional[User],
+) -> AnimalRigVariantsResponse:
+    selected_animal = _task_animal_type_from_settings(task)
+    if not _is_animal_task(task) or not task.guid or not selected_animal:
+        return AnimalRigVariantsResponse(
+            available=False,
+            task_id=task.id,
+            current_animal_type=selected_animal,
+            selected_animal_type=selected_animal,
+            login_required=not bool(user),
+            all_files_credits=_download_all_files_cost(task),
+        )
+
+    available, files, _data, _error = await _fetch_worker_model_files(task)
+    file_map: Dict[str, Dict[str, Any]] = {}
+    if available:
+        for item in files:
+            name = str(item.get("name") or "").strip()
+            if name:
+                file_map[name.lower()] = item
+
+    matrix = await _fetch_animal_variant_matrix(task, file_map) if file_map else {}
+    progress_text = await _fetch_animal_variant_progress_line(task)
+    purchased_all = await _has_full_task_download_purchase(db, user, task.id) if user else False
+
+    variants: List[AnimalRigVariantItem] = []
+    for animal_type in ANIMAL_VARIANT_TYPES:
+        for orientation in ANIMAL_VARIANT_ORIENTATIONS:
+            is_primary = animal_type == selected_animal and orientation == "front"
+            blend_item = next((
+                file_map.get(name.lower())
+                for name in _animal_variant_candidate_filenames(task.guid, animal_type, orientation, "blend", is_primary=is_primary)
+                if file_map.get(name.lower())
+            ), None)
+            fbx_item = next((
+                file_map.get(name.lower())
+                for name in _animal_variant_candidate_filenames(task.guid, animal_type, orientation, "fbx", is_primary=is_primary)
+                if file_map.get(name.lower())
+            ), None)
+            skeleton_item = next((
+                file_map.get(name.lower())
+                for name in _animal_variant_candidate_filenames(task.guid, animal_type, orientation, "skeleton", is_primary=is_primary)
+                if file_map.get(name.lower())
+            ), None)
+
+            row = matrix.get(f"{animal_type}:{orientation}") or {}
+            matrix_status = str(row.get("status") or row.get("state") or "").strip().lower()
+            error = str(row.get("error") or row.get("message") or "").strip() or None
+
+            if blend_item and fbx_item:
+                status = "ready"
+            elif matrix_status in ("failed", "error", "skipped"):
+                status = "skipped" if matrix_status == "skipped" else "failed"
+            elif task.status == "done":
+                status = "missing"
+            else:
+                status = "pending"
+
+            variants.append(AnimalRigVariantItem(
+                animal_type=animal_type,
+                orientation=orientation,
+                label=f"{animal_type} {orientation}",
+                is_primary=is_primary,
+                status=status,
+                error=error,
+                preview_url=_animal_variant_public_url(task.id, animal_type, orientation, "fbx", preview=True) if fbx_item else None,
+                blend=_animal_variant_file_state(blend_item, task.id, animal_type, orientation, "blend"),
+                fbx=_animal_variant_file_state(fbx_item, task.id, animal_type, orientation, "fbx"),
+                skeleton=_animal_variant_file_state(skeleton_item, task.id, animal_type, orientation, "skeleton"),
+            ))
+
+    return AnimalRigVariantsResponse(
+        available=True,
+        task_id=task.id,
+        current_animal_type=selected_animal,
+        selected_animal_type=selected_animal,
+        selected_orientation="front",
+        progress_text=progress_text,
+        purchased_all=purchased_all,
+        login_required=not bool(user),
+        all_files_credits=_download_all_files_cost(task),
+        variants=variants,
+    )
+
+
+@app.get("/api/task/{task_id}/animal-variants", response_model=AnimalRigVariantsResponse)
+async def api_task_animal_variants(
+    task_id: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return await _build_animal_variants_response(task, db, user)
+
+
+async def _resolve_animal_variant_source(
+    task: Task,
+    animal_type: str,
+    orientation: str,
+    kind: str,
+) -> Tuple[str, str]:
+    animal_type = str(animal_type or "").strip().lower()
+    orientation = str(orientation or "").strip().lower()
+    kind = str(kind or "").strip().lower()
+    if not _is_animal_task(task):
+        raise HTTPException(status_code=404, detail="Animal variants are available for animal rig tasks only")
+    if animal_type not in ANIMAL_VARIANT_TYPES or orientation not in ANIMAL_VARIANT_ORIENTATIONS or kind not in ("blend", "fbx", "skeleton"):
+        raise HTTPException(status_code=400, detail="Invalid animal variant request")
+    if not task.guid:
+        raise HTTPException(status_code=404, detail="Variant files are not available yet")
+
+    selected_animal = _task_animal_type_from_settings(task)
+    is_primary = animal_type == selected_animal and orientation == "front"
+    filenames = _animal_variant_candidate_filenames(task.guid, animal_type, orientation, kind, is_primary=is_primary)
+
+    available, files, _data, _error = await _fetch_worker_model_files(task)
+    if available:
+        for item in files:
+            item_name = str(item.get("name") or "").strip().lower()
+            for filename in filenames:
+                if item_name == filename.lower() and item.get("url"):
+                    return str(item["url"]), filename
+
+    worker_root, guid = _infer_worker_root_and_guid(task)
+    if worker_root and guid:
+        for filename in filenames:
+            url = f"{worker_root}/{guid}/{filename}"
+            if await _remote_file_exists(url):
+                return url, filename
+
+    raise HTTPException(status_code=404, detail="Variant file not available yet")
+
+
+@app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/preview.fbx")
+async def api_animal_variant_preview_fbx(
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "fbx")
+    return await _proxy_model_file(source_url, filename, as_attachment=False)
+
+
+@app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/skeleton.json")
+async def api_animal_variant_skeleton(
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "skeleton")
+    return await _proxy_model_file(source_url, filename, as_attachment=False)
+
+
+@app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/download/{kind}")
+async def api_animal_variant_download(
+    task_id: str,
+    animal_type: str,
+    orientation: str,
+    kind: str,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    kind = str(kind or "").strip().lower()
+    if kind not in ("blend", "fbx"):
+        raise HTTPException(status_code=400, detail="Unsupported variant download kind")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required to download files")
+    if not await _has_full_task_download_purchase(db, user, task_id):
+        raise HTTPException(status_code=402, detail="Full download purchase required")
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, kind)
+    return await _proxy_model_file(source_url, filename, as_attachment=True)
+
+
+async def _animal_animation_pack_download_response(
+    task: Task,
+    user: Optional[User],
+    db: AsyncSession,
+    animal_type: str,
+    orientation: str,
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    animal_type = str(animal_type or "").strip().lower()
+    orientation = str(orientation or "").strip().lower()
+    if animal_type not in ANIMAL_VARIANT_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid animal type")
+    if orientation not in ANIMAL_VARIANT_ORIENTATIONS:
+        raise HTTPException(status_code=400, detail="Invalid animal orientation")
+
+    if not await _has_animal_animation_pack_purchase(db, user, task.id, animal_type, orientation):
+        raise HTTPException(status_code=402, detail="Payment required to download this animal animation pack")
+
+    source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "fbx")
+    fbx_bytes = await _download_worker_file_bytes(
+        source_url,
+        "Animal animation pack FBX",
+        max_bytes=250 * 1024 * 1024,
+    )
+
+    safe_variant = re.sub(r"[^a-zA-Z0-9_.-]+", "_", f"{animal_type}_{orientation}").strip("_")
+    zip_path = Path(tempfile.gettempdir()) / f"autorig_{task.id}_{safe_variant}_animal_animations_{uuid.uuid4().hex}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(filename, fbx_bytes)
+        zf.writestr(
+            "README.txt",
+            (
+                "This animal animation pack contains one rigged FBX file.\n\n"
+                "The FBX includes the selected animal variant rig and all animation clips generated by AutoRig.online for this variant.\n"
+                "Use the animation/action list inside your DCC or game engine to select the clip you need.\n"
+                "Blend files and full task archives remain separate downloads.\n"
+            ),
+        )
+
+    if task.ga_client_id:
+        asyncio.create_task(send_ga4_event(
+            task.ga_client_id,
+            "animal_animation_pack_downloaded",
+            {
+                "task_id": task.id,
+                "animal_type": animal_type,
+                "orientation": orientation,
+                "filename": filename,
+            },
+        ))
+
+    bundle_name = f"{task.id}_{safe_variant}_animal_animations.zip"
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=bundle_name,
+        headers={"Cache-Control": "private, max-age=0"},
+        background=BackgroundTask(lambda: zip_path.unlink(missing_ok=True)),
+    )
+
+
+@app.get("/api/task/{task_id}/animations/download-pack")
+async def api_download_animal_animation_pack(
+    task_id: str,
+    animal_type: str,
+    orientation: str = "front",
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _is_animal_task(task):
+        raise HTTPException(status_code=404, detail="Animal animation packs are available for animal rig tasks only")
+    return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
 
 
 @app.post("/api/task/{task_id}/retry", response_model=TaskCreateResponse)
@@ -5501,6 +5797,100 @@ async def api_restart_task(
     if not task.input_url:
         raise HTTPException(status_code=400, detail="No input URL to restart")
 
+    restart_body_data: Dict[str, Any] = {}
+    try:
+        body = await request.body()
+        if body:
+            import json as json_module
+            parsed_body = json_module.loads(body)
+            if isinstance(parsed_body, dict):
+                restart_body_data = parsed_body
+    except Exception as e:
+        print(f"[Restart] Could not parse body: {e}")
+
+    animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
+    requested_rig_key = str(
+        restart_body_data.get("rig_type")
+        or restart_body_data.get("animal_type")
+        or restart_body_data.get("input_type")
+        or ""
+    ).strip().lower()
+    if requested_rig_key in ("human", "character", "humanoid", "t_pose", "t-pose"):
+        task.input_type = "t_pose"
+        restart_animal_type = None
+        restart_worker_mode = None
+    elif requested_rig_key in animal_allowed:
+        task.input_type = "animal"
+        restart_animal_type = requested_rig_key
+        restart_worker_mode = str(restart_body_data.get("mode") or "only_rig").strip() or "only_rig"
+    elif str(restart_body_data.get("input_type") or "").strip().lower() == "animal":
+        restart_animal_type = str(restart_body_data.get("animal_type") or "").strip().lower()
+        if restart_animal_type not in animal_allowed:
+            raise HTTPException(status_code=400, detail="animal_type is required for animal rig restart")
+        task.input_type = "animal"
+        restart_worker_mode = str(restart_body_data.get("mode") or "only_rig").strip() or "only_rig"
+    else:
+        restart_animal_type = None
+        restart_worker_mode = None
+
+    if not restart_animal_type and str(task.input_type or "").strip().lower() == "animal":
+        try:
+            settings_for_animal = json.loads(task.viewer_settings or "{}")
+            detection_for_animal = settings_for_animal.get("rig_v2_animal_detection") if isinstance(settings_for_animal, dict) else None
+            if isinstance(detection_for_animal, dict):
+                candidate = str(
+                    detection_for_animal.get("animal_type")
+                    or detection_for_animal.get("animal_type_string")
+                    or detection_for_animal.get("candidate_animal_type_string")
+                    or ""
+                ).strip().lower()
+                if candidate in animal_allowed:
+                    restart_animal_type = candidate
+                    restart_worker_mode = str(detection_for_animal.get("mode") or "only_rig").strip() or "only_rig"
+        except Exception as e:
+            print(f"[Restart] Could not read existing animal metadata: {e}")
+        if not restart_animal_type:
+            raise HTTPException(status_code=400, detail="animal_type is required for animal rig restart")
+
+    if restart_body_data.get("rig_v2_manual_selection") or restart_animal_type:
+        try:
+            settings = json.loads(task.viewer_settings or "{}")
+            if not isinstance(settings, dict):
+                settings = {}
+        except Exception:
+            settings = {}
+        if restart_animal_type:
+            existing_detection = settings.get("rig_v2_animal_detection")
+            if not isinstance(existing_detection, dict):
+                existing_detection = {}
+            settings["rig_v2_animal_detection"] = {
+                **existing_detection,
+                "type": "animal",
+                "animal_type": restart_animal_type,
+                "animal_type_string": restart_animal_type,
+                "mode": restart_worker_mode or "only_rig",
+                "source": "manual_task_restart",
+                "accepted": True,
+                "manual_selection": True,
+                "user_selected_bool": True,
+                "animal_decision_accepted_bool": True,
+            }
+        else:
+            existing_detection = settings.get("rig_v2_animal_detection")
+            if isinstance(existing_detection, dict):
+                settings["rig_v2_animal_detection"] = {
+                    **existing_detection,
+                    "type": "humanoid",
+                    "animal_type": "",
+                    "animal_type_string": "",
+                    "mode": "t_pose",
+                    "source": "manual_task_restart",
+                    "accepted": True,
+                    "manual_selection": True,
+                    "user_selected_bool": True,
+                }
+        task.viewer_settings = json.dumps(settings, ensure_ascii=False)
+
     # Increment version (restart_count)
     task.restart_count = (task.restart_count or 0) + 1
 
@@ -5560,25 +5950,28 @@ async def api_restart_task(
     if pk_restart not in ("rig", "convert"):
         pk_restart = "rig"
 
+    viewer_environment_restart = None
+    if pk_restart == "rig":
+        try:
+            restart_settings = json.loads(task.viewer_settings or "{}")
+            if not isinstance(restart_settings, dict):
+                restart_settings = {}
+        except Exception:
+            restart_settings = {}
+        if ensure_viewer_environment_in_settings(restart_settings):
+            task.viewer_settings = json.dumps(restart_settings, ensure_ascii=False)
+        viewer_environment_restart = get_viewer_environment_from_settings(restart_settings)
+
     # Parse transform params from request body (rig pipeline only)
     transform_params = None
     if pk_restart == "rig":
-        try:
-            body = await request.body()
-            if body:
-                import json as json_module
-                body_data = json_module.loads(body)
-                if isinstance(body_data, dict):
-                    # Extract transform params if present
-                    if any(k in body_data for k in ("local_position", "local_rotation", "local_scale")):
-                        transform_params = {
-                            "local_position": body_data.get("local_position"),
-                            "local_rotation": body_data.get("local_rotation"),
-                            "local_scale": body_data.get("local_scale")
-                        }
-                        print(f"[Restart] Transform params from request: {transform_params}")
-        except Exception as e:
-            print(f"[Restart] Could not parse body: {e}")
+        if any(k in restart_body_data for k in ("local_position", "local_rotation", "local_scale")):
+            transform_params = {
+                "local_position": restart_body_data.get("local_position"),
+                "local_rotation": restart_body_data.get("local_rotation"),
+                "local_scale": restart_body_data.get("local_scale")
+            }
+            print(f"[Restart] Transform params from request: {transform_params}")
 
         # Fallback: read from saved viewer_settings if no transforms in request
         if not transform_params and task.viewer_settings:
@@ -5617,6 +6010,9 @@ async def api_restart_task(
         task.input_type or "t_pose",
         transform_params=transform_params,
         pipeline_kind=pk_restart,
+        animal_type=restart_animal_type,
+        mode=restart_worker_mode,
+        viewer_environment=viewer_environment_restart,
     )
     if not result.success:
         task.status = "error"
@@ -5654,12 +6050,15 @@ async def api_get_purchase_state(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    anon_session = await get_anon_session(request, response, db)
+    anon_id = (
+        getattr(request.state, "api_key_anon_id", None)
+        or request.cookies.get(ANON_COOKIE)
+    )
     
     # Check if user is owner
-    is_owner = (
+    is_owner = bool(
         (user and task.owner_type == "user" and task.owner_id == user.email) or
-        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+        (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
     
     # For non-owners, check purchases
@@ -5669,7 +6068,8 @@ async def api_get_purchase_state(
             purchased_files=[],
             is_owner=False,
             login_required=True,
-            user_credits=0
+            user_credits=0,
+            all_files_credits=_download_all_files_cost(task),
         )
     
     # Get user's purchases for this task
@@ -5690,7 +6090,8 @@ async def api_get_purchase_state(
         purchased_files=purchased_indices,
         is_owner=is_owner,
         login_required=False,
-        user_credits=user.balance_credits
+        user_credits=user.balance_credits,
+        all_files_credits=_download_all_files_cost(task),
     )
 
 
@@ -5711,12 +6112,15 @@ async def api_purchase_files(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    anon_session = await get_anon_session(request, response, db)
+    anon_id = (
+        getattr(request.state, "api_key_anon_id", None)
+        or request.cookies.get(ANON_COOKIE)
+    )
     
     # Check if user is owner (owners must still purchase to download)
-    is_owner = (
+    is_owner = bool(
         (user and task.owner_type == "user" and task.owner_id == user.email) or
-        (task.owner_type == "anon" and task.owner_id == anon_session.anon_id)
+        (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
     
     # Check existing purchases
@@ -5738,88 +6142,28 @@ async def api_purchase_files(
             credits_remaining=user.balance_credits
         )
     
-    # Handle "buy all" request (full-task access)
-    if purchase_req.all:
-        cost = DOWNLOAD_ALL_FILES_CREDITS
-        if user.balance_credits < cost:
-            raise HTTPException(status_code=402, detail="Insufficient credits")
-        
-        # Deduct credits from buyer
-        user.balance_credits -= cost
-        
-        # Credit task owner (if they have a user account)
-        await _credit_task_owner_for_sale(db, task, user, cost)
-        
-        # Create purchase record for "all files"
-        purchase = TaskFilePurchase(
-            task_id=task_id,
-            user_email=user.email,
-            file_index=None,  # NULL means all files
-            credits_spent=cost
-        )
-        db.add(purchase)
-        await db.commit()
-        
-        return PurchaseResponse(
-            success=True,
-            purchased_files=list(already_indices),
-            purchased_all=True,
-            credits_remaining=user.balance_credits
-        )
-    
-    # Handle individual file purchase
-    if purchase_req.file_indices:
-        new_indices = [i for i in purchase_req.file_indices if i not in already_indices]
-        
-        if not new_indices:
-            return PurchaseResponse(
-                success=True,
-                purchased_files=list(already_indices),
-                purchased_all=False,
-                credits_remaining=user.balance_credits
-            )
-        
-        cost = len(new_indices)  # 1 credit per file
-        if user.balance_credits < cost:
-            raise HTTPException(status_code=402, detail="Insufficient credits")
-        
-        # Deduct credits from buyer
-        user.balance_credits -= cost
-        
-        # Credit task owner (if they have a user account)
-        if task.owner_type == "user" and task.owner_id:
-            owner_result = await db.execute(
-                select(User).where(User.email == task.owner_id)
-            )
-            task_owner = owner_result.scalar_one_or_none()
-            if task_owner and task_owner.id != user.id:  # Don't credit yourself
-                task_owner.balance_credits += cost  # Same amount as buyer spent
-        
-        # Create purchase records
-        for idx in new_indices:
-            purchase = TaskFilePurchase(
-                task_id=task_id,
-                user_email=user.email,
-                file_index=idx,
-                credits_spent=1
-            )
-            db.add(purchase)
-        
-        await db.commit()
-        
-        return PurchaseResponse(
-            success=True,
-            purchased_files=list(already_indices | set(new_indices)),
-            purchased_all=False,
-            credits_remaining=user.balance_credits
-        )
-    
-    raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
+    if not purchase_req.all and not purchase_req.file_indices:
+        raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
+
+    unlock = await _ensure_full_task_unlock(db, task, user)
+    if unlock.get("status") == "insufficient_credits":
+        raise HTTPException(status_code=402, detail="Insufficient credits")
+
+    await db.commit()
+
+    return PurchaseResponse(
+        success=True,
+        purchased_files=list(already_indices),
+        purchased_all=True,
+        credits_remaining=user.balance_credits
+    )
 
 
 @app.get("/api/task/{task_id}/animations/catalog", response_model=AnimationCatalogResponse)
 async def api_get_animation_catalog(
     task_id: str,
+    animal_type: Optional[str] = None,
+    orientation: Optional[str] = None,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -5828,6 +6172,15 @@ async def api_get_animation_catalog(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    if _is_animal_task(task):
+        return await _build_animal_animation_catalog_response(
+            task,
+            db,
+            user,
+            animal_type=animal_type,
+            orientation=orientation,
+        )
+
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
     if not isinstance(raw_items, list):
@@ -5835,44 +6188,6 @@ async def api_get_animation_catalog(
 
     file_map = await _build_task_animation_file_map(task, raw_items)
     purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
-
-    is_animal_task = str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
-    if is_animal_task:
-        bundle_url, bundle_filename = await _resolve_available_all_animations_fbx_url(task)
-        if not bundle_filename:
-            _, bundle_filename = _resolve_all_animations_fbx_url(task)
-        bundle_ready = bool(bundle_url)
-        bundle_item = AnimationCatalogItem(
-            id="animal_animation_bundle",
-            name="Animal animation bundle",
-            type="animal_bundle",
-            type_label="Animal Bundle",
-            tags=["animal", "bundle"],
-            credits=ANIMATION_BUNDLE_CREDITS,
-            format="fbx",
-            available=bundle_ready,
-            ready=bundle_ready,
-            purchased=purchased_all,
-            file_name=bundle_filename if bundle_ready else None,
-            preview_url=f"/api/task/{task_id}/animations.fbx" if bundle_ready else None,
-        )
-        return AnimationCatalogResponse(
-            types=[{"id": "animal_bundle", "label": "Animal bundle", "count": 1}],
-            animations=[bundle_item],
-            purchased_all=purchased_all,
-            purchased_ids=sorted(purchased_ids),
-            login_required=(user is None),
-            user_credits=(user.balance_credits if user else 0),
-            pricing={
-                "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-                "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
-                "download_format": "fbx",
-                "all_animations_fbx_url": f"/api/task/{task_id}/animations.fbx",
-                "bundle_only": True,
-                "bundle_ready": bundle_ready,
-                "bundle_label": "Animal animation bundle",
-            },
-        )
 
     items: List[AnimationCatalogItem] = []
     for item in raw_items:
@@ -5898,7 +6213,7 @@ async def api_get_animation_catalog(
             type=str(item.get("type") or "other"),
             type_label=str(item.get("type_label") or str(item.get("type") or "other").title()),
             tags=[str(t) for t in tags if isinstance(t, str)],
-            credits=int(item.get("credits", ANIMATION_SINGLE_CREDITS) or ANIMATION_SINGLE_CREDITS),
+            credits=TASK_UNLOCK_CREDITS,
             format=str(item.get("format") or "fbx"),
             preview_gif=item.get("preview_gif"),
             available=available,
@@ -5928,8 +6243,10 @@ async def api_get_animation_catalog(
         login_required=(user is None),
         user_credits=(user.balance_credits if user else 0),
         pricing={
-            "single_animation_credits": ANIMATION_SINGLE_CREDITS,
-            "all_animations_credits": ANIMATION_BUNDLE_CREDITS,
+            "single_animation_credits": TASK_UNLOCK_CREDITS,
+            "all_animations_credits": TASK_UNLOCK_CREDITS,
+            "task_unlock_credits": TASK_UNLOCK_CREDITS,
+            "purchase_scope": "task",
             "download_format": "fbx",
             "all_animations_fbx_url": f"/api/task/{task_id}/animations.fbx",
         }
@@ -5943,13 +6260,29 @@ async def api_purchase_animation(
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Purchase one custom animation (1 credit) or unlock all custom animations (10 credits)."""
+    """Legacy animation purchase endpoint; new purchases unlock the whole task."""
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    if _is_animal_task(task):
+        parsed_animal = _parse_animal_animation_id(str(purchase_req.animation_id or ""))
+        if parsed_animal:
+            animal_type, orientation, _action_key = parsed_animal
+        else:
+            animal_type = purchase_req.animal_type
+            orientation = purchase_req.orientation
+        if purchase_req.all or parsed_animal or animal_type or orientation:
+            return await _purchase_animal_animation_pack(
+                task,
+                db,
+                user,
+                animal_type=animal_type,
+                orientation=orientation,
+            )
 
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
@@ -5974,22 +6307,10 @@ async def api_purchase_animation(
                 credits_remaining=user.balance_credits
             )
 
-        cost = ANIMATION_BUNDLE_CREDITS
-        if user.balance_credits < cost:
+        unlock = await _ensure_full_task_unlock(db, task, user)
+        if unlock.get("status") == "insufficient_credits":
             raise HTTPException(status_code=402, detail="Insufficient credits")
-
-        user.balance_credits -= cost
-        await _credit_task_owner_for_sale(db, task, user, cost)
-        db.add(TaskAnimationBundlePurchase(
-            task_id=task_id,
-            user_email=user.email,
-            credits_spent=cost,
-        ))
-
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
+        await db.commit()
 
         purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
         return AnimationPurchaseResponse(
@@ -6019,23 +6340,10 @@ async def api_purchase_animation(
     if not resolved:
         raise HTTPException(status_code=409, detail="Animation is not available for this task yet")
 
-    cost = ANIMATION_SINGLE_CREDITS
-    if user.balance_credits < cost:
+    unlock = await _ensure_full_task_unlock(db, task, user)
+    if unlock.get("status") == "insufficient_credits":
         raise HTTPException(status_code=402, detail="Insufficient credits")
-
-    user.balance_credits -= cost
-    await _credit_task_owner_for_sale(db, task, user, cost)
-    db.add(TaskAnimationPurchase(
-        task_id=task_id,
-        user_email=user.email,
-        animation_id=animation_id,
-        credits_spent=cost
-    ))
-
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
+    await db.commit()
 
     purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
     return AnimationPurchaseResponse(
@@ -6078,6 +6386,12 @@ async def api_preview_animation(
         raise HTTPException(status_code=403, detail="Not authorized to preview this animation")
 
     anim_id = _normalize_animation_key(animation_id)
+    parsed_animal = _parse_animal_animation_id(anim_id)
+    if parsed_animal and _is_animal_task(task):
+        animal_type, orientation, _action_key = parsed_animal
+        source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "fbx")
+        return await _proxy_model_file(source_url, filename, as_attachment=False)
+
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
     catalog_by_id: Dict[str, dict] = {}
@@ -6142,6 +6456,11 @@ async def api_download_animation(
         raise HTTPException(status_code=404, detail="Task not found")
 
     anim_id = _normalize_animation_key(animation_id)
+    parsed_animal = _parse_animal_animation_id(anim_id)
+    if parsed_animal and _is_animal_task(task):
+        animal_type, orientation, _action_key = parsed_animal
+        return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
+
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
     catalog_by_id: Dict[str, dict] = {}
@@ -6224,6 +6543,11 @@ async def api_download_animation_with_base(
         raise HTTPException(status_code=404, detail="Task not found")
 
     anim_id = _normalize_animation_key(animation_id)
+    parsed_animal = _parse_animal_animation_id(anim_id)
+    if parsed_animal and _is_animal_task(task):
+        animal_type, orientation, _action_key = parsed_animal
+        return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
+
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
     catalog_by_id: Dict[str, dict] = {}
@@ -6248,7 +6572,7 @@ async def api_download_animation_with_base(
     if not (purchased_all or anim_id in purchased_ids):
         raise HTTPException(status_code=402, detail="Payment required to download this animation")
 
-    base_url, base_filename = await _resolve_available_all_animations_fbx_url(task)
+    base_url, base_filename = _resolve_all_animations_fbx_url(task)
     if not base_url or not base_filename:
         raise HTTPException(status_code=404, detail="Animations FBX not available yet")
 
@@ -6337,6 +6661,7 @@ async def api_get_gallery(
     page: int = 1,
     per_page: int = 12,
     sort: str = "likes",
+    rig_type: str = "all",
     author: Optional[str] = None,  # Filter by author email
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
@@ -6358,18 +6683,22 @@ async def api_get_gallery(
         base_conditions.append(Task.owner_type == "user")
         base_conditions.append(Task.owner_id == author)
 
-    # Count total completed tasks with video (with author filter if present)
-    count_result = await db.execute(
-        select(func.count(distinct(func.coalesce(Task.input_url, Task.id)))).where(*base_conditions)
-    )
-    total = count_result.scalar() or 0
+    sort = (sort or "date").strip().lower()
+    if sort not in {"date", "likes", "sales"}:
+        sort = "date"
+    rig_filter = (rig_type or "all").strip().lower()
+    if rig_filter not in GALLERY_RIG_TYPES:
+        rig_filter = "all"
+    should_filter_rig = rig_filter != "all"
 
     # Get task IDs with like counts
     offset = (page - 1) * per_page
+    page_offset = 0 if should_filter_rig else offset
+    page_limit = None if should_filter_rig else per_page
 
     if sort == "likes":
         # Sort by like count (descending), then by date
-        result = await db.execute(
+        query = (
             select(
                 Task,
                 func.count(TaskLike.id).label('like_count')
@@ -6378,12 +6707,10 @@ async def api_get_gallery(
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc('like_count'), desc(Task.created_at))
-            .offset(offset)
-            .limit(per_page)
         )
     elif sort == "sales":
         # Sort by sales count (descending), then by date
-        result = await db.execute(
+        query = (
             select(
                 Task,
                 func.count(TaskLike.id).label('like_count'),
@@ -6394,12 +6721,10 @@ async def api_get_gallery(
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc('sales_count'), desc(Task.created_at))
-            .offset(offset)
-            .limit(per_page)
         )
     else:
         # Sort by date (newest first) - default
-        result = await db.execute(
+        query = (
             select(
                 Task,
                 func.count(TaskLike.id).label('like_count')
@@ -6408,11 +6733,24 @@ async def api_get_gallery(
             .where(*base_conditions)
             .group_by(func.coalesce(Task.input_url, Task.id))
             .order_by(desc(Task.created_at))
-            .offset(offset)
-            .limit(per_page)
         )
+
+    if page_offset:
+        query = query.offset(page_offset)
+    if page_limit is not None:
+        query = query.limit(page_limit)
     
+    result = await db.execute(query)
     rows = result.all()
+    if should_filter_rig:
+        rows = [row for row in rows if _gallery_rig_icon_key(row[0]) == rig_filter]
+        total = len(rows)
+        rows = rows[offset:offset + per_page]
+    else:
+        count_result = await db.execute(
+            select(func.count(distinct(func.coalesce(Task.input_url, Task.id)))).where(*base_conditions)
+        )
+        total = count_result.scalar() or 0
     task_ids = [row[0].id for row in rows]
     
     # Get user's likes if logged in
@@ -6448,8 +6786,11 @@ async def api_get_gallery(
         )
         author_nicknames = {r[0]: r[1] for r in users_result.all()}
     
-    items = [
-        GalleryItem(
+    items = []
+    for row in rows:
+        t = row[0]
+        like_count = row[1] if len(row) > 1 else 0
+        items.append(GalleryItem(
             task_id=t.id,
             video_url=f"/api/video/{t.id}",
             thumbnail_url=f"/thumb/{t.id}",
@@ -6462,9 +6803,7 @@ async def api_get_gallery(
             author_nickname=author_nicknames.get(t.owner_id) if t.owner_type == "user" else None,
             content_rating=getattr(t, "content_rating", None),
             rig_icon_key=_gallery_rig_icon_key(t),
-        )
-        for t, like_count in rows
-    ]
+        ))
     
     has_more = (page * per_page) < total
     
@@ -6473,7 +6812,8 @@ async def api_get_gallery(
         total=total,
         page=page,
         per_page=per_page,
-        has_more=has_more
+        has_more=has_more,
+        stats=await get_public_gallery_stats(db),
     )
 
 
@@ -7402,7 +7742,7 @@ async def api_admin_cleanup(
 ):
     """
     Manually trigger disk cleanup (admin only).
-    Deletes oldest task files until MIN_FREE_SPACE_GB is available.
+    Runs pressure cleanup until MIN_FREE_SPACE_GB is available.
     """
     import shutil
     
@@ -7551,6 +7891,7 @@ async def api_admin_disk_stats(
             "new_task_purge_max_freed_gb": round(float(NEW_TASK_PURGE_TASKS_MAX_FREED_GB), 2),
             "cleanup_interval_cycles": CLEANUP_CHECK_INTERVAL_CYCLES,
             "min_age_hours": CLEANUP_MIN_AGE_HOURS,
+            "upload_pressure_cleanup_min_age_hours": round(float(UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS), 2),
             "gallery_db_purge_interval_cycles": GALLERY_DB_PURGE_INTERVAL_CYCLES,
             "automatic_task_db_deletion": AUTOMATIC_TASK_DB_DELETION,
             "task_cache_max_gb": round(float(task_cache_max_gb), 4),
@@ -7653,11 +7994,23 @@ async def api_admin_restart_incomplete_tasks(
                     pk_ad = getattr(task, "pipeline_kind", None) or "rig"
                     if pk_ad not in ("rig", "convert"):
                         pk_ad = "rig"
+                    viewer_environment_ad = None
+                    if pk_ad == "rig":
+                        try:
+                            ad_settings = json.loads(task.viewer_settings or "{}")
+                            if not isinstance(ad_settings, dict):
+                                ad_settings = {}
+                        except Exception:
+                            ad_settings = {}
+                        if ensure_viewer_environment_in_settings(ad_settings):
+                            task.viewer_settings = json.dumps(ad_settings, ensure_ascii=False)
+                        viewer_environment_ad = get_viewer_environment_from_settings(ad_settings)
                     send_result = await send_task_to_worker(
                         worker_url,
                         task.input_url,
                         task.input_type or "t_pose",
                         pipeline_kind=pk_ad,
+                        viewer_environment=viewer_environment_ad,
                     )
                     if not send_result.success:
                         task.status = "error"
@@ -7733,7 +8086,8 @@ async def proxy_video(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.video_url:
+    source_video_url = await _resolve_task_video_source_url(task)
+    if not source_video_url:
         raise HTTPException(status_code=404, detail="Video not available")
 
     # Forward range headers so browser can seek to arbitrary frames.
@@ -7748,7 +8102,7 @@ async def proxy_video(
 
     client = httpx.AsyncClient(timeout=120.0)
     try:
-        req = client.build_request("GET", task.video_url, headers=upstream_headers)
+        req = client.build_request("GET", source_video_url, headers=upstream_headers)
         worker_resp = await client.send(req, stream=True)
     except Exception:
         await client.aclose()
@@ -7768,11 +8122,13 @@ async def proxy_video(
         finally:
             await client.aclose()
 
-    _vname = (
-        f"{task_id}_video_small.mp4"
-        if "_video_small.mp4" in (task.video_url or "")
-        else f"{task_id}_video.mp4"
-    )
+    _source_lower = source_video_url.lower()
+    if "_rig_preview.mp4" in _source_lower:
+        _vname = f"{task_id}_rig_preview.mp4"
+    elif "_video_small.mp4" in _source_lower:
+        _vname = f"{task_id}_video_small.mp4"
+    else:
+        _vname = f"{task_id}_video.mp4"
     response_headers: Dict[str, str] = {
         "Content-Disposition": f'inline; filename="{_vname}"',
         "Cache-Control": "public, max-age=86400",
@@ -7830,6 +8186,9 @@ async def _has_paid_access(
     purchases = result.scalars().all()
     if any(p.file_index is None for p in purchases):
         return True
+    task = await get_task_by_id(db, task_id)
+    if task and _is_animal_download_task(task):
+        return False
     if file_index is None:
         return False
     purchased_indices = {p.file_index for p in purchases if p.file_index is not None}
@@ -8143,6 +8502,34 @@ async def _ensure_purchased_worker_bundle_zip_url(
     return task, zip_url
 
 
+async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
+    urls_to_cache = list(dict.fromkeys((task.ready_urls or []) + (task.output_urls or [])))
+    cache_dir = TASK_CACHE_DIR / task.id
+    if urls_to_cache:
+        await cache_task_files(task.id, urls_to_cache, task.guid)
+
+    files = [
+        p for p in sorted(cache_dir.iterdir())
+        if p.is_file() and not p.name.endswith(".tmp") and not p.name.startswith(".")
+    ] if cache_dir.exists() else []
+    if not files:
+        raise HTTPException(status_code=404, detail="No downloadable task files are available")
+
+    safe_guid = (task.guid or task.id).strip()
+    zip_path = Path(tempfile.gettempdir()) / f"autorig_{task.id}_{uuid.uuid4().hex}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for file_path in files:
+            zf.write(file_path, arcname=file_path.name)
+
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"{safe_guid}.zip",
+        headers={"Cache-Control": "private, max-age=0"},
+        background=BackgroundTask(lambda: zip_path.unlink(missing_ok=True)),
+    )
+
+
 @app.get("/api/task/{task_id}/downloads/bundle-url")
 async def api_task_worker_bundle_url(
     task_id: str,
@@ -8176,7 +8563,11 @@ async def _stream_purchased_task_bundle_zip(
 
     safe_guid = (task.guid or task_id).strip()
     filename = f"{safe_guid}.zip"
-    return await _proxy_model_file(zip_url, filename, as_attachment=True)
+    try:
+        return await _proxy_model_file(zip_url, filename, as_attachment=True)
+    except HTTPException as exc:
+        print(f"[Bundle] Worker ZIP unavailable for task {task_id}: {exc.detail}; building fallback")
+        return await _build_task_bundle_zip_from_cache(task)
 
 
 @app.get("/api/task/{task_id}/downloads/bundle")
@@ -8420,6 +8811,180 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
     return None
 
 
+BLUEPRINT_SKELETON_SUFFIX = "_skeleton.json"
+BLUEPRINT_RIG_PREVIEW_SUFFIX = "_rig_preview.mp4"
+
+
+def _is_animal_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+
+
+def _find_cached_blueprint_file(task_id: str, guid: Optional[str], suffix: str) -> Optional[Path]:
+    cache_dir = TASK_CACHE_DIR / task_id
+    if not cache_dir.exists():
+        return None
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        names = ["skeleton.json"]
+    elif suffix == BLUEPRINT_RIG_PREVIEW_SUFFIX:
+        names = ["rig_preview.mp4"]
+    else:
+        names = []
+    if guid:
+        names.append(f"{guid}{suffix}")
+    for name in names:
+        path = cache_dir / name
+        if path.exists() and path.is_file() and path.stat().st_size > 0:
+            return path
+    matches = sorted(cache_dir.glob(f"*{suffix}"))
+    for path in matches:
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+    return None
+
+
+async def _remote_file_exists(url: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+            resp = await client.head(url)
+            if 200 <= resp.status_code < 400:
+                return True
+            if resp.status_code not in (405, 501):
+                return False
+            resp = await client.get(url, headers={"Range": "bytes=0-0"})
+            return resp.status_code in (200, 206)
+    except Exception:
+        return False
+
+
+async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str]:
+    urls = list(task.ready_urls or []) + list(task.output_urls or [])
+    existing = _find_file_in_ready_urls(urls, suffix)
+    if existing:
+        return existing
+    if not task.guid or not task.worker_api:
+        return None
+
+    from workers import get_worker_base_url
+
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    worker_base = worker_base.rstrip("/")
+    worker_root = f"{worker_base}/converter/glb"
+
+    direct_url = f"{worker_root}/{task.guid}/{task.guid}{suffix}"
+    if await _remote_file_exists(direct_url):
+        return direct_url
+
+    files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(files_url)
+        if resp.status_code != 200:
+            return None
+        data = resp.json() if resp.content else {}
+    except Exception:
+        return None
+
+    for folder_data in (data.get("folders") or {}).values():
+        if not isinstance(folder_data, dict):
+            continue
+        for item in folder_data.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            rel_path = str(item.get("rel_path") or "")
+            if rel_path and name.lower().endswith(suffix):
+                return f"{worker_root}/{task.guid}/{rel_path}"
+    return None
+
+
+async def _resolve_task_blueprint_urls(task: Task) -> Tuple[Optional[str], Optional[str]]:
+    if not _is_animal_task(task):
+        return None, None
+
+    skeleton_cached = _find_cached_blueprint_file(task.id, task.guid, BLUEPRINT_SKELETON_SUFFIX)
+    rig_preview_cached = _find_cached_blueprint_file(task.id, task.guid, BLUEPRINT_RIG_PREVIEW_SUFFIX)
+
+    skeleton_url = (
+        f"/api/task/{task.id}/blueprint/skeleton.json"
+        if skeleton_cached or await _resolve_task_worker_file_url(task, BLUEPRINT_SKELETON_SUFFIX)
+        else None
+    )
+    rig_preview_url = (
+        f"/api/task/{task.id}/blueprint/rig-preview.mp4"
+        if rig_preview_cached or await _resolve_task_worker_file_url(task, BLUEPRINT_RIG_PREVIEW_SUFFIX)
+        else None
+    )
+    return skeleton_url, rig_preview_url
+
+
+async def _resolve_task_video_source_url(task: Task) -> Optional[str]:
+    """Return the preferred upstream video source for public playback/upload flows."""
+    if _is_animal_task(task):
+        rig_preview_url = await _resolve_task_worker_file_url(task, BLUEPRINT_RIG_PREVIEW_SUFFIX)
+        if rig_preview_url:
+            return rig_preview_url
+    return (task.video_url or "").strip() or None
+
+
+async def _resolve_task_blueprint_model_url(task: Task) -> Optional[str]:
+    urls = list(task.ready_urls or []) + list(task.output_urls or [])
+    for pattern in ("_model_prepared.glb", "_model_prepared_temp.glb"):
+        existing = _find_file_in_ready_urls(urls, pattern, ".glb")
+        if existing:
+            return existing
+    if not task.guid or not task.worker_api:
+        return None
+
+    from workers import get_worker_base_url
+
+    worker_base = get_worker_base_url(task.worker_api)
+    if not worker_base:
+        return None
+    worker_base = worker_base.rstrip("/")
+    worker_root = f"{worker_base}/converter/glb"
+    for filename in (
+        f"{task.guid}_model_prepared.glb",
+        f"{task.guid}_model_prepared_temp.glb",
+        f"{task.guid}.glb",
+    ):
+        direct_url = f"{worker_root}/{task.guid}/{filename}"
+        if await _remote_file_exists(direct_url):
+            return direct_url
+
+    files_url = f"{worker_base}/api-converter-glb/model-files/{task.guid}"
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(files_url)
+        if resp.status_code != 200:
+            return None
+        data = resp.json() if resp.content else {}
+    except Exception:
+        return None
+
+    priority = (
+        f"{task.guid}_model_prepared.glb",
+        f"{task.guid}_model_prepared_temp.glb",
+        f"{task.guid}.glb",
+    )
+    candidates: Dict[str, str] = {}
+    for folder_data in (data.get("folders") or {}).values():
+        if not isinstance(folder_data, dict):
+            continue
+        for item in folder_data.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "")
+            rel_path = str(item.get("rel_path") or "")
+            if rel_path and name in priority:
+                candidates[name] = f"{worker_root}/{task.guid}/{rel_path}"
+    for name in priority:
+        if name in candidates:
+            return candidates[name]
+    return None
+
+
 def _task_has_poster(task: Task) -> bool:
     """True if ready_urls/output_urls contain a file usable as /api/thumb source (same rules as api_proxy_thumb)."""
     urls = list(task.ready_urls or []) + list(task.output_urls or [])
@@ -8456,6 +9021,613 @@ def _gallery_task_has_poster_sql():
     pats = ("_video_poster.jpg", "_poster.jpg", "icon.png", "Render_1_view.jpg")
     cols = (Task._ready_urls, Task._output_urls)
     return or_(*[func.instr(col, p) > 0 for col in cols for p in pats])
+
+
+GALLERY_RIG_TYPES = (
+    "humanoid",
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle",
+)
+
+
+def _gallery_rig_icon_key(task: Task) -> str:
+    """Humanoid vs animal rig key for gallery UI icons and filters."""
+    input_type = str(getattr(task, "input_type", "") or "").strip().lower()
+    if input_type != "animal":
+        return "humanoid"
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+    except Exception:
+        settings = {}
+    det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+    if not isinstance(det, dict):
+        return "humanoid"
+    animal = str(
+        det.get("animal_type")
+        or det.get("animal_type_string")
+        or ""
+    ).strip().lower()
+    return animal if animal in GALLERY_RIG_TYPES and animal != "humanoid" else "humanoid"
+
+
+RIG_ARTICLE_LANGS: Dict[str, Dict[str, str]] = {
+    "en": {
+        "suffix": "",
+        "html_lang": "en",
+        "guides": "Guides",
+        "kicker": "Rig type SEO guide",
+        "overview": "What this rig type is for",
+        "workflow": "Online workflow",
+        "prep": "Model preparation tips",
+        "examples": "Real AutoRig examples",
+        "faq": "FAQ",
+        "cta_upload": "Start auto rigging online",
+        "cta_gallery": "Browse real examples",
+        "empty": "Real public examples for this rig type will appear here automatically after matching completed tasks are published in the gallery.",
+        "open_example": "Open rig preview",
+        "examples_intro": "These examples are pulled from completed public AutoRig tasks and refreshed from the live gallery data.",
+    },
+    "ru": {
+        "suffix": "-ru",
+        "html_lang": "ru",
+        "guides": "Руководства",
+        "kicker": "SEO-статья по типу рига",
+        "overview": "Для чего нужен этот тип рига",
+        "workflow": "Онлайн workflow",
+        "prep": "Как подготовить модель",
+        "examples": "Реальные примеры AutoRig",
+        "faq": "FAQ",
+        "cta_upload": "Запустить auto rigging online",
+        "cta_gallery": "Смотреть реальные примеры",
+        "empty": "Реальные публичные примеры для этого типа появятся здесь автоматически после публикации подходящих задач в галерее.",
+        "open_example": "Открыть preview рига",
+        "examples_intro": "Эти примеры подтягиваются из завершённых публичных задач AutoRig и обновляются по live gallery data.",
+    },
+    "zh": {
+        "suffix": "-zh",
+        "html_lang": "zh",
+        "guides": "指南",
+        "kicker": "绑定类型 SEO 指南",
+        "overview": "这个绑定类型适合什么",
+        "workflow": "在线工作流",
+        "prep": "模型准备建议",
+        "examples": "真实 AutoRig 示例",
+        "faq": "FAQ",
+        "cta_upload": "开始在线自动绑定",
+        "cta_gallery": "浏览真实示例",
+        "empty": "当图库中出现匹配的已完成公开任务后，此处会自动显示该绑定类型的真实示例。",
+        "open_example": "打开绑定预览",
+        "examples_intro": "这些示例来自已完成的公开 AutoRig 任务，并从实时图库数据刷新。",
+    },
+    "hi": {
+        "suffix": "-hi",
+        "html_lang": "hi",
+        "guides": "Guides",
+        "kicker": "Rig type SEO guide",
+        "overview": "यह rig type किसके लिए है",
+        "workflow": "Online workflow",
+        "prep": "Model preparation tips",
+        "examples": "Real AutoRig examples",
+        "faq": "FAQ",
+        "cta_upload": "Online auto rigging शुरू करें",
+        "cta_gallery": "Real examples देखें",
+        "empty": "इस rig type के real public examples matching completed tasks gallery में publish होते ही यहां automatically दिखेंगे।",
+        "open_example": "Rig preview खोलें",
+        "examples_intro": "ये examples completed public AutoRig tasks से आते हैं और live gallery data से refresh होते हैं।",
+    },
+}
+
+# Generated rig-type pages are currently indexed in English first. The localized
+# variants stay routable, but are not advertised in sitemap/hreflang until their
+# copy is fully reviewed.
+RIG_ARTICLE_INDEXED_LANGS: Tuple[str, ...] = ("en",)
+
+RIG_ARTICLE_EXAMPLE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "dog": ("dog", "dogs", "wolf", "wolves", "canine", "puppy", "fox"),
+    "bear": ("bear", "bears", "cub", "grizzly", "panda"),
+    "cat": ("cat", "cats", "kitten", "feline", "panther", "tiger", "lion"),
+    "cow": ("cow", "cows", "bull", "cattle", "calf", "ox"),
+    "deer": ("deer", "stag", "elk", "antler", "antlers", "doe"),
+    "elephant": ("elephant", "elephants", "mammoth", "trunk"),
+    "giraffe": ("giraffe", "giraffes", "long neck", "long-necked"),
+    "horse": ("horse", "horses", "pony", "ponies", "equine", "unicorn", "mount"),
+    "mouse": ("mouse", "mice", "rat", "rats", "rodent", "hamster"),
+    "pig": ("pig", "pigs", "piglet", "boar", "hog", "swine"),
+    "rabbit": ("rabbit", "rabbits", "bunny", "bunnies", "hare"),
+    "turtle": ("turtle", "turtles", "tortoise", "tortoises", "shell", "reptile"),
+}
+
+RIG_ARTICLE_STATIC_EXAMPLES: Dict[str, Dict[str, str]] = {
+    "cat": {
+        "title": "Cat V2 animal rig animation example",
+        "image": "/static/videos/animal-rig/cat-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+    "horse": {
+        "title": "Quadruped animal rig animation example",
+        "image": "/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+    "rabbit": {
+        "title": "Rabbit V2 animal rig animation example",
+        "image": "/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+    "turtle": {
+        "title": "Turtle V2 low-body rig animation example",
+        "image": "/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png",
+        "url": "/animal-rig#examples",
+    },
+}
+
+DEFAULT_RIG_ARTICLE_STATIC_EXAMPLE: Dict[str, str] = {
+    "title": "AutoRig V2 animal rig presentation",
+    "image": "/static/videos/animal-rig/after-poster-20260516.png",
+    "url": "/animal-rig#presentation",
+}
+
+
+RIG_ARTICLE_TYPES: Dict[str, Dict[str, Any]] = {
+    "humanoid": {
+        "labels": {"en": "humanoid character", "ru": "humanoid-персонаж", "zh": "人形角色", "hi": "humanoid character"},
+        "shape": {"en": "biped characters with arms, legs, hands, head, and animation-ready proportions", "ru": "двуногие персонажи с руками, ногами, кистями, головой и animation-ready пропорциями", "zh": "带有手臂、腿部、手、头部和动画比例的人形角色", "hi": "arms, legs, hands, head और animation-ready proportions वाले biped characters"},
+        "use": {"en": "game heroes, NPCs, stylized people, robots, and human-like creatures", "ru": "игровых героев, NPC, stylized people, роботов и human-like creatures", "zh": "游戏主角、NPC、风格化人物、机器人和类人生物", "hi": "game heroes, NPCs, stylized people, robots और human-like creatures"},
+        "tip": {"en": "Use a clear T-pose or relaxed A-pose, keep arms away from the torso, and avoid fused fingers if hand motion matters.", "ru": "Используйте чистую T-pose или relaxed A-pose, держите руки отдельно от тела и не склеивайте пальцы, если важна анимация кистей.", "zh": "使用清晰的 T-pose 或放松的 A-pose，让手臂离开身体；如果需要手部动画，避免手指粘连。", "hi": "Clear T-pose या relaxed A-pose रखें, arms को torso से अलग रखें, और hand motion चाहिए तो fused fingers से बचें।"},
+    },
+    "dog": {
+        "labels": {"en": "dog and wolf", "ru": "собака и wolf", "zh": "狗和狼", "hi": "dog और wolf"},
+        "shape": {"en": "quadruped bodies with paws, tail motion, shoulder/hip deformation, and low head posture", "ru": "quadruped body с лапами, tail motion, shoulder/hip deformation и низким положением головы", "zh": "具有爪子、尾巴运动、肩/髋变形和较低头部姿态的四足身体", "hi": "paws, tail motion, shoulder/hip deformation और low head posture वाले quadruped bodies"},
+        "use": {"en": "dogs, wolves, stylized pets, fantasy companions, and canine game creatures", "ru": "собак, волков, stylized pets, fantasy companions и canine game creatures", "zh": "狗、狼、风格化宠物、奇幻伙伴和犬科游戏生物", "hi": "dogs, wolves, stylized pets, fantasy companions और canine game creatures"},
+        "tip": {"en": "Keep legs separated, make paws visible, and leave enough mesh loops around shoulders, hips, neck, and tail.", "ru": "Разведите лапы, сделайте paws читаемыми и оставьте достаточно mesh loops у плеч, таза, шеи и хвоста.", "zh": "让四肢分开、爪子清晰，并在肩部、髋部、颈部和尾巴周围保留足够网格环。", "hi": "Legs अलग रखें, paws visible रखें, और shoulders, hips, neck तथा tail के आसपास पर्याप्त mesh loops रखें।"},
+    },
+    "bear": {
+        "labels": {"en": "bear", "ru": "медведь", "zh": "熊", "hi": "bear"},
+        "shape": {"en": "heavy quadrupeds with broad shoulders, thick paws, short tail, and powerful torso motion", "ru": "тяжёлые quadrupeds с широкими плечами, мощными лапами, коротким хвостом и массивным корпусом", "zh": "宽肩、厚爪、短尾和强壮躯干运动的大型四足动物", "hi": "broad shoulders, thick paws, short tail और powerful torso motion वाले heavy quadrupeds"},
+        "use": {"en": "bears, stylized cubs, fantasy beasts, and bulky animal characters", "ru": "медведей, stylized cubs, fantasy beasts и bulky animal characters", "zh": "熊、风格化幼熊、奇幻野兽和大型动物角色", "hi": "bears, stylized cubs, fantasy beasts और bulky animal characters"},
+        "tip": {"en": "Avoid merged front legs and give the shoulder area enough geometry for weight transfer during walking animations.", "ru": "Не склеивайте передние лапы и добавьте геометрию в зоне плеч для корректного переноса веса при walk animations.", "zh": "避免前腿粘连，并为肩部区域提供足够几何，以支持行走动画中的重心转移。", "hi": "Front legs merge न करें और walking animations में weight transfer के लिए shoulder area में enough geometry रखें।"},
+    },
+    "cat": {
+        "labels": {"en": "cat", "ru": "кошка", "zh": "猫", "hi": "cat"},
+        "shape": {"en": "flexible quadrupeds with arched backs, small paws, long tails, and agile spine motion", "ru": "гибкие quadrupeds с арочной спиной, маленькими лапами, длинным хвостом и agile spine motion", "zh": "具有弓背、小爪、长尾和灵活脊柱运动的四足动物", "hi": "arched backs, small paws, long tails और agile spine motion वाले flexible quadrupeds"},
+        "use": {"en": "cats, kittens, cartoon pets, feline companions, and stylized fantasy animals", "ru": "кошек, kittens, cartoon pets, feline companions и stylized fantasy animals", "zh": "猫、小猫、卡通宠物、猫科伙伴和风格化奇幻动物", "hi": "cats, kittens, cartoon pets, feline companions और stylized fantasy animals"},
+        "tip": {"en": "Keep the tail detached from the body silhouette and make the spine topology clean enough for curved poses.", "ru": "Держите хвост отдельным от силуэта тела и сделайте topology спины достаточно чистой для curved poses.", "zh": "让尾巴在轮廓上与身体分离，并保持脊柱拓扑干净，以支持弯曲姿态。", "hi": "Tail को body silhouette से अलग रखें और curved poses के लिए spine topology clean रखें।"},
+    },
+    "cow": {
+        "labels": {"en": "cow", "ru": "корова", "zh": "牛", "hi": "cow"},
+        "shape": {"en": "large farm quadrupeds with hooves, broad torso, neck motion, and optional horns or udder details", "ru": "крупные farm quadrupeds с копытами, широким корпусом, neck motion и optional horns/udder details", "zh": "带蹄、宽大躯干、颈部运动以及可选角/乳房细节的大型农场四足动物", "hi": "hooves, broad torso, neck motion और optional horns/udder details वाले large farm quadrupeds"},
+        "use": {"en": "cows, bulls, calves, farm animals, and stylized livestock for games or animation", "ru": "коров, быков, телят, farm animals и stylized livestock для игр или animation", "zh": "奶牛、公牛、小牛、农场动物和游戏/动画中的风格化家畜", "hi": "cows, bulls, calves, farm animals और games या animation के stylized livestock"},
+        "tip": {"en": "Separate hooves clearly, avoid a single fused underside mesh, and keep horns as readable geometry if they should move with the head.", "ru": "Чётко разделите копыта, не делайте слитную нижнюю часть mesh и оставьте horns читаемой геометрией, если они должны двигаться с головой.", "zh": "清晰分离蹄子，避免底部网格完全粘连；如果角要随头部移动，应保持角的几何清晰。", "hi": "Hooves clearly separate रखें, underside mesh fused न रखें, और horns को readable geometry रखें यदि वे head के साथ move करने चाहिए।"},
+    },
+    "deer": {
+        "labels": {"en": "deer", "ru": "олень", "zh": "鹿", "hi": "deer"},
+        "shape": {"en": "slender quadrupeds with thin legs, light torso, neck motion, and optional antlers", "ru": "стройные quadrupeds с тонкими ногами, лёгким корпусом, neck motion и optional antlers", "zh": "细腿、轻盈躯干、颈部运动和可选鹿角的纤细四足动物", "hi": "thin legs, light torso, neck motion और optional antlers वाले slender quadrupeds"},
+        "use": {"en": "deer, elk-like creatures, forest animals, fantasy mounts, and elegant wildlife models", "ru": "оленей, elk-like creatures, forest animals, fantasy mounts и elegant wildlife models", "zh": "鹿、麋鹿类生物、森林动物、奇幻坐骑和优雅野生动物模型", "hi": "deer, elk-like creatures, forest animals, fantasy mounts और elegant wildlife models"},
+        "tip": {"en": "Give thin legs enough thickness for skin weights and keep antlers separate enough to avoid confusing them with ears.", "ru": "Сделайте тонкие ноги достаточно толстыми для skin weights и отделите antlers от ушей, чтобы модель читалась правильно.", "zh": "让细腿有足够厚度以便蒙皮权重稳定，并让鹿角与耳朵足够分离。", "hi": "Thin legs में skin weights के लिए enough thickness रखें और antlers को ears से clear separation दें।"},
+    },
+    "elephant": {
+        "labels": {"en": "elephant", "ru": "слон", "zh": "大象", "hi": "elephant"},
+        "shape": {"en": "large quadrupeds with heavy legs, big ears, trunk silhouette, and slow weight-shift motion", "ru": "крупные quadrupeds с массивными ногами, большими ушами, trunk silhouette и slow weight-shift motion", "zh": "具有粗壮腿、大耳朵、象鼻轮廓和缓慢重心移动的大型四足动物", "hi": "heavy legs, big ears, trunk silhouette और slow weight-shift motion वाले large quadrupeds"},
+        "use": {"en": "elephants, mammoths, fantasy giants, stylized zoo animals, and large creature rigs", "ru": "слонов, мамонтов, fantasy giants, stylized zoo animals и large creature rigs", "zh": "大象、猛犸、奇幻巨兽、风格化动物园动物和大型生物绑定", "hi": "elephants, mammoths, fantasy giants, stylized zoo animals और large creature rigs"},
+        "tip": {"en": "Keep the trunk visible and separated from the legs, and avoid very thin ear geometry that cannot deform cleanly.", "ru": "Держите trunk видимым и отделённым от ног, избегайте слишком тонкой геометрии ушей, которая плохо деформируется.", "zh": "保持象鼻清晰并与腿部分离，避免耳朵几何过薄导致变形不干净。", "hi": "Trunk को visible और legs से separate रखें, और बहुत thin ear geometry से बचें जो clean deform नहीं कर सके।"},
+    },
+    "giraffe": {
+        "labels": {"en": "giraffe", "ru": "жираф", "zh": "长颈鹿", "hi": "giraffe"},
+        "shape": {"en": "tall quadrupeds with long necks, long legs, small horns, and high center-of-mass motion", "ru": "высокие quadrupeds с длинной шеей, длинными ногами, маленькими horns и высоким center-of-mass motion", "zh": "长颈、长腿、小角和高重心运动的高大四足动物", "hi": "long necks, long legs, small horns और high center-of-mass motion वाले tall quadrupeds"},
+        "use": {"en": "giraffes, tall fantasy herbivores, stylized safari animals, and long-necked creatures", "ru": "жирафов, tall fantasy herbivores, stylized safari animals и long-necked creatures", "zh": "长颈鹿、高大奇幻食草动物、风格化 safari 动物和长颈生物", "hi": "giraffes, tall fantasy herbivores, stylized safari animals और long-necked creatures"},
+        "tip": {"en": "Keep the neck segmented with enough topology and avoid merging thin legs into the body silhouette.", "ru": "Добавьте достаточно topology по шее и не сливайте тонкие ноги с body silhouette.", "zh": "颈部需要足够分段拓扑，并避免细腿与身体轮廓粘连。", "hi": "Neck में enough segmented topology रखें और thin legs को body silhouette में merge न करें।"},
+    },
+    "horse": {
+        "labels": {"en": "horse", "ru": "лошадь", "zh": "马", "hi": "horse"},
+        "shape": {"en": "equine quadrupeds with long legs, hooves, mane, tail, and gait-focused deformation", "ru": "equine quadrupeds с длинными ногами, копытами, гривой, хвостом и gait-focused deformation", "zh": "长腿、蹄、鬃毛、尾巴和步态变形重点的马类四足动物", "hi": "long legs, hooves, mane, tail और gait-focused deformation वाले equine quadrupeds"},
+        "use": {"en": "horses, ponies, mounts, unicorns, and stylized riding animals", "ru": "лошадей, пони, mounts, unicorns и stylized riding animals", "zh": "马、小马、坐骑、独角兽和风格化骑乘动物", "hi": "horses, ponies, mounts, unicorns और stylized riding animals"},
+        "tip": {"en": "Make hooves distinct, keep the tail separate, and add clean loops around shoulders and hips for walk and run cycles.", "ru": "Сделайте копыта различимыми, отделите хвост и добавьте clean loops вокруг плеч и таза для walk/run cycles.", "zh": "让蹄子清晰、尾巴分离，并在肩部和髋部添加干净网格环以支持走/跑循环。", "hi": "Hooves distinct रखें, tail separate रखें, और walk/run cycles के लिए shoulders और hips के आसपास clean loops रखें।"},
+    },
+    "mouse": {
+        "labels": {"en": "mouse", "ru": "мышь", "zh": "老鼠", "hi": "mouse"},
+        "shape": {"en": "small rodent bodies with short legs, round torso, large ears, and a thin tail", "ru": "маленькие rodent bodies с короткими ногами, круглым корпусом, большими ушами и тонким хвостом", "zh": "短腿、圆身体、大耳朵和细尾巴的小型啮齿动物身体", "hi": "short legs, round torso, large ears और thin tail वाले small rodent bodies"},
+        "use": {"en": "mice, rats, cartoon rodents, tiny game companions, and stylized mascot animals", "ru": "мышей, крыс, cartoon rodents, tiny game companions и stylized mascot animals", "zh": "老鼠、鼠类、卡通啮齿动物、小型游戏伙伴和风格化吉祥物动物", "hi": "mice, rats, cartoon rodents, tiny game companions और stylized mascot animals"},
+        "tip": {"en": "Keep the tail and ears readable, and avoid paws that are too small to deform in preview animations.", "ru": "Держите хвост и уши читаемыми, избегайте лап, слишком маленьких для деформации в preview animations.", "zh": "保持尾巴和耳朵清晰，避免爪子过小导致预览动画无法良好变形。", "hi": "Tail और ears readable रखें, और paws इतने छोटे न हों कि preview animations में deform न हो सकें।"},
+    },
+    "pig": {
+        "labels": {"en": "pig", "ru": "свинья", "zh": "猪", "hi": "pig"},
+        "shape": {"en": "compact quadrupeds with short legs, rounded torso, snout, ears, and small tail motion", "ru": "compact quadrupeds с короткими ногами, круглым корпусом, snout, ушами и small tail motion", "zh": "短腿、圆躯干、猪鼻、耳朵和小尾巴运动的紧凑四足动物", "hi": "short legs, rounded torso, snout, ears और small tail motion वाले compact quadrupeds"},
+        "use": {"en": "pigs, boars, farm animals, cartoon mascots, and stylized livestock characters", "ru": "свиней, кабанов, farm animals, cartoon mascots и stylized livestock characters", "zh": "猪、野猪、农场动物、卡通吉祥物和风格化家畜角色", "hi": "pigs, boars, farm animals, cartoon mascots और stylized livestock characters"},
+        "tip": {"en": "Leave space under the belly, separate the legs clearly, and keep the snout geometry attached cleanly to the head.", "ru": "Оставьте пространство под животом, чётко разделите ноги и аккуратно соедините snout geometry с головой.", "zh": "腹部下方留出空间，腿部清晰分离，并让猪鼻几何干净连接到头部。", "hi": "Belly के नीचे space रखें, legs clear separate रखें, और snout geometry को head से clean attach करें।"},
+    },
+    "rabbit": {
+        "labels": {"en": "rabbit", "ru": "кролик", "zh": "兔子", "hi": "rabbit"},
+        "shape": {"en": "small quadrupeds with long ears, strong back legs, compact torso, and short tail", "ru": "small quadrupeds с длинными ушами, сильными задними ногами, compact torso и short tail", "zh": "长耳、强后腿、紧凑躯干和短尾的小型四足动物", "hi": "long ears, strong back legs, compact torso और short tail वाले small quadrupeds"},
+        "use": {"en": "rabbits, hares, cartoon pets, fantasy familiars, and cute game creatures", "ru": "кроликов, зайцев, cartoon pets, fantasy familiars и cute game creatures", "zh": "兔子、野兔、卡通宠物、奇幻伙伴和可爱游戏生物", "hi": "rabbits, hares, cartoon pets, fantasy familiars और cute game creatures"},
+        "tip": {"en": "Keep long ears separate from the body and give the rear legs enough topology for crouch and hop poses.", "ru": "Держите длинные уши отдельно от тела и добавьте topology задним ногам для crouch/hop poses.", "zh": "长耳要与身体分离，并为后腿提供足够拓扑以支持蹲伏和跳跃姿态。", "hi": "Long ears को body से separate रखें और crouch/hop poses के लिए rear legs में enough topology दें।"},
+    },
+    "turtle": {
+        "labels": {"en": "turtle", "ru": "черепаха", "zh": "乌龟", "hi": "turtle"},
+        "shape": {"en": "shell-based non-humanoid bodies with short legs, neck motion, tail, and rigid shell areas", "ru": "shell-based non-humanoid bodies с короткими ногами, neck motion, хвостом и rigid shell areas", "zh": "基于龟壳的非人形身体，带短腿、颈部运动、尾巴和刚性龟壳区域", "hi": "short legs, neck motion, tail और rigid shell areas वाले shell-based non-humanoid bodies"},
+        "use": {"en": "turtles, tortoises, armored creatures, stylized reptiles, and shell-backed game characters", "ru": "черепах, tortoises, armored creatures, stylized reptiles и shell-backed game characters", "zh": "乌龟、陆龟、装甲生物、风格化爬行动物和带壳游戏角色", "hi": "turtles, tortoises, armored creatures, stylized reptiles और shell-backed game characters"},
+        "tip": {"en": "Keep the shell as a clear rigid volume and separate the neck and legs enough for visible motion.", "ru": "Держите панцирь как clear rigid volume и отделите шею и ноги достаточно для заметного motion.", "zh": "龟壳应保持清晰刚性体积，颈部和腿部要足够分离以显示运动。", "hi": "Shell को clear rigid volume रखें और visible motion के लिए neck तथा legs को enough separate रखें।"},
+    },
+}
+
+
+def _rig_article_path(rig_key: str, lang: str = "en") -> str:
+    suffix = RIG_ARTICLE_LANGS.get(lang, RIG_ARTICLE_LANGS["en"])["suffix"]
+    return f"/{rig_key}-auto-rig{suffix}"
+
+
+def _rig_article_localized_urls(base: str, rig_key: str) -> Dict[str, str]:
+    return {
+        lang: f"{base}{_rig_article_path(rig_key, lang)}"
+        for lang in RIG_ARTICLE_LANGS
+    }
+
+
+def _rig_article_text(rig_key: str, lang: str) -> Dict[str, Any]:
+    ui = RIG_ARTICLE_LANGS.get(lang, RIG_ARTICLE_LANGS["en"])
+    info = RIG_ARTICLE_TYPES[rig_key]
+    label = info["labels"].get(lang, info["labels"]["en"])
+    shape = info["shape"].get(lang, info["shape"]["en"])
+    use = info["use"].get(lang, info["use"]["en"])
+    tip = info["tip"].get(lang, info["tip"]["en"])
+    if lang == "ru":
+        title = f"AI auto rigging online: {label} | AutoRig.online"
+        description = f"Онлайн AI-риггинг для типа {label}: загрузите GLB, FBX или OBJ и получите rigged модель с animation-ready preview для Blender, Unity и Unreal Engine."
+        h1 = f"AI auto rigging online: {label}"
+        lead = f"AutoRig.online автоматически строит rig для {label}: {shape}. Страница сфокусирована на задачах, где пользователю нужно быстро получить готовый rig онлайн без ручной расстановки костей."
+        workflow = f"Загрузите GLB, FBX или OBJ, дождитесь обработки, откройте task preview и скачайте результат для Blender, Unity, Unreal Engine или web viewers. Такой workflow подходит для {use}."
+        prep = tip
+        faq = [
+            (f"Можно ли сделать auto rig для {label} онлайн?", f"Да. AutoRig.online принимает GLB, FBX и OBJ модели и запускает AI-assisted rigging workflow для {label}, если геометрия подходит для выбранного типа."),
+            (f"Какие файлы подходят для {label} rigging?", "Лучше всего подходят чистые GLB, FBX или OBJ модели с разделёнными конечностями, читаемым силуэтом и достаточной topology в местах сгиба."),
+            (f"Можно ли использовать результат в Blender, Unity и Unreal Engine?", "Да. После обработки можно открыть preview, скачать rigged файлы и использовать их в Blender, Unity, Unreal Engine и других 3D pipelines."),
+        ]
+    elif lang == "zh":
+        title = f"{label} AI 在线自动绑定 | AutoRig.online"
+        description = f"面向 {label} 的在线 AI 自动绑定。上传 GLB、FBX 或 OBJ，生成适合 Blender、Unity、Unreal Engine 和网页预览的可动画 rigged 模型。"
+        h1 = f"{label} AI 在线自动绑定"
+        lead = f"AutoRig.online 为 {label} 自动生成 rig：{shape}。此页面面向需要在线自动绑定特定动物或模型类型的创作者。"
+        workflow = f"上传 GLB、FBX 或 OBJ，等待处理，打开 task preview，并导出到 Blender、Unity、Unreal Engine 或网页查看器。该流程适合 {use}。"
+        prep = tip
+        faq = [
+            (f"可以在线自动绑定 {label} 吗？", f"可以。AutoRig.online 支持上传 GLB、FBX 或 OBJ，并为 {label} 运行 AI-assisted rigging workflow。"),
+            (f"{label} 绑定前模型应该怎样准备？", "保持轮廓清晰、四肢分离，并在关节和弯曲区域保留足够拓扑。"),
+            ("结果可以用于 Blender、Unity 和 Unreal Engine 吗？", "可以。处理完成后可打开 preview，下载 rigged 文件，并用于常见 3D 和游戏开发流程。"),
+        ]
+    elif lang == "hi":
+        title = f"{label} AI auto rigging online | AutoRig.online"
+        description = f"{label} के लिए online AI auto rigging. GLB, FBX या OBJ upload करें और Blender, Unity, Unreal Engine तथा web previews के लिए rigged animation-ready model export करें."
+        h1 = f"{label} AI auto rigging online"
+        lead = f"AutoRig.online {label} के लिए automatically rig बनाता है: {shape}. यह page उन creators के लिए है जिन्हें specific rig type के लिए online automatic rigging चाहिए."
+        workflow = f"GLB, FBX या OBJ upload करें, processing complete होने दें, task preview खोलें, और Blender, Unity, Unreal Engine या web viewers के लिए result download करें. यह workflow {use} के लिए useful है."
+        prep = tip
+        faq = [
+            (f"क्या {label} को online auto rig किया जा सकता है?", f"हाँ. AutoRig.online GLB, FBX और OBJ uploads लेकर {label} के लिए AI-assisted rigging workflow चलाता है."),
+            (f"{label} rigging के लिए model कैसे prepare करें?", "Clear silhouette, separated limbs और bending areas में enough topology रखें ताकि animation preview साफ रहे।"),
+            ("क्या result Blender, Unity और Unreal Engine में काम करेगा?", "हाँ. Processing के बाद preview खोलें, rigged files download करें, और उन्हें common 3D/game pipelines में use करें।"),
+        ]
+    else:
+        title = f"{label.title()} AI auto rigging online | AutoRig.online"
+        description = f"Online AI auto rigging for {label} 3D models. Upload GLB, FBX, or OBJ and export a rigged, animation-ready result for Blender, Unity, Unreal Engine, and web previews."
+        h1 = f"{label.title()} AI auto rigging online"
+        lead = f"AutoRig.online automatically builds rigs for {label} models: {shape}. This page targets creators who need a fast online workflow for a specific rig type, not only generic humanoid character rigging."
+        workflow = f"Upload a GLB, FBX, or OBJ file, wait for the AI-assisted rigging task, open the task preview, and export the rigged result for Blender, Unity, Unreal Engine, or web viewers. The workflow is designed for {use}."
+        prep = tip
+        faq = [
+            (f"Can I auto rig a {label} model online?", f"Yes. AutoRig.online accepts GLB, FBX, and OBJ uploads and runs an AI-assisted rigging workflow for {label} models when the geometry matches the supported rig type."),
+            (f"What should I prepare before {label} auto rigging?", "Use a clean silhouette, separated limbs, and enough topology around bending areas so the generated rig and animation preview can deform cleanly."),
+            ("Can I use the result in Blender, Unity, and Unreal Engine?", "Yes. After processing, open the preview, download the rigged files, and use them in common 3D and game development pipelines."),
+        ]
+    return {
+        "title": title,
+        "description": description,
+        "h1": h1,
+        "lead": lead,
+        "workflow": workflow,
+        "prep": prep,
+        "label": label,
+        "shape": shape,
+        "use": use,
+        "faq": faq,
+        "ui": ui,
+        "keywords": [
+            f"{label} auto rig",
+            f"{label} rigging",
+            f"{label} 3D model rig",
+            "AI auto rigging",
+            "animal rigging online",
+            "GLB FBX OBJ rigging",
+            "Blender rigging",
+            "Unity Unreal rigging",
+        ],
+    }
+
+
+async def _rig_article_examples(db: AsyncSession, rig_key: str, limit: int = 6) -> List[Task]:
+    base_conditions = [
+        Task.status == "done",
+        Task.video_ready == True,
+        _gallery_task_has_poster_sql(),
+        or_(Task.content_rating.is_(None), Task.content_rating != "adult"),
+    ]
+    result = await db.execute(
+        select(Task)
+        .where(*base_conditions)
+        .order_by(func.coalesce(Task.updated_at, Task.created_at).desc())
+        .limit(700)
+    )
+    out: List[Task] = []
+    for task in result.scalars().all():
+        if _gallery_rig_icon_key(task) == rig_key and _rig_article_example_matches(task, rig_key):
+            out.append(task)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _rig_article_example_matches(task: Task, rig_key: str) -> bool:
+    if rig_key == "humanoid":
+        return True
+    keywords = RIG_ARTICLE_EXAMPLE_KEYWORDS.get(rig_key)
+    if not keywords:
+        return False
+    haystack = _rig_article_example_text(task)
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", haystack)
+        for keyword in keywords
+    )
+
+
+def _rig_article_example_text(task: Task) -> str:
+    parts: List[str] = []
+    for attr in ("poster_llm_title", "poster_llm_description"):
+        value = str(getattr(task, attr, "") or "").strip()
+        if value:
+            parts.append(value)
+    raw_keywords = getattr(task, "poster_llm_keywords", None)
+    if raw_keywords:
+        try:
+            parsed = json.loads(raw_keywords)
+            if isinstance(parsed, list):
+                parts.extend(str(item) for item in parsed if item)
+            else:
+                parts.append(str(raw_keywords))
+        except Exception:
+            parts.append(str(raw_keywords))
+    return " ".join(parts).lower()
+
+
+def _task_public_title(task: Task, fallback: str) -> str:
+    title = str(getattr(task, "poster_llm_title", "") or "").strip()
+    return title[:96] if title else fallback
+
+
+def _rig_article_static_example(rig_key: str) -> Dict[str, str]:
+    item = dict(DEFAULT_RIG_ARTICLE_STATIC_EXAMPLE)
+    item.update(RIG_ARTICLE_STATIC_EXAMPLES.get(rig_key, {}))
+    return item
+
+
+def _build_rig_article_html(rig_key: str, lang: str, examples: List[Task]) -> str:
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    lang = lang if lang in RIG_ARTICLE_LANGS else "en"
+    text = _rig_article_text(rig_key, lang)
+    ui = text["ui"]
+    is_indexed_lang = lang in RIG_ARTICLE_INDEXED_LANGS
+    canonical_lang = lang if is_indexed_lang else RIG_ARTICLE_INDEXED_LANGS[0]
+    canonical = f"{base}{_rig_article_path(rig_key, canonical_lang)}"
+    localized_urls = _rig_article_localized_urls(base, rig_key)
+    advertised_localized_urls = {
+        hreflang: localized_urls[hreflang]
+        for hreflang in RIG_ARTICLE_INDEXED_LANGS
+        if hreflang in localized_urls
+    }
+    static_example = _rig_article_static_example(rig_key)
+    static_example_image = f"{base}{static_example['image']}"
+    static_example_url = f"{base}{static_example['url']}"
+    first_image = f"{base}/thumb/{examples[0].id}" if examples else static_example_image
+    robots_content = "index,follow" if is_indexed_lang else "noindex,follow"
+    article_json = {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": text["title"],
+        "description": text["description"],
+        "inLanguage": ui["html_lang"],
+        "url": canonical,
+        "mainEntityOfPage": canonical,
+        "image": first_image,
+        "keywords": ", ".join(text["keywords"]),
+        "publisher": {"@type": "Organization", "name": "AutoRig.online", "url": base},
+        "about": [
+            text["label"],
+            "AI auto rigging",
+            "animal rigging",
+            "GLB FBX OBJ workflow",
+            "Blender Unity Unreal export",
+        ],
+    }
+    faq_json = {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": q,
+                "acceptedAnswer": {"@type": "Answer", "text": a},
+            }
+            for q, a in text["faq"]
+        ],
+    }
+    breadcrumb_json = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "AutoRig.online", "item": base},
+            {"@type": "ListItem", "position": 2, "name": ui["guides"], "item": f"{base}/guides"},
+            {"@type": "ListItem", "position": 3, "name": text["h1"], "item": canonical},
+        ],
+    }
+    item_list_json = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": f"{text['label']} AutoRig examples",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": idx + 1,
+                "url": f"{base}/task?id={task.id}",
+                "name": _task_public_title(task, text["h1"]),
+                "image": f"{base}/thumb/{task.id}",
+            }
+            for idx, task in enumerate(examples)
+        ] if examples else [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "url": static_example_url,
+                "name": static_example["title"],
+                "image": static_example_image,
+            }
+        ],
+    }
+    alt_links = "\n".join(
+        f'    <link rel="alternate" hreflang="{hreflang}" href="{html.escape(url, quote=True)}">'
+        for hreflang, url in advertised_localized_urls.items()
+    )
+    alt_links += f'\n    <link rel="alternate" hreflang="x-default" href="{html.escape(localized_urls["en"], quote=True)}">'
+    examples_html = ""
+    if examples:
+        cards: List[str] = []
+        for task in examples:
+            task_title = html.escape(_task_public_title(task, text["h1"]), quote=True)
+            cards.append(f"""
+                    <a class="rig-article-example" href="/task?id={html.escape(task.id, quote=True)}">
+                        <span class="rig-article-example-media">
+                            <img src="/thumb/{html.escape(task.id, quote=True)}" alt="{task_title}" loading="lazy" width="360" height="640">
+                        </span>
+                        <span class="rig-article-example-title">{task_title}</span>
+                        <span class="rig-article-example-link">{html.escape(ui["open_example"])}</span>
+                    </a>""")
+        examples_html = "\n".join(cards)
+    else:
+        static_title = html.escape(static_example["title"], quote=True)
+        examples_html = f"""
+                    <a class="rig-article-example" href="{html.escape(static_example["url"], quote=True)}">
+                        <span class="rig-article-example-media">
+                            <img src="{html.escape(static_example["image"], quote=True)}" alt="{static_title}" loading="lazy" width="640" height="360">
+                        </span>
+                        <span class="rig-article-example-title">{static_title}</span>
+                        <span class="rig-article-example-link">Open V2 animal rig examples</span>
+                    </a>"""
+
+    faq_html = "\n".join(
+        f"""
+                    <article class="rig-article-faq-item">
+                        <h3>{html.escape(q)}</h3>
+                        <p>{html.escape(a)}</p>
+                    </article>"""
+        for q, a in text["faq"]
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="{html.escape(ui["html_lang"], quote=True)}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{html.escape(text["title"])}</title>
+    <meta name="description" content="{html.escape(text["description"], quote=True)}">
+    <meta name="keywords" content="{html.escape(", ".join(text["keywords"]), quote=True)}">
+    <meta name="robots" content="{robots_content}">
+    <link rel="canonical" href="{html.escape(canonical, quote=True)}">
+{alt_links}
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="{html.escape(canonical, quote=True)}">
+    <meta property="og:title" content="{html.escape(text["title"], quote=True)}">
+    <meta property="og:description" content="{html.escape(text["description"], quote=True)}">
+    <meta property="og:image" content="{html.escape(first_image, quote=True)}">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{html.escape(text["title"], quote=True)}">
+    <meta name="twitter:description" content="{html.escape(text["description"], quote=True)}">
+    <meta name="twitter:image" content="{html.escape(first_image, quote=True)}">
+    <script type="application/ld+json">{json.dumps(article_json, ensure_ascii=False)}</script>
+    <script type="application/ld+json">{json.dumps(faq_json, ensure_ascii=False)}</script>
+    <script type="application/ld+json">{json.dumps(breadcrumb_json, ensure_ascii=False)}</script>
+    <script type="application/ld+json">{json.dumps(item_list_json, ensure_ascii=False)}</script>
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-rig-type-seo">
+</head>
+<body data-layout-free3d-init="none">
+    <div id="site-header"></div>
+    <main class="rig-article-page">
+        <section class="rig-article-hero">
+            <div class="container rig-article-hero-inner">
+                <p class="rig-article-kicker">{html.escape(ui["kicker"])}</p>
+                <h1>{html.escape(text["h1"])}</h1>
+                <p class="rig-article-lead">{html.escape(text["lead"])}</p>
+                <div class="rig-article-actions">
+                    <a class="btn btn-primary" href="/">{html.escape(ui["cta_upload"])}</a>
+                    <a class="btn btn-secondary" href="/gallery?rig_type={html.escape(rig_key, quote=True)}">{html.escape(ui["cta_gallery"])}</a>
+                </div>
+            </div>
+        </section>
+        <section class="container rig-article-section">
+            <div class="rig-article-content-grid">
+                <article class="rig-article-panel">
+                    <h2>{html.escape(ui["overview"])}</h2>
+                    <p>{html.escape(text["shape"])}</p>
+                    <p>{html.escape(text["use"])}</p>
+                </article>
+                <article class="rig-article-panel">
+                    <h2>{html.escape(ui["workflow"])}</h2>
+                    <p>{html.escape(text["workflow"])}</p>
+                </article>
+                <article class="rig-article-panel">
+                    <h2>{html.escape(ui["prep"])}</h2>
+                    <p>{html.escape(text["prep"])}</p>
+                </article>
+            </div>
+        </section>
+        <section class="container rig-article-section">
+            <div class="rig-article-section-header">
+                <h2>{html.escape(ui["examples"])}</h2>
+                <p>{html.escape(ui["examples_intro"])}</p>
+            </div>
+            <div class="rig-article-examples">
+{examples_html}
+            </div>
+        </section>
+        <section class="container rig-article-section">
+            <div class="rig-article-section-header">
+                <h2>{html.escape(ui["faq"])}</h2>
+            </div>
+            <div class="rig-article-faq">
+{faq_html}
+            </div>
+        </section>
+    </main>
+    <div id="site-footer"></div>
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js"></script>
+</body>
+</html>
+"""
+
+
+async def _rig_article_response(rig_key: str, lang: str, db: AsyncSession) -> HTMLResponse:
+    if rig_key not in RIG_ARTICLE_TYPES or lang not in RIG_ARTICLE_LANGS:
+        raise HTTPException(status_code=404, detail="Not found")
+    examples = await _rig_article_examples(db, rig_key)
+    return HTMLResponse(content=_inject_static_layout(_build_rig_article_html(rig_key, lang, examples)))
 
 
 def _resolve_worker_base_from_task(task) -> Optional[str]:
@@ -8516,6 +9688,9 @@ async def _proxy_model_file(
     content_types = {
         "glb": "model/gltf-binary",
         "fbx": "application/octet-stream",
+        "blend": "application/x-blender",
+        "json": "application/json",
+        "mp4": "video/mp4",
         "zip": "application/zip",
     }
     content_type = content_types.get(ext, "application/octet-stream")
@@ -8673,6 +9848,19 @@ def _estimate_path_size(path: Path) -> int:
         return 0
 
 
+def _upload_path_for_token(upload_token: Optional[str]) -> Optional[Path]:
+    if not upload_token or upload_token in (".", "..") or "/" in upload_token or "\\" in upload_token:
+        return None
+    try:
+        base = Path(UPLOAD_DIR).resolve()
+        path = (base / upload_token).resolve()
+        if path == base or os.path.commonpath([str(base), str(path)]) != str(base):
+            return None
+        return path
+    except Exception:
+        return None
+
+
 def _iter_task_artifact_paths(task: Task) -> List[Path]:
     paths: List[Path] = [
         TASK_CACHE_DIR / task.id,
@@ -8680,8 +9868,9 @@ def _iter_task_artifact_paths(task: Task) -> List[Path]:
     ]
     paths.extend(GLB_CACHE_DIR.glob(f"{task.id}_*.glb"))
     upload_token = _extract_upload_token_from_input_url(getattr(task, "input_url", None))
-    if upload_token:
-        paths.append(Path(UPLOAD_DIR) / upload_token)
+    upload_path = _upload_path_for_token(upload_token)
+    if upload_path:
+        paths.append(upload_path)
 
     unique_paths: List[Path] = []
     seen: set[str] = set()
@@ -8813,12 +10002,98 @@ def purge_task_cache_bundle_zips(
     return deleted, freed
 
 
-async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
+async def purge_terminal_upload_dirs(
+    db: AsyncSession,
+    *,
+    target_free_bytes: Optional[int] = None,
+    min_age_hours: float = UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS,
+    record_items: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[int, int]:
+    """
+    Under disk pressure, remove original upload folders for completed/failed tasks.
+
+    This preserves public gallery rows, cached task downloads, GLB cache, videos, and
+    poster assets. Upload folders for created/processing tasks are always protected.
+    """
+    upload_base = Path(UPLOAD_DIR)
+    if not upload_base.exists():
+        return 0, 0
+
+    cutoff_ts = time.time() - max(0.0, float(min_age_hours)) * 3600
+    protected_tokens: set[str] = set()
+    candidate_paths: Dict[str, Path] = {}
+
+    rows = (
+        await db.execute(
+            select(Task.id, Task.status, Task.input_url)
+            .where(Task.input_url.isnot(None))
+        )
+    ).all()
+
+    for _task_id, status, input_url in rows:
+        token = _extract_upload_token_from_input_url(input_url)
+        if not token:
+            continue
+        path = _upload_path_for_token(token)
+        if path is None or not path.is_dir():
+            continue
+        if status not in ("done", "error"):
+            protected_tokens.add(token)
+            candidate_paths.pop(token, None)
+            continue
+        if token not in protected_tokens:
+            candidate_paths[token] = path
+
+    cleanable: List[Tuple[float, Path]] = []
+    for token, path in candidate_paths.items():
+        if token in protected_tokens:
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff_ts:
+            cleanable.append((mtime, path))
+
+    cleanable.sort(key=lambda x: x[0])
+    deleted = 0
+    freed = 0
+
+    for _mtime, path in cleanable:
+        if target_free_bytes is not None and shutil.disk_usage("/").free >= target_free_bytes:
+            break
+        if not path.is_dir():
+            continue
+        size = _estimate_path_size(path)
+        try:
+            shutil.rmtree(path)
+            deleted += 1
+            freed += size
+            print(f"[Disk] Removed terminal upload {path.name} ({size / (1024**2):.1f} MB)")
+            if record_items is not None:
+                record_items.append(
+                    {
+                        "path": path.name,
+                        "type": "terminal_upload",
+                        "size_mb": size / (1024**2),
+                    }
+                )
+        except Exception as e:
+            print(f"[Disk] Failed to remove terminal upload {path}: {e}")
+
+    return deleted, freed
+
+
+async def ensure_disk_headroom_for_new_task(
+    db: AsyncSession,
+    *,
+    delete_task_rows: bool = AUTOMATIC_TASK_DB_DELETION,
+) -> dict:
     """
     Run when creating a new task: if free space on / is below NEW_TASK_MIN_FREE_GB,
-    first delete bundle ZIPs; if still low, delete oldest done/error tasks (DB + artifacts)
-    until free space target is met or NEW_TASK_PURGE_TASKS_MAX_FREED_GB of data was removed
-    in that second phase (whichever comes first).
+    first delete bundle ZIPs, then old terminal-task upload originals; if still low,
+    delete oldest done/error tasks (DB + artifacts) until free space target is met or
+    NEW_TASK_PURGE_TASKS_MAX_FREED_GB of data was removed in that final phase.
     """
     target_bytes = NEW_TASK_MIN_FREE_GB * 1024 * 1024 * 1024
     max_task_phase_bytes = NEW_TASK_PURGE_TASKS_MAX_FREED_GB * 1024 * 1024 * 1024
@@ -8828,6 +10103,8 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
         "initial_free_gb": free_bytes / (1024**3),
         "zips_deleted": 0,
         "zip_freed_bytes": 0,
+        "terminal_uploads_deleted": 0,
+        "terminal_upload_freed_bytes": 0,
         "tasks_purged": 0,
         "task_phase_freed_bytes": 0,
         "final_free_gb": free_bytes / (1024**3),
@@ -8848,6 +10125,39 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
                 f"[NewTask Disk] ZIP purge: removed {zd} file(s), "
                 f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB)"
             )
+        return summary
+
+    ud, ub = await purge_terminal_upload_dirs(db, target_free_bytes=target_bytes)
+    summary["terminal_uploads_deleted"] = ud
+    summary["terminal_upload_freed_bytes"] = ub
+
+    free_bytes = shutil.disk_usage("/").free
+    summary["final_free_gb"] = free_bytes / (1024**3)
+    if free_bytes >= target_bytes:
+        if ud:
+            print(
+                f"[NewTask Disk] Upload purge: removed {ud} folder(s), "
+                f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB)"
+            )
+        return summary
+
+    if not delete_task_rows:
+        print(
+            f"[NewTask Disk] Still low after non-DB cleanup: "
+            f"{free_bytes / (1024**3):.2f} GB free (target {NEW_TASK_MIN_FREE_GB} GB); "
+            "skipping task DB row purge"
+        )
+        try:
+            from telegram_bot import broadcast_disk_space_low
+
+            await broadcast_disk_space_low(
+                free_gb=summary["final_free_gb"],
+                target_gb=NEW_TASK_MIN_FREE_GB,
+                zips_deleted=summary["zips_deleted"],
+                tasks_purged=0,
+            )
+        except Exception as e:
+            print(f"[NewTask Disk] Telegram disk-low notify failed: {e}")
         return summary
 
     task_phase_freed = 0
@@ -8886,9 +10196,10 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
 
     free_bytes = shutil.disk_usage("/").free
     summary["final_free_gb"] = free_bytes / (1024**3)
-    if summary["zips_deleted"] or summary["tasks_purged"]:
+    if summary["zips_deleted"] or summary["terminal_uploads_deleted"] or summary["tasks_purged"]:
         print(
             f"[NewTask Disk] Headroom pass done: zips={summary['zips_deleted']}, "
+            f"uploads={summary['terminal_uploads_deleted']}, "
             f"tasks={summary['tasks_purged']}, free now {summary['final_free_gb']:.2f} GB "
             f"(target {NEW_TASK_MIN_FREE_GB} GB)"
         )
@@ -8905,6 +10216,37 @@ async def ensure_disk_headroom_for_new_task(db: AsyncSession) -> dict:
         except Exception as e:
             print(f"[NewTask Disk] Telegram disk-low notify failed: {e}")
     return summary
+
+
+async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dict[str, Any]:
+    """
+    Request-path disk guard. It may remove regenerable bundle ZIPs, stale terminal
+    upload originals, and orphan cache files, but it never deletes task DB rows.
+    """
+    try:
+        await enforce_task_cache_max_size(db)
+        result = await cleanup_disk_space(
+            min_free_gb=NEW_TASK_MIN_FREE_GB,
+            db=db,
+            delete_task_rows=False,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[Request Disk] Cleanup failed before {context}: {exc}")
+        result = {}
+
+    free_gb = shutil.disk_usage("/").free / (1024**3)
+    if free_gb < NEW_TASK_MIN_FREE_GB:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Server disk is under pressure. "
+                f"{free_gb:.2f}GB free, target is {NEW_TASK_MIN_FREE_GB:.2f}GB. "
+                "Please try again later."
+            ),
+        )
+    return result
 
 
 def _parse_uuid_dirname(name: str) -> Optional[uuid.UUID]:
@@ -9036,6 +10378,82 @@ async def enforce_task_cache_max_size(db: AsyncSession) -> Dict[str, Any]:
     return summary
 
 
+async def evict_task_cache_until_free_space(
+    db: AsyncSession,
+    *,
+    min_free_gb: float,
+    record_items: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Pressure-only task cache eviction.
+
+    This removes oldest static/tasks/<task_id> directories until root free space
+    reaches min_free_gb. It does not delete task DB rows and skips active tasks.
+    """
+    target_bytes = int(float(min_free_gb) * 1024 * 1024 * 1024)
+    free_bytes = shutil.disk_usage("/").free
+    summary: Dict[str, Any] = {
+        "target_free_gb": float(min_free_gb),
+        "initial_free_gb": free_bytes / (1024**3),
+        "initial_task_cache_gb": _dir_size_bytes(TASK_CACHE_DIR) / (1024**3),
+        "dirs_removed": 0,
+        "bytes_freed": 0,
+        "final_free_gb": free_bytes / (1024**3),
+        "final_task_cache_gb": _dir_size_bytes(TASK_CACHE_DIR) / (1024**3),
+    }
+    if free_bytes >= target_bytes:
+        return summary
+
+    safety = 0
+    while shutil.disk_usage("/").free < target_bytes:
+        safety += 1
+        if safety > 50000:
+            print("[TaskCachePressure] Safety stop: too many iterations")
+            break
+
+        candidates = await _task_cache_eviction_candidates(db)
+        if not candidates:
+            break
+
+        _ts, dirname = candidates[0]
+        target = TASK_CACHE_DIR / dirname
+        if not target.is_dir():
+            continue
+
+        try:
+            before = _dir_size_bytes(target)
+            shutil.rmtree(target)
+            summary["dirs_removed"] += 1
+            summary["bytes_freed"] += before
+            if record_items is not None:
+                record_items.append(
+                    {
+                        "path": dirname,
+                        "type": "task_cache_pressure",
+                        "size_mb": before / (1024**2),
+                    }
+                )
+            print(
+                f"[TaskCachePressure] Removed {dirname} (~{before / (1024**2):.1f} MB), "
+                f"free now {shutil.disk_usage('/').free / (1024**3):.2f} GB "
+                f"(target {min_free_gb} GB)"
+            )
+        except OSError as e:
+            print(f"[TaskCachePressure] Failed to remove {target}: {e}")
+            break
+
+    final_free = shutil.disk_usage("/").free
+    summary["final_free_gb"] = final_free / (1024**3)
+    summary["final_task_cache_gb"] = _dir_size_bytes(TASK_CACHE_DIR) / (1024**3)
+    if summary["dirs_removed"] > 0:
+        print(
+            f"[TaskCachePressure] Complete: removed {summary['dirs_removed']} dir(s), "
+            f"freed {summary['bytes_freed'] / (1024**3):.2f} GB, "
+            f"free now {summary['final_free_gb']:.2f} GB"
+        )
+    return summary
+
+
 async def purge_tasks_without_poster_and_video(db: AsyncSession) -> dict:
     """
     Delete terminal tasks (done/error) with no poster-like URL in ready_urls/output_urls.
@@ -9133,7 +10551,8 @@ async def purge_gallery_upstream_dead_tasks(
                     await db.rollback()
                     print(f"[Gallery upstream purge] Failed {task.id} (dead poster): {e}")
                 continue
-            if task.video_url and not await _probe_http_asset_reachable(client, task.video_url):
+            video_url = await _resolve_task_video_source_url(task)
+            if video_url and not await _probe_http_asset_reachable(client, video_url):
                 _delete_task_artifacts(task)
                 try:
                     await _delete_task_record_and_related(db, task.id)
@@ -9219,18 +10638,14 @@ async def api_proxy_model_glb(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    if not task.guid:
+    if not task.guid or not task.worker_api:
         raise HTTPException(status_code=404, detail="Model not available yet")
-
-    worker_base = _resolve_worker_base_from_task(task)
-    if not worker_base:
-        raise HTTPException(status_code=404, detail="Model worker is not available yet")
+    
+    from workers import get_worker_base_url
+    worker_base = get_worker_base_url(task.worker_api)
     model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
     
-    cached = await _get_cached_glb(task_id, model_url, "model")
-    if cached:
-        return cached
-    raise HTTPException(status_code=404, detail="Model GLB not available yet")
+    return await _proxy_model_file(model_url, f"{task_id}_model.glb")
 
 
 @app.get("/api/task/{task_id}/animations.glb")
@@ -9284,8 +10699,10 @@ async def api_head_animations_fbx(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    animations_url, filename = await _resolve_available_all_animations_fbx_url(task)
+    animations_url, filename = _resolve_all_animations_fbx_url(task)
     if not animations_url or not filename:
+        raise HTTPException(status_code=404, detail="Animations FBX not available yet")
+    if not await _worker_file_available(animations_url):
         raise HTTPException(status_code=404, detail="Animations FBX not available yet")
 
     return Response(
@@ -9309,7 +10726,7 @@ async def api_proxy_animations_fbx(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    animations_url, filename = await _resolve_available_all_animations_fbx_url(task)
+    animations_url, filename = _resolve_all_animations_fbx_url(task)
     if not animations_url or not filename:
         raise HTTPException(status_code=404, detail="Animations FBX not available yet")
     return await _proxy_model_file(animations_url, filename, as_attachment=True)
@@ -9362,6 +10779,98 @@ async def api_proxy_prepared_glb(
     # NOTE: Don't fall back to original model ({guid}.glb) as it's not "prepared" 
     # and would cause viewer to set preparedLoaded=true, skipping the actual prepared version
     raise HTTPException(status_code=404, detail="Prepared model not available yet")
+
+
+async def _blueprint_file_response(
+    task_id: str,
+    suffix: str,
+    public_filename: str,
+    media_type: str,
+    db: AsyncSession,
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if str(task.input_type or "").strip().lower() != "animal":
+        raise HTTPException(status_code=404, detail="Blueprint files are available for animal rig tasks only")
+
+    cached = _find_cached_blueprint_file(task_id, task.guid, suffix)
+    if cached:
+        return FileResponse(
+            path=str(cached),
+            media_type=media_type,
+            filename=public_filename,
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Encoding": "identity",
+            },
+        )
+
+    source_url = await _resolve_task_worker_file_url(task, suffix)
+    if not source_url:
+        raise HTTPException(status_code=404, detail="Blueprint file not available yet")
+    return await _proxy_model_file(source_url, public_filename, as_attachment=False)
+
+
+@app.head("/api/task/{task_id}/blueprint/skeleton.json")
+@app.get("/api/task/{task_id}/blueprint/skeleton.json")
+async def api_proxy_blueprint_skeleton(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _blueprint_file_response(
+        task_id,
+        BLUEPRINT_SKELETON_SUFFIX,
+        "skeleton.json",
+        "application/json",
+        db,
+    )
+
+
+@app.head("/api/task/{task_id}/blueprint/rig-preview.mp4")
+@app.get("/api/task/{task_id}/blueprint/rig-preview.mp4")
+async def api_proxy_blueprint_rig_preview(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _blueprint_file_response(
+        task_id,
+        BLUEPRINT_RIG_PREVIEW_SUFFIX,
+        "rig_preview.mp4",
+        "video/mp4",
+        db,
+    )
+
+
+@app.head("/api/task/{task_id}/blueprint/model.glb")
+@app.get("/api/task/{task_id}/blueprint/model.glb")
+async def api_proxy_blueprint_model_glb(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _is_animal_task(task):
+        raise HTTPException(status_code=404, detail="Blueprint model is available for animal rig tasks only")
+
+    cache_path = GLB_CACHE_DIR / f"{task_id}_blueprint.glb"
+    if cache_path.exists() and _validate_glb_file(cache_path):
+        return FileResponse(
+            path=str(cache_path),
+            media_type="model/gltf-binary",
+            filename=f"{task_id}_blueprint.glb",
+            headers=dict(_GLB_FILE_HTTP_HEADERS),
+        )
+
+    source_url = await _resolve_task_blueprint_model_url(task)
+    if not source_url:
+        raise HTTPException(status_code=404, detail="Blueprint model not available yet")
+    result = await _get_cached_glb(task_id, source_url, "blueprint")
+    if result:
+        return result
+    raise HTTPException(status_code=404, detail="Blueprint model not available yet")
 
 
 @app.head("/thumb/{task_id}")
@@ -9664,34 +11173,20 @@ def validate_telegram_init_data(init_data: str) -> Optional[dict]:
 @app.post("/api/notify/credits-click")
 async def notify_credits_click(
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    user: Optional[User] = Depends(get_current_user),
 ):
-    """Notify Telegram about credits purchase click"""
+    """Notify Telegram about a purchase button click."""
     try:
         body = await request.json()
-        package = body.get('package', 'unknown')
-        price = body.get('price', 'unknown')
+        package = str(body.get('package') or 'unknown')[:120]
+        price = str(body.get('price') or 'unknown')[:80]
+        product_kind = str(body.get('product_kind') or 'credits')[:40]
+        permalink = str(body.get('permalink') or '')[:120]
+        source = str(body.get('source') or '')[:80]
+        page_url = str(body.get('page_url') or '')[:500]
         
-        # Get user info from session
-        user_email = None
-        anon_id = None
-        
-        session_id = request.cookies.get("session_id")
-        if session_id:
-            result = await db.execute(
-                select(UserSession).where(UserSession.session_id == session_id)
-            )
-            sess = result.scalar_one_or_none()
-            if sess:
-                user_result = await db.execute(
-                    select(User).where(User.id == sess.user_id)
-                )
-                user = user_result.scalar_one_or_none()
-                if user:
-                    user_email = user.email
-        
-        if not user_email:
-            anon_id = request.cookies.get("anon_id")
+        user_email = user.email if user else None
+        anon_id = None if user_email else _effective_anon_id(request)
         
         # Fire-and-forget notification
         from telegram_bot import broadcast_credits_purchase_click
@@ -9699,7 +11194,11 @@ async def notify_credits_click(
             package=package,
             price=price,
             user_email=user_email,
-            anon_id=anon_id
+            anon_id=anon_id,
+            product_kind=product_kind,
+            permalink=permalink,
+            source=source,
+            page_url=page_url,
         ))
         
         return {"ok": True}
@@ -9755,6 +11254,746 @@ async def telegram_config():
 
 
 # =============================================================================
+VIEWER_BACKDROP_SUFFIXES = frozenset({".jpg", ".jpeg"})
+VIEWER_THEME_JSON_VERSION = 1
+VIEWER_THEME_ROOT_DIR = Path(__file__).resolve().parent.parent / "static" / "env" / "backdrops"
+VIEWER_THEME_SOURCE_DIR = VIEWER_THEME_ROOT_DIR / "source"
+VIEWER_THEME_VIEWER_DIR = VIEWER_THEME_ROOT_DIR / "viewer"
+VIEWER_THEME_THUMB_DIR = VIEWER_THEME_ROOT_DIR / "thumbs"
+VIEWER_THEME_ASSET_VERSION = "20260516-16x9"
+
+
+
+
+
+def _slugify_viewer_theme(value: str) -> str:
+
+    s = re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower())
+
+    s = re.sub(r"_+", "_", s).strip("_")
+
+    return s or "viewer_theme"
+
+
+
+
+
+def _viewer_theme_json_path_for_image(image_path: Path) -> Path:
+    return VIEWER_THEME_ROOT_DIR / f"{_slugify_viewer_theme(image_path.stem)}.json"
+
+def _load_viewer_theme_json(image_path: Path) -> Dict[str, Any]:
+    theme_id = _slugify_viewer_theme(image_path.stem)
+    json_path = _viewer_theme_json_path_for_image(image_path)
+    if not json_path.is_file():
+        raise RuntimeError(f"Viewer theme JSON missing for {theme_id}: {json_path}")
+    data = _read_json_file(str(json_path))
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Viewer theme JSON is invalid for {theme_id}: {json_path}")
+    theme_id = _slugify_viewer_theme(str(data.get("theme_id") or theme_id))
+    viewer_path = VIEWER_THEME_VIEWER_DIR / f"{theme_id}.jpg"
+    thumb_path = VIEWER_THEME_THUMB_DIR / f"{theme_id}.jpg"
+    if not viewer_path.is_file():
+        raise RuntimeError(f"Viewer theme derivative missing for {theme_id}: {viewer_path}")
+    if not thumb_path.is_file():
+        raise RuntimeError(f"Viewer theme thumbnail missing for {theme_id}: {thumb_path}")
+    merged = dict(data)
+    merged["theme_id"] = theme_id
+    merged["id"] = theme_id
+    merged["image_filename"] = image_path.name
+    merged["source_src"] = f"/static/env/backdrops/source/{quote(image_path.name)}"
+    merged["src"] = f"/static/env/backdrops/viewer/{quote(theme_id)}.jpg?v={VIEWER_THEME_ASSET_VERSION}"
+    merged["thumb_src"] = f"/static/env/backdrops/thumbs/{quote(theme_id)}.jpg?v={VIEWER_THEME_ASSET_VERSION}"
+    return merged
+
+def _viewer_theme_source_images() -> List[Path]:
+    if not VIEWER_THEME_SOURCE_DIR.is_dir():
+        raise RuntimeError(f"Viewer theme source directory missing: {VIEWER_THEME_SOURCE_DIR}")
+    return sorted(
+        [p for p in VIEWER_THEME_SOURCE_DIR.iterdir() if p.is_file() and p.suffix.lower() in VIEWER_BACKDROP_SUFFIXES],
+        key=lambda p: p.name.lower(),
+    )
+
+
+def _ensure_viewer_theme_json_files() -> None:
+    missing = []
+    for p in _viewer_theme_source_images():
+        if not _viewer_theme_json_path_for_image(p).is_file():
+            missing.append(_slugify_viewer_theme(p.stem))
+    if missing:
+        raise RuntimeError(f"Viewer theme JSON missing for: {', '.join(missing)}")
+
+async def _sync_viewer_backdrop_themes_async() -> None:
+    await asyncio.to_thread(_ensure_viewer_theme_json_files)
+
+def _list_viewer_theme_items() -> List[Dict[str, Any]]:
+    """Theme manifest for the 3D viewer: optimized viewer JPG plus tiny JPG strip thumbnail."""
+    _ensure_viewer_theme_json_files()
+    files = _viewer_theme_source_images()
+    seen = set()
+    out: List[Dict[str, Any]] = []
+    for p in files:
+        item = _load_viewer_theme_json(p)
+        tid = _slugify_viewer_theme(str(item.get("theme_id") or p.stem))
+        if tid in seen:
+            continue
+        seen.add(tid)
+        item["id"] = tid
+        item["theme_id"] = tid
+        out.append(item)
+    return out
+
+@app.get("/api/viewer-themes")
+
+async def api_viewer_themes():
+
+    """Auto-discovered 3D viewer themes (image + companion JSON settings, name order)."""
+
+    return _list_viewer_theme_items()
+
+
+
+
+
+@app.get("/api/viewer-backdrops")
+
+async def api_viewer_backdrops():
+
+    """Backward-compatible alias for theme-aware viewer backgrounds."""
+
+    return _list_viewer_theme_items()
+
+
+
+
+
+@app.put("/api/admin/viewer-themes/{theme_id}")
+
+async def api_admin_save_viewer_theme(
+
+    theme_id: str,
+
+    request: Request,
+
+    admin: User = Depends(require_admin),
+
+):
+
+    body = await request.body()
+
+    try:
+
+        payload = json.loads(body.decode("utf-8"))
+
+    except Exception:
+
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    if not isinstance(payload, dict):
+
+        raise HTTPException(status_code=400, detail="Expected JSON object")
+
+    themes = _list_viewer_theme_items()
+
+    theme = next((x for x in themes if str(x.get("theme_id")) == str(theme_id)), None)
+
+    if not theme:
+
+        raise HTTPException(status_code=404, detail="Theme not found")
+
+    image_filename = str(theme.get("image_filename") or "")
+
+    image_path = VIEWER_THEME_SOURCE_DIR / image_filename
+
+    if not image_path.is_file():
+
+        raise HTTPException(status_code=404, detail="Theme image not found")
+
+    existing = _load_viewer_theme_json(image_path)
+
+    allowed = {
+
+        "theme_name",
+
+        "theme_short_description",
+
+        "semantic_tags",
+
+        "camera_transform",
+
+        "plane_color",
+
+        "shadow_settings",
+
+        "environment_settings",
+
+        "sun_settings",
+
+    }
+
+    clean = {k: payload[k] for k in allowed if k in payload}
+
+    clean["schema_version"] = VIEWER_THEME_JSON_VERSION
+
+    clean["theme_id"] = str(theme_id)
+
+    clean["image_filename"] = image_filename
+
+    clean["admin_edited_bool"] = True
+
+    merged = {**existing, **clean}
+
+    _atomic_write_json_file(str(_viewer_theme_json_path_for_image(image_path)), merged)
+
+    return {"ok": True, "theme": _load_viewer_theme_json(image_path)}
+
+
+
+
+
+def _viewer_theme_score_text(theme: Dict[str, Any], text: str) -> float:
+
+    hay = f" {text.lower()} "
+
+    score = 0.0
+
+    tid = str(theme.get("theme_id") or theme.get("id") or "").lower()
+
+    alias_tags: Dict[str, List[str]] = {
+
+        "dog_park_yard": ["cat", "cats", "kitten", "kitty", "feline", "dog", "puppy", "pet", "pets"],
+
+        "ranch_farmyard": ["horse", "cow", "bull", "pony", "deer", "goat", "sheep", "pig", "piglet", "hog", "boar", "swine"],
+
+        "alien_planet": ["astronaut", "space", "alien", "planet", "ufo"],
+
+        "sci_fi_hangar": ["robot", "mech", "android", "cyborg", "spaceship", "vehicle"],
+
+        "jungle_temple_ruins": ["dinosaur", "dinosaurs", "dino", "reptile", "prehistoric", "lizard", "turtle"],
+
+        "studio_white_softbox": ["product", "toy", "neutral", "studio"],
+
+    }
+
+    for alias in alias_tags.get(tid, []):
+
+        if f" {alias} " in hay:
+
+            score += 3.0
+
+    for tag in theme.get("semantic_tags") or []:
+
+        tag_s = str(tag).strip().lower()
+
+        if not tag_s:
+
+            continue
+
+        if tag_s in hay:
+
+            score += 2.5
+
+        for part in re.split(r"[^a-z0-9]+", tag_s):
+
+            if len(part) >= 4 and f" {part} " in hay:
+
+                score += 1.0
+
+    name = str(theme.get("theme_name") or "").lower()
+
+    if name and any(part and part in hay for part in re.split(r"[^a-z0-9]+", name) if len(part) >= 4):
+
+        score += 0.75
+
+    return score
+
+
+
+
+
+def _viewer_theme_text_has_any(text: str, terms: List[str]) -> bool:
+
+    tokens = set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+
+    return any(str(term or "").lower() in tokens for term in terms)
+
+
+
+
+
+def _viewer_theme_rule_based_selection(
+
+    themes: List[Dict[str, Any]],
+
+    text: str,
+
+    *,
+
+    provider_string: str,
+
+) -> Optional[Dict[str, Any]]:
+
+    rules = [
+
+        (
+
+            ["pig", "piglet", "hog", "boar", "swine", "cow", "bull", "horse", "pony", "goat", "sheep"],
+
+            "ranch_farmyard",
+
+            "farm/livestock animal keyword match",
+
+        ),
+
+        (
+
+            ["dinosaur", "dinosaurs", "dino", "prehistoric", "reptile"],
+
+            "jungle_temple_ruins",
+
+            "dinosaur/reptile keyword match",
+
+        ),
+
+        (
+
+            ["dragon", "wyvern"],
+
+            "crystal_cavern",
+
+            "dragon/fantasy creature keyword match",
+
+        ),
+
+    ]
+
+    for terms, theme_id, reason in rules:
+
+        if not _viewer_theme_text_has_any(text, terms):
+
+            continue
+
+        if not any(str(t.get("theme_id")) == theme_id for t in themes):
+
+            continue
+
+        return {
+
+            "theme_id": theme_id,
+
+            "confidence_float": 0.95,
+
+            "reason_string": reason,
+
+            "provider_string": provider_string,
+
+        }
+
+    return None
+
+
+
+
+
+def _select_viewer_theme_from_metadata(
+
+    *,
+
+    input_url: Optional[str],
+
+    input_type: Optional[str],
+
+    rig_v2_detection_meta: Optional[Dict[str, Any]],
+
+) -> Optional[Dict[str, Any]]:
+
+    try:
+
+        themes = _list_viewer_theme_items()
+
+    except Exception as e:
+
+        print(f"[ViewerThemes] metadata select failed to list themes: {e}")
+
+        return None
+
+    if not themes:
+
+        return None
+
+    pieces: List[str] = [str(input_type or "")]
+
+    if input_url:
+
+        try:
+
+            pieces.append(Path(urlparse(input_url).path or "").name)
+
+        except Exception:
+
+            pieces.append(str(input_url))
+
+    if isinstance(rig_v2_detection_meta, dict):
+
+        pieces.extend(str(v) for v in rig_v2_detection_meta.values() if isinstance(v, (str, int, float)))
+
+        first = rig_v2_detection_meta.get("first_result")
+
+        if isinstance(first, dict):
+
+            pieces.extend(str(v) for v in first.values() if isinstance(v, (str, int, float)))
+
+    text = " ".join(pieces)
+
+    rule_selected = _viewer_theme_rule_based_selection(themes, text, provider_string="heuristic:create-rule")
+
+    if rule_selected:
+
+        return rule_selected
+
+    scored = sorted(((t, _viewer_theme_score_text(t, text)) for t in themes), key=lambda x: x[1], reverse=True)
+
+    best, score = scored[0]
+
+    if score <= 0:
+
+        return None
+
+    return {
+
+        "theme_id": str(best.get("theme_id")),
+
+        "confidence_float": min(1.0, max(0.2, score / 8.0)),
+
+        "reason_string": "create metadata match",
+
+        "provider_string": "heuristic:create",
+
+    }
+
+
+
+
+
+async def _viewer_theme_select_with_openai(image_data_url: str, themes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+
+    if not image_data_url:
+
+        return None
+
+    try:
+
+        cfg = _rig_v2_load_vision_config()
+
+    except Exception:
+
+        return None
+
+    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
+
+    api_url = str(cfg.get("open_ai_api_url_string") or "https://api.openai.com/v1/chat/completions").strip()
+
+    if not api_key or not api_url:
+
+        return None
+
+    compact = [
+
+        {
+
+            "theme_id": str(t.get("theme_id") or t.get("id") or ""),
+
+            "theme_name": str(t.get("theme_name") or ""),
+
+            "description": str(t.get("theme_short_description") or ""),
+
+            "tags": t.get("semantic_tags") or [],
+
+        }
+
+        for t in themes
+
+    ]
+
+    prompt = (
+
+        "Analyze the rendered 3D model image and choose the most semantically appropriate viewer theme for the model subject. "
+
+        "Ignore the current background/backdrop in the screenshot; it may be a wrong temporary default. "
+
+        "Return only JSON: {\"theme_id\":\"<one theme_id>\",\"confidence_float\":0.0,\"reason_string\":\"short\"}. "
+
+        "Prefer exact concepts: cat/kitten/dog/pet -> pet park; astronaut/alien/planet -> space; robot/mech -> sci-fi hangar; horse/cow/deer -> ranch/stable; "
+
+        "wild animal -> forest/savanna; fantasy creature -> crystal/ruins/jungle; neutral product -> studio.\n\n"
+
+        f"Available themes JSON:\n{json.dumps(compact, ensure_ascii=False)}"
+
+    )
+
+    model = str(cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
+
+    payload: Dict[str, Any] = {
+
+        "model": model,
+
+        "response_format": {"type": "json_object"},
+
+        "messages": [
+
+            {
+
+                "role": "user",
+
+                "content": [
+
+                    {"type": "text", "text": prompt},
+
+                    {"type": "image_url", "image_url": {"url": image_data_url, "detail": "low"}},
+
+                ],
+
+            }
+
+        ],
+
+    }
+
+    if model.startswith(("gpt-5", "o3", "o4")):
+
+        payload["max_completion_tokens"] = 900
+
+    else:
+
+        payload["temperature"] = 0.0
+
+        payload["max_tokens"] = 900
+
+    try:
+
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+
+            resp = await client.post(api_url, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=payload)
+
+        if resp.status_code != 200:
+
+            print(f"[ViewerThemes] OpenAI auto-select HTTP {resp.status_code}: {resp.text[:240]}")
+
+            return None
+
+        data = resp.json()
+
+        content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "")
+
+        parsed = json.loads(str(content))
+
+        if not isinstance(parsed, dict):
+
+            return None
+
+        tid = str(parsed.get("theme_id") or "").strip()
+
+        if not tid:
+
+            return None
+
+        match = next((t for t in themes if str(t.get("theme_id")) == tid), None)
+
+        if not match:
+
+            return None
+
+        return {
+
+            "theme_id": tid,
+
+            "confidence_float": max(0.0, min(1.0, float(parsed.get("confidence_float") or 0.5))),
+
+            "reason_string": str(parsed.get("reason_string") or "vision selected theme")[:240],
+
+            "provider_string": f"openai:{model}",
+
+        }
+
+    except Exception as e:
+
+        print(f"[ViewerThemes] OpenAI auto-select failed: {e}")
+
+        return None
+
+
+
+
+
+@app.post("/api/task/{task_id}/viewer-theme/auto-select")
+
+async def api_task_viewer_theme_auto_select(
+
+    task_id: str,
+
+    request: Request,
+
+    response: Response,
+
+    user: Optional[User] = Depends(get_current_user),
+
+    db: AsyncSession = Depends(get_db),
+
+):
+
+    task = await get_task_by_id(db, task_id)
+
+    if not task:
+
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    try:
+
+        body = await request.json()
+
+        if not isinstance(body, dict):
+
+            body = {}
+
+    except Exception:
+
+        body = {}
+
+    themes = _list_viewer_theme_items()
+
+    if not themes:
+
+        return {"ok": False, "detail": "No viewer themes"}
+
+    anon_session = None
+
+    try:
+
+        anon_session = await get_anon_session(request, response, db)
+
+    except Exception:
+
+        anon_session = None
+
+    can_persist = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
+
+    image_data = str(body.get("image_data_url_string") or "").strip()
+
+    hint_pieces: List[str] = [
+
+        str(getattr(task, "input_type", "") or ""),
+
+        str(getattr(task, "poster_llm_title", "") or ""),
+
+        str(getattr(task, "poster_llm_description", "") or ""),
+
+    ]
+
+    input_url_text = str(getattr(task, "input_url", "") or "")
+
+    if input_url_text:
+
+        hint_pieces.append(input_url_text)
+
+        try:
+
+            hint_pieces.append(Path(urlparse(input_url_text).path or "").name)
+
+        except Exception:
+
+            pass
+
+    try:
+
+        kws = json.loads(getattr(task, "poster_llm_keywords", "") or "[]")
+
+        if isinstance(kws, list):
+
+            hint_pieces.extend(str(x) for x in kws)
+
+    except Exception:
+
+        pass
+
+    try:
+
+        settings = json.loads(task.viewer_settings or "{}")
+
+        det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
+
+        if isinstance(det, dict):
+
+            hint_pieces.extend(str(v) for v in det.values() if isinstance(v, (str, int, float)))
+
+            for result in det.get("results") or []:
+
+                if isinstance(result, dict):
+
+                    hint_pieces.extend(str(v) for v in result.values() if isinstance(v, (str, int, float)))
+
+    except Exception:
+
+        pass
+
+    hint_pieces.append(str(body.get("model_hint_string") or ""))
+
+    hint_text = " ".join(hint_pieces)
+
+    selected = _viewer_theme_rule_based_selection(themes, hint_text, provider_string="heuristic:auto-rule")
+
+    if not selected and can_persist:
+
+        selected = await _viewer_theme_select_with_openai(image_data, themes)
+
+    provider = selected.get("provider_string") if selected else "heuristic"
+
+    if not selected:
+
+        scored = sorted(((t, _viewer_theme_score_text(t, hint_text)) for t in themes), key=lambda x: x[1], reverse=True)
+
+        best, score = scored[0]
+
+        if score <= 0:
+
+            return {"ok": False, "detail": "No matching viewer theme"}
+
+        selected = {
+
+            "theme_id": str(best.get("theme_id")),
+
+            "confidence_float": min(1.0, max(0.2, score / 8.0)),
+
+            "reason_string": "keyword match",
+
+            "provider_string": provider,
+
+        }
+
+    if can_persist:
+
+        try:
+
+            existing = json.loads(task.viewer_settings or "{}")
+
+            if not isinstance(existing, dict):
+
+                existing = {}
+
+        except Exception:
+
+            existing = {}
+
+        existing["viewer_theme_selection"] = selected
+        ensure_viewer_environment_in_settings(existing)
+
+        task.viewer_settings = json.dumps(existing, ensure_ascii=False)
+
+        await db.commit()
+
+    theme = next((t for t in themes if str(t.get("theme_id")) == selected["theme_id"]), None)
+
+    return {"ok": True, "selection": selected, "theme": theme, "persisted": bool(can_persist)}
+
+
 # Viewer Settings (per-task + global defaults)
 # =============================================================================
 @app.get("/api/viewer-default-settings")
@@ -9847,14 +12086,14 @@ async def api_set_task_viewer_settings(
     settings = _validate_viewer_settings_payload(body)
     try:
         existing = json.loads(task.viewer_settings or "{}")
+        if not isinstance(existing, dict):
+            existing = {}
     except Exception:
         existing = {}
-    if (
-        isinstance(existing, dict)
-        and isinstance(existing.get("rig_v2_animal_detection"), dict)
-        and "rig_v2_animal_detection" not in settings
-    ):
-        settings["rig_v2_animal_detection"] = existing["rig_v2_animal_detection"]
+    for key in ("rig_v2_animal_detection", "viewer_theme_selection", "viewer_environment"):
+        if isinstance(existing.get(key), dict) and key not in settings:
+            settings[key] = existing[key]
+    ensure_viewer_environment_in_settings(settings)
     task.viewer_settings = json.dumps(settings, ensure_ascii=False)
     await db.commit()
     return {"ok": True}
@@ -9989,662 +12228,163 @@ GLB_CACHE_DIR = STATIC_DIR / "glb_cache"  # Cached GLB files for fast loading
 # Ensure cache directories exist
 TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-(STATIC_DIR / "env" / "backdrops").mkdir(parents=True, exist_ok=True)
 
-VIEWER_BACKDROP_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".avif"})
-VIEWER_THEME_JSON_VERSION = 1
+STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
+    "index.html": "/",
+    "gallery.html": "/gallery",
+    "guides.html": "/guides",
+    "buy-credits.html": "/buy-credits",
+    "blender-plugin.html": "/blender-plugin",
+    "animal-rig.html": "/animal-rig",
+    "developers.html": "/developers",
+    "payment-success.html": "/payment/success",
+    "glb-auto-rig.html": "/glb-auto-rig",
+    "fbx-auto-rig.html": "/fbx-auto-rig",
+    "obj-auto-rig.html": "/obj-auto-rig",
+    "how-it-works.html": "/how-it-works",
+    "faq.html": "/faq",
+    "terms-of-use.html": "/terms",
+    "user-agreement.html": "/user-agreement",
+    "t-pose-rig.html": "/t-pose-rig",
+    "mixamo-alternative.html": "/mixamo-alternative",
+    "mixamo-alternative-ru.html": "/mixamo-alternative-ru",
+    "mixamo-alternative-zh.html": "/mixamo-alternative-zh",
+    "mixamo-alternative-hi.html": "/mixamo-alternative-hi",
+    "rig-glb-unity.html": "/rig-glb-unity",
+    "rig-glb-unity-ru.html": "/rig-glb-unity-ru",
+    "rig-glb-unity-zh.html": "/rig-glb-unity-zh",
+    "rig-glb-unity-hi.html": "/rig-glb-unity-hi",
+    "rig-fbx-unreal.html": "/rig-fbx-unreal",
+    "rig-fbx-unreal-ru.html": "/rig-fbx-unreal-ru",
+    "rig-fbx-unreal-zh.html": "/rig-fbx-unreal-zh",
+    "rig-fbx-unreal-hi.html": "/rig-fbx-unreal-hi",
+    "glb-vs-fbx.html": "/glb-vs-fbx",
+    "glb-vs-fbx-ru.html": "/glb-vs-fbx-ru",
+    "glb-vs-fbx-zh.html": "/glb-vs-fbx-zh",
+    "glb-vs-fbx-hi.html": "/glb-vs-fbx-hi",
+    "t-pose-vs-a-pose.html": "/t-pose-vs-a-pose",
+    "t-pose-vs-a-pose-ru.html": "/t-pose-vs-a-pose-ru",
+    "t-pose-vs-a-pose-zh.html": "/t-pose-vs-a-pose-zh",
+    "t-pose-vs-a-pose-hi.html": "/t-pose-vs-a-pose-hi",
+    "animation-retargeting.html": "/animation-retargeting",
+    "animation-retargeting-ru.html": "/animation-retargeting-ru",
+    "animation-retargeting-zh.html": "/animation-retargeting-zh",
+    "animation-retargeting-hi.html": "/animation-retargeting-hi",
+    "face-rig-animation.html": "/face-rig-animation",
+    "face-rig-animation-ru.html": "/face-rig-animation-ru",
+    "face-rig-animation-zh.html": "/face-rig-animation-zh",
+    "face-rig-animation-hi.html": "/face-rig-animation-hi",
+    "auto-rig-obj.html": "/auto-rig-obj",
+    "auto-rig-obj-ru.html": "/auto-rig-obj-ru",
+    "auto-rig-obj-zh.html": "/auto-rig-obj-zh",
+    "auto-rig-obj-hi.html": "/auto-rig-obj-hi",
+}
 
-
-def _slugify_viewer_theme(value: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower())
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s or "viewer_theme"
-
-
-def _viewer_theme_default_for_stem(stem: str) -> Dict[str, Any]:
-    key = _slugify_viewer_theme(stem)
-    presets: Dict[str, Dict[str, Any]] = {
-        "studio_white_softbox": {
-            "theme_name": "White Photo Studio",
-            "theme_short_description": "Clean white photography studio with softbox lights.",
-            "semantic_tags": ["studio", "product", "white", "clean", "neutral", "toy", "character"],
-            "plane_color": "#e9e9e9",
-            "shadow_settings": {"opacity": 0.42, "softness": 5.0, "sun_multiplier": 1.5, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -35, "inclination": 55, "intensity": 2.0},
-        },
-        "dog_park_yard": {
-            "theme_name": "Pet Park Yard",
-            "theme_short_description": "Sunny fenced pet yard with play equipment and warm dirt ground.",
-            "semantic_tags": ["dog", "cat", "kitten", "feline", "pet", "park", "yard", "animal", "puppy", "domestic"],
-            "plane_color": "#9a7b4f",
-            "shadow_settings": {"opacity": 0.55, "softness": 6.0, "sun_multiplier": 2.4, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -55, "inclination": 48, "intensity": 2.5},
-        },
-        "mediterranean_courtyard": {
-            "theme_name": "Mediterranean Courtyard",
-            "theme_short_description": "Warm stone courtyard with plants and sunlit rustic walls.",
-            "semantic_tags": ["courtyard", "stone", "mediterranean", "garden", "human", "statue", "animal"],
-            "plane_color": "#b9a37d",
-            "shadow_settings": {"opacity": 0.5, "softness": 5.0, "sun_multiplier": 2.3, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -65, "inclination": 52, "intensity": 2.45},
-        },
-        "ranch_farmyard": {
-            "theme_name": "Ranch Farmyard",
-            "theme_short_description": "Open rural farmyard with fences, barn and dry dirt road.",
-            "semantic_tags": ["farm", "ranch", "horse", "cow", "deer", "animal", "western", "stable"],
-            "plane_color": "#a88455",
-            "shadow_settings": {"opacity": 0.55, "softness": 6.5, "sun_multiplier": 2.5, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -65, "inclination": 45, "intensity": 2.55},
-        },
-        "pine_forest_trail": {
-            "theme_name": "Pine Forest Trail",
-            "theme_short_description": "Wide pine forest trail with rocks, logs and natural dirt ground.",
-            "semantic_tags": ["forest", "pine", "wildlife", "bear", "wolf", "deer", "creature", "nature"],
-            "plane_color": "#6d573c",
-            "shadow_settings": {"opacity": 0.58, "softness": 7.0, "sun_multiplier": 1.8, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -120, "inclination": 40, "intensity": 2.1},
-        },
-        "savanna_acacia_plain": {
-            "theme_name": "Savanna Acacia Plain",
-            "theme_short_description": "Bright dry savanna with acacia trees and distant hills.",
-            "semantic_tags": ["savanna", "africa", "giraffe", "elephant", "lion", "zebra", "wildlife", "desert"],
-            "plane_color": "#b58548",
-            "shadow_settings": {"opacity": 0.55, "softness": 6.0, "sun_multiplier": 2.8, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -70, "inclination": 56, "intensity": 2.8},
-        },
-        "forest_stable_paddock": {
-            "theme_name": "Forest Stable Paddock",
-            "theme_short_description": "Wooden stable paddock framed by tall forest trees.",
-            "semantic_tags": ["stable", "horse", "deer", "farm", "forest", "ranch", "animal"],
-            "plane_color": "#a67b4c",
-            "shadow_settings": {"opacity": 0.54, "softness": 6.5, "sun_multiplier": 2.1, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -100, "inclination": 48, "intensity": 2.35},
-        },
-        "post_apocalyptic_factory": {
-            "theme_name": "Ruined Industrial Factory",
-            "theme_short_description": "Destroyed concrete factory yard under a stormy grey sky.",
-            "semantic_tags": ["industrial", "robot", "mech", "zombie", "post-apocalyptic", "vehicle", "war", "ruins"],
-            "plane_color": "#5f5a50",
-            "shadow_settings": {"opacity": 0.62, "softness": 8.0, "sun_multiplier": 1.4, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -20, "inclination": 32, "intensity": 1.6},
-        },
-        "tiny_forest_floor": {
-            "theme_name": "Tiny Forest Floor",
-            "theme_short_description": "Macro forest floor with moss, mushrooms and soft green bokeh.",
-            "semantic_tags": ["small", "mouse", "rabbit", "insect", "fairy", "mushroom", "forest", "cute"],
-            "plane_color": "#6e593d",
-            "shadow_settings": {"opacity": 0.5, "softness": 7.5, "sun_multiplier": 1.7, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -115, "inclination": 38, "intensity": 1.9},
-        },
-        "sci_fi_hangar": {
-            "theme_name": "Sci-Fi Hangar",
-            "theme_short_description": "Blue metallic spaceship hangar with glowing panels and reflective floor.",
-            "semantic_tags": ["sci-fi", "robot", "mech", "astronaut", "spaceship", "vehicle", "cyber", "metal"],
-            "plane_color": "#55606a",
-            "shadow_settings": {"opacity": 0.48, "softness": 5.5, "sun_multiplier": 1.7, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -10, "inclination": 62, "intensity": 1.9},
-        },
-        "alien_planet": {
-            "theme_name": "Alien Planet",
-            "theme_short_description": "Purple alien desert landscape with planets, rocks and sci-fi sky.",
-            "semantic_tags": ["space", "alien", "astronaut", "sci-fi", "planet", "creature", "fantasy", "robot"],
-            "plane_color": "#8b6d82",
-            "shadow_settings": {"opacity": 0.55, "softness": 7.0, "sun_multiplier": 1.9, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -135, "inclination": 28, "intensity": 2.0},
-        },
-        "ancient_ruins": {
-            "theme_name": "Ancient Marble Ruins",
-            "theme_short_description": "Bright ancient stone ruins with columns and open sky.",
-            "semantic_tags": ["ruins", "ancient", "mythology", "statue", "warrior", "greek", "roman", "fantasy"],
-            "plane_color": "#b2ab9b",
-            "shadow_settings": {"opacity": 0.45, "softness": 5.5, "sun_multiplier": 2.4, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -60, "inclination": 52, "intensity": 2.45},
-        },
-        "crystal_cavern": {
-            "theme_name": "Crystal Cavern",
-            "theme_short_description": "Glowing fantasy crystal valley in purple and blue light.",
-            "semantic_tags": ["crystal", "magic", "fantasy", "dragon", "unicorn", "creature", "gem", "cavern"],
-            "plane_color": "#8a67a7",
-            "shadow_settings": {"opacity": 0.5, "softness": 8.0, "sun_multiplier": 1.5, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -150, "inclination": 36, "intensity": 1.8},
-        },
-        "jungle_temple_ruins": {
-            "theme_name": "Jungle Temple Ruins",
-            "theme_short_description": "Mossy jungle temple courtyard with ancient stone and misty cliffs.",
-            "semantic_tags": [
-                "jungle",
-                "temple",
-                "ruins",
-                "turtle",
-                "dinosaur",
-                "dino",
-                "reptile",
-                "prehistoric",
-                "monkey",
-                "lizard",
-                "adventure",
-                "fantasy",
-            ],
-            "plane_color": "#777469",
-            "shadow_settings": {"opacity": 0.52, "softness": 8.5, "sun_multiplier": 1.6, "shadow_y_offset": 0.005},
-            "sun_settings": {"rotation": -105, "inclination": 35, "intensity": 1.85},
-        },
-    }
-    preset = presets.get(key, {})
-    nice = str(stem or "").replace("_", " ").replace("-", " ").strip().title() or "Viewer Theme"
-    return {
-        "schema_version": VIEWER_THEME_JSON_VERSION,
-        "theme_id": key,
-        "theme_name": preset.get("theme_name", nice),
-        "theme_short_description": preset.get(
-            "theme_short_description",
-            f"Auto-discovered 3D viewer theme based on {nice.lower()}."
-        ),
-        "semantic_tags": preset.get("semantic_tags", [x for x in key.split("_") if x]),
-        "camera_transform": {
-            "position": {"x": 2.5, "y": 1.8, "z": 3.0},
-            "target": {"x": 0.0, "y": 0.8, "z": 0.0},
-            "fov": 45,
-        },
-        "plane_color": preset.get("plane_color", "#6d7d8c"),
-        "shadow_settings": preset.get(
-            "shadow_settings",
-            {"opacity": 0.5, "softness": 6.0, "sun_multiplier": 2.0, "shadow_y_offset": 0.005},
-        ),
-        "environment_settings": preset.get(
-            "environment_settings",
-            {"mode": "image", "source": "backdrop", "intensity": 1.0, "reflection_intensity": 3.0},
-        ),
-        "sun_settings": preset.get(
-            "sun_settings",
-            {"rotation": -75, "inclination": 45, "intensity": 2.2},
-        ),
-        "admin_edited_bool": False,
-    }
+PUBLIC_QUERY_NOINDEX_PATHS = {"/", "/gallery"}
 
 
-def _viewer_theme_json_path_for_image(image_path: Path) -> Path:
-    return image_path.with_suffix(".json")
-
-
-def _viewer_theme_vision_metadata(image_path: Path, fallback_id: str) -> Optional[Dict[str, Any]]:
-    try:
-        cfg = _rig_v2_load_vision_config()
-        data = analyze_backdrop_theme_with_openai(image_path=image_path, cfg=cfg, fallback_id=fallback_id)
-        if isinstance(data, dict):
-            return data
-    except Exception as e:
-        print(f"[ViewerThemes] vision metadata failed for {image_path.name}: {e}")
-    return None
-
-
-def _load_viewer_theme_json(image_path: Path) -> Dict[str, Any]:
-    json_path = _viewer_theme_json_path_for_image(image_path)
-    data = _read_json_file(str(json_path)) or {}
-    defaults = _viewer_theme_default_for_stem(image_path.stem)
-    merged = {**defaults, **data}
-    merged["theme_id"] = _slugify_viewer_theme(str(merged.get("theme_id") or image_path.stem))
-    merged["image_filename"] = image_path.name
-    merged["src"] = f"/static/env/backdrops/{quote(image_path.name)}"
-    return merged
-
-
-def _convert_backdrop_png_files_to_jpg() -> None:
-    """Convert *.png in static/env/backdrops to JPEG (white behind alpha), then delete the PNG.
-
-    Runs on server startup and again before listing /api/viewer-backdrops so the folder stays JPG-only.
-    Uses imdecode/imencode + raw file bytes (works reliably for paths with spaces / non-ASCII).
-    """
-    d = STATIC_DIR / "env" / "backdrops"
-    if not d.is_dir():
-        print("[ViewerBackdrops] PNG→JPG: backdrops dir missing, skip")
-        return
-    pngs = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() == ".png"]
-    if not pngs:
-        return
-    try:
-        import cv2
-        import numpy as np
-    except ImportError as e:
-        print(f"[ViewerBackdrops] PNG→JPG skipped (install opencv + numpy): {e}")
-        return
-    converted = 0
-    failed = 0
-    for p in sorted(pngs, key=lambda x: x.name.lower()):
-        jpg_path = p.with_suffix(".jpg")
-        try:
-            raw = np.frombuffer(p.read_bytes(), dtype=np.uint8)
-            if raw.size == 0:
-                print(f"[ViewerBackdrops] PNG→JPG: empty {p.name}")
-                failed += 1
-                continue
-            img = cv2.imdecode(raw, cv2.IMREAD_UNCHANGED)
-            if img is None:
-                print(f"[ViewerBackdrops] PNG→JPG: cannot decode {p.name}")
-                failed += 1
-                continue
-            if img.ndim == 2:
-                out = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-            elif img.ndim == 3 and img.shape[2] == 4:
-                bgr = img[:, :, :3].astype(np.float32)
-                a = img[:, :, 3].astype(np.float32) / 255.0
-                a3 = np.stack([a, a, a], axis=2)
-                white = np.full_like(bgr, 255.0)
-                out = np.clip(bgr * a3 + white * (1.0 - a3), 0, 255).astype(np.uint8)
-            elif img.ndim == 3 and img.shape[2] == 3:
-                out = img
-            else:
-                print(f"[ViewerBackdrops] PNG→JPG: unsupported shape {img.shape} ({p.name})")
-                failed += 1
-                continue
-            ok, enc = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
-            if not ok or enc is None:
-                print(f"[ViewerBackdrops] PNG→JPG: encode failed {p.name}")
-                failed += 1
-                continue
-            jpg_path.write_bytes(enc.tobytes())
-            p.unlink(missing_ok=True)
-            converted += 1
-        except Exception as e:
-            failed += 1
-            print(f"[ViewerBackdrops] PNG→JPG: {p.name} → {e}")
-    print(
-        f"[ViewerBackdrops] PNG→JPG: startup/conversion pass — "
-        f"{converted} converted, {failed} failed, {len(pngs)} png input(s)"
+def _response_without_body(response: Response) -> Response:
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    return Response(
+        content=b"",
+        status_code=response.status_code,
+        headers=headers,
+        media_type=getattr(response, "media_type", None),
     )
 
 
-def _ensure_viewer_theme_json_files() -> None:
-    d = STATIC_DIR / "env" / "backdrops"
-    if not d.is_dir():
-        return
-    for p in sorted(d.iterdir(), key=lambda x: x.name.lower()):
-        if not p.is_file() or p.suffix.lower() not in VIEWER_BACKDROP_SUFFIXES:
-            continue
-        jp = _viewer_theme_json_path_for_image(p)
-        if jp.exists():
-            continue
-        fallback_id = _slugify_viewer_theme(p.stem)
-        data = _viewer_theme_vision_metadata(p, fallback_id) or _viewer_theme_default_for_stem(p.stem)
-        suggested_id = _slugify_viewer_theme(str(data.get("theme_id") or fallback_id))
-        if suggested_id and suggested_id != fallback_id:
-            target = p.with_name(f"{suggested_id}{p.suffix.lower()}")
-            if not target.exists() and not _viewer_theme_json_path_for_image(target).exists():
-                try:
-                    p.rename(target)
-                    p = target
-                    jp = _viewer_theme_json_path_for_image(p)
-                    fallback_id = suggested_id
-                except Exception as e:
-                    print(f"[ViewerThemes] semantic rename failed {p.name} -> {target.name}: {e}")
-        data["schema_version"] = VIEWER_THEME_JSON_VERSION
-        data["theme_id"] = _slugify_viewer_theme(str(data.get("theme_id") or fallback_id))
-        data["image_filename"] = p.name
-        data.setdefault("admin_edited_bool", False)
-        _atomic_write_json_file(str(jp), data)
+def _should_fallback_head_to_get(path: str) -> bool:
+    if path in {"/", "/task", "/dashboard", "/admin", "/admin/workers"}:
+        return True
+    return path in set(STATIC_PAGE_CANONICAL_PATHS.values())
 
 
-async def _sync_viewer_backdrop_themes_async() -> None:
-    await asyncio.to_thread(_convert_backdrop_png_files_to_jpg)
-    await asyncio.to_thread(_ensure_viewer_theme_json_files)
+@app.middleware("http")
+async def seo_http_headers_and_head_fallback(request: Request, call_next):
+    original_method = request.scope.get("method", "").upper()
+    is_head_fallback = original_method == "HEAD" and _should_fallback_head_to_get(request.url.path)
+
+    if is_head_fallback:
+        request.scope["method"] = "GET"
+
+    response = await call_next(request)
+
+    path = request.url.path
+    if path == "/dashboard":
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    elif path.startswith("/m/"):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    elif path in PUBLIC_QUERY_NOINDEX_PATHS and request.url.query:
+        response.headers["X-Robots-Tag"] = "noindex, follow"
+
+    if is_head_fallback:
+        request.scope["method"] = original_method
+        return _response_without_body(response)
+
+    return response
 
 
-def _list_viewer_theme_items() -> List[Dict[str, Any]]:
-    """Plate themes in static/env/backdrops for the 3D viewer strip; sorted by filename (case-insensitive)."""
-    d = STATIC_DIR / "env" / "backdrops"
-    if not d.is_dir():
-        return []
-    _convert_backdrop_png_files_to_jpg()
-    _ensure_viewer_theme_json_files()
-    files = [
-        p
-        for p in d.iterdir()
-        if p.is_file() and p.suffix.lower() in VIEWER_BACKDROP_SUFFIXES
-    ]
-    files.sort(key=lambda p: p.name.lower())
-    seen: set[str] = set()
-    out: List[Dict[str, Any]] = []
-    for p in files:
-        item = _load_viewer_theme_json(p)
-        stem = _slugify_viewer_theme(str(item.get("theme_id") or p.stem))
-        bid = stem
-        if bid in seen:
-            n = 2
-            while f"{stem}_{n}" in seen:
-                n += 1
-            bid = f"{stem}_{n}"
-        seen.add(bid)
-        item["id"] = bid
-        item["theme_id"] = bid
-        out.append(item)
-    return out
+def _read_static_partial(name: str) -> str:
+    path = STATIC_DIR / "partials" / name
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
 
 
-@app.get("/api/viewer-themes")
-async def api_viewer_themes():
-    """Auto-discovered 3D viewer themes (image + companion JSON settings, name order)."""
-    return _list_viewer_theme_items()
-
-
-@app.get("/api/viewer-backdrops")
-async def api_viewer_backdrops():
-    """Backward-compatible alias for theme-aware viewer backgrounds."""
-    return _list_viewer_theme_items()
-
-
-@app.put("/api/admin/viewer-themes/{theme_id}")
-async def api_admin_save_viewer_theme(
-    theme_id: str,
-    request: Request,
-    admin: User = Depends(require_admin),
-):
-    body = await request.body()
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Expected JSON object")
-    themes = _list_viewer_theme_items()
-    theme = next((x for x in themes if str(x.get("theme_id")) == str(theme_id)), None)
-    if not theme:
-        raise HTTPException(status_code=404, detail="Theme not found")
-    image_filename = str(theme.get("image_filename") or "")
-    image_path = STATIC_DIR / "env" / "backdrops" / image_filename
-    if not image_path.is_file():
-        raise HTTPException(status_code=404, detail="Theme image not found")
-    existing = _load_viewer_theme_json(image_path)
-    allowed = {
-        "theme_name",
-        "theme_short_description",
-        "semantic_tags",
-        "camera_transform",
-        "plane_color",
-        "shadow_settings",
-        "environment_settings",
-        "sun_settings",
-    }
-    clean = {k: payload[k] for k in allowed if k in payload}
-    clean["schema_version"] = VIEWER_THEME_JSON_VERSION
-    clean["theme_id"] = str(theme_id)
-    clean["image_filename"] = image_filename
-    clean["admin_edited_bool"] = True
-    merged = {**existing, **clean}
-    _atomic_write_json_file(str(_viewer_theme_json_path_for_image(image_path)), merged)
-    return {"ok": True, "theme": _load_viewer_theme_json(image_path)}
-
-
-def _viewer_theme_score_text(theme: Dict[str, Any], text: str) -> float:
-    hay = f" {text.lower()} "
-    score = 0.0
-    tid = str(theme.get("theme_id") or theme.get("id") or "").lower()
-    alias_tags: Dict[str, List[str]] = {
-        "dog_park_yard": ["cat", "cats", "kitten", "kitty", "feline", "dog", "puppy", "pet", "pets"],
-        "ranch_farmyard": ["horse", "cow", "bull", "pony", "deer", "goat", "sheep", "pig", "piglet", "hog", "boar", "swine"],
-        "alien_planet": ["astronaut", "space", "alien", "planet", "ufo"],
-        "sci_fi_hangar": ["robot", "mech", "android", "cyborg", "spaceship", "vehicle"],
-        "jungle_temple_ruins": ["dinosaur", "dinosaurs", "dino", "reptile", "prehistoric", "lizard", "turtle"],
-        "studio_white_softbox": ["product", "toy", "neutral", "studio"],
-    }
-    for alias in alias_tags.get(tid, []):
-        if f" {alias} " in hay:
-            score += 3.0
-    for tag in theme.get("semantic_tags") or []:
-        tag_s = str(tag).strip().lower()
-        if not tag_s:
-            continue
-        if tag_s in hay:
-            score += 2.5
-        for part in re.split(r"[^a-z0-9]+", tag_s):
-            if len(part) >= 4 and f" {part} " in hay:
-                score += 1.0
-    name = str(theme.get("theme_name") or "").lower()
-    if name and any(part and part in hay for part in re.split(r"[^a-z0-9]+", name) if len(part) >= 4):
-        score += 0.75
-    return score
-
-
-def _viewer_theme_text_has_any(text: str, terms: List[str]) -> bool:
-    tokens = set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
-    return any(str(term or "").lower() in tokens for term in terms)
-
-
-def _viewer_theme_rule_based_selection(
-    themes: List[Dict[str, Any]],
-    text: str,
-    *,
-    provider_string: str,
-) -> Optional[Dict[str, Any]]:
-    rules = [
-        (
-            ["pig", "piglet", "hog", "boar", "swine", "cow", "bull", "horse", "pony", "goat", "sheep"],
-            "ranch_farmyard",
-            "farm/livestock animal keyword match",
-        ),
-        (
-            ["dinosaur", "dinosaurs", "dino", "prehistoric", "reptile"],
-            "jungle_temple_ruins",
-            "dinosaur/reptile keyword match",
-        ),
-        (
-            ["dragon", "wyvern"],
-            "crystal_cavern",
-            "dragon/fantasy creature keyword match",
-        ),
-    ]
-    for terms, theme_id, reason in rules:
-        if not _viewer_theme_text_has_any(text, terms):
-            continue
-        if not any(str(t.get("theme_id")) == theme_id for t in themes):
-            continue
-        return {
-            "theme_id": theme_id,
-            "confidence_float": 0.95,
-            "reason_string": reason,
-            "provider_string": provider_string,
-        }
-    return None
-
-
-def _select_viewer_theme_from_metadata(
-    *,
-    input_url: Optional[str],
-    input_type: Optional[str],
-    rig_v2_detection_meta: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    try:
-        themes = _list_viewer_theme_items()
-    except Exception as e:
-        print(f"[ViewerThemes] metadata select failed to list themes: {e}")
-        return None
-    if not themes:
-        return None
-    pieces: List[str] = [str(input_type or "")]
-    if input_url:
-        try:
-            pieces.append(Path(urlparse(input_url).path or "").name)
-        except Exception:
-            pieces.append(str(input_url))
-    if isinstance(rig_v2_detection_meta, dict):
-        pieces.extend(str(v) for v in rig_v2_detection_meta.values() if isinstance(v, (str, int, float)))
-        first = rig_v2_detection_meta.get("first_result")
-        if isinstance(first, dict):
-            pieces.extend(str(v) for v in first.values() if isinstance(v, (str, int, float)))
-    text = " ".join(pieces)
-    rule_selected = _viewer_theme_rule_based_selection(themes, text, provider_string="heuristic:create-rule")
-    if rule_selected:
-        return rule_selected
-    scored = sorted(((t, _viewer_theme_score_text(t, text)) for t in themes), key=lambda x: x[1], reverse=True)
-    best, score = scored[0]
-    if score <= 0:
-        best = next((t for t in themes if "studio" in str(t.get("theme_id", "")).lower()), themes[0])
-    return {
-        "theme_id": str(best.get("theme_id")),
-        "confidence_float": min(1.0, max(0.2, score / 8.0)),
-        "reason_string": "create metadata match" if score > 0 else "create neutral fallback",
-        "provider_string": "heuristic:create",
-    }
-
-
-async def _viewer_theme_select_with_openai(image_data_url: str, themes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not image_data_url:
-        return None
-    try:
-        cfg = _rig_v2_load_vision_config()
-    except Exception:
-        return None
-    api_key = str(cfg.get("open_AI_api_key") or cfg.get("open_ai_api_key") or "").strip()
-    api_url = str(cfg.get("open_ai_api_url_string") or "https://api.openai.com/v1/chat/completions").strip()
-    if not api_key or not api_url:
-        return None
-    compact = [
-        {
-            "theme_id": str(t.get("theme_id") or t.get("id") or ""),
-            "theme_name": str(t.get("theme_name") or ""),
-            "description": str(t.get("theme_short_description") or ""),
-            "tags": t.get("semantic_tags") or [],
-        }
-        for t in themes
-    ]
-    prompt = (
-        "Analyze the rendered 3D model image and choose the most semantically appropriate viewer theme for the model subject. "
-        "Ignore the current background/backdrop in the screenshot; it may be a wrong temporary default. "
-        "Return only JSON: {\"theme_id\":\"<one theme_id>\",\"confidence_float\":0.0,\"reason_string\":\"short\"}. "
-        "Prefer exact concepts: cat/kitten/dog/pet -> pet park; astronaut/alien/planet -> space; robot/mech -> sci-fi hangar; horse/cow/deer -> ranch/stable; "
-        "wild animal -> forest/savanna; fantasy creature -> crystal/ruins/jungle; neutral product -> studio.\n\n"
-        f"Available themes JSON:\n{json.dumps(compact, ensure_ascii=False)}"
+def _inject_static_layout(html_content: str, canonical_path: Optional[str] = None) -> str:
+    body_match = re.search(r"<body\b[^>]*>", html_content, flags=re.IGNORECASE)
+    body_tag = body_match.group(0) if body_match else ""
+    show_search = (
+        'data-layout-free3d-ribbon="1"' in body_tag
+        or "data-layout-free3d-ribbon='1'" in body_tag
+        or 'data-layout-free3d-ribbon="true"' in body_tag
+        or "data-layout-free3d-ribbon='true'" in body_tag
     )
-    model = str(cfg.get("open_ai_vision_model_string") or "gpt-4o-mini").strip()
-    payload: Dict[str, Any] = {
-        "model": model,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_data_url, "detail": "low"}},
-                ],
-            }
-        ],
-    }
-    if model.startswith(("gpt-5", "o3", "o4")):
-        payload["max_completion_tokens"] = 900
-    else:
-        payload["temperature"] = 0.0
-        payload["max_tokens"] = 900
-    try:
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-            resp = await client.post(api_url, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=payload)
-        if resp.status_code != 200:
-            print(f"[ViewerThemes] OpenAI auto-select HTTP {resp.status_code}: {resp.text[:240]}")
-            return None
-        data = resp.json()
-        content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "")
-        parsed = json.loads(str(content))
-        if not isinstance(parsed, dict):
-            return None
-        tid = str(parsed.get("theme_id") or "").strip()
-        if not tid:
-            return None
-        match = next((t for t in themes if str(t.get("theme_id")) == tid), None)
-        if not match:
-            return None
-        return {
-            "theme_id": tid,
-            "confidence_float": max(0.0, min(1.0, float(parsed.get("confidence_float") or 0.5))),
-            "reason_string": str(parsed.get("reason_string") or "vision selected theme")[:240],
-            "provider_string": f"openai:{model}",
-        }
-    except Exception as e:
-        print(f"[ViewerThemes] OpenAI auto-select failed: {e}")
-        return None
+
+    if '<div id="site-header"></div>' in html_content:
+        header_markup = _read_static_partial("site-header.html")
+        if show_search:
+            header_markup = f"{header_markup}\n{_read_static_partial('site-free3d-search.html')}"
+        html_content = html_content.replace(
+            '<div id="site-header"></div>',
+            f'<div id="site-header" data-server-rendered="1">\n{header_markup}\n</div>',
+            1,
+        )
+
+    if '<div id="site-footer"></div>' in html_content:
+        footer_markup = _read_static_partial("site-footer.html")
+        html_content = html_content.replace(
+            '<div id="site-footer"></div>',
+            f'<div id="site-footer" data-server-rendered="1">\n{footer_markup}\n</div>',
+            1,
+        )
+
+    if canonical_path and not re.search(r"<link\b[^>]+rel=[\"']canonical[\"']", html_content, flags=re.IGNORECASE):
+        base_url = (APP_URL or "https://autorig.online").rstrip("/")
+        canonical_url = f"{base_url}{canonical_path}"
+        canonical_tag = f'    <link rel="canonical" href="{html.escape(canonical_url, quote=True)}">\n'
+        html_content = re.sub(
+            r"</head\s*>",
+            f"{canonical_tag}</head>",
+            html_content,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    return html_content
 
 
-@app.post("/api/task/{task_id}/viewer-theme/auto-select")
-async def api_task_viewer_theme_auto_select(
-    task_id: str,
-    request: Request,
-    response: Response,
-    user: Optional[User] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    task = await get_task_by_id(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            body = {}
-    except Exception:
-        body = {}
-    themes = _list_viewer_theme_items()
-    if not themes:
-        return {"ok": False, "detail": "No viewer themes"}
-    anon_session = None
-    try:
-        anon_session = await get_anon_session(request, response, db)
-    except Exception:
-        anon_session = None
-    can_persist = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
-    image_data = str(body.get("image_data_url_string") or "").strip()
-    hint_pieces: List[str] = [
-        str(getattr(task, "input_type", "") or ""),
-        str(getattr(task, "poster_llm_title", "") or ""),
-        str(getattr(task, "poster_llm_description", "") or ""),
-    ]
-    input_url_text = str(getattr(task, "input_url", "") or "")
-    if input_url_text:
-        hint_pieces.append(input_url_text)
-        try:
-            hint_pieces.append(Path(urlparse(input_url_text).path or "").name)
-        except Exception:
-            pass
-    try:
-        kws = json.loads(getattr(task, "poster_llm_keywords", "") or "[]")
-        if isinstance(kws, list):
-            hint_pieces.extend(str(x) for x in kws)
-    except Exception:
-        pass
-    try:
-        settings = json.loads(task.viewer_settings or "{}")
-        det = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
-        if isinstance(det, dict):
-            hint_pieces.extend(str(v) for v in det.values() if isinstance(v, (str, int, float)))
-            for result in det.get("results") or []:
-                if isinstance(result, dict):
-                    hint_pieces.extend(str(v) for v in result.values() if isinstance(v, (str, int, float)))
-    except Exception:
-        pass
-    hint_pieces.append(str(body.get("model_hint_string") or ""))
-    hint_text = " ".join(hint_pieces)
-    selected = _viewer_theme_rule_based_selection(themes, hint_text, provider_string="heuristic:auto-rule")
-    if not selected and can_persist:
-        selected = await _viewer_theme_select_with_openai(image_data, themes)
-    provider = selected.get("provider_string") if selected else "heuristic"
-    if not selected:
-        scored = sorted(((t, _viewer_theme_score_text(t, hint_text)) for t in themes), key=lambda x: x[1], reverse=True)
-        best, score = scored[0]
-        if score <= 0:
-            best = next((t for t in themes if "studio" in str(t.get("theme_id", "")).lower()), themes[0])
-        selected = {
-            "theme_id": str(best.get("theme_id")),
-            "confidence_float": min(1.0, max(0.2, score / 8.0)),
-            "reason_string": "keyword match" if score > 0 else "neutral fallback",
-            "provider_string": provider,
-        }
-    if can_persist:
-        try:
-            existing = json.loads(task.viewer_settings or "{}")
-            if not isinstance(existing, dict):
-                existing = {}
-        except Exception:
-            existing = {}
-        existing["viewer_theme_selection"] = selected
-        task.viewer_settings = json.dumps(existing, ensure_ascii=False)
-        await db.commit()
-    theme = next((t for t in themes if str(t.get("theme_id")) == selected["theme_id"]), None)
-    return {"ok": True, "selection": selected, "theme": theme, "persisted": bool(can_persist)}
+def _static_html_response(filename: str) -> HTMLResponse:
+    path = STATIC_DIR / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return HTMLResponse(
+        content=_inject_static_layout(
+            path.read_text(encoding="utf-8"),
+            canonical_path=STATIC_PAGE_CANONICAL_PATHS.get(filename),
+        )
+    )
 
 
 def _task_cache_dir_size_bytes(task_id: str) -> Optional[int]:
@@ -10745,9 +12485,9 @@ async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> 
                 async with client.stream("GET", url, follow_redirects=True) as response:
                     if response.status_code == 200:
                         # Write to temp file first, then rename (atomic)
-                        temp_path = filepath.with_suffix('.tmp')
+                        temp_path = filepath.with_name(f".{filename}.{uuid.uuid4().hex}.tmp")
                         size_bytes = await _stream_httpx_response_to_file(response, temp_path)
-                        temp_path.rename(filepath)
+                        os.replace(temp_path, filepath)
                         
                         cached_files.append({
                             "name": filename,
@@ -10809,8 +12549,10 @@ async def cleanup_disk_space(
     Clean up old files when disk space is low.
 
     Priority:
-    1. Remove the oldest completed/error tasks physically and delete their DB rows (if delete_task_rows).
-    2. Remove orphaned cache/upload/video files not referenced by any remaining task.
+    1. Remove regenerable bundle ZIPs.
+    2. Remove old upload originals for terminal tasks, preserving gallery/cache/video/poster data.
+    3. Remove the oldest completed/error tasks physically and delete their DB rows (only if delete_task_rows).
+    4. Remove orphaned cache/upload/video files not referenced by any remaining task.
     """
     if delete_task_rows is None:
         delete_task_rows = AUTOMATIC_TASK_DB_DELETION
@@ -10888,6 +12630,46 @@ async def cleanup_disk_space(
                     and task.created_at < age_cutoff
                 ):
                     task_cleanup_candidates.append(task)
+
+            ud, ub = await purge_terminal_upload_dirs(
+                cleanup_db,
+                target_free_bytes=min_free_bytes,
+                record_items=result["deleted_items"],
+            )
+            result["deleted_count"] += ud
+            result["freed_bytes"] += ub
+
+            disk_usage = shutil.disk_usage("/")
+            free_bytes = disk_usage.free
+            if free_bytes >= min_free_bytes:
+                result["freed_gb"] = result["freed_bytes"] / (1024**3)
+                result["final_free_gb"] = free_bytes / (1024**3)
+                if ud > 0:
+                    print(
+                        f"[Disk Cleanup] Target reached after terminal upload purge: "
+                        f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
+                    )
+                return result
+
+            cd = await evict_task_cache_until_free_space(
+                cleanup_db,
+                min_free_gb=min_free_gb,
+                record_items=result["deleted_items"],
+            )
+            result["deleted_count"] += int(cd.get("dirs_removed") or 0)
+            result["freed_bytes"] += int(cd.get("bytes_freed") or 0)
+
+            disk_usage = shutil.disk_usage("/")
+            free_bytes = disk_usage.free
+            if free_bytes >= min_free_bytes:
+                result["freed_gb"] = result["freed_bytes"] / (1024**3)
+                result["final_free_gb"] = free_bytes / (1024**3)
+                if cd.get("dirs_removed"):
+                    print(
+                        f"[Disk Cleanup] Target reached after task cache pressure eviction: "
+                        f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
+                    )
+                return result
 
             if delete_task_rows:
                 for task in task_cleanup_candidates:
@@ -11062,27 +12844,21 @@ async def serve_llm_txt():
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-FAVICON_ICO = STATIC_DIR / "images" / "logo" / "favicon.ico"
+FAVICON_SVG = STATIC_DIR / "images" / "logo" / "favicon.svg"
 
 
 @app.get("/favicon.ico")
 async def favicon_ico():
-    """Browsers request /favicon.ico by default; multi-resolution ICO generated from brand mark."""
-    if not FAVICON_ICO.is_file():
+    """Browsers request /favicon.ico by default; serve existing SVG (no separate .ico asset)."""
+    if not FAVICON_SVG.is_file():
         raise HTTPException(status_code=404, detail="Not found")
-    return FileResponse(str(FAVICON_ICO), media_type="image/x-icon")
+    return FileResponse(str(FAVICON_SVG), media_type="image/svg+xml")
 
 
 @app.get("/")
 async def index():
     """Serve main page"""
-    return FileResponse(str(STATIC_DIR / "index.html"))
-
-
-@app.get("/rig-v2.html")
-async def rig_v2_page():
-    """Prototype upload + local preview + animal-type vision page."""
-    return FileResponse(str(STATIC_DIR / "rig-v2.html"))
+    return _static_html_response("index.html")
 
 
 @app.get("/task")
@@ -11102,7 +12878,7 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
         )
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=_inject_static_layout(html_content))
     
     task_id = id.strip()
     if not task_id:
@@ -11110,7 +12886,7 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
         )
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=_inject_static_layout(html_content))
 
     base_url = (APP_URL or "https://autorig.online").rstrip("/")
     task_url = f"{base_url}/task?id={task_id}"
@@ -11121,6 +12897,7 @@ async def task_page(
     has_video = False
     has_thumb = False
     task = None
+    task_keywords: List[str] = []
     
     try:
         from database import Task
@@ -11131,6 +12908,17 @@ async def task_page(
             if task.status == "done":
                 task_title = "✅ Rigged 3D Model Ready"
                 task_description = "3D character rigged with skeleton and 50+ animations. Download in GLB, FBX, OBJ formats."
+                try:
+                    from seo_gallery import enrich_seo_metadata
+
+                    seo_title, seo_desc, seo_keywords, _seo_semantic = enrich_seo_metadata(task)
+                    if seo_title:
+                        task_title = seo_title
+                    if seo_desc:
+                        task_description = seo_desc[:500]
+                    task_keywords = seo_keywords
+                except Exception as seo_error:
+                    print(f"[Task Page] Error enriching SEO metadata: {seo_error}")
             elif task.status == "processing":
                 task_title = "⏳ Rigging in Progress..."
                 task_description = "3D model is being rigged with AI. View live progress."
@@ -11152,15 +12940,47 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{base_url}/task">',
         )
-        return HTMLResponse(content=html_content)
+        return HTMLResponse(content=_inject_static_layout(html_content))
     
+    title_suffix = f" | AutoRig task {task_id[:8]}"
+    compact_task_title = re.sub(r"\s+", " ", task_title).strip() or "Rigged 3D model"
+    max_task_title_len = max(24, 70 - len(title_suffix))
+    if len(compact_task_title) > max_task_title_len:
+        compact_task_title = compact_task_title[: max_task_title_len - 3].rstrip() + "..."
+    task_page_title = f"{compact_task_title}{title_suffix}"
+    safe_task_page_title = html.escape(task_page_title, quote=True)
+    safe_task_heading = html.escape(compact_task_title)
+    task_meta_description = re.sub(r"\s+", " ", task_description).strip()
+    if len(task_meta_description) > 170:
+        task_meta_description = task_meta_description[:167].rsplit(" ", 1)[0].rstrip(".,;:-") + "..."
+    safe_task_meta_description = html.escape(task_meta_description, quote=True)
+    keywords_meta = ""
+    if task_keywords:
+        safe_keywords = html.escape(", ".join(task_keywords[:24]), quote=True)
+        keywords_meta = f'\n    <meta name="keywords" content="{safe_keywords}">'
+    json_ld = ""
+    if task.status == "done":
+        creative_work = {
+            "@context": "https://schema.org",
+            "@type": "CreativeWork",
+            "name": task_page_title[:200],
+            "description": task_description[:2000],
+            "url": task_url,
+            "image": f"{base_url}/api/thumb/{task_id}",
+            "mainEntityOfPage": task_url,
+        }
+        if task_keywords:
+            creative_work["keywords"] = ", ".join(task_keywords[:24])
+        json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
+    standard_seo_tags = f'<meta name="description" content="{safe_task_meta_description}">{keywords_meta}{json_ld}'
+
     # Build OG meta tags
     og_tags = f'''
     <!-- Open Graph / Telegram / Social -->
     <meta property="og:type" content="{'video.other' if has_video else 'website'}">
     <meta property="og:url" content="{task_url}">
-    <meta property="og:title" content="{task_title} | AutoRig.online">
-    <meta property="og:description" content="{task_description}">
+    <meta property="og:title" content="{safe_task_page_title}">
+    <meta property="og:description" content="{safe_task_meta_description}">
     <meta property="og:site_name" content="AutoRig.online">'''
     
     # Add image/video tags
@@ -11194,8 +13014,8 @@ async def task_page(
     <meta name="twitter:card" content="summary">'''
     
     og_tags += f'''
-    <meta name="twitter:title" content="{task_title} | AutoRig.online">
-    <meta name="twitter:description" content="{task_description}">
+    <meta name="twitter:title" content="{safe_task_page_title}">
+    <meta name="twitter:description" content="{safe_task_meta_description}">
     '''
     
     # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
@@ -11205,16 +13025,20 @@ async def task_page(
     )
     html_content = html_content.replace(
         "<!-- TASK_SEO_PLACEHOLDER -->",
-        f'<link rel="canonical" href="{task_url}">\n    {og_tags}',
+        f'{standard_seo_tags}\n    <link rel="canonical" href="{task_url}">\n    {og_tags}',
     )
     
     # Update <title> tag to be dynamic
     html_content = html_content.replace(
         '<title>Task Progress | AutoRig.online</title>',
-        f'<title>{task_title} | AutoRig.online</title>'
+        f'<title>{safe_task_page_title}</title>'
+    )
+    html_content = html_content.replace(
+        '<h2 data-i18n="task_title" class="task-status-header-title">AutoRig task</h2>',
+        f'<h1 class="task-status-header-title" id="task-seo-heading">{safe_task_heading}</h1>',
     )
     
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=_inject_static_layout(html_content))
 
 
 @app.post("/api/task/{task_id}/purchase-intent")
@@ -11292,7 +13116,7 @@ async def admin_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin page"""
     if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
-    return FileResponse(str(STATIC_DIR / "admin.html"))
+    return _static_html_response("admin.html")
 
 
 @app.get("/admin/workers")
@@ -11300,44 +13124,65 @@ async def admin_workers_page(user: Optional[User] = Depends(get_current_user)):
     """Serve admin workers page (dedicated)."""
     if not user or not is_admin_email(user.email):
         return RedirectResponse(url="/auth/login")
-    return FileResponse(str(STATIC_DIR / "admin-workers.html"))
+    return _static_html_response("admin-workers.html")
 
 
 @app.get("/gallery")
 async def gallery_page():
     """Serve Gallery page"""
-    return FileResponse(str(STATIC_DIR / "gallery.html"))
+    return _static_html_response("gallery.html")
 
 
 @app.get("/dashboard")
 async def dashboard_page():
     """User dashboard: notification settings."""
-    return FileResponse(str(STATIC_DIR / "dashboard.html"))
+    return _static_html_response("dashboard.html")
 
 
 @app.get("/guides")
 async def guides_page():
     """Serve Guides page"""
-    return FileResponse(str(STATIC_DIR / "guides.html"))
+    return _static_html_response("guides.html")
 
 
 @app.get("/buy-credits")
-@app.get("/buy")
 async def buy_credits_page():
     """Serve Buy Credits page"""
-    return FileResponse(str(STATIC_DIR / "buy-credits.html"))
+    return _static_html_response("buy-credits.html")
+
+
+@app.get("/blender-plugin")
+async def blender_plugin_page():
+    """Native Blender plugin landing page."""
+    return _static_html_response("blender-plugin.html")
+
+
+@app.get("/animal-rig")
+async def animal_rig_page():
+    """AutoRig V2 animal and non-humanoid rigging landing page."""
+    return _static_html_response("animal-rig.html")
+
+
+@app.get("/rig-animals", include_in_schema=False)
+async def redirect_rig_animals_page():
+    return RedirectResponse(url="/animal-rig", status_code=301)
+
+
+@app.get("/animal-rig-animation", include_in_schema=False)
+async def redirect_animal_rig_animation_page():
+    return RedirectResponse(url="/animal-rig", status_code=301)
 
 
 @app.get("/developers")
 async def developers_page():
     """API documentation and key management for developers."""
-    return FileResponse(str(STATIC_DIR / "developers.html"))
+    return _static_html_response("developers.html")
 
 
 @app.get("/payment/success")
 async def payment_success_page():
     """Serve payment success info page (no credit logic here)."""
-    return FileResponse(str(STATIC_DIR / "payment-success.html"))
+    return _static_html_response("payment-success.html")
 
 
 # =============================================================================
@@ -11348,236 +13193,242 @@ async def payment_success_page():
 @app.get("/glb-auto-rig")
 async def glb_auto_rig_page():
     """GLB auto-rigging landing page"""
-    return FileResponse(str(STATIC_DIR / "glb-auto-rig.html"))
+    return _static_html_response("glb-auto-rig.html")
 
 
 @app.get("/fbx-auto-rig")
 async def fbx_auto_rig_page():
     """FBX auto-rigging landing page"""
-    return FileResponse(str(STATIC_DIR / "fbx-auto-rig.html"))
+    return _static_html_response("fbx-auto-rig.html")
 
 
 @app.get("/obj-auto-rig")
 async def obj_auto_rig_page():
     """OBJ auto-rigging landing page"""
-    return FileResponse(str(STATIC_DIR / "obj-auto-rig.html"))
-
-
-@app.get("/animal-rig")
-async def animal_rig_page():
-    """AI animal rigging and animation landing page."""
-    return FileResponse(str(STATIC_DIR / "animal-rig.html"))
-
-
-@app.get("/rig-animals")
-@app.get("/animal-rig-animation")
-async def animal_rig_alias_page():
-    """SEO aliases for AI animal rigging."""
-    return RedirectResponse(url="/animal-rig", status_code=301)
+    return _static_html_response("obj-auto-rig.html")
 
 
 # Info pages
 @app.get("/how-it-works")
 async def how_it_works_page():
     """How it works page"""
-    return FileResponse(str(STATIC_DIR / "how-it-works.html"))
+    return _static_html_response("how-it-works.html")
 
 
 @app.get("/faq")
 async def faq_page():
     """FAQ page"""
-    return FileResponse(str(STATIC_DIR / "faq.html"))
+    return _static_html_response("faq.html")
 
 
 @app.get("/terms")
 async def terms_of_use_page():
     """Terms of Use (website)."""
-    return FileResponse(str(STATIC_DIR / "terms-of-use.html"))
+    return _static_html_response("terms-of-use.html")
 
 
 @app.get("/user-agreement")
 async def user_agreement_page():
     """User Agreement (content license, previews, promotional use)."""
-    return FileResponse(str(STATIC_DIR / "user-agreement.html"))
+    return _static_html_response("user-agreement.html")
 
 
 @app.get("/guides")
 async def guides_page():
     """Guides page"""
-    return FileResponse(str(STATIC_DIR / "guides.html"))
+    return _static_html_response("guides.html")
 
 
 @app.get("/t-pose-rig")
 async def t_pose_rig_page():
     """T-pose rig page"""
-    return FileResponse(str(STATIC_DIR / "t-pose-rig.html"))
+    return _static_html_response("t-pose-rig.html")
 
 
 # Mixamo alternative pages (4 languages)
 @app.get("/mixamo-alternative")
 async def mixamo_alternative_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative.html"))
+    return _static_html_response("mixamo-alternative.html")
 
 
 @app.get("/mixamo-alternative-ru")
 async def mixamo_alternative_ru_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-ru.html"))
+    return _static_html_response("mixamo-alternative-ru.html")
 
 
 @app.get("/mixamo-alternative-zh")
 async def mixamo_alternative_zh_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-zh.html"))
+    return _static_html_response("mixamo-alternative-zh.html")
 
 
 @app.get("/mixamo-alternative-hi")
 async def mixamo_alternative_hi_page():
-    return FileResponse(str(STATIC_DIR / "mixamo-alternative-hi.html"))
+    return _static_html_response("mixamo-alternative-hi.html")
 
 
 # Rig GLB for Unity pages (4 languages)
 @app.get("/rig-glb-unity")
 async def rig_glb_unity_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity.html"))
+    return _static_html_response("rig-glb-unity.html")
 
 
 @app.get("/rig-glb-unity-ru")
 async def rig_glb_unity_ru_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-ru.html"))
+    return _static_html_response("rig-glb-unity-ru.html")
 
 
 @app.get("/rig-glb-unity-zh")
 async def rig_glb_unity_zh_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-zh.html"))
+    return _static_html_response("rig-glb-unity-zh.html")
 
 
 @app.get("/rig-glb-unity-hi")
 async def rig_glb_unity_hi_page():
-    return FileResponse(str(STATIC_DIR / "rig-glb-unity-hi.html"))
+    return _static_html_response("rig-glb-unity-hi.html")
 
 
 # Rig FBX for Unreal pages (4 languages)
 @app.get("/rig-fbx-unreal")
 async def rig_fbx_unreal_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal.html"))
+    return _static_html_response("rig-fbx-unreal.html")
 
 
 @app.get("/rig-fbx-unreal-ru")
 async def rig_fbx_unreal_ru_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-ru.html"))
+    return _static_html_response("rig-fbx-unreal-ru.html")
 
 
 @app.get("/rig-fbx-unreal-zh")
 async def rig_fbx_unreal_zh_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-zh.html"))
+    return _static_html_response("rig-fbx-unreal-zh.html")
 
 
 @app.get("/rig-fbx-unreal-hi")
 async def rig_fbx_unreal_hi_page():
-    return FileResponse(str(STATIC_DIR / "rig-fbx-unreal-hi.html"))
+    return _static_html_response("rig-fbx-unreal-hi.html")
 
 
 # GLB vs FBX comparison pages (4 languages)
 @app.get("/glb-vs-fbx")
 async def glb_vs_fbx_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx.html"))
+    return _static_html_response("glb-vs-fbx.html")
 
 
 @app.get("/glb-vs-fbx-ru")
 async def glb_vs_fbx_ru_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-ru.html"))
+    return _static_html_response("glb-vs-fbx-ru.html")
 
 
 @app.get("/glb-vs-fbx-zh")
 async def glb_vs_fbx_zh_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-zh.html"))
+    return _static_html_response("glb-vs-fbx-zh.html")
 
 
 @app.get("/glb-vs-fbx-hi")
 async def glb_vs_fbx_hi_page():
-    return FileResponse(str(STATIC_DIR / "glb-vs-fbx-hi.html"))
+    return _static_html_response("glb-vs-fbx-hi.html")
 
 
 # T-pose vs A-pose comparison pages (4 languages)
 @app.get("/t-pose-vs-a-pose")
 async def t_pose_vs_a_pose_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose.html"))
+    return _static_html_response("t-pose-vs-a-pose.html")
 
 
 @app.get("/t-pose-vs-a-pose-ru")
 async def t_pose_vs_a_pose_ru_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-ru.html"))
+    return _static_html_response("t-pose-vs-a-pose-ru.html")
 
 
 @app.get("/t-pose-vs-a-pose-zh")
 async def t_pose_vs_a_pose_zh_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-zh.html"))
+    return _static_html_response("t-pose-vs-a-pose-zh.html")
 
 
 @app.get("/t-pose-vs-a-pose-hi")
 async def t_pose_vs_a_pose_hi_page():
-    return FileResponse(str(STATIC_DIR / "t-pose-vs-a-pose-hi.html"))
+    return _static_html_response("t-pose-vs-a-pose-hi.html")
 
 
 # Animation retargeting pages (4 languages)
 @app.get("/animation-retargeting")
 async def animation_retargeting_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting.html"))
+    return _static_html_response("animation-retargeting.html")
 
 
 @app.get("/animation-retargeting-ru")
 async def animation_retargeting_ru_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-ru.html"))
+    return _static_html_response("animation-retargeting-ru.html")
 
 
 @app.get("/animation-retargeting-zh")
 async def animation_retargeting_zh_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-zh.html"))
+    return _static_html_response("animation-retargeting-zh.html")
 
 
 @app.get("/animation-retargeting-hi")
 async def animation_retargeting_hi_page():
-    return FileResponse(str(STATIC_DIR / "animation-retargeting-hi.html"))
+    return _static_html_response("animation-retargeting-hi.html")
 
 
 @app.get("/face-rig-animation")
 async def face_rig_animation_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation.html"))
+    return _static_html_response("face-rig-animation.html")
 
 
 @app.get("/face-rig-animation-ru")
 async def face_rig_animation_ru_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation-ru.html"))
+    return _static_html_response("face-rig-animation-ru.html")
 
 
 @app.get("/face-rig-animation-zh")
 async def face_rig_animation_zh_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation-zh.html"))
+    return _static_html_response("face-rig-animation-zh.html")
 
 
 @app.get("/face-rig-animation-hi")
 async def face_rig_animation_hi_page():
-    return FileResponse(str(STATIC_DIR / "face-rig-animation-hi.html"))
+    return _static_html_response("face-rig-animation-hi.html")
 
 
 # Auto-rig OBJ pages (4 languages)
 @app.get("/auto-rig-obj")
 async def auto_rig_obj_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj.html"))
+    return _static_html_response("auto-rig-obj.html")
 
 
 @app.get("/auto-rig-obj-ru")
 async def auto_rig_obj_ru_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-ru.html"))
+    return _static_html_response("auto-rig-obj-ru.html")
 
 
 @app.get("/auto-rig-obj-zh")
 async def auto_rig_obj_zh_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-zh.html"))
+    return _static_html_response("auto-rig-obj-zh.html")
 
 
 @app.get("/auto-rig-obj-hi")
 async def auto_rig_obj_hi_page():
-    return FileResponse(str(STATIC_DIR / "auto-rig-obj-hi.html"))
+    return _static_html_response("auto-rig-obj-hi.html")
+
+
+def _make_rig_article_endpoint(rig_key: str, lang: str):
+    async def rig_article_endpoint(db: AsyncSession = Depends(get_db)):
+        return await _rig_article_response(rig_key, lang, db)
+
+    rig_article_endpoint.__name__ = f"{rig_key}_auto_rig_{lang}_page"
+    return rig_article_endpoint
+
+
+for _rig_key in GALLERY_RIG_TYPES:
+    for _lang in RIG_ARTICLE_LANGS:
+        app.add_api_route(
+            _rig_article_path(_rig_key, _lang),
+            _make_rig_article_endpoint(_rig_key, _lang),
+            methods=["GET", "HEAD"],
+            response_class=HTMLResponse,
+            include_in_schema=False,
+        )
 
 
 # Sitemap and robots.txt
@@ -11585,7 +13436,7 @@ async def auto_rig_obj_hi_page():
 @app.get("/sitemap.xml")
 async def sitemap_index(db: AsyncSession = Depends(get_db)):
     """
-    Sitemap index: static marketing pages + public gallery `/task?id=` urlsets by part.
+    Sitemap index: static marketing pages + public task urlsets by part.
     """
     from seo_gallery import (
         build_sitemap_index_xml,
@@ -11634,7 +13485,7 @@ async def sitemap_mirror(db: AsyncSession = Depends(get_db)):
 @app.head("/sitemap/gallery/part/{part}.xml")
 @app.get("/sitemap/gallery/part/{part}.xml")
 async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(get_db)):
-    """Chunk (max 50) of public `/task?id=` URLs (no SEO gate)."""
+    """Chunk (max 50) of public /task?id={task_id} URLs (no SEO gate)."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_all_part
 
     if part < 0:
@@ -11650,7 +13501,7 @@ async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(ge
 @app.head("/sitemap/gallery/indexing/part/{part}.xml")
 @app.get("/sitemap/gallery/indexing/part/{part}.xml")
 async def sitemap_gallery_indexing_part_only(part: int, db: AsyncSession = Depends(get_db)):
-    """SEO-gated chunk (max 50) of `/task?id=` URLs."""
+    """SEO-gated chunk (max 50) of /task?id={task_id} URLs."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_indexing_part
 
     if part < 0:
@@ -11666,7 +13517,7 @@ async def sitemap_gallery_indexing_part_only(part: int, db: AsyncSession = Depen
 @app.head("/sitemap/videos.xml")
 @app.get("/sitemap/videos.xml")
 async def sitemap_videos(db: AsyncSession = Depends(get_db)):
-    """Google Video sitemap for public task pages with uploaded YouTube previews."""
+    """Google Video sitemap for public model pages with uploaded YouTube previews."""
     from seo_gallery import build_video_sitemap_xml, video_sitemap_entries
 
     base = (APP_URL or "https://autorig.online").rstrip("/")
@@ -11675,23 +13526,6 @@ async def sitemap_videos(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Empty video sitemap")
     xml = build_video_sitemap_xml(base, entries)
     return Response(content=xml, media_type="application/xml; charset=utf-8")
-
-
-@app.head("/m/{task_id}")
-@app.get("/m/{task_id}")
-async def public_model_seo_page(task_id: str, db: AsyncSession = Depends(get_db)):
-    """
-    Legacy URL: permanent redirect to the task viewer for gallery-eligible tasks only.
-    Bookmarks and external links to /m/{id} continue to work.
-    """
-    from seo_gallery import load_task_for_public_model_page
-
-    task = await load_task_for_public_model_page(db, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Not found")
-    base = (APP_URL or "https://autorig.online").rstrip("/")
-    target = f"{base}/task?id={task_id}"
-    return RedirectResponse(url=target, status_code=301)
 
 
 @app.get("/robots.txt")
@@ -11704,6 +13538,20 @@ async def robots():
 
 
 # Search engine verification files
+INDEXNOW_KEY = "793f81f63218433f87e43c0afd353c14"
+INDEXNOW_KEY_FILE = f"{INDEXNOW_KEY}.txt"
+
+
+@app.head(f"/{INDEXNOW_KEY_FILE}")
+@app.get(f"/{INDEXNOW_KEY_FILE}")
+async def indexnow_key_file():
+    """Serve the IndexNow API key from the site root."""
+    return FileResponse(
+        str(STATIC_DIR / INDEXNOW_KEY_FILE),
+        media_type="text/plain",
+    )
+
+
 @app.get("/yandex_7bb48a0ce446816a.html")
 async def yandex_verification():
     """Yandex Webmaster verification file"""

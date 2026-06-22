@@ -22,6 +22,14 @@ class TaskCreateRequest(BaseModel):
         default="rig",
         description="``rig`` (default Auto Rig) or ``convert`` (GLB-only retopo/format pipeline; ``input_url`` must be ``.glb``)",
     )
+    local_rotation: Optional[List[float]] = Field(
+        None,
+        description="Optional animal rig retarget rotation [x,y,z] in worker degrees.",
+    )
+    animal_semantic_markers: Optional[Dict[str, List[float]]] = Field(
+        None,
+        description="Optional semantic marker overrides for animal rig retargeting.",
+    )
     ga_client_id: Optional[str] = Field(None, description="Google Analytics client ID")
 
 
@@ -46,9 +54,15 @@ class TaskStatusResponse(BaseModel):
     ready_urls: List[str]  # Files that are ready for download
     video_ready: bool
     video_url: Optional[str]
+    blueprint_skeleton_ready: bool = False
+    blueprint_skeleton_url: Optional[str] = None
+    blueprint_rig_preview_ready: bool = False
+    blueprint_rig_preview_url: Optional[str] = None
     # Input URL (for Free3D models viewer loads directly from this)
     input_url: Optional[str] = None
     input_type: Optional[str] = None
+    animal_type: Optional[str] = None
+    rig_type: Optional[str] = None
     # FBX -> GLB pre-conversion (only when input was .fbx)
     fbx_glb_output_url: Optional[str] = None
     fbx_glb_model_name: Optional[str] = None
@@ -91,6 +105,43 @@ class TaskStatusResponse(BaseModel):
     youtube_upload_status: Optional[str] = None  # uploaded | skipped | failed
     rig_v2_animal_detection: Optional[dict] = None
     viewer_theme_selection: Optional[dict] = None
+    viewer_environment: Optional[dict] = None
+
+
+class AnimalVariantFileState(BaseModel):
+    """Availability for one animal variant artifact."""
+    ready: bool = False
+    url: Optional[str] = None
+    size: Optional[int] = None
+    filename: Optional[str] = None
+
+
+class AnimalRigVariantItem(BaseModel):
+    """One selectable animal rig variant."""
+    animal_type: str
+    orientation: str
+    label: str
+    is_primary: bool = False
+    status: str = "pending"
+    error: Optional[str] = None
+    preview_url: Optional[str] = None
+    blend: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
+    fbx: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
+    skeleton: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
+
+
+class AnimalRigVariantsResponse(BaseModel):
+    """Selectable animal rig variants for a task."""
+    available: bool = False
+    task_id: str
+    current_animal_type: Optional[str] = None
+    selected_animal_type: Optional[str] = None
+    selected_orientation: str = "front"
+    progress_text: Optional[str] = None
+    purchased_all: bool = False
+    login_required: bool = False
+    all_files_credits: int = 10
+    variants: List[AnimalRigVariantItem] = []
 
 
 class TaskHistoryItem(BaseModel):
@@ -408,6 +459,12 @@ class GalleryItem(BaseModel):
     rig_icon_key: str = "humanoid"  # humanoid | dog | bear | … for UI icon under Icons_png/
 
 
+class GalleryStats(BaseModel):
+    """Public gallery counters not tied to current retained gallery rows."""
+    completed_total: int
+    completed_last_24h: int
+
+
 class GalleryResponse(BaseModel):
     """Response for gallery"""
     items: List[GalleryItem]
@@ -415,6 +472,7 @@ class GalleryResponse(BaseModel):
     page: int
     per_page: int
     has_more: bool
+    stats: GalleryStats
 
 
 class LikeResponse(BaseModel):
@@ -447,6 +505,7 @@ class PurchaseStateResponse(BaseModel):
     is_owner: bool = False
     login_required: bool = False
     user_credits: int = 0
+    all_files_credits: int = 10
 
 
 class PurchaseRequest(BaseModel):
@@ -480,6 +539,13 @@ class AnimationCatalogItem(BaseModel):
     purchased: bool = False
     file_name: Optional[str] = None
     preview_url: Optional[str] = None
+    source_kind: Optional[str] = None
+    animal_type: Optional[str] = None
+    orientation: Optional[str] = None
+    action_name: Optional[str] = None
+    download_scope: Optional[str] = None
+    pack_credits: Optional[int] = None
+    pack_purchased: Optional[bool] = None
 
 
 class AnimationCatalogResponse(BaseModel):
@@ -495,6 +561,8 @@ class AnimationCatalogResponse(BaseModel):
 class AnimationPurchaseRequest(BaseModel):
     animation_id: Optional[str] = None
     all: Optional[bool] = None
+    animal_type: Optional[str] = None
+    orientation: Optional[str] = None
 
 
 class AnimationPurchaseResponse(BaseModel):
@@ -745,4 +813,3 @@ class SupportChatMessageItem(BaseModel):
 
 class SupportChatMessagesPollResponse(BaseModel):
     messages: List[SupportChatMessageItem]
-

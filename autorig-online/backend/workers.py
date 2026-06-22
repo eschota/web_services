@@ -8,15 +8,16 @@ from typing import Optional, List, Tuple, Dict, Any
 from dataclasses import dataclass, field
 import random
 import os
+import time
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import httpx
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 
-from database import WorkerEndpoint
+from database import WorkerEndpoint, Task
 from config import (
     WORKERS, 
     PROGRESS_BATCH_SIZE, 
@@ -87,6 +88,97 @@ def extract_guid(text: str) -> Optional[str]:
 # =============================================================================
 # Worker Communication
 # =============================================================================
+async def _recover_worker_task_after_post_timeout(
+    client: httpx.AsyncClient,
+    worker_url: str,
+    input_url: str,
+    request_started_at: float,
+) -> Optional[WorkerTaskResult]:
+    """
+    Some workers accept the job, create /converter/glb/{guid}/ immediately, but
+    keep the POST request open long enough for our 30s client timeout. If the
+    worker status exposes the running job, recover its GUID/progress page instead
+    of incorrectly marking the task as Worker timeout.
+    """
+    try:
+        resp = await client.get(worker_url, timeout=5.0)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        refs, has_payload = parse_worker_active_tasks_from_json(data)
+        if not has_payload or not refs:
+            return None
+        blob = "\n".join(refs)
+        blob_lc = blob.lower()
+        input_lc = (input_url or "").strip().lower()
+        total_active = int(data.get("total_active") or 0)
+        # Prefer exact input match; allow single-active-worker fallback because
+        # start_task_on_worker only posts to a worker reported as free. The
+        # fallback still requires a recently-created worker job so an unrelated
+        # long-running task is not attached to our DB task.
+        if input_lc and input_lc not in blob_lc:
+            if total_active != 1:
+                return None
+            created_values: List[float] = []
+            for bucket in ("active_tasks", "processing_tasks", "pending_tasks"):
+                val = data.get(bucket)
+                items = val.values() if isinstance(val, dict) else val if isinstance(val, list) else []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        created_values.append(float(item.get("created_at") or 0))
+                    except Exception:
+                        continue
+            if created_values and max(created_values) < (request_started_at - 10.0):
+                return None
+
+        guid = None
+        for ref in refs:
+            s = str(ref or "").strip()
+            if "/converter/glb/" not in s:
+                continue
+            m = re.search(r"/converter/glb/([0-9a-fA-F\-]{36})(?:/|\.zip|$)", s)
+            if m:
+                guid = m.group(1)
+                break
+        if not guid:
+            guid = extract_guid(blob)
+        if not guid:
+            return None
+        progress_page = None
+        output_urls: List[str] = []
+        for ref in refs:
+            s = str(ref or "").strip()
+            if not s:
+                continue
+            if guid in s and s.startswith(("http://", "https://")):
+                if "/converter/glb/" in s and s.endswith(".html") and not progress_page:
+                    progress_page = s
+                output_urls.append(s)
+        if not progress_page:
+            worker_base = get_worker_base_url(worker_url)
+            if not worker_base:
+                return None
+            progress_page = f"{worker_base}/converter/glb/{guid}/{guid}.html"
+        print(
+            f"[Workers] POST timeout recovered active worker task: "
+            f"worker={worker_url} guid={guid} progress_page={progress_page}"
+        )
+        return WorkerTaskResult(
+            success=True,
+            task_id=guid,
+            output_urls=output_urls,
+            progress_page=progress_page,
+            guid=guid,
+        )
+    except Exception as e:
+        print(f"[Workers] POST timeout recovery failed for {worker_url}: {e}")
+        return None
+
+
 async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) -> List[Tuple[str, int]]:
     """
     Return enabled worker URLs ordered by weight desc (priority), id asc.
@@ -112,6 +204,41 @@ async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) 
 async def get_configured_workers(db: Optional[AsyncSession] = None) -> List[str]:
     """Convenience wrapper returning only URLs."""
     return [url for (url, _w) in await get_configured_workers_with_weight(db)]
+
+
+async def get_backend_worker_processing_counts(db: Optional[AsyncSession] = None) -> Dict[str, int]:
+    """
+    Count tasks already assigned by the backend per worker.
+    Worker APIs can lag for a few seconds after dispatch; these counts prevent
+    burst uploads from piling onto one worker while other workers are idle.
+    """
+    if not db:
+        return {}
+    try:
+        res = await db.execute(
+            select(Task.worker_api, func.count())
+            .where(Task.status == "processing")
+            .where(Task.worker_api.is_not(None))
+            .group_by(Task.worker_api)
+        )
+    except Exception as e:
+        print(f"[Workers] Could not read backend processing counts: {e}")
+        return {}
+
+    counts: Dict[str, int] = {}
+    for raw_url, count in res.all():
+        key = normalize_worker_url_key(raw_url or "")
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + int(count or 0)
+    return counts
+
+
+def get_worker_effective_active(worker: Any, backend_counts: Optional[Dict[str, int]] = None) -> int:
+    """Use the stricter of worker-reported active jobs and backend-assigned jobs."""
+    reported = _safe_worker_int(getattr(worker, "total_active", 0), 0)
+    backend = int((backend_counts or {}).get(normalize_worker_url_key(getattr(worker, "url", "")), 0) or 0)
+    return max(reported, backend)
 
 
 WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
@@ -181,10 +308,16 @@ async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerI
         if response.status_code == 200:
             data = response.json()
             # Worker may return load info in different formats
-            load = data.get("load", data.get("queue_size", 0))
+            load = data.get("load")
+            active = _safe_worker_int(data.get("total_active"), 0)
+            pending = _safe_worker_int(data.get("total_pending"), 0)
+            queue_size = _safe_worker_int(data.get("queue_size"), 0)
+            counter_load = active + pending + queue_size
+            if load is None:
+                load = counter_load
             if isinstance(load, (int, float)):
-                return WorkerInfo(url=worker_url, available=True, load=float(load))
-            return WorkerInfo(url=worker_url, available=True, load=0.0)
+                return WorkerInfo(url=worker_url, available=True, load=max(float(load), float(counter_load)))
+            return WorkerInfo(url=worker_url, available=True, load=float(counter_load))
         return WorkerInfo(url=worker_url, available=False, error=f"HTTP {response.status_code}")
     except Exception as e:
         return WorkerInfo(url=worker_url, available=False, error=str(e))
@@ -223,6 +356,7 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
         return None
 
     statuses = await get_all_workers_status(worker_urls)
+    backend_processing = await get_backend_worker_processing_counts(db)
     available = [w for w in statuses if w.available]
     quarantine_safe_available = [w for w in available if not is_worker_quarantined(w.url)]
 
@@ -240,14 +374,18 @@ async def select_best_worker(db: Optional[AsyncSession] = None) -> Optional[str]
 
     # For direct restart/admin dispatch, avoid piling new work onto a high-weight
     # worker that is already busy when lower-weight idle workers are available.
-    idle_candidates = [w for w in candidates_pool if (w.load or 0) <= 0]
-    dispatch_pool = idle_candidates or candidates_pool
+    effective_pool = [
+        (w, max(float(w.load or 0), float(backend_processing.get(normalize_worker_url_key(w.url), 0) or 0)))
+        for w in candidates_pool
+    ]
+    idle_candidates = [(w, load) for (w, load) in effective_pool if load <= 0]
+    dispatch_pool = idle_candidates or effective_pool
 
     weight_by_url: Dict[str, int] = {u: w for (u, w) in workers_with_weight}
-    max_weight = max(weight_by_url.get(w.url, 0) for w in dispatch_pool)
-    candidates = [w for w in dispatch_pool if weight_by_url.get(w.url, 0) == max_weight]
-    candidates.sort(key=lambda w: w.load)
-    return candidates[0].url
+    max_weight = max(weight_by_url.get(w.url, 0) for (w, _load) in dispatch_pool)
+    candidates = [(w, load) for (w, load) in dispatch_pool if weight_by_url.get(w.url, 0) == max_weight]
+    candidates.sort(key=lambda item: item[1])
+    return candidates[0][0].url
 
 
 async def send_task_to_worker(
@@ -259,6 +397,8 @@ async def send_task_to_worker(
     pipeline_kind: str = "rig",
     animal_type: Optional[str] = None,
     mode: Optional[str] = None,
+    animal_semantic_markers: Optional[Dict[str, List[float]]] = None,
+    viewer_environment: Optional[Dict[str, Any]] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -292,6 +432,10 @@ async def send_task_to_worker(
                 }
                 if animal_type:
                     payload["animal_type"] = animal_type
+                if animal_semantic_markers:
+                    payload["animal_semantic_markers"] = animal_semantic_markers
+                if isinstance(viewer_environment, dict) and viewer_environment:
+                    payload["viewer_environment"] = viewer_environment
                 if transform_params:
                     if transform_params.get("local_position"):
                         payload["local_position"] = transform_params["local_position"]
@@ -300,6 +444,7 @@ async def send_task_to_worker(
                     if transform_params.get("local_scale"):
                         payload["local_scale"] = transform_params["local_scale"]
             
+            request_started_at = time.time()
             response = await client.post(
                 worker_url,
                 json=payload,
@@ -335,6 +480,14 @@ async def send_task_to_worker(
                 )
                 
         except httpx.TimeoutException:
+            recovered = await _recover_worker_task_after_post_timeout(
+                client,
+                worker_url,
+                input_url,
+                request_started_at,
+            )
+            if recovered is not None:
+                return recovered
             return WorkerTaskResult(success=False, error="Worker timeout")
         except Exception as e:
             return WorkerTaskResult(success=False, error=str(e))
@@ -468,13 +621,19 @@ async def check_urls_batch(
     return newly_ready, len(already_ready)
 
 
-async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[bool, Optional[str]]:
+async def check_video_availability(
+    guid: str,
+    worker_base_url: str,
+    *,
+    prefer_rig_preview: bool = False,
+) -> Tuple[bool, Optional[str]]:
     """
     Check if a preview or full video is available on the worker.
     Returns: (is_ready, video_url)
 
-    Prefers ``{guid}_video_small.mp4`` for the site /api/video proxy; falls back to
-    ``{guid}_video.mp4`` for older tasks or before the small encode exists.
+    For animal rig tasks, prefer ``{guid}_rig_preview.mp4`` because it shows the
+    final rig result. Otherwise prefer ``{guid}_video_small.mp4`` for the site
+    /api/video proxy and fall back to ``{guid}_video.mp4``.
 
     worker_base_url is already without /api-converter-glb (e.g., http://5.129.157.224:5267)
     """
@@ -482,15 +641,20 @@ async def check_video_availability(guid: str, worker_base_url: str) -> Tuple[boo
         return False, None
 
     base = worker_base_url.rstrip("/")
+    rig_preview_url = f"{base}/converter/glb/{guid}/{guid}_rig_preview.mp4"
     small_url = f"{base}/converter/glb/{guid}/{guid}_video_small.mp4"
     large_url = f"{base}/converter/glb/{guid}/{guid}_video.mp4"
 
     try:
         async with httpx.AsyncClient() as client:
+            if prefer_rig_preview and await probe_resource_available(rig_preview_url, client):
+                return True, rig_preview_url
             if await probe_resource_available(small_url, client):
                 return True, small_url
             if await probe_resource_available(large_url, client):
                 return True, large_url
+            if not prefer_rig_preview and await probe_resource_available(rig_preview_url, client):
+                return True, rig_preview_url
     except Exception:
         pass
 
@@ -802,12 +966,25 @@ async def get_global_queue_status(db: Optional[AsyncSession] = None) -> GlobalQu
         
         # Calculate totals
         available_workers = [w for w in workers if w.available]
-        total_active = sum(w.total_active for w in available_workers)
+        backend_processing = await get_backend_worker_processing_counts(db)
+        backend_created = 0
+        if db:
+            try:
+                created_res = await db.execute(
+                    select(func.count())
+                    .select_from(Task)
+                    .where(Task.status == "created")
+                )
+                backend_created = int(created_res.scalar() or 0)
+            except Exception as e:
+                print(f"[Workers] Could not read backend queued count: {e}")
+
+        total_active = sum(get_worker_effective_active(w, backend_processing) for w in available_workers)
         total_pending = sum(w.total_pending for w in available_workers)
-        total_queue = sum(w.queue_size for w in available_workers)
+        worker_queue = sum(w.queue_size for w in available_workers)
+        total_queue = worker_queue + backend_created
         
-        # Calculate estimated wait time
-        # Formula: (pending + active tasks) * avg_time / num_available_workers
+        # Calculate estimated wait time for a newly submitted task.
         avg_task_time = 900  # 15 minutes default
         if available_workers:
             # Use average from workers that have data
@@ -815,12 +992,17 @@ async def get_global_queue_status(db: Optional[AsyncSession] = None) -> GlobalQu
             if times:
                 avg_task_time = sum(times) / len(times)
         
-        num_workers = len(available_workers) if available_workers else 1
-        tasks_ahead = total_pending + total_active
-        
-        # Each worker can process 1 task at a time (max_concurrent=1)
-        # So wait time = (tasks_ahead / num_workers) * avg_task_time
-        estimated_wait_seconds = int((tasks_ahead / num_workers) * avg_task_time) if num_workers > 0 else 0
+        total_capacity = sum(max(1, w.max_concurrent) for w in available_workers) or 1
+        free_capacity = max(0, total_capacity - total_active)
+        waiting_tasks = total_pending + total_queue
+
+        # If the pool still has free capacity after already queued jobs, a new
+        # task should dispatch immediately instead of showing a fake wait.
+        if free_capacity > waiting_tasks:
+            estimated_wait_seconds = 0
+        else:
+            tasks_ahead = max(0, waiting_tasks - free_capacity + 1)
+            estimated_wait_seconds = int((tasks_ahead / total_capacity) * avg_task_time) if total_capacity > 0 else 0
         
         # Format wait time
         if estimated_wait_seconds < 60:
@@ -843,4 +1025,3 @@ async def get_global_queue_status(db: Optional[AsyncSession] = None) -> GlobalQu
             estimated_wait_seconds=estimated_wait_seconds,
             estimated_wait_formatted=wait_formatted
         )
-
