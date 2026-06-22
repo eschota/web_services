@@ -117,6 +117,25 @@ def _transform_params_from_viewer_settings(settings: Dict[str, Any]) -> Optional
     }
 
 
+def _ensure_site_transform_params_from_viewer_settings(
+    settings: Dict[str, Any],
+    *,
+    created_via_api: bool,
+    source: str = "site_auto",
+) -> Optional[Dict[str, Any]]:
+    transform_params = _transform_params_from_viewer_settings(settings)
+    if transform_params or created_via_api:
+        return transform_params
+
+    orientation = _site_authoritative_identity_orientation(source)
+    settings["rig_orientation"] = orientation
+    return {
+        "local_rotation": orientation["local_rotation"],
+        "local_rotation_authoritative": True,
+        "rig_orientation": orientation,
+    }
+
+
 RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
 
 
@@ -411,11 +430,22 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
 
                 # Start main pipeline immediately (do not wait for next poll).
                 if not task.worker_task_id and task.fbx_glb_output_url:
-                    viewer_environment = get_viewer_environment_from_settings(_load_task_viewer_settings(task))
+                    viewer_settings = _load_task_viewer_settings(task)
+                    if ensure_viewer_environment_in_settings(viewer_settings):
+                        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
+                    viewer_environment = get_viewer_environment_from_settings(viewer_settings)
+                    transform_params = _ensure_site_transform_params_from_viewer_settings(
+                        viewer_settings,
+                        created_via_api=bool(getattr(task, "created_via_api", False)),
+                        source="site_auto",
+                    )
+                    if transform_params:
+                        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
                     result = await send_task_to_worker(
                         task.worker_api,
                         task.fbx_glb_output_url,
                         task.input_type or "t_pose",
+                        transform_params=transform_params,
                         pipeline_kind="rig",
                         viewer_environment=viewer_environment,
                     )
@@ -533,7 +563,11 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             await db.commit()
             await db.refresh(task)
         viewer_environment = get_viewer_environment_from_settings(viewer_settings)
-        transform_params = _transform_params_from_viewer_settings(viewer_settings)
+        transform_params = _ensure_site_transform_params_from_viewer_settings(
+            viewer_settings,
+            created_via_api=bool(getattr(task, "created_via_api", False)),
+            source="site_auto",
+        )
     if str(task_type_for_worker).strip().lower() == "animal":
         try:
             detection = viewer_settings.get("rig_v2_animal_detection") if isinstance(viewer_settings, dict) else None
@@ -569,17 +603,10 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             await db.commit()
             await db.refresh(task)
             return task, task.error_message
-    if pk == "rig" and not transform_params and not bool(getattr(task, "created_via_api", False)):
-        orientation = _site_authoritative_identity_orientation("site_auto")
-        viewer_settings["rig_orientation"] = orientation
+    if pk == "rig" and transform_params:
         task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
         await db.commit()
         await db.refresh(task)
-        transform_params = {
-            "local_rotation": orientation["local_rotation"],
-            "local_rotation_authoritative": True,
-            "rig_orientation": orientation,
-        }
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,

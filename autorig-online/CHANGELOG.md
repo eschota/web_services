@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.01.005 - Orientation-safe worker dispatch
+
+- Reused a single site orientation-to-worker transform helper for background rig dispatch.
+- Preserved authoritative rig orientation through FBX pre-conversion continuation.
+- Added authoritative orientation to admin bulk restart worker payloads.
+
 ## v0.01.004 - Default site rig orientation
 
 - Defaulted browser-created rig tasks to an authoritative identity orientation when the user does not rotate the model manually.

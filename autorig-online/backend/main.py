@@ -4096,6 +4096,60 @@ def _ensure_site_authoritative_rig_orientation(
     )
 
 
+def _transform_params_from_rig_orientation(
+    rig_orientation: Optional[Dict[str, Any]],
+    *,
+    default_source: str,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(rig_orientation, dict):
+        return None
+    try:
+        orientation = _coerce_rig_orientation(
+            rig_orientation,
+            default_source=default_source,
+        )
+    except HTTPException:
+        return None
+    if not orientation:
+        return None
+    return {
+        "local_rotation": orientation["local_rotation"],
+        "local_rotation_authoritative": bool(orientation.get("local_rotation_authoritative", True)),
+        "rig_orientation": orientation,
+    }
+
+
+def _ensure_site_transform_params_from_settings(
+    settings: Dict[str, Any],
+    *,
+    default_source: str,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(settings, dict):
+        return None
+    transform_params = _transform_params_from_rig_orientation(
+        settings.get("rig_orientation"),
+        default_source=default_source,
+    )
+    if transform_params:
+        settings["rig_orientation"] = transform_params["rig_orientation"]
+        return transform_params
+
+    orientation = _ensure_site_authoritative_rig_orientation(
+        None,
+        local_rotation=None,
+        local_rotation_authoritative=None,
+        default_source=default_source,
+    )
+    if not orientation:
+        return None
+    settings["rig_orientation"] = orientation
+    return {
+        "local_rotation": orientation["local_rotation"],
+        "local_rotation_authoritative": True,
+        "rig_orientation": orientation,
+    }
+
+
 def _coerce_animal_semantic_markers(value: Any) -> Optional[Dict[str, List[float]]]:
     if value in (None, ""):
         return None
@@ -8273,6 +8327,7 @@ async def api_admin_restart_incomplete_tasks(
                     if pk_ad not in ("rig", "convert"):
                         pk_ad = "rig"
                     viewer_environment_ad = None
+                    transform_params_ad = None
                     if pk_ad == "rig":
                         try:
                             ad_settings = json.loads(task.viewer_settings or "{}")
@@ -8283,10 +8338,17 @@ async def api_admin_restart_incomplete_tasks(
                         if ensure_viewer_environment_in_settings(ad_settings):
                             task.viewer_settings = json.dumps(ad_settings, ensure_ascii=False)
                         viewer_environment_ad = get_viewer_environment_from_settings(ad_settings)
+                        transform_params_ad = _ensure_site_transform_params_from_settings(
+                            ad_settings,
+                            default_source="task_restart",
+                        )
+                        if transform_params_ad:
+                            task.viewer_settings = json.dumps(ad_settings, ensure_ascii=False)
                     send_result = await send_task_to_worker(
                         worker_url,
                         task.input_url,
                         task.input_type or "t_pose",
+                        transform_params=transform_params_ad,
                         pipeline_kind=pk_ad,
                         viewer_environment=viewer_environment_ad,
                     )
