@@ -439,8 +439,13 @@ async def send_task_to_worker(
                 if transform_params:
                     if transform_params.get("local_position"):
                         payload["local_position"] = transform_params["local_position"]
-                    if transform_params.get("local_rotation"):
+                    if transform_params.get("local_rotation") is not None:
                         payload["local_rotation"] = transform_params["local_rotation"]
+                    if "local_rotation_authoritative" in transform_params:
+                        payload["local_rotation_authoritative"] = bool(transform_params.get("local_rotation_authoritative"))
+                    rig_orientation = transform_params.get("rig_orientation")
+                    if isinstance(rig_orientation, dict) and rig_orientation:
+                        payload["rig_orientation"] = rig_orientation
                     if transform_params.get("local_scale"):
                         payload["local_scale"] = transform_params["local_scale"]
             

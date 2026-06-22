@@ -3596,6 +3596,8 @@ async def api_create_task(
     rig_v2_detection_meta: Optional[Dict[str, Any]] = None
     rig_v2_manual_selection = False
     local_rotation: Optional[List[float]] = None
+    local_rotation_authoritative: Optional[bool] = None
+    rig_orientation: Optional[Dict[str, Any]] = None
     animal_semantic_markers: Optional[Dict[str, List[float]]] = None
     preflight_render_image_data_url: Optional[str] = None
     source_preview_url: Optional[str] = None
@@ -3630,6 +3632,19 @@ async def api_create_task(
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
         local_rotation = _coerce_float_vec3(data.get("local_rotation"), "local_rotation")
+        local_rotation_authoritative = _coerce_optional_bool(
+            data.get("local_rotation_authoritative"),
+            "local_rotation_authoritative",
+        )
+        rig_orientation = _coerce_rig_orientation(
+            data.get("rig_orientation") or data.get("rig_orientation_json"),
+            local_rotation=local_rotation,
+            local_rotation_authoritative=local_rotation_authoritative,
+            default_source="site_auto",
+        )
+        if rig_orientation:
+            local_rotation = rig_orientation["local_rotation"]
+            local_rotation_authoritative = bool(rig_orientation.get("local_rotation_authoritative"))
         animal_semantic_markers = _coerce_animal_semantic_markers(data.get("animal_semantic_markers"))
         rig_v2_manual_selection = bool(data.get("rig_v2_manual_selection"))
         raw_detection = data.get("rig_v2_animal_detection")
@@ -3676,6 +3691,19 @@ async def api_create_task(
             form.get("local_rotation_json") or form.get("local_rotation"),
             "local_rotation",
         )
+        local_rotation_authoritative = _coerce_optional_bool(
+            form.get("local_rotation_authoritative"),
+            "local_rotation_authoritative",
+        )
+        rig_orientation = _coerce_rig_orientation(
+            form.get("rig_orientation_json") or form.get("rig_orientation"),
+            local_rotation=local_rotation,
+            local_rotation_authoritative=local_rotation_authoritative,
+            default_source="site_auto",
+        )
+        if rig_orientation:
+            local_rotation = rig_orientation["local_rotation"]
+            local_rotation_authoritative = bool(rig_orientation.get("local_rotation_authoritative"))
         animal_semantic_markers = _coerce_animal_semantic_markers(
             form.get("animal_semantic_markers_json") or form.get("animal_semantic_markers")
         )
@@ -3790,6 +3818,10 @@ async def api_create_task(
         }
         if local_rotation is not None:
             rig_v2_detection_meta["local_rotation"] = local_rotation
+        if local_rotation_authoritative is not None:
+            rig_v2_detection_meta["local_rotation_authoritative"] = bool(local_rotation_authoritative)
+        if rig_orientation:
+            rig_v2_detection_meta["rig_orientation"] = rig_orientation
         if animal_semantic_markers:
             rig_v2_detection_meta["animal_semantic_markers"] = animal_semantic_markers
             rig_v2_detection_meta["source"] = "blueprint_retarget"
@@ -3828,6 +3860,9 @@ async def api_create_task(
 
     if rig_v2_detection_meta:
         settings["rig_v2_animal_detection"] = rig_v2_detection_meta
+
+    if rig_orientation:
+        settings["rig_orientation"] = rig_orientation
 
     if source_preview_url:
         parsed_source_preview = urlparse(source_preview_url)
@@ -3939,6 +3974,84 @@ def _coerce_float_vec3(value: Any, field_name: str) -> Optional[List[float]]:
             raise HTTPException(status_code=400, detail=f"{field_name} contains an invalid number")
         out.append(number)
     return out
+
+
+def _coerce_optional_bool(value: Any, field_name: str) -> Optional[bool]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("1", "true", "yes", "on"):
+            return True
+        if lowered in ("0", "false", "no", "off"):
+            return False
+    raise HTTPException(status_code=400, detail=f"{field_name} must be a boolean")
+
+
+def _quarter_turns_from_rotation(local_rotation: List[float]) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for axis, value in zip(("x", "y", "z"), local_rotation):
+        try:
+            out[axis] = int(round(float(value) / 90.0))
+        except Exception:
+            out[axis] = 0
+    return out
+
+
+def _coerce_rig_orientation(
+    value: Any,
+    *,
+    local_rotation: Optional[List[float]] = None,
+    local_rotation_authoritative: Optional[bool] = None,
+    default_source: str = "site_auto",
+) -> Optional[Dict[str, Any]]:
+    if isinstance(value, str) and value.strip():
+        try:
+            value = json.loads(value)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="rig_orientation must be a JSON object") from exc
+    if value in (None, ""):
+        if local_rotation is None or local_rotation_authoritative is not True:
+            return None
+        value = {}
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="rig_orientation must be an object")
+
+    orientation = json.loads(json.dumps(value, ensure_ascii=False))
+    rotation = _coerce_float_vec3(
+        orientation.get("local_rotation", local_rotation),
+        "rig_orientation.local_rotation",
+    )
+    if rotation is None:
+        return None
+
+    authoritative = local_rotation_authoritative
+    if authoritative is None:
+        authoritative = _coerce_optional_bool(
+            orientation.get("local_rotation_authoritative", True),
+            "rig_orientation.local_rotation_authoritative",
+        )
+    if authoritative is None:
+        authoritative = True
+
+    quarter_turns = orientation.get("quarter_turns")
+    if not isinstance(quarter_turns, dict):
+        quarter_turns = _quarter_turns_from_rotation(rotation)
+
+    orientation["schema_version"] = int(orientation.get("schema_version") or 1)
+    orientation["source"] = str(orientation.get("source") or default_source)
+    orientation["local_rotation"] = rotation
+    orientation["local_rotation_authoritative"] = bool(authoritative)
+    orientation["quarter_turns"] = {
+        axis: int(quarter_turns.get(axis, 0) or 0)
+        for axis in ("x", "y", "z")
+    }
+    orientation["user_interacted_bool"] = bool(orientation.get("user_interacted_bool", False))
+    return orientation
 
 
 def _coerce_animal_semantic_markers(value: Any) -> Optional[Dict[str, List[float]]]:
@@ -5865,6 +5978,26 @@ async def api_restart_task(
     except Exception as e:
         print(f"[Restart] Could not parse body: {e}")
 
+    restart_local_rotation = None
+    restart_local_rotation_authoritative = None
+    restart_rig_orientation = None
+    if "local_rotation" in restart_body_data:
+        restart_local_rotation = _coerce_float_vec3(restart_body_data.get("local_rotation"), "local_rotation")
+    if "local_rotation_authoritative" in restart_body_data:
+        restart_local_rotation_authoritative = _coerce_optional_bool(
+            restart_body_data.get("local_rotation_authoritative"),
+            "local_rotation_authoritative",
+        )
+    restart_rig_orientation = _coerce_rig_orientation(
+        restart_body_data.get("rig_orientation") or restart_body_data.get("rig_orientation_json"),
+        local_rotation=restart_local_rotation,
+        local_rotation_authoritative=restart_local_rotation_authoritative,
+        default_source="task_restart",
+    )
+    if restart_rig_orientation:
+        restart_local_rotation = restart_rig_orientation["local_rotation"]
+        restart_local_rotation_authoritative = bool(restart_rig_orientation.get("local_rotation_authoritative"))
+
     animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
     requested_rig_key = str(
         restart_body_data.get("rig_type")
@@ -5932,6 +6065,12 @@ async def api_restart_task(
                 "user_selected_bool": True,
                 "animal_decision_accepted_bool": True,
             }
+            if restart_local_rotation is not None:
+                settings["rig_v2_animal_detection"]["local_rotation"] = restart_local_rotation
+            if restart_local_rotation_authoritative is not None:
+                settings["rig_v2_animal_detection"]["local_rotation_authoritative"] = bool(restart_local_rotation_authoritative)
+            if restart_rig_orientation:
+                settings["rig_v2_animal_detection"]["rig_orientation"] = restart_rig_orientation
         else:
             existing_detection = settings.get("rig_v2_animal_detection")
             if isinstance(existing_detection, dict):
@@ -5946,6 +6085,8 @@ async def api_restart_task(
                     "manual_selection": True,
                     "user_selected_bool": True,
                 }
+        if restart_rig_orientation:
+            settings["rig_orientation"] = restart_rig_orientation
         task.viewer_settings = json.dumps(settings, ensure_ascii=False)
 
     # Increment version (restart_count)
@@ -6018,6 +6159,9 @@ async def api_restart_task(
         if ensure_viewer_environment_in_settings(restart_settings):
             task.viewer_settings = json.dumps(restart_settings, ensure_ascii=False)
         viewer_environment_restart = get_viewer_environment_from_settings(restart_settings)
+        if restart_rig_orientation:
+            restart_settings["rig_orientation"] = restart_rig_orientation
+            task.viewer_settings = json.dumps(restart_settings, ensure_ascii=False)
 
     # Parse transform params from request body (rig pipeline only)
     transform_params = None
@@ -6025,9 +6169,13 @@ async def api_restart_task(
         if any(k in restart_body_data for k in ("local_position", "local_rotation", "local_scale")):
             transform_params = {
                 "local_position": restart_body_data.get("local_position"),
-                "local_rotation": restart_body_data.get("local_rotation"),
+                "local_rotation": restart_local_rotation if restart_local_rotation is not None else restart_body_data.get("local_rotation"),
                 "local_scale": restart_body_data.get("local_scale")
             }
+            if restart_local_rotation_authoritative is not None:
+                transform_params["local_rotation_authoritative"] = bool(restart_local_rotation_authoritative)
+            if restart_rig_orientation:
+                transform_params["rig_orientation"] = restart_rig_orientation
             print(f"[Restart] Transform params from request: {transform_params}")
 
         # Fallback: read from saved viewer_settings if no transforms in request
@@ -6056,6 +6204,12 @@ async def api_restart_task(
                             ],
                             "local_scale": [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)]
                         }
+                        orientation = settings.get("rig_orientation") if isinstance(settings, dict) else None
+                        if isinstance(orientation, dict):
+                            transform_params["rig_orientation"] = orientation
+                            transform_params["local_rotation_authoritative"] = bool(
+                                orientation.get("local_rotation_authoritative", True)
+                            )
                         print(f"[Restart] Transform params from viewer_settings: {transform_params}")
             except Exception as e:
                 print(f"[Restart] Could not read viewer_settings: {e}")
@@ -12163,7 +12317,7 @@ async def api_set_task_viewer_settings(
             existing = {}
     except Exception:
         existing = {}
-    for key in ("rig_v2_animal_detection", "viewer_theme_selection", "viewer_environment"):
+    for key in ("rig_v2_animal_detection", "viewer_theme_selection", "viewer_environment", "rig_orientation"):
         if isinstance(existing.get(key), dict) and key not in settings:
             settings[key] = existing[key]
     ensure_viewer_environment_in_settings(settings)

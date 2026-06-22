@@ -12,8 +12,12 @@ const App = {
         activeTab: 'upload',
         free3dCreateInFlight: false,
         taskSubmitInProgress: false,
+        /** True for the whole submit chain (detect → review → POST), cleared in finally. */
+        taskSubmitChainLock: false,
         rigV2VisionDeps: null,
         rigDetectModalResizeObs: null,
+        rigDetectLocalRotation: [0, 0, 0],
+        rigDetectOrientationUserInteracted: false,
     },
 
     scheduleNonCriticalWork(callback, timeout = 1200) {
@@ -260,9 +264,10 @@ const App = {
                 this.setConvertFormBusyMessage('upload_progress_creating_task');
             });
             xhr.onload = () => {
+                const text = xhr.responseText || '';
                 let data = {};
                 try {
-                    data = JSON.parse(xhr.responseText || '{}');
+                    data = JSON.parse(text || '{}');
                 } catch (err) {
                     data = {};
                 }
@@ -270,11 +275,54 @@ const App = {
                     ok: xhr.status >= 200 && xhr.status < 300,
                     status: xhr.status,
                     data,
+                    text,
                 });
             };
             xhr.onerror = () => reject(new Error('network'));
             xhr.send(formData);
         });
+    },
+
+    parseTaskCreateResponseText(text) {
+        try {
+            const data = JSON.parse(text || '{}');
+            return data && typeof data === 'object' ? data : {};
+        } catch (err) {
+            return {};
+        }
+    },
+
+    taskCreateErrorMessage(status, data, text) {
+        const detail = data && typeof data.detail === 'string' ? data.detail.trim() : '';
+        if (detail) return detail;
+
+        const translatedOr = (key, fallback) => {
+            const value = typeof t === 'function' ? t(key) : '';
+            return value && value !== key ? value : fallback;
+        };
+
+        if (status === 413) {
+            return translatedOr(
+                'error_upload_too_large',
+                'This file is too large. Upload a GLB, FBX, or OBJ file up to 100MB.'
+            );
+        }
+        if (status === 429) {
+            return translatedOr(
+                'error_rate_limited',
+                'Too many upload attempts. Please wait a minute and try again.'
+            );
+        }
+        if (status === 502 || status === 503 || status === 504) {
+            return translatedOr(
+                'error_service_unavailable',
+                'The rigging service is temporarily unavailable. Please try again in a few minutes.'
+            );
+        }
+        if (status > 0 && text && !String(text).trim().startsWith('{')) {
+            return `${translatedOr('error_generic', 'Something went wrong. Please try again.')} (HTTP ${status})`;
+        }
+        return translatedOr('error_generic', 'Something went wrong. Please try again.');
     },
 
     async loadRigV2VisionDeps() {
@@ -301,6 +349,8 @@ const App = {
     /** All rig types shown on home detection modal (humanoid + 12 animals). */
     RIG_DETECT_RIG_TYPES: ['humanoid', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'],
     RIG_DETECT_REVIEW_SECONDS: 30,
+    TASK_CREATE_DEDUPE_MS: 31000,
+    TASK_CREATE_DEDUPE_LS_KEY: 'autorig:lastTaskCreateDedupe:v1',
 
     _rigDetectLabelKey(rigKey) {
         const k = String(rigKey || '').toLowerCase();
@@ -399,9 +449,46 @@ const App = {
         return (h % 1000) / 1000;
     },
 
+    normalizeRigDetectRotation(rotation) {
+        const raw = Array.isArray(rotation) ? rotation : [0, 0, 0];
+        return [0, 1, 2].map((idx) => {
+            const n = Number(raw[idx] ?? 0);
+            if (!Number.isFinite(n)) return 0;
+            return ((Math.round(n / 90) * 90) % 360 + 360) % 360;
+        });
+    },
+
+    rigDetectQuarterTurns(rotation) {
+        const r = this.normalizeRigDetectRotation(rotation);
+        return {
+            x: Math.round(r[0] / 90) % 4,
+            y: Math.round(r[1] / 90) % 4,
+            z: Math.round(r[2] / 90) % 4,
+        };
+    },
+
+    buildRigOrientationPayload(localRotation, userInteracted, source = null) {
+        const rotation = this.normalizeRigDetectRotation(localRotation);
+        const interacted = !!userInteracted;
+        return {
+            schema_version: 1,
+            source: source || (interacted ? 'site_manual' : 'site_auto'),
+            local_rotation: rotation,
+            local_rotation_authoritative: true,
+            quarter_turns: this.rigDetectQuarterTurns(rotation),
+            user_interacted_bool: interacted,
+        };
+    },
+
+    renderRigDetectOrientationState(target, localRotation) {
+        if (!target) return;
+        const r = this.normalizeRigDetectRotation(localRotation);
+        target.textContent = `X ${r[0]} / Y ${r[1]} / Z ${r[2]}`;
+    },
+
     /**
      * Client-side detection + optional live viewer in viewerHost.
-     * @returns {{ detection: object|null, dispose: () => void }}
+     * @returns {{ detection: object|null, dispose: () => void, setLocalRotation: (rotation: number[]) => void }}
      */
     async runHiddenAnimalDetection(source, options = {}) {
         const viewerHost = options.viewerHost || null;
@@ -420,6 +507,8 @@ const App = {
         let pmremGenerator = null;
         let offHost = null;
         let resizeObserver = null;
+        let previewObject = null;
+        let setLocalRotation = () => {};
 
         const dispose = () => {
             if (disposed) return;
@@ -560,7 +649,7 @@ const App = {
                 object = await loadWithLoader(new OBJLoader(), url);
             } else {
                 dispose();
-                return { detection: null, dispose: () => {} };
+                return { detection: null, dispose: () => {}, setLocalRotation: () => {} };
             }
             const detectorFallbackMaterial = new THREE.MeshStandardMaterial({
                 name: 'vision_detector_neutral_gray',
@@ -614,8 +703,22 @@ const App = {
                 }
             });
             scene.add(object);
+            previewObject = object;
             const box = new THREE.Box3().setFromObject(object);
             object.position.sub(box.getCenter(new THREE.Vector3()));
+            setLocalRotation = (rotation) => {
+                if (!previewObject || !renderer || !camera) return;
+                const r = this.normalizeRigDetectRotation(rotation);
+                previewObject.rotation.set(
+                    THREE.MathUtils.degToRad(r[0]),
+                    THREE.MathUtils.degToRad(r[1]),
+                    THREE.MathUtils.degToRad(r[2])
+                );
+                previewObject.updateMatrixWorld(true);
+                controls?.update();
+                renderer.render(scene, camera);
+            };
+            setLocalRotation(options.localRotation || [0, 0, 0]);
             const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
             const bounds = new THREE.Box3().setFromObject(object);
             const maxDim = Math.max(size.x, size.y, size.z, 1);
@@ -761,21 +864,24 @@ const App = {
 
             if (!deferDisposal) {
                 dispose();
-                return { detection, dispose: () => {} };
+                return { detection, dispose: () => {}, setLocalRotation: () => {} };
             }
-            return { detection, dispose };
+            return { detection, dispose, setLocalRotation };
         } catch (err) {
             console.warn('[RigV2Preflight] animal detection skipped:', err);
             dispose();
-            return { detection: null, dispose: () => {} };
+            return { detection: null, dispose: () => {}, setLocalRotation: () => {} };
         }
     },
 
-    buildRigDetectionSubmitPayload(detection, selectedRigKey) {
+    buildRigDetectionSubmitPayload(detection, selectedRigKey, orientationState = null) {
         const d = JSON.parse(JSON.stringify(detection));
         delete d.preflight_render_jpg_base64_string;
         const autoKey = this.rigDetectAutoKey(detection);
         const sel = String(selectedRigKey || 'humanoid').toLowerCase();
+        const localRotation = this.normalizeRigDetectRotation(orientationState?.localRotation || this.state.rigDetectLocalRotation);
+        const userInteracted = !!orientationState?.userInteracted;
+        const rigOrientation = this.buildRigOrientationPayload(localRotation, userInteracted);
         if (sel === 'humanoid') {
             d.type = 'humanoid';
             d.animal_type = '';
@@ -786,15 +892,21 @@ const App = {
             d.mode = 'only_rig';
             d.user_selected_bool = sel !== autoKey;
         }
+        d.local_rotation = localRotation;
+        d.local_rotation_authoritative = true;
+        d.rig_orientation = rigOrientation;
         return d;
     },
 
-    applyRigSelectionToFormData(formData, detection, selectedRigKey) {
+    applyRigSelectionToFormData(formData, detection, selectedRigKey, orientationState = null) {
         formData.set('type', 't_pose');
         formData.delete('animal_type');
         formData.delete('mode');
-        const payload = this.buildRigDetectionSubmitPayload(detection, selectedRigKey);
+        const payload = this.buildRigDetectionSubmitPayload(detection, selectedRigKey, orientationState);
         formData.set('rig_v2_animal_detection_json', JSON.stringify(payload));
+        formData.set('local_rotation_json', JSON.stringify(payload.local_rotation));
+        formData.set('local_rotation_authoritative', 'true');
+        formData.set('rig_orientation_json', JSON.stringify(payload.rig_orientation));
         const preflight = detection.preflight_render_jpg_base64_string;
         if (preflight) {
             formData.set('preflight_render_jpg_base64_string', preflight);
@@ -869,10 +981,48 @@ const App = {
         });
     },
 
+    getTaskCreateInputFingerprint(isUpload, file, linkVal) {
+        if (isUpload && file) {
+            return `u:${file.name}|${file.size}|${file.lastModified}`;
+        }
+        return `l:${String(linkVal || '').trim().toLowerCase()}`;
+    },
+
+    getTaskCreateRigProfileKey(selectedRigKey) {
+        const s = String(selectedRigKey || 'humanoid').toLowerCase();
+        return s === 'humanoid' ? 'humanoid' : `animal:${s}`;
+    },
+
+    readTaskCreateDedupeRecord() {
+        try {
+            const raw = localStorage.getItem(this.TASK_CREATE_DEDUPE_LS_KEY);
+            if (!raw) return null;
+            const o = JSON.parse(raw);
+            if (o && typeof o.key === 'string' && typeof o.t === 'number') return o;
+        } catch (_) {
+            /* ignore */
+        }
+        return null;
+    },
+
+    writeTaskCreateDedupeRecord(key) {
+        try {
+            localStorage.setItem(this.TASK_CREATE_DEDUPE_LS_KEY, JSON.stringify({ key, t: Date.now() }));
+        } catch (_) {
+            /* ignore */
+        }
+    },
+
+    isTaskCreateDeduped(dedupeKey) {
+        const rec = this.readTaskCreateDedupeRecord();
+        if (!rec || rec.key !== dedupeKey) return false;
+        return Date.now() - rec.t < this.TASK_CREATE_DEDUPE_MS;
+    },
+
     /**
-     * @returns {Promise<string>} selected rig key (humanoid | animal)
+     * @returns {Promise<{selectedRigKey: string, localRotation: number[], userInteracted: boolean}>}
      */
-    waitRigDetectReview(detection, initialSelected) {
+    waitRigDetectReview(detection, initialSelected, options = {}) {
         return new Promise((resolve) => {
             const overlay = document.getElementById('convert-form-busy');
             const review = document.getElementById('rig-detect-review');
@@ -880,18 +1030,24 @@ const App = {
             const hint = document.getElementById('rig-detect-hint');
             const startBtn = document.getElementById('rig-detect-start-now');
             const footer = document.getElementById('rig-detect-footer');
+            const orientationPanel = document.getElementById('rig-detect-orientation');
+            const orientationState = document.getElementById('rig-detect-orientation-state');
+            const orientationButtons = Array.from(document.querySelectorAll('[data-rig-rotate-axis]'));
 
             const initialReviewSelection = initialSelected;
 
             let viewerTitlePhase = 'review';
             const refreshViewerTitle = () => this.refreshRigDetectViewerTitle(viewerTitlePhase);
             let selected = initialSelected;
+            let localRotation = this.normalizeRigDetectRotation(options.localRotation || this.state.rigDetectLocalRotation);
+            let userInteracted = !!this.state.rigDetectOrientationUserInteracted;
             let secondsLeft = this.RIG_DETECT_REVIEW_SECONDS;
             let interval = 0;
+            let settled = false;
 
             const renderReviewCopy = () => {
                 if (typeof t !== 'function') return;
-                const manual = selected !== initialReviewSelection;
+                const manual = userInteracted || selected !== initialReviewSelection;
                 const leadKey = manual ? 'upload_rig_review_lead_manual' : 'upload_rig_review_lead_auto';
                 if (lead) {
                     lead.textContent = t(leadKey, { animation_type: this.rigDetectTypeLabel(selected) });
@@ -910,14 +1066,31 @@ const App = {
                     startBtn.textContent = t('upload_rig_start_now_with_timer', { timer: String(secondsLeft) });
                 }
             };
+            const renderOrientationState = () => {
+                this.renderRigDetectOrientationState(orientationState, localRotation);
+            };
+            const resetCountdown = () => {
+                secondsLeft = this.RIG_DETECT_REVIEW_SECONDS;
+                renderReviewCopy();
+                refreshStartBtn();
+            };
+            const markManualInteraction = () => {
+                userInteracted = true;
+                this.state.rigDetectOrientationUserInteracted = true;
+                resetCountdown();
+            };
 
             overlay?.classList.add('rig-detect--review-phase');
             review?.classList.remove('hidden');
+            orientationPanel?.classList.remove('hidden');
             refreshViewerTitle();
+            renderOrientationState();
+            options.setLocalRotation?.(localRotation);
 
             this.renderRigDetectCloud(detection, selected, (rig) => {
                 selected = rig;
                 this.updateRigDetectSelection(selected);
+                markManualInteraction();
                 renderReviewCopy();
             });
 
@@ -931,15 +1104,39 @@ const App = {
                 refreshStartBtn();
                 refreshViewerTitle();
                 this.refreshRigDetectCloudLabels();
+                renderOrientationState();
             };
             window.addEventListener('languageChanged', onLang);
 
+            const onRotate = (event) => {
+                const axis = String(event.currentTarget?.dataset?.rigRotateAxis || '').toLowerCase();
+                const idx = { x: 0, y: 1, z: 2 }[axis];
+                if (idx === undefined) return;
+                const next = this.normalizeRigDetectRotation(localRotation);
+                next[idx] = (next[idx] + 90) % 360;
+                localRotation = next;
+                this.state.rigDetectLocalRotation = [...localRotation];
+                options.setLocalRotation?.(localRotation);
+                renderOrientationState();
+                markManualInteraction();
+            };
+            orientationButtons.forEach((btn) => btn.addEventListener('click', onRotate));
+
             const finish = (value) => {
+                if (settled) return;
+                settled = true;
                 if (interval) clearInterval(interval);
+                interval = 0;
                 window.removeEventListener('languageChanged', onLang);
+                orientationButtons.forEach((btn) => btn.removeEventListener('click', onRotate));
                 if (startBtn) startBtn.onclick = null;
+                orientationPanel?.classList.add('hidden');
                 overlay?.classList.remove('rig-detect--review-phase');
-                resolve(value);
+                resolve({
+                    selectedRigKey: value,
+                    localRotation: this.normalizeRigDetectRotation(localRotation),
+                    userInteracted,
+                });
             };
 
             interval = window.setInterval(() => {
@@ -1171,7 +1368,7 @@ const App = {
             return;
         }
 
-        if (this.state.taskSubmitInProgress) {
+        if (this.state.taskSubmitInProgress || this.state.taskSubmitChainLock) {
             return;
         }
 
@@ -1204,7 +1401,9 @@ const App = {
             alert(t('error_no_file'));
             return;
         }
-        
+
+        this.state.taskSubmitChainLock = true;
+
         formData.append('type', 't_pose');
         
         // Add GA client ID if available
@@ -1264,12 +1463,26 @@ const App = {
                     url: linkVal,
                     ext: '.' + String(linkVal || '').split('?')[0].split('#')[0].split('.').pop().toLowerCase()
                 };
-            const { detection, dispose: dDispose } = await this.runHiddenAnimalDetection(sourceInfo, { viewerHost: viewerHost || null });
+            this.state.rigDetectLocalRotation = [0, 0, 0];
+            this.state.rigDetectOrientationUserInteracted = false;
+            const { detection, dispose: dDispose, setLocalRotation } = await this.runHiddenAnimalDetection(sourceInfo, {
+                viewerHost: viewerHost || null,
+                localRotation: this.state.rigDetectLocalRotation,
+            });
             detectionDispose = dDispose;
 
             let selectedRigKey = this.rigDetectReviewInitialKey(detection);
+            let reviewResult = {
+                selectedRigKey,
+                localRotation: this.state.rigDetectLocalRotation,
+                userInteracted: false,
+            };
             if (detection) {
-                selectedRigKey = await this.waitRigDetectReview(detection, selectedRigKey);
+                reviewResult = await this.waitRigDetectReview(detection, selectedRigKey, {
+                    localRotation: this.state.rigDetectLocalRotation,
+                    setLocalRotation,
+                });
+                selectedRigKey = reviewResult.selectedRigKey;
             }
             detectionDispose();
             detectionDispose = () => {};
@@ -1284,8 +1497,18 @@ const App = {
             rigCloud?.classList.add('hidden');
 
             if (detection) {
-                this.applyRigSelectionToFormData(formData, detection, selectedRigKey);
+                this.applyRigSelectionToFormData(formData, detection, selectedRigKey, reviewResult);
             }
+
+            const rigProfileKey = this.getTaskCreateRigProfileKey(selectedRigKey);
+            const inputFp = this.getTaskCreateInputFingerprint(isUpload, this.state.selectedFile, linkVal);
+            const rotationKey = this.normalizeRigDetectRotation(reviewResult.localRotation).join(',');
+            const dedupeKey = `${busyMode}|${inputFp}|${rigProfileKey}|rot:${rotationKey}`;
+            if (this.isTaskCreateDeduped(dedupeKey)) {
+                alert(typeof t === 'function' ? t('error_task_create_duplicate_recent') : 'Please wait before creating the same task again.');
+                return;
+            }
+            this.writeTaskCreateDedupeRecord(dedupeKey);
 
             this.setConvertFormBusyMessage(isUpload ? 'upload_progress_uploading' : 'upload_progress_creating_task');
             this.resetConvertFormProgressUI(busyMode);
@@ -1293,6 +1516,7 @@ const App = {
             let ok;
             let status;
             let data;
+            let responseText = '';
 
             if (isUpload) {
                 const result = await this.postTaskCreateMultipart(formData, (pct) =>
@@ -1301,13 +1525,15 @@ const App = {
                 ok = result.ok;
                 status = result.status;
                 data = result.data;
+                responseText = result.text;
             } else {
                 const response = await fetch('/api/task/create', {
                     method: 'POST',
                     body: formData,
                 });
                 status = response.status;
-                data = await response.json();
+                responseText = await response.text();
+                data = this.parseTaskCreateResponseText(responseText);
                 ok = response.ok;
             }
 
@@ -1320,7 +1546,7 @@ const App = {
                 } else if (status === 402) {
                     window.location.href = '/buy';
                 } else {
-                    alert(data.detail || t('error_generic'));
+                    alert(this.taskCreateErrorMessage(status, data, responseText));
                 }
             }
         } catch (error) {
@@ -1346,6 +1572,7 @@ const App = {
                 startBtn.disabled = false;
                 startBtn.textContent = t('btn_start');
             }
+            this.state.taskSubmitChainLock = false;
         }
     },
     
@@ -1364,23 +1591,43 @@ const App = {
         console.log('[Gallery] Loading preview...');
 
         try {
-            // Homepage preview should show top liked by default
-            const resp = await fetch('/api/gallery?per_page=12&sort=likes&t=' + Date.now());
+            const rigTypeEl = document.getElementById('gallery-preview-rig-type');
+            if (rigTypeEl && rigTypeEl.dataset.galleryPreviewBound !== '1') {
+                rigTypeEl.dataset.galleryPreviewBound = '1';
+                rigTypeEl.addEventListener('change', () => this.loadGalleryPreview());
+            }
+            const rigType = (rigTypeEl && rigTypeEl.value) ? rigTypeEl.value : 'all';
+
+            // Homepage preview follows the public gallery order.
+            const params = new URLSearchParams({
+                per_page: '12',
+                sort: 'date',
+                rig_type: rigType,
+                t: String(Date.now())
+            });
+            const resp = await fetch(`/api/gallery?${params.toString()}`);
             const data = await resp.json();
             const items = (data && data.items) ? data.items : [];
             
             console.log('[Gallery] Received items:', items.length);
-            const total = (data && typeof data.total === 'number') ? data.total : null;
+            const stats = (data && data.stats) ? data.stats : null;
+            const completedTotal = stats && typeof stats.completed_total === 'number' ? stats.completed_total : null;
+            const completedLast24h = stats && typeof stats.completed_last_24h === 'number' ? stats.completed_last_24h : null;
 
             const viewAllLink = document.getElementById('gallery-view-all-link');
-            if (viewAllLink && total !== null) {
-                // Localized: "View all (N)"
-                if (typeof window.t === 'function') {
-                    viewAllLink.textContent = t('gallery_view_all', { count: total });
-                } else {
-                    viewAllLink.textContent = `View all (${total})`;
-                }
-                viewAllLink.href = '/gallery';
+            if (viewAllLink) {
+                viewAllLink.textContent = (typeof window.t === 'function') ? t('gallery_view_all_plain') : 'View all';
+                viewAllLink.href = rigType === 'all' ? '/gallery' : `/gallery?rig_type=${encodeURIComponent(rigType)}`;
+            }
+            const subtitleEl = document.getElementById('gallery-preview-subtitle');
+            if (subtitleEl && completedTotal !== null && completedLast24h !== null) {
+                const formatCount = (value) => Number(value || 0).toLocaleString();
+                subtitleEl.textContent = (typeof window.t === 'function')
+                    ? t('gallery_home_stats', {
+                        total: formatCount(completedTotal),
+                        last24: formatCount(completedLast24h)
+                    })
+                    : `${formatCount(completedTotal)}+ rigs completed. ${formatCount(completedLast24h)} rigs completed in the last 24 hours.`;
             }
 
             if (!items.length) {
@@ -1390,8 +1637,8 @@ const App = {
 
             // Use TaskCard component if available
             if (typeof TaskCard !== 'undefined') {
-                grid.innerHTML = items.map(it => TaskCard.render(it, { currentSort: 'likes' })).join('');
-                TaskCard.attachHandlers(grid, { currentSort: 'likes' });
+                grid.innerHTML = items.map(it => TaskCard.render(it, { currentSort: 'date' })).join('');
+                TaskCard.attachHandlers(grid, { currentSort: 'date' });
             } else {
                 // Fallback if TaskCard not loaded
                 grid.innerHTML = items.map(it => {
@@ -1491,12 +1738,13 @@ const App = {
 
             // Update values
             activeEl.textContent = data.total_active;
-            pendingEl.textContent = data.total_pending;
+            const queued = Number(data.total_queue ?? data.total_pending ?? 0);
+            pendingEl.textContent = queued;
             waitEl.textContent = formatWait(data.estimated_wait_seconds);
             serversEl.textContent = `${data.available_workers}/${data.total_workers}`;
             
             // Add warning class if queue is long
-            if (data.total_pending > 5) {
+            if (queued > 5) {
                 pendingEl.classList.add('warning');
             } else {
                 pendingEl.classList.remove('warning');
@@ -1799,6 +2047,7 @@ const App = {
             return `
                 <div class="free3d-item" 
                      data-glb-url="${glbUrl}" 
+                     data-preview-url="${previewUrl.replace(/"/g, '&quot;')}"
                      data-title="${title.replace(/"/g, '&quot;')}"
                      title="${title}">
                     <div class="free3d-item-inner">
@@ -1817,7 +2066,8 @@ const App = {
             item.addEventListener('click', () => {
                 const glbUrl = item.dataset.glbUrl;
                 const title = item.dataset.title;
-                this.createTaskFromFree3D(glbUrl, title);
+                const previewUrl = item.dataset.previewUrl;
+                this.createTaskFromFree3D(glbUrl, title, previewUrl);
             });
         });
     },
@@ -1825,7 +2075,7 @@ const App = {
     /**
      * Create a new AutoRig task from a Free3D model
      */
-    async createTaskFromFree3D(glbUrl, title) {
+    async createTaskFromFree3D(glbUrl, title, previewUrl = '') {
         if (!glbUrl) {
             alert(t('error_generic'));
             return;
@@ -1848,6 +2098,9 @@ const App = {
         formData.append('source', 'link');
         formData.append('input_url', glbUrl);
         formData.append('type', 't_pose');
+        if (previewUrl && !String(previewUrl).includes('placeholder-thumb.svg')) {
+            formData.append('source_preview_url', previewUrl);
+        }
 
         this.state.free3dCreateInFlight = true;
         this.showFree3DCreateOverlay(title);
@@ -1892,4 +2145,3 @@ window.App = App;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => App.init());
-

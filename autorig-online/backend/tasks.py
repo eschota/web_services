@@ -63,6 +63,49 @@ def _load_task_viewer_settings(task: Task) -> Dict[str, Any]:
         return settings if isinstance(settings, dict) else {}
     except Exception:
         return {}
+
+
+def _coerce_rotation_list(value: Any) -> Optional[List[float]]:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return None
+    out: List[float] = []
+    for item in value:
+        try:
+            number = float(item)
+        except Exception:
+            return None
+        if number != number or abs(number) > 1_000_000:
+            return None
+        out.append(number)
+    return out
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
+def _transform_params_from_viewer_settings(settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(settings, dict):
+        return None
+    orientation = settings.get("rig_orientation")
+    if not isinstance(orientation, dict):
+        return None
+    local_rotation = _coerce_rotation_list(orientation.get("local_rotation"))
+    if local_rotation is None:
+        return None
+    return {
+        "local_rotation": local_rotation,
+        "local_rotation_authoritative": _as_bool(orientation.get("local_rotation_authoritative", True)),
+        "rig_orientation": orientation,
+    }
+
+
 RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
 
 
@@ -479,6 +522,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             await db.commit()
             await db.refresh(task)
         viewer_environment = get_viewer_environment_from_settings(viewer_settings)
+        transform_params = _transform_params_from_viewer_settings(viewer_settings)
     if str(task_type_for_worker).strip().lower() == "animal":
         try:
             detection = viewer_settings.get("rig_v2_animal_detection") if isinstance(viewer_settings, dict) else None
@@ -487,8 +531,14 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
                     animal_type = _animal_type_from_detection_meta(detection)
                     mode = str(detection.get("mode") or "").strip() or None
                     local_rotation = detection.get("local_rotation")
-                    if isinstance(local_rotation, list) and len(local_rotation) == 3:
+                    if not transform_params and isinstance(local_rotation, list) and len(local_rotation) == 3:
                         transform_params = {"local_rotation": local_rotation}
+                        if "local_rotation_authoritative" in detection:
+                            transform_params["local_rotation_authoritative"] = _as_bool(
+                                detection.get("local_rotation_authoritative")
+                            )
+                        if isinstance(detection.get("rig_orientation"), dict):
+                            transform_params["rig_orientation"] = detection["rig_orientation"]
                     markers = detection.get("animal_semantic_markers")
                     if isinstance(markers, dict):
                         animal_semantic_markers = markers
