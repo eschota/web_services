@@ -10110,8 +10110,39 @@ def _validate_glb(data: bytes) -> bool:
     return True
 
 
-def _validate_glb_file(path: Path) -> bool:
-    """Validate GLB header and declared length without loading the whole file into RAM."""
+def _glb_json_payload(path: Path) -> Optional[dict]:
+    """Read the JSON chunk from a GLB without touching binary buffers."""
+    try:
+        with path.open("rb") as f:
+            if f.read(4) != b"glTF":
+                return None
+            f.read(8)
+            while True:
+                header = f.read(8)
+                if len(header) < 8:
+                    return None
+                chunk_len = int.from_bytes(header[:4], "little")
+                chunk_type = header[4:8]
+                data = f.read(chunk_len)
+                if len(data) < chunk_len:
+                    return None
+                if chunk_type == b"JSON":
+                    return json.loads(data.decode("utf-8").rstrip("\x00 \t\r\n"))
+    except Exception as e:
+        print(f"[GLB Validate] Failed to parse JSON chunk for {path.name}: {e}")
+    return None
+
+
+def _glb_mesh_count(path: Path) -> int:
+    payload = _glb_json_payload(path)
+    if not isinstance(payload, dict):
+        return 0
+    meshes = payload.get("meshes") or []
+    return len(meshes) if isinstance(meshes, list) else 0
+
+
+def _validate_glb_file(path: Path, *, require_mesh: bool = False) -> bool:
+    """Validate GLB header/length and optionally require renderable mesh data."""
     try:
         actual_size = path.stat().st_size
         if actual_size < 12:
@@ -10130,6 +10161,9 @@ def _validate_glb_file(path: Path) -> bool:
     expected_length = int.from_bytes(header[8:12], "little")
     if actual_size != expected_length:
         print(f"[GLB Validate] Length mismatch for {path.name}: header says {expected_length}, actual {actual_size}")
+        return False
+    if require_mesh and _glb_mesh_count(path) <= 0:
+        print(f"[GLB Validate] Meshless GLB rejected for preview: {path.name}")
         return False
     return True
 
@@ -10908,7 +10942,7 @@ async def purge_gallery_upstream_dead_tasks(
     }
 
 
-async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:
+async def _get_cached_glb(task_id: str, url: str, cache_name: str, *, require_mesh: bool = False) -> Optional[FileResponse]:
     """
     Get GLB file from local cache, or download and cache it.
     Returns FileResponse for cached file, or None if download failed.
@@ -10920,7 +10954,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
     if cache_path.exists():
         # Validate cached file is not corrupted
         try:
-            if not _validate_glb_file(cache_path):
+            if not _validate_glb_file(cache_path, require_mesh=require_mesh):
                 print(f"[GLB Cache] Cached file corrupted, deleting: {cache_path.name}")
                 cache_path.unlink()
             else:
@@ -10946,7 +10980,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
                     return None
                 size_bytes = await _stream_httpx_response_to_file(response, temp_path)
 
-            if not _validate_glb_file(temp_path):
+            if not _validate_glb_file(temp_path, require_mesh=require_mesh):
                 print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
                 try:
                     temp_path.unlink()
@@ -11004,17 +11038,23 @@ async def api_proxy_animations_glb(
     # Check cache first (fastest path)
     cache_path = GLB_CACHE_DIR / f"{task_id}_animations.glb"
     if cache_path.exists():
-        return FileResponse(
-            path=str(cache_path),
-            media_type="model/gltf-binary",
-            filename=f"{task_id}_animations.glb",
-            headers=dict(_GLB_FILE_HTTP_HEADERS),
-        )
+        if not _validate_glb_file(cache_path, require_mesh=True):
+            try:
+                cache_path.unlink()
+            except OSError:
+                pass
+        else:
+            return FileResponse(
+                path=str(cache_path),
+                media_type="model/gltf-binary",
+                filename=f"{task_id}_animations.glb",
+                headers=dict(_GLB_FILE_HTTP_HEADERS),
+            )
     
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
     animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
     if animations_url:
-        result = await _get_cached_glb(task_id, animations_url, "animations")
+        result = await _get_cached_glb(task_id, animations_url, "animations", require_mesh=True)
         if result:
             return result
 
@@ -11022,7 +11062,7 @@ async def api_proxy_animations_glb(
     worker_base = _resolve_worker_base_from_task(task)
     if worker_base:
         synthesized_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations.glb"
-        result = await _get_cached_glb(task_id, synthesized_url, "animations")
+        result = await _get_cached_glb(task_id, synthesized_url, "animations", require_mesh=True)
         if result:
             return result
 

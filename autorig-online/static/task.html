@@ -8851,6 +8851,11 @@
         const params = new URLSearchParams(window.location.search);
         const rawTaskId = params.get('id') || '';
         const taskId = rawTaskId.split('?')[0];  // Sanitize malformed URLs
+        function taskAssetUrl(assetName) {
+            const taskState = window.TaskUI?.task || {};
+            const rawVersion = taskState.updated_at || taskState.guid || window.TaskUI?.taskFetchedAt || Date.now();
+            return `/api/task/${taskId}/${assetName}?v=${encodeURIComponent(String(rawVersion))}`;
+        }
 
         const wrap = document.getElementById('model-viewer-wrap');
         const host = document.getElementById('model-viewer');
@@ -13828,7 +13833,7 @@
                                         setLoadingUIState(true);
                                         loadingManager.show('Loading Model');
                                         loadingManager.setQueue([{ name: 'Prepared Model', status: 'pending' }]);
-                                        const ok = await loadModel(`/api/task/${taskId}/prepared.glb`, 'Prepared Model');
+                                        const ok = await loadModel(taskAssetUrl('prepared.glb'), 'Prepared Model');
                                         if (ok) {
                                             currentModelType = 'prepared';
                                             // Cache for future use
@@ -13888,14 +13893,14 @@
                                             { name: 'Animations GLB', status: 'pending' }
                                         ]);
                                         let ok = await loadModel(
-                                            `/api/task/${taskId}/animations.glb`,
+                                            taskAssetUrl('animations.glb'),
                                             'Animations GLB',
                                             0,
                                             120000
                                         );
                                         if (!ok) {
                                             window.taskDbg('[Viewer] Animations GLB unavailable; trying package FBX preview...');
-                                            ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                                            ok = await loadFBX(taskAssetUrl('animations.fbx'), 'Animations FBX');
                                         }
                                         if (ok) {
                                             currentModelType = 'animations';
@@ -14026,14 +14031,14 @@
                                     loadingManager.show('Loading Ragdoll');
                                     loadingManager.setQueue([{ name: 'Skinned Animations GLB', status: 'pending' }]);
                                     let ok = await loadModel(
-                                        `/api/task/${taskId}/animations.glb`,
+                                        taskAssetUrl('animations.glb'),
                                         'Skinned Animations GLB',
                                         0,
                                         120000
                                     );
                                     if (!ok) {
                                         window.taskDbg('[Viewer] Ragdoll GLB unavailable; trying package FBX preview...');
-                                        ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Skinned Animations FBX');
+                                        ok = await loadFBX(taskAssetUrl('animations.fbx'), 'Skinned Animations FBX');
                                     }
                                     setLoadingUIState(false);
                                     if (ok) {
@@ -16106,7 +16111,7 @@
                     
                     const gltf = await new Promise((resolve, reject) => {
                         loader.load(
-                            `/api/task/${taskId}/animations.glb`,
+                            taskAssetUrl('animations.glb'),
                             resolve,
                             (xhr) => {
                                 if (xhr.total > 0) {
@@ -16144,7 +16149,7 @@
                     );
                     try {
                         window.taskDbg('[Viewer] Background animation fallback: trying animations.fbx');
-                        const fbxOk = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                        const fbxOk = await loadFBX(taskAssetUrl('animations.fbx'), 'Animations FBX');
                         if (fbxOk) {
                             currentModelType = 'animations';
                             modelCache.animations = currentModel;
@@ -16262,7 +16267,7 @@
                     }
                     const formats = taskReadyAnimationFormats(taskState);
                     if (formats.fbx && !formats.glb) {
-                        const ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                        const ok = await loadFBX(taskAssetUrl('animations.fbx'), 'Animations FBX');
                         if (ok) {
                             currentModelType = 'animations';
                             modelCache.animations = currentModel;
@@ -18042,10 +18047,10 @@
                         }
                     }
                     if (task.status === 'done') {
-                        return `/api/task/${taskId}/animations.glb`;
+                        return taskAssetUrl('animations.glb');
                     }
                     if (task.prepared_glb_ready) {
-                        return `/api/task/${taskId}/prepared.glb`;
+                        return taskAssetUrl('prepared.glb');
                     }
                     return null;
                 }
@@ -18510,7 +18515,7 @@
                         loadingManager.setQueue([{ name: 'Prepared Model', status: 'pending' }]);
                         
                         try {
-                            const ok = await loadModel(`/api/task/${taskId}/prepared.glb`, 'Prepared Model');
+                            const ok = await loadModel(taskAssetUrl('prepared.glb'), 'Prepared Model');
                             if (ok) {
                                 preparedLoaded = true;
                                 currentModelType = 'prepared';
@@ -18633,7 +18638,7 @@
                 window.taskDbg('[Viewer] preparedModelReady event: attempting early load...');
                 
                 try {
-                    const ok = await loadModel(`/api/task/${taskId}/prepared.glb`, 'Prepared Model (Early)');
+                    const ok = await loadModel(taskAssetUrl('prepared.glb'), 'Prepared Model (Early)');
                     if (ok) {
                         const modelCache = getSharedModelCache();
                         preparedLoaded = true;

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.01.006 - Viewer animation cache recovery
+
+- Rejected meshless `animations.glb` task assets so the viewer can fall back to animation FBX.
+- Added cache-busted task viewer model URLs for `animations.glb`, `animations.fbx`, and `prepared.glb` to avoid stale invisible GLB browser cache.
+
 ## v0.01.005 - Orientation-safe worker dispatch
 
 - Reused a single site orientation-to-worker transform helper for background rig dispatch.
