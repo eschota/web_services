@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.01.007 - Animated viewer GLB source priority
+
+- Prefer task viewer `<guid>_all_animations_threejs_preview.glb` over legacy `<guid>_all_animations.glb` when serving `/api/task/{id}/animations.glb`.
+- Require both mesh and animation data for cached `animations.glb` responses so skeleton-only or static GLBs fall through to the existing FBX viewer fallback.
+- Moved `animations.glb` cache entries to source-specific names to avoid serving stale pre-hotfix GLB cache files.
+
 ## v0.01.006 - Viewer animation cache recovery
 
 - Rejected meshless `animations.glb` task assets so the viewer can fall back to animation FBX.

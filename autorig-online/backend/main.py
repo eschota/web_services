@@ -10133,16 +10133,23 @@ def _glb_json_payload(path: Path) -> Optional[dict]:
     return None
 
 
-def _glb_mesh_count(path: Path) -> int:
+def _glb_counts(path: Path) -> tuple[int, int]:
     payload = _glb_json_payload(path)
     if not isinstance(payload, dict):
-        return 0
+        return 0, 0
     meshes = payload.get("meshes") or []
-    return len(meshes) if isinstance(meshes, list) else 0
+    animations = payload.get("animations") or []
+    mesh_count = len(meshes) if isinstance(meshes, list) else 0
+    animation_count = len(animations) if isinstance(animations, list) else 0
+    return mesh_count, animation_count
 
 
-def _validate_glb_file(path: Path, *, require_mesh: bool = False) -> bool:
-    """Validate GLB header/length and optionally require renderable mesh data."""
+def _glb_mesh_count(path: Path) -> int:
+    return _glb_counts(path)[0]
+
+
+def _validate_glb_file(path: Path, *, require_mesh: bool = False, require_animation: bool = False) -> bool:
+    """Validate GLB header/length and optionally require renderable animated mesh data."""
     try:
         actual_size = path.stat().st_size
         if actual_size < 12:
@@ -10162,9 +10169,14 @@ def _validate_glb_file(path: Path, *, require_mesh: bool = False) -> bool:
     if actual_size != expected_length:
         print(f"[GLB Validate] Length mismatch for {path.name}: header says {expected_length}, actual {actual_size}")
         return False
-    if require_mesh and _glb_mesh_count(path) <= 0:
-        print(f"[GLB Validate] Meshless GLB rejected for preview: {path.name}")
-        return False
+    if require_mesh or require_animation:
+        mesh_count, animation_count = _glb_counts(path)
+        if require_mesh and mesh_count <= 0:
+            print(f"[GLB Validate] Meshless GLB rejected for preview: {path.name}")
+            return False
+        if require_animation and animation_count <= 0:
+            print(f"[GLB Validate] Animationless GLB rejected for preview: {path.name}")
+            return False
     return True
 
 
@@ -10942,7 +10954,14 @@ async def purge_gallery_upstream_dead_tasks(
     }
 
 
-async def _get_cached_glb(task_id: str, url: str, cache_name: str, *, require_mesh: bool = False) -> Optional[FileResponse]:
+async def _get_cached_glb(
+    task_id: str,
+    url: str,
+    cache_name: str,
+    *,
+    require_mesh: bool = False,
+    require_animation: bool = False,
+) -> Optional[FileResponse]:
     """
     Get GLB file from local cache, or download and cache it.
     Returns FileResponse for cached file, or None if download failed.
@@ -10954,7 +10973,11 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str, *, require_me
     if cache_path.exists():
         # Validate cached file is not corrupted
         try:
-            if not _validate_glb_file(cache_path, require_mesh=require_mesh):
+            if not _validate_glb_file(
+                cache_path,
+                require_mesh=require_mesh,
+                require_animation=require_animation,
+            ):
                 print(f"[GLB Cache] Cached file corrupted, deleting: {cache_path.name}")
                 cache_path.unlink()
             else:
@@ -10980,7 +11003,11 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str, *, require_me
                     return None
                 size_bytes = await _stream_httpx_response_to_file(response, temp_path)
 
-            if not _validate_glb_file(temp_path, require_mesh=require_mesh):
+            if not _validate_glb_file(
+                temp_path,
+                require_mesh=require_mesh,
+                require_animation=require_animation,
+            ):
                 print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
                 try:
                     temp_path.unlink()
@@ -11027,42 +11054,59 @@ async def api_proxy_animations_glb(
     task_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get animations GLB file with server-side caching"""
+    """Get a renderable animated GLB for the task viewer.
+
+    The legacy canonical *_all_animations.glb can be a skeleton-only animation
+    carrier for older tasks. Prefer the Three.js preview GLB when present, and
+    only serve GLBs that contain both mesh and animation data so the viewer can
+    safely fall back to the package FBX instead of showing an invisible/static
+    asset.
+    """
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     if not task.guid:
         raise HTTPException(status_code=404, detail="Model not available yet")
-    
-    # Check cache first (fastest path)
-    cache_path = GLB_CACHE_DIR / f"{task_id}_animations.glb"
-    if cache_path.exists():
-        if not _validate_glb_file(cache_path, require_mesh=True):
-            try:
-                cache_path.unlink()
-            except OSError:
-                pass
-        else:
-            return FileResponse(
-                path=str(cache_path),
-                media_type="model/gltf-binary",
-                filename=f"{task_id}_animations.glb",
-                headers=dict(_GLB_FILE_HTTP_HEADERS),
-            )
-    
-    # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
-    animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
-    if animations_url:
-        result = await _get_cached_glb(task_id, animations_url, "animations", require_mesh=True)
-        if result:
-            return result
 
-    # Fallback: synthesize canonical all_animations path from worker root.
+    candidates: list[tuple[str, str]] = []
+    ready_urls = task.ready_urls or []
+    preview_url = _find_file_in_ready_urls(ready_urls, "_all_animations_threejs_preview.glb")
+    if preview_url:
+        candidates.append(("animations_preview", preview_url))
+
+    animations_url = _find_file_in_ready_urls(ready_urls, "_all_animations.glb")
+    if animations_url:
+        candidates.append(("animations_all", animations_url))
+
     worker_base = _resolve_worker_base_from_task(task)
     if worker_base:
-        synthesized_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations.glb"
-        result = await _get_cached_glb(task_id, synthesized_url, "animations", require_mesh=True)
+        candidates.extend(
+            [
+                (
+                    "animations_preview",
+                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations_threejs_preview.glb",
+                ),
+                (
+                    "animations_all",
+                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations.glb",
+                ),
+            ]
+        )
+
+    seen: set[str] = set()
+    for cache_name, candidate_url in candidates:
+        normalized_url = candidate_url.strip()
+        if not normalized_url or normalized_url in seen:
+            continue
+        seen.add(normalized_url)
+        result = await _get_cached_glb(
+            task_id,
+            normalized_url,
+            cache_name,
+            require_mesh=True,
+            require_animation=True,
+        )
         if result:
             return result
 
