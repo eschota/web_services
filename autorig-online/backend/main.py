@@ -12114,6 +12114,22 @@ async def api_get_task_viewer_settings(
     data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
     if not data:
         data = DEFAULT_VIEWER_SETTINGS
+    if not isinstance(data, dict):
+        data = {}
+    else:
+        data = dict(data)
+
+    # Public viewers still need the task-specific immutable environment so the
+    # task page matches worker-rendered previews without exposing editable state.
+    try:
+        public_task_settings = json.loads(task.viewer_settings or "{}")
+        if isinstance(public_task_settings, dict):
+            for key in ("viewer_theme_selection", "viewer_environment"):
+                value = public_task_settings.get(key)
+                if isinstance(value, dict):
+                    data[key] = value
+    except Exception:
+        pass
     return data
 
 
