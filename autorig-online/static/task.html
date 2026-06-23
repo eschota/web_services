@@ -12183,6 +12183,17 @@
                 return diagnostic;
             }
 
+            window.__getViewerRuntimeDiagnostics = function getViewerRuntimeDiagnostics(reason = 'manual') {
+                const previous = window.__viewerAssetDiagnostics || {};
+                return updateViewerAssetDiagnostics({
+                    source: previous.source || (currentModelType === 'animations' ? 'animations.glb' : currentModelType || 'runtime'),
+                    label: previous.label || 'runtime',
+                    model: currentModel,
+                    animationCount: Array.isArray(animations) ? animations.length : 0,
+                    reason,
+                });
+            };
+
             function isSavedGlobalCameraCompatibleWithBounds(boundsInfo) {
                 if (!boundsInfo?.box || !boundsInfo?.center || !savedCameraPosition || !savedCameraTarget || !THREE) {
                     return false;
