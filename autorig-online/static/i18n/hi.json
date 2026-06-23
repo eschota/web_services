@@ -233,7 +233,7 @@
     "feedback_in_reply_to": "जवाब",
     "feedback_load_error": "फ़ीडबैक लोड नहीं हो सका।",
     "viewer_instruction": "3D मॉडल रिग किया गया है, आप डाउनलोड अनुभाग में रिग और तैयार एनिमेशन डाउनलोड कर सकते हैं। यदि मॉडल गलत तरीके से रिг किया गया है, तो कैरेक्टर को सही ढंग से रखने के लिए 3D व्यूअर и X Y Z बटन का उपयोग करें (अपने कैरेक्टर को बेसिक अर्ध-पारदर्शी T-Pose मॉडल के साथ संरेखित करें, फिर Save T-POSE बटन दबाएं и RIG के पुनर्जीवित होने की प्रतीक्षा करें।)",
-    "download_archive_desc": "??????? ??? ?? ???????? ??? rig, character ?? ??? 50+ animations, animal rigs ?? ??? 10 animations, Unity package, video preview ?? poster ????? ????",
+    "download_archive_desc": "\u0906\u0930\u094d\u0915\u093e\u0907\u0935 \u092e\u0947\u0902 \u0915\u0908 \u092b\u093c\u0949\u0930\u094d\u092e\u0948\u091f \u092e\u0947\u0902 rig, character \u0915\u0947 \u0932\u093f\u090f 50+ animations, animal rigs \u0915\u0947 \u0932\u093f\u090f 10 animations, Unity package, video preview \u0914\u0930 poster \u0936\u093e\u092e\u093f\u0932 \u0939\u0948\u0902\u0964",
     "purchase_all_bundle": "सभी फ़ाइलें डाउनलोड करें",
     "download_all_files_word": "फ़ाइलें",
     "preparing_downloads": "तैयार हो रहा है…",

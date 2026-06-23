@@ -233,7 +233,7 @@
     "feedback_in_reply_to": "回复",
     "feedback_load_error": "加载反馈失败。",
     "viewer_instruction": "3D模型已绑定，您可以在下载部分下载绑定和现成的动画。如果模型绑定不正确，请使用3D查看器和 X Y Z 按钮正确放置角色（将您的角色与基本的半透明 T-Pose 模型对齐，然后按保存 T-POSE 按钮并等待重新生成绑定。）",
-    "download_archive_desc": "???????????????50 ???????10 ????????Unity package?????????",
+    "download_archive_desc": "\u5f52\u6863\u5305\u5305\u542b\u591a\u79cd\u683c\u5f0f\u7684\u7ed1\u5b9a\u6a21\u578b\u300150 \u591a\u4e2a\u89d2\u8272\u52a8\u753b\u300110 \u4e2a\u52a8\u7269\u7ed1\u5b9a\u52a8\u753b\u3001Unity package\u3001\u89c6\u9891\u9884\u89c8\u548c\u6d77\u62a5\u3002",
     "purchase_all_bundle": "下载所有文件",
     "download_all_files_word": "个文件",
     "preparing_downloads": "正在准备…",
