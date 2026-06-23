@@ -726,6 +726,8 @@ def _is_primary_worker_output(name: str) -> bool:
         or n.endswith("_rig_preview.mp4")
         or n.endswith("_skeleton.json")
         or n.endswith("_all_animations.blend")
+        or n.endswith("_all_animations.glb")
+        or n.endswith("_all_animations_threejs_preview.glb")
         or n.endswith("_all_animations_unity.fbx")
         or n.endswith("_hdrp.unitypackage")
     )
