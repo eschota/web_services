@@ -12030,6 +12030,46 @@
                 return !!currentSignature && !!savedSignature && currentSignature === savedSignature;
             }
 
+            function isAppliedCameraCompatibleWithBounds(boundsInfo) {
+                if (!boundsInfo?.box || !boundsInfo?.center || !camera || !controls || !THREE) {
+                    return true;
+                }
+                const maxDim = Math.max(Number(boundsInfo.maxDim) || 0, 0.001);
+                const cameraDistance = camera.position.distanceTo(controls.target);
+                const distanceRatio = cameraDistance / maxDim;
+                const targetOffsetRatio = controls.target.distanceTo(boundsInfo.center) / maxDim;
+                const expandedBox = boundsInfo.box.clone().expandByScalar(maxDim * 8);
+                const targetInsideExpandedBounds = expandedBox.containsPoint(controls.target);
+                const compatible = (
+                    Number.isFinite(distanceRatio)
+                    && distanceRatio >= 0.35
+                    && distanceRatio <= 60
+                    && targetOffsetRatio <= 30
+                    && targetInsideExpandedBounds
+                );
+                if (!compatible) {
+                    window.taskDbg('[Viewer] Applied camera incompatible with current model bounds', {
+                        cameraDistance: roundViewerDebugNumber(cameraDistance, 3),
+                        modelMaxDim: roundViewerDebugNumber(maxDim, 3),
+                        distanceRatio: roundViewerDebugNumber(distanceRatio, 3),
+                        targetOffsetRatio: roundViewerDebugNumber(targetOffsetRatio, 3),
+                        targetInsideExpandedBounds,
+                        boundsSignature: getModelBoundsSignature(boundsInfo),
+                    });
+                }
+                return compatible;
+            }
+
+            function restoreSavedCameraOrRefit(model, label, boundsInfo) {
+                restoreSavedCamera();
+                if (!isAppliedCameraCompatibleWithBounds(boundsInfo)) {
+                    fitCameraToModelBounds(model, `post-restore ${label}`, {
+                        boundsInfo,
+                        distanceMultiplier: 1.45,
+                    });
+                }
+            }
+
             function getCameraHintDirection() {
                 if (pendingThemeCameraHint?.position && pendingThemeCameraHint?.target && THREE) {
                     const pos = pendingThemeCameraHint.position;
@@ -13729,7 +13769,7 @@
                     if (window.recreateWireframe) window.recreateWireframe();
                     const cachedBoundsInfo = getModelBoundsInfo(currentModel);
                     if (isSavedCameraUsableForBounds(cachedBoundsInfo)) {
-                        restoreSavedCamera();
+                        restoreSavedCameraOrRefit(currentModel, `cache ${cacheKey}`, cachedBoundsInfo);
                     } else if (!fitCameraToModelBounds(currentModel, `cache ${cacheKey}`, { boundsInfo: cachedBoundsInfo })) {
                         cameraInitialized = true;
                     }
@@ -15798,7 +15838,7 @@
 
                 const modelBoundsInfo = getModelBoundsInfo(model);
                 if (isSavedCameraUsableForBounds(modelBoundsInfo)) {
-                    restoreSavedCamera();
+                    restoreSavedCameraOrRefit(model, `load ${label}`, modelBoundsInfo);
                 } else if (!fitCameraToModelBounds(model, `load ${label}`, { boundsInfo: modelBoundsInfo })) {
                     cameraInitialized = true;
                 }
@@ -16027,7 +16067,7 @@
 
                 const fbxModelBoundsInfo = getModelBoundsInfo(model);
                 if (isSavedCameraUsableForBounds(fbxModelBoundsInfo)) {
-                    restoreSavedCamera();
+                    restoreSavedCameraOrRefit(model, `load ${label}`, fbxModelBoundsInfo);
                 } else if (!fitCameraToModelBounds(model, `load ${label}`, { boundsInfo: fbxModelBoundsInfo })) {
                     cameraInitialized = true;
                 }
