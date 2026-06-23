@@ -10589,6 +10589,7 @@
             let savedCameraBoundsPolicy = null;
             let savedGlobalCameraPreset = false;
             let pendingThemeCameraHint = null;
+            let forceWideCameraFitOnce = false;
 
 
             // ============================================================
@@ -12005,6 +12006,7 @@
                 );
 
                 if (!compatible) {
+                    forceWideCameraFitOnce = true;
                     window.taskDbg('[Viewer] Ignoring incompatible global camera for current model bounds', {
                         cameraDistance: roundViewerDebugNumber(cameraDistance, 3),
                         modelMaxDim: roundViewerDebugNumber(maxDim, 3),
@@ -12072,7 +12074,8 @@
                     sphereDistance,
                     boundsInfo.maxDim * 1.8,
                     0.85
-                ) * 1.25;
+                ) * (options.distanceMultiplier || (forceWideCameraFitOnce ? 3.2 : 1.25));
+                forceWideCameraFitOnce = false;
 
                 const direction = getCameraHintDirection();
                 const nextPosition = target.clone().add(direction.multiplyScalar(distance));
