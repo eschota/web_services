@@ -11974,9 +11974,54 @@
                 ].map((value) => roundViewerDebugNumber(Math.max(0, Number(value) || 0), 4).toFixed(4)).join('x');
             }
 
+            function isSavedGlobalCameraCompatibleWithBounds(boundsInfo) {
+                if (!boundsInfo?.box || !boundsInfo?.center || !savedCameraPosition || !savedCameraTarget || !THREE) {
+                    return false;
+                }
+
+                const maxDim = Math.max(Number(boundsInfo.maxDim) || 0, 0.001);
+                const position = new THREE.Vector3(
+                    finiteCameraNumber(savedCameraPosition.x, 0),
+                    finiteCameraNumber(savedCameraPosition.y, 0),
+                    finiteCameraNumber(savedCameraPosition.z, 0)
+                );
+                const target = new THREE.Vector3(
+                    finiteCameraNumber(savedCameraTarget.x, 0),
+                    finiteCameraNumber(savedCameraTarget.y, 0),
+                    finiteCameraNumber(savedCameraTarget.z, 0)
+                );
+                const cameraDistance = position.distanceTo(target);
+                const distanceRatio = cameraDistance / maxDim;
+                const padding = maxDim * 8;
+                const expandedBox = boundsInfo.box.clone().expandByScalar(padding);
+                const targetInsideExpandedBounds = expandedBox.containsPoint(target);
+                const targetOffsetRatio = target.distanceTo(boundsInfo.center) / maxDim;
+                const compatible = (
+                    Number.isFinite(distanceRatio)
+                    && distanceRatio >= 0.25
+                    && distanceRatio <= 60
+                    && targetOffsetRatio <= 30
+                    && targetInsideExpandedBounds
+                );
+
+                if (!compatible) {
+                    window.taskDbg('[Viewer] Ignoring incompatible global camera for current model bounds', {
+                        cameraDistance: roundViewerDebugNumber(cameraDistance, 3),
+                        modelMaxDim: roundViewerDebugNumber(maxDim, 3),
+                        distanceRatio: roundViewerDebugNumber(distanceRatio, 3),
+                        targetOffsetRatio: roundViewerDebugNumber(targetOffsetRatio, 3),
+                        targetInsideExpandedBounds,
+                        boundsSignature: getModelBoundsSignature(boundsInfo),
+                    });
+                }
+                return compatible;
+            }
+
             function isSavedCameraUsableForBounds(boundsInfo) {
                 if (!savedCameraPosition || !savedCameraTarget) return false;
-                if (savedGlobalCameraPreset || savedCameraBoundsPolicy === 'ignore' || isGlobalCameraPreset()) return true;
+                if (savedGlobalCameraPreset || savedCameraBoundsPolicy === 'ignore' || isGlobalCameraPreset()) {
+                    return isSavedGlobalCameraCompatibleWithBounds(boundsInfo);
+                }
                 if (!boundsInfo) return false;
                 const currentSignature = getModelBoundsSignature(boundsInfo);
                 const savedSignature = String(savedCameraBoundsSignature || viewerState.camera?.model_bounds_signature || '').trim();

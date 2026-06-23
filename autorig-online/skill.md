@@ -26,6 +26,7 @@ AutoRig.online is a cloud service for automatic 3D model rigging and animation p
 - Per-task owner/admin settings: `GET/POST /api/task/{task_id}/viewer-settings`.
 - A camera saved through `/api/admin/viewer-default-camera` is stored with `global_camera_preset: true` and `bounds_policy: "ignore"`.
 - Global camera presets are absolute Three.js camera transforms (`position`, `target`, `fov`, optional `up`) and intentionally bypass `model_bounds_signature` checks so the same admin-framed camera applies to all users/tasks.
+- The task viewer still rejects a global camera locally when its distance/target are obviously incompatible with the loaded model bounds; in that case it falls back to `fitCameraToModelBounds()` instead of showing a tiny or lost model.
 - When a global camera preset exists, task viewer settings reads merge that global `camera` over per-task settings; per-task lighting/theme data remains intact.
 
 ## Task Download Bundles
