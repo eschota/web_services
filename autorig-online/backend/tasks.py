@@ -912,8 +912,14 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     # Some worker modes (notably animal-only-rig and newer exporters) write the
     # final files into concrete folders such as {guid}_100k or root, while the
     # initial task response may contain legacy placeholder URLs. Reconcile from
-    # model-files once the actual downloadable set is present.
-    if task.status not in ("done", "error") and task.guid and task.worker_api:
+    # model-files once the actual downloadable set is present. Also run this in
+    # the same poll where a processing task just became done, before cache and
+    # Telegram notifications consume the legacy URL list.
+    should_reconcile_outputs = (
+        task.status not in ("done", "error")
+        or (was_processing and task.status == "done")
+    )
+    if should_reconcile_outputs and task.guid and task.worker_api:
         concrete_urls = await _fetch_concrete_worker_output_urls(task)
         if concrete_urls and _worker_outputs_look_complete(concrete_urls):
             task.output_urls = concrete_urls
