@@ -1202,6 +1202,7 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     owner_email = None
     content_rating = "unknown"
     resolved_progress = progress_page
+    worker_line = None
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(select(Task).where(Task.id == task_id))
@@ -1213,11 +1214,23 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
                 if cr:
                     content_rating = str(cr).strip().lower()
                 if not resolved_progress and task.guid and task.worker_api:
-                    parsed = urlparse(task.worker_api)
-                    worker_base = f"{parsed.scheme}://{parsed.netloc}"
+                    worker_base = get_worker_base_url(task.worker_api)
                     resolved_progress = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+                try:
+                    from worker_labels import format_task_worker_telegram_html
+
+                    worker_line = format_task_worker_telegram_html(task.worker_api)
+                except Exception as label_exc:
+                    print(f"[Telegram] Failed to format worker label for done notification: {label_exc}")
     except Exception as e:
         print(f"[Telegram] Failed to get task details for done notification: {e}")
+    if not worker_line and resolved_progress:
+        try:
+            from worker_labels import format_task_worker_telegram_html
+
+            worker_line = format_task_worker_telegram_html(resolved_progress)
+        except Exception as label_exc:
+            print(f"[Telegram] Failed to format worker label from progress URL: {label_exc}")
 
     rating_line = _format_content_rating_line(content_rating)
 
@@ -1227,6 +1240,8 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
         done_parts.append(f"👤 {html.escape(owner_email)}")
     if dur:
         done_parts.append(f"⏱ {html.escape(dur)}")
+    if worker_line:
+        done_parts.append(worker_line)
     done_parts.append(html.escape(metrics_line))
 
     text = f"✅ <b>Task completed</b>\n{rating_line}\n" + " | ".join(done_parts)
