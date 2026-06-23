@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<skills root="R:\autorig">
+  <skill id="root" path="skill.md" role="repository-root">
+    <child id="project-index" path="autorig.skill.md" role="project-node" />
+    <child id="autorig-online" path="autorig-online/skill.md" role="service-skill" />
+    <child id="project-rules" path="AGENTS.md" role="rules" />
+  </skill>
+</skills>

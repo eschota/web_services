@@ -8,6 +8,7 @@ import uuid
 import shutil
 import asyncio
 import time
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any, Tuple, Set
 import hashlib
@@ -1064,6 +1065,59 @@ def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="Viewer settings must be a JSON object")
     return data
+
+
+def _validate_viewer_camera_vector(value: Any, field_name: str) -> Dict[str, float]:
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail=f"camera.{field_name} must be an object")
+    out: Dict[str, float] = {}
+    for axis in ("x", "y", "z"):
+        try:
+            n = float(value[axis])
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"camera.{field_name}.{axis} must be a number")
+        if not math.isfinite(n) or abs(n) > 1_000_000:
+            raise HTTPException(status_code=400, detail=f"camera.{field_name}.{axis} is out of range")
+        out[axis] = n
+    return out
+
+
+def _validate_viewer_default_camera_payload(body_bytes: bytes, *, saved_by: str) -> Dict[str, Any]:
+    data = _validate_viewer_settings_payload(body_bytes)
+    source = data.get("camera") if isinstance(data.get("camera"), dict) else data
+    if not isinstance(source, dict):
+        raise HTTPException(status_code=400, detail="camera payload must be an object")
+
+    try:
+        fov = float(source["fov"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="camera.fov must be a number")
+    if not math.isfinite(fov) or fov < 1 or fov > 120:
+        raise HTTPException(status_code=400, detail="camera.fov is out of range")
+
+    camera_settings: Dict[str, Any] = {
+        "position": _validate_viewer_camera_vector(source.get("position"), "position"),
+        "target": _validate_viewer_camera_vector(source.get("target"), "target"),
+        "fov": fov,
+        "global_camera_preset": True,
+        "bounds_policy": "ignore",
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_by": saved_by,
+    }
+    if isinstance(source.get("up"), dict):
+        camera_settings["up"] = _validate_viewer_camera_vector(source.get("up"), "up")
+    return camera_settings
+
+
+def _read_global_viewer_camera_preset() -> Optional[Dict[str, Any]]:
+    data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
+    camera_settings = data.get("camera") if isinstance(data, dict) else None
+    if not isinstance(camera_settings, dict):
+        return None
+    bounds_policy = str(camera_settings.get("bounds_policy") or "").strip().lower()
+    if camera_settings.get("global_camera_preset") is True or bounds_policy == "ignore":
+        return camera_settings
+    return None
 
 
 def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optional[AnonSession]) -> bool:
@@ -8354,6 +8408,145 @@ async def proxy_file_by_name(
     )
 
 
+def _task_bundle_meta_cache_path(task_id: str) -> Path:
+    return TASK_CACHE_DIR / task_id / ".meta" / "bundle.json"
+
+
+def _bundle_meta_response(
+    *,
+    ready: bool,
+    source: str,
+    file_count: Optional[int] = None,
+    total_size: Optional[int] = None,
+    generated_at: Optional[str] = None,
+    converter_version: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "bundle_file_count": file_count if ready else None,
+        "bundle_file_count_ready": bool(ready),
+        "bundle_file_count_source": source,
+        "bundle_total_size": total_size,
+        "bundle_meta_generated_at": generated_at,
+        "bundle_converter_version": converter_version,
+    }
+
+
+def _normalize_bundle_meta(raw: Any, *, source: str, worker_zip_url: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        file_count = int(raw.get("bundle_file_count", raw.get("file_count", 0)) or 0)
+    except Exception:
+        file_count = 0
+    if file_count <= 0:
+        return None
+
+    total_size_raw = raw.get("bundle_total_size", raw.get("zip_size"))
+    try:
+        total_size = int(total_size_raw) if total_size_raw is not None else None
+    except Exception:
+        total_size = None
+
+    meta_source = str(raw.get("bundle_file_count_source") or raw.get("source") or source or "unknown")
+    return _bundle_meta_response(
+        ready=True,
+        source=meta_source,
+        file_count=file_count,
+        total_size=total_size,
+        generated_at=raw.get("bundle_meta_generated_at") or raw.get("generated_at"),
+        converter_version=raw.get("bundle_converter_version") or raw.get("converter_version"),
+    )
+
+
+def _read_cached_task_bundle_meta(task_id: str, worker_zip_url: Optional[str]) -> Optional[Dict[str, Any]]:
+    path = _task_bundle_meta_cache_path(task_id)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    cached_zip_url = raw.get("bundle_worker_zip_url") or raw.get("worker_zip_url")
+    if cached_zip_url and worker_zip_url and cached_zip_url != worker_zip_url:
+        return None
+    return _normalize_bundle_meta(raw, source="metadata_cache", worker_zip_url=worker_zip_url)
+
+
+def _write_cached_task_bundle_meta(task_id: str, meta: Dict[str, Any]) -> None:
+    try:
+        path = _task_bundle_meta_cache_path(task_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"[BundleMeta] Failed to write metadata cache for task {task_id}: {e}")
+
+
+async def _worker_bundle_zip_available(zip_url: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            async with client.stream("GET", zip_url, headers={"Range": "bytes=0-0"}) as response:
+                return response.status_code in (200, 206)
+    except Exception:
+        return False
+
+
+async def _load_task_bundle_meta(
+    task: Task,
+    *,
+    fallback_file_count: int = 0,
+    fallback_total_size: int = 0,
+) -> Dict[str, Any]:
+    zip_url = resolve_worker_full_bundle_zip_url(task)
+    cached_meta = _read_cached_task_bundle_meta(task.id, zip_url)
+    if cached_meta and cached_meta.get("bundle_file_count_source") != "fallback_cache":
+        return cached_meta
+
+    if zip_url:
+        meta_url = f"{zip_url}.meta.json"
+        try:
+            async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+                response = await client.get(meta_url, headers={"Accept": "application/json"})
+            if response.status_code == 200:
+                worker_meta = _normalize_bundle_meta(
+                    response.json(),
+                    source="worker_meta",
+                    worker_zip_url=zip_url,
+                )
+                if worker_meta:
+                    worker_meta["bundle_file_count_source"] = "worker_meta"
+                    worker_meta_cache = dict(worker_meta)
+                    worker_meta_cache["worker_zip_url"] = zip_url
+                    _write_cached_task_bundle_meta(task.id, worker_meta_cache)
+                    return worker_meta
+        except Exception as e:
+            print(f"[BundleMeta] Worker metadata unavailable for task {task.id}: {e}")
+
+        if await _worker_bundle_zip_available(zip_url):
+            return _bundle_meta_response(
+                ready=False,
+                source="worker_meta_missing",
+            )
+
+    if cached_meta and cached_meta.get("bundle_file_count_source") == "fallback_cache":
+        return cached_meta
+
+    if fallback_file_count > 0:
+        return _bundle_meta_response(
+            ready=True,
+            source="fallback_cache",
+            file_count=int(fallback_file_count),
+            total_size=int(fallback_total_size or 0),
+        )
+
+    return _bundle_meta_response(
+        ready=False,
+        source="unknown" if task.status == "done" else "task_not_done",
+    )
+
+
 @app.get("/api/task/{task_id}/cached-files")
 async def api_task_cached_files(
     task_id: str,
@@ -8386,12 +8579,18 @@ async def api_task_cached_files(
                 })
         
         if files:
+            bundle_meta = await _load_task_bundle_meta(
+                task,
+                fallback_file_count=len(files),
+                fallback_total_size=total_size,
+            )
             return {
                 "cached": True,
                 "task_id": task_id,
                 "files": files,
                 "total_size": total_size,
-                "file_count": len(files)
+                "file_count": len(files),
+                **bundle_meta,
             }
     
     # If task is done but not cached yet, trigger caching
@@ -8405,23 +8604,36 @@ async def api_task_cached_files(
         urls_to_cache = list(dict.fromkeys(urls_to_cache))
         # Start caching in background
         result = await cache_task_files(task_id, urls_to_cache, task.guid)
+        total_size = sum(f["size"] for f in result["files"])
+        bundle_meta = await _load_task_bundle_meta(
+            task,
+            fallback_file_count=len(result["files"]),
+            fallback_total_size=total_size,
+        )
         return {
             "cached": result["cached"],
             "task_id": task_id,
             "files": result["files"],
-            "total_size": sum(f["size"] for f in result["files"]),
+            "total_size": total_size,
             "file_count": len(result["files"]),
-            "errors": result.get("errors", [])
+            "errors": result.get("errors", []),
+            **bundle_meta,
         }
     
     # Task not ready yet
+    bundle_meta = (
+        await _load_task_bundle_meta(task)
+        if task.status == "done"
+        else _bundle_meta_response(ready=False, source="task_not_done")
+    )
     return {
         "cached": False,
         "task_id": task_id,
         "files": [],
         "total_size": 0,
         "file_count": 0,
-        "message": "Task not completed yet" if task.status != "done" else "No files to cache"
+        "message": "Task not completed yet" if task.status != "done" else "No files to cache",
+        **bundle_meta,
     }
 
 
@@ -8486,6 +8698,17 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for file_path in files:
             zf.write(file_path, arcname=file_path.name)
+
+    fallback_meta = _bundle_meta_response(
+        ready=True,
+        source="fallback_cache",
+        file_count=len(files),
+        total_size=zip_path.stat().st_size if zip_path.exists() else None,
+        generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    )
+    fallback_meta_cache = dict(fallback_meta)
+    fallback_meta_cache["worker_zip_url"] = resolve_worker_full_bundle_zip_url(task)
+    _write_cached_task_bundle_meta(task.id, fallback_meta_cache)
 
     return FileResponse(
         zip_path,
@@ -11985,6 +12208,28 @@ async def api_set_viewer_default_settings(
     return {"ok": True}
 
 
+@app.post("/api/admin/viewer-default-camera")
+async def api_set_viewer_default_camera(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """Admin-only: merge the live 3D viewer camera into global default settings."""
+    body = await request.body()
+    camera_settings = _validate_viewer_default_camera_payload(
+        body,
+        saved_by=str(getattr(admin, "email", "") or ""),
+    )
+    try:
+        existing = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
+        if not existing:
+            existing = json.loads(json.dumps(DEFAULT_VIEWER_SETTINGS))
+        existing["camera"] = camera_settings
+        _atomic_write_json_file(VIEWER_DEFAULT_SETTINGS_PATH, existing)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save default camera: {e}")
+    return {"ok": True, "camera": camera_settings}
+
+
 @app.get("/api/task/{task_id}/viewer-settings")
 async def api_get_task_viewer_settings(
     task_id: str,
@@ -12014,6 +12259,9 @@ async def api_get_task_viewer_settings(
         try:
             data = json.loads(task.viewer_settings)
             if isinstance(data, dict):
+                global_camera = _read_global_viewer_camera_preset()
+                if global_camera:
+                    data = {**data, "camera": global_camera}
                 return data
         except Exception:
             # Corrupt JSON in DB: ignore and fallback to defaults.

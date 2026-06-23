@@ -3572,6 +3572,7 @@
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-env-ibl">Env IBL</label><input type="range" id="viewer-admin-env-ibl" min="0" max="10" step="0.01" value="1" /><span id="viewer-admin-env-ibl-val" class="viewer-admin-shadow-val">1.00</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-reflect">Reflect</label><input type="range" id="viewer-admin-reflect" min="0" max="10" step="0.01" value="3" /><span id="viewer-admin-reflect-val" class="viewer-admin-shadow-val">3.00</span></div>
                         <button type="button" class="btn btn-primary" id="viewer-admin-theme-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Save theme</button>
+                        <button type="button" class="btn btn-secondary" id="viewer-admin-camera-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Save camera globally</button>
                         <button type="button" class="btn btn-secondary" id="viewer-admin-default-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Save globally</button>
                         <span id="viewer-admin-theme-save-status" style="font-size:0.68rem;color:var(--text-muted);"></span>
                     </div>
@@ -6799,16 +6800,21 @@
             animalVariantsLastFetchAt: 0,
             animalVariantSelected: '',
             animalVariantOrientation: 'front',
-            /** Count for "Download All N files" — cached file list, else task.total_count, else manifest items */
-            downloadBundleLabelCount: 0,
+            /** Exact count for the full worker bundle ZIP, never the direct cached file list. */
+            downloadBundleFileCount: 0,
+            downloadBundleFileCountReady: false,
+            downloadBundleFileCountSource: 'unknown',
 
             buildDownloadAllButtonLabel() {
-                const fileCount = Number(this.downloadBundleLabelCount || 0);
+                const fileCount = Number(this.downloadBundleFileCount || 0);
                 const word = this.tSafe('download_all_files_word', 'files');
-                if (this.task?.status === 'done' && fileCount > 0) {
+                if (this.task?.status !== 'done') {
+                    return this.tSafe('preparing_downloads', 'Preparing downloads…');
+                }
+                if (this.downloadBundleFileCountReady && fileCount > 0) {
                     return `📦 ${this.tSafe('btn_download_all', 'Download All')} ${fileCount} ${word}`;
                 }
-                return this.tSafe('preparing_downloads', 'Preparing downloads…');
+                return `📦 ${this.tSafe('purchase_all_bundle', 'Download All Files')}`;
             },
 
             getDownloadAllCredits() {
@@ -8392,12 +8398,10 @@
                 this.downloadItems = readyItems;
 
                 const totalFromTask = Number(task?.total_count || 0);
-                const cachedFc =
-                    this.cachedFilesData?.cached && typeof this.cachedFilesData.file_count === 'number'
-                        ? this.cachedFilesData.file_count
-                        : 0;
-                this.downloadBundleLabelCount =
-                    cachedFc > 0 ? cachedFc : totalFromTask > 0 ? totalFromTask : items.length;
+                const bundleCount = Number(this.cachedFilesData?.bundle_file_count || 0);
+                this.downloadBundleFileCountReady = Boolean(this.cachedFilesData?.bundle_file_count_ready && bundleCount > 0);
+                this.downloadBundleFileCount = this.downloadBundleFileCountReady ? bundleCount : 0;
+                this.downloadBundleFileCountSource = this.cachedFilesData?.bundle_file_count_source || 'unknown';
 
                 const filesHtml = items.map((item) => {
                     const iconHtml = item.icon
@@ -8419,8 +8423,8 @@
                 if (task?.status === 'done' && !this._cachedFilesChecked) {
                     this._cachedFilesChecked = true;
                     this.checkCachedFiles().then(() => {
-                        // Re-render if cached files became available
-                        if (this.cachedFilesData?.cached && this.cachedFilesData?.files?.length > 0) {
+                        // Re-render when cached files or full bundle metadata became available.
+                        if (this.cachedFilesData) {
                             this.lastFileListHash = ''; // Force re-render
                             this.updateFileList(urls, task, readyUrls);
                         }
@@ -10323,6 +10327,80 @@
                 return _viewerAdminPromise;
             }
 
+            function isGlobalCameraPreset(cameraState = viewerState.camera) {
+                return !!(
+                    cameraState &&
+                    (cameraState.global_camera_preset === true || String(cameraState.bounds_policy || '').toLowerCase() === 'ignore')
+                );
+            }
+
+            function finiteCameraNumber(value, fallback) {
+                const n = Number(value);
+                return Number.isFinite(n) ? n : fallback;
+            }
+
+            function vectorToPlainObjectSafe(value, fallback = { x: 0, y: 0, z: 0 }) {
+                return {
+                    x: finiteCameraNumber(value?.x, fallback.x),
+                    y: finiteCameraNumber(value?.y, fallback.y),
+                    z: finiteCameraNumber(value?.z, fallback.z),
+                };
+            }
+
+            function captureCurrentViewerCameraState(options = {}) {
+                if (!camera || !controls) return null;
+                const existingCamera = viewerState.camera || {};
+                const captured = {
+                    position: vectorToPlainObjectSafe(camera.position, existingCamera.position || { x: 0, y: 1.6, z: 3.5 }),
+                    target: vectorToPlainObjectSafe(controls.target, existingCamera.target || { x: 0, y: 1.0, z: 0 }),
+                    fov: finiteCameraNumber(camera.fov, finiteCameraNumber(existingCamera.fov, 45)),
+                    up: vectorToPlainObjectSafe(camera.up, existingCamera.up || { x: 0, y: 1, z: 0 }),
+                };
+                if (options.globalPreset) {
+                    captured.global_camera_preset = true;
+                    captured.bounds_policy = 'ignore';
+                } else {
+                    if (existingCamera.global_camera_preset === true) captured.global_camera_preset = true;
+                    if (existingCamera.bounds_policy !== undefined) captured.bounds_policy = existingCamera.bounds_policy;
+                    if (existingCamera.model_bounds_signature !== undefined) captured.model_bounds_signature = existingCamera.model_bounds_signature;
+                    if (existingCamera.bounds_signature !== undefined) captured.bounds_signature = existingCamera.bounds_signature;
+                    if (existingCamera.model_bounds !== undefined) captured.model_bounds = existingCamera.model_bounds;
+                }
+                viewerState.camera = {
+                    ...existingCamera,
+                    ...captured,
+                    position: { ...captured.position },
+                    target: { ...captured.target },
+                    up: { ...captured.up },
+                };
+                savedCameraPosition = { ...captured.position };
+                savedCameraTarget = { ...captured.target };
+                savedCameraBoundsSignature = String(captured.model_bounds_signature || captured.bounds_signature || '').trim() || null;
+                savedCameraBoundsPolicy = String(captured.bounds_policy || '').trim() || null;
+                savedGlobalCameraPreset = captured.global_camera_preset === true || savedCameraBoundsPolicy === 'ignore';
+                return captured;
+            }
+
+            function applyLoadedViewerCameraSettings(cameraSettings, reason = 'settings load') {
+                if (!cameraSettings || !cameraSettings.position || !cameraSettings.target) return false;
+                viewerState.camera = {
+                    ...viewerState.camera,
+                    ...cameraSettings,
+                    position: { ...cameraSettings.position },
+                    target: { ...cameraSettings.target },
+                };
+                if (cameraSettings.up) {
+                    viewerState.camera.up = { ...cameraSettings.up };
+                }
+                savedCameraPosition = { ...cameraSettings.position };
+                savedCameraTarget = { ...cameraSettings.target };
+                savedCameraBoundsSignature = String(cameraSettings.model_bounds_signature || cameraSettings.bounds_signature || '').trim() || null;
+                savedCameraBoundsPolicy = String(cameraSettings.bounds_policy || '').trim() || null;
+                savedGlobalCameraPreset = isGlobalCameraPreset(cameraSettings);
+                window.taskDbg('[Viewer] Saved camera position for later:', { reason, position: savedCameraPosition, global: savedGlobalCameraPreset });
+                return true;
+            }
+
             async function saveDefaultViewerSettings(source = 'unknown') {
                 const isAdmin = await ensureViewerAdmin();
                 window.taskDbg('[Viewer] Save default settings requested:', { source, isAdmin });
@@ -10330,6 +10408,7 @@
                     alert('Admin only');
                     return;
                 }
+                captureCurrentViewerCameraState();
                 try {
                     const resp = await fetch('/api/admin/viewer-default-settings', {
                         method: 'POST',
@@ -10349,6 +10428,55 @@
                     alert('Failed to save defaults');
                 }
             }
+
+            async function saveGlobalViewerCameraPreset(source = 'unknown') {
+                const isAdmin = await ensureViewerAdmin();
+                window.taskDbg('[Viewer] Save global camera requested:', { source, isAdmin });
+                if (!isAdmin) {
+                    alert('Admin only');
+                    return false;
+                }
+                const cameraPayload = captureCurrentViewerCameraState({ globalPreset: true });
+                if (!cameraPayload) {
+                    alert('Camera is not ready');
+                    return false;
+                }
+                try {
+                    const resp = await fetch('/api/admin/viewer-default-camera', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(cameraPayload)
+                    });
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => ({}));
+                        console.warn('[Viewer] Failed to save global camera:', data);
+                        alert(data.detail || 'Failed to save global camera');
+                        return false;
+                    }
+                    const data = await resp.json().catch(() => ({}));
+                    if (data.camera) {
+                        viewerState.camera = {
+                            ...viewerState.camera,
+                            ...data.camera,
+                            position: { ...data.camera.position },
+                            target: { ...data.camera.target },
+                            up: data.camera.up ? { ...data.camera.up } : viewerState.camera.up,
+                        };
+                        savedCameraPosition = { ...viewerState.camera.position };
+                        savedCameraTarget = { ...viewerState.camera.target };
+                        savedCameraBoundsSignature = null;
+                        savedCameraBoundsPolicy = 'ignore';
+                        savedGlobalCameraPreset = true;
+                    }
+                    window.taskDbg('[Viewer] Global viewer camera saved', viewerState.camera);
+                    alert('Global viewer camera saved');
+                    return true;
+                } catch (e) {
+                    console.error('[Viewer] Failed to save global camera:', e);
+                    alert('Failed to save global camera');
+                    return false;
+                }
+            }
             
             // Load viewer settings from server
             async function loadViewerSettings() {
@@ -10356,6 +10484,7 @@
                     const resp = await fetch(`/api/task/${taskId}/viewer-settings`);
                     if (resp.ok) {
                         const settings = await resp.json();
+                        applyLoadedViewerCameraSettings(settings.camera, 'viewer settings preload');
                         viewerState.mainLightIntensity = settings.mainLightIntensity !== undefined ? settings.mainLightIntensity : 3.0;
                         viewerState.envIntensity = settings.envIntensity !== undefined ? settings.envIntensity : 1.0;
                         viewerState.reflectionIntensity = settings.reflectionIntensity !== undefined ? settings.reflectionIntensity : 3.0;
@@ -10388,18 +10517,7 @@
                             viewerState.bloom = { ...viewerState.bloom, ...settings.bloom };
                         }
                         // Save camera position separately - will be applied after model loads
-                        if (settings.camera && settings.camera.position && settings.camera.target) {
-                            viewerState.camera = {
-                                ...viewerState.camera,
-                                ...settings.camera,
-                                position: { ...settings.camera.position },
-                                target: { ...settings.camera.target }
-                            };
-                            savedCameraPosition = { ...settings.camera.position };
-                            savedCameraTarget = { ...settings.camera.target };
-                            savedCameraBoundsSignature = String(settings.camera.model_bounds_signature || settings.camera.bounds_signature || '').trim() || null;
-                            window.taskDbg('[Viewer] Saved camera position for later:', savedCameraPosition);
-                        }
+                        applyLoadedViewerCameraSettings(settings.camera, 'viewer settings load');
                         
                         if (settings.adjustments) {
                             // Merge saved adjustments with defaults
@@ -10468,6 +10586,8 @@
             let savedCameraPosition = null; // Store camera position from server until model loads
             let savedCameraTarget = null;
             let savedCameraBoundsSignature = null;
+            let savedCameraBoundsPolicy = null;
+            let savedGlobalCameraPreset = false;
             let pendingThemeCameraHint = null;
 
 
@@ -10790,6 +10910,10 @@
                     z: _themeNumber(target.z, NaN),
                 };
                 if (!Number.isFinite(nextPos.x + nextPos.y + nextPos.z + nextTarget.x + nextTarget.y + nextTarget.z)) return false;
+                if (isGlobalCameraPreset()) {
+                    window.taskDbg?.('[ViewerTheme] camera hint ignored because global camera preset is active', { reason });
+                    return false;
+                }
                 pendingThemeCameraHint = {
                     position: nextPos,
                     target: nextTarget,
@@ -10952,6 +11076,7 @@
                     if (status) status.textContent = 'Admin only';
                     return;
                 }
+                captureCurrentViewerCameraState();
                 if (status) status.textContent = 'Saving...';
                 const resp = await fetch(`/api/admin/viewer-themes/${encodeURIComponent(id)}`, {
                     method: 'PUT',
@@ -10968,7 +11093,7 @@
                     window.__activeViewerTheme = data.theme;
                     activeViewerTheme = data.theme;
                     appliedTaskViewerThemeSelectionId = String(data.theme.theme_id || data.theme.id || '').trim();
-                    viewerThemeRuntimeApply(data.theme, 'theme save response');
+                    viewerThemeRuntimeApply(data.theme, 'theme save response', { skipCamera: true });
                 }
                 if (status) status.textContent = 'Saved';
                 setTimeout(() => { if (status) status.textContent = ''; }, 1800);
@@ -11021,6 +11146,21 @@
                     });
                 });
 
+                document.getElementById('viewer-admin-camera-save-btn')?.addEventListener('click', () => {
+                    const status = document.getElementById('viewer-admin-theme-save-status');
+                    if (status) status.textContent = 'Saving camera...';
+                    saveGlobalViewerCameraPreset('theme-admin-row')
+                        .then((ok) => {
+                            if (status) {
+                                status.textContent = ok ? 'Camera saved' : 'Camera not saved';
+                                setTimeout(() => { if (status) status.textContent = ''; }, 1800);
+                            }
+                        })
+                        .catch((e) => {
+                            if (status) status.textContent = e?.message || 'Camera save failed';
+                        });
+                });
+
                 document.getElementById('viewer-admin-default-save-btn')?.addEventListener('click', (e) => {
                     e.preventDefault();
                     saveDefaultViewerSettings('theme-admin-row');
@@ -11043,7 +11183,7 @@
                 }
             }
 
-            function viewerThemeRuntimeApply(theme, reason = '') {
+            function viewerThemeRuntimeApply(theme, reason = '', options = {}) {
                 if (!theme) return;
                 const shadow = theme.shadow_settings || {};
                 const sun = theme.sun_settings || {};
@@ -11065,7 +11205,9 @@
                 if (sun.intensity !== undefined) viewerState.mainLightIntensity = _themeNumber(sun.intensity, viewerState.mainLightIntensity);
                 if (env.intensity !== undefined) viewerState.envIntensity = _themeNumber(env.intensity, viewerState.envIntensity);
                 if (env.reflection_intensity !== undefined) viewerState.reflectionIntensity = _themeNumber(env.reflection_intensity, viewerState.reflectionIntensity);
-                applyViewerThemeCameraTransform(theme.camera_transform || {}, reason || 'theme');
+                if (!options.skipCamera) {
+                    applyViewerThemeCameraTransform(theme.camera_transform || {}, reason || 'theme');
+                }
                 try { applyViewerState(); updateViewerUI(); syncViewerAdminThemeControlsFromState(); } catch (_) {}
                 try { applySceneEnvironmentIntensity(); } catch (_) {}
                 window.taskDbg?.('[ViewerTheme] applied settings', { id: theme.theme_id || theme.id, reason });
@@ -11251,12 +11393,22 @@
                 if (savedCameraPosition && savedCameraTarget && camera && controls) {
                     window.taskDbg('[Viewer] Restoring saved camera position:', savedCameraPosition);
                     camera.position.set(savedCameraPosition.x, savedCameraPosition.y, savedCameraPosition.z);
+                    if (viewerState.camera?.up) {
+                        camera.up.set(
+                            finiteCameraNumber(viewerState.camera.up.x, 0),
+                            finiteCameraNumber(viewerState.camera.up.y, 1),
+                            finiteCameraNumber(viewerState.camera.up.z, 0)
+                        );
+                    }
                     controls.target.set(savedCameraTarget.x, savedCameraTarget.y, savedCameraTarget.z);
-                    controls.update();
                     
                     // Update viewerState with restored values
                     viewerState.camera.position = { ...savedCameraPosition };
                     viewerState.camera.target = { ...savedCameraTarget };
+                    if (savedGlobalCameraPreset || savedCameraBoundsPolicy === 'ignore') {
+                        viewerState.camera.global_camera_preset = true;
+                        viewerState.camera.bounds_policy = 'ignore';
+                    }
                     if (savedCameraBoundsSignature) {
                         viewerState.camera.model_bounds_signature = savedCameraBoundsSignature;
                     }
@@ -11264,6 +11416,7 @@
                         camera.fov = Number(viewerState.camera.fov);
                         camera.updateProjectionMatrix?.();
                     }
+                    controls.update();
                     
                     // Tell ViewerControls to skip next focus (will be called by setRigType)
                     if (viewerControls) {
@@ -11822,7 +11975,9 @@
             }
 
             function isSavedCameraUsableForBounds(boundsInfo) {
-                if (!savedCameraPosition || !savedCameraTarget || !boundsInfo) return false;
+                if (!savedCameraPosition || !savedCameraTarget) return false;
+                if (savedGlobalCameraPreset || savedCameraBoundsPolicy === 'ignore' || isGlobalCameraPreset()) return true;
+                if (!boundsInfo) return false;
                 const currentSignature = getModelBoundsSignature(boundsInfo);
                 const savedSignature = String(savedCameraBoundsSignature || viewerState.camera?.model_bounds_signature || '').trim();
                 return !!currentSignature && !!savedSignature && currentSignature === savedSignature;
@@ -13525,7 +13680,9 @@
                     }
                     if (window.recreateWireframe) window.recreateWireframe();
                     const cachedBoundsInfo = getModelBoundsInfo(currentModel);
-                    if (!fitCameraToModelBounds(currentModel, `cache ${cacheKey}`, { boundsInfo: cachedBoundsInfo })) {
+                    if (isSavedCameraUsableForBounds(cachedBoundsInfo)) {
+                        restoreSavedCamera();
+                    } else if (!fitCameraToModelBounds(currentModel, `cache ${cacheKey}`, { boundsInfo: cachedBoundsInfo })) {
                         cameraInitialized = true;
                     }
                     if (activeViewerTheme?.src) {
