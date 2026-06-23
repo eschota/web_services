@@ -4908,7 +4908,7 @@
             <div class="task-paywall-dialog__head">
                 <div>
                     <h2 id="task-paywall-dialog-title">Unlock downloads</h2>
-                    <p id="task-paywall-dialog-copy">Unlock this task once to download the ZIP, protected files, animal variants, and all custom animation FBX files.</p>
+                    <p id="task-paywall-dialog-copy" data-i18n="download_archive_desc">The archive includes the rig in multiple formats, 50+ character animations, 10 animal rig animations, a Unity package, a video preview, and a poster.</p>
                 </div>
                 <button type="button" class="task-paywall-dialog__close" id="task-paywall-dialog-close" aria-label="Close">&times;</button>
             </div>
@@ -6930,7 +6930,7 @@
                 if (requiredCredits > 0) {
                     return `Unlock this task for ${requiredCredits} credits. Your current balance is ${balance} credits.`;
                 }
-                return 'One task unlock gives access to the ZIP, protected files, animal variants, and all custom animation downloads.';
+                return this.tSafe('download_archive_desc', 'The archive includes the rig in multiple formats, 50+ character animations, 10 animal rig animations, a Unity package, a video preview, and a poster.');
             },
 
             async refreshAuthForPaywall() {

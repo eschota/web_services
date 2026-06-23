@@ -251,7 +251,7 @@
     "feedback_in_reply_to": "Reply to",
     "feedback_load_error": "Failed to load feedback.",
     "viewer_instruction": "The 3D model is rigged, you can download the Rig and Ready-made animations in the Downloads section. If the model is rigged incorrectly, use the 3D viewer and X Y Z buttons to correctly position the character (Align your character with the basic semi-transparent T-Pose model, then press the Save T-POSE button and wait for the RIG to be regenerated.)",
-    "download_archive_desc": "Unlock this task once to download the ZIP, protected files, animal variants, and custom animation FBX files.",
+    "download_archive_desc": "The archive includes the rig in multiple formats, 50+ character animations, 10 animal rig animations, a Unity package, a video preview, and a poster.",
     "download_all_files_word": "files",
     "preparing_downloads": "Preparing downloads…",
     "prepare_files": "Prepare Files",
