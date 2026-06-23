@@ -9146,65 +9146,189 @@
                 },
             ];
 
-            function normalizeFbxClipUnits(clips) {
-                if (!Array.isArray(clips) || !clips.length) return [];
+            function positionTrackMaxDelta(track) {
+                if (!track?.values || track.values.length < 3) return 0;
+                const baseX = Number(track.values[0]) || 0;
+                const baseY = Number(track.values[1]) || 0;
+                const baseZ = Number(track.values[2]) || 0;
+                let max = 0;
+                for (let index = 0; index < track.values.length; index += 3) {
+                    const dx = (Number(track.values[index]) || 0) - baseX;
+                    const dy = (Number(track.values[index + 1]) || 0) - baseY;
+                    const dz = (Number(track.values[index + 2]) || 0) - baseZ;
+                    max = Math.max(max, Math.sqrt(dx * dx + dy * dy + dz * dz));
+                }
+                return max;
+            }
 
-                let maxAbsPosition = 0;
-                for (const clip of clips) {
-                    if (!clip || !Array.isArray(clip.tracks)) continue;
-                    for (const track of clip.tracks) {
-                        const trackName = String(track?.name || '');
-                        if (!trackName.endsWith('.position') || !track?.values) continue;
-                        for (let i = 0; i < track.values.length; i++) {
-                            const v = Math.abs(Number(track.values[i]) || 0);
-                            if (v > maxAbsPosition) maxAbsPosition = v;
+            function findAnimationTrackTargetObject(track, model = currentModel) {
+                if (!model?.traverse) return null;
+                const candidates = trackTargetCandidates(track?.name);
+                if (!candidates.size) return null;
+                let found = null;
+                model.traverse((obj) => {
+                    if (found || !obj) return;
+                    const objectCandidates = new Set();
+                    addTrackTargetVariants(objectCandidates, obj.name);
+                    for (const candidate of objectCandidates) {
+                        if (candidates.has(candidate)) {
+                            found = obj;
+                            return;
                         }
                     }
-                }
-
-                // FBX often stores in centimeters while GLB scene is in meters.
-                if (maxAbsPosition < FBX_CLIP_SCALE_TRIGGER_ABS) {
-                    return clips;
-                }
-
-                const scaled = clips.map((clip) => {
-                    if (!clip || !Array.isArray(clip.tracks)) return clip;
-                    const scaledTracks = clip.tracks.map((track) => {
-                        const trackName = String(track?.name || '');
-                        if (!trackName.endsWith('.position') || !track?.values || !track?.times) {
-                            return track;
-                        }
-                        const ValuesCtor = track.values.constructor || Float32Array;
-                        const TimesCtor = track.times.constructor || Float32Array;
-                        const scaledValues = new ValuesCtor(track.values.length);
-                        const clonedTimes = new TimesCtor(track.times.length);
-                        for (let i = 0; i < track.values.length; i++) {
-                            scaledValues[i] = Number(track.values[i]) * FBX_CLIP_POSITION_SCALE_FACTOR;
-                        }
-                        for (let i = 0; i < track.times.length; i++) {
-                            clonedTimes[i] = Number(track.times[i]);
-                        }
-                        const TrackCtor = track.constructor;
-                        try {
-                            if (typeof track.getInterpolation === 'function') {
-                                return new TrackCtor(track.name, clonedTimes, scaledValues, track.getInterpolation());
+                    if (obj.isSkinnedMesh && obj.skeleton?.bones?.length) {
+                        for (const bone of obj.skeleton.bones) {
+                            const boneCandidates = new Set();
+                            addTrackTargetVariants(boneCandidates, bone?.name);
+                            for (const candidate of boneCandidates) {
+                                if (candidates.has(candidate)) {
+                                    found = bone;
+                                    return;
+                                }
                             }
-                            return new TrackCtor(track.name, clonedTimes, scaledValues);
-                        } catch (_) {
-                            return track;
                         }
-                    });
-                    try {
-                        return new THREE.AnimationClip(clip.name, clip.duration, scaledTracks, clip.blendMode);
-                    } catch (_) {
-                        return clip;
                     }
                 });
+                return found;
+            }
 
-                window.taskDbg(
-                    `[Viewer] Normalized FBX clip units by ${FBX_CLIP_POSITION_SCALE_FACTOR} (max position ${maxAbsPosition.toFixed(2)})`
-                );
-                return scaled;
+            function cloneRootPositionTrackRelativeToBind(track, scaleFactor = 1) {
+                const next = track.clone();
+                if (!next?.values || next.values.length < 3) return next;
+                const sourceBaseX = Number(next.values[0]) || 0;
+                const sourceBaseY = Number(next.values[1]) || 0;
+                const sourceBaseZ = Number(next.values[2]) || 0;
+                const target = findAnimationTrackTargetObject(track);
+                const bindX = Number(target?.position?.x);
+                const bindY = Number(target?.position?.y);
+                const bindZ = Number(target?.position?.z);
+                const baseX = Number.isFinite(bindX) ? bindX : 0;
+                const baseY = Number.isFinite(bindY) ? bindY : 0;
+                const baseZ = Number.isFinite(bindZ) ? bindZ : 0;
+                for (let index = 0; index < next.values.length; index += 3) {
+                    next.values[index] = baseX + (((Number(next.values[index]) || 0) - sourceBaseX) * scaleFactor);
+                    next.values[index + 1] = baseY + (((Number(next.values[index + 1]) || 0) - sourceBaseY) * scaleFactor);
+                    next.values[index + 2] = baseZ + (((Number(next.values[index + 2]) || 0) - sourceBaseZ) * scaleFactor);
+                }
+                return next;
+            }
+
+            function customClipPositionScaleFactor(maxDelta, modelMaxDim) {
+                const safeModelMaxDim = Math.max(Number(modelMaxDim) || 0, 0.001);
+                const trigger = Math.max(FBX_CLIP_SCALE_TRIGGER_ABS, safeModelMaxDim * 2.5);
+                return maxDelta > trigger ? FBX_CLIP_POSITION_SCALE_FACTOR : 1;
+            }
+
+            function sanitizeCustomAnimationTrack(track, validTargets, modelMaxDim, stats) {
+                const trackName = String(track?.name || '');
+                const isPosition = trackName.endsWith('.position');
+                const isScale = trackName.endsWith('.scale');
+
+                if (isScale) {
+                    stats.scaleDropped += 1;
+                    stats.dropped += 1;
+                    return null;
+                }
+
+                if (isPosition) {
+                    if (!isLikelyRootPositionTrack(track)) {
+                        stats.nonRootPositionDropped += 1;
+                        stats.dropped += 1;
+                        return null;
+                    }
+                    if (!trackTargetExists(track, validTargets)) {
+                        stats.unmatchedRootPositionDropped += 1;
+                        stats.dropped += 1;
+                        return null;
+                    }
+                    const maxDelta = positionTrackMaxDelta(track);
+                    const scaleFactor = customClipPositionScaleFactor(maxDelta, modelMaxDim);
+                    stats.rootPositionNormalized += 1;
+                    stats.maxRootPositionDelta = Math.max(stats.maxRootPositionDelta, maxDelta);
+                    if (scaleFactor !== 1) {
+                        stats.rootPositionScaled += 1;
+                        stats.positionScaleFactor = scaleFactor;
+                    }
+                    stats.kept += 1;
+                    return cloneRootPositionTrackRelativeToBind(track, scaleFactor);
+                }
+
+                if (!trackTargetExists(track, validTargets)) {
+                    stats.unmatchedDropped += 1;
+                    stats.dropped += 1;
+                    return null;
+                }
+
+                stats.kept += 1;
+                return track;
+            }
+
+            function sanitizeCustomAnimationClips(clips, label = 'Custom Animation FBX') {
+                if (!Array.isArray(clips) || !clips.length) return [];
+                const validTargets = collectPlayableTrackTargets(currentModel);
+                const boundsInfo = getModelBoundsInfo(currentModel);
+                const modelMaxDim = Number(boundsInfo?.maxDim) || 1;
+                const runStats = {
+                    label,
+                    sourceClipCount: clips.length,
+                    sanitizedClipCount: 0,
+                    validTargets: validTargets.size,
+                    modelMaxDim: roundViewerDebugNumber(modelMaxDim),
+                    clips: [],
+                };
+                const sanitizedClips = [];
+
+                clips.forEach((sourceClip) => {
+                    if (!sourceClip || !Array.isArray(sourceClip.tracks)) return;
+                    const stats = {
+                        clip: sourceClip.name || '',
+                        sourceTracks: sourceClip.tracks.length,
+                        kept: 0,
+                        dropped: 0,
+                        scaleDropped: 0,
+                        nonRootPositionDropped: 0,
+                        unmatchedRootPositionDropped: 0,
+                        unmatchedDropped: 0,
+                        rootPositionNormalized: 0,
+                        rootPositionScaled: 0,
+                        positionScaleFactor: 1,
+                        maxRootPositionDelta: 0,
+                    };
+                    const tracks = sourceClip.tracks
+                        .map((track) => sanitizeCustomAnimationTrack(track, validTargets, modelMaxDim, stats))
+                        .filter(Boolean);
+                    if (!tracks.length) {
+                        stats.zeroCompatibleTracks = true;
+                        runStats.clips.push(stats);
+                        return;
+                    }
+
+                    let nextClip = null;
+                    try {
+                        nextClip = new THREE.AnimationClip(sourceClip.name, sourceClip.duration, tracks, sourceClip.blendMode);
+                    } catch (_) {
+                        nextClip = sourceClip.clone();
+                        nextClip.tracks = tracks;
+                    }
+                    try {
+                        nextClip.optimize();
+                    } catch (_) {
+                        // keep unoptimized clip
+                    }
+                    sanitizedClips.push(nextClip);
+                    stats.sanitizedTracks = tracks.length;
+                    runStats.clips.push(stats);
+                });
+
+                runStats.sanitizedClipCount = sanitizedClips.length;
+                window.__lastCustomAnimationSanitization = runStats;
+                if (!sanitizedClips.length) {
+                    console.warn('[Viewer] Custom FBX clip sanitized to zero compatible tracks; falling back to built-in clip by name', runStats);
+                    return [];
+                }
+                console.info('[Viewer] Sanitized custom animation clips', runStats);
+                window.taskDbg('[Viewer] Sanitized custom animation clips:', runStats);
+                return sanitizedClips;
             }
 
             async function loadAnimationClipsFromFbxUrl(fbxUrl, label = 'Custom Animation FBX', retryCount = 0) {
@@ -9246,7 +9370,7 @@
                 }
 
                 const rawClips = Array.isArray(fbxModel?.animations) ? fbxModel.animations : [];
-                const clips = normalizeFbxClipUnits(rawClips);
+                const clips = sanitizeCustomAnimationClips(rawClips, label);
                 if (clips.length) {
                     customAnimationClipCache.set(normalizedUrl, clips);
                 }
@@ -9614,6 +9738,7 @@
                         setStatus('Animations GLB is not ready yet');
                         return false;
                     }
+                    restoreAnimationPreviewBindPose(currentModel.userData?.autorigLtxBasePose || currentModel.userData?.autorigPlayModeBindPose);
                     const clips = await loadAnimationClipsFromFbxUrl(url, 'Custom Animation FBX');
                     if (!clips.length) return false;
 
@@ -11975,6 +12100,89 @@
                 ].map((value) => roundViewerDebugNumber(Math.max(0, Number(value) || 0), 4).toFixed(4)).join('x');
             }
 
+            const VIEWER_TEXTURE_MAP_KEYS = [
+                'map',
+                'normalMap',
+                'roughnessMap',
+                'metalnessMap',
+                'emissiveMap',
+                'aoMap',
+                'alphaMap',
+                'bumpMap',
+                'displacementMap',
+                'specularMap',
+                'specularColorMap',
+                'specularIntensityMap',
+                'clearcoatMap',
+                'clearcoatNormalMap',
+                'clearcoatRoughnessMap',
+                'sheenColorMap',
+                'sheenRoughnessMap',
+                'transmissionMap',
+                'thicknessMap',
+            ];
+
+            function materialHasViewerTextureMap(material) {
+                if (!material) return false;
+                return VIEWER_TEXTURE_MAP_KEYS.some((key) => !!material[key]);
+            }
+
+            function collectViewerMaterialStats(model) {
+                const stats = {
+                    materialCount: 0,
+                    texturedMaterialCount: 0,
+                    textureMapCount: 0,
+                };
+                const seen = new Set();
+                model?.traverse?.((node) => {
+                    if (!node?.isMesh || !node.material) return;
+                    const materials = Array.isArray(node.material) ? node.material : [node.material];
+                    materials.forEach((material) => {
+                        if (!material) return;
+                        const key = material.uuid || `${node.uuid}:${stats.materialCount}`;
+                        if (seen.has(key)) return;
+                        seen.add(key);
+                        stats.materialCount += 1;
+                        let mapCount = 0;
+                        VIEWER_TEXTURE_MAP_KEYS.forEach((mapKey) => {
+                            if (material[mapKey]) mapCount += 1;
+                        });
+                        if (mapCount > 0) stats.texturedMaterialCount += 1;
+                        stats.textureMapCount += mapCount;
+                    });
+                });
+                return stats;
+            }
+
+            function updateViewerAssetDiagnostics({ source, label, model, boundsInfo, animationCount = 0, reason = '' } = {}) {
+                const materialStats = collectViewerMaterialStats(model);
+                const bounds = boundsInfo || getModelBoundsInfo(model);
+                const diagnostic = {
+                    source: source || 'unknown',
+                    label: label || '',
+                    reason: reason || '',
+                    currentModelType,
+                    materialCount: materialStats.materialCount,
+                    texturedMaterialCount: materialStats.texturedMaterialCount,
+                    textureMapCount: materialStats.textureMapCount,
+                    animationCount: Number(animationCount) || 0,
+                    boundsSignature: getModelBoundsSignature(bounds),
+                    bounds: bounds ? {
+                        center: vectorToDebugObject(bounds.center),
+                        size: vectorToDebugObject(bounds.size),
+                        maxDim: roundViewerDebugNumber(bounds.maxDim),
+                        radius: roundViewerDebugNumber(bounds.radius),
+                        meshCount: Number(bounds.meshCount || 0),
+                        vertexCount: Number(bounds.vertexCount || 0),
+                    } : null,
+                    updatedAt: new Date().toISOString(),
+                };
+                window.__viewerAssetDiagnostics = diagnostic;
+                console.info('[ViewerDiagnostics]', diagnostic);
+                window.taskDbg('[ViewerDiagnostics]', diagnostic);
+                return diagnostic;
+            }
+
             function isSavedGlobalCameraCompatibleWithBounds(boundsInfo) {
                 if (!boundsInfo?.box || !boundsInfo?.center || !savedCameraPosition || !savedCameraTarget || !THREE) {
                     return false;
@@ -14096,20 +14304,37 @@
                                             modelCache.animationsData = [...animations];
                                             window.taskDbg('[Viewer] ✓ Cached animations model');
                                         } else {
-                                            console.error('[Viewer] Animation preview failed; GLB and FBX are unavailable or corrupted');
-                                            setStatus('Animation preview unavailable/corrupted');
-                                            mode = 'tpose';
-                                            animBtn?.classList.remove('active');
-                                            tposeBtn?.classList.add('active');
-                                            setEditControlsVisible(true);
-                                            if (tPoseReference) {
-                                                tPoseReference.setVisible(true);
-                                                const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
-                                                if (tposeToggleBtn) tposeToggleBtn.classList.add('active');
+                                            console.error('[Viewer] Animation preview failed; GLB and FBX are unavailable or corrupted. Trying textured prepared.glb static preview.');
+                                            const preparedOk = await loadModel(`/api/task/${taskId}/prepared.glb`, 'Prepared Model', 0, 120000);
+                                            if (preparedOk) {
+                                                currentModelType = 'prepared';
+                                                mode = 'rig';
+                                                modelCache.prepared = currentModel;
+                                                modelCache.preparedData = [];
+                                                animations.length = 0;
+                                                mixer = null;
+                                                animBtn?.classList.remove('active');
+                                                rigBtn?.classList.add('active');
+                                                if (sel) sel.classList.add('hidden');
+                                                if (playBtn) playBtn.classList.add('hidden');
+                                                if (pauseBtn) pauseBtn.classList.add('hidden');
+                                                setStatus('Ready (static textured preview)');
+                                                window.taskDbg('[Viewer] Using prepared.glb as static fallback after animation preview failure');
+                                            } else {
+                                                setStatus('Animation preview unavailable/corrupted');
+                                                mode = 'tpose';
+                                                animBtn?.classList.remove('active');
+                                                tposeBtn?.classList.add('active');
+                                                setEditControlsVisible(true);
+                                                if (tPoseReference) {
+                                                    tPoseReference.setVisible(true);
+                                                    const tposeToggleBtn = document.getElementById('tpose-toggle-btn');
+                                                    if (tposeToggleBtn) tposeToggleBtn.classList.add('active');
+                                                }
+                                                if (sel) sel.classList.add('hidden');
+                                                if (playBtn) playBtn.classList.add('hidden');
+                                                if (pauseBtn) pauseBtn.classList.add('hidden');
                                             }
-                                            if (sel) sel.classList.add('hidden');
-                                            if (playBtn) playBtn.classList.add('hidden');
-                                            if (pauseBtn) pauseBtn.classList.add('hidden');
                                         }
                                         setLoadingUIState(false);
                                     }
@@ -15609,8 +15834,8 @@
                         materials.forEach((mat) => {
                             if (!mat) return;
                         
-                            // Check if material has no albedo/diffuse texture
-                            const hasTexture = mat.map || mat.diffuseMap || mat.albedoMap;
+                            // GLB/PBR textures are authoritative for the website preview.
+                            const hasTexture = materialHasViewerTextureMap(mat) || mat.diffuseMap || mat.albedoMap;
                             
                             if (!hasTexture) {
                                 // Model without texture - apply improved material
@@ -15634,14 +15859,8 @@
 
                                     window.taskDbg('[Materials] Applied improved material (no texture):', child.name);
                                 }
-                            } else {
-                                // Model with texture - make slightly darker and more reflective
-                                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-                                    mat.metalness = Math.max(mat.metalness, 0.18);
-                                    mat.roughness = Math.min(mat.roughness, 0.72);
-                                    mat.envMapIntensity = Math.max(mat.envMapIntensity || 1, 1.2);
-                                    mat.needsUpdate = true;
-                                }
+                            } else if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                                mat.needsUpdate = true;
                             }
                         });
                     }
@@ -15854,6 +16073,14 @@
                 setTimeout(() => hideLoadingOverlay(), 300);
 
                 animations = gltf.animations || [];
+                updateViewerAssetDiagnostics({
+                    source: isAnimationPreview ? 'animations.glb' : 'prepared.glb',
+                    label,
+                    model,
+                    boundsInfo: modelBoundsInfo,
+                    animationCount: animations.length,
+                    reason: `load ${label}`,
+                });
                 window.taskDbg(`[Viewer] ${label} loaded. Animations found:`, animations.length);
                 if (animations.length) {
                     window.taskDbg('[Viewer] Animation names:', animations.map(a => a.name));
@@ -16084,6 +16311,14 @@
 
                 // FBX animations are stored on the model object directly
                 animations = model.animations || [];
+                updateViewerAssetDiagnostics({
+                    source: isAnimationPreview ? 'animations.fbx' : 'fbx',
+                    label,
+                    model,
+                    boundsInfo: fbxModelBoundsInfo,
+                    animationCount: animations.length,
+                    reason: `load ${label}`,
+                });
                 window.taskDbg(`[Viewer] ${label} loaded. Animations found:`, animations.length);
                 if (animations.length) {
                     window.taskDbg('[Viewer] Animation names:', animations.map(a => a.name));
@@ -16394,16 +16629,9 @@
                         return false;
                     }
                     const formats = taskReadyAnimationFormats(taskState);
-                    if (formats.fbx && !formats.glb) {
-                        const ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
-                        if (ok) {
-                            currentModelType = 'animations';
-                            modelCache.animations = currentModel;
-                            modelCache.animationsData = [...animations];
-                        }
-                    } else {
-                        await setActiveMode('animation');
-                    }
+                    console.info('[ViewerBoot] Requesting GLB-first final preview', { reason, readyUrlFormats: formats });
+                    window.taskDbg('[Viewer] Requesting GLB-first final preview; ready_urls are not authoritative:', formats);
+                    await setActiveMode('animation');
                     const ok = currentModelType === 'animations' && !!currentModel;
                     if (ok) {
                         console.info('[ViewerBoot] Final animation preview is active', {

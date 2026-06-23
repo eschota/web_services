@@ -29,6 +29,15 @@ AutoRig.online is a cloud service for automatic 3D model rigging and animation p
 - The task viewer still rejects a global camera locally when its distance/target are obviously incompatible with the loaded model bounds; in that case it falls back to `fitCameraToModelBounds()` instead of showing a tiny or lost model.
 - When a global camera preset exists, task viewer settings reads merge that global `camera` over per-task settings; per-task lighting/theme data remains intact.
 
+## 3D Viewer Runtime Contract
+
+- Website preview is GLB-first for completed tasks: the frontend must try `GET /api/task/{task_id}/animations.glb` before any FBX preview path.
+- `ready_urls` is not authoritative for `/animations.glb` availability; completed tasks can have a working endpoint even when `_all_animations.glb` is missing from `ready_urls`.
+- FBX is a fallback/download/custom-clip source, not the default website model when the GLB endpoint works.
+- If both animation GLB and FBX fail, the viewer should fall back to `prepared.glb` as a textured static preview instead of showing a broken/degraded animated model.
+- Custom FBX animation previews are applied as clips to the current GLB runtime model. They must not replace the model.
+- Custom FBX clips must be sanitized before playback: drop `.scale` tracks, drop non-root `.position` tracks, normalize root `.position` tracks relative to the first frame/current bind pose, and reject zero-compatible clips so the UI can fall back to a matching built-in clip.
+
 ## Task Download Bundles
 
 - Full-task download uses the worker ZIP resolved as `/converter/glb/<guid>.zip` and streamed through `GET /api/task/{task_id}/bundle.zip`.
