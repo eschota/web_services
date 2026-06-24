@@ -574,6 +574,37 @@ async def background_task_updater():
     background_worker_cycle_count = 0
     
     print("[Background Worker] Started task updater")
+
+    async def _sync_processing_tasks(db):
+        # Keep backend task rows aligned with terminal worker state before stall checks
+        # and before dispatch can hand the same worker another queued task.
+        result = await db.execute(
+            select(Task).where(Task.status == "processing")
+        )
+        processing_tasks = result.scalars().all()
+
+        if not processing_tasks:
+            return
+
+        print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
+
+        # Update tasks concurrently (bounded) so the loop doesn't take minutes when many tasks are processing.
+        # IMPORTANT: Each task gets its own DB session to avoid SQLAlchemy transaction conflicts.
+        semaphore = asyncio.Semaphore(8)
+
+        async def _update_one(task_id: str):
+            async with semaphore:
+                try:
+                    async with AsyncSessionLocal() as task_db:
+                        task = await get_task_by_id(task_db, task_id)
+                        if task and task.status == "processing":
+                            await update_task_progress(task_db, task)
+                except Exception as e:
+                    print(f"[Background Worker] Error updating task {task_id}: {e}")
+
+        # Pass task IDs, not task objects (to get fresh data in each session).
+        task_ids = [t.id for t in processing_tasks]
+        await asyncio.gather(*[_update_one(tid) for tid in task_ids])
     
     while background_task_running:
         try:
@@ -583,10 +614,12 @@ async def background_task_updater():
                 queue_status = None
                 force_stale_reset = False
                 # =============================================================
-                # 1. Queue snapshot + stall monitor, then stale reset, then dispatch
+                # 1. Worker state sync, queue snapshot + stall monitor, then stale reset, then dispatch
                 #    (reset must run before dispatch so tasks moved to "created" post in the same tick)
                 # =============================================================
                 try:
+                    await _sync_processing_tasks(db)
+
                     queue_status = await get_global_queue_status(db=db)
                     try:
                         stalled_detected = await _monitor_stalled_workers(db, queue_status=queue_status)
@@ -718,35 +751,6 @@ async def background_task_updater():
                                 print(f"[Background Worker] No-assets purge error: {e}")
                         finally:
                             _release_gallery_purge_lock(lock_f)
-
-                # =============================================================
-                # 3. Update progress for all processing tasks
-                # =============================================================
-                result = await db.execute(
-                    select(Task).where(Task.status == "processing")
-                )
-                processing_tasks = result.scalars().all()
-                
-                if processing_tasks:
-                    print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
-
-                    # Update tasks concurrently (bounded) so the loop doesn't take minutes when many tasks are processing
-                    # IMPORTANT: Each task gets its own DB session to avoid SQLAlchemy transaction conflicts
-                    semaphore = asyncio.Semaphore(8)
-
-                    async def _update_one(task_id: str):
-                        async with semaphore:
-                            try:
-                                async with AsyncSessionLocal() as task_db:
-                                    task = await get_task_by_id(task_db, task_id)
-                                    if task and task.status == "processing":
-                                        await update_task_progress(task_db, task)
-                            except Exception as e:
-                                print(f"[Background Worker] Error updating task {task_id}: {e}")
-
-                    # Pass task IDs, not task objects (to get fresh data in each session)
-                    task_ids = [t.id for t in processing_tasks]
-                    await asyncio.gather(*[_update_one(tid) for tid in task_ids])
 
                 # =============================================================
                 # 4. Poster classification recovery (pending or transient poster fetch errors)

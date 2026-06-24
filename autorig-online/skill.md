@@ -47,6 +47,12 @@ AutoRig.online is a cloud service for automatic 3D model rigging and animation p
 - If worker metadata is missing while the ZIP is available, UI must show a generic `Download All Files` label instead of falling back to the smaller direct-file count.
 - `fallback_cache` count is valid only when the worker ZIP is unavailable and the backend builds the ZIP from cached direct files.
 
+## Backend Worker Routing
+
+- The background worker loop must synchronize all `processing` task rows with worker terminal state before stalled-worker checks and before dispatching new queued tasks.
+- This ordering prevents false `Worker stalled` alerts when a converter already reports a terminal failure but the backend task row has not yet been updated.
+- Worker capacity uses both worker-reported active tasks and backend-assigned tasks; do not dispatch a new task to a worker just because its live `/server-status` is free while the backend still has an unsynchronized processing row.
+
 ## Supported Workflows
 
 - Humanoid character auto-rigging.
