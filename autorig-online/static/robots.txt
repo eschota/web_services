@@ -18,6 +18,9 @@ Allow: /api/video/
 Allow: /skill.md
 Allow: /llm.txt
 Allow: /llms.txt
+Disallow: /m$
+Disallow: /m/
+Disallow: /m?
 Disallow: /api/
 Disallow: /admin
 Disallow: /admin/
@@ -145,6 +148,9 @@ Allow: /turtle-auto-rig-hi
 # Disallow API and admin
 Allow: /api/thumb/
 Allow: /api/video/
+Disallow: /m$
+Disallow: /m/
+Disallow: /m?
 Disallow: /api/
 Disallow: /admin
 Disallow: /admin/

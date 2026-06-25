@@ -23,3 +23,7 @@ Use this file as the project-level entrypoint for agents working in `R:\autorig`
 - AutoRig backend exposes full bundle count through `bundle_file_count` only when `bundle_file_count_ready` is true.
 - UI must not use direct cached-file `file_count` as the full bundle count.
 
+## Current SEO URL Contract
+
+- Public task URLs stay on `https://autorig.online/task?id={task_id}`.
+- Do not create or index `/m` / `/m/...` task pages; they are not part of AutoRig.online.

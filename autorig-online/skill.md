@@ -66,6 +66,7 @@ AutoRig.online is a cloud service for automatic 3D model rigging and animation p
 - LLM discovery file: https://autorig.online/llm.txt
 - Standard LLM discovery file: https://autorig.online/llms.txt
 - Public task SEO URLs stay on the canonical viewer URL shape: `https://autorig.online/task?id={task_id}`.
+- Do not create, advertise, sitemap or canonicalize `/m` or `/m/...` pages. AutoRig task pages have one public URL shape only: `/task?id={task_id}`.
 - Root `/sitemap.xml` links only SEO-gated task chunks under `/sitemap/gallery/part/{n}.xml`; those chunks include completed, non-adult tasks with poster/video and LLM-enriched metadata.
 - The full public gallery task set without SEO gate is diagnostic-only at `/sitemap/gallery/all/part/{n}.xml`.
 - IndexNow verification key is served from the site root and can be used by deploy/new-task jobs to submit changed public URLs.
