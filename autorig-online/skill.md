@@ -52,6 +52,7 @@ AutoRig.online is a cloud service for automatic 3D model rigging and animation p
 - The background worker loop must synchronize all `processing` task rows with worker terminal state before stalled-worker checks and before dispatching new queued tasks.
 - This ordering prevents false `Worker stalled` alerts when a converter already reports a terminal failure but the backend task row has not yet been updated.
 - Worker capacity uses both worker-reported active tasks and backend-assigned tasks; do not dispatch a new task to a worker just because its live `/server-status` is free while the backend still has an unsynchronized processing row.
+- If a dispatched processing task lost `worker_api` but still has a worker `progress_page`, backend progress sync must recover `worker_api` from that `progress_page` before checking concrete outputs, worker terminal failures, stale resets, or video availability.
 
 ## Supported Workflows
 

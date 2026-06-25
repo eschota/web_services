@@ -614,6 +614,33 @@ def _is_animal_task(task: Task) -> bool:
     return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
 
 
+def _restore_worker_api_from_progress_page(task: Task) -> bool:
+    """
+    Recover worker_api for already-dispatched tasks when the DB row kept only
+    progress_page. This lets existing progress/failure sync code use the worker.
+    """
+    if (getattr(task, "worker_api", None) or "").strip():
+        return False
+    progress_page = (getattr(task, "progress_page", None) or "").strip()
+    if not progress_page:
+        return False
+    try:
+        parsed = urlparse(progress_page)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    if "/converter/glb/" not in parsed.path:
+        return False
+
+    task.worker_api = f"{parsed.scheme}://{parsed.netloc}/api-converter-glb"
+    if not (getattr(task, "guid", None) or "").strip():
+        match = re.search(r"/converter/glb/([0-9a-fA-F-]{36})(?:/|$)", parsed.path)
+        if match:
+            task.guid = match.group(1)
+    return True
+
+
 def _worker_outputs_look_complete(urls: List[str]) -> bool:
     names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
     has_video = any(
@@ -751,6 +778,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     Check and update task progress.
     Checks a batch of URLs and updates ready count.
     """
+    if _restore_worker_api_from_progress_page(task):
+        task.updated_at = datetime.utcnow()
+        print(f"[Tasks] Restored worker_api from progress_page for task {task.id}: {task.worker_api}")
+
     # Track if task just completed
     was_processing = task.status == "processing"
     previous_ready_count = task.ready_count
