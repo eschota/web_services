@@ -1,0 +1,31 @@
+# AutoRig Online
+
+> Cloud service for automatic 3D character rigging and animation-ready exports. Upload GLB, FBX, or OBJ models and receive rigged assets, animation previews, posters, and engine-ready files for Unity, Unreal Engine, Blender, and web viewers.
+
+## Primary Resources
+
+- Home and upload: https://autorig.online/
+- Gallery: https://autorig.online/gallery
+- Animal and non-humanoid rigging: https://autorig.online/animal-rig
+- Blender plugin: https://autorig.online/blender-plugin
+- Developer API overview: https://autorig.online/developers
+- Agent/API skill: https://autorig.online/skill.md
+
+## Search Discovery
+
+- Sitemap index: https://autorig.online/sitemap.xml
+- Marketing pages sitemap: https://autorig.online/sitemap/pages.xml
+- Public task pages use canonical URLs in the form `https://autorig.online/task?id={task_id}`.
+- Public task sitemap chunks are SEO-gated and include only completed, non-adult tasks with poster/video and LLM-enriched metadata.
+
+## What AutoRig Does
+
+- AI-assisted humanoid character auto-rigging.
+- Animal and non-humanoid rigging for quadrupeds and stylized creatures.
+- Animation retargeting and preview generation.
+- Exports for GLB, FBX, OBJ-oriented workflows, Unity packages, Blender, Unreal Engine, and web previews.
+
+## Crawler Notes
+
+- Public pages, gallery previews, `/skill.md`, `/llm.txt`, and `/llms.txt` are intended for search and AI-agent discovery.
+- Raw API internals, admin pages, auth endpoints, and raw uploaded user files are not public indexing surfaces.

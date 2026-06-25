@@ -15,5 +15,7 @@
 
 ## Discovery
 
-- **Sitemap index (updates on request; marketing pages + public `/task?id={task_id}` chunks):** https://autorig.online/sitemap.xml
-- **This file (llm.txt):** https://autorig.online/llm.txt
+- **Sitemap index (updates on request; marketing pages + SEO-gated public `/task?id={task_id}` chunks):** https://autorig.online/sitemap.xml
+- **LLM discovery:** https://autorig.online/llms.txt
+- **Legacy LLM discovery alias:** https://autorig.online/llm.txt
+- **Robots policy:** https://autorig.online/robots.txt

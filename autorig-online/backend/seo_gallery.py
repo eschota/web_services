@@ -7,7 +7,8 @@ Sitemap rules:
 - Gallery /task?id={id} URLs for **indexing** are listed at /sitemap/gallery/part/{n}.xml (50 URLs max per part),
   including only tasks that pass :func:`seo_passes_indexing_gate` (LLM poster fields + enriched SEO check).
 
-Public task URLs still use :func:`gallery_seo_task_conditions` (broader than indexing sitemap).
+The broader public task pool still uses :func:`gallery_seo_task_conditions` and is exposed only through
+diagnostic/all-public exports, not through the root sitemap.
 
 A daily cron can mirror the same XML to disk; see scripts/daily_sitemap_refresh.py.
 """

@@ -13057,6 +13057,18 @@ async def serve_llm_txt():
     raise HTTPException(status_code=404, detail="llm.txt not found")
 
 
+@app.get("/llms.txt")
+async def serve_llms_txt():
+    """De-facto LLM discovery file; keep /llm.txt as backward-compatible alias."""
+    path = STATIC_DIR / "llms.txt"
+    if path.is_file():
+        return FileResponse(str(path), media_type="text/plain; charset=utf-8")
+    fallback = STATIC_DIR / "llm.txt"
+    if fallback.is_file():
+        return FileResponse(str(fallback), media_type="text/plain; charset=utf-8")
+    raise HTTPException(status_code=404, detail="llms.txt not found")
+
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -13142,9 +13154,11 @@ async def task_page(
                 task_title = "❌ Rigging Failed"
                 task_description = "There was an error processing this model."
             
-            # Check if video exists
+            # Check if video exists. Prefer DB truth; filesystem check is a legacy fallback.
             video_path = f"/var/autorig/videos/{task_id}.mp4"
-            has_video = os.path.exists(video_path) and os.path.getsize(video_path) > 0
+            has_video = bool(getattr(task, "video_ready", False)) or (
+                os.path.exists(video_path) and os.path.getsize(video_path) > 0
+            )
             
             # Assume thumb exists if task has ready_urls
             has_thumb = bool(task.ready_urls)
@@ -13183,10 +13197,26 @@ async def task_page(
             "description": task_description[:2000],
             "url": task_url,
             "image": f"{base_url}/api/thumb/{task_id}",
+            "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
             "mainEntityOfPage": task_url,
+            "creator": {"@type": "Organization", "name": "AutoRig.online"},
+            "isFamilyFriendly": True,
         }
+        if task.created_at:
+            creative_work["dateCreated"] = task.created_at.isoformat()
+        if task.updated_at:
+            creative_work["dateModified"] = task.updated_at.isoformat()
         if task_keywords:
             creative_work["keywords"] = ", ".join(task_keywords[:24])
+        if has_video:
+            creative_work["associatedMedia"] = {
+                "@type": "VideoObject",
+                "name": task_page_title[:200],
+                "description": task_description[:2000],
+                "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
+                "contentUrl": f"{base_url}/api/video/{task_id}",
+                "uploadDate": (task.updated_at or task.created_at or datetime.utcnow()).isoformat(),
+            }
         json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
     standard_seo_tags = f'<meta name="description" content="{safe_task_meta_description}">{keywords_meta}{json_ld}'
 
@@ -13237,7 +13267,7 @@ async def task_page(
     # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
     html_content = html_content.replace(
         '<meta name="robots" content="noindex, nofollow">',
-        '<meta name="robots" content="index, follow">',
+        '<meta name="robots" content="index, follow, max-image-preview:large, max-video-preview:-1">',
     )
     html_content = html_content.replace(
         "<!-- TASK_SEO_PLACEHOLDER -->",
@@ -13652,17 +13682,17 @@ for _rig_key in GALLERY_RIG_TYPES:
 @app.get("/sitemap.xml")
 async def sitemap_index(db: AsyncSession = Depends(get_db)):
     """
-    Sitemap index: static marketing pages + public task urlsets by part.
+    Sitemap index: static marketing pages + SEO-gated public task urlsets by part.
     """
     from seo_gallery import (
         build_sitemap_index_xml,
-        gallery_sitemap_all_index_part_count,
+        gallery_sitemap_index_part_count,
         video_sitemap_entry_count,
     )
 
     base = (APP_URL or "https://autorig.online").rstrip("/")
     child_locs: List[Tuple[str, Optional[datetime]]] = [(f"{base}/sitemap/pages.xml", None)]
-    n_parts = await gallery_sitemap_all_index_part_count(db)
+    n_parts = await gallery_sitemap_index_part_count(db)
     for p in range(n_parts):
         child_locs.append((f"{base}/sitemap/gallery/part/{p}.xml", None))
     n_video_entries = await video_sitemap_entry_count(db)
@@ -13701,7 +13731,23 @@ async def sitemap_mirror(db: AsyncSession = Depends(get_db)):
 @app.head("/sitemap/gallery/part/{part}.xml")
 @app.get("/sitemap/gallery/part/{part}.xml")
 async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(get_db)):
-    """Chunk (max 50) of public /task?id={task_id} URLs (no SEO gate)."""
+    """Chunk (max 50) of SEO-gated public /task?id={task_id} URLs."""
+    from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_indexing_part
+
+    if part < 0:
+        raise HTTPException(status_code=404, detail="Invalid sitemap chunk")
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    urls = await gallery_sitemap_urls_for_indexing_part(db, part)
+    if not urls:
+        raise HTTPException(status_code=404, detail="Empty sitemap chunk")
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/sitemap/gallery/all/part/{part}.xml")
+@app.get("/sitemap/gallery/all/part/{part}.xml")
+async def sitemap_gallery_public_part(part: int, db: AsyncSession = Depends(get_db)):
+    """Diagnostic full public chunk (max 50) of /task?id={task_id} URLs, without SEO gate."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_all_part
 
     if part < 0:
@@ -13710,7 +13756,7 @@ async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(ge
     urls = await gallery_sitemap_urls_for_all_part(db, part)
     if not urls:
         raise HTTPException(status_code=404, detail="Empty sitemap chunk")
-    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.45")
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 

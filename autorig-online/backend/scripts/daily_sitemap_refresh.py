@@ -49,10 +49,10 @@ async def run(output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
 
     async with AsyncSessionLocal() as db:
-        public_parts = await gallery_sitemap_all_index_part_count(db)
         indexing_parts = await gallery_sitemap_index_part_count(db)
+        public_parts = await gallery_sitemap_all_index_part_count(db)
         child_locs = [(f"{base}/sitemap/pages.xml", None)]
-        for p in range(public_parts):
+        for p in range(indexing_parts):
             child_locs.append((f"{base}/sitemap/gallery/part/{p}.xml", None))
         index_xml = build_sitemap_index_xml(base, child_locs)
 
@@ -93,10 +93,17 @@ async def run(output_dir: str) -> None:
         f.write(index_xml)
 
     async with AsyncSessionLocal() as db:
-        for p in range(public_parts):
-            urls = await gallery_sitemap_urls_for_all_part(db, p)
+        for p in range(indexing_parts):
+            urls = await gallery_sitemap_urls_for_indexing_part(db, p)
             part_xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
             part_path = os.path.join(output_dir, f"gallery-part-{p}.xml")
+            with open(part_path, "w", encoding="utf-8") as f:
+                f.write(part_xml)
+
+        for p in range(public_parts):
+            urls = await gallery_sitemap_urls_for_all_part(db, p)
+            part_xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.45")
+            part_path = os.path.join(output_dir, f"gallery-all-part-{p}.xml")
             with open(part_path, "w", encoding="utf-8") as f:
                 f.write(part_xml)
 
@@ -113,8 +120,8 @@ async def run(output_dir: str) -> None:
         f.write("\n")
 
     print(
-        f"[daily_sitemap_refresh] wrote {index_path}, {public_parts} public gallery parts, "
-        f"{indexing_parts} indexed gallery parts, "
+        f"[daily_sitemap_refresh] wrote {index_path}, {indexing_parts} root gallery parts, "
+        f"{public_parts} diagnostic all-public gallery parts, "
         f"{report_path} (indexing URLs: {len(entries)}, failed gate: {failed_total})"
     )
 
