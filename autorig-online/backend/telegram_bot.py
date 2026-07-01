@@ -240,9 +240,17 @@ async def upsert_chat(chat_id: int, chat_type, title: str | None) -> None:
 
 
 async def get_active_chat_ids() -> list[int]:
+    chat_ids: list[int] = []
+    if TELEGRAM_NOTIFICATION_CHAT_ID is not None and int(TELEGRAM_NOTIFICATION_CHAT_ID) != 0:
+        chat_ids.append(int(TELEGRAM_NOTIFICATION_CHAT_ID))
+
     async with AsyncSessionLocal() as db:
         rs = await db.execute(select(TelegramChat.chat_id).where(TelegramChat.is_active.is_(True)))
-        return [int(row[0]) for row in rs.all()]
+        for row in rs.all():
+            chat_id = int(row[0])
+            if chat_id not in chat_ids:
+                chat_ids.append(chat_id)
+    return chat_ids
 
 
 # =============================================================================
