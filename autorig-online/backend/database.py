@@ -328,7 +328,10 @@ class Task(Base):
     def progress(self) -> int:
         if self.total_count == 0:
             return 0
-        return int((self.ready_count / self.total_count) * 100)
+        value = int((self.ready_count / self.total_count) * 100)
+        if self.status == "processing":
+            return min(value, 99)
+        return value
 
 
 class AdminOverlayCounters(Base):
