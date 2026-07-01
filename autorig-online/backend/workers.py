@@ -242,6 +242,7 @@ def get_worker_effective_active(worker: Any, backend_counts: Optional[Dict[str, 
 
 
 WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
+WORKER_DISPATCH_TIMEOUT_SECONDS = float(os.getenv("WORKER_DISPATCH_TIMEOUT_SECONDS", "120"))
 _worker_quarantine_until: Dict[str, datetime] = {}
 _worker_quarantine_reason: Dict[str, str] = {}
 
@@ -445,7 +446,7 @@ async def send_task_to_worker(
             response = await client.post(
                 worker_url,
                 json=payload,
-                timeout=30.0
+                timeout=WORKER_DISPATCH_TIMEOUT_SECONDS,
             )
             
             if response.status_code == 200:
