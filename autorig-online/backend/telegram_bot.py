@@ -1588,6 +1588,18 @@ async def reserve_and_broadcast_task_done(task_id: str) -> None:
         )
 
 
+async def mark_task_done_notification_sent(task_id: str) -> None:
+    """Backstop task-level idempotency after at least one Telegram done send succeeds."""
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(Task)
+            .where(Task.id == task_id)
+            .where(Task.telegram_done_notified_at.is_(None))
+            .values(telegram_done_notified_at=datetime.utcnow())
+        )
+        await db.commit()
+
+
 async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:
     print(f"[Telegram] broadcast_task_done called for task {task_id}")
     token = _get_token()
@@ -1680,6 +1692,8 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
         results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
         sent_count = sum(1 for r in results if r is not None)
         print(f"[Telegram] Done notification sent to {sent_count}/{len(chat_ids)} chat(s)")
+        if sent_count > 0:
+            await mark_task_done_notification_sent(task_id)
         return
 
     sem = asyncio.Semaphore(2)
@@ -1728,7 +1742,11 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
                 ), retry_network=False)
             return result
 
-    await asyncio.gather(*[_one(cid) for cid in chat_ids])
+    results = await asyncio.gather(*[_one(cid) for cid in chat_ids])
+    sent_count = sum(1 for r in results if r is not None)
+    print(f"[Telegram] Done video notification sent to {sent_count}/{len(chat_ids)} chat(s)")
+    if sent_count > 0:
+        await mark_task_done_notification_sent(task_id)
 
 
 async def broadcast_server_startup() -> None:
