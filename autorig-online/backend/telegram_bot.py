@@ -46,6 +46,17 @@ def _task_url(task_id: str) -> str:
     return f"{base}/task?id={task_id}&t={ts}"
 
 
+def _sanitize_error_for_telegram(message: str | None) -> str:
+    """Keep operator error notifications useful without leaking raw paths or tokens."""
+    text = (message or "Task failed").replace("\r", " ").replace("\n", " ").strip()
+    text = re.sub(r"https?://\S+", "<url>", text)
+    text = re.sub(r"[A-Za-z]:\\[^\s]+", "<path>", text)
+    text = re.sub(r"(?<!\w)/(?:[^\s]+/)+[^\s]+", "<path>", text)
+    text = re.sub(r"\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b", "<token>", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return (text or "Task failed")[:500]
+
+
 def _format_content_rating_line(rating: str | None) -> str:
     """HTML line for server-side NSFW poster rating (Task.content_rating)."""
     r = (rating or "unknown").strip().lower()
@@ -1588,6 +1599,44 @@ async def reserve_and_broadcast_task_done(task_id: str) -> None:
         )
 
 
+async def reserve_and_broadcast_task_error(task_id: str) -> None:
+    """
+    Atomically reserve telegram_done_notified_at and enqueue a terminal error
+    notification. This shares the task-level terminal-notified flag with done
+    notifications so each terminal state emits at most one operator alert.
+    """
+    async with AsyncSessionLocal() as db:
+        now = datetime.utcnow()
+        stmt = (
+            update(Task)
+            .where(Task.id == task_id)
+            .where(Task.telegram_done_notified_at.is_(None))
+            .values(telegram_done_notified_at=now)
+        )
+        res = await db.execute(stmt)
+        await db.commit()
+
+        if res.rowcount != 1:
+            return
+
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task:
+            return
+
+        duration = None
+        if task.created_at:
+            duration = int((datetime.utcnow() - task.created_at).total_seconds())
+        progress_url = None
+        if task.guid and task.worker_api:
+            worker_base = get_worker_base_url(task.worker_api)
+            progress_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+
+        print(f"[Telegram] Scheduling error notification for task {task_id}")
+        asyncio.create_task(
+            broadcast_task_error(task_id, duration_seconds=duration, progress_page=progress_url)
+        )
+
+
 async def mark_task_done_notification_sent(task_id: str) -> None:
     """Backstop task-level idempotency after at least one Telegram done send succeeds."""
     async with AsyncSessionLocal() as db:
@@ -1598,6 +1647,76 @@ async def mark_task_done_notification_sent(task_id: str) -> None:
             .values(telegram_done_notified_at=datetime.utcnow())
         )
         await db.commit()
+
+
+async def broadcast_task_error(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:
+    print(f"[Telegram] broadcast_task_error called for task {task_id}")
+    token = _get_token()
+    if not token:
+        print("[Telegram] No token, skipping error notification")
+        return
+
+    from telegram import Bot
+    from telegram.constants import ParseMode
+
+    bot = Bot(token=token)
+    url = _task_url(task_id)
+    metrics_line = _format_task_metrics(await _task_telegram_metrics(task_id))
+    resolved_progress = progress_page
+    error_message = "Task failed"
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Task).where(Task.id == task_id))
+            task = result.scalar_one_or_none()
+            if task:
+                error_message = _sanitize_error_for_telegram(getattr(task, "error_message", None))
+                if not resolved_progress and task.guid and task.worker_api:
+                    parsed = urlparse(task.worker_api)
+                    worker_base = f"{parsed.scheme}://{parsed.netloc}"
+                    resolved_progress = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.html"
+    except Exception as e:
+        print(f"[Telegram] Failed to get task details for error notification: {e}")
+
+    dur = _format_duration(duration_seconds)
+    parts = [f'<a href="{html.escape(url)}">View Result</a>']
+    if dur:
+        parts.append(f"duration {html.escape(dur)}")
+    parts.append(html.escape(metrics_line))
+
+    text = "ERROR <b>Task failed</b>\n" + " | ".join(parts)
+    if resolved_progress:
+        text += f'\nWorker logs: <a href="{html.escape(resolved_progress)}">open</a>'
+    text += f"\n<code>{html.escape(error_message)}</code>"
+
+    chat_ids = await get_active_chat_ids()
+    if not chat_ids:
+        print("[Telegram] No active chats, skipping error notification")
+        return
+
+    async def _one_text(chat_id: int):
+        old_message_id = await pop_notification_message_id(chat_id, "task_new", task_id)
+        if old_message_id:
+            await _send_with_retry(
+                lambda cid=chat_id, mid=old_message_id: bot.delete_message(chat_id=cid, message_id=mid),
+                retry_network=False,
+            )
+        reserved = await reserve_notification(chat_id, "task_error", task_id)
+        if not reserved:
+            print(f"[Telegram] Skip duplicate error notification for chat={chat_id}, task={task_id}")
+            return None
+        return await _send_with_retry(lambda cid=chat_id: bot.send_message(
+            chat_id=cid,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=False,
+        ), retry_network=False)
+
+    results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
+    sent_count = sum(1 for r in results if r is not None)
+    print(f"[Telegram] Error notification sent to {sent_count}/{len(chat_ids)} chat(s)")
+    if sent_count > 0:
+        await mark_task_done_notification_sent(task_id)
 
 
 async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:

@@ -356,6 +356,7 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
                         task.error_message = result.error
                         task.updated_at = datetime.utcnow()
                         await db.commit()
+                        _schedule_task_error_notification(task.id)
                         return
 
                     task.worker_task_id = result.task_id
@@ -384,6 +385,7 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
         task.error_message = task.fbx_glb_error
         task.updated_at = datetime.utcnow()
         await db.commit()
+        _schedule_task_error_notification(task.id)
 
 
 # =============================================================================
@@ -486,6 +488,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             task.updated_at = datetime.utcnow()
             await db.commit()
             await db.refresh(task)
+            _schedule_task_error_notification(task.id)
             return task, task.error_message
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
@@ -525,6 +528,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         task.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(task)
+        _schedule_task_error_notification(task.id)
         return task, error
 
     task.worker_task_id = result.task_id
@@ -743,6 +747,17 @@ async def _worker_conversion_completed(task: Task) -> bool:
     return "Conversion completed" in text
 
 
+def _schedule_task_error_notification(task_id: str) -> None:
+    """Fire-and-forget operator alert when a task reaches terminal error."""
+    try:
+        from telegram_bot import reserve_and_broadcast_task_error
+
+        print(f"[Tasks] Scheduling Telegram error notification for task {task_id}")
+        asyncio.create_task(reserve_and_broadcast_task_error(task_id))
+    except Exception as e:
+        print(f"[Telegram] Failed to schedule error notification for task {task_id}: {e}")
+
+
 async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> bool:
     failure = await _fetch_worker_failure_message(task)
     if not failure:
@@ -752,6 +767,7 @@ async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> 
     task.updated_at = datetime.utcnow()
     await db.commit()
     print(f"[Tasks] Worker reported terminal failure for {task.id}: {failure}")
+    _schedule_task_error_notification(task.id)
     return True
 
 
@@ -990,6 +1006,8 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
     task.fbx_glb_model_name = None
     task.fbx_glb_ready = False
     task.fbx_glb_error = None
+    task.telegram_new_notified_at = None
+    task.telegram_done_notified_at = None
 
 
 async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
@@ -1008,6 +1026,7 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
         task.updated_at = datetime.utcnow()
         await db.commit()
         print(f"[Stale Task] Task {task.id} marked as error after {current_restarts} restarts")
+        _schedule_task_error_notification(task.id)
         return False
     
     # Reset task for re-processing
@@ -1071,6 +1090,7 @@ async def find_and_reset_stale_tasks(
     active_tasks = result.scalars().all()
 
     action_count = 0
+    terminal_error_task_ids: list[str] = []
     for task in active_tasks:
         # 1. Global hard timeout (default aligned with ~2h worker job cap via env)
         if task.created_at and task.created_at < global_cutoff:
@@ -1079,6 +1099,7 @@ async def find_and_reset_stale_tasks(
             task.updated_at = now
             print(f"[Timeout] Task {task.id} marked as error (global timeout)")
             action_count += 1
+            terminal_error_task_ids.append(task.id)
             continue
 
         if task.status != "processing":
@@ -1144,6 +1165,8 @@ async def find_and_reset_stale_tasks(
 
     if action_count > 0:
         await db.commit()
+        for task_id in terminal_error_task_ids:
+            _schedule_task_error_notification(task_id)
 
     return action_count
 
