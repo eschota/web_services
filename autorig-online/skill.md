@@ -54,6 +54,7 @@ AutoRig.online is a cloud service for automatic 3D model rigging and animation p
 - Worker capacity uses both worker-reported active tasks and backend-assigned tasks; do not dispatch a new task to a worker just because its live `/server-status` is free while the backend still has an unsynchronized processing row.
 - If a dispatched processing task lost `worker_api` but still has a worker `progress_page`, backend progress sync must recover `worker_api` from that `progress_page` before checking concrete outputs, worker terminal failures, stale resets, or video availability.
 - Rig worker dispatch sends the selected viewer backdrop as top-level `viewer_environment`, resolved from `task.viewer_settings.viewer_theme_selection.theme_id` to an absolute `/static/env/backdrops/viewer/...jpg?v=...` URL. Do not send this as root-level `background_url`; that field belongs to the worker's inpaint contract.
+- Task media proxy URLs (`/api/video/{task_id}`, `/api/thumb/{task_id}`, `/thumb/{task_id}`) are mutable across restarts. Keep response cache revalidated and add a frontend media version (`guid`, `updated_at`, or task card `version`) so browsers do not reuse stale preview videos after regeneration.
 
 ## Supported Workflows
 

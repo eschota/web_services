@@ -21,8 +21,24 @@ const TaskCard = {
         const currentSort = options.currentSort || 'date';
 
         const taskUrl = `/task?id=${item.task_id}`;
-        const thumbUrl = item.thumbnail_url || `/api/thumb/${item.task_id}`;
-        const videoUrl = item.video_url || `/api/video/${item.task_id}`;
+        const mediaVersion = encodeURIComponent(
+            String(item.guid || item.updated_at || item.video_url || item.version || 'ready')
+        );
+        const versionTaskMediaUrl = (url) => {
+            const raw = String(url || '');
+            if (!mediaVersion) return raw;
+            const isTaskMedia = (
+                raw.startsWith('/api/video/')
+                || raw.startsWith('/api/thumb/')
+                || raw.startsWith('/thumb/')
+                || raw.includes('/api/video/')
+                || raw.includes('/api/thumb/')
+            );
+            if (!isTaskMedia) return raw;
+            return `${raw}${raw.includes('?') ? '&' : '?'}v=${mediaVersion}`;
+        };
+        const thumbUrl = versionTaskMediaUrl(item.thumbnail_url || `/api/thumb/${item.task_id}`);
+        const videoUrl = versionTaskMediaUrl(item.video_url || `/api/video/${item.task_id}`);
         const salesCount = (typeof item.sales_count === 'number') ? item.sales_count : 0;
 
         const authorDisplay = this.formatAuthorName(item.author_nickname, item.author_email);

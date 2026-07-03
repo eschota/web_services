@@ -8166,7 +8166,7 @@ async def proxy_video(
         _vname = f"{task_id}_video.mp4"
     response_headers: Dict[str, str] = {
         "Content-Disposition": f'inline; filename="{_vname}"',
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=0, must-revalidate",
         # Prevent GZip middleware from wrapping video stream and breaking ranges.
         "Content-Encoding": "identity",
         "Accept-Ranges": "bytes",
@@ -11105,7 +11105,7 @@ async def api_proxy_thumb(
                 content=response.content,
                 media_type="image/jpeg",
                 headers={
-                    "Cache-Control": "public, max-age=86400",
+                    "Cache-Control": "public, max-age=0, must-revalidate",
                     "Access-Control-Allow-Origin": "*"
                 }
             )

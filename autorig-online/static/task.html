@@ -5624,8 +5624,11 @@
                     container.classList.remove('hidden');
                     window.__taskPageBoot?.revealElement(container, 1);
                     pending.classList.add('hidden');
-                    const proxyUrl = `/api/video/${this.taskId}`;
-                    video.poster = `/api/thumb/${this.taskId}`;
+                    const mediaVersion = encodeURIComponent(
+                        String(task.guid || task.updated_at || task.video_url || task.ready_count || 'ready')
+                    );
+                    const proxyUrl = `/api/video/${this.taskId}?v=${mediaVersion}`;
+                    video.poster = `/api/thumb/${this.taskId}?v=${mediaVersion}`;
                     video.preload = 'metadata';
 
                     if (video.dataset.previewSrc !== proxyUrl) {
