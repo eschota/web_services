@@ -15775,9 +15775,12 @@
                 }
                 if (!THREE?.MeshStandardMaterial) return sourceMat;
 
+                const sourceHasTexture = materialHasViewerTextureMap(sourceMat) || sourceMat.diffuseMap || sourceMat.albedoMap;
                 const params = {
                     name: sourceMat.name || '',
-                    color: sourceMat.color ? sourceMat.color.clone() : TEXTURELESS_PREVIEW_MATERIAL_COLOR.clone(),
+                    color: sourceMat.color ? sourceMat.color.clone() : (
+                        sourceHasTexture ? new THREE.Color(0.78, 0.78, 0.78) : TEXTURELESS_PREVIEW_MATERIAL_COLOR.clone()
+                    ),
                     map: sourceMat.map || sourceMat.diffuseMap || null,
                     normalMap: sourceMat.normalMap || null,
                     aoMap: sourceMat.aoMap || null,
@@ -15792,9 +15795,13 @@
                     depthTest: sourceMat.depthTest,
                     alphaTest: Number.isFinite(sourceMat.alphaTest) ? sourceMat.alphaTest : 0,
                     vertexColors: !!sourceMat.vertexColors,
-                    metalness: Number.isFinite(sourceMat.metalness) ? sourceMat.metalness : TEXTURELESS_PREVIEW_MATERIAL_METALNESS,
-                    roughness: Number.isFinite(sourceMat.roughness) ? sourceMat.roughness : TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS,
-                    envMapIntensity: TEXTURELESS_PREVIEW_MATERIAL_ENV_INTENSITY,
+                    metalness: Number.isFinite(sourceMat.metalness) ? sourceMat.metalness : (
+                        sourceHasTexture ? 0.08 : TEXTURELESS_PREVIEW_MATERIAL_METALNESS
+                    ),
+                    roughness: Number.isFinite(sourceMat.roughness) ? sourceMat.roughness : (
+                        sourceHasTexture ? 0.62 : TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS
+                    ),
+                    envMapIntensity: sourceHasTexture ? 1 : TEXTURELESS_PREVIEW_MATERIAL_ENV_INTENSITY,
                 };
                 if (sourceMat.specular?.isColor) {
                     const specularStrength = Math.max(sourceMat.specular.r, sourceMat.specular.g, sourceMat.specular.b);
