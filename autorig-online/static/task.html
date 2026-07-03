@@ -15764,6 +15764,11 @@
              * Apply improved materials for models without textures
              * Makes them darker and more reflective for better visibility
              */
+            const TEXTURELESS_PREVIEW_MATERIAL_COLOR = new THREE.Color(0x9e9a91);
+            const TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS = 0.94;
+            const TEXTURELESS_PREVIEW_MATERIAL_METALNESS = 0.02;
+            const TEXTURELESS_PREVIEW_MATERIAL_ENV_INTENSITY = 0.45;
+
             function createEnvironmentResponsiveMaterial(sourceMat) {
                 if (!sourceMat || sourceMat.isMeshStandardMaterial || sourceMat.isMeshPhysicalMaterial) {
                     return sourceMat;
@@ -15772,7 +15777,7 @@
 
                 const params = {
                     name: sourceMat.name || '',
-                    color: sourceMat.color ? sourceMat.color.clone() : new THREE.Color(0.78, 0.78, 0.78),
+                    color: sourceMat.color ? sourceMat.color.clone() : TEXTURELESS_PREVIEW_MATERIAL_COLOR.clone(),
                     map: sourceMat.map || sourceMat.diffuseMap || null,
                     normalMap: sourceMat.normalMap || null,
                     aoMap: sourceMat.aoMap || null,
@@ -15787,9 +15792,9 @@
                     depthTest: sourceMat.depthTest,
                     alphaTest: Number.isFinite(sourceMat.alphaTest) ? sourceMat.alphaTest : 0,
                     vertexColors: !!sourceMat.vertexColors,
-                    metalness: Number.isFinite(sourceMat.metalness) ? sourceMat.metalness : 0.08,
-                    roughness: Number.isFinite(sourceMat.roughness) ? sourceMat.roughness : 0.62,
-                    envMapIntensity: 1,
+                    metalness: Number.isFinite(sourceMat.metalness) ? sourceMat.metalness : TEXTURELESS_PREVIEW_MATERIAL_METALNESS,
+                    roughness: Number.isFinite(sourceMat.roughness) ? sourceMat.roughness : TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS,
+                    envMapIntensity: TEXTURELESS_PREVIEW_MATERIAL_ENV_INTENSITY,
                 };
                 if (sourceMat.specular?.isColor) {
                     const specularStrength = Math.max(sourceMat.specular.r, sourceMat.specular.g, sourceMat.specular.b);
@@ -15852,23 +15857,17 @@
                             const hasTexture = materialHasViewerTextureMap(mat) || mat.diffuseMap || mat.albedoMap;
                             
                             if (!hasTexture) {
-                                // Model without texture - apply improved material
-                                // Color: medium gray (#808080)
-                                // Metalness: ~0.22 (56/255)
-                                // Roughness: 0.88
-                                // Enhanced reflections
-                                
                                 if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
                                     // Check if color is default white or unset
                                     const isDefaultColor = !mat.color ||
                                         (mat.color.r > 0.9 && mat.color.g > 0.9 && mat.color.b > 0.9);
 
                                     if (isDefaultColor) {
-                                        mat.color.setRGB(128/255, 128/255, 128/255);  // #808080
+                                        mat.color.copy(TEXTURELESS_PREVIEW_MATERIAL_COLOR);
                                     }
-                                    mat.metalness = 0.22;
-                                    mat.roughness = 0.88;
-                                    mat.envMapIntensity = 1.5;  // Enhanced reflections
+                                    mat.metalness = Math.min(Number.isFinite(mat.metalness) ? mat.metalness : TEXTURELESS_PREVIEW_MATERIAL_METALNESS, 0.04);
+                                    mat.roughness = Math.max(Number.isFinite(mat.roughness) ? mat.roughness : TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS, TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS);
+                                    mat.envMapIntensity = TEXTURELESS_PREVIEW_MATERIAL_ENV_INTENSITY;
                                     mat.needsUpdate = true;
 
                                     window.taskDbg('[Materials] Applied improved material (no texture):', child.name);
