@@ -15,6 +15,8 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession, AsyncSessionLocal
+from config import APP_URL
+from viewer_environment import build_viewer_environment_from_settings
 from workers import (
     select_best_worker,
     send_task_to_worker,
@@ -99,6 +101,13 @@ def _animal_detection_confident_enough(detection: Any) -> bool:
     except Exception:
         threshold = RIG_V2_ANIMAL_DECISION_THRESHOLD
     return weight >= threshold
+
+
+def _viewer_environment_for_task(task: Task) -> Optional[Dict[str, Any]]:
+    return build_viewer_environment_from_settings(
+        getattr(task, "viewer_settings", None),
+        app_url=APP_URL,
+    )
 
 
 def _animal_type_from_detection_meta(detection: Any) -> Optional[str]:
@@ -350,6 +359,7 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
                         task.fbx_glb_output_url,
                         task.input_type or "t_pose",
                         pipeline_kind="rig",
+                        viewer_environment=_viewer_environment_for_task(task),
                     )
                     if not result.success:
                         task.status = "error"
@@ -500,6 +510,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         animal_type=animal_type,
         mode=mode,
         animal_semantic_markers=animal_semantic_markers,
+        viewer_environment=_viewer_environment_for_task(task) if pk == "rig" else None,
     )
     if not result.success:
         error = result.error or "Worker dispatch failed"

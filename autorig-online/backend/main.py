@@ -74,6 +74,7 @@ from config import (
     RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
 )
+from viewer_environment import build_viewer_environment_from_settings
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
@@ -6049,6 +6050,11 @@ async def api_restart_task(
         pipeline_kind=pk_restart,
         animal_type=restart_animal_type,
         mode=restart_worker_mode,
+        viewer_environment=(
+            build_viewer_environment_from_settings(task.viewer_settings, app_url=APP_URL)
+            if pk_restart == "rig"
+            else None
+        ),
     )
     if not result.success:
         task.status = "error"
@@ -8035,6 +8041,11 @@ async def api_admin_restart_incomplete_tasks(
                         task.input_url,
                         task.input_type or "t_pose",
                         pipeline_kind=pk_ad,
+                        viewer_environment=(
+                            build_viewer_environment_from_settings(task.viewer_settings, app_url=APP_URL)
+                            if pk_ad == "rig"
+                            else None
+                        ),
                     )
                     if not send_result.success:
                         task.status = "error"

@@ -24,6 +24,7 @@ from config import (
     PROGRESS_CONCURRENCY,
     PROGRESS_CHECK_TIMEOUT
 )
+from worker_payloads import build_worker_task_payload
 
 
 def normalize_task_type(value: Optional[str]) -> str:
@@ -399,6 +400,7 @@ async def send_task_to_worker(
     animal_type: Optional[str] = None,
     mode: Optional[str] = None,
     animal_semantic_markers: Optional[Dict[str, List[float]]] = None,
+    viewer_environment: Optional[Dict[str, Any]] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -419,28 +421,16 @@ async def send_task_to_worker(
 
     async with httpx.AsyncClient() as client:
         try:
-            if pk == "convert":
-                payload = {
-                    "input_url": input_url,
-                    "type": task_type,
-                }
-            else:
-                payload = {
-                    "input_url": input_url,
-                    "type": task_type,
-                    "mode": mode or "only_rig",
-                }
-                if animal_type:
-                    payload["animal_type"] = animal_type
-                if animal_semantic_markers:
-                    payload["animal_semantic_markers"] = animal_semantic_markers
-                if transform_params:
-                    if transform_params.get("local_position"):
-                        payload["local_position"] = transform_params["local_position"]
-                    if transform_params.get("local_rotation"):
-                        payload["local_rotation"] = transform_params["local_rotation"]
-                    if transform_params.get("local_scale"):
-                        payload["local_scale"] = transform_params["local_scale"]
+            payload = build_worker_task_payload(
+                input_url,
+                task_type,
+                transform_params,
+                pipeline_kind=pk,
+                animal_type=animal_type,
+                mode=mode,
+                animal_semantic_markers=animal_semantic_markers,
+                viewer_environment=viewer_environment,
+            )
             
             request_started_at = time.time()
             response = await client.post(
