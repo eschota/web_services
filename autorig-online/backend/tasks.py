@@ -18,6 +18,7 @@ from database import Task, User, AnonSession, AsyncSessionLocal
 from config import APP_URL
 from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
+from task_timeout_contract import task_hard_timeout_reference
 from workers import (
     select_best_worker,
     send_task_to_worker,
@@ -1103,10 +1104,11 @@ async def find_and_reset_stale_tasks(
         # 1. Hard timeout from the current dispatch/progress epoch. Using the
         # original creation time here made every redispatch of an old task
         # immediately stale again, producing misleading multi-worker failures.
-        hard_timeout_reference = (
-            get_task_progress_reference_time(task)
-            if task.status == "processing"
-            else task.created_at
+        hard_timeout_reference = task_hard_timeout_reference(
+            status=task.status,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            last_progress_at=task.last_progress_at,
         )
         if hard_timeout_reference and hard_timeout_reference < global_cutoff:
             task.status = "error"
