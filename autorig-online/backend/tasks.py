@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import Task, User, AnonSession, AsyncSessionLocal
 from config import APP_URL
 from viewer_environment import build_viewer_environment_from_settings
+from worker_progress_contract import latest_terminal_failure_reason
 from workers import (
     select_best_worker,
     send_task_to_worker,
@@ -455,12 +456,6 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     Workers accept GLB, FBX, OBJ directly via input_url.
     Returns: (task, error_message)
     """
-    task.worker_api = worker_url
-    task.status = "processing"
-    task.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(task)
-
     pk = getattr(task, "pipeline_kind", None) or "rig"
     if pk not in ("rig", "convert"):
         pk = "rig"
@@ -491,6 +486,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             mode = None
         if not animal_type:
             task.status = "error"
+            task.worker_api = None
             task.error_message = (
                 "Animal rig task is missing animal_type metadata. "
                 "Please retry the upload so AI animal detection can finish."
@@ -500,6 +496,15 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             await db.refresh(task)
             _schedule_task_error_notification(task.id)
             return task, task.error_message
+
+    # Reserve the worker only after all deterministic task metadata is valid.
+    # Otherwise malformed legacy animal tasks look like worker-side failures.
+    task.worker_api = worker_url
+    task.status = "processing"
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(task)
+
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,
@@ -725,18 +730,10 @@ async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
             resp = await client.get(log_url)
         if resp.status_code != 200:
             return None
-        text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+        text = resp.text
     except Exception:
         return None
-
-    failure_re = re.compile(r"\b(FAILURE|FATAL|ERROR)\s*:\s*(.+)", re.IGNORECASE)
-    for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
-        match = failure_re.search(line)
-        if not match:
-            continue
-        message = match.group(2).strip() or line
-        return message[:500]
-    return None
+    return latest_terminal_failure_reason(text)
 
 
 async def _worker_conversion_completed(task: Task) -> bool:
@@ -1033,7 +1030,7 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     if current_restarts >= MAX_TASK_RESTARTS:
         # Mark as error - too many restarts
         task.status = "error"
-        task.error_message = f"Task failed after {current_restarts} automatic restart attempts. Worker may be unavailable."
+        task.error_message = f"Task made no progress after {current_restarts} automatic restart attempts."
         task.updated_at = datetime.utcnow()
         await db.commit()
         print(f"[Stale Task] Task {task.id} marked as error after {current_restarts} restarts")
@@ -1103,10 +1100,20 @@ async def find_and_reset_stale_tasks(
     action_count = 0
     terminal_error_task_ids: list[str] = []
     for task in active_tasks:
-        # 1. Global hard timeout (default aligned with ~2h worker job cap via env)
-        if task.created_at and task.created_at < global_cutoff:
+        # 1. Hard timeout from the current dispatch/progress epoch. Using the
+        # original creation time here made every redispatch of an old task
+        # immediately stale again, producing misleading multi-worker failures.
+        hard_timeout_reference = (
+            get_task_progress_reference_time(task)
+            if task.status == "processing"
+            else task.created_at
+        )
+        if hard_timeout_reference and hard_timeout_reference < global_cutoff:
             task.status = "error"
-            task.error_message = f"Task timed out after {GLOBAL_TASK_TIMEOUT_MINUTES} minutes."
+            task.error_message = (
+                f"Task had no dispatch/progress activity for "
+                f"{GLOBAL_TASK_TIMEOUT_MINUTES} minutes."
+            )
             task.updated_at = now
             print(f"[Timeout] Task {task.id} marked as error (global timeout)")
             action_count += 1
