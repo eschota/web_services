@@ -740,7 +740,9 @@ const App = {
             };
             const preflightRender = capture(views[0]);
             const first = await analyze(views[0], preflightRender);
-            const rest = await Promise.all(views.slice(1).map(analyze));
+            // Array.map passes (value, index, array). Keep the index from being
+            // mistaken for analyze()'s optional capturedImage argument.
+            const rest = await Promise.all(views.slice(1).map((view) => analyze(view)));
             const results = [first].concat(rest);
             const scores = {};
             const votes = {};
