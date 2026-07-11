@@ -183,7 +183,9 @@ async def _recover_worker_task_after_post_timeout(
 async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) -> List[Tuple[str, int]]:
     """
     Return enabled worker URLs ordered by weight desc (priority), id asc.
-    Fallback to config.WORKERS (weight=0) when DB has no rows or db is not provided.
+    Fallback to config.WORKERS (weight=0) only when the DB has no configured
+    worker rows or no DB session was provided. An existing table with every
+    worker disabled is an intentional maintenance drain and must stay empty.
     """
     if not db:
         return [(u, 0) for u in WORKERS]
@@ -196,10 +198,16 @@ async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) 
         )
         rows = res.all()
         workers = [(url, int(weight or 0)) for (url, weight) in rows if url]
-    except Exception:
-        workers = []
+        if workers:
+            return workers
 
-    return workers or [(u, 0) for u in WORKERS]
+        configured_count_res = await db.execute(select(func.count(WorkerEndpoint.id)))
+        if int(configured_count_res.scalar() or 0) > 0:
+            return []
+    except Exception:
+        pass
+
+    return [(u, 0) for u in WORKERS]
 
 
 async def get_configured_workers(db: Optional[AsyncSession] = None) -> List[str]:
