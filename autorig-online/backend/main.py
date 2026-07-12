@@ -836,6 +836,8 @@ async def lifespan(app: FastAPI):
     
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
+    from youtube_upload import youtube_retry_worker
+    app.state.youtube_retry_worker = asyncio.create_task(youtube_retry_worker())
     
     # Send Telegram startup notification (fire-and-forget)
     try:
@@ -862,11 +864,19 @@ async def lifespan(app: FastAPI):
     # Shutdown
     background_task_running = False
     background_worker = getattr(app.state, "background_worker", None)
+    youtube_worker = getattr(app.state, "youtube_retry_worker", None)
     if background_worker:
         background_worker.cancel()
+    if youtube_worker:
+        youtube_worker.cancel()
     try:
         if background_worker:
             await background_worker
+    except asyncio.CancelledError:
+        pass
+    try:
+        if youtube_worker:
+            await youtube_worker
     except asyncio.CancelledError:
         pass
 

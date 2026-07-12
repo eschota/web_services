@@ -302,7 +302,7 @@ class Task(Base):
 
     # YouTube auto-upload (server uses OAuth refresh token; see youtube_upload.py)
     youtube_video_id = Column(String(64), nullable=True)
-    youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
+    youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed | deferred
     youtube_upload_error = Column(Text, nullable=True)
     youtube_uploaded_at = Column(DateTime, nullable=True)
     # SHA-256 hex of uploaded video bytes (dedupe + audit)
