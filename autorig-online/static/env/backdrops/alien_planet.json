@@ -39,6 +39,12 @@
     "sun_multiplier": 3.5
   },
   "src": "/static/env/backdrops/alien_planet.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/alien_planet.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/alien_planet.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/alien_planet.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/alien_planet.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 19,
     "intensity": 2,

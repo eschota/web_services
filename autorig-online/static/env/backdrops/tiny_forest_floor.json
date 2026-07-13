@@ -39,6 +39,12 @@
     "sun_multiplier": 1.7
   },
   "src": "/static/env/backdrops/tiny_forest_floor.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/tiny_forest_floor.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/tiny_forest_floor.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/tiny_forest_floor.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/tiny_forest_floor.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 38,
     "intensity": 1.9,

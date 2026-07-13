@@ -635,6 +635,12 @@ export class ViewerControls {
         this.groundPlane = options.groundPlane; // Ground plane mesh
         this.model = options.model;
         this.t = options.t || ((key) => key);
+        this.pointerEventFilter = typeof options.pointerEventFilter === 'function'
+            ? options.pointerEventFilter
+            : null;
+        this.pointerNdcResolver = typeof options.pointerNdcResolver === 'function'
+            ? options.pointerNdcResolver
+            : null;
         
         this.bloomPass = options.bloomPass || null;
         
@@ -2082,12 +2088,19 @@ export class ViewerControls {
         const domElement = this.renderer.domElement;
 
         const getMousePos = (e) => {
+            const resolved = this.pointerNdcResolver?.(e);
+            if (resolved && Number.isFinite(resolved.x) && Number.isFinite(resolved.y)) {
+                mouse.x = resolved.x;
+                mouse.y = resolved.y;
+                return;
+            }
             const rect = domElement.getBoundingClientRect();
             mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         };
 
         const onPointerDown = (e) => {
+            if (this.pointerEventFilter && !this.pointerEventFilter(e)) return;
             if (this.rigType !== RigType.CHAR && this.rigType !== RigType.ANIMATIONS) return;
             if (this.cameraMode === CameraMode.FLY) return;
 
@@ -2119,6 +2132,7 @@ export class ViewerControls {
 
         const onPointerMove = (e) => {
             if (!dragging) return;
+            if (this.pointerEventFilter && !this.pointerEventFilter(e)) return;
 
             getMousePos(e);
             raycaster.setFromCamera(mouse, this.camera);
@@ -3100,6 +3114,12 @@ export class TransformManager {
         this.renderer = options.renderer;
         this.controls = options.controls;      // OrbitControls
         this.model = options.model;
+        this.pointerEventFilter = typeof options.pointerEventFilter === 'function'
+            ? options.pointerEventFilter
+            : null;
+        this.pointerNdcResolver = typeof options.pointerNdcResolver === 'function'
+            ? options.pointerNdcResolver
+            : null;
         
         this.mode = TransformMode.SELECT;
         this.snapEnabled = true;
@@ -3167,6 +3187,10 @@ export class TransformManager {
      * Get normalized mouse coordinates
      */
     _getMouse(event) {
+        const resolved = this.pointerNdcResolver?.(event);
+        if (resolved && Number.isFinite(resolved.x) && Number.isFinite(resolved.y)) {
+            return resolved;
+        }
         const rect = this.renderer.domElement.getBoundingClientRect();
         return {
             x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -3179,6 +3203,7 @@ export class TransformManager {
      */
     _onPointerDown(event) {
         if (event.button !== 0) return; // Left click only
+        if (this.pointerEventFilter && !this.pointerEventFilter(event)) return;
 
         const mouse = this._getMouse(event);
 
@@ -3221,6 +3246,7 @@ export class TransformManager {
      * Pointer move handler
      */
     _onPointerMove(event) {
+        if (this.pointerEventFilter && !this.pointerEventFilter(event)) return;
         const mouse = this._getMouse(event);
         
         if (this.isDragging && this.dragAxis) {

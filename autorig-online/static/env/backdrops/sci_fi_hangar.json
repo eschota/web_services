@@ -39,6 +39,12 @@
     "sun_multiplier": 2.55
   },
   "src": "/static/env/backdrops/sci_fi_hangar.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/sci_fi_hangar.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/sci_fi_hangar.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/sci_fi_hangar.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/sci_fi_hangar.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 28,
     "intensity": 1.9,

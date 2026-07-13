@@ -43,6 +43,12 @@
     "sun_multiplier": 2.95
   },
   "src": "/static/env/backdrops/jungle_temple_ruins.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/jungle_temple_ruins.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/jungle_temple_ruins.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/jungle_temple_ruins.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/jungle_temple_ruins.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 25,
     "intensity": 1.85,

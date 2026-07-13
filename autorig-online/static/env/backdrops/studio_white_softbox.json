@@ -40,6 +40,12 @@
     "sun_multiplier": 0.5
   },
   "src": "/static/env/backdrops/studio_white_softbox.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/studio_white_softbox.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/studio_white_softbox.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/studio_white_softbox.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/studio_white_softbox.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 55,
     "intensity": 2,

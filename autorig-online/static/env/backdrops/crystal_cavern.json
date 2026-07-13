@@ -39,6 +39,12 @@
     "sun_multiplier": 1.5
   },
   "src": "/static/env/backdrops/crystal_cavern.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/crystal_cavern.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/crystal_cavern.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/crystal_cavern.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/crystal_cavern.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 36,
     "intensity": 1.8,

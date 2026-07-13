@@ -619,5 +619,9 @@
     "idle_ltx_fit_applying": "Применяем fitted clip...",
     "idle_ltx_fit_no_skeleton": "В viewer не найден skinned animal skeleton.",
     "idle_ltx_fit_video_error": "Видео-референс не удалось декодировать для fitting.",
-    "idle_ltx_fit_not_animal_viewer": "Переключите viewer на animated animal model перед fitting."
+    "idle_ltx_fit_not_animal_viewer": "Переключите viewer на animated animal model перед fitting.",
+    "viewer_split_perspective": "Перспектива",
+    "viewer_split_top": "Сверху",
+    "viewer_split_front": "Спереди",
+    "viewer_split_blueprint_left": "Чертёж слева"
 }

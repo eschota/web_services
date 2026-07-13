@@ -39,6 +39,12 @@
     "sun_multiplier": 1.4
   },
   "src": "/static/env/backdrops/post_apocalyptic_factory.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/post_apocalyptic_factory.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/post_apocalyptic_factory.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/post_apocalyptic_factory.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/post_apocalyptic_factory.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 32,
     "intensity": 1.6,

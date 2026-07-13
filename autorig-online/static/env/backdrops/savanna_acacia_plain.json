@@ -39,6 +39,12 @@
     "sun_multiplier": 2.8
   },
   "src": "/static/env/backdrops/savanna_acacia_plain.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/savanna_acacia_plain.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/savanna_acacia_plain.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/savanna_acacia_plain.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/savanna_acacia_plain.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 56,
     "intensity": 2.8,

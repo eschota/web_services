@@ -1590,7 +1590,7 @@
         }
 
         .viewer-custom-layout:has(#custom-animations-wrap:not(.hidden)) {
-            grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
+            grid-template-columns: minmax(0, 1fr);
         }
 
         #model-viewer-wrap {
@@ -1616,6 +1616,60 @@
             width: 100% !important;
             height: 100% !important;
             border-radius: 12px;
+        }
+
+        #viewer-split-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 18;
+            overflow: hidden;
+            border-radius: 12px;
+            pointer-events: none;
+        }
+
+        .viewer-split-pane {
+            position: absolute;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.22);
+        }
+
+        .viewer-split-pane[data-role='main'],
+        .viewer-split-pane[data-role='maximized'] {
+            border-color: rgba(129, 140, 248, 0.58);
+        }
+
+        .viewer-split-label {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            max-width: calc(100% - 1rem);
+            padding: 0.2rem 0.48rem;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 999px;
+            background: rgba(2, 6, 23, 0.68);
+            color: #f8fafc;
+            font-size: 0.66rem;
+            font-weight: 700;
+            line-height: 1;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            backdrop-filter: blur(8px);
+        }
+
+        @media (max-width: 640px) {
+            .viewer-split-label {
+                top: 0.3rem;
+                right: 0.3rem;
+                min-height: 20px;
+                max-width: calc(100% - 0.6rem);
+                padding: 0.16rem 0.34rem;
+                font-size: 0.56rem;
+            }
         }
 
         .blueprint-viewer-card {
@@ -3585,6 +3639,7 @@
                         
                         <!-- Viewer Overlay UI (above canvas) -->
                         <div id="viewer-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; border-radius: 12px;">
+                            <div id="viewer-split-overlay" aria-label="Four camera viewport layout"></div>
                             <!-- HIDDEN: Top-left Channel Selector (kept for compatibility) -->
                             <div id="viewer-channel-wrap" style="position: absolute; top: 0.75rem; left: 0.75rem; pointer-events: auto; display: none; flex-direction: column; gap: 0.5rem;">
                                 <select id="viewer-channel-select" class="form-select" style="
@@ -8823,6 +8878,7 @@
         } from '/static/js/animation-preview-policy.js?v=2';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
         import { PlayModeController } from '/static/js/task-play-mode.js?v=38';
+        import { TaskSplitViewportController } from '/static/js/task-split-viewer.js?v=20260713-split-v1';
 
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
@@ -9858,7 +9914,7 @@
             function captureAnimalLtxFrame768() {
                 try {
                     if (!renderer?.domElement || !scene || !camera) return '';
-                    if (typeof renderMainViewerFrame === 'function') renderMainViewerFrame();
+                    if (typeof renderCanonicalPerspectiveFrame === 'function') renderCanonicalPerspectiveFrame();
                     else renderer.render(scene, camera);
                     const source = renderer.domElement;
                     const canvas = document.createElement('canvas');
@@ -10292,6 +10348,13 @@
             let sceneInited = false;
             let scene, renderer, camera, controls, transform;
             let zoomState = null;  // Custom zoom with inertia - initialized in initScene
+            let splitViewportController = null;
+            let splitViewportActiveInteractionView = 'perspective';
+            const splitViewportCameras = {};
+            const splitViewportControls = {};
+            const splitViewportTextures = { top: null, front: null, left: null };
+            let splitViewportTextureLoadSerial = 0;
+            let splitViewportBlueprintMaterial = null;
             let currentModel = null;
             let preparedLoaded = false;
             let finalLoaded = false;
@@ -10791,6 +10854,208 @@
                 try { target?.dispose?.(); } catch (_) {}
             }
 
+            function splitViewportLabel(viewId) {
+                const labels = {
+                    perspective: ['viewer_split_perspective', 'Perspective'],
+                    top: ['viewer_split_top', 'Top'],
+                    front: ['viewer_split_front', 'Front'],
+                    left: ['viewer_split_blueprint_left', 'Blueprint Left'],
+                };
+                const [key, fallback] = labels[viewId] || [viewId, viewId];
+                try {
+                    const translated = t(key);
+                    return translated && translated !== key ? translated : fallback;
+                } catch (_) {
+                    return fallback;
+                }
+            }
+
+            function updateSplitViewportOverlay(_state = null, rectsOpt = null) {
+                const overlay = document.getElementById('viewer-split-overlay');
+                if (!overlay || !splitViewportController) return;
+                const rects = rectsOpt || splitViewportController.getRects();
+                overlay.replaceChildren(...rects.map((rect) => {
+                    const pane = document.createElement('div');
+                    pane.className = 'viewer-split-pane';
+                    pane.dataset.viewId = rect.id;
+                    pane.dataset.role = rect.role;
+                    pane.style.left = `${rect.x}px`;
+                    pane.style.top = `${rect.y}px`;
+                    pane.style.width = `${rect.width}px`;
+                    pane.style.height = `${rect.height}px`;
+                    const label = document.createElement('span');
+                    label.className = 'viewer-split-label';
+                    label.textContent = splitViewportLabel(rect.id);
+                    pane.appendChild(label);
+                    return pane;
+                }));
+            }
+
+            function setSplitViewportInteractionView(viewId) {
+                if (!splitViewportControls[viewId]) viewId = 'perspective';
+                splitViewportActiveInteractionView = viewId;
+                Object.entries(splitViewportControls).forEach(([id, orbit]) => {
+                    if (orbit) orbit.enabled = id === viewId;
+                });
+                window.__taskSplitViewport = {
+                    state: splitViewportController?.state || null,
+                    interactionView: viewId,
+                };
+            }
+
+            function splitViewportPointerAllowed(event) {
+                return !splitViewportController || splitViewportController.isEventInView(event, 'perspective');
+            }
+
+            function splitViewportPointerNdc(event) {
+                return splitViewportController
+                    ? splitViewportController.getNdcForEvent(event, 'perspective')
+                    : null;
+            }
+
+            function setupSplitViewportRuntime() {
+                if (!renderer?.domElement || !camera || !controls || splitViewportController) return;
+                splitViewportCameras.perspective = camera;
+                splitViewportControls.perspective = controls;
+
+                const cameraSpecs = {
+                    top: { position: [0, 4, 0], up: [0, 0, -1] },
+                    front: { position: [0, 1.5, 4], up: [0, 1, 0] },
+                    left: { position: [-4, 1.5, 0], up: [0, 1, 0] },
+                };
+                Object.entries(cameraSpecs).forEach(([viewId, spec]) => {
+                    const splitCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+                    splitCamera.position.set(...spec.position);
+                    splitCamera.up.set(...spec.up);
+                    splitCamera.lookAt(0, 1, 0);
+                    splitViewportCameras[viewId] = splitCamera;
+
+                    const orbit = new OrbitControls(splitCamera, renderer.domElement);
+                    orbit.enableDamping = true;
+                    orbit.dampingFactor = 0.08;
+                    orbit.enableZoom = true;
+                    orbit.enablePan = true;
+                    orbit.screenSpacePanning = true;
+                    orbit.target.set(0, 1, 0);
+                    orbit.minDistance = 0.25;
+                    orbit.maxDistance = 1000;
+                    orbit.enabled = false;
+                    orbit.update();
+                    splitViewportControls[viewId] = orbit;
+                });
+
+                splitViewportBlueprintMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x67e8f9,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.78,
+                    depthTest: true,
+                    depthWrite: true,
+                });
+
+                splitViewportController = new TaskSplitViewportController({
+                    canvas: renderer.domElement,
+                    host,
+                    mainRatio: 0.72,
+                    dragThreshold: 6,
+                    onInteractionView: setSplitViewportInteractionView,
+                    onStateChange: (state, rects) => {
+                        updateSplitViewportOverlay(state, rects);
+                        updateSplitViewportCameraProjections(rects);
+                        window.__taskSplitViewport = { state, interactionView: splitViewportActiveInteractionView };
+                    },
+                });
+                setSplitViewportInteractionView('perspective');
+                updateSplitViewportOverlay();
+                syncSplitViewportBackdropTextures(activeViewerTheme, 'split runtime init');
+            }
+
+            function updateSplitViewportCameraProjections(rectsOpt = null) {
+                if (!splitViewportController) return;
+                const rects = rectsOpt || splitViewportController.getRects();
+                rects.forEach((rect) => {
+                    const viewCamera = splitViewportCameras[rect.id];
+                    if (!viewCamera) return;
+                    viewCamera.aspect = Math.max(0.05, rect.width / Math.max(1, rect.height));
+                    viewCamera.updateProjectionMatrix();
+                });
+            }
+
+            function fitSplitAuxiliaryCameras(model, boundsInfoOpt = null) {
+                if (!splitViewportController || !model || !THREE) return;
+                const boundsInfo = boundsInfoOpt || getModelBoundsInfo(model);
+                if (!boundsInfo) return;
+                const center = boundsInfo.center.clone();
+                const target = center.clone();
+                target.y = Math.max(center.y, boundsInfo.box.min.y + boundsInfo.size.y * 0.45);
+                const directions = {
+                    top: new THREE.Vector3(0, 1, 0),
+                    front: new THREE.Vector3(0, 0, 1),
+                    left: new THREE.Vector3(-1, 0, 0),
+                };
+                const rects = splitViewportController.getRects();
+                Object.entries(directions).forEach(([viewId, direction]) => {
+                    const viewCamera = splitViewportCameras[viewId];
+                    const orbit = splitViewportControls[viewId];
+                    if (!viewCamera || !orbit) return;
+                    const rect = rects.find((item) => item.id === viewId);
+                    viewCamera.aspect = Math.max(0.05, (rect?.width || host.clientWidth) / Math.max(1, rect?.height || host.clientHeight));
+                    viewCamera.fov = Math.min(80, Math.max(18, Number(camera?.fov || 45)));
+                    const fovRad = THREE.MathUtils.degToRad(viewCamera.fov);
+                    const hFov = 2 * Math.atan(Math.tan(fovRad / 2) * viewCamera.aspect);
+                    const fitHeight = (Math.max(boundsInfo.size.y, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(fovRad / 2));
+                    const fitWidth = (Math.max(boundsInfo.size.x, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(hFov / 2));
+                    const distance = Math.max(fitHeight, fitWidth, boundsInfo.radius * 1.5, boundsInfo.maxDim * 1.45, 0.85);
+                    viewCamera.position.copy(target).add(direction.clone().multiplyScalar(distance));
+                    if (viewId === 'top') viewCamera.up.set(0, 0, -1);
+                    else viewCamera.up.set(0, 1, 0);
+                    viewCamera.near = Math.max(0.001, distance / 1000);
+                    viewCamera.far = Math.max(100, distance * 20 + boundsInfo.radius * 20);
+                    orbit.target.copy(target);
+                    orbit.minDistance = Math.max(0.05, distance * 0.08);
+                    orbit.maxDistance = Math.max(10, distance * 8);
+                    viewCamera.lookAt(target);
+                    viewCamera.updateProjectionMatrix();
+                    orbit.update();
+                });
+                updateSplitViewportCameraProjections();
+            }
+
+            function splitViewportSource(theme, viewId) {
+                const source = theme?.viewport_srcs?.[viewId];
+                return String(source || theme?.src || LIGHTING_CONFIG.backdropImagePath || '').trim();
+            }
+
+            function syncSplitViewportBackdropTextures(theme, reason = '') {
+                if (!THREE || !theme) return;
+                const serial = ++splitViewportTextureLoadSerial;
+                const loader = new THREE.TextureLoader();
+                loader.setCrossOrigin('anonymous');
+                ['top', 'front', 'left'].forEach((viewId) => {
+                    const path = splitViewportSource(theme, viewId);
+                    if (!path) return;
+                    loader.load(path, (tex) => {
+                        if (serial !== splitViewportTextureLoadSerial) { disposeTextureSafe(tex); return; }
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.mapping = THREE.UVMapping;
+                        tex.minFilter = THREE.LinearFilter;
+                        tex.magFilter = THREE.LinearFilter;
+                        tex.wrapS = THREE.ClampToEdgeWrapping;
+                        tex.wrapT = THREE.ClampToEdgeWrapping;
+                        try { tex.generateMipmaps = false; } catch (_) {}
+                        disposeTextureSafe(splitViewportTextures[viewId]);
+                        splitViewportTextures[viewId] = tex;
+                        console.info('[ViewerSplit] backdrop ready', { viewId, path, reason });
+                    }, undefined, (error) => {
+                        if (serial === splitViewportTextureLoadSerial) {
+                            disposeTextureSafe(splitViewportTextures[viewId]);
+                            splitViewportTextures[viewId] = null;
+                        }
+                        console.warn('[ViewerSplit] directional backdrop failed; using Perspective fallback', { viewId, path, error });
+                    });
+                });
+            }
+
             function forEachModelMaterial(model, callback) {
                 if (!model || typeof callback !== 'function') return;
                 model.traverse((child) => {
@@ -10854,13 +11119,13 @@
                 applyModelEnvironmentIntensity();
             }
 
-            function updateScreenBackdropCover() {
-                const tex = backdropSceneTexture;
+            function updateScreenBackdropCover(texOpt = null, aspectOpt = null) {
+                const tex = texOpt || backdropSceneTexture;
                 if (!tex?.image || !camera) return;
                 const imgW = Number(tex.image.naturalWidth || tex.image.width || 0);
                 const imgH = Number(tex.image.naturalHeight || tex.image.height || 0);
                 if (!imgW || !imgH) return;
-                const viewAspect = Math.max(0.01, Number(camera.aspect || 1));
+                const viewAspect = Math.max(0.01, Number(aspectOpt || camera.aspect || 1));
                 const imageAspect = imgW / imgH;
                 tex.offset.set(0, 0);
                 tex.repeat.set(1, 1);
@@ -10876,8 +11141,74 @@
                 tex.needsUpdate = true;
             }
 
+            function renderSplitViewportRect(rect) {
+                const viewCamera = splitViewportCameras[rect.id] || camera;
+                if (!viewCamera) return;
+                const renderY = Math.max(0, (host.clientHeight || rect.height) - rect.y - rect.height);
+                const texture = rect.id === 'perspective'
+                    ? backdropSceneTexture
+                    : (splitViewportTextures[rect.id] || backdropSceneTexture);
+                viewCamera.aspect = Math.max(0.05, rect.width / Math.max(1, rect.height));
+                viewCamera.updateProjectionMatrix();
+                if (texture?.image) updateScreenBackdropCover(texture, viewCamera.aspect);
+
+                const previousBackground = scene.background;
+                const previousOverride = scene.overrideMaterial;
+                const previousSkyVisible = skyObject?.visible;
+                const previousGroundVisible = groundPlaneMesh?.visible;
+                if (skyObject) skyObject.visible = !texture;
+                if (texture) scene.background = texture;
+                if (rect.id === 'left' && splitViewportBlueprintMaterial) {
+                    scene.overrideMaterial = splitViewportBlueprintMaterial;
+                    if (groundPlaneMesh) groundPlaneMesh.visible = false;
+                }
+                renderer.setViewport(rect.x, renderY, rect.width, rect.height);
+                renderer.setScissor(rect.x, renderY, rect.width, rect.height);
+                renderer.clear(true, true, true);
+                renderer.render(scene, viewCamera);
+                scene.background = previousBackground;
+                scene.overrideMaterial = previousOverride;
+                if (skyObject && previousSkyVisible !== undefined) skyObject.visible = previousSkyVisible;
+                if (groundPlaneMesh && previousGroundVisible !== undefined) groundPlaneMesh.visible = previousGroundVisible;
+            }
+
+            function renderCanonicalPerspectiveFrame() {
+                if (!renderer || !scene || !camera) return;
+                const width = Math.max(1, host.clientWidth || renderer.domElement.clientWidth || 1);
+                const height = Math.max(1, host.clientHeight || renderer.domElement.clientHeight || 1);
+                const previousBackground = scene.background;
+                const previousOverride = scene.overrideMaterial;
+                const previousSkyVisible = skyObject?.visible;
+                const previousGroundVisible = groundPlaneMesh?.visible;
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+                if (backdropSceneTexture?.image) updateScreenBackdropCover(backdropSceneTexture, camera.aspect);
+                renderer.setScissorTest(false);
+                renderer.setViewport(0, 0, width, height);
+                if (skyObject) skyObject.visible = !backdropSceneTexture;
+                if (backdropSceneTexture) scene.background = backdropSceneTexture;
+                scene.overrideMaterial = null;
+                if (groundPlaneMesh && previousGroundVisible !== undefined) groundPlaneMesh.visible = previousGroundVisible;
+                renderer.render(scene, camera);
+                scene.background = previousBackground;
+                scene.overrideMaterial = previousOverride;
+                if (skyObject && previousSkyVisible !== undefined) skyObject.visible = previousSkyVisible;
+            }
+
             function renderMainViewerFrame() {
                 if (!renderer || !scene || !camera) return;
+                if (splitViewportController) {
+                    const previousAutoUpdate = renderer.shadowMap.autoUpdate;
+                    renderer.setScissorTest(true);
+                    splitViewportController.getRects().forEach((rect, index) => {
+                        if (renderer.shadowMap.enabled) renderer.shadowMap.autoUpdate = index === 0 && previousAutoUpdate;
+                        renderSplitViewportRect(rect);
+                    });
+                    renderer.shadowMap.autoUpdate = previousAutoUpdate;
+                    renderer.setScissorTest(false);
+                    renderer.setViewport(0, 0, host.clientWidth || 1, host.clientHeight || 1);
+                    return;
+                }
                 const hasThemeBackdrop = !!(usingStaticBackdrop && backdropSceneTexture);
                 if (!hasThemeBackdrop) {
                     if (skyObject) skyObject.visible = true;
@@ -11386,6 +11717,7 @@
                 window.__activeViewerTheme = theme;
                 window.__pendingViewerThemeSettings = theme;
                 applyViewerBackdropUrl(theme.src, reason || 'theme');
+                syncSplitViewportBackdropTextures(theme, reason || 'theme');
                 viewerThemeRuntimeApply(theme, reason || 'theme');
             }
 
@@ -11438,7 +11770,7 @@
             function captureViewerThemeAutoSelectImage() {
                 try {
                     if (renderer?.domElement && scene && camera) {
-                        if (typeof renderMainViewerFrame === 'function') renderMainViewerFrame();
+                        if (typeof renderCanonicalPerspectiveFrame === 'function') renderCanonicalPerspectiveFrame();
                         else renderer.render?.(scene, camera);
                         return renderer.domElement.toDataURL('image/jpeg', 0.68);
                     }
@@ -12341,6 +12673,7 @@
                         distanceMultiplier: 1.45,
                     });
                 }
+                fitSplitAuxiliaryCameras(model, boundsInfo);
             }
 
             function getCameraHintDirection() {
@@ -12410,6 +12743,7 @@
                 }
                 controls.update?.();
                 viewerControls?.skipNextFocusOnModel?.();
+                fitSplitAuxiliaryCameras(model, boundsInfo);
 
                 const signature = getModelBoundsSignature(boundsInfo);
                 savedCameraBoundsSignature = signature;
@@ -12487,15 +12821,8 @@
                         window.taskDbg('[Viewer] Fullscreen request successful');
                         isFullscreen = true;
                         
-                        // Update renderer size to fill the fullscreen element
-                        renderer.setSize(window.screen.width, window.screen.height);
-                        renderer.setPixelRatio(getMainViewerTargetPixelRatio());
-                        
-                        // Update camera aspect ratio
-                        if (camera) {
-                            camera.aspect = window.screen.width / window.screen.height;
-                            camera.updateProjectionMatrix();
-                        }
+                        // Let the shared resize path update the canvas and all four cameras.
+                        mainViewerResize();
                         
                         window.taskDbg('[Viewer] Renderer resized to:', window.screen.width, 'x', window.screen.height);
                         
@@ -12512,14 +12839,7 @@
                             window.taskDbg('[Viewer] Fullscreen entered (fallback check)');
                             isFullscreen = true;
                             
-                            // Update renderer size
-                            renderer.setSize(window.screen.width, window.screen.height);
-                            renderer.setPixelRatio(getMainViewerTargetPixelRatio());
-                            
-                            if (camera) {
-                                camera.aspect = window.screen.width / window.screen.height;
-                                camera.updateProjectionMatrix();
-                            }
+                            mainViewerResize();
                             
                             updateFullscreenButton();
                             document.addEventListener('keydown', handleFullscreenKeydown);
@@ -12562,14 +12882,8 @@
                     // Just exited fullscreen
                     isFullscreen = false;
                     
-                    // Restore normal size
-                    renderer.setSize(normalCanvasSize.width, normalCanvasSize.height);
-                    renderer.setPixelRatio(getMainViewerTargetPixelRatio());
-                    
-                    if (camera) {
-                        camera.aspect = normalCanvasSize.width / normalCanvasSize.height;
-                        camera.updateProjectionMatrix();
-                    }
+                    // Restore through the shared resize path after the element leaves fullscreen.
+                    mainViewerResize();
                     
                     // Remove ESC key handler
                     document.removeEventListener('keydown', handleFullscreenKeydown);
@@ -12599,7 +12913,7 @@
             }
 
             function shouldUseMainViewerComposer() {
-                return !!composer && !!getMainViewerQualityProfile().useComposer && !usingStaticBackdrop;
+                return !!composer && !splitViewportController && !!getMainViewerQualityProfile().useComposer && !usingStaticBackdrop;
             }
 
             function syncMainViewerBloomPass() {
@@ -13330,6 +13644,7 @@
                 
                 // Wheel handler - accumulate velocity
                 renderer.domElement.addEventListener('wheel', (e) => {
+                    if (splitViewportController && !splitViewportController.isEventInView(e, 'perspective')) return;
                     e.preventDefault();
                     // Normalize wheel delta across browsers
                     const delta = e.deltaY > 0 ? 1 : -1;
@@ -13371,6 +13686,7 @@
                 controls.enabled = true;
 
                 controls.update();
+                setupSplitViewportRuntime();
 
                 // TransformControls disabled - using custom GLB gizmos instead
                 // transform = new TransformControls(camera, renderer.domElement);
@@ -13466,6 +13782,8 @@
                     if (composer) composer.setSize(w, h);
                     if (bloomPass) bloomPass.resolution.set(w, h);
                     updateScreenBackdropCover();
+                    splitViewportController?.refresh();
+                    updateSplitViewportCameraProjections();
                 };
                 window.addEventListener('resize', mainViewerResize);
                 mainViewerResize();
@@ -13483,6 +13801,8 @@
                     groundPlane: groundPlaneMesh, // Pass the ground plane mesh
                     bloomPass, // Pass the bloom pass
                     t,
+                    pointerEventFilter: splitViewportPointerAllowed,
+                    pointerNdcResolver: splitViewportPointerNdc,
                     onSaveDefaultSettings: () => saveDefaultViewerSettings('hotkey'),
                     onCameraModeChange: (mode) => {
                         const label = document.getElementById('viewer-camera-label');
@@ -13518,6 +13838,8 @@
                     camera,
                     renderer,
                     controls,
+                    pointerEventFilter: splitViewportPointerAllowed,
+                    pointerNdcResolver: splitViewportPointerNdc,
                     onModeChange: (mode, prevMode) => {
                         window.taskDbg('[Viewer] Transform mode changed:', prevMode, '->', mode);
                         updateTransformToolbarUI(mode);
@@ -13733,13 +14055,13 @@
                                 snapCurrentModelToGround({ force: false });
                             }
                         }
-                        if (viewerControls) viewerControls.updateFlyCamera(dt);
+                        if (viewerControls && splitViewportActiveInteractionView === 'perspective') viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
                         if (playModeController?.active) playModeController.update(dt);
                         updateSunShadowFocus(false);
                         publishMainViewerDebugState();
-                        if (window.updateZoomInertia) window.updateZoomInertia();
-                        controls.update();
+                        if (window.updateZoomInertia && splitViewportActiveInteractionView === 'perspective') window.updateZoomInertia();
+                        Object.values(splitViewportControls).forEach((orbit) => orbit?.update?.());
                         
                         if (!isDefaultComparisonOn && cameraInitialized && camera && controls) {
                             viewerState.camera.position.x = camera.position.x;

@@ -40,6 +40,12 @@
     "sun_multiplier": 3.5
   },
   "src": "/static/env/backdrops/mediterranean_courtyard.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/mediterranean_courtyard.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/mediterranean_courtyard.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/mediterranean_courtyard.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/mediterranean_courtyard.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 55,
     "intensity": 2.45,

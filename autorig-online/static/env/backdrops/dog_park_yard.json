@@ -41,6 +41,12 @@
     "sun_multiplier": 1.75
   },
   "src": "/static/env/backdrops/dog_park_yard.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/dog_park_yard.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/dog_park_yard.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/dog_park_yard.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/dog_park_yard.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 25,
     "intensity": 2.5,

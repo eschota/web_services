@@ -42,6 +42,12 @@
     "sun_multiplier": 3.5
   },
   "src": "/static/env/backdrops/ancient_ruins.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/ancient_ruins.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/ancient_ruins.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/ancient_ruins.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/ancient_ruins.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
     "inclination": 35,
     "intensity": 2.45,
