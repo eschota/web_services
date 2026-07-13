@@ -10503,6 +10503,10 @@
             let splitViewportBlueprintCard = null;
             let splitViewportBlueprintSurfaceCleanup = null;
             let splitViewportShadowWarmupTarget = null;
+            const splitViewportShadowLights = {};
+            const splitViewportShadowCatcherStates = {};
+            let splitViewportShadowLastRefresh = 0;
+            const SPLIT_VIEWPORT_SHADOW_REFRESH_MS = 100;
             let currentModel = null;
             let preparedLoaded = false;
             let finalLoaded = false;
@@ -11148,6 +11152,7 @@
                     dragThreshold: 6,
                     onInteractionView: setSplitViewportInteractionView,
                     onStateChange: (state, rects) => {
+                        splitViewportShadowLastRefresh = 0;
                         updateSplitViewportOverlay(state, rects);
                         updateSplitViewportCameraProjections(rects);
                         window.__taskSplitViewport = { state, interactionView: splitViewportActiveInteractionView };
@@ -11330,9 +11335,55 @@
                 tex.needsUpdate = true;
             }
 
-            function renderSplitViewportShadowMap(viewCamera, viewId) {
-                if (!renderer?.shadowMap?.enabled || !sunLight?.castShadow || !sunLight.shadow || !viewCamera) return;
-                updateSunShadowFocus(true, viewCamera, viewId);
+            function syncSplitViewportShadowLight(light) {
+                if (!light || !sunLight) return light;
+                if (light !== sunLight) {
+                    light.color.copy(sunLight.color);
+                    light.intensity = sunLight.intensity;
+                    light.castShadow = sunLight.castShadow;
+                    light.shadow.bias = sunLight.shadow.bias;
+                    light.shadow.normalBias = sunLight.shadow.normalBias;
+                    light.shadow.radius = sunLight.shadow.radius;
+                    const mapSize = Math.min(1024, sunLight.shadow.mapSize.width || 1024);
+                    if (light.shadow.mapSize.width !== mapSize || light.shadow.mapSize.height !== mapSize) {
+                        light.shadow.mapSize.set(mapSize, mapSize);
+                        light.shadow.map?.dispose?.();
+                        light.shadow.map = null;
+                    }
+                }
+                return light;
+            }
+
+            function getSplitViewportShadowLight(viewId) {
+                if (!sunLight || viewId === 'perspective') return sunLight;
+                if (!splitViewportShadowLights[viewId]) {
+                    const light = new THREE.DirectionalLight(sunLight.color.clone(), sunLight.intensity);
+                    light.name = `TaskViewerSplitShadowLight_${viewId}`;
+                    light.castShadow = true;
+                    light.visible = false;
+                    scene.add(light, light.target);
+                    splitViewportShadowLights[viewId] = light;
+                }
+                return syncSplitViewportShadowLight(splitViewportShadowLights[viewId]);
+            }
+
+            function activateSplitViewportShadowLight(viewId) {
+                const active = syncSplitViewportShadowLight(getSplitViewportShadowLight(viewId));
+                if (sunLight) sunLight.visible = active === sunLight;
+                Object.values(splitViewportShadowLights).forEach((light) => {
+                    light.visible = light === active;
+                });
+                return active;
+            }
+
+            function restorePrimaryViewerShadowLight() {
+                if (sunLight) sunLight.visible = true;
+                Object.values(splitViewportShadowLights).forEach((light) => { light.visible = false; });
+            }
+
+            function renderSplitViewportShadowMap(viewCamera, viewId, shadowLight) {
+                if (!renderer?.shadowMap?.enabled || !shadowLight?.castShadow || !shadowLight.shadow || !viewCamera) return;
+                updateSunShadowFocus(true, viewCamera, viewId, shadowLight);
                 if (!splitViewportShadowWarmupTarget) {
                     splitViewportShadowWarmupTarget = new THREE.WebGLRenderTarget(1, 1, {
                         depthBuffer: true,
@@ -11348,7 +11399,7 @@
                     renderer.setViewport(0, 0, 1, 1);
                     renderer.setScissor(0, 0, 1, 1);
                     renderer.shadowMap.needsUpdate = true;
-                    sunLight.shadow.needsUpdate = true;
+                    shadowLight.shadow.needsUpdate = true;
                     renderer.render(scene, viewCamera);
                 } finally {
                     renderer.setRenderTarget(previousTarget);
@@ -11356,10 +11407,11 @@
                 }
             }
 
-            function renderSplitViewportRect(rect) {
+            function renderSplitViewportRect(rect, refreshShadows = false) {
                 const viewCamera = splitViewportCameras[rect.id] || camera;
                 if (!viewCamera) return;
                 if (rect.id === 'left' && isSemanticBlueprintSplitViewportVisible()) return;
+                const shadowLight = activateSplitViewportShadowLight(rect.id);
                 const renderY = Math.max(0, (host.clientHeight || rect.height) - rect.y - rect.height);
                 const texture = rect.id === 'perspective'
                     ? backdropSceneTexture
@@ -11385,7 +11437,8 @@
                     });
                 }
                 try {
-                    renderSplitViewportShadowMap(viewCamera, rect.id);
+                    if (refreshShadows) renderSplitViewportShadowMap(viewCamera, rect.id, shadowLight);
+                    else applySplitViewportShadowCatcherState(rect.id);
                     renderer.setScissorTest(true);
                     renderer.setViewport(rect.x, renderY, rect.width, rect.height);
                     renderer.setScissor(rect.x, renderY, rect.width, rect.height);
@@ -11427,12 +11480,18 @@
                 if (!renderer || !scene || !camera) return;
                 if (splitViewportController) {
                     const previousAutoUpdate = renderer.shadowMap.autoUpdate;
+                    const now = performance.now();
+                    const refreshShadows = !splitViewportShadowLastRefresh
+                        || (now - splitViewportShadowLastRefresh) >= SPLIT_VIEWPORT_SHADOW_REFRESH_MS;
+                    if (refreshShadows) splitViewportShadowLastRefresh = now;
                     renderer.shadowMap.autoUpdate = false;
+                    renderer.shadowMap.needsUpdate = false;
                     try {
                         renderer.setScissorTest(true);
-                        splitViewportController.getRects().forEach((rect) => renderSplitViewportRect(rect));
+                        splitViewportController.getRects().forEach((rect) => renderSplitViewportRect(rect, refreshShadows));
                     } finally {
-                        updateSunShadowFocus(false, camera, 'perspective');
+                        applySplitViewportShadowCatcherState('perspective');
+                        restorePrimaryViewerShadowLight();
                         renderer.shadowMap.autoUpdate = previousAutoUpdate;
                         renderer.setRenderTarget(null);
                         renderer.setScissorTest(false);
@@ -11743,6 +11802,12 @@
                 groundPlaneMesh.scale.set(scale, scale, 1);
                 groundPlaneMesh.userData.shadowCatcherExtent = extent;
                 groundPlaneMesh.userData.shadowCatcherView = viewId;
+                splitViewportShadowCatcherStates[viewId] = {
+                    position: groundPlaneMesh.position.clone(),
+                    quaternion: groundPlaneMesh.quaternion.clone(),
+                    scale: groundPlaneMesh.scale.clone(),
+                    extent,
+                };
             }
 
             function updateShadowCatcherPlaneForModel(model, viewId = 'perspective') {
@@ -11758,6 +11823,22 @@
                 } catch (_) {
                     return false;
                 }
+            }
+
+            function applySplitViewportShadowCatcherState(viewId) {
+                if (!groundPlaneMesh) return false;
+                let state = splitViewportShadowCatcherStates[viewId];
+                if (!state) {
+                    updateShadowCatcherPlaneForModel(getActiveShadowCasterRoot(), viewId);
+                    state = splitViewportShadowCatcherStates[viewId];
+                }
+                if (!state) return false;
+                groundPlaneMesh.position.copy(state.position);
+                groundPlaneMesh.quaternion.copy(state.quaternion);
+                groundPlaneMesh.scale.copy(state.scale);
+                groundPlaneMesh.userData.shadowCatcherExtent = state.extent;
+                groundPlaneMesh.userData.shadowCatcherView = viewId;
+                return true;
             }
 
             function getShadowCameraHalfSize(modelSize) {
@@ -13202,7 +13283,8 @@
                     });
                 }
                 if (sunLight.shadow) {
-                    const mapSize = Number(profile.shadowMapSize || 1024);
+                    const requestedMapSize = Number(profile.shadowMapSize || 1024);
+                    const mapSize = splitViewportController ? Math.min(1024, requestedMapSize) : requestedMapSize;
                     if (sunLight.shadow.mapSize.width !== mapSize || sunLight.shadow.mapSize.height !== mapSize) {
                         sunLight.shadow.mapSize.set(mapSize, mapSize);
                         if (sunLight.shadow.map) {
@@ -13235,8 +13317,8 @@
                 return new THREE.Vector3(x, y, z);
             }
 
-            function updateSunShadowFocus(force = false, viewCamera = camera, viewId = 'perspective') {
-                if (!sunLight || !sunLight.target || !THREE) return;
+            function updateSunShadowFocus(force = false, viewCamera = camera, viewId = 'perspective', shadowLight = sunLight) {
+                if (!shadowLight || !shadowLight.target || !THREE) return;
                 const focus = new THREE.Vector3();
                 const modelSize = new THREE.Vector3(2, 2, 2);
                 let hasFocus = false;
@@ -13259,23 +13341,23 @@
                 const r = Math.max(12, Number(viewerState.groundSize || 10) * 0.5);
                 const sunOffset = getViewerSunOffset(r, viewCamera);
 
-                sunLight.target.position.copy(focus);
-                sunLight.position.copy(focus).add(sunOffset);
-                sunLight.target.updateMatrixWorld();
-                sunLight.updateMatrixWorld();
+                shadowLight.target.position.copy(focus);
+                shadowLight.position.copy(focus).add(sunOffset);
+                shadowLight.target.updateMatrixWorld();
+                shadowLight.updateMatrixWorld();
 
-                if (sunLight.shadow) {
+                if (shadowLight.shadow) {
                     const size = getShadowCameraHalfSize(modelSize);
-                    sunLight.shadow.camera.left = -size;
-                    sunLight.shadow.camera.right = size;
-                    sunLight.shadow.camera.top = size;
-                    sunLight.shadow.camera.bottom = -size;
-                    sunLight.shadow.camera.near = 0.05;
-                    sunLight.shadow.camera.far = Math.max(160, size * 4 + Math.max(20, r * 2) + modelSize.y * 4);
-                    sunLight.shadow.camera.updateProjectionMatrix();
+                    shadowLight.shadow.camera.left = -size;
+                    shadowLight.shadow.camera.right = size;
+                    shadowLight.shadow.camera.top = size;
+                    shadowLight.shadow.camera.bottom = -size;
+                    shadowLight.shadow.camera.near = 0.05;
+                    shadowLight.shadow.camera.far = Math.max(160, size * 4 + Math.max(20, r * 2) + modelSize.y * 4);
+                    shadowLight.shadow.camera.updateProjectionMatrix();
                     if (force || playModeController?.active) {
                         renderer.shadowMap.needsUpdate = true;
-                        sunLight.shadow.needsUpdate = true;
+                        shadowLight.shadow.needsUpdate = true;
                     }
                 }
             }
@@ -14311,7 +14393,7 @@
                         if (viewerControls && splitViewportActiveInteractionView === 'perspective') viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
                         if (playModeController?.active) playModeController.update(dt);
-                        updateSunShadowFocus(false);
+                        if (!splitViewportController) updateSunShadowFocus(false);
                         publishMainViewerDebugState();
                         if (window.updateZoomInertia && splitViewportActiveInteractionView === 'perspective') window.updateZoomInertia();
                         Object.values(splitViewportControls).forEach((orbit) => orbit?.update?.());
