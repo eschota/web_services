@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -7,6 +8,8 @@ import {
     shouldApplyCatalogPreview,
     shouldLoadExternalFbxPreview,
 } from '../animation-preview-policy.js';
+
+const taskHtml = await readFile(new URL('../../task.html', import.meta.url), 'utf8');
 
 test('prefers the first moving clip over a zero-duration base pose', () => {
     const basePose = { name: 'Horse_default', duration: 1 / 24 };
@@ -60,4 +63,9 @@ test('keeps explicit external FBX fallback for non-animal tasks only', () => {
         embeddedMatched: false,
         automatic: true,
     }), false);
+});
+
+test('applies the preferred clip after replacing cloned select controls', () => {
+    const postCloneSelections = taskHtml.match(/sel = newSel;\s+if \(preferredClip\) sel\.value = preferredClip\.name;/g) || [];
+    assert.equal(postCloneSelections.length, 3);
 });
