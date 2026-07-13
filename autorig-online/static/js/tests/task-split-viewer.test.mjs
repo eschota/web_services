@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     activateSplitViewport,
+    isSplitViewportControlTarget,
     normalizeSplitViewportState,
     splitViewportAtPoint,
     splitViewportNdc,
@@ -52,4 +53,10 @@ test('hit testing and NDC use the local viewport rectangle', () => {
     const front = splitViewportAtPoint(rects, 850, 250);
     assert.equal(front.id, 'front');
     assert.deepEqual(splitViewportNdc(front, 860, 300), { x: 0, y: 0 });
+});
+
+test('embedded viewport controls do not trigger viewport activation', () => {
+    assert.equal(isSplitViewportControlTarget({ closest: () => ({ tagName: 'BUTTON' }) }), true);
+    assert.equal(isSplitViewportControlTarget({ closest: () => null }), false);
+    assert.equal(isSplitViewportControlTarget(null), false);
 });

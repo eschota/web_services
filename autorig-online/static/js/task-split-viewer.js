@@ -98,6 +98,10 @@ export function splitViewportNdc(rect, x, y) {
     };
 }
 
+export function isSplitViewportControlTarget(target) {
+    return Boolean(target?.closest?.('button, select, input, textarea, a, label, [role="button"], [data-split-viewport-no-activate]'));
+}
+
 export class TaskSplitViewportController {
     constructor(options = {}) {
         this.canvas = options.canvas || null;
@@ -109,6 +113,7 @@ export class TaskSplitViewportController {
         this.onStateChange = options.onStateChange || (() => {});
         this.pointerStart = null;
         this.interactionView = 'perspective';
+        this.externalSurfaces = new Map();
 
         this._pointerDown = this._pointerDown.bind(this);
         this._pointerUp = this._pointerUp.bind(this);
@@ -125,12 +130,62 @@ export class TaskSplitViewportController {
     }
 
     destroy() {
-        if (!this.canvas) return;
-        this.canvas.removeEventListener('pointerdown', this._pointerDown, true);
-        this.canvas.removeEventListener('pointerup', this._pointerUp, true);
-        this.canvas.removeEventListener('pointercancel', this._pointerCancel, true);
-        this.canvas.removeEventListener('pointerleave', this._pointerCancel, true);
-        this.canvas.removeEventListener('wheel', this._wheel, true);
+        if (this.canvas) {
+            this.canvas.removeEventListener('pointerdown', this._pointerDown, true);
+            this.canvas.removeEventListener('pointerup', this._pointerUp, true);
+            this.canvas.removeEventListener('pointercancel', this._pointerCancel, true);
+            this.canvas.removeEventListener('pointerleave', this._pointerCancel, true);
+            this.canvas.removeEventListener('wheel', this._wheel, true);
+        }
+        [...this.externalSurfaces.keys()].forEach((surface) => this.unregisterExternalSurface(surface));
+    }
+
+    registerExternalSurface(surface, viewId, options = {}) {
+        if (!surface || !validViewId(viewId)) return () => {};
+        this.unregisterExternalSurface(surface);
+        const state = { pointerStart: null };
+        const ignoreTarget = typeof options.ignoreTarget === 'function'
+            ? options.ignoreTarget
+            : isSplitViewportControlTarget;
+        const pointerDown = (event) => {
+            if (event.button !== 0 || ignoreTarget(event.target)) {
+                state.pointerStart = null;
+                return;
+            }
+            this.setInteractionView(viewId);
+            state.pointerStart = {
+                pointerId: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+            };
+        };
+        const pointerUp = (event) => {
+            const start = state.pointerStart;
+            state.pointerStart = null;
+            if (!start || start.pointerId !== event.pointerId || ignoreTarget(event.target)) return;
+            const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+            if (distance <= this.dragThreshold) this.activate(viewId);
+        };
+        const pointerCancel = () => { state.pointerStart = null; };
+        const wheel = () => this.setInteractionView(viewId);
+        surface.addEventListener('pointerdown', pointerDown, true);
+        surface.addEventListener('pointerup', pointerUp, true);
+        surface.addEventListener('pointercancel', pointerCancel, true);
+        surface.addEventListener('pointerleave', pointerCancel, true);
+        surface.addEventListener('wheel', wheel, { capture: true, passive: true });
+        this.externalSurfaces.set(surface, { pointerDown, pointerUp, pointerCancel, wheel });
+        return () => this.unregisterExternalSurface(surface);
+    }
+
+    unregisterExternalSurface(surface) {
+        const handlers = this.externalSurfaces.get(surface);
+        if (!handlers) return;
+        surface.removeEventListener('pointerdown', handlers.pointerDown, true);
+        surface.removeEventListener('pointerup', handlers.pointerUp, true);
+        surface.removeEventListener('pointercancel', handlers.pointerCancel, true);
+        surface.removeEventListener('pointerleave', handlers.pointerCancel, true);
+        surface.removeEventListener('wheel', handlers.wheel, true);
+        this.externalSurfaces.delete(surface);
     }
 
     getRects() {

@@ -1688,6 +1688,154 @@
             display: none !important;
         }
 
+        #model-viewer-container > #blueprint-viewer-card.is-split-viewport {
+            position: absolute !important;
+            z-index: 8;
+            min-width: 0;
+            min-height: 0;
+            margin: 0 !important;
+            overflow: hidden;
+            box-sizing: border-box;
+            contain: layout paint;
+            container-type: size;
+            pointer-events: auto;
+            --blueprint-stage-height: 100%;
+        }
+
+        #model-viewer-container > #blueprint-viewer-card.is-split-viewport.split-slot-inactive {
+            display: none !important;
+        }
+
+        #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-viewer-stage {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100% !important;
+            aspect-ratio: auto;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-view-cube {
+            top: 2.35rem;
+        }
+
+        #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-stage-hud {
+            bottom: 3.15rem;
+        }
+
+        #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-actions {
+            position: absolute;
+            z-index: 10;
+            left: 0.48rem;
+            right: 0.48rem;
+            bottom: 0.46rem;
+            display: flex;
+            flex-direction: row;
+            align-items: stretch;
+            gap: 0.35rem;
+            margin: 0;
+            pointer-events: auto;
+        }
+
+        #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-legend {
+            position: absolute;
+            z-index: 9;
+            left: 0.55rem;
+            bottom: 2.72rem;
+            max-width: calc(100% - 1.1rem);
+            margin: 0;
+            padding: 0.18rem 0.34rem;
+            overflow: hidden;
+            border-radius: 5px;
+            background: rgba(2, 6, 23, 0.54);
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        @container (max-width: 430px) {
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-stage-controls {
+                top: 0.34rem;
+                left: 0.34rem;
+                gap: 0.24rem;
+                max-width: calc(100% - 0.68rem);
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-view-select {
+                width: 5.35rem;
+                height: 1.55rem;
+                padding: 0 1.25rem 0 0.4rem;
+                font-size: 0.58rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-icon-btn {
+                width: 1.55rem;
+                height: 1.55rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-icon-btn svg {
+                width: 0.8rem;
+                height: 0.8rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-view-cube {
+                top: 1.95rem;
+                right: 0.32rem;
+                width: 2.35rem;
+                height: 2.35rem;
+                grid-template-columns: 0.6rem 1.15rem 0.6rem;
+                grid-template-rows: 0.6rem 1.15rem 0.6rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-cube-zone,
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-cube-cycle {
+                font-size: 0.46rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-actions {
+                left: 0.3rem;
+                right: 0.3rem;
+                bottom: 0.28rem;
+                gap: 0.24rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-rig-reset-btn,
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-actions .blueprint-add-node-btn,
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-actions .blueprint-retarget-btn {
+                width: auto;
+                min-width: 1.75rem;
+                min-height: 1.65rem;
+                padding: 0.28rem 0.4rem;
+                font-size: 0.56rem;
+                line-height: 1.05;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-rig-reset-btn span {
+                display: none;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-rig-reset-btn svg {
+                width: 0.86rem;
+                height: 0.86rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-legend {
+                left: 0.32rem;
+                bottom: 2.18rem;
+                max-width: calc(100% - 0.64rem);
+                padding: 0.12rem 0.24rem;
+                font-size: 0.52rem;
+            }
+
+            #model-viewer-container > #blueprint-viewer-card.is-split-viewport .blueprint-stage-hud {
+                left: 0.34rem;
+                right: 0.34rem;
+                bottom: 2.15rem;
+                font-size: 0.54rem;
+            }
+        }
+
         .blueprint-stage-controls,
         .blueprint-stage-hud {
             position: absolute;
@@ -4453,7 +4601,7 @@
             </div>
             </div>
 
-            <div id="blueprint-viewer-card" class="card blueprint-viewer-card viewer-side-panel hidden" aria-label="Blueprint semantic skeleton editor">
+            <div id="blueprint-viewer-card" class="card blueprint-viewer-card viewer-side-panel hidden is-split-viewport split-slot-inactive" aria-label="Blueprint semantic skeleton editor">
                 <div class="blueprint-viewer-stage">
                     <div id="blueprint-viewer-canvas" class="blueprint-viewer-canvas"></div>
                     <div id="blueprint-viewer-empty" class="blueprint-viewer-empty">Blueprint data will appear when the worker publishes skeleton.json.</div>
@@ -7668,11 +7816,8 @@
                 if (modelViewerWrap.parentElement !== layout) {
                     layout.insertBefore(modelViewerWrap, layout.firstChild);
                 }
-                if (blueprintWrap && modelViewerContainer) {
-                    const insertAfter = modelViewerContainer.nextSibling;
-                    if (blueprintWrap.parentElement !== modelViewerWrap || blueprintWrap.previousElementSibling !== modelViewerContainer) {
-                        modelViewerWrap.insertBefore(blueprintWrap, insertAfter);
-                    }
+                if (blueprintWrap && modelViewerContainer && blueprintWrap.parentElement !== modelViewerContainer) {
+                    modelViewerContainer.appendChild(blueprintWrap);
                 }
                 if (customWrap.parentElement !== layout) {
                     layout.appendChild(customWrap);
@@ -8847,7 +8992,7 @@
     <script>
         window.IDLE_LTX_UI_ENABLED = true;
     </script>
-    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=23"></script>
+    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=24"></script>
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
@@ -8878,7 +9023,7 @@
         } from '/static/js/animation-preview-policy.js?v=2';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
         import { PlayModeController } from '/static/js/task-play-mode.js?v=38';
-        import { TaskSplitViewportController } from '/static/js/task-split-viewer.js?v=20260713-split-v1';
+        import { TaskSplitViewportController } from '/static/js/task-split-viewer.js?v=20260713-split-v2';
 
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
@@ -10355,6 +10500,9 @@
             const splitViewportTextures = { top: null, front: null, left: null };
             let splitViewportTextureLoadSerial = 0;
             let splitViewportBlueprintMaterial = null;
+            let splitViewportBlueprintCard = null;
+            let splitViewportBlueprintSurfaceCleanup = null;
+            let splitViewportShadowWarmupTarget = null;
             let currentModel = null;
             let preparedLoaded = false;
             let finalLoaded = false;
@@ -10889,6 +11037,46 @@
                     pane.appendChild(label);
                     return pane;
                 }));
+                syncBlueprintSplitViewport(rects);
+            }
+
+            function ensureBlueprintSplitViewportMounted() {
+                const modelViewerContainer = document.getElementById('model-viewer-container');
+                const card = document.getElementById('blueprint-viewer-card');
+                if (!modelViewerContainer || !card) return null;
+                if (card.parentElement !== modelViewerContainer) modelViewerContainer.appendChild(card);
+                card.classList.add('is-split-viewport');
+                splitViewportBlueprintCard = card;
+                if (splitViewportController && !splitViewportBlueprintSurfaceCleanup) {
+                    splitViewportBlueprintSurfaceCleanup = splitViewportController.registerExternalSurface(card, 'left');
+                }
+                return card;
+            }
+
+            function syncBlueprintSplitViewport(rectsOpt = null) {
+                const card = ensureBlueprintSplitViewportMounted();
+                if (!card || !splitViewportController) return;
+                const rects = rectsOpt || splitViewportController.getRects();
+                const rect = rects.find((item) => item.id === 'left') || null;
+                card.classList.toggle('split-slot-inactive', !rect);
+                if (!rect) return;
+                card.dataset.splitRole = rect.role;
+                card.style.left = `${rect.x}px`;
+                card.style.top = `${rect.y}px`;
+                card.style.width = `${rect.width}px`;
+                card.style.height = `${rect.height}px`;
+                card.style.setProperty('--blueprint-stage-height', `${rect.height}px`);
+                requestAnimationFrame(() => window.AnimalBlueprintViewer?.resize?.());
+            }
+
+            function isSemanticBlueprintSplitViewportVisible() {
+                const card = splitViewportBlueprintCard || document.getElementById('blueprint-viewer-card');
+                return Boolean(
+                    card
+                    && card.parentElement?.id === 'model-viewer-container'
+                    && !card.classList.contains('hidden')
+                    && !card.classList.contains('split-slot-inactive')
+                );
             }
 
             function setSplitViewportInteractionView(viewId) {
@@ -10965,6 +11153,7 @@
                         window.__taskSplitViewport = { state, interactionView: splitViewportActiveInteractionView };
                     },
                 });
+                ensureBlueprintSplitViewportMounted();
                 setSplitViewportInteractionView('perspective');
                 updateSplitViewportOverlay();
                 syncSplitViewportBackdropTextures(activeViewerTheme, 'split runtime init');
@@ -11141,9 +11330,35 @@
                 tex.needsUpdate = true;
             }
 
+            function renderSplitViewportShadowMap(viewCamera, viewId) {
+                if (!renderer?.shadowMap?.enabled || !sunLight?.castShadow || !sunLight.shadow || !viewCamera) return;
+                updateSunShadowFocus(true, viewCamera, viewId);
+                if (!splitViewportShadowWarmupTarget) {
+                    splitViewportShadowWarmupTarget = new THREE.WebGLRenderTarget(1, 1, {
+                        depthBuffer: true,
+                        stencilBuffer: false,
+                    });
+                    splitViewportShadowWarmupTarget.texture.generateMipmaps = false;
+                }
+                const previousTarget = renderer.getRenderTarget();
+                const previousScissorTest = renderer.getScissorTest();
+                try {
+                    renderer.setScissorTest(false);
+                    renderer.setRenderTarget(splitViewportShadowWarmupTarget);
+                    renderer.setViewport(0, 0, 1, 1);
+                    renderer.setScissor(0, 0, 1, 1);
+                    sunLight.shadow.needsUpdate = true;
+                    renderer.render(scene, viewCamera);
+                } finally {
+                    renderer.setRenderTarget(previousTarget);
+                    renderer.setScissorTest(previousScissorTest);
+                }
+            }
+
             function renderSplitViewportRect(rect) {
                 const viewCamera = splitViewportCameras[rect.id] || camera;
                 if (!viewCamera) return;
+                if (rect.id === 'left' && isSemanticBlueprintSplitViewportVisible()) return;
                 const renderY = Math.max(0, (host.clientHeight || rect.height) - rect.y - rect.height);
                 const texture = rect.id === 'perspective'
                     ? backdropSceneTexture
@@ -11160,7 +11375,6 @@
                 if (skyObject) skyObject.visible = !texture;
                 if (texture) scene.background = texture;
                 if (rect.id === 'left' && splitViewportBlueprintMaterial) {
-                    if (groundPlaneMesh) groundPlaneMesh.visible = false;
                     currentModel?.traverse?.((child) => {
                         if (!child?.isMesh || !child.material) return;
                         blueprintMaterialEntries.push({ child, material: child.material });
@@ -11170,6 +11384,8 @@
                     });
                 }
                 try {
+                    renderSplitViewportShadowMap(viewCamera, rect.id);
+                    renderer.setScissorTest(true);
                     renderer.setViewport(rect.x, renderY, rect.width, rect.height);
                     renderer.setScissor(rect.x, renderY, rect.width, rect.height);
                     renderer.clear(true, true, true);
@@ -11210,14 +11426,17 @@
                 if (!renderer || !scene || !camera) return;
                 if (splitViewportController) {
                     const previousAutoUpdate = renderer.shadowMap.autoUpdate;
-                    renderer.setScissorTest(true);
-                    splitViewportController.getRects().forEach((rect, index) => {
-                        if (renderer.shadowMap.enabled) renderer.shadowMap.autoUpdate = index === 0 && previousAutoUpdate;
-                        renderSplitViewportRect(rect);
-                    });
-                    renderer.shadowMap.autoUpdate = previousAutoUpdate;
-                    renderer.setScissorTest(false);
-                    renderer.setViewport(0, 0, host.clientWidth || 1, host.clientHeight || 1);
+                    renderer.shadowMap.autoUpdate = false;
+                    try {
+                        renderer.setScissorTest(true);
+                        splitViewportController.getRects().forEach((rect) => renderSplitViewportRect(rect));
+                    } finally {
+                        updateSunShadowFocus(false, camera, 'perspective');
+                        renderer.shadowMap.autoUpdate = previousAutoUpdate;
+                        renderer.setRenderTarget(null);
+                        renderer.setScissorTest(false);
+                        renderer.setViewport(0, 0, host.clientWidth || 1, host.clientHeight || 1);
+                    }
                     return;
                 }
                 const hasThemeBackdrop = !!(usingStaticBackdrop && backdropSceneTexture);
@@ -11493,20 +11712,37 @@
                 return clampNumber(Math.max(configured * 8, footprint * 60, 640), 640, 4200);
             }
 
-            function updateShadowCatcherPlaneFromBounds(box, focus, modelSize) {
+            function updateShadowCatcherPlaneFromBounds(box, focus, modelSize, viewId = 'perspective') {
                 if (!groundPlaneMesh || !box || !focus || !modelSize) return;
                 const extent = getShadowCatcherExtent(modelSize);
                 const scale = extent / TASK_VIEWER_SHADOW_CATCHER_BASE_SIZE;
-                groundPlaneMesh.position.set(
-                    Number.isFinite(focus.x) ? focus.x : 0,
-                    Number.isFinite(box.min?.y) ? box.min.y - getViewerShadowYOffset() : 0,
-                    Number.isFinite(focus.z) ? focus.z : 0
+                const x = Number.isFinite(focus.x) ? focus.x : 0;
+                const y = Number.isFinite(focus.y) ? focus.y : 0;
+                const z = Number.isFinite(focus.z) ? focus.z : 0;
+                const gap = Math.max(
+                    Math.abs(getViewerShadowYOffset()),
+                    Math.max(Number(modelSize.x || 0), Number(modelSize.y || 0), Number(modelSize.z || 0), 1) * 0.012,
                 );
+                groundPlaneMesh.rotation.set(0, 0, 0);
+                if (viewId === 'front') {
+                    groundPlaneMesh.position.set(x, y, Number.isFinite(box.min?.z) ? box.min.z - gap : z - gap);
+                } else if (viewId === 'left') {
+                    groundPlaneMesh.rotation.y = -Math.PI / 2;
+                    groundPlaneMesh.position.set(Number.isFinite(box.max?.x) ? box.max.x + gap : x + gap, y, z);
+                } else {
+                    groundPlaneMesh.rotation.x = -Math.PI / 2;
+                    groundPlaneMesh.position.set(
+                        x,
+                        Number.isFinite(box.min?.y) ? box.min.y - gap : 0,
+                        z,
+                    );
+                }
                 groundPlaneMesh.scale.set(scale, scale, 1);
                 groundPlaneMesh.userData.shadowCatcherExtent = extent;
+                groundPlaneMesh.userData.shadowCatcherView = viewId;
             }
 
-            function updateShadowCatcherPlaneForModel(model) {
+            function updateShadowCatcherPlaneForModel(model, viewId = 'perspective') {
                 if (!model || !THREE || !groundPlaneMesh) return false;
                 try {
                     model.updateMatrixWorld?.(true);
@@ -11514,7 +11750,7 @@
                     if (box.isEmpty()) return false;
                     const focus = box.getCenter(new THREE.Vector3());
                     const modelSize = box.getSize(new THREE.Vector3());
-                    updateShadowCatcherPlaneFromBounds(box, focus, modelSize);
+                    updateShadowCatcherPlaneFromBounds(box, focus, modelSize, viewId);
                     return true;
                 } catch (_) {
                     return false;
@@ -12974,18 +13210,18 @@
                 }
             }
 
-            function getViewerSunOffset(radius = 10) {
+            function getViewerSunOffset(radius = 10, viewCamera = camera) {
                 const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
                 const theta = viewerState.sunRotation * (Math.PI / 180);
                 const x = radius * Math.sin(phi) * Math.sin(theta);
                 const y = Math.max(3, radius * Math.cos(phi));
                 const z = radius * Math.sin(phi) * Math.cos(theta);
-                if (usingStaticBackdrop && camera) {
-                    camera.updateMatrixWorld?.();
-                    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
-                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+                if (usingStaticBackdrop && viewCamera) {
+                    viewCamera.updateMatrixWorld?.();
+                    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(viewCamera.quaternion).normalize();
+                    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(viewCamera.quaternion).normalize();
                     const towardCamera = new THREE.Vector3();
-                    camera.getWorldDirection(towardCamera);
+                    viewCamera.getWorldDirection(towardCamera);
                     towardCamera.multiplyScalar(-1).normalize();
                     return new THREE.Vector3()
                         .addScaledVector(right, x)
@@ -12995,7 +13231,7 @@
                 return new THREE.Vector3(x, y, z);
             }
 
-            function updateSunShadowFocus(force = false) {
+            function updateSunShadowFocus(force = false, viewCamera = camera, viewId = 'perspective') {
                 if (!sunLight || !sunLight.target || !THREE) return;
                 const focus = new THREE.Vector3();
                 const modelSize = new THREE.Vector3(2, 2, 2);
@@ -13008,7 +13244,7 @@
                         const casterBox = new THREE.Box3().setFromObject(casterRoot);
                         casterBox.getCenter(focus);
                         casterBox.getSize(modelSize);
-                        updateShadowCatcherPlaneFromBounds(casterBox, focus, modelSize);
+                        updateShadowCatcherPlaneFromBounds(casterBox, focus, modelSize, viewId);
                         hasFocus = true;
                     } catch (error) {
                         hasFocus = false;
@@ -13017,7 +13253,7 @@
                 if (!hasFocus) return;
 
                 const r = Math.max(12, Number(viewerState.groundSize || 10) * 0.5);
-                const sunOffset = getViewerSunOffset(r);
+                const sunOffset = getViewerSunOffset(r, viewCamera);
 
                 sunLight.target.position.copy(focus);
                 sunLight.position.copy(focus).add(sunOffset);
@@ -13124,6 +13360,7 @@
                     } : null,
                     groundReceiveShadow: !!groundPlaneMesh?.receiveShadow,
                     shadowCatcher: groundPlaneMesh ? {
+                        view: groundPlaneMesh.userData?.shadowCatcherView || 'perspective',
                         extent: roundViewerDebugNumber(groundPlaneMesh.userData?.shadowCatcherExtent),
                         position: vectorToDebugObject(groundPlaneMesh.position),
                         scale: vectorToDebugObject(groundPlaneMesh.scale),

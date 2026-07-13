@@ -299,7 +299,8 @@ class AnimalBlueprintViewerController {
 
     syncStageHeight() {
         if (!this.card || !this.heightTarget) return;
-        const height = this.heightTarget.getBoundingClientRect().height;
+        const target = this.card.classList.contains('is-split-viewport') ? this.card : this.heightTarget;
+        const height = target.getBoundingClientRect().height;
         if (height > 120) {
             this.card.style.setProperty('--blueprint-stage-height', `${Math.round(height)}px`);
             this.resize();
@@ -411,6 +412,8 @@ class AnimalBlueprintViewerController {
         this.scene.background = new THREE.Color(0x061a3a);
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.host.appendChild(this.renderer.domElement);
 
         this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
@@ -459,9 +462,24 @@ class AnimalBlueprintViewerController {
         this.scene.add(gridB);
 
         this.scene.add(new THREE.HemisphereLight(0xbae6fd, 0x082f49, 2.4));
-        const key = new THREE.DirectionalLight(0xe0f2fe, 2.2);
-        key.position.set(3, -4, 6);
-        this.scene.add(key);
+        this.keyLight = new THREE.DirectionalLight(0xe0f2fe, 2.2);
+        this.keyLight.position.set(3, -4, 6);
+        this.keyLight.castShadow = true;
+        this.keyLight.shadow.mapSize.set(1024, 1024);
+        this.keyLight.shadow.radius = 3;
+        this.keyLight.shadow.bias = -0.00015;
+        this.keyLight.shadow.normalBias = 0.015;
+        this.scene.add(this.keyLight, this.keyLight.target);
+
+        this.shadowCatcher = new THREE.Mesh(
+            new THREE.PlaneGeometry(1, 1),
+            new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.34, transparent: true, depthWrite: false }),
+        );
+        this.shadowCatcher.receiveShadow = true;
+        this.shadowCatcher.castShadow = false;
+        this.shadowCatcher.renderOrder = -2;
+        this.shadowCatcher.name = 'BlueprintViewportShadowCatcher';
+        this.scene.add(this.shadowCatcher);
 
         this.raycaster = new THREE.Raycaster();
         this.pointer = new THREE.Vector2();
@@ -529,6 +547,8 @@ class AnimalBlueprintViewerController {
             if (!object.isMesh || !object.geometry) return;
             this.meshes.push(object);
             object.material = blueprintMaterial;
+            object.castShadow = true;
+            object.receiveShadow = false;
             const pos = object.geometry.attributes.position;
             if (!pos) return;
             const stride = Math.max(1, Math.ceil(pos.count / 2500));
@@ -540,6 +560,7 @@ class AnimalBlueprintViewerController {
         });
         this.bounds = new THREE.Box3().setFromObject(this.model);
         this.modelDiag = Math.max(this.bounds.getSize(new THREE.Vector3()).length(), 1);
+        this.syncShadowForView(true);
     }
 
     buildSkeleton() {
@@ -594,6 +615,8 @@ class AnimalBlueprintViewerController {
             }),
         );
         mesh.position.set(position[0], position[1], position[2]);
+        mesh.castShadow = true;
+        mesh.receiveShadow = false;
         mesh.userData.blueprintNodeId = id;
         this.nodeGroup.add(mesh);
         this.nodeMeshes.set(id, mesh);
@@ -674,6 +697,7 @@ class AnimalBlueprintViewerController {
         this.perspectiveCamera.aspect = width / height;
         this.perspectiveCamera.updateProjectionMatrix();
         this.fitCamera(false);
+        this.syncShadowForView(true);
     }
 
     setView(view) {
@@ -697,6 +721,7 @@ class AnimalBlueprintViewerController {
             this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
             this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
             this.fitPerspective();
+            this.syncShadowForView(true);
             if (this.selectedNodeId) this.transformControls.attach(this.nodeMeshes.get(this.selectedNodeId));
             this.setStatus('Perspective edit mode');
             return;
@@ -714,7 +739,57 @@ class AnimalBlueprintViewerController {
         this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
         this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
         this.fitOrthographic(view);
+        this.syncShadowForView(true);
         this.setStatus(`${view[0].toUpperCase()}${view.slice(1)} orthographic edit mode`);
+    }
+
+    syncShadowForView(force = false) {
+        if (!this.bounds || !this.camera || !this.keyLight || !this.shadowCatcher) return;
+        const center = this.bounds.getCenter(new THREE.Vector3());
+        const size = this.bounds.getSize(new THREE.Vector3());
+        const viewDirection = new THREE.Vector3();
+        this.camera.getWorldDirection(viewDirection).normalize();
+        const towardCamera = viewDirection.clone().multiplyScalar(-1);
+        const screenRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
+        const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
+        const extent = Math.max(size.x, size.y, size.z, 0.5) * 3.2;
+        const depth = Math.max(
+            Math.abs(viewDirection.x) * size.x,
+            Math.abs(viewDirection.y) * size.y,
+            Math.abs(viewDirection.z) * size.z,
+            0.05,
+        );
+        const planeCenter = center.clone().addScaledVector(viewDirection, depth * 0.58 + this.modelDiag * 0.012);
+        if (this.activeView === 'perspective' || this.activeView === 'top') {
+            planeCenter.set(center.x, center.y, this.bounds.min.z - this.modelDiag * 0.012);
+            this.shadowCatcher.quaternion.setFromUnitVectors(
+                new THREE.Vector3(0, 0, 1),
+                new THREE.Vector3(0, 0, 1),
+            );
+        } else {
+            this.shadowCatcher.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), towardCamera);
+        }
+        this.shadowCatcher.position.copy(planeCenter);
+        this.shadowCatcher.scale.set(extent, extent, 1);
+
+        const lightDistance = Math.max(this.modelDiag * 2.2, 2);
+        this.keyLight.target.position.copy(center);
+        this.keyLight.position.copy(center)
+            .addScaledVector(towardCamera, lightDistance)
+            .addScaledVector(screenRight, lightDistance * 0.34)
+            .addScaledVector(screenUp, lightDistance * 0.46);
+        this.keyLight.target.updateMatrixWorld();
+        this.keyLight.updateMatrixWorld();
+        const half = Math.max(this.modelDiag * 0.9, 0.75);
+        const shadowCamera = this.keyLight.shadow.camera;
+        shadowCamera.left = -half;
+        shadowCamera.right = half;
+        shadowCamera.top = half;
+        shadowCamera.bottom = -half;
+        shadowCamera.near = 0.01;
+        shadowCamera.far = Math.max(20, lightDistance * 5);
+        shadowCamera.updateProjectionMatrix();
+        if (force) this.keyLight.shadow.needsUpdate = true;
     }
 
     cycleView() {
@@ -1139,6 +1214,7 @@ class AnimalBlueprintViewerController {
         requestAnimationFrame(() => this.animate());
         this.updatePerspectiveZoomInertia();
         this.controls?.update();
+        this.syncShadowForView(false);
         this.updateLabelScales();
         this.renderer.render(this.scene, this.camera);
     }
