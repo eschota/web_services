@@ -115,11 +115,90 @@ void main() {
     };
 }
 
-test('does not structurally auto-detect unmarked COLOR_0 and TEXCOORD_1', () => {
+test('structurally detects unmarked COLOR_0 and TEXCOORD_1 without texture maps', () => {
     const { model, mesh, sourceMaterial } = makeModel({ marker: null });
     const report = vertexPbr.prepareSecsVertexPbrModel(THREE, model);
+    assert.equal(report.profile, vertexPbr.SECS_VERTEX_PBR_PROFILE);
+    assert.equal(report.detection, 'structural');
+    assert.notEqual(mesh.material, sourceMaterial);
+});
+
+test('preserves legacy textured PBR materials without COLOR_0 and TEXCOORD_1', () => {
+    const baseColorTexture = { id: 'base-color' };
+    const metallicRoughnessTexture = { id: 'metallic-roughness' };
+    const { model, mesh, sourceMaterial } = makeModel({
+        marker: null,
+        attributes: { color: undefined, uv1: undefined },
+        material: makeSourceMaterial({
+            map: baseColorTexture,
+            metalnessMap: metallicRoughnessTexture,
+            roughnessMap: metallicRoughnessTexture,
+        }),
+    });
+    const report = vertexPbr.prepareSecsVertexPbrModel(THREE, model);
     assert.equal(report.profile, null);
+    assert.equal(report.detection, null);
+    assert.equal(report.configuredMeshCount, 0);
     assert.equal(mesh.material, sourceMaterial);
+    assert.equal(mesh.material.map, baseColorTexture);
+    assert.equal(mesh.material.metalnessMap, metallicRoughnessTexture);
+    assert.equal(mesh.material.roughnessMap, metallicRoughnessTexture);
+});
+
+test('legacy and physical texture maps veto structural detection', () => {
+    for (const textureKey of ['map', 'iridescenceMap', 'anisotropyMap', 'envMap']) {
+        const { model, mesh, sourceMaterial } = makeModel({
+            marker: null,
+            material: makeSourceMaterial({ [textureKey]: { id: textureKey } }),
+        });
+        const report = vertexPbr.prepareSecsVertexPbrModel(THREE, model);
+        assert.equal(report.profile, null, textureKey);
+        assert.equal(mesh.material, sourceMaterial, textureKey);
+    }
+});
+
+test('structural detection is all-or-nothing for a mixed legacy scene', () => {
+    const structural = makeModel({ marker: null });
+    const legacy = makeModel({
+        marker: null,
+        attributes: { color: undefined, uv1: undefined },
+        material: makeSourceMaterial({ map: { id: 'legacy-base-color' } }),
+    });
+    structural.model.children.push(legacy.mesh);
+    legacy.mesh.parent = structural.model;
+    structural.model.traverse = (callback) => {
+        callback(structural.model);
+        structural.model.children.forEach(callback);
+    };
+
+    const report = vertexPbr.prepareSecsVertexPbrModel(THREE, structural.model);
+    assert.equal(report.profile, null);
+    assert.equal(structural.mesh.material, structural.sourceMaterial);
+    assert.equal(legacy.mesh.material, legacy.sourceMaterial);
+});
+
+test('accepts the versioned profile from glTF asset extras', () => {
+    const { model, mesh, sourceMaterial } = makeModel({ marker: null });
+    const report = vertexPbr.prepareSecsVertexPbrModel(THREE, model, {
+        asset: { extras: { secsVertexPbr: vertexPbr.SECS_VERTEX_PBR_PROFILE } },
+    });
+    assert.equal(report.profile, vertexPbr.SECS_VERTEX_PBR_PROFILE);
+    assert.equal(report.detection, 'declared');
+    assert.notEqual(mesh.material, sourceMaterial);
+});
+
+test('fails closed when a declared root has no renderable meshes', () => {
+    const model = {
+        userData: { secsVertexPbrProfile: vertexPbr.SECS_VERTEX_PBR_PROFILE },
+        parent: null,
+        traverse(callback) {
+            callback(this);
+        },
+    };
+    assert.throws(
+        () => vertexPbr.prepareSecsVertexPbrModel(THREE, model),
+        /profile marker exists but no renderable meshes were found/,
+    );
 });
 
 test('configures a clean MeshStandardMaterial for a valid profile', () => {

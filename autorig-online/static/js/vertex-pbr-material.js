@@ -19,8 +19,14 @@ const DISALLOWED_TEXTURE_KEYS = [
     'clearcoatRoughnessMap',
     'sheenColorMap',
     'sheenRoughnessMap',
+    'iridescenceMap',
+    'iridescenceThicknessMap',
+    'anisotropyMap',
     'transmissionMap',
     'thicknessMap',
+    'envMap',
+    'gradientMap',
+    'matcap',
 ];
 
 export class SecsVertexPbrValidationError extends Error {
@@ -35,8 +41,31 @@ export class SecsVertexPbrValidationError extends Error {
 }
 
 function profileFromUserData(value) {
-    const profile = value?.userData?.secsVertexPbrProfile;
-    return profile === SECS_VERTEX_PBR_PROFILE ? profile : null;
+    const markers = [
+        value?.userData?.secsVertexPbrProfile,
+        value?.userData?.secsVertexPbr,
+        value?.userData?.asset?.extras?.secsVertexPbr,
+        value?.userData?.gltfAsset?.extras?.secsVertexPbr,
+    ];
+    return markers.some((marker) => (
+        marker === SECS_VERTEX_PBR_PROFILE ||
+        marker?.profile === SECS_VERTEX_PBR_PROFILE
+    )) ? SECS_VERTEX_PBR_PROFILE : null;
+}
+
+function profileFromAssetMetadata(asset) {
+    const markers = [
+        asset?.extras?.secsVertexPbr,
+        asset?.extras?.secsVertexPbrProfile,
+        asset?.asset?.extras?.secsVertexPbr,
+        asset?.asset?.extras?.secsVertexPbrProfile,
+        asset?.secsVertexPbr,
+        asset?.secsVertexPbrProfile,
+    ];
+    return markers.some((marker) => (
+        marker === SECS_VERTEX_PBR_PROFILE ||
+        marker?.profile === SECS_VERTEX_PBR_PROFILE
+    )) ? SECS_VERTEX_PBR_PROFILE : null;
 }
 
 function hasProfileInAncestry(object) {
@@ -59,6 +88,10 @@ function meshUsesVertexPbrProfile(mesh, materials) {
     return hasProfileInAncestry(mesh) || materials.some((material) => isSecsVertexPbrMaterial(material));
 }
 
+function materialHasDisallowedTexture(material) {
+    return DISALLOWED_TEXTURE_KEYS.some((key) => !!material?.[key]);
+}
+
 function attributeIssue(geometry, name, minItemSize, exactItemSize = null) {
     const attribute = geometry?.attributes?.[name];
     if (!attribute) return `missing ${name}`;
@@ -75,15 +108,57 @@ function meshLabel(mesh, fallbackIndex) {
     return String(mesh?.name || mesh?.uuid || `mesh-${fallbackIndex}`);
 }
 
-function collectProfiledMeshes(model) {
+function collectRenderableMeshes(model) {
     const meshes = [];
     model?.traverse?.((object) => {
         if (!object?.isMesh || !object.material) return;
         const materials = (Array.isArray(object.material) ? object.material : [object.material]).filter(Boolean);
-        if (!materials.length || !meshUsesVertexPbrProfile(object, materials)) return;
+        if (!materials.length) return;
         meshes.push({ mesh: object, materials });
     });
     return meshes;
+}
+
+function hasRequiredStructuralLayout({ mesh, materials }) {
+    const geometry = mesh?.geometry;
+    if (attributeIssue(geometry, 'position', 3)) return false;
+    if (attributeIssue(geometry, 'normal', 3)) return false;
+    if (attributeIssue(geometry, 'color', 4, 4)) return false;
+    if (attributeIssue(geometry, 'uv1', 2)) return false;
+    if (materials.some((material) => materialHasDisallowedTexture(material))) return false;
+    return materials.every((material) => {
+        if (!material.normalMap) return true;
+        return Number(material.normalMap.channel) === 2 && !attributeIssue(geometry, 'uv2', 2);
+    });
+}
+
+export function detectSecsVertexPbrCapability(model, { asset = null } = {}) {
+    const renderableMeshes = collectRenderableMeshes(model);
+    const assetHasProfile = profileFromAssetMetadata(asset) === SECS_VERTEX_PBR_PROFILE ||
+        profileFromAssetMetadata(model?.userData) === SECS_VERTEX_PBR_PROFILE;
+    const rootHasProfile = hasProfileInAncestry(model);
+    const declarationCoversModel = assetHasProfile || rootHasProfile;
+    const declaredMeshes = renderableMeshes.filter(({ mesh, materials }) => (
+        declarationCoversModel || meshUsesVertexPbrProfile(mesh, materials)
+    ));
+
+    if (declarationCoversModel || declaredMeshes.length > 0) {
+        return {
+            profile: SECS_VERTEX_PBR_PROFILE,
+            detection: 'declared',
+            renderableMeshes,
+            profiledMeshes: declarationCoversModel ? renderableMeshes : declaredMeshes,
+        };
+    }
+
+    const structurallyCompatible = renderableMeshes.length > 0 &&
+        renderableMeshes.every((entry) => hasRequiredStructuralLayout(entry));
+    return {
+        profile: structurallyCompatible ? SECS_VERTEX_PBR_PROFILE : null,
+        detection: structurallyCompatible ? 'structural' : null,
+        renderableMeshes,
+        profiledMeshes: structurallyCompatible ? renderableMeshes : [],
+    };
 }
 
 function validateProfiledMeshes(profiledMeshes) {
@@ -254,7 +329,7 @@ function createRuntimeMaterial(THREE, sourceMaterial) {
     return runtimeMaterial;
 }
 
-export function prepareSecsVertexPbrModel(THREE, model, { throwOnError = true } = {}) {
+export function prepareSecsVertexPbrModel(THREE, model, { throwOnError = true, asset = null } = {}) {
     if (!THREE?.MeshStandardMaterial) {
         throw new Error('Three.js MeshStandardMaterial is required for Vertex PBR');
     }
@@ -262,15 +337,21 @@ export function prepareSecsVertexPbrModel(THREE, model, { throwOnError = true } 
         throw new Error('A traversable Three.js model is required for Vertex PBR');
     }
 
-    const profiledMeshes = collectProfiledMeshes(model);
-    const rootHasProfile = hasProfileInAncestry(model);
+    const capability = detectSecsVertexPbrCapability(model, { asset });
+    const profiledMeshes = capability.profiledMeshes;
+    const rootHasProfile = capability.detection === 'declared' && (
+        hasProfileInAncestry(model) ||
+        profileFromAssetMetadata(asset) === SECS_VERTEX_PBR_PROFILE ||
+        profileFromAssetMetadata(model?.userData) === SECS_VERTEX_PBR_PROFILE
+    );
     const errors = validateProfiledMeshes(profiledMeshes);
     if (rootHasProfile && profiledMeshes.length === 0) {
         errors.push('profile marker exists but no renderable meshes were found');
     }
 
     const report = {
-        profile: profiledMeshes.length || rootHasProfile ? SECS_VERTEX_PBR_PROFILE : null,
+        profile: capability.profile,
+        detection: capability.detection,
         profiledMeshCount: profiledMeshes.length,
         configuredMeshCount: 0,
         configuredMaterialCount: 0,

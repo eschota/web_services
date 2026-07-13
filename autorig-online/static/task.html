@@ -9010,7 +9010,11 @@
         import {
             isSecsVertexPbrMaterial,
             prepareSecsVertexPbrModel,
-        } from '/static/js/vertex-pbr-material.js?v=2';
+        } from '/static/js/vertex-pbr-material.js?v=3';
+        import {
+            cloneAppearanceMaterial,
+            transferAppearanceMaterials,
+        } from '/static/js/appearance-material-transfer.js?v=1';
         import {
             animationPreviewCandidates,
             preferredMovingClip,
@@ -13077,8 +13081,8 @@
                 return VIEWER_TEXTURE_MAP_KEYS.some((key) => !!material[key]);
             }
 
-            function prepareVertexPbrForViewer(model, reason = 'model load') {
-                const report = prepareSecsVertexPbrModel(THREE, model);
+            function prepareVertexPbrForViewer(model, reason = 'model load', asset = null) {
+                const report = prepareSecsVertexPbrModel(THREE, model, { asset });
                 if (report.profile) {
                     console.info('[VertexPBR] Prepared runtime material', { reason, ...report });
                     window.taskDbg('[VertexPBR] Prepared runtime material:', { reason, ...report });
@@ -16856,6 +16860,107 @@
                 return value.includes('animation') || value.includes('animations.glb') || value.includes('animations.fbx');
             }
 
+            let preparedAppearanceDonorPromise = null;
+
+            function isCanonicalTaskAnimationFbxUrl(url = '') {
+                const cleanUrl = String(url || '').split(/[?#]/, 1)[0];
+                return cleanUrl === `/api/task/${taskId}/animations.fbx`;
+            }
+
+            async function loadPreparedAppearanceDonor() {
+                const cachedPreparedModel = getSharedModelCache()?.prepared;
+                if (cachedPreparedModel) return cachedPreparedModel;
+                if (!preparedAppearanceDonorPromise) {
+                    preparedAppearanceDonorPromise = new Promise((resolve, reject) => {
+                        const loader = new GLTFLoader();
+                        const timeout = setTimeout(
+                            () => reject(new Error('Timed out loading prepared.glb appearance donor')),
+                            LOAD_MODEL_DEFAULT_TIMEOUT_MS,
+                        );
+                        loader.load(
+                            `/api/task/${encodeURIComponent(taskId)}/prepared.glb`,
+                            (gltf) => {
+                                clearTimeout(timeout);
+                                try {
+                                    const donor = gltf.scene;
+                                    prepareVertexPbrForViewer(
+                                        donor,
+                                        'FBX prepared.glb appearance donor',
+                                        gltf?.parser?.json?.asset || null,
+                                    );
+                                    resolve(donor);
+                                } catch (error) {
+                                    reject(error);
+                                }
+                            },
+                            undefined,
+                            (error) => {
+                                clearTimeout(timeout);
+                                reject(error);
+                            },
+                        );
+                    });
+                }
+                try {
+                    return await preparedAppearanceDonorPromise;
+                } catch (error) {
+                    preparedAppearanceDonorPromise = null;
+                    throw error;
+                }
+            }
+
+            function validateViewerAppearanceMatch({ targetMesh, sourceMesh }) {
+                const sourceMaterials = (Array.isArray(sourceMesh?.material)
+                    ? sourceMesh.material
+                    : [sourceMesh?.material]).filter(Boolean);
+                if (!sourceMaterials.some((material) => isSecsVertexPbrMaterial(material))) return true;
+                const attributes = targetMesh?.geometry?.attributes || {};
+                const positionCount = Number(attributes.position?.count);
+                if (
+                    !attributes.color ||
+                    Number(attributes.color.itemSize) !== 4 ||
+                    Number(attributes.color.count) !== positionCount
+                ) {
+                    return { compatible: false, reason: 'Vertex PBR donor requires FBX COLOR_0 vec4' };
+                }
+                if (
+                    !attributes.uv1 ||
+                    Number(attributes.uv1.itemSize) < 2 ||
+                    Number(attributes.uv1.count) !== positionCount
+                ) {
+                    return { compatible: false, reason: 'Vertex PBR donor requires FBX TEXCOORD_1' };
+                }
+                return true;
+            }
+
+            async function hydrateCanonicalAnimationFbxAppearance(model, label) {
+                const donor = await loadPreparedAppearanceDonor();
+                const report = transferAppearanceMaterials(model, donor, {
+                    materialCloner: (material) => {
+                        const cloned = cloneAppearanceMaterial(material, { textureFlipY: true });
+                        if (isSecsVertexPbrMaterial(material) && cloned?.userData) {
+                            delete cloned.userData.autorigVertexPbrShaderInstalled;
+                        }
+                        return cloned;
+                    },
+                    validateMatch: validateViewerAppearanceMatch,
+                });
+                model.userData = model.userData || {};
+                model.userData.autorigAppearanceTransferReport = report;
+                if (!report.complete) {
+                    throw new Error(
+                        `Prepared appearance transfer incomplete for ${label}: ` +
+                        `${report.transferredMeshCount}/${report.targetMeshCount} meshes; ` +
+                        `${report.unmatched.length} unmatched, ${report.ambiguous.length} ambiguous, ` +
+                        `${report.incompatible.length} incompatible`,
+                    );
+                }
+                prepareVertexPbrForViewer(model, 'hydrated animation FBX appearance');
+                console.info('[ViewerAppearance] Hydrated animation FBX from prepared.glb', report);
+                window.taskDbg('[ViewerAppearance] Hydrated animation FBX from prepared.glb:', report);
+                return report;
+            }
+
             async function loadModel(glbUrl, label = 'GLB', retryCount = 0, timeoutMs = LOAD_MODEL_DEFAULT_TIMEOUT_MS) {
                 if (!sceneInited) await initScene();
                 const isAnimationPreview = isAnimationModelSource(label, glbUrl);
@@ -16940,7 +17045,7 @@
 
                 const model = gltf.scene;
                 try {
-                    prepareVertexPbrForViewer(model, `load ${label}`);
+                    prepareVertexPbrForViewer(model, `load ${label}`, gltf?.parser?.json?.asset || null);
                 } catch (error) {
                     console.error('[VertexPBR] Model rejected:', error);
                     setStatus(error?.message || `Invalid ${label}`);
@@ -17140,6 +17245,16 @@
                 }
                 
                 loadingManager.updateProgress(85, `Processing ${label}...`);
+
+                if (isCanonicalTaskAnimationFbxUrl(fbxUrl)) {
+                    try {
+                        await hydrateCanonicalAnimationFbxAppearance(model, label);
+                    } catch (error) {
+                        console.error('[ViewerAppearance] Refusing unhydrated animation FBX:', error);
+                        loadingManager.setItemStatus(label, 'error');
+                        return false;
+                    }
+                }
 
                 // Remove previous model
                 if (currentModel) {
@@ -17378,7 +17493,11 @@
                     
                     // Cache the loaded model (don't add to scene yet)
                     const model = gltf.scene;
-                    prepareVertexPbrForViewer(model, 'background animations load');
+                    prepareVertexPbrForViewer(
+                        model,
+                        'background animations load',
+                        gltf?.parser?.json?.asset || null,
+                    );
                     const loadedAnimations = gltf.animations || [];
                     
                     modelCache.animations = model;
