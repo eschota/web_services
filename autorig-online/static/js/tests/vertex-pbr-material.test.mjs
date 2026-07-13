@@ -110,7 +110,7 @@ void main() {
     #include <roughnessmap_fragment>
     #include <metalnessmap_fragment>
     vec3 outgoingLight = vec3(1.0);
-    #include <output_fragment>
+    #include <opaque_fragment>
 }`,
     };
 }
@@ -206,6 +206,7 @@ test('shader patch decodes base color, AO, metallic and roughness exactly once',
     assert.match(firstFragment, /roughnessFactor = clamp\(vSecsMetalRough\.y/);
     assert.match(firstFragment, /metalnessFactor = clamp\(vSecsMetalRough\.x/);
     assert.match(firstFragment, /mix\(0\.46, 1\.0, clamp\(vColor\.a/);
+    assert.match(firstFragment, /mix\(0\.46[\s\S]*#include <opaque_fragment>/);
 
     vertexPbr.patchSecsVertexPbrShader(shader);
     assert.equal(shader.vertexShader, firstVertex);

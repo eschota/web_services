@@ -3,7 +3,7 @@
  * Modal dialog for changing rig type and restarting tasks
  */
 
-import { isSecsVertexPbrMaterial } from './vertex-pbr-material.js?v=1';
+import { isSecsVertexPbrMaterial } from './vertex-pbr-material.js?v=2';
 
 // Rig types enum
 export const RigType = {
@@ -1468,11 +1468,13 @@ export class ViewerControls {
 
             // 9. Output Debug Overrides
             const originalShader = shader.fragmentShader;
-            const hasOutputFragment = originalShader.includes('#include <output_fragment>');
+            const outputAnchor = originalShader.includes('#include <opaque_fragment>')
+                ? '#include <opaque_fragment>'
+                : (originalShader.includes('#include <output_fragment>') ? '#include <output_fragment>' : null);
 
-            if (hasOutputFragment) {
+            if (outputAnchor) {
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <output_fragment>',
+                    outputAnchor,
                     `
                     if (u_debug_mode > 0.5) {
                     vec3 debugCol = vec3(1.0, 0.0, 1.0); // Magenta fallback
@@ -1550,12 +1552,12 @@ export class ViewerControls {
                     
                     gl_FragColor = vec4(debugCol, 1.0);
                 } else {
-                    #include <output_fragment>
+                    ${outputAnchor}
                 }
                 `
                 );
             } else {
-                console.warn('[ViewerControls] #include <output_fragment> not found, adding debug block at end of shader');
+                console.warn('[ViewerControls] Standard output shader chunk not found, adding debug block at end of shader');
                 const lastBrace = shader.fragmentShader.lastIndexOf('}');
                 if (lastBrace > 0) {
                     const beforeLastBrace = shader.fragmentShader.substring(0, lastBrace);

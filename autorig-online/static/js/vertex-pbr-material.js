@@ -1,6 +1,6 @@
 export const SECS_VERTEX_PBR_PROFILE = 'secs.vertexPbr.v1';
 
-const SHADER_REVISION = 'autorig-secs-vertex-pbr-r1';
+const SHADER_REVISION = 'autorig-secs-vertex-pbr-r2';
 const DISALLOWED_TEXTURE_KEYS = [
     'map',
     'aoMap',
@@ -182,11 +182,17 @@ roughnessFactor = clamp(vSecsMetalRough.y, 0.0, 1.0);`,
 metalnessFactor = clamp(vSecsMetalRough.x, 0.0, 1.0);`,
         'metalness',
     );
+    // Three.js r154+ renamed output_fragment to opaque_fragment. Apply AO to
+    // outgoingLight immediately before the standard output stage so tone
+    // mapping, color-space conversion and fog remain owned by Three.js.
+    const outputAnchor = shader.fragmentShader.includes('#include <opaque_fragment>')
+        ? '#include <opaque_fragment>'
+        : '#include <output_fragment>';
     shader.fragmentShader = replaceRequired(
         shader.fragmentShader,
-        '#include <output_fragment>',
+        outputAnchor,
         `outgoingLight *= mix(0.46, 1.0, clamp(vColor.a, 0.0, 1.0));
-#include <output_fragment>`,
+${outputAnchor}`,
         'ambient occlusion',
     );
     return shader;
