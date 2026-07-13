@@ -9025,6 +9025,7 @@
             captureRootTransform,
             restoreRootTransform,
         } from '/static/js/animation-playlist-controller.js?v=1';
+        import { TaskBoneCorrectionPanel } from '/static/js/task-bone-correction-panel.js?v=1';
 
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
@@ -9094,6 +9095,8 @@
             const animationManifestCache = new Map();
             let animationPlaylistConfigureToken = 0;
             let animationPlaylistMixer = null;
+            let boneCorrectionPanel = null;
+            let boneCorrectionConfiguredModel = null;
 
             const animationPlaylist = new AnimationPlaylistController({
                 playClip: (name, options) => play(name, options),
@@ -9107,6 +9110,7 @@
                 },
                 onClipChange: (entry, state) => {
                     if (sel && entry?.name) sel.value = entry.name;
+                    boneCorrectionPanel?.setActiveClip?.(entry);
                     window.TaskUI?.syncAnimationPlaylistClip?.(entry);
                     if (state?.mode === 'autoplay') {
                         setStatus(`Ready (${animationPlaylist.entries.length} animations) · ${state.index + 1}/${state.total}`);
@@ -9204,6 +9208,8 @@
                 if (configuredModel && !animationPlaylistRootSnapshots.has(configuredModel)) {
                     animationPlaylistRootSnapshots.set(configuredModel, captureRootTransform(configuredModel));
                 }
+
+                configureBoneCorrectionForCurrentModel(configuredModel);
 
                 animationPlaylist.configure({
                     mixer: configuredMixer,
@@ -10667,6 +10673,44 @@
             let splitViewportShadowLastRefresh = 0;
             const SPLIT_VIEWPORT_SHADOW_REFRESH_MS = 100;
             let currentModel = null;
+
+            function ensureBoneCorrectionPanel() {
+                if (boneCorrectionPanel || !THREE) return boneCorrectionPanel;
+                const card = document.getElementById('blueprint-viewer-card');
+                if (!card) return null;
+                boneCorrectionPanel = new TaskBoneCorrectionPanel({
+                    THREE,
+                    taskId,
+                    card,
+                    getCamera: () => splitViewportCameras.left || null,
+                    onModeChange: () => {
+                        splitViewportShadowLastRefresh = 0;
+                        updateSplitViewportOverlay();
+                    },
+                    onInteraction: (reason) => {
+                        markAnimationPlaylistInteraction(reason || 'bone-correction');
+                        if (splitViewportControls.left) setSplitViewportInteractionView('left');
+                    },
+                    onCorrectionChange: () => {
+                        splitViewportShadowLastRefresh = 0;
+                        if (currentModel) updateShadowCatcherPlaneForModel(currentModel);
+                    },
+                });
+                window.__taskBoneCorrectionPanel = boneCorrectionPanel;
+                return boneCorrectionPanel;
+            }
+
+            function configureBoneCorrectionForCurrentModel(model = currentModel) {
+                const panel = ensureBoneCorrectionPanel();
+                if (!panel) return null;
+                const modelChanged = boneCorrectionConfiguredModel !== model;
+                boneCorrectionConfiguredModel = model || null;
+                panel.configure({ model: model || null, currentModelType });
+                if (animationPlaylist.currentEntry) panel.setActiveClip(animationPlaylist.currentEntry);
+                if (modelChanged) splitViewportShadowLastRefresh = 0;
+                return panel;
+            }
+
             let preparedLoaded = false;
             let finalLoaded = false;
             let mainViewerEnabled = true;
@@ -11239,6 +11283,7 @@
                     && card.parentElement?.id === 'model-viewer-container'
                     && !card.classList.contains('hidden')
                     && !card.classList.contains('split-slot-inactive')
+                    && card.dataset.blueprintMode !== 'animation'
                 );
             }
 
@@ -11275,7 +11320,10 @@
                     left: { position: [-4, 1.5, 0], up: [0, 1, 0] },
                 };
                 Object.entries(cameraSpecs).forEach(([viewId, spec]) => {
-                    const splitCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+                    const splitCamera = viewId === 'left'
+                        ? new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000)
+                        : new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+                    if (viewId === 'left') splitCamera.userData.autorigOrthoHalfHeight = 1;
                     splitCamera.position.set(...spec.position);
                     splitCamera.up.set(...spec.up);
                     splitCamera.lookAt(0, 1, 0);
@@ -11290,6 +11338,10 @@
                     orbit.target.set(0, 1, 0);
                     orbit.minDistance = 0.25;
                     orbit.maxDistance = 1000;
+                    if (viewId === 'left') {
+                        orbit.minZoom = 0.1;
+                        orbit.maxZoom = 20;
+                    }
                     orbit.enabled = false;
                     orbit.update();
                     splitViewportControls[viewId] = orbit;
@@ -11318,6 +11370,7 @@
                     },
                 });
                 ensureBlueprintSplitViewportMounted();
+                ensureBoneCorrectionPanel();
                 setSplitViewportInteractionView('perspective');
                 updateSplitViewportOverlay();
                 syncSplitViewportBackdropTextures(activeViewerTheme, 'split runtime init');
@@ -11329,7 +11382,15 @@
                 rects.forEach((rect) => {
                     const viewCamera = splitViewportCameras[rect.id];
                     if (!viewCamera) return;
-                    viewCamera.aspect = Math.max(0.05, rect.width / Math.max(1, rect.height));
+                    const aspect = Math.max(0.05, rect.width / Math.max(1, rect.height));
+                    viewCamera.aspect = aspect;
+                    if (viewCamera.isOrthographicCamera) {
+                        const halfHeight = Math.max(0.01, Number(viewCamera.userData.autorigOrthoHalfHeight || 1));
+                        viewCamera.left = -halfHeight * aspect;
+                        viewCamera.right = halfHeight * aspect;
+                        viewCamera.top = halfHeight;
+                        viewCamera.bottom = -halfHeight;
+                    }
                     viewCamera.updateProjectionMatrix();
                 });
             }
@@ -11352,13 +11413,28 @@
                     const orbit = splitViewportControls[viewId];
                     if (!viewCamera || !orbit) return;
                     const rect = rects.find((item) => item.id === viewId);
-                    viewCamera.aspect = Math.max(0.05, (rect?.width || host.clientWidth) / Math.max(1, rect?.height || host.clientHeight));
-                    viewCamera.fov = Math.min(80, Math.max(18, Number(camera?.fov || 45)));
-                    const fovRad = THREE.MathUtils.degToRad(viewCamera.fov);
-                    const hFov = 2 * Math.atan(Math.tan(fovRad / 2) * viewCamera.aspect);
-                    const fitHeight = (Math.max(boundsInfo.size.y, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(fovRad / 2));
-                    const fitWidth = (Math.max(boundsInfo.size.x, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(hFov / 2));
-                    const distance = Math.max(fitHeight, fitWidth, boundsInfo.radius * 1.5, boundsInfo.maxDim * 1.45, 0.85);
+                    const aspect = Math.max(0.05, (rect?.width || host.clientWidth) / Math.max(1, rect?.height || host.clientHeight));
+                    viewCamera.aspect = aspect;
+                    let distance;
+                    if (viewCamera.isOrthographicCamera) {
+                        const visibleHeight = Math.max(boundsInfo.size.y, 0.08) * 1.18;
+                        const visibleWidth = Math.max(boundsInfo.size.z, 0.08) * 1.18;
+                        const halfHeight = Math.max(visibleHeight * 0.5, visibleWidth * 0.5 / aspect, 0.1);
+                        viewCamera.userData.autorigOrthoHalfHeight = halfHeight;
+                        viewCamera.left = -halfHeight * aspect;
+                        viewCamera.right = halfHeight * aspect;
+                        viewCamera.top = halfHeight;
+                        viewCamera.bottom = -halfHeight;
+                        viewCamera.zoom = 1;
+                        distance = Math.max(boundsInfo.radius * 2, boundsInfo.maxDim * 2, 1);
+                    } else {
+                        viewCamera.fov = Math.min(80, Math.max(18, Number(camera?.fov || 45)));
+                        const fovRad = THREE.MathUtils.degToRad(viewCamera.fov);
+                        const hFov = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
+                        const fitHeight = (Math.max(boundsInfo.size.y, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(fovRad / 2));
+                        const fitWidth = (Math.max(boundsInfo.size.x, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(hFov / 2));
+                        distance = Math.max(fitHeight, fitWidth, boundsInfo.radius * 1.5, boundsInfo.maxDim * 1.45, 0.85);
+                    }
                     viewCamera.position.copy(target).add(direction.clone().multiplyScalar(distance));
                     if (viewId === 'top') viewCamera.up.set(0, 0, -1);
                     else viewCamera.up.set(0, 1, 0);
@@ -11575,7 +11651,15 @@
                 const texture = rect.id === 'perspective'
                     ? backdropSceneTexture
                     : (splitViewportTextures[rect.id] || backdropSceneTexture);
-                viewCamera.aspect = Math.max(0.05, rect.width / Math.max(1, rect.height));
+                const viewAspect = Math.max(0.05, rect.width / Math.max(1, rect.height));
+                viewCamera.aspect = viewAspect;
+                if (viewCamera.isOrthographicCamera) {
+                    const halfHeight = Math.max(0.01, Number(viewCamera.userData.autorigOrthoHalfHeight || 1));
+                    viewCamera.left = -halfHeight * viewAspect;
+                    viewCamera.right = halfHeight * viewAspect;
+                    viewCamera.top = halfHeight;
+                    viewCamera.bottom = -halfHeight;
+                }
                 viewCamera.updateProjectionMatrix();
                 if (texture?.image) updateScreenBackdropCover(texture, viewCamera.aspect);
 
@@ -14544,12 +14628,17 @@
                         if (!mainViewerEnabled || document.hidden) {
                             return;
                         }
+                        const correctionRuntimeEnabled = currentModelType === 'animations' && !playModeController?.active;
+                        boneCorrectionPanel?.setRuntimeEnabled?.(correctionRuntimeEnabled);
+                        boneCorrectionPanel?.beforeMixerUpdate?.();
                         if (mixer) {
                             mixer.update(dt);
                             if (currentModelType !== 'animations') {
                                 snapCurrentModelToGround({ force: false });
                             }
                         }
+                        const correctionPoseChanged = boneCorrectionPanel?.afterMixerUpdate?.() === true;
+                        if (correctionPoseChanged) currentModel?.updateMatrixWorld?.(true);
                         if (viewerControls && splitViewportActiveInteractionView === 'perspective') viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
                         if (playModeController?.active) playModeController.update(dt);
@@ -14557,6 +14646,7 @@
                         publishMainViewerDebugState();
                         if (window.updateZoomInertia && splitViewportActiveInteractionView === 'perspective') window.updateZoomInertia();
                         Object.values(splitViewportControls).forEach((orbit) => orbit?.update?.());
+                        boneCorrectionPanel?.updateOverlay?.();
                         
                         if (!isDefaultComparisonOn && cameraInitialized && camera && controls) {
                             viewerState.camera.position.x = camera.position.x;
@@ -15383,6 +15473,7 @@
                                 setStatus('Ragdoll mode active · R reset · Space impulse');
                             }
                         }
+                        configureBoneCorrectionForCurrentModel();
                     };
                     
                     tposeBtn?.addEventListener('click', () => { tposeBtn.blur(); setActiveMode('tpose'); });
@@ -17192,6 +17283,7 @@
                     const ok = await loadFBX(url, label);
                     if (ok) {
                         currentModelType = 'variant';
+                        configureBoneCorrectionForCurrentModel();
                         finalLoaded = true;
                     }
                     return ok;
