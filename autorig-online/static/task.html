@@ -11347,6 +11347,7 @@
                     renderer.setRenderTarget(splitViewportShadowWarmupTarget);
                     renderer.setViewport(0, 0, 1, 1);
                     renderer.setScissor(0, 0, 1, 1);
+                    renderer.shadowMap.needsUpdate = true;
                     sunLight.shadow.needsUpdate = true;
                     renderer.render(scene, viewCamera);
                 } finally {
@@ -11719,21 +11720,23 @@
                 const x = Number.isFinite(focus.x) ? focus.x : 0;
                 const y = Number.isFinite(focus.y) ? focus.y : 0;
                 const z = Number.isFinite(focus.z) ? focus.z : 0;
-                const gap = Math.max(
+                const maxDim = Math.max(Number(modelSize.x || 0), Number(modelSize.y || 0), Number(modelSize.z || 0), 1);
+                const contactGap = Math.max(
                     Math.abs(getViewerShadowYOffset()),
-                    Math.max(Number(modelSize.x || 0), Number(modelSize.y || 0), Number(modelSize.z || 0), 1) * 0.012,
+                    maxDim * 0.012,
                 );
+                const screenGap = Math.max(contactGap, maxDim * 0.18);
                 groundPlaneMesh.rotation.set(0, 0, 0);
                 if (viewId === 'front') {
-                    groundPlaneMesh.position.set(x, y, Number.isFinite(box.min?.z) ? box.min.z - gap : z - gap);
+                    groundPlaneMesh.position.set(x, y, Number.isFinite(box.min?.z) ? box.min.z - screenGap : z - screenGap);
                 } else if (viewId === 'left') {
                     groundPlaneMesh.rotation.y = -Math.PI / 2;
-                    groundPlaneMesh.position.set(Number.isFinite(box.max?.x) ? box.max.x + gap : x + gap, y, z);
+                    groundPlaneMesh.position.set(Number.isFinite(box.max?.x) ? box.max.x + screenGap : x + screenGap, y, z);
                 } else {
                     groundPlaneMesh.rotation.x = -Math.PI / 2;
                     groundPlaneMesh.position.set(
                         x,
-                        Number.isFinite(box.min?.y) ? box.min.y - gap : 0,
+                        Number.isFinite(box.min?.y) ? box.min.y - contactGap : 0,
                         z,
                     );
                 }
@@ -13178,6 +13181,7 @@
                 const shadowsEnabled = !!profile.shadows;
                 renderer.shadowMap.enabled = shadowsEnabled;
                 renderer.shadowMap.autoUpdate = shadowsEnabled;
+                renderer.shadowMap.needsUpdate = shadowsEnabled;
                 sunLight.castShadow = shadowsEnabled;
                 if (groundPlaneMesh) {
                     groundPlaneMesh.receiveShadow = shadowsEnabled;
@@ -13270,6 +13274,7 @@
                     sunLight.shadow.camera.far = Math.max(160, size * 4 + Math.max(20, r * 2) + modelSize.y * 4);
                     sunLight.shadow.camera.updateProjectionMatrix();
                     if (force || playModeController?.active) {
+                        renderer.shadowMap.needsUpdate = true;
                         sunLight.shadow.needsUpdate = true;
                     }
                 }
