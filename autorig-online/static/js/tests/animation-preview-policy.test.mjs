@@ -9,7 +9,7 @@ import {
 } from '../animation-preview-policy.js';
 
 test('prefers the first moving clip over a zero-duration base pose', () => {
-    const basePose = { name: 'Horse_default', duration: 0 };
+    const basePose = { name: 'Horse_default', duration: 1 / 24 };
     const gallop = { name: 'Horse_gallop', duration: 0.75 };
     assert.equal(preferredMovingClip([basePose, gallop]), gallop);
 });

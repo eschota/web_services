@@ -1,4 +1,6 @@
-export const MOVING_CLIP_MIN_DURATION_SECONDS = 1 / 60;
+// Blender/glTF can represent a one-frame rest action as one frame of duration.
+// Treat anything shorter than a tenth of a second as a pose, not a preview clip.
+export const MOVING_CLIP_MIN_DURATION_SECONDS = 0.1;
 
 export function animationPreviewCandidates(selected = {}) {
     const values = [
