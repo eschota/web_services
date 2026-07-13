@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/animation-fitting/animal-contact-profile.v1.schema.json",
+  "title": "AutoRig animal contact profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile_id",
+    "revision",
+    "rig_type",
+    "action_id",
+    "loop_unique_frames",
+    "gait",
+    "foot_order",
+    "forward_axis_world",
+    "root_motion_policy",
+    "feet"
+  ],
+  "properties": {
+    "schema": {"const": "autorig-animal-contact-profile.v1"},
+    "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]+$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "rig_type": {"type": "string", "minLength": 1},
+    "action_id": {"type": "string", "minLength": 1},
+    "loop_unique_frames": {"type": "integer", "minimum": 8},
+    "gait": {"const": "lateral_sequence_walk"},
+    "foot_order": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "forward_axis_world": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"type": "number"}
+    },
+    "root_motion_policy": {
+      "const": "canonical_in_place_optional_derived_root_motion"
+    },
+    "feet": {
+      "type": "object",
+      "minProperties": 4,
+      "maxProperties": 4,
+      "additionalProperties": {"$ref": "#/$defs/foot"}
+    }
+  },
+  "$defs": {
+    "foot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bone", "vertex_ids"],
+      "properties": {
+        "bone": {"type": "string", "minLength": 1},
+        "vertex_ids": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

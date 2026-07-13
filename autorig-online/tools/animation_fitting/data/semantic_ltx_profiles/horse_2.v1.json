@@ -1,0 +1,89 @@
+{
+  "schema": "autorig-semantic-ltx-profile.v1",
+  "profile_id": "horse_2.semantic_limbs.v1",
+  "source": {
+    "rig_type": "HORSE_2",
+    "filename": "Horse_2.blend",
+    "sha256": "fa75772d83c2613ddd6df6f7a305a407e12abf4a75c9083bb53df4d2619f50a1",
+    "armature_name": "Horse_rig",
+    "mesh_names": [
+      "Horse_geo"
+    ]
+  },
+  "limb_groups": {
+    "fore_left": {
+      "anatomy": "fore",
+      "side": "left",
+      "bones": [
+        "clavicle.l",
+        "c_thigh_b_dupli_001.l",
+        "thigh_twist_dupli_001.l",
+        "thigh_stretch_dupli_001.l",
+        "leg_stretch_dupli_001.l",
+        "leg_twist_dupli_001.l",
+        "foot_dupli_001.l",
+        "toes_01_dupli_001.l"
+      ]
+    },
+    "fore_right": {
+      "anatomy": "fore",
+      "side": "right",
+      "bones": [
+        "clavicle.r",
+        "c_thigh_b_dupli_001.r",
+        "thigh_twist_dupli_001.r",
+        "thigh_stretch_dupli_001.r",
+        "leg_stretch_dupli_001.r",
+        "leg_twist_dupli_001.r",
+        "foot_dupli_001.r",
+        "toes_01_dupli_001.r"
+      ]
+    },
+    "hind_left": {
+      "anatomy": "hind",
+      "side": "left",
+      "bones": [
+        "c_thigh_b.l",
+        "thigh_twist.l",
+        "thigh_stretch.l",
+        "leg_stretch.l",
+        "leg_twist.l",
+        "foot.l",
+        "toes_01.l"
+      ]
+    },
+    "hind_right": {
+      "anatomy": "hind",
+      "side": "right",
+      "bones": [
+        "c_thigh_b.r",
+        "thigh_twist.r",
+        "thigh_stretch.r",
+        "leg_stretch.r",
+        "leg_twist.r",
+        "foot.r",
+        "toes_01.r"
+      ]
+    }
+  },
+  "palette_linear": {
+    "body": [0.46, 0.50, 0.56],
+    "fore_near": [0.00, 0.85, 1.00],
+    "fore_far": [0.12, 0.22, 1.00],
+    "hind_near": [1.00, 0.72, 0.02],
+    "hind_far": [1.00, 0.08, 0.55]
+  },
+  "gates": {
+    "minimum_face_limb_weight": 0.60,
+    "minimum_face_dominance": 0.95,
+    "minimum_faces_per_source_group": 24,
+    "minimum_group_weight_mass": 30.0,
+    "minimum_near_far_depth_separation": 0.05,
+    "minimum_pixels_per_output_label": 900,
+    "minimum_pixel_fraction_of_mask": 0.03,
+    "maximum_mask_mismatch_pixels": 0,
+    "mask_threshold": 0.50,
+    "pixel_color_tolerance": 0.08,
+    "minimum_palette_distance": 0.55
+  }
+}

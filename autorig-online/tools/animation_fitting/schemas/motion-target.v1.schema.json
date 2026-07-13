@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/animation-fitting/motion-target.v1.schema.json",
+  "title": "Canonical Blender motion target v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source_sha256", "armature_name"],
+  "properties": {
+    "schema": {"const": "autorig-motion-target.v1"},
+    "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "armature_name": {"type": "string", "minLength": 1},
+    "armature_data_name": {"type": "string", "minLength": 1},
+    "bone_names": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "bone_parents": {
+      "type": "object",
+      "additionalProperties": {"type": ["string", "null"]}
+    }
+  }
+}

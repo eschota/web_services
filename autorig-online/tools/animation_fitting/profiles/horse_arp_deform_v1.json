@@ -1,0 +1,120 @@
+{
+  "schema": "autorig-anatomical-rig-profile.v1",
+  "profile_id": "horse_arp_deform_v1",
+  "revision": 1,
+  "species": "horse",
+  "source_rig_type": "HORSE_2",
+  "minimum_blender_version": [
+    5,
+    1,
+    0
+  ],
+  "canonical_source": {
+    "filename": "Horse_2.blend",
+    "sha256": "fa75772d83c2613ddd6df6f7a305a407e12abf4a75c9083bb53df4d2619f50a1",
+    "armature_name": "Horse_rig",
+    "mesh_names": [
+      "Horse_geo"
+    ],
+    "vertex_count": 344,
+    "deform_bone_count": 51,
+    "maximum_vertex_influences": 4
+  },
+  "target": {
+    "master_root": "__animal_export_root",
+    "deformation_model": "normalized_linear_blend_skinning",
+    "translation_policy": "master_root_only",
+    "scale_policy": "identity",
+    "parent_map": {
+      "root.x": null,
+      "spine_01.x": null,
+      "spine_02.x": "spine_01.x",
+      "spine_03.x": "spine_02.x",
+      "c_subneck_1.x": "spine_03.x",
+      "c_subneck_2.x": "c_subneck_1.x",
+      "c_subneck_3.x": "c_subneck_2.x",
+      "c_subneck_4.x": "c_subneck_3.x",
+      "neck.x": "c_subneck_4.x",
+      "head.x": "neck.x",
+      "c_ear_01.l": "head.x",
+      "c_ear_02.l": "c_ear_01.l",
+      "c_ear_01.r": "head.x",
+      "c_ear_02.r": "c_ear_01.r",
+      "c_tail_00.x": "root.x",
+      "c_tail_01.x": "c_tail_00.x",
+      "c_tail_02.x": "c_tail_01.x",
+      "c_tail_03.x": "c_tail_02.x",
+      "c_tail_04.x": "c_tail_03.x",
+      "c_tail_05.x": "c_tail_04.x",
+      "c_tail_06.x": "c_tail_05.x",
+      "clavicle.l": "spine_03.x",
+      "clavicle.r": "spine_03.x",
+      "c_thigh_b.l": "root.x",
+      "thigh_twist.l": "c_thigh_b.l",
+      "thigh_stretch.l": "thigh_twist.l",
+      "leg_stretch.l": "thigh_stretch.l",
+      "leg_twist.l": "leg_stretch.l",
+      "foot.l": "leg_twist.l",
+      "toes_01.l": "foot.l",
+      "c_thigh_b.r": "root.x",
+      "thigh_twist.r": "c_thigh_b.r",
+      "thigh_stretch.r": "thigh_twist.r",
+      "leg_stretch.r": "thigh_stretch.r",
+      "leg_twist.r": "leg_stretch.r",
+      "foot.r": "leg_twist.r",
+      "toes_01.r": "foot.r",
+      "c_thigh_b_dupli_001.l": "clavicle.l",
+      "thigh_twist_dupli_001.l": "c_thigh_b_dupli_001.l",
+      "thigh_stretch_dupli_001.l": "thigh_twist_dupli_001.l",
+      "leg_stretch_dupli_001.l": "thigh_stretch_dupli_001.l",
+      "leg_twist_dupli_001.l": "leg_stretch_dupli_001.l",
+      "foot_dupli_001.l": "leg_twist_dupli_001.l",
+      "toes_01_dupli_001.l": "foot_dupli_001.l",
+      "c_thigh_b_dupli_001.r": "clavicle.r",
+      "thigh_twist_dupli_001.r": "c_thigh_b_dupli_001.r",
+      "thigh_stretch_dupli_001.r": "thigh_twist_dupli_001.r",
+      "leg_stretch_dupli_001.r": "thigh_stretch_dupli_001.r",
+      "leg_twist_dupli_001.r": "leg_stretch_dupli_001.r",
+      "foot_dupli_001.r": "leg_twist_dupli_001.r",
+      "toes_01_dupli_001.r": "foot_dupli_001.r"
+    }
+  },
+  "linearization": {
+    "source_deformation_model": "blender_armature_with_bbone_segments",
+    "target_deformation_model": "normalized_linear_blend_skinning",
+    "bbone_bones": [
+      "thigh_twist.l",
+      "thigh_twist.r",
+      "spine_02.x",
+      "c_tail_00.x",
+      "c_tail_01.x",
+      "c_tail_02.x",
+      "c_tail_03.x",
+      "thigh_twist_dupli_001.l",
+      "thigh_twist_dupli_001.r",
+      "leg_twist_dupli_001.l",
+      "leg_twist_dupli_001.r",
+      "leg_twist.l",
+      "leg_twist.r"
+    ],
+    "horse_gallop_reference": {
+      "action": "Horse_gallop",
+      "frames": [
+        0,
+        18
+      ],
+      "maximum_vertex_error_m": 0.024863,
+      "maximum_rmse_m": 0.003616,
+      "maximum_error_without_bbone_deformation_m": 0.000000734
+    }
+  },
+  "approval_contract": {
+    "joint_limit_profile_required": true,
+    "joint_limit_profile": null,
+    "fitting_ready": false,
+    "blocking_reasons": [
+      "joint_limit_profile_missing",
+      "linearized_bbone_target_requires_manual_acceptance"
+    ]
+  }
+}
