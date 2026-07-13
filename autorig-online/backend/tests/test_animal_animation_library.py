@@ -153,7 +153,7 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
                 "coincident_rest_vertex_separation": {
                     "measured": True,
                     "pass": True,
-                    "threshold_m": self.library.COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M,
+                    "threshold_m": self.library.COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M_BY_RIG["horse"],
                     "max_separation_m": 0.0005,
                     "sample_count": self.library.COINCIDENT_REST_VERTEX_MIN_SAMPLE_COUNT,
                     "group_count": 32,
@@ -464,7 +464,7 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
             failed_separation = await candidate_for("idle_relaxed", 26, failed_separation_metrics)
             excessive_threshold_metrics = self._visual_phase_metrics("idle_look_around", f"{27:064x}")
             excessive_threshold_metrics["visual_phase_gate"]["coincident_rest_vertex_separation"].update({
-                "threshold_m": self.library.COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M + 0.001,
+                "threshold_m": self.library.COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M_BY_RIG["horse"] + 0.001,
                 "max_separation_m": 0.001,
             })
             excessive_threshold = await candidate_for(
@@ -503,6 +503,21 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
                 admin_email="admin@example.com",
             )
             self.assertEqual(approved.decision, "approved")
+
+    def test_visual_phase_gate_blocks_uncalibrated_rig_threshold(self):
+        fitted_sha = "9" * 64
+        metrics = self._visual_phase_metrics("walk_forward", fitted_sha)
+        metrics["visual_phase_gate"]["rig_type"] = "dog"
+
+        with self.assertRaises(self.library.AnimationLibraryError) as blocked:
+            self.library.validate_visual_phase_gate(
+                metrics,
+                expected_rig_type="dog",
+                expected_semantic_id="walk_forward",
+                expected_fitted_clip_sha256=fitted_sha,
+            )
+        self.assertEqual(blocked.exception.status_code, 409)
+        self.assertIn("not calibrated", str(blocked.exception))
 
     async def test_activation_revalidates_visual_phase_evidence(self):
         async with self.database.AsyncSessionLocal() as db:

@@ -38,8 +38,13 @@ MANIFEST_SCHEMA_ID = "animal-animation-manifest.v1"
 VISUAL_PHASE_QA_SCHEMA_ID = "autorig.animation-visual-phase-qa.v1"
 VISUAL_PHASE_QA_VERSION = 1
 VISUAL_PHASE_REQUIRED_PHASES = ("start", "middle", "three_quarter")
-COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M = 0.002
-COINCIDENT_REST_VERTEX_MIN_SAMPLE_COUNT = len(VISUAL_PHASE_REQUIRED_PHASES)
+COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M_BY_RIG = {
+    # Provisional Horse calibration: the visually accepted Andalusian comparator
+    # peaks around 0.032 m, while the rejected Akhal-Teke opens to 0.178 m.
+    # Human fixed-camera phase review remains mandatory below this numeric cap.
+    "horse": 0.04,
+}
+COINCIDENT_REST_VERTEX_MIN_SAMPLE_COUNT = 5
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
@@ -307,10 +312,13 @@ def validate_visual_phase_gate(
                 f"Coincident-rest-vertex {field_name} must be a finite number",
                 status_code=409,
             )
-    if (
-        float(threshold_m) <= 0
-        or float(threshold_m) > COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M
-    ):
+    server_threshold_m = COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M_BY_RIG.get(rig_type)
+    if server_threshold_m is None:
+        raise AnimationLibraryError(
+            "Coincident-rest-vertex release threshold is not calibrated for this rig type",
+            status_code=409,
+        )
+    if float(threshold_m) <= 0 or float(threshold_m) > server_threshold_m:
         raise AnimationLibraryError(
             "Coincident-rest-vertex threshold_m exceeds the server release limit",
             status_code=409,
