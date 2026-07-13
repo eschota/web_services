@@ -9,11 +9,13 @@ import shutil
 import sys
 from typing import Optional
 
+from .derive_semantic_reference import derive_semantic_reference_cli
 from .errors import FittingError
 from .frames import extract_frames
 from .observations import adapt_tracker_json, load_observations
 from .optimizer import FittingConfig, fit_sequence
 from .rig import load_rig_bundle
+from .semantic_ltx_reference import SemanticLtxContractError
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -44,6 +46,17 @@ def _parser() -> argparse.ArgumentParser:
 
     validate = commands.add_parser("validate-bundle", help="Verify an actionless fitting bundle and hashes")
     validate.add_argument("--bundle", required=True)
+
+    semantic = commands.add_parser(
+        "derive-semantic-reference",
+        help=(
+            "Derive an immutable rig-semantic LTX conditioning PNG from an "
+            "existing actionless bundle"
+        ),
+    )
+    semantic.add_argument("--bundle", required=True)
+    semantic.add_argument("--profile", required=True)
+    semantic.add_argument("--output-dir", required=True)
 
     fit = commands.add_parser("fit", help="Run bounded temporal fitting and write every local bone transform")
     fit.add_argument("--bundle", required=True)
@@ -168,6 +181,28 @@ def main(argv: Optional[list[str]] = None) -> int:
                 )
             )
             return 0
+        if args.command == "derive-semantic-reference":
+            result = derive_semantic_reference_cli(
+                args.bundle,
+                args.profile,
+                args.output_dir,
+            )
+            print(
+                json.dumps(
+                    {
+                        "output_dir": str(result.output_dir),
+                        "semantic_png": str(result.semantic_path),
+                        "semantic_sha256": result.semantic_sha256,
+                        "derivation_manifest": str(result.derivation_manifest_path),
+                        "immutable_manifest": str(result.immutable_manifest_path),
+                        "immutable_manifest_sha256": result.immutable_manifest_sha256,
+                        "ltx_generation_authorized": False,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
         if args.command == "fit":
             config = FittingConfig.from_json(args.config) if args.config else FittingConfig()
             if args.allow_unbounded_joints:
@@ -192,7 +227,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
         if args.command == "doctor":
             return _doctor(args)
-    except FittingError as exc:
+    except (FittingError, SemanticLtxContractError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     return 2
