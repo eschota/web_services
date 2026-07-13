@@ -127,6 +127,56 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
             "poses": list(self.library.TAXONOMY["poses"]),
         }
 
+    def _visual_phase_metrics(
+        self,
+        semantic_id: str,
+        fitted_clip_sha256: str,
+        *,
+        decision: str = "PASS",
+    ) -> dict:
+        return {
+            "foot_slide": 0.01,
+            "visual_phase_gate": {
+                "schema": self.library.VISUAL_PHASE_QA_SCHEMA_ID,
+                "version": self.library.VISUAL_PHASE_QA_VERSION,
+                "rig_type": "horse",
+                "semantic_id": semantic_id,
+                "fitted_clip_sha256": fitted_clip_sha256,
+                "decision": decision,
+                "camera": {
+                    "static": True,
+                    "projection": "orthographic",
+                    "view": "side",
+                    "root_motion_locked": True,
+                    "settings_sha256": "a" * 64,
+                },
+                "coincident_rest_vertex_separation": {
+                    "measured": True,
+                    "pass": True,
+                    "threshold_m": self.library.COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M,
+                    "max_separation_m": 0.0005,
+                    "sample_count": self.library.COINCIDENT_REST_VERTEX_MIN_SAMPLE_COUNT,
+                    "group_count": 32,
+                    "report_url": f"https://worker.example/visual/{semantic_id}/separation.json",
+                    "report_sha256": "b" * 64,
+                },
+                "required_phases": list(self.library.VISUAL_PHASE_REQUIRED_PHASES),
+                "frames": [
+                    {
+                        "phase": phase,
+                        "frame_index": index * 10,
+                        "evidence_url": f"https://worker.example/visual/{semantic_id}/{phase}.png",
+                        "sha256": f"{index + 11:064x}",
+                    }
+                    for index, phase in enumerate(self.library.VISUAL_PHASE_REQUIRED_PHASES)
+                ],
+                "reviewer": {
+                    "id": "visual-qa@example.com",
+                    "reviewed_at": "2026-07-13T12:00:00Z",
+                },
+            },
+        }
+
     @staticmethod
     def _request(*, if_none_match: str = "") -> Request:
         headers = []
@@ -172,6 +222,7 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
                 library_root=os.environ["ANIMATION_LIBRARY_ROOT"],
             )
         for clip in self.library.ANIMAL_CLIPS:
+            fitted_clip_sha256 = f"{clip['order']:064x}"
             db.add(self.database.AnimalAnimationApprovedClip(
                 library_version_id=version.id,
                 candidate_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{revision}:{clip['id']}")),
@@ -186,8 +237,12 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
                 root_motion_available=False,
                 qa_profile_revision="horse_qa_profile_v1",
                 fbx_url=f"https://worker.example/{clip['id']}.fbx",
-                fbx_sha256=f"{clip['order']:064x}",
-                metrics_json="{}",
+                fbx_sha256=fitted_clip_sha256,
+                metrics_json=json.dumps(
+                    self._visual_phase_metrics(clip["id"], fitted_clip_sha256),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
                 provenance_json="{}",
                 approved_by="admin@example.com",
             ))
@@ -324,7 +379,7 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
                     fps=30,
                     qa_passed=True,
                     rank=1,
-                    metrics={"foot_slide": 0.01},
+                    metrics=self._visual_phase_metrics("idle_neutral", "4" * 64),
                 ),
             )
             approved = await self.library.decide_fitting_candidate(
@@ -343,6 +398,138 @@ class AnimalAnimationLibraryTests(unittest.IsolatedAsyncioTestCase):
             rows = (await db.execute(select(self.database.AnimalAnimationApprovedClip))).scalars().all()
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].semantic_id, "idle_neutral")
+
+    async def test_visual_phase_gate_blocks_numeric_hold_and_reject_but_allows_pass(self):
+        async with self.database.AsyncSessionLocal() as db:
+            version = await self.library.create_library_version(
+                db,
+                self.library.AnimationLibraryCreateRequest(
+                    rig_type="horse",
+                    revision="horse-visual-gate-v1",
+                    template_skeleton_sha256="1" * 64,
+                    qa_profile_revision="horse_qa_profile_v1",
+                ),
+                admin_email="admin@example.com",
+            )
+
+            async def candidate_for(semantic_id: str, seed: int, metrics: dict):
+                job = await self.library.create_fitting_job(
+                    db,
+                    self.library.AnimationFittingJobCreateRequest(
+                        rig_type="horse",
+                        semantic_id=semantic_id,
+                        library_revision=version.revision,
+                        workflow_name="autorig_animal_loop_ltx2_19b_v1",
+                        workflow_fingerprint=f"visual-gate-{semantic_id}",
+                        worker_url="https://worker-4090.example",
+                        prompt=f"Target-specific {semantic_id} motion.",
+                    ),
+                    admin_email="admin@example.com",
+                )
+                fitted_sha = f"{seed:064x}"
+                return await self.library.add_fitting_candidate(
+                    db,
+                    job_id=job.id,
+                    request=self.library.AnimationCandidateCreateRequest(
+                        seed=seed,
+                        fitted_clip_url=f"https://worker.example/{semantic_id}.fbx",
+                        fitted_clip_sha256=fitted_sha,
+                        duration=1.0,
+                        fps=30,
+                        qa_passed=True,
+                        rank=1,
+                        metrics=metrics,
+                    ),
+                )
+
+            numeric_only = await candidate_for("idle_neutral", 21, {"max_edge_stretch": 4.9})
+            hold = await candidate_for(
+                "walk_forward",
+                22,
+                self._visual_phase_metrics("walk_forward", f"{22:064x}", decision="HOLD"),
+            )
+            rejected = await candidate_for(
+                "run",
+                23,
+                self._visual_phase_metrics("run", f"{23:064x}", decision="REJECT"),
+            )
+            missing_separation_metrics = self._visual_phase_metrics("idle_alert", f"{25:064x}")
+            del missing_separation_metrics["visual_phase_gate"]["coincident_rest_vertex_separation"]
+            missing_separation = await candidate_for("idle_alert", 25, missing_separation_metrics)
+            failed_separation_metrics = self._visual_phase_metrics("idle_relaxed", f"{26:064x}")
+            failed_separation_metrics["visual_phase_gate"]["coincident_rest_vertex_separation"].update({
+                "pass": False,
+                "max_separation_m": 0.004,
+            })
+            failed_separation = await candidate_for("idle_relaxed", 26, failed_separation_metrics)
+            excessive_threshold_metrics = self._visual_phase_metrics("idle_look_around", f"{27:064x}")
+            excessive_threshold_metrics["visual_phase_gate"]["coincident_rest_vertex_separation"].update({
+                "threshold_m": self.library.COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M + 0.001,
+                "max_separation_m": 0.001,
+            })
+            excessive_threshold = await candidate_for(
+                "idle_look_around",
+                27,
+                excessive_threshold_metrics,
+            )
+            for candidate in (
+                numeric_only,
+                hold,
+                rejected,
+                missing_separation,
+                failed_separation,
+                excessive_threshold,
+            ):
+                with self.subTest(candidate_id=candidate.id):
+                    with self.assertRaises(self.library.AnimationLibraryError) as blocked:
+                        await self.library.decide_fitting_candidate(
+                            db,
+                            candidate_id=candidate.id,
+                            request=self.library.AnimationCandidateDecisionRequest(decision="approve"),
+                            admin_email="admin@example.com",
+                        )
+                    self.assertEqual(blocked.exception.status_code, 409)
+
+            valid_sha = f"{24:064x}"
+            valid = await candidate_for(
+                "jump_start",
+                24,
+                self._visual_phase_metrics("jump_start", valid_sha),
+            )
+            approved = await self.library.decide_fitting_candidate(
+                db,
+                candidate_id=valid.id,
+                request=self.library.AnimationCandidateDecisionRequest(decision="approve"),
+                admin_email="admin@example.com",
+            )
+            self.assertEqual(approved.decision, "approved")
+
+    async def test_activation_revalidates_visual_phase_evidence(self):
+        async with self.database.AsyncSessionLocal() as db:
+            version = await self._create_complete_version(db, "horse-visual-tamper-v1")
+            first_clip = (
+                await db.execute(
+                    select(self.database.AnimalAnimationApprovedClip)
+                    .where(self.database.AnimalAnimationApprovedClip.library_version_id == version.id)
+                    .order_by(self.database.AnimalAnimationApprovedClip.clip_order.asc())
+                )
+            ).scalars().first()
+            tampered_metrics = json.loads(first_clip.metrics_json)
+            tampered_metrics["visual_phase_gate"]["coincident_rest_vertex_separation"][
+                "report_sha256"
+            ] = "not-a-sha256"
+            first_clip.metrics_json = json.dumps(tampered_metrics)
+            await db.commit()
+
+            with self.assertRaises(self.library.AnimationLibraryError) as blocked:
+                await self.library.activate_library_version(
+                    db,
+                    rig_type="horse",
+                    revision=version.revision,
+                    admin_email="admin@example.com",
+                    library_root=os.environ["ANIMATION_LIBRARY_ROOT"],
+                )
+            self.assertEqual(blocked.exception.status_code, 409)
 
     async def test_activation_history_prevents_backfill_and_supports_rollback(self):
         async with self.database.AsyncSessionLocal() as db:

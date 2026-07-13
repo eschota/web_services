@@ -9,14 +9,15 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 from urllib.parse import urlparse
 import uuid
 
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import ANIMATION_FITTING_JOBS_ROOT, ANIMATION_LIBRARY_ROOT
@@ -34,6 +35,11 @@ BACKEND_DIR = Path(__file__).resolve().parent
 TAXONOMY_PATH = BACKEND_DIR / "animal_animation_taxonomy.v1.json"
 MANIFEST_SCHEMA_PATH = BACKEND_DIR / "animal_animation_manifest.v1.schema.json"
 MANIFEST_SCHEMA_ID = "animal-animation-manifest.v1"
+VISUAL_PHASE_QA_SCHEMA_ID = "autorig.animation-visual-phase-qa.v1"
+VISUAL_PHASE_QA_VERSION = 1
+VISUAL_PHASE_REQUIRED_PHASES = ("start", "middle", "three_quarter")
+COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M = 0.002
+COINCIDENT_REST_VERTEX_MIN_SAMPLE_COUNT = len(VISUAL_PHASE_REQUIRED_PHASES)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
@@ -158,6 +164,240 @@ def _validate_http_url(value: Any, field_name: str) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise AnimationLibraryError(f"{field_name} must be an absolute HTTP(S) URL")
     return url
+
+
+def _require_exact_object_keys(value: Any, field_name: str, expected: Sequence[str]) -> dict:
+    if not isinstance(value, dict):
+        raise AnimationLibraryError(f"{field_name} must be an object", status_code=409)
+    expected_keys = set(expected)
+    actual_keys = set(value)
+    if actual_keys != expected_keys:
+        missing = sorted(expected_keys - actual_keys)
+        unexpected = sorted(actual_keys - expected_keys)
+        detail = []
+        if missing:
+            detail.append(f"missing {', '.join(missing)}")
+        if unexpected:
+            detail.append(f"unexpected {', '.join(unexpected)}")
+        raise AnimationLibraryError(
+            f"{field_name} has invalid fields ({'; '.join(detail)})",
+            status_code=409,
+        )
+    return value
+
+
+def _validate_visual_phase_sha256(value: Any, field_name: str) -> str:
+    try:
+        return normalize_sha256(value, field_name)
+    except AnimationLibraryError as exc:
+        raise AnimationLibraryError(str(exc), status_code=409) from exc
+
+
+def _validate_visual_phase_url(value: Any, field_name: str) -> str:
+    try:
+        return _validate_http_url(value, field_name)
+    except AnimationLibraryError as exc:
+        raise AnimationLibraryError(str(exc), status_code=409) from exc
+
+
+def validate_visual_phase_gate(
+    metrics: Any,
+    *,
+    expected_rig_type: str,
+    expected_semantic_id: str,
+    expected_fitted_clip_sha256: str,
+) -> dict:
+    """Validate immutable, fixed-camera visual evidence for a fitted clip.
+
+    Machine QA and numeric deformation thresholds remain separate.  This gate
+    is intentionally fail-closed so a candidate cannot be approved or a
+    library activated from numeric metrics alone.
+    """
+    if not isinstance(metrics, dict):
+        raise AnimationLibraryError("Candidate metrics must be an object", status_code=409)
+    metrics_object = metrics
+    gate = _require_exact_object_keys(
+        metrics_object.get("visual_phase_gate"),
+        "metrics.visual_phase_gate",
+        (
+            "schema",
+            "version",
+            "rig_type",
+            "semantic_id",
+            "fitted_clip_sha256",
+            "decision",
+            "camera",
+            "coincident_rest_vertex_separation",
+            "required_phases",
+            "frames",
+            "reviewer",
+        ),
+    )
+    if (
+        gate["schema"] != VISUAL_PHASE_QA_SCHEMA_ID
+        or not isinstance(gate["version"], int)
+        or isinstance(gate["version"], bool)
+    ):
+        raise AnimationLibraryError("Unsupported visual phase QA schema/version", status_code=409)
+    if gate["version"] != VISUAL_PHASE_QA_VERSION:
+        raise AnimationLibraryError("Unsupported visual phase QA schema/version", status_code=409)
+
+    rig_type = normalize_rig_type(expected_rig_type)
+    semantic_id = str(expected_semantic_id or "").strip().lower()
+    taxonomy_clip(semantic_id)
+    fitted_clip_sha256 = _validate_visual_phase_sha256(expected_fitted_clip_sha256, "fitted_clip_sha256")
+    if gate["rig_type"] != rig_type:
+        raise AnimationLibraryError("Visual phase QA rig_type does not match the candidate", status_code=409)
+    if gate["semantic_id"] != semantic_id:
+        raise AnimationLibraryError("Visual phase QA semantic_id does not match the candidate", status_code=409)
+    if gate["fitted_clip_sha256"] != fitted_clip_sha256:
+        raise AnimationLibraryError(
+            "Visual phase QA fitted_clip_sha256 does not match the candidate",
+            status_code=409,
+        )
+    if gate["decision"] != "PASS":
+        raise AnimationLibraryError("Visual phase QA decision must be PASS", status_code=409)
+
+    camera = _require_exact_object_keys(
+        gate["camera"],
+        "metrics.visual_phase_gate.camera",
+        ("static", "projection", "view", "root_motion_locked", "settings_sha256"),
+    )
+    if camera["static"] is not True:
+        raise AnimationLibraryError("Visual phase QA camera must be static", status_code=409)
+    if camera["root_motion_locked"] is not True:
+        raise AnimationLibraryError("Visual phase QA must use root-motion lock", status_code=409)
+    if camera["projection"] not in ("orthographic", "perspective"):
+        raise AnimationLibraryError("Visual phase QA camera projection is invalid", status_code=409)
+    view = camera["view"]
+    if not isinstance(view, str) or not view.strip() or len(view) > 64 or view != view.strip():
+        raise AnimationLibraryError("Visual phase QA camera view is invalid", status_code=409)
+    _validate_visual_phase_sha256(camera["settings_sha256"], "visual phase camera settings_sha256")
+
+    separation = _require_exact_object_keys(
+        gate["coincident_rest_vertex_separation"],
+        "metrics.visual_phase_gate.coincident_rest_vertex_separation",
+        (
+            "measured",
+            "pass",
+            "threshold_m",
+            "max_separation_m",
+            "sample_count",
+            "group_count",
+            "report_url",
+            "report_sha256",
+        ),
+    )
+    if separation["measured"] is not True:
+        raise AnimationLibraryError("Coincident-rest-vertex separation must be measured", status_code=409)
+    if separation["pass"] is not True:
+        raise AnimationLibraryError("Coincident-rest-vertex separation gate did not pass", status_code=409)
+    threshold_m = separation["threshold_m"]
+    max_separation_m = separation["max_separation_m"]
+    for value, field_name in (
+        (threshold_m, "threshold_m"),
+        (max_separation_m, "max_separation_m"),
+    ):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+        ):
+            raise AnimationLibraryError(
+                f"Coincident-rest-vertex {field_name} must be a finite number",
+                status_code=409,
+            )
+    if (
+        float(threshold_m) <= 0
+        or float(threshold_m) > COINCIDENT_REST_VERTEX_MAX_THRESHOLD_M
+    ):
+        raise AnimationLibraryError(
+            "Coincident-rest-vertex threshold_m exceeds the server release limit",
+            status_code=409,
+        )
+    if float(max_separation_m) < 0 or float(max_separation_m) > float(threshold_m):
+        raise AnimationLibraryError(
+            "Coincident-rest-vertex max_separation_m exceeds threshold_m",
+            status_code=409,
+        )
+    sample_count = separation["sample_count"]
+    group_count = separation["group_count"]
+    if (
+        not isinstance(sample_count, int)
+        or isinstance(sample_count, bool)
+        or sample_count < COINCIDENT_REST_VERTEX_MIN_SAMPLE_COUNT
+        or not isinstance(group_count, int)
+        or isinstance(group_count, bool)
+        or group_count < 0
+    ):
+        raise AnimationLibraryError(
+            "Coincident-rest-vertex sample/group counts are invalid",
+            status_code=409,
+        )
+    if group_count == 0 and float(max_separation_m) != 0:
+        raise AnimationLibraryError(
+            "Coincident-rest-vertex zero groups require zero separation",
+            status_code=409,
+        )
+    _validate_visual_phase_url(separation["report_url"], "coincident-rest-vertex report_url")
+    _validate_visual_phase_sha256(
+        separation["report_sha256"],
+        "coincident-rest-vertex report_sha256",
+    )
+
+    required_phases = gate["required_phases"]
+    if required_phases != list(VISUAL_PHASE_REQUIRED_PHASES):
+        raise AnimationLibraryError(
+            "Visual phase QA required_phases must be start, middle, three_quarter",
+            status_code=409,
+        )
+    frames = gate["frames"]
+    if not isinstance(frames, list) or len(frames) != len(VISUAL_PHASE_REQUIRED_PHASES):
+        raise AnimationLibraryError("Visual phase QA must contain all required frames", status_code=409)
+    frame_indices = []
+    for expected_phase, frame in zip(VISUAL_PHASE_REQUIRED_PHASES, frames):
+        frame_object = _require_exact_object_keys(
+            frame,
+            f"metrics.visual_phase_gate.frames.{expected_phase}",
+            ("phase", "frame_index", "evidence_url", "sha256"),
+        )
+        if frame_object["phase"] != expected_phase:
+            raise AnimationLibraryError("Visual phase QA frame phases are incomplete or unordered", status_code=409)
+        frame_index = frame_object["frame_index"]
+        if not isinstance(frame_index, int) or isinstance(frame_index, bool) or frame_index < 0:
+            raise AnimationLibraryError("Visual phase QA frame_index must be a non-negative integer", status_code=409)
+        frame_indices.append(frame_index)
+        _validate_visual_phase_url(frame_object["evidence_url"], "visual phase evidence_url")
+        _validate_visual_phase_sha256(frame_object["sha256"], "visual phase frame sha256")
+    if frame_indices != sorted(set(frame_indices)):
+        raise AnimationLibraryError("Visual phase QA frame indices must be unique and increasing", status_code=409)
+
+    reviewer = _require_exact_object_keys(
+        gate["reviewer"],
+        "metrics.visual_phase_gate.reviewer",
+        ("id", "reviewed_at"),
+    )
+    reviewer_id = reviewer["id"]
+    if (
+        not isinstance(reviewer_id, str)
+        or not reviewer_id.strip()
+        or len(reviewer_id) > 320
+        or reviewer_id != reviewer_id.strip()
+    ):
+        raise AnimationLibraryError("Visual phase QA reviewer id is invalid", status_code=409)
+    reviewed_at = reviewer["reviewed_at"]
+    if not isinstance(reviewed_at, str):
+        raise AnimationLibraryError("Visual phase QA reviewed_at must be an ISO-8601 timestamp", status_code=409)
+    try:
+        parsed_reviewed_at = datetime.fromisoformat(reviewed_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AnimationLibraryError(
+            "Visual phase QA reviewed_at must be an ISO-8601 timestamp",
+            status_code=409,
+        ) from exc
+    if parsed_reviewed_at.utcoffset() is None:
+        raise AnimationLibraryError("Visual phase QA reviewed_at must include a timezone", status_code=409)
+    return gate
 
 
 def _validated_runtime_path(value: Any, root: str, field_name: str) -> str:
@@ -872,6 +1112,12 @@ async def decide_fitting_candidate(
         raise AnimationLibraryError("Only an automatically ranked top-3 candidate can be approved", status_code=409)
     if not candidate.fitted_clip_sha256 or not candidate.duration or not candidate.fps:
         raise AnimationLibraryError("Candidate fitted clip metadata is incomplete", status_code=409)
+    validate_visual_phase_gate(
+        _json_value(candidate.metrics_json, None),
+        expected_rig_type=job.rig_type,
+        expected_semantic_id=job.semantic_id,
+        expected_fitted_clip_sha256=candidate.fitted_clip_sha256,
+    )
     clip = taxonomy_clip(job.semantic_id)
     if approved is None:
         approved = AnimalAnimationApprovedClip(
@@ -1013,6 +1259,13 @@ async def _validate_activation_contents(
     approved = list(approved_result.scalars().all())
     if [row.semantic_id for row in approved] != list(ANIMAL_CLIP_IDS):
         raise AnimationLibraryError("All 30 canonical clips must be approved before activation", status_code=409)
+    for approved_clip in approved:
+        validate_visual_phase_gate(
+            _json_value(approved_clip.metrics_json, None),
+            expected_rig_type=version.rig_type,
+            expected_semantic_id=approved_clip.semantic_id,
+            expected_fitted_clip_sha256=approved_clip.fbx_sha256,
+        )
     artifact_result = await db.execute(
         select(AnimalAnimationLibraryArtifact).where(
             AnimalAnimationLibraryArtifact.library_version_id == version.id
