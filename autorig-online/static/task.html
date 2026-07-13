@@ -7788,7 +7788,7 @@
                     this.renderAnimationCatalog();
                     if (this.isAnimalAnimationCatalog() && !this.customAnimationUserInteracted && !this.animalAnimationAutoplayStopped) {
                         const applyToken = ++this.animationApplyToken;
-                        await this.applySelectedAnimationToViewer(applyToken);
+                        await this.applySelectedAnimationToViewer(applyToken, { automatic: true });
                     }
                     this.scheduleAnimalAnimationAutoplay();
                 } catch (e) {
@@ -7923,46 +7923,62 @@
                 this.selectedAnimationId = id;
                 this.renderAnimationCatalog();
                 const applyToken = ++this.animationApplyToken;
-                await this.applySelectedAnimationToViewer(applyToken);
+                await this.applySelectedAnimationToViewer(applyToken, { automatic: Boolean(options.auto) });
             },
 
-            async applySelectedAnimationToViewer(applyToken = null) {
+            async applySelectedAnimationToViewer(applyToken = null, options = {}) {
                 const token = applyToken ?? ++this.animationApplyToken;
                 const selected = this.getSelectedAnimationItem();
                 if (!selected) return;
                 if (token !== this.animationApplyToken) return;
+                const automatic = Boolean(options.automatic);
+                const previewPolicy = window.AnimationPreviewPolicy;
+                const shouldApply = previewPolicy?.shouldApplyCatalogPreview?.({ automatic }) ?? !automatic;
+                if (!shouldApply) {
+                    window.taskDbg('[Viewer] Keeping canonical GLB clip during automatic catalog selection:', selected.id);
+                    return;
+                }
 
                 const bridge = window.CustomAnimationViewerBridge;
                 if (!bridge) return;
+                const candidates = previewPolicy?.animationPreviewCandidates?.(selected) || [
+                    selected.action_name,
+                    selected.name,
+                    selected.id,
+                    selected.file_name,
+                ].map((value) => String(value || '').trim()).filter(Boolean);
+                let embeddedMatched = false;
 
-                if (selected.preview_url && typeof bridge.playByFbxUrl === 'function') {
+                if (typeof bridge.playByName === 'function') {
+                    for (const candidate of candidates) {
+                        if (token !== this.animationApplyToken) return;
+                        try {
+                            embeddedMatched = await bridge.playByName(candidate);
+                            if (embeddedMatched) return;
+                        } catch (_) {
+                            // try the next embedded clip name
+                        }
+                    }
+                }
+                if (token !== this.animationApplyToken) return;
+
+                const policyInput = {
+                    automatic,
+                    embeddedMatched,
+                    isAnimalTask: this.isAnimalAnimationCatalog(),
+                    previewUrl: selected.preview_url,
+                };
+                const useExternalFbx = previewPolicy?.shouldLoadExternalFbxPreview?.(policyInput)
+                    ?? Boolean(policyInput.previewUrl && !automatic && !embeddedMatched && !policyInput.isAnimalTask);
+                if (useExternalFbx && typeof bridge.playByFbxUrl === 'function') {
                     try {
-                        const ok = await bridge.playByFbxUrl(selected.preview_url, [
-                            selected.action_name,
-                            selected.name,
-                            selected.id,
-                            selected.file_name
-                        ]);
+                        const ok = await bridge.playByFbxUrl(selected.preview_url, candidates);
                         if (ok) return;
                     } catch (e) {
                         console.warn('FBX preview playback failed:', e);
                     }
                 }
-                if (token !== this.animationApplyToken) return;
-
-                if (typeof bridge.playByName !== 'function') return;
-
-                const candidates = [selected.action_name, selected.name, selected.id];
-                for (const c of candidates) {
-                    if (token !== this.animationApplyToken) return;
-                    try {
-                        const ok = await bridge.playByName(c);
-                        if (ok) return;
-                    } catch (_) {
-                        // try next candidate
-                    }
-                }
-                console.warn('No matching clip found for animation:', selected.id, selected.name);
+                console.warn('No compatible embedded animation clip found:', selected.id, selected.name);
             },
 
             updateCustomAnimationActions() {
@@ -8799,8 +8815,21 @@
             isSecsVertexPbrMaterial,
             prepareSecsVertexPbrModel,
         } from '/static/js/vertex-pbr-material.js?v=2';
+        import {
+            animationPreviewCandidates,
+            preferredMovingClip,
+            shouldApplyCatalogPreview,
+            shouldLoadExternalFbxPreview,
+        } from '/static/js/animation-preview-policy.js?v=1';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
         import { PlayModeController } from '/static/js/task-play-mode.js?v=38';
+
+        window.AnimationPreviewPolicy = {
+            animationPreviewCandidates,
+            preferredMovingClip,
+            shouldApplyCatalogPreview,
+            shouldLoadExternalFbxPreview,
+        };
 
         // Make THREE available globally for rig-editor module
         window.THREE = THREE;
@@ -8976,6 +9005,10 @@
             function rebuildAnimationControls(preferredClipName = null) {
                 if (sel && playBtn && pauseBtn && animations.length) {
                     sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+                    const preferredClip = preferredClipName
+                        ? animations.find((clip) => clip.name === preferredClipName)
+                        : preferredMovingClip(animations);
+                    if (preferredClip) sel.value = preferredClip.name;
                     sel.classList.remove('hidden');
                     playBtn.classList.remove('hidden');
                     pauseBtn.classList.remove('hidden');
@@ -14306,6 +14339,8 @@
                                         // Setup animation UI after cache swap
                                         if (animations.length && sel && playBtn && pauseBtn) {
                                             sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+                                            const preferredClip = preferredMovingClip(animations);
+                                            if (preferredClip) sel.value = preferredClip.name;
                                             sel.classList.remove('hidden');
                                             playBtn.classList.remove('hidden');
                                             pauseBtn.classList.remove('hidden');
@@ -16152,6 +16187,8 @@
                 if (sel && playBtn && pauseBtn && animations.length) {
                     window.taskDbg('[Viewer] Setting up animation UI controls...');
                     sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+                    const preferredClip = preferredMovingClip(animations);
+                    if (preferredClip) sel.value = preferredClip.name;
                     sel.classList.remove('hidden');
                     playBtn.classList.remove('hidden');
                     pauseBtn.classList.remove('hidden');
@@ -16390,6 +16427,8 @@
                 if (sel && playBtn && pauseBtn && animations.length) {
                     window.taskDbg('[Viewer] Setting up animation UI controls...');
                     sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+                    const preferredClip = preferredMovingClip(animations);
+                    if (preferredClip) sel.value = preferredClip.name;
                     sel.classList.remove('hidden');
                     playBtn.classList.remove('hidden');
                     pauseBtn.classList.remove('hidden');
