@@ -1071,8 +1071,8 @@ async def broadcast_disk_usage_warning(
     glb_cache_cap_gb: float,
 ) -> None:
     """
-    Send a live disk-pressure warning every timer run while the root filesystem
-    remains above the configured used-percent threshold.
+    Send a live disk-pressure warning at most once per UTC hour per chat while
+    the root filesystem remains above the configured used-percent threshold.
     """
     token = _get_token()
     if not token:
@@ -1097,9 +1097,15 @@ async def broadcast_disk_usage_warning(
         return
 
     sem = asyncio.Semaphore(3)
+    hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
+    event_key = f"pressure_{hour_bucket}"
 
     async def _one(chat_id: int):
         async with sem:
+            reserved = await reserve_notification(chat_id, "disk_pressure", event_key)
+            if not reserved:
+                print(f"[Telegram] Skip duplicate disk-pressure warning chat={chat_id} hour={hour_bucket}")
+                return
             result = await _send_with_retry(
                 lambda cid=chat_id: bot.send_message(
                     chat_id=cid,

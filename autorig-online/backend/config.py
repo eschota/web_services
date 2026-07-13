@@ -310,6 +310,9 @@ PERIODIC_TASK_CACHE_MIN_AGE_HOURS = float(
 GLB_CACHE_MIN_AGE_HOURS = float(
     os.getenv("GLB_CACHE_MIN_AGE_HOURS", "24")
 )  # Under pressure, evict glb_cache only for files older than this
+VIDEO_CACHE_MIN_AGE_HOURS = float(
+    os.getenv("VIDEO_CACHE_MIN_AGE_HOURS", "24")
+)  # Last-resort pressure cleanup: only videos already uploaded to YouTube
 
 # Before each new task: try to reach at least this much free space on /
 NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))

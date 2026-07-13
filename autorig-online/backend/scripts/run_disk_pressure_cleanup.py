@@ -227,6 +227,69 @@ async def _enforce_periodic_task_cache_max_size(db, *, max_gb: float, min_age_ho
     return summary
 
 
+async def _purge_uploaded_video_cache_until(
+    db,
+    *,
+    video_cache_dir: Path,
+    target_free_gb: float,
+    min_age_hours: float,
+) -> tuple[int, int]:
+    """
+    Last-resort pressure cleanup for backend-cached task previews.
+
+    Only remove old videos for completed tasks that already have a successful
+    YouTube upload. Deferred/not-yet-uploaded tasks stay protected because the
+    YouTube retry worker may still need their local MP4 after worker URLs expire.
+    """
+    from database import Task
+    from sqlalchemy import select
+
+    if _free_gb() >= target_free_gb or not video_cache_dir.exists():
+        return 0, 0
+
+    result = await db.execute(
+        select(Task.id).where(
+            Task.status == "done",
+            Task.youtube_upload_status == "uploaded",
+            Task.youtube_video_id.isnot(None),
+        )
+    )
+    uploaded_task_ids = set(result.scalars().all())
+    if not uploaded_task_ids:
+        return 0, 0
+
+    cutoff_ts = _age_cutoff_timestamp(min_age_hours)
+    candidates: list[tuple[float, int, Path]] = []
+    for path in video_cache_dir.glob("*.mp4"):
+        if path.stem not in uploaded_task_ids:
+            continue
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        if stat.st_mtime > cutoff_ts:
+            continue
+        candidates.append((stat.st_mtime, stat.st_size, path))
+
+    candidates.sort(key=lambda item: item[0])
+    removed = 0
+    freed = 0
+    for _mtime, size, path in candidates:
+        if _free_gb() >= target_free_gb:
+            break
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        removed += 1
+        freed += size
+        print(
+            f"[Disk Video Cache] Removed YouTube-backed video {path.name} "
+            f"({size / (1024**2):.1f} MB); free now {_free_gb():.2f} GB"
+        )
+    return removed, freed
+
+
 async def run() -> None:
     from config import (
         AUTOMATIC_TASK_DB_DELETION,
@@ -238,6 +301,7 @@ async def run() -> None:
         MIN_FREE_SPACE_GB,
         PERIODIC_TASK_CACHE_MIN_AGE_HOURS,
         PERIODIC_TASK_CACHE_MAX_GB,
+        VIDEO_CACHE_MIN_AGE_HOURS,
     )
     from database import AsyncSessionLocal, init_db
     from main import (
@@ -272,6 +336,15 @@ async def run() -> None:
             db=db,
             delete_task_rows=AUTOMATIC_TASK_DB_DELETION,
         )
+        video_cache_dir = Path("/var/autorig/videos")
+        video_cache_gb_before = _dir_size_bytes(video_cache_dir) / (1024**3)
+        video_deleted, video_freed_bytes = await _purge_uploaded_video_cache_until(
+            db,
+            video_cache_dir=video_cache_dir,
+            target_free_gb=target_free_gb,
+            min_age_hours=float(VIDEO_CACHE_MIN_AGE_HOURS),
+        )
+        video_cache_gb_after = _dir_size_bytes(video_cache_dir) / (1024**3)
     after = _disk_snapshot()
 
     task_cache_gb = _dir_size_bytes(TASK_CACHE_DIR) / (1024**3)
@@ -290,9 +363,12 @@ async def run() -> None:
         )
 
     summary = {
-        "deleted_count": result.get("deleted_count", 0),
+        "deleted_count": int(result.get("deleted_count", 0) or 0) + int(video_deleted),
         "deleted_task_rows": result.get("deleted_task_rows", 0),
-        "freed_gb": round(float(result.get("freed_gb", 0.0)), 4),
+        "freed_gb": round(
+            float(result.get("freed_gb", 0.0)) + float(video_freed_bytes) / (1024**3),
+            4,
+        ),
         "initial_free_gb": round(float(before["free_gb"]), 4),
         "final_free_gb": round(float(after["free_gb"]), 4),
         "target_free_gb": round(float(target_free_gb), 4),
@@ -308,6 +384,11 @@ async def run() -> None:
         "periodic_task_cache_min_age_hours": round(float(PERIODIC_TASK_CACHE_MIN_AGE_HOURS), 2),
         "glb_cache_cap_gb": round(float(GLB_CACHE_MAX_GB), 4),
         "glb_cache_min_age_hours": round(float(GLB_CACHE_MIN_AGE_HOURS), 2),
+        "video_cache_gb_before": round(float(video_cache_gb_before), 4),
+        "video_cache_gb_after": round(float(video_cache_gb_after), 4),
+        "video_cache_min_age_hours": round(float(VIDEO_CACHE_MIN_AGE_HOURS), 2),
+        "video_cache_deleted": int(video_deleted),
+        "video_cache_freed_gb": round(float(video_freed_bytes) / (1024**3), 4),
         "task_cache_dirs_removed": int(task_cache_summary.get("dirs_removed", 0) or 0),
         "task_cache_dirs_freed_gb": round(
             float(task_cache_summary.get("bytes_freed_dirs", 0) or 0) / (1024**3),
