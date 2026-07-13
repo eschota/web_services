@@ -65,7 +65,10 @@ test('keeps explicit external FBX fallback for non-animal tasks only', () => {
     }), false);
 });
 
-test('applies the preferred clip after replacing cloned select controls', () => {
-    const postCloneSelections = taskHtml.match(/sel = newSel;\s+if \(preferredClip\) sel\.value = preferredClip\.name;/g) || [];
-    assert.equal(postCloneSelections.length, 3);
+test('centralizes cloned controls in the shared playlist integration', () => {
+    const cloneSites = taskHtml.match(/sel = newSel;/g) || [];
+    assert.equal(cloneSites.length, 1);
+    assert.match(taskHtml, /if \(preferredEntry\) sel\.value = preferredEntry\.name;/);
+    assert.match(taskHtml, /configureAnimationPlaylistForCurrentModel\(\);/);
+    assert.doesNotMatch(taskHtml, /Setting up animation UI controls/);
 });

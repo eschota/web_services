@@ -7880,6 +7880,7 @@
                 this.customAnimationUserInteracted = true;
                 this.animalAnimationAutoplayStopped = true;
                 this.stopAnimalAnimationAutoplay();
+                window.AnimationPlaylistBridge?.markInteraction?.('catalog-or-controls');
             },
 
             stopAnimalAnimationAutoplay() {
@@ -7890,28 +7891,26 @@
             },
 
             scheduleAnimalAnimationAutoplay() {
+                // The viewer playlist owns timing. Catalog cards only mirror its
+                // current clip and must never run a second independent timer.
                 this.stopAnimalAnimationAutoplay();
-                if (!this.isAnimalAnimationCatalog()) return;
-                if (this.customAnimationUserInteracted || this.animalAnimationAutoplayStopped) return;
-                const ready = (this.animationCatalog?.animations || [])
-                    .filter(a => Boolean(a?.available) && Boolean(a?.ready));
-                if (ready.length < 2) return;
-                this.animalAnimationAutoplayTimer = setTimeout(async () => {
-                    if (this.customAnimationUserInteracted || this.animalAnimationAutoplayStopped) return;
-                    const latestReady = (this.animationCatalog?.animations || [])
-                        .filter(a => Boolean(a?.available) && Boolean(a?.ready));
-                    if (latestReady.length < 2) return;
-                    const currentIndex = latestReady.findIndex(
-                        a => this.normalizeAnimationKey(a?.id) === this.normalizeAnimationKey(this.selectedAnimationId)
-                    );
-                    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % latestReady.length : (this.animalAnimationAutoplayIndex % latestReady.length);
-                    this.animalAnimationAutoplayIndex = nextIndex + 1;
-                    const next = latestReady[nextIndex];
-                    if (next?.id) {
-                        await this.selectAnimation(next.id, { auto: true });
-                    }
-                    this.scheduleAnimalAnimationAutoplay();
-                }, 5200);
+            },
+
+            syncAnimationPlaylistClip(entry) {
+                if (!entry || !Array.isArray(this.animationCatalog?.animations)) return;
+                const probes = [entry.id, entry.name]
+                    .map((value) => this.normalizeAnimationKey(value))
+                    .filter(Boolean);
+                const matched = this.animationCatalog.animations.find((animation) => {
+                    const keys = [animation?.id, animation?.action_name, animation?.name, animation?.file_name]
+                        .map((value) => this.normalizeAnimationKey(value))
+                        .filter(Boolean);
+                    return probes.some((probe) => keys.includes(probe));
+                });
+                if (!matched) return;
+                this.selectedAnimationId = this.normalizeAnimationKey(matched.id);
+                if (matched.type) this.animationTypeFilter = String(matched.type).toLowerCase();
+                this.renderAnimationCatalog();
             },
 
             /** Fields that affect GET /animations/catalog (must match server-side resolution). */
@@ -7986,10 +7985,7 @@
                     wrap.classList.remove('hidden');
                     window.__taskPageBoot?.revealElement(wrap, 0);
                     this.renderAnimationCatalog();
-                    if (this.isAnimalAnimationCatalog() && !this.customAnimationUserInteracted && !this.animalAnimationAutoplayStopped) {
-                        const applyToken = ++this.animationApplyToken;
-                        await this.applySelectedAnimationToViewer(applyToken, { automatic: true });
-                    }
+                    this.syncAnimationPlaylistClip(window.AnimationPlaylistBridge?.currentEntry?.());
                     this.scheduleAnimalAnimationAutoplay();
                 } catch (e) {
                     console.warn('Failed to load animation catalog:', e);
@@ -9024,6 +9020,11 @@
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
         import { PlayModeController } from '/static/js/task-play-mode.js?v=38';
         import { TaskSplitViewportController } from '/static/js/task-split-viewer.js?v=20260713-split-v2';
+        import {
+            AnimationPlaylistController,
+            captureRootTransform,
+            restoreRootTransform,
+        } from '/static/js/animation-playlist-controller.js?v=1';
 
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
@@ -9089,6 +9090,34 @@
             let animations = [];
             let currentAction = null;
             const clock = new THREE.Clock();
+            const animationPlaylistRootSnapshots = new WeakMap();
+            const animationManifestCache = new Map();
+            let animationPlaylistConfigureToken = 0;
+            let animationPlaylistMixer = null;
+
+            const animationPlaylist = new AnimationPlaylistController({
+                playClip: (name, options) => play(name, options),
+                restoreRoot: () => {
+                    if (!currentModel) return;
+                    const snapshot = animationPlaylistRootSnapshots.get(currentModel);
+                    if (!snapshot || !restoreRootTransform(currentModel, snapshot)) return;
+                    try {
+                        updateShadowCatcherPlaneForModel(currentModel);
+                    } catch (_) {}
+                },
+                onClipChange: (entry, state) => {
+                    if (sel && entry?.name) sel.value = entry.name;
+                    window.TaskUI?.syncAnimationPlaylistClip?.(entry);
+                    if (state?.mode === 'autoplay') {
+                        setStatus(`Ready (${animationPlaylist.entries.length} animations) · ${state.index + 1}/${state.total}`);
+                    }
+                },
+                onStateChange: (state) => {
+                    if (!wrap) return;
+                    wrap.dataset.animationPlaylistMode = state.manualMode ? 'manual' : (state.autoplay ? 'autoplay' : 'idle');
+                    wrap.dataset.animationPlaylistClip = state.currentId || '';
+                },
+            });
             
             // Viewer keyboard focus - only capture keys after user clicks on viewer
             let viewerFocused = false;
@@ -9123,6 +9152,112 @@
 
             function setStatus(s) { statusEl.textContent = s; }
 
+            function selectedAnimationManifestUrl() {
+                const selected = window.TaskUI?.animalAnimationCatalogParams?.();
+                if (!selected?.animal_type) {
+                    return `/api/task/${encodeURIComponent(taskId)}/animation-manifest`;
+                }
+                const query = new URLSearchParams({
+                    rig_type: String(selected.animal_type),
+                    orientation: String(selected.orientation || 'front'),
+                });
+                return `/api/task/${encodeURIComponent(taskId)}/animation-manifest?${query.toString()}`;
+            }
+
+            async function loadAnimationPlaylistManifest() {
+                const url = selectedAnimationManifestUrl();
+                if (!animationManifestCache.has(url)) {
+                    animationManifestCache.set(url, (async () => {
+                        try {
+                            const response = await fetch(url, {
+                                credentials: 'same-origin',
+                                headers: { Accept: 'application/json' },
+                            });
+                            if (!response.ok) {
+                                if (response.status !== 404) {
+                                    console.warn('[Viewer] Animation manifest unavailable:', response.status, url);
+                                }
+                                return null;
+                            }
+                            const payload = await response.json();
+                            return payload && Array.isArray(payload.clips) ? payload : null;
+                        } catch (error) {
+                            console.warn('[Viewer] Animation manifest request failed:', error);
+                            return null;
+                        }
+                    })());
+                }
+                return await animationManifestCache.get(url);
+            }
+
+            function configureAnimationPlaylistForCurrentModel(preferredClipName = null) {
+                const configureToken = ++animationPlaylistConfigureToken;
+                const configuredModel = currentModel;
+                const configuredMixer = mixer;
+                const configuredClips = Array.isArray(animations) ? [...animations] : [];
+
+                if (configuredMixer !== animationPlaylistMixer) {
+                    currentAction = null;
+                    animationPlaylistMixer = configuredMixer;
+                }
+
+                if (configuredModel && !animationPlaylistRootSnapshots.has(configuredModel)) {
+                    animationPlaylistRootSnapshots.set(configuredModel, captureRootTransform(configuredModel));
+                }
+
+                animationPlaylist.configure({
+                    mixer: configuredMixer,
+                    clips: configuredClips,
+                    manifest: null,
+                });
+                rebuildAnimationControls(preferredClipName);
+                animationPlaylist.startAutoplay();
+                if (document.hidden) animationPlaylist.suspend();
+
+                if (!configuredModel || !configuredMixer || !configuredClips.length) return;
+                void loadAnimationPlaylistManifest().then((manifest) => {
+                    if (!manifest || configureToken !== animationPlaylistConfigureToken) return;
+                    if (currentModel !== configuredModel || mixer !== configuredMixer) return;
+                    const selectedBeforeManifest = animationPlaylist.currentEntry?.name || preferredClipName;
+                    animationPlaylist.configure({
+                        mixer: configuredMixer,
+                        clips: configuredClips,
+                        manifest,
+                    });
+                    rebuildAnimationControls(selectedBeforeManifest);
+                    animationPlaylist.startAutoplay();
+                    if (document.hidden) animationPlaylist.suspend();
+                });
+            }
+
+            function markAnimationPlaylistInteraction(reason) {
+                animationPlaylist.markInteraction(reason);
+            }
+
+            function setupAnimationPlaylistInteractionHooks() {
+                if (wrap?.dataset.animationPlaylistHooks === '1') return;
+                if (wrap) {
+                    wrap.dataset.animationPlaylistHooks = '1';
+                    wrap.addEventListener('pointerdown', () => markAnimationPlaylistInteraction('viewer-pointer'), true);
+                    wrap.addEventListener('touchstart', () => markAnimationPlaylistInteraction('viewer-touch'), { capture: true, passive: true });
+                    wrap.addEventListener('wheel', () => markAnimationPlaylistInteraction('viewer-wheel'), { capture: true, passive: true });
+                }
+                document.addEventListener('keydown', (event) => {
+                    if (!viewerFocused || event.target?.matches?.('input, textarea, select')) return;
+                    markAnimationPlaylistInteraction('viewer-keyboard');
+                }, true);
+                document.addEventListener('click', (event) => {
+                    if (event.target?.closest?.('#view-mode-tpose, #view-mode-rig, #view-mode-anim, #view-mode-play, #view-mode-ragdoll')) {
+                        markAnimationPlaylistInteraction('viewer-mode');
+                    }
+                }, true);
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) animationPlaylist.suspend();
+                    else animationPlaylist.resume();
+                });
+            }
+            setupAnimationPlaylistInteractionHooks();
+
             function play(name, options = {}) {
                 if (!mixer || !animations.length) return;
                 const clip = animations.find(c => c.name === name) || animations[0];
@@ -9146,13 +9281,15 @@
                 if (currentAction === next) {
                     next.play();
                 } else if (currentAction) {
-                    currentAction.crossFadeTo(next, fade, false);
+                    if (fade > 0) currentAction.crossFadeTo(next, fade, false);
+                    else currentAction.stop();
                 } else {
                     next.fadeIn(fade);
                 }
                 next.play();
                 currentAction = next;
                 mixer.timeScale = 1;
+                return next;
             }
 
             function stabilizeAnimationPreviewPose(reason = 'animation preview') {
@@ -9204,11 +9341,14 @@
             }
 
             function rebuildAnimationControls(preferredClipName = null) {
-                if (sel && playBtn && pauseBtn && animations.length) {
-                    sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
-                    const preferredClip = preferredClipName
-                        ? animations.find((clip) => clip.name === preferredClipName)
-                        : preferredMovingClip(animations);
+                const playlistEntries = animationPlaylist.entries.length
+                    ? animationPlaylist.entries
+                    : animations.map((clip) => ({ name: clip.name, clip }));
+                if (sel && playBtn && pauseBtn && playlistEntries.length) {
+                    sel.replaceChildren(...playlistEntries.map((entry) => new Option(entry.name, entry.name)));
+                    const preferredEntry = preferredClipName
+                        ? playlistEntries.find((entry) => entry.name === preferredClipName || entry.id === preferredClipName)
+                        : (animationPlaylist.currentEntry || playlistEntries[0]);
                     sel.classList.remove('hidden');
                     playBtn.classList.remove('hidden');
                     pauseBtn.classList.remove('hidden');
@@ -9217,7 +9357,7 @@
                     const newSel = sel.cloneNode(true);
                     sel.parentNode.replaceChild(newSel, sel);
                     sel = newSel;
-                    if (preferredClip) sel.value = preferredClip.name;
+                    if (preferredEntry) sel.value = preferredEntry.name;
 
                     const newPlayBtn = playBtn.cloneNode(true);
                     playBtn.parentNode.replaceChild(newPlayBtn, playBtn);
@@ -9229,25 +9369,22 @@
 
                     sel.addEventListener('change', () => {
                         window.TaskUI?.markCustomAnimationUserInteraction?.();
-                        play(sel.value);
+                        animationPlaylist.manualPlay(sel.value);
                     });
                     playBtn.addEventListener('click', () => {
                         window.TaskUI?.markCustomAnimationUserInteraction?.();
-                        play(sel.value);
+                        animationPlaylist.manualPlay(sel.value);
                     });
                     pauseBtn.addEventListener('click', () => {
                         window.TaskUI?.markCustomAnimationUserInteraction?.();
-                        if (mixer) mixer.timeScale = 0;
+                        animationPlaylist.manualPause();
                     });
 
-                    if (preferredClipName && animations.some(a => a.name === preferredClipName)) {
-                        sel.value = preferredClipName;
-                    }
-                    try {
-                        play(sel.value, currentModelType === 'animations' ? { fade: 0 } : {});
-                        stabilizeAnimationPreviewPose('animation controls autoplay');
-                    } catch (e) {
-                        console.warn('[Viewer] Auto-play failed:', e);
+                    if (preferredClipName) {
+                        const matching = playlistEntries.find(
+                            (entry) => entry.name === preferredClipName || entry.id === preferredClipName
+                        );
+                        if (matching) sel.value = matching.name;
                     }
                 } else {
                     sel?.classList.add('hidden');
@@ -9275,7 +9412,10 @@
 
                 const picked = pickBestAnimationClipByHints(hints);
                 const preferredClipName = picked ? picked.name : (animations[0]?.name || null);
-                rebuildAnimationControls(preferredClipName);
+                configureAnimationPlaylistForCurrentModel(preferredClipName);
+                if (preferredClipName && animationPlaylist.manualMode) {
+                    animationPlaylist.manualPlay(preferredClipName);
+                }
                 setStatus(`Ready (${animations.length} animations)`);
                 return true;
             }
@@ -9949,10 +10089,27 @@
                 if (!mixer || !animations.length) return false;
                 const clip = pickBestAnimationClipByHints([query]);
                 if (!clip) return false;
-                play(clip.name);
+                animationPlaylist.manualPlay(clip.name);
                 if (sel) sel.value = clip.name;
                 return true;
             }
+
+            window.AnimationPlaylistBridge = {
+                markInteraction(reason = 'external') {
+                    markAnimationPlaylistInteraction(reason);
+                },
+                currentEntry() {
+                    return animationPlaylist.currentEntry;
+                },
+                listEntries() {
+                    return animationPlaylist.entries.map((entry) => ({
+                        id: entry.id,
+                        name: entry.name,
+                        autoplay: entry.autoplay,
+                        loop: entry.loop,
+                    }));
+                },
+            };
 
             // Bridge used by custom animation catalog UI.
             window.CustomAnimationViewerBridge = {
@@ -9986,7 +10143,9 @@
                     return applyAnimationClipsToCurrentModel(clips, hints);
                 },
                 listClipNames() {
-                    return (animations || []).map(c => c.name);
+                    return animationPlaylist.entries.length
+                        ? animationPlaylist.entries.map((entry) => entry.name)
+                        : (animations || []).map(c => c.name);
                 }
             };
 
@@ -13961,6 +14120,7 @@
                 controls.enableDamping = true;
                 controls.dampingFactor = 0.08;
                 controls.target.set(0, 1.0, 0);
+                controls.addEventListener('start', () => markAnimationPlaylistInteraction('orbit-controls'));
                 
                 // Disable built-in zoom - we use custom inertia zoom
                 controls.enableZoom = false;
@@ -14681,16 +14841,17 @@
                     // Set root model for transforms
                     if (transformManager) transformManager.setRootModel(currentModel);
                     
-                    // Restore animations if any
-                    if (modelCache[cacheKey + 'Data']) {
-                        animations = modelCache[cacheKey + 'Data'];
-                        if (mixer) {
+                    // Restore one shared mixer/playlist for every split camera.
+                    if (mixer) {
+                        try {
                             mixer.stopAllAction();
-                        }
-                        if (animations.length > 0) {
-                            mixer = new THREE.AnimationMixer(currentModel);
-                        }
+                            mixer.uncacheRoot?.(mixer.getRoot?.());
+                        } catch (_) {}
                     }
+                    animations = Array.isArray(modelCache[cacheKey + 'Data'])
+                        ? [...modelCache[cacheKey + 'Data']]
+                        : [];
+                    mixer = animations.length ? new THREE.AnimationMixer(currentModel) : null;
                     
                     // Update references
                     if (viewerControls) {
@@ -14716,6 +14877,7 @@
                         viewerThemeRuntimeApply(activeViewerTheme, `cache ${cacheKey}`);
                     }
                     applyViewerState();
+                    configureAnimationPlaylistForCurrentModel();
                     
                     return true;
                 }
@@ -14993,24 +15155,6 @@
                                         currentModelType = 'animations';
                                         window.taskDbg('[Viewer] ✓ Swapped to cached animations model');
                                         
-                                        // Setup animation UI after cache swap
-                                        if (animations.length && sel && playBtn && pauseBtn) {
-                                            sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
-                                            const preferredClip = preferredMovingClip(animations);
-                                            if (preferredClip) sel.value = preferredClip.name;
-                                            sel.classList.remove('hidden');
-                                            playBtn.classList.remove('hidden');
-                                            pauseBtn.classList.remove('hidden');
-                                            
-                                            // Auto-play first animation
-                                            try {
-                                                play(sel.value, { fade: 0 });
-                                                stabilizeAnimationPreviewPose('cached animation swap');
-                                                window.taskDbg('[Viewer] ✓ Auto-playing animation after cache swap:', sel.value);
-                                            } catch (e) {
-                                                console.warn('[Viewer] Auto-play after cache swap failed:', e);
-                                            }
-                                        }
                                     } else {
                                         // Need to load from server
                                         window.taskDbg('[Viewer] Loading animations.glb from server...');
@@ -16840,60 +16984,9 @@
                     currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
                 }
 
-                // UI for animations
-                if (sel && playBtn && pauseBtn && animations.length) {
-                    window.taskDbg('[Viewer] Setting up animation UI controls...');
-                    sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
-                    const preferredClip = preferredMovingClip(animations);
-                    sel.classList.remove('hidden');
-                    playBtn.classList.remove('hidden');
-                    pauseBtn.classList.remove('hidden');
-                    
-                    // Remove old listeners and add new ones
-                    const newSel = sel.cloneNode(true);
-                    sel.parentNode.replaceChild(newSel, sel);
-                    sel = newSel;
-                    if (preferredClip) sel.value = preferredClip.name;
-                    
-                    const newPlayBtn = playBtn.cloneNode(true);
-                    playBtn.parentNode.replaceChild(newPlayBtn, playBtn);
-                    playBtn = newPlayBtn;
-                    
-                    const newPauseBtn = pauseBtn.cloneNode(true);
-                    pauseBtn.parentNode.replaceChild(newPauseBtn, pauseBtn);
-                    pauseBtn = newPauseBtn;
-                    
-                    sel.addEventListener('change', () => {
-                        window.taskDbg('[Viewer] Animation changed to:', sel.value);
-                        play(sel.value);
-                    });
-                    playBtn.addEventListener('click', () => {
-                        window.taskDbg('[Viewer] Play clicked, animation:', sel.value);
-                        play(sel.value);
-                    });
-                    pauseBtn.addEventListener('click', () => {
-                        window.taskDbg('[Viewer] Pause clicked');
-                        if (mixer) mixer.timeScale = 0;
-                    });
-                    
-                    try {
-                        window.taskDbg('[Viewer] Auto-playing first animation:', sel.value);
-                        play(sel.value, isAnimationPreview ? { fade: 0 } : {});
-                        if (isAnimationPreview) {
-                            stabilizeAnimationPreviewPose(`initial ${label}`);
-                        }
-                    } catch (e) {
-                        console.warn('[Viewer] Auto-play failed:', e);
-                    }
-                } else {
-                    window.taskDbg('[Viewer] No animations or UI elements missing');
-                    sel?.classList.add('hidden');
-                    playBtn?.classList.add('hidden');
-                    pauseBtn?.classList.add('hidden');
-                }
-
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';
                 setStatus(statusText);
+                configureAnimationPlaylistForCurrentModel();
                 window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
@@ -17080,60 +17173,9 @@
                     currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
                 }
 
-                // UI for animations
-                if (sel && playBtn && pauseBtn && animations.length) {
-                    window.taskDbg('[Viewer] Setting up animation UI controls...');
-                    sel.innerHTML = animations.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
-                    const preferredClip = preferredMovingClip(animations);
-                    sel.classList.remove('hidden');
-                    playBtn.classList.remove('hidden');
-                    pauseBtn.classList.remove('hidden');
-                    
-                    // Remove old listeners and add new ones
-                    const newSel = sel.cloneNode(true);
-                    sel.parentNode.replaceChild(newSel, sel);
-                    sel = newSel;
-                    if (preferredClip) sel.value = preferredClip.name;
-                    
-                    const newPlayBtn = playBtn.cloneNode(true);
-                    playBtn.parentNode.replaceChild(newPlayBtn, playBtn);
-                    playBtn = newPlayBtn;
-                    
-                    const newPauseBtn = pauseBtn.cloneNode(true);
-                    pauseBtn.parentNode.replaceChild(newPauseBtn, pauseBtn);
-                    pauseBtn = newPauseBtn;
-                    
-                    sel.addEventListener('change', () => {
-                        window.taskDbg('[Viewer] Animation changed to:', sel.value);
-                        play(sel.value);
-                    });
-                    playBtn.addEventListener('click', () => {
-                        window.taskDbg('[Viewer] Play clicked, animation:', sel.value);
-                        play(sel.value);
-                    });
-                    pauseBtn.addEventListener('click', () => {
-                        window.taskDbg('[Viewer] Pause clicked');
-                        if (mixer) mixer.timeScale = 0;
-                    });
-                    
-                    try {
-                        window.taskDbg('[Viewer] Auto-playing first animation:', sel.value);
-                        play(sel.value, isAnimationPreview ? { fade: 0 } : {});
-                        if (isAnimationPreview) {
-                            stabilizeAnimationPreviewPose(`initial ${label}`);
-                        }
-                    } catch (e) {
-                        console.warn('[Viewer] Auto-play failed:', e);
-                    }
-                } else {
-                    window.taskDbg('[Viewer] No animations or UI elements missing');
-                    sel?.classList.add('hidden');
-                    playBtn?.classList.add('hidden');
-                    pauseBtn?.classList.add('hidden');
-                }
-
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';
                 setStatus(statusText);
+                configureAnimationPlaylistForCurrentModel();
                 window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
