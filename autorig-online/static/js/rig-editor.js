@@ -3,6 +3,8 @@
  * Modal dialog for changing rig type and restarting tasks
  */
 
+import { isSecsVertexPbrMaterial } from './vertex-pbr-material.js?v=1';
+
 // Rig types enum
 export const RigType = {
     CHAR: 'char',
@@ -1263,6 +1265,9 @@ export class ViewerControls {
             console.log('[ViewerControls] Material already has post-processing injected, skipping:', material.name || material.type);
             return;
         }
+
+        const isVertexPbr = isSecsVertexPbrMaterial(material);
+        const previousOnBeforeCompile = material.onBeforeCompile;
         
         console.log('[ViewerControls] Injecting post-processing into material:', {
             type: material.type,
@@ -1277,8 +1282,14 @@ export class ViewerControls {
             }
         });
 
-        material.onBeforeCompile = (shader) => {
+        material.onBeforeCompile = (shader, renderer) => {
             console.log('[ViewerControls] onBeforeCompile called for material:', material.name || material.type);
+
+            // Vertex PBR owns the base material decode. Run it first, then layer
+            // the viewer's channel adjustments/debug UI over the resulting shader.
+            if (typeof previousOnBeforeCompile === 'function') {
+                previousOnBeforeCompile.call(material, shader, renderer);
+            }
             
             // Add all channel uniforms to the shader
             const channels = ['albedo', 'ao', 'normal', 'roughness', 'metalness', 'emissive'];
@@ -1467,13 +1478,17 @@ export class ViewerControls {
                     vec3 debugCol = vec3(1.0, 0.0, 1.0); // Magenta fallback
                     
                     if (u_debug_mode < 1.5) {
-                        // AO - read directly from aoMap
-                        #ifdef USE_AOMAP
-                            vec4 aoTexel = texture2D(aoMap, vAoMapUv);
-                            debugCol = vec3(aoTexel.r);
-                        #else
-                            debugCol = vec3(1.0); // No AO = white
-                        #endif
+                        // AO - Vertex PBR stores AO in COLOR_0.a.
+                        ${isVertexPbr ? `
+                            debugCol = vec3(clamp(vColor.a, 0.0, 1.0));
+                        ` : `
+                            #ifdef USE_AOMAP
+                                vec4 aoTexel = texture2D(aoMap, vAoMapUv);
+                                debugCol = vec3(aoTexel.r);
+                            #else
+                                debugCol = vec3(1.0); // No AO = white
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 2.5) {
                         // Normal - read directly from normalMap
@@ -1485,31 +1500,43 @@ export class ViewerControls {
                         #endif
                     }
                     else if (u_debug_mode < 3.5) {
-                        // Albedo - read directly from map (base color)
-                        #ifdef USE_MAP
-                            vec4 albedoTexel = texture2D(map, vMapUv);
-                            debugCol = albedoTexel.rgb;
-                        #else
-                            debugCol = diffuseColor.rgb; // Use material color
-                        #endif
+                        // Albedo - Vertex PBR stores linear base color in COLOR_0.rgb.
+                        ${isVertexPbr ? `
+                            debugCol = clamp(vColor.rgb, 0.0, 1.0);
+                        ` : `
+                            #ifdef USE_MAP
+                                vec4 albedoTexel = texture2D(map, vMapUv);
+                                debugCol = albedoTexel.rgb;
+                            #else
+                                debugCol = diffuseColor.rgb; // Use material color
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 4.5) {
-                        // Metalness - read from metalnessMap (blue channel for GLB)
-                        #ifdef USE_METALNESSMAP
-                            vec4 metalnessTexel = texture2D(metalnessMap, vMetalnessMapUv);
-                            debugCol = vec3(metalnessTexel.b); // Blue channel = metalness
-                        #else
-                            debugCol = vec3(metalness); // Use material value
-                        #endif
+                        // Metalness - Vertex PBR stores it in TEXCOORD_1.x.
+                        ${isVertexPbr ? `
+                            debugCol = vec3(clamp(vSecsMetalRough.x, 0.0, 1.0));
+                        ` : `
+                            #ifdef USE_METALNESSMAP
+                                vec4 metalnessTexel = texture2D(metalnessMap, vMetalnessMapUv);
+                                debugCol = vec3(metalnessTexel.b); // Blue channel = metalness
+                            #else
+                                debugCol = vec3(metalness); // Use material value
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 5.5) {
-                        // Roughness - read from roughnessMap (green channel for GLB)
-                        #ifdef USE_ROUGHNESSMAP
-                            vec4 roughnessTexel = texture2D(roughnessMap, vRoughnessMapUv);
-                            debugCol = vec3(roughnessTexel.g); // Green channel = roughness
-                        #else
-                            debugCol = vec3(roughness); // Use material value
-                        #endif
+                        // Roughness - Vertex PBR stores perceptual roughness in TEXCOORD_1.y.
+                        ${isVertexPbr ? `
+                            debugCol = vec3(clamp(vSecsMetalRough.y, 0.0, 1.0));
+                        ` : `
+                            #ifdef USE_ROUGHNESSMAP
+                                vec4 roughnessTexel = texture2D(roughnessMap, vRoughnessMapUv);
+                                debugCol = vec3(roughnessTexel.g); // Green channel = roughness
+                            #else
+                                debugCol = vec3(roughness); // Use material value
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 6.5) {
                         // Emissive - read directly from emissiveMap
@@ -1635,6 +1662,17 @@ export class ViewerControls {
                 }
 
                 const original = this.originalMaterials.get(matKey);
+
+                if (isSecsVertexPbrMaterial(original)) {
+                    // Vertex PBR channel views are implemented by the composed
+                    // standard-material shader so skinning and PBR stay active.
+                    if (Array.isArray(child.material)) {
+                        child.material[index] = original;
+                    } else {
+                        child.material = original;
+                    }
+                    return;
+                }
 
                 if (channel === MaterialChannel.PBR) {
                     // Restore original PBR material (already has injected adjustments)
@@ -2188,7 +2226,7 @@ export class ViewerControls {
                         this.injectPostProcessing(mat);
                         
                         // Apply baked AO if material doesn't have its own aoMap
-                        if (!mat.aoMap && this.bakedAOTexture) {
+                        if (!isSecsVertexPbrMaterial(mat) && !mat.aoMap && this.bakedAOTexture) {
                             mat.aoMap = this.bakedAOTexture;
                             mat.aoMapIntensity = 1.0;
                             mat.needsUpdate = true;
@@ -2296,6 +2334,8 @@ export class ViewerControls {
                     // Get original material to check if it had aoMap
                     const originalKey = `${child.uuid}_${idx}`;
                     const originalMat = this.originalMaterials.get(originalKey);
+
+                    if (isSecsVertexPbrMaterial(originalMat || mat)) return;
                     
                     // If original didn't have aoMap, update with new baked one
                     if (!originalMat?.aoMap && mat.aoMap !== this.bakedAOTexture) {
