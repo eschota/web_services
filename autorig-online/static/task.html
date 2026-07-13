@@ -10714,7 +10714,6 @@
                 if (modelChanged) splitViewportShadowLastRefresh = 0;
                 return panel;
             }
-
             let preparedLoaded = false;
             let finalLoaded = false;
             let mainViewerEnabled = true;
@@ -15137,6 +15136,7 @@
                         if (nextMode === 'animation') {
                             restoreAnimationPreviewClipsAfterPlay();
                         }
+                        configureBoneCorrectionForCurrentModel();
                     };
 
                     const showRagdollHelpOnce = () => {
@@ -15481,7 +15481,6 @@
                                 setStatus('Ragdoll mode active · R reset · Space impulse');
                             }
                         }
-                        configureBoneCorrectionForCurrentModel();
                     };
                     
                     tposeBtn?.addEventListener('click', () => { tposeBtn.blur(); setActiveMode('tpose'); });
