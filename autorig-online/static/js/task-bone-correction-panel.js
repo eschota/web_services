@@ -130,6 +130,8 @@ export class TaskBoneCorrectionPanel {
         this.exportState = { status: 'idle' };
         this.visibleBones = [];
         this.overlayNodes = new Map();
+        this.skeletonHelper = null;
+        this.skeletonLayer = 29;
         this.drag = null;
         this.exportPollTimer = null;
         this._suppressDirty = false;
@@ -253,6 +255,7 @@ export class TaskBoneCorrectionPanel {
         this.currentModelType = nextType;
         if (modelChanged) {
             const records = this.controller.configure({ model });
+            this._replaceSkeletonHelper(model);
             this._guardSkeletonSignature(records);
             this._refreshBoneList();
         }
@@ -302,6 +305,7 @@ export class TaskBoneCorrectionPanel {
     setMode(mode) {
         const next = mode === 'animation' && this.controller.bones.length ? 'animation' : 'rig';
         this.mode = next;
+        if (this.skeletonHelper) this.skeletonHelper.visible = next === 'animation';
         this.card.dataset.blueprintMode = next;
         this.root?.querySelectorAll('[data-correction-mode]').forEach((button) => button.classList.toggle('active', button.dataset.correctionMode === next));
         if (next === 'animation') this._refreshBoneList();
@@ -326,6 +330,7 @@ export class TaskBoneCorrectionPanel {
 
     updateOverlay() {
         if (!this.root || this.mode !== 'animation') return;
+        this._attachSkeletonHelper();
         if (this.controller.bones.length) this.card.classList.remove('hidden');
         if (!this.card.offsetParent) return;
         const camera = this.getCamera();
@@ -363,6 +368,44 @@ export class TaskBoneCorrectionPanel {
                 }
             }
         });
+    }
+
+    _replaceSkeletonHelper(model) {
+        this._destroySkeletonHelper();
+        if (!model || !this.THREE?.SkeletonHelper || !this.controller.bones.length) return;
+        const helper = new this.THREE.SkeletonHelper(model);
+        helper.name = 'AnimationCorrectionSkeletonHelper';
+        helper.layers.set(this.skeletonLayer);
+        helper.visible = this.mode === 'animation';
+        helper.renderOrder = 50;
+        if (helper.material) {
+            helper.material.transparent = true;
+            helper.material.opacity = 0.72;
+            helper.material.depthTest = false;
+            helper.material.depthWrite = false;
+            helper.material.toneMapped = false;
+            helper.material.needsUpdate = true;
+        }
+        this.skeletonHelper = helper;
+        this._attachSkeletonHelper();
+    }
+
+    _attachSkeletonHelper() {
+        const helper = this.skeletonHelper;
+        const model = this.controller.model;
+        const camera = this.getCamera();
+        camera?.layers?.enable?.(this.skeletonLayer);
+        if (helper && !helper.parent && model?.parent) model.parent.add(helper);
+    }
+
+    _destroySkeletonHelper() {
+        const helper = this.skeletonHelper;
+        if (!helper) return;
+        helper.removeFromParent?.();
+        helper.geometry?.dispose?.();
+        if (Array.isArray(helper.material)) helper.material.forEach((material) => material?.dispose?.());
+        else helper.material?.dispose?.();
+        this.skeletonHelper = null;
     }
 
     _refreshBoneList() {
@@ -734,6 +777,7 @@ export class TaskBoneCorrectionPanel {
 
     destroy() {
         clearTimeout(this.exportPollTimer);
+        this._destroySkeletonHelper();
         this.controller.destroy();
         this.root?.remove();
         this.root = null;

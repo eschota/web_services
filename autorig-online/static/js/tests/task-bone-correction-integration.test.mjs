@@ -36,6 +36,9 @@ test('Blueprint Left switches semantic surface to shared orthographic animation 
     assert.match(panelSource, /data-blueprint-mode='animation'/);
     assert.match(panelSource, /Rig Points/);
     assert.match(panelSource, /Animation Correction/);
+    assert.match(panelSource, /new this\.THREE\.SkeletonHelper\(model\)/);
+    assert.match(panelSource, /helper\.layers\.set\(this\.skeletonLayer\)/);
+    assert.match(panelSource, /camera\?\.layers\?\.enable\?\.\(this\.skeletonLayer\)/);
 });
 
 
