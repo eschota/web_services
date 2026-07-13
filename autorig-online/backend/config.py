@@ -35,6 +35,16 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production-very-secret-key-12
 # =============================================================================
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./db/autorig.db")
 
+# Canonical animal animation artifacts are runtime data and must stay outside Git.
+ANIMATION_LIBRARY_ROOT = os.getenv(
+    "ANIMATION_LIBRARY_ROOT",
+    "/var/autorig/animation-library",
+).strip()
+ANIMATION_FITTING_JOBS_ROOT = os.getenv(
+    "ANIMATION_FITTING_JOBS_ROOT",
+    "/var/autorig/animation-fitting/jobs",
+).strip()
+
 # =============================================================================
 # Google OAuth2
 # =============================================================================

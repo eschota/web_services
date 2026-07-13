@@ -1,0 +1,175 @@
+import json
+import unittest
+import uuid
+from pathlib import Path
+
+import httpx
+
+from animation_fitting.comfy import (
+    ComfyAnimationClient,
+    ComfyContractError,
+    ComfyWorker,
+    apply_workflow_bindings,
+    deterministic_prompt_id,
+    workflow_fingerprint,
+)
+from animation_fitting.specs import load_animation_fitting_specs
+
+
+def _api_prompt_for(workflow):
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "animation_fitting"
+        / "specs"
+        / "workflows"
+        / workflow.workflow_name
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _node_value(prompt, title, input_name):
+    for node in prompt.values():
+        if node.get("_meta", {}).get("title") == title:
+            return node["inputs"][input_name]
+    raise AssertionError(f"node title not found: {title}")
+
+
+class AnimationFittingWorkflowBindingTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.specs = load_animation_fitting_specs()
+
+    def _bind(self, mode):
+        workflow = self.specs.workflows[mode]
+        return workflow, apply_workflow_bindings(
+            _api_prompt_for(workflow),
+            workflow,
+            uploaded_start_image="autorig/ref.png",
+            positive_prompt="horse motion",
+            negative_prompt="camera movement",
+            frame_count=49,
+            seed=1234,
+            output_prefix="animation_fitting/task/run/candidate_00",
+        )
+
+    def test_loop_reuses_identical_start_image_at_frame_zero_and_n_minus_one(self):
+        workflow, prompt = self._bind("loop")
+        start = workflow.bindings["start_image"]
+        end = workflow.bindings["end_image"]
+        self.assertEqual(_node_value(prompt, start.node_title, start.input_name), "autorig/ref.png")
+        self.assertEqual(_node_value(prompt, end.node_title, end.input_name), "autorig/ref.png")
+        for target in workflow.bindings["frame_count"].targets:
+            self.assertEqual(_node_value(prompt, target.node_title, target.input_name), 49)
+        for target in workflow.bindings["fps"].targets:
+            self.assertEqual(_node_value(prompt, target.node_title, target.input_name), 24)
+        for target in workflow.bindings["output_fps"].targets:
+            self.assertEqual(_node_value(prompt, target.node_title, target.input_name), 30)
+
+    def test_one_shot_uses_start_frame_only_and_rejects_hidden_end_conditioning(self):
+        workflow, prompt = self._bind("one_shot")
+        self.assertFalse(
+            any(node.get("_meta", {}).get("title") == "AUTORIG_END_FRAME" for node in prompt.values())
+        )
+        poisoned = _api_prompt_for(workflow)
+        poisoned["999"] = {
+            "class_type": "LTXVAddGuide",
+            "inputs": {"frame_idx": -1},
+            "_meta": {"title": "AUTORIG_END_GUIDE_N_MINUS_1"},
+        }
+        with self.assertRaisesRegex(ComfyContractError, "must not include end-frame"):
+            apply_workflow_bindings(
+                poisoned,
+                workflow,
+                uploaded_start_image="autorig/ref.png",
+                positive_prompt="horse motion",
+                negative_prompt="camera movement",
+                frame_count=49,
+                seed=1234,
+                output_prefix="animation_fitting/task/death/candidate_00",
+            )
+
+    def test_prompt_id_is_stable_uuid_v4_shape(self):
+        first = deterministic_prompt_id("same-job")
+        second = deterministic_prompt_id("same-job")
+        self.assertEqual(first, second)
+        parsed = uuid.UUID(first)
+        self.assertEqual(parsed.version, 4)
+        self.assertEqual(parsed.variant, uuid.RFC_4122)
+
+    def test_worker_rejects_unpinned_or_plaintext_remote_route(self):
+        with self.assertRaisesRegex(ComfyContractError, "SHA-256"):
+            ComfyWorker("gpu", "http://127.0.0.1:8188", "workflow.json", "")
+        with self.assertRaisesRegex(ComfyContractError, "loopback"):
+            ComfyWorker("gpu", "http://render.example", "workflow.json", "0" * 64)
+
+
+class AnimationFittingComfyClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_pins_canonical_workflow_and_submit_uses_deterministic_id(self):
+        workflow = {
+            "1": {
+                "class_type": "TestNode",
+                "inputs": {"text": "hello"},
+                "_meta": {"title": "TEST"},
+            }
+        }
+        fingerprint = workflow_fingerprint(workflow)
+        captured = {}
+
+        def handler(request):
+            if request.method == "GET" and "/api/userdata/" in request.url.path:
+                return httpx.Response(200, json=workflow)
+            if request.method == "GET" and request.url.path.startswith("/history/"):
+                return httpx.Response(200, json={})
+            if request.method == "GET" and request.url.path == "/queue":
+                return httpx.Response(200, json={"queue_running": [], "queue_pending": []})
+            if request.method == "POST" and request.url.path == "/prompt":
+                payload = json.loads(request.content)
+                captured.update(payload)
+                return httpx.Response(200, json={"prompt_id": payload["prompt_id"]})
+            return httpx.Response(404)
+
+        worker = ComfyWorker(
+            "local-4090",
+            "http://127.0.0.1:8188",
+            "autorig_ltx2_animal_loop_v1_api.json",
+            fingerprint,
+        )
+        transport = httpx.MockTransport(handler)
+        http_client = httpx.AsyncClient(transport=transport)
+        try:
+            client = ComfyAnimationClient(worker, client=http_client)
+            fetched, fetched_fingerprint = await client.fetch_api_workflow()
+            submission = await client.submit(fetched, "animation-fitting-job-1")
+        finally:
+            await http_client.aclose()
+
+        self.assertEqual(fetched, workflow)
+        self.assertEqual(fetched_fingerprint, fingerprint)
+        self.assertEqual(submission.prompt_id, deterministic_prompt_id("animation-fitting-job-1"))
+        self.assertEqual(captured["prompt_id"], submission.prompt_id)
+        self.assertEqual(captured["prompt"], workflow)
+        self.assertFalse(submission.resumed_existing_bool)
+
+    async def test_fetch_rejects_workflow_drift(self):
+        workflow = {"1": {"class_type": "TestNode", "inputs": {}}}
+
+        def handler(request):
+            return httpx.Response(200, json=workflow)
+
+        worker = ComfyWorker(
+            "local-4090",
+            "http://127.0.0.1:8188",
+            "workflow.json",
+            "0" * 64,
+        )
+        http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            client = ComfyAnimationClient(worker, client=http_client)
+            with self.assertRaisesRegex(ComfyContractError, "fingerprint mismatch"):
+                await client.fetch_api_workflow()
+        finally:
+            await http_client.aclose()
+
+
+if __name__ == "__main__":
+    unittest.main()

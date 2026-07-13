@@ -334,6 +334,195 @@ class Task(Base):
         return value
 
 
+class AnimalAnimationLibraryVersion(Base):
+    """One immutable draft/published revision of a canonical species library."""
+
+    __tablename__ = "animal_animation_library_versions"
+    __table_args__ = (
+        UniqueConstraint("rig_type", "revision", name="uq_animal_animation_library_rig_revision"),
+        Index("ix_animal_animation_library_rig_status", "rig_type", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rig_type = Column(String(32), nullable=False, index=True)
+    revision = Column(String(128), nullable=False, index=True)
+    status = Column(String(24), nullable=False, default="draft", index=True)  # draft | published | retired
+    template_skeleton_sha256 = Column(String(64), nullable=False)
+    qa_profile_revision = Column(String(128), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    published_at = Column(DateTime, nullable=True)
+
+
+class AnimalAnimationLibraryArtifact(Base):
+    """Orientation-specific canonical manifest and multi-clip GLB for a revision."""
+
+    __tablename__ = "animal_animation_library_artifacts"
+    __table_args__ = (
+        UniqueConstraint("library_version_id", "orientation", name="uq_animal_animation_artifact_orientation"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    orientation = Column(String(16), nullable=False)
+    manifest_json = Column(Text, nullable=False)
+    manifest_sha256 = Column(String(64), nullable=False)
+    animation_glb_url = Column(String(2048), nullable=True)
+    animation_glb_path = Column(String(2048), nullable=True)
+    artifact_sha256 = Column(String(64), nullable=False)
+    animation_clip_count = Column(Integer, nullable=False)
+    package_zip_url = Column(String(2048), nullable=True)
+    package_zip_path = Column(String(2048), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AnimalAnimationLibraryActivation(Base):
+    """History interval used to bind a task to the revision active when it was created."""
+
+    __tablename__ = "animal_animation_library_activations"
+    __table_args__ = (
+        Index("ix_animal_animation_activation_lookup", "rig_type", "activated_at", "deactivated_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rig_type = Column(String(32), nullable=False, index=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id"),
+        nullable=False,
+        index=True,
+    )
+    activated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    deactivated_at = Column(DateTime, nullable=True, index=True)
+    activated_by = Column(String(255), nullable=False)
+    reason = Column(String(32), nullable=False, default="activate")  # activate | rollback
+
+
+class AnimalAnimationFittingJob(Base):
+    """Durable orchestration state for one species/semantic action fitting run."""
+
+    __tablename__ = "animal_animation_fitting_jobs"
+    __table_args__ = (
+        Index("ix_animal_fitting_job_library_action", "library_version_id", "semantic_id"),
+        Index("ix_animal_fitting_job_status_created", "status", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    rig_type = Column(String(32), nullable=False, index=True)
+    semantic_id = Column(String(128), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="queued", index=True)
+    workflow_name = Column(String(128), nullable=False)
+    workflow_fingerprint = Column(String(128), nullable=False)
+    worker_url = Column(String(2048), nullable=False)
+    prompt_id = Column(String(128), nullable=False, unique=True, index=True)
+    prompt = Column(Text, nullable=False)
+    candidate_target = Column(Integer, nullable=False, default=8)
+    candidate_limit = Column(Integer, nullable=False, default=16)
+    candidates_attempted = Column(Integer, nullable=False, default=0)
+    config_json = Column(Text, nullable=False, default="{}")
+    error = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+
+
+class AnimalAnimationCandidate(Base):
+    """Generated LTX video plus fitted clip and machine QA for a fitting job."""
+
+    __tablename__ = "animal_animation_candidates"
+    __table_args__ = (
+        UniqueConstraint("job_id", "seed", name="uq_animal_animation_candidate_job_seed"),
+        UniqueConstraint("job_id", "rank", name="uq_animal_animation_candidate_job_rank"),
+        Index("ix_animal_animation_candidate_job_rank", "job_id", "rank"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    job_id = Column(
+        String(36),
+        ForeignKey("animal_animation_fitting_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    seed = Column(BigInteger, nullable=False)
+    status = Column(String(32), nullable=False, default="generated", index=True)
+    raw_video_url = Column(String(2048), nullable=True)
+    raw_video_path = Column(String(2048), nullable=True)
+    decoded_frames_path = Column(String(2048), nullable=True)
+    fitted_clip_url = Column(String(2048), nullable=True)
+    fitted_clip_path = Column(String(2048), nullable=True)
+    fitted_clip_sha256 = Column(String(64), nullable=True)
+    duration = Column(Float, nullable=True)
+    fps = Column(Float, nullable=True)
+    root_motion_available = Column(Boolean, nullable=False, default=False)
+    metrics_json = Column(Text, nullable=False, default="{}")
+    provenance_json = Column(Text, nullable=False, default="{}")
+    rank_score = Column(Float, nullable=True)
+    rank = Column(Integer, nullable=True)
+    qa_passed = Column(Boolean, nullable=False, default=False)
+    decision = Column(String(16), nullable=True)  # approved | rejected
+    decision_reason = Column(Text, nullable=True)
+    reviewed_by = Column(String(255), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AnimalAnimationApprovedClip(Base):
+    """The one admin-approved candidate for a semantic ID in a library revision."""
+
+    __tablename__ = "animal_animation_approved_clips"
+    __table_args__ = (
+        UniqueConstraint("library_version_id", "semantic_id", name="uq_animal_approved_clip_semantic"),
+        UniqueConstraint("candidate_id", name="uq_animal_approved_clip_candidate"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    candidate_id = Column(
+        String(36),
+        ForeignKey("animal_animation_candidates.id"),
+        nullable=False,
+        index=True,
+    )
+    semantic_id = Column(String(128), nullable=False, index=True)
+    category = Column(String(32), nullable=False)
+    clip_order = Column(Integer, nullable=False)
+    loop = Column(Boolean, nullable=False)
+    duration = Column(Float, nullable=False)
+    fps = Column(Float, nullable=False)
+    start_pose_id = Column(String(128), nullable=False)
+    end_pose_id = Column(String(128), nullable=False)
+    root_motion_available = Column(Boolean, nullable=False, default=False)
+    qa_profile_revision = Column(String(128), nullable=False)
+    fbx_url = Column(String(2048), nullable=True)
+    fbx_path = Column(String(2048), nullable=True)
+    fbx_sha256 = Column(String(64), nullable=False)
+    metrics_json = Column(Text, nullable=False, default="{}")
+    provenance_json = Column(Text, nullable=False, default="{}")
+    approved_by = Column(String(255), nullable=False)
+    approved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class AdminOverlayCounters(Base):
     """Singleton (id=1): периодные счётчики для админ-оверлея; сброс вручную."""
 

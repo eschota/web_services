@@ -1,0 +1,142 @@
+{
+  "schema": "autorig.animation-fitting-workflows.v1",
+  "fingerprint_algorithm_string": "sha256-canonical-json-v1",
+  "workflow_format_string": "comfy-api-prompt",
+  "input_fps_int": 24,
+  "output_fps_int": 30,
+  "workflows_object": {
+    "loop": {
+      "workflow_name_string": "autorig_ltx2_animal_loop_v1_api.json",
+      "workflow_fingerprint_sha256_string": "e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56",
+      "generation_mode_string": "loop",
+      "post_sampling_guide_crop_required_bool": true,
+      "conditioned_frames_array": [
+        {
+          "role_string": "start",
+          "frame_index_expression_string": "0"
+        },
+        {
+          "role_string": "end",
+          "frame_index_expression_string": "N-1",
+          "reuse_start_image_bool": true
+        }
+      ],
+      "bindings_object": {
+        "start_image": {
+          "node_title_string": "AUTORIG_START_FRAME",
+          "input_name_string": "image"
+        },
+        "end_image": {
+          "node_title_string": "AUTORIG_START_FRAME",
+          "input_name_string": "image"
+        },
+        "positive_prompt": {
+          "node_title_string": "AUTORIG_POSITIVE_PROMPT",
+          "input_name_string": "text"
+        },
+        "negative_prompt": {
+          "node_title_string": "AUTORIG_NEGATIVE_PROMPT",
+          "input_name_string": "text"
+        },
+        "frame_count": {
+          "targets_array": [
+            {
+              "node_title_string": "AUTORIG_VIDEO_LATENT",
+              "input_name_string": "length"
+            },
+            {
+              "node_title_string": "AUTORIG_AUDIO_LATENT",
+              "input_name_string": "frames_number"
+            }
+          ]
+        },
+        "fps": {
+          "targets_array": [
+            {
+              "node_title_string": "AUTORIG_INPUT_CONDITIONING",
+              "input_name_string": "frame_rate"
+            },
+            {
+              "node_title_string": "AUTORIG_AUDIO_LATENT",
+              "input_name_string": "frame_rate"
+            }
+          ]
+        },
+        "output_fps": {
+          "node_title_string": "AUTORIG_OUTPUT_VIDEO",
+          "input_name_string": "fps"
+        },
+        "seed": {
+          "node_title_string": "AUTORIG_SEED",
+          "input_name_string": "noise_seed"
+        },
+        "output": {
+          "node_title_string": "AUTORIG_OUTPUT",
+          "input_name_string": "filename_prefix"
+        }
+      }
+    },
+    "one_shot": {
+      "workflow_name_string": "autorig_ltx2_animal_one_shot_v1_api.json",
+      "workflow_fingerprint_sha256_string": "3ad06e73aefe81f7613b9a922812e749ed4d4f422d5da6592c43b0dbcf38200c",
+      "generation_mode_string": "one_shot",
+      "post_sampling_guide_crop_required_bool": true,
+      "conditioned_frames_array": [
+        {
+          "role_string": "start",
+          "frame_index_expression_string": "0"
+        }
+      ],
+      "bindings_object": {
+        "start_image": {
+          "node_title_string": "AUTORIG_START_FRAME",
+          "input_name_string": "image"
+        },
+        "positive_prompt": {
+          "node_title_string": "AUTORIG_POSITIVE_PROMPT",
+          "input_name_string": "text"
+        },
+        "negative_prompt": {
+          "node_title_string": "AUTORIG_NEGATIVE_PROMPT",
+          "input_name_string": "text"
+        },
+        "frame_count": {
+          "targets_array": [
+            {
+              "node_title_string": "AUTORIG_VIDEO_LATENT",
+              "input_name_string": "length"
+            },
+            {
+              "node_title_string": "AUTORIG_AUDIO_LATENT",
+              "input_name_string": "frames_number"
+            }
+          ]
+        },
+        "fps": {
+          "targets_array": [
+            {
+              "node_title_string": "AUTORIG_INPUT_CONDITIONING",
+              "input_name_string": "frame_rate"
+            },
+            {
+              "node_title_string": "AUTORIG_AUDIO_LATENT",
+              "input_name_string": "frame_rate"
+            }
+          ]
+        },
+        "output_fps": {
+          "node_title_string": "AUTORIG_OUTPUT_VIDEO",
+          "input_name_string": "fps"
+        },
+        "seed": {
+          "node_title_string": "AUTORIG_SEED",
+          "input_name_string": "noise_seed"
+        },
+        "output": {
+          "node_title_string": "AUTORIG_OUTPUT",
+          "input_name_string": "filename_prefix"
+        }
+      }
+    }
+  }
+}

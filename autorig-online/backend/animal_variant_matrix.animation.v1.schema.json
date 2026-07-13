@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/animal-variant-matrix.animation.v1.json",
+  "title": "Authoritative animation fields in animal_variant_matrix.json",
+  "type": "object",
+  "required": ["variants"],
+  "properties": {
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "animal_slug",
+          "orientation",
+          "animation_manifest_url",
+          "animation_glb_url",
+          "animation_library_revision",
+          "animation_clip_count",
+          "animation_glb_sha256"
+        ],
+        "properties": {
+          "animal_slug": {"enum": ["dog", "bear", "cat", "cow", "deer", "elephant", "giraffe", "horse", "mouse", "pig", "rabbit", "turtle"]},
+          "orientation": {"enum": ["front", "back"]},
+          "animation_manifest_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+          "animation_glb_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+          "animation_library_revision": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+          "animation_clip_count": {"const": 30},
+          "animation_glb_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "animation_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "animation_clip_ids": {
+            "type": "array",
+            "minItems": 30,
+            "maxItems": 30,
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,223 @@
+{
+  "schema": "autorig.animation-fitting-prompts.v1",
+  "taxonomy_schema": "animal-animation-taxonomy.v1",
+  "input_fps_int": 24,
+  "output_fps_int": 30,
+  "frame_rule_string": "8n+1",
+  "common_positive_prefix_string": "Locked-camera motion reference for inverse skeletal fitting of the exact {{species}} shown in the supplied base-pose render. Preserve the same individual, geometry, proportions, materials, limb count, skeleton-readable silhouette, lighting, ground plane, framing, and background. Keep the complete body visible. Use physically plausible animal biomechanics and clean, deliberate motion with no camera movement or scene cut.",
+  "loop_instruction_string": "Create one seamless cyclic action. The supplied base-pose image is both frame 0 and the final conditioned frame. Motion phase, body pose, root velocity, and limb velocity must close smoothly across the seam without a pause, duplicate beat, teleport, or foot slide.",
+  "one_shot_instruction_string": "Create one clearly readable action beginning from the supplied base-pose image at frame 0. Perform the action once with a decisive anticipation, action, and recovery or final pose appropriate to the action. Do not force the subject back to the starting pose when the action naturally ends elsewhere.",
+  "common_negative_prompt_string": "camera movement, pan, tilt, orbit, dolly, zoom, tracking shot, handheld shake, reframing, crop, scene cut, background drift, parallax, identity change, species change, altered proportions, extra limb, missing limb, fused limb, duplicated subject, broken joint, rubber body, floating, foot sliding, ground penetration, topology change, material change, flicker, motion smear, text, watermark, logo",
+  "actions_array": [
+    {
+      "action_id_string": "idle_neutral",
+      "family_string": "idle",
+      "generation_mode_string": "loop",
+      "frame_count_int": 97,
+      "motion_prompt_string": "The {{species}} remains in a neutral ready stance with subtle breathing, small natural weight transfer, and restrained head, ear, tail, or equivalent species-appropriate secondary motion. Ground contacts remain planted and stable."
+    },
+    {
+      "action_id_string": "idle_alert",
+      "family_string": "idle",
+      "generation_mode_string": "loop",
+      "frame_count_int": 97,
+      "motion_prompt_string": "The {{species}} holds an alert stance, raises attention toward a distant stimulus, and makes controlled head, ear, eye-line, tail, or shell movements while keeping the body ready and the feet or contact points stable."
+    },
+    {
+      "action_id_string": "idle_relaxed",
+      "family_string": "idle",
+      "generation_mode_string": "loop",
+      "frame_count_int": 97,
+      "motion_prompt_string": "The {{species}} settles into a relaxed standing idle with slow breathing, softened posture, a gentle weight shift, and subtle species-appropriate secondary motion. Avoid a full sit or lie-down transition."
+    },
+    {
+      "action_id_string": "idle_look_around",
+      "family_string": "idle",
+      "generation_mode_string": "loop",
+      "frame_count_int": 97,
+      "motion_prompt_string": "The {{species}} calmly scans the environment with a readable left-center-right head and upper-body look sequence, then returns naturally to the starting orientation while ground contacts stay stable."
+    },
+    {
+      "action_id_string": "idle_fidget",
+      "family_string": "idle",
+      "generation_mode_string": "loop",
+      "frame_count_int": 97,
+      "motion_prompt_string": "The {{species}} performs a small species-appropriate fidget such as a hoof or paw adjustment, tail flick, ear twitch, skin shake, or shell shift, then settles cleanly without locomoting away."
+    },
+    {
+      "action_id_string": "walk_forward",
+      "family_string": "locomotion",
+      "generation_mode_string": "loop",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs a clear anatomically correct forward walk cycle in place at a steady controller-friendly cadence. Show ordered footfalls, stable body mass, believable spine motion, and no net translation."
+    },
+    {
+      "action_id_string": "walk_backward",
+      "family_string": "locomotion",
+      "generation_mode_string": "loop",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs a cautious anatomically plausible backward walk cycle in place. Feet step backward in a stable sequence, the body balances over the support contacts, and there is no net translation."
+    },
+    {
+      "action_id_string": "trot_jog",
+      "family_string": "locomotion",
+      "generation_mode_string": "loop",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs its natural medium-speed gait in place, using a trot, jog, fast crawl, or equivalent species-specific gait. Preserve a clean repeating support pattern and controller-friendly cadence."
+    },
+    {
+      "action_id_string": "run",
+      "family_string": "locomotion",
+      "generation_mode_string": "loop",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs an energetic natural run cycle in place with clear propulsion, recovery, suspension where anatomically appropriate, stable root height, and no net translation."
+    },
+    {
+      "action_id_string": "sprint",
+      "family_string": "locomotion",
+      "generation_mode_string": "loop",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs its fastest sustainable species-appropriate gait in place, such as gallop, bound, sprint, or rapid crawl. Motion is powerful but anatomically controlled with a clean repeatable stride."
+    },
+    {
+      "action_id_string": "turn_left_90",
+      "family_string": "turn",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} turns exactly ninety degrees to its left using believable planted pivots and stepping contacts, ending balanced and motionless in the new heading."
+    },
+    {
+      "action_id_string": "turn_right_90",
+      "family_string": "turn",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} turns exactly ninety degrees to its right using believable planted pivots and stepping contacts, ending balanced and motionless in the new heading."
+    },
+    {
+      "action_id_string": "turn_around_180",
+      "family_string": "turn",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} performs a controlled one-hundred-eighty-degree turn with a readable species-appropriate stepping sequence, ending balanced and facing the opposite direction."
+    },
+    {
+      "action_id_string": "stop_brake",
+      "family_string": "locomotion",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} enters with forward locomotion energy, performs a believable deceleration and braking action, absorbs momentum through the limbs and body, and ends in a stable neutral stance."
+    },
+    {
+      "action_id_string": "jump_air",
+      "family_string": "jump",
+      "generation_mode_string": "loop",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} is in a cyclic airborne or traversal phase appropriate to its anatomy, with controlled limb recovery and stable body orientation. This is an air-state loop with no ground contact and no abrupt pose snap."
+    },
+    {
+      "action_id_string": "fall",
+      "family_string": "jump",
+      "generation_mode_string": "loop",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs a controlled falling air-state loop with subtle gravity-driven body and limb motion, readable orientation, no ground impact, and no uncontrolled tumbling unless species-appropriate."
+    },
+    {
+      "action_id_string": "jump_start",
+      "family_string": "jump",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} anticipates, compresses its body and support limbs, pushes off powerfully, and ends just after clean ground separation in a readable takeoff pose."
+    },
+    {
+      "action_id_string": "jump_land",
+      "family_string": "jump",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} begins airborne, makes anatomically correct ground contact, absorbs the impact through its support anatomy, and settles into a stable stance without foot sliding or ground penetration."
+    },
+    {
+      "action_id_string": "jump_full",
+      "family_string": "jump",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs one complete species-appropriate jump, hop, bound, or obstacle-clear action: anticipation, takeoff, airborne arc, landing, impact absorption, and stable recovery."
+    },
+    {
+      "action_id_string": "attack_primary",
+      "family_string": "combat",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs its clearest primary attack, such as bite, peck, horn thrust, trunk strike, forelimb swipe, or shell lunge, with anticipation, a readable contact moment, and controlled recovery."
+    },
+    {
+      "action_id_string": "attack_secondary",
+      "family_string": "combat",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs a distinct secondary attack using different anatomy or timing from the primary attack, with clear anticipation, impact direction, balance, and recovery."
+    },
+    {
+      "action_id_string": "attack_heavy",
+      "family_string": "combat",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 49,
+      "motion_prompt_string": "The {{species}} performs a powerful committed heavy attack such as rear-and-strike, kick, charge hit, stomp, body slam, or forceful bite. Emphasize weight transfer and follow-through without breaking anatomy."
+    },
+    {
+      "action_id_string": "hit_front",
+      "family_string": "reaction",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} reacts once to a moderate impact arriving from the front, recoils through the head and body, preserves footing where possible, and recovers toward a controllable stance."
+    },
+    {
+      "action_id_string": "hit_left",
+      "family_string": "reaction",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} reacts once to a moderate impact arriving from its left side, with directional recoil, believable balance correction, and a controlled recovery."
+    },
+    {
+      "action_id_string": "hit_right",
+      "family_string": "reaction",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} reacts once to a moderate impact arriving from its right side, with directional recoil, believable balance correction, and a controlled recovery."
+    },
+    {
+      "action_id_string": "death",
+      "family_string": "state_change",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 65,
+      "motion_prompt_string": "The {{species}} loses strength and falls once under gravity into a readable final resting pose on the ground. The collapse respects mass, joint limits, contact, and anatomy and does not return to the starting pose."
+    },
+    {
+      "action_id_string": "get_up",
+      "family_string": "state_change",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 65,
+      "motion_prompt_string": "The {{species}} begins in a grounded resting pose, places support anatomy correctly, shifts weight, rises with believable effort, and ends balanced in its neutral standing stance."
+    },
+    {
+      "action_id_string": "eat_interact",
+      "family_string": "behavior",
+      "generation_mode_string": "loop",
+      "frame_count_int": 97,
+      "motion_prompt_string": "The {{species}} performs a repeatable species-appropriate eating or nearby-object interaction cycle using head, mouth, trunk, forelimb, shell, or equivalent anatomy while keeping its main body placement stable. Do not invent a new prop."
+    },
+    {
+      "action_id_string": "sleep_rest",
+      "family_string": "behavior",
+      "generation_mode_string": "loop",
+      "frame_count_int": 97,
+      "motion_prompt_string": "The {{species}} holds a species-appropriate sleeping or deep-rest pose with slow breathing and minimal secondary motion. Preserve stable body-ground contact and create a seamless calm loop."
+    },
+    {
+      "action_id_string": "vocalize_emote",
+      "family_string": "behavior",
+      "generation_mode_string": "one_shot",
+      "frame_count_int": 33,
+      "motion_prompt_string": "The {{species}} performs one recognizable species-appropriate vocalization or expressive display, such as neigh, bark, roar, trumpet, hiss, squeak, posture display, or shell-and-head gesture, then settles naturally."
+    }
+  ]
+}

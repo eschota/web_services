@@ -83,6 +83,12 @@ from database import (
     CryptoPaymentReport, EmailCampaignClick, EmailCampaignSend, EmailDeliveryEvent,
     SupportChatSession,
     SupportChatMessage,
+    AnimalAnimationApprovedClip,
+    AnimalAnimationCandidate,
+    AnimalAnimationFittingJob,
+    AnimalAnimationLibraryActivation,
+    AnimalAnimationLibraryArtifact,
+    AnimalAnimationLibraryVersion,
     reset_admin_overlay_counters,
     get_or_create_admin_overlay_counters,
     get_public_gallery_stats,
@@ -161,6 +167,37 @@ import httpx
 
 from namecheap_remote_api import router as namecheap_remote_router
 from idle_ltx_routes import register_idle_ltx_routes
+from animal_animation_library import (
+    ANIMAL_CLIP_IDS,
+    ANIMAL_RIG_TYPES,
+    AnimationCandidateCreateRequest,
+    AnimationCandidateDecisionRequest,
+    AnimationFittingJobCreateRequest,
+    AnimationLibraryArtifactPutRequest,
+    AnimationLibraryCreateRequest,
+    AnimationLibraryError,
+    AnimationLibraryRollbackRequest,
+    activate_library_version,
+    activation_for_task,
+    activations_for_task,
+    add_fitting_candidate,
+    canonical_animation_id,
+    create_fitting_job,
+    create_library_version,
+    current_activation as current_animation_library_activation,
+    decide_fitting_candidate,
+    find_library_version,
+    get_fitting_job_payload,
+    manifest_sha256 as calculate_animation_manifest_sha256,
+    parse_matrix_animation_artifact,
+    put_library_artifact,
+    rollback_library_version,
+    serialize_candidate,
+    serialize_fitting_job,
+    serialize_library_version,
+    validate_animation_manifest,
+    validate_glb_animation_contract,
+)
 
 # Throttle poster-classification recovery triggers from GET /api/task (per task_id).
 _poster_recovery_throttle: Dict[str, float] = {}
@@ -1171,20 +1208,7 @@ ANIMAL_ANIMATION_PACK_CREDITS = TASK_UNLOCK_CREDITS
 DOWNLOAD_ALL_FILES_CREDITS = TASK_UNLOCK_CREDITS
 ANIMAL_RIG_DOWNLOAD_CREDITS = TASK_UNLOCK_CREDITS
 PURCHASE_CHECKOUT_INTENT_MAX_AGE = timedelta(hours=72)
-ANIMAL_VARIANT_TYPES = [
-    "dog",
-    "bear",
-    "cat",
-    "cow",
-    "deer",
-    "elephant",
-    "giraffe",
-    "horse",
-    "mouse",
-    "pig",
-    "rabbit",
-    "turtle",
-]
+ANIMAL_VARIANT_TYPES = list(ANIMAL_RIG_TYPES)
 ANIMAL_VARIANT_ORIENTATIONS = ("front", "back")
 
 
@@ -5237,6 +5261,21 @@ def _clean_animal_action_name(value: Any) -> Optional[str]:
 
 
 def _extract_animal_variant_actions(row: Dict[str, Any], animal_type: str) -> List[str]:
+    # Versioned library rows use canonical semantic IDs.  Do not fuzzy-match
+    # worker action basenames: only exact IDs or aliases declared in taxonomy.
+    if isinstance(row, dict) and row.get("animation_library_revision"):
+        raw_ids = row.get("animation_clip_ids")
+        if isinstance(raw_ids, list):
+            canonical_ids = [canonical_animation_id(value, animal_type) for value in raw_ids]
+            if canonical_ids == list(ANIMAL_CLIP_IDS):
+                return list(ANIMAL_CLIP_IDS)
+        try:
+            declared_count = int(row.get("animation_clip_count"))
+        except (TypeError, ValueError):
+            declared_count = 0
+        if declared_count == len(ANIMAL_CLIP_IDS):
+            return list(ANIMAL_CLIP_IDS)
+
     candidates: List[Any] = []
     if isinstance(row, dict):
         stage4 = row.get("stage4_finalize")
@@ -5334,7 +5373,33 @@ async def _build_animal_animation_catalog_response(
                 file_map[name.lower()] = item
     matrix = await _fetch_animal_variant_matrix(task, file_map)
     row = matrix.get(f"{normalized_animal}:{normalized_orientation}") or {}
-    actions = _extract_animal_variant_actions(row, normalized_animal)
+    action_row = row
+    if isinstance(row, dict) and row.get("animation_library_revision"):
+        assignment = await activation_for_task(
+            db,
+            rig_type=normalized_animal,
+            task_created_at=task.created_at,
+        )
+        try:
+            if not assignment:
+                raise AnimationLibraryError("No task library assignment", status_code=404)
+            parse_matrix_animation_artifact(
+                row,
+                rig_type=normalized_animal,
+                orientation=normalized_orientation,
+                expected_revision=assignment[1].revision,
+            )
+        except AnimationLibraryError:
+            # Do not backfill old tasks or advertise clips from a mismatched
+            # matrix revision.  Preserve only the worker's legacy action list.
+            action_row = dict(row)
+            for key in (
+                "animation_library_revision",
+                "animation_clip_count",
+                "animation_clip_ids",
+            ):
+                action_row.pop(key, None)
+    actions = _extract_animal_variant_actions(action_row, normalized_animal)
     pack_purchased = await _has_animal_animation_pack_purchase(
         db,
         user,
@@ -5505,9 +5570,10 @@ async def _build_animal_variants_response(
             if name:
                 file_map[name.lower()] = item
 
-    matrix = await _fetch_animal_variant_matrix(task, file_map) if file_map else {}
+    matrix = await _fetch_animal_variant_matrix(task, file_map)
     progress_text = await _fetch_animal_variant_progress_line(task)
     purchased_all = await _has_full_task_download_purchase(db, user, task.id) if user else False
+    task_library_assignments = await activations_for_task(db, task_created_at=task.created_at)
 
     variants: List[AnimalRigVariantItem] = []
     for animal_type in ANIMAL_VARIANT_TYPES:
@@ -5532,6 +5598,18 @@ async def _build_animal_variants_response(
             row = matrix.get(f"{animal_type}:{orientation}") or {}
             matrix_status = str(row.get("status") or row.get("state") or "").strip().lower()
             error = str(row.get("error") or row.get("message") or "").strip() or None
+            animation_meta = None
+            assignment = task_library_assignments.get(animal_type)
+            if assignment:
+                try:
+                    animation_meta = parse_matrix_animation_artifact(
+                        row,
+                        rig_type=animal_type,
+                        orientation=orientation,
+                        expected_revision=assignment[1].revision,
+                    )
+                except AnimationLibraryError:
+                    animation_meta = None
 
             if blend_item and fbx_item:
                 status = "ready"
@@ -5550,6 +5628,18 @@ async def _build_animal_variants_response(
                 status=status,
                 error=error,
                 preview_url=_animal_variant_public_url(task.id, animal_type, orientation, "fbx", preview=True) if fbx_item else None,
+                animation_manifest_url=(
+                    f"/api/task/{task.id}/animation-manifest?rig_type={quote(animal_type)}&orientation={quote(orientation)}"
+                    if animation_meta else None
+                ),
+                animation_glb_url=(
+                    f"/api/task/{task.id}/animations.glb?rig_type={quote(animal_type)}&orientation={quote(orientation)}"
+                    if animation_meta else None
+                ),
+                animation_library_revision=animation_meta.library_revision if animation_meta else None,
+                animation_clip_count=animation_meta.animation_clip_count if animation_meta else None,
+                animation_manifest_sha256=animation_meta.animation_manifest_sha256 if animation_meta else None,
+                animation_glb_sha256=animation_meta.animation_glb_sha256 if animation_meta else None,
                 blend=_animal_variant_file_state(blend_item, task.id, animal_type, orientation, "blend"),
                 fbx=_animal_variant_file_state(fbx_item, task.id, animal_type, orientation, "fbx"),
                 skeleton=_animal_variant_file_state(skeleton_item, task.id, animal_type, orientation, "skeleton"),
@@ -5579,6 +5669,301 @@ async def api_task_animal_variants(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return await _build_animal_variants_response(task, db, user)
+
+
+def _raise_animation_library_http_error(exc: AnimationLibraryError):
+    raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/animation-libraries/taxonomy")
+async def api_admin_animation_taxonomy(
+    admin: User = Depends(require_admin),
+):
+    from animal_animation_library import TAXONOMY
+
+    return TAXONOMY
+
+
+@app.post("/api/admin/animation-libraries")
+async def api_admin_create_animation_library(
+    body: AnimationLibraryCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        version = await create_library_version(db, body, admin_email=admin.email)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_library_version(version)
+
+
+@app.get("/api/admin/animation-libraries")
+async def api_admin_list_animation_libraries(
+    rig_type: Optional[str] = None,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(AnimalAnimationLibraryVersion).order_by(
+        AnimalAnimationLibraryVersion.rig_type.asc(),
+        AnimalAnimationLibraryVersion.created_at.desc(),
+    )
+    if rig_type:
+        normalized = str(rig_type).strip().lower()
+        if normalized not in ANIMAL_VARIANT_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid animal rig type")
+        query = query.where(AnimalAnimationLibraryVersion.rig_type == normalized)
+    versions = list((await db.execute(query)).scalars().all())
+    active_ids: Set[int] = set()
+    active_result = await db.execute(
+        select(AnimalAnimationLibraryActivation.library_version_id).where(
+            AnimalAnimationLibraryActivation.deactivated_at.is_(None)
+        )
+    )
+    active_ids = {int(row[0]) for row in active_result.all()}
+    payload = []
+    for version in versions:
+        artifacts = list((await db.execute(
+            select(AnimalAnimationLibraryArtifact).where(
+                AnimalAnimationLibraryArtifact.library_version_id == version.id
+            )
+        )).scalars().all())
+        approved_count = int((await db.execute(
+            select(func.count(AnimalAnimationApprovedClip.id)).where(
+                AnimalAnimationApprovedClip.library_version_id == version.id
+            )
+        )).scalar() or 0)
+        payload.append(serialize_library_version(
+            version,
+            artifacts=artifacts,
+            approved_clip_count=approved_count,
+            active=version.id in active_ids,
+        ))
+    return {"libraries": payload, "total": len(payload)}
+
+
+@app.get("/api/admin/animation-libraries/{rig_type}/{revision}")
+async def api_admin_get_animation_library(
+    rig_type: str,
+    revision: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        version = await find_library_version(db, rig_type, revision)
+        active = await current_animation_library_activation(db, version.rig_type)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    artifacts = list((await db.execute(
+        select(AnimalAnimationLibraryArtifact).where(
+            AnimalAnimationLibraryArtifact.library_version_id == version.id
+        )
+    )).scalars().all())
+    clips = list((await db.execute(
+        select(AnimalAnimationApprovedClip)
+        .where(AnimalAnimationApprovedClip.library_version_id == version.id)
+        .order_by(AnimalAnimationApprovedClip.clip_order.asc())
+    )).scalars().all())
+    payload = serialize_library_version(
+        version,
+        artifacts=artifacts,
+        approved_clip_count=len(clips),
+        active=bool(active and active[1].id == version.id),
+    )
+    payload["approved_clips"] = [
+        {
+            "semantic_id": clip.semantic_id,
+            "category": clip.category,
+            "order": clip.clip_order,
+            "loop": clip.loop,
+            "duration": clip.duration,
+            "fps": clip.fps,
+            "start_pose_id": clip.start_pose_id,
+            "end_pose_id": clip.end_pose_id,
+            "root_motion_available": clip.root_motion_available,
+            "qa_profile_revision": clip.qa_profile_revision,
+            "candidate_id": clip.candidate_id,
+            "fbx_url": clip.fbx_url,
+            "fbx_sha256": clip.fbx_sha256,
+            "metrics": json.loads(clip.metrics_json or "{}"),
+            "provenance": json.loads(clip.provenance_json or "{}"),
+            "approved_by": clip.approved_by,
+            "approved_at": clip.approved_at,
+        }
+        for clip in clips
+    ]
+    return payload
+
+
+@app.put("/api/admin/animation-libraries/{rig_type}/{revision}/artifacts/{orientation}")
+async def api_admin_put_animation_library_artifact(
+    rig_type: str,
+    revision: str,
+    orientation: str,
+    body: AnimationLibraryArtifactPutRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        artifact = await put_library_artifact(
+            db,
+            rig_type=rig_type,
+            revision=revision,
+            orientation=orientation,
+            request=body,
+        )
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return {
+        "orientation": artifact.orientation,
+        "manifest_sha256": artifact.manifest_sha256,
+        "artifact_sha256": artifact.artifact_sha256,
+        "animation_clip_count": artifact.animation_clip_count,
+        "animation_glb_url": artifact.animation_glb_url,
+        "package_zip_url": artifact.package_zip_url,
+    }
+
+
+@app.post("/api/admin/animation-libraries/{rig_type}/{revision}/activate")
+async def api_admin_activate_animation_library(
+    rig_type: str,
+    revision: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        activation = await activate_library_version(
+            db,
+            rig_type=rig_type,
+            revision=revision,
+            admin_email=admin.email,
+        )
+        version = await find_library_version(db, rig_type, revision)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return {
+        "rig_type": version.rig_type,
+        "revision": version.revision,
+        "activation_id": activation.id,
+        "activated_at": activation.activated_at,
+        "reason": activation.reason,
+    }
+
+
+@app.post("/api/admin/animation-libraries/{rig_type}/rollback")
+async def api_admin_rollback_animation_library(
+    rig_type: str,
+    body: AnimationLibraryRollbackRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        activation = await rollback_library_version(
+            db,
+            rig_type=rig_type,
+            target_revision=body.target_revision,
+            admin_email=admin.email,
+        )
+        version_result = await db.execute(
+            select(AnimalAnimationLibraryVersion).where(
+                AnimalAnimationLibraryVersion.id == activation.library_version_id
+            )
+        )
+        version = version_result.scalar_one()
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return {
+        "rig_type": version.rig_type,
+        "revision": version.revision,
+        "activation_id": activation.id,
+        "activated_at": activation.activated_at,
+        "reason": activation.reason,
+    }
+
+
+@app.post("/api/admin/animation-fitting/jobs")
+async def api_admin_create_animation_fitting_job(
+    body: AnimationFittingJobCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job = await create_fitting_job(db, body, admin_email=admin.email)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_fitting_job(job)
+
+
+@app.get("/api/admin/animation-fitting/jobs")
+async def api_admin_list_animation_fitting_jobs(
+    rig_type: Optional[str] = None,
+    semantic_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(AnimalAnimationFittingJob)
+    if rig_type:
+        normalized_rig = str(rig_type).strip().lower()
+        if normalized_rig not in ANIMAL_VARIANT_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid animal rig type")
+        query = query.where(AnimalAnimationFittingJob.rig_type == normalized_rig)
+    if semantic_id:
+        canonical = canonical_animation_id(semantic_id)
+        if not canonical:
+            raise HTTPException(status_code=400, detail="Invalid semantic animation ID")
+        query = query.where(AnimalAnimationFittingJob.semantic_id == canonical)
+    if status:
+        query = query.where(AnimalAnimationFittingJob.status == str(status).strip().lower())
+    jobs = list((await db.execute(
+        query.order_by(AnimalAnimationFittingJob.created_at.desc()).limit(limit)
+    )).scalars().all())
+    return {"jobs": [serialize_fitting_job(job) for job in jobs], "total": len(jobs)}
+
+
+@app.get("/api/admin/animation-fitting/jobs/{job_id}")
+async def api_admin_get_animation_fitting_job(
+    job_id: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await get_fitting_job_payload(db, job_id)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+
+
+@app.post("/api/admin/animation-fitting/jobs/{job_id}/candidates")
+async def api_admin_add_animation_fitting_candidate(
+    job_id: str,
+    body: AnimationCandidateCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        candidate = await add_fitting_candidate(db, job_id=job_id, request=body)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_candidate(candidate)
+
+
+@app.post("/api/admin/animation-fitting/candidates/{candidate_id}/decision")
+async def api_admin_decide_animation_fitting_candidate(
+    candidate_id: str,
+    body: AnimationCandidateDecisionRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        candidate = await decide_fitting_candidate(
+            db,
+            candidate_id=candidate_id,
+            request=body,
+            admin_email=admin.email,
+        )
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_candidate(candidate)
 
 
 async def _resolve_animal_variant_source(
@@ -10008,7 +10393,12 @@ def _validate_glb_file(path: Path) -> bool:
     return True
 
 
-async def _stream_httpx_response_to_file(response: httpx.Response, destination: Path) -> int:
+async def _stream_httpx_response_to_file(
+    response: httpx.Response,
+    destination: Path,
+    *,
+    max_bytes: Optional[int] = None,
+) -> int:
     """Stream an upstream response to disk to avoid buffering large files in memory."""
     bytes_written = 0
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -10019,6 +10409,8 @@ async def _stream_httpx_response_to_file(response: httpx.Response, destination: 
                     continue
                 f.write(chunk)
                 bytes_written += len(chunk)
+                if max_bytes is not None and bytes_written > max_bytes:
+                    raise ValueError(f"Download exceeds {max_bytes} bytes")
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -10862,12 +11254,231 @@ async def api_proxy_model_glb(
     return await _proxy_model_file(model_url, f"{task_id}_model.glb")
 
 
+async def _resolve_task_matrix_animation_artifact(
+    task: Task,
+    db: AsyncSession,
+    *,
+    rig_type: Optional[str],
+    orientation: str,
+):
+    if not _is_animal_task(task):
+        raise HTTPException(status_code=404, detail="Animal animation manifest is available for animal tasks only")
+    selected_rig = str(rig_type or _task_animal_type_from_settings(task) or "").strip().lower()
+    selected_orientation = str(orientation or "front").strip().lower()
+    try:
+        assignment = await activation_for_task(
+            db,
+            rig_type=selected_rig,
+            task_created_at=task.created_at,
+        )
+    except AnimationLibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No animation library was assigned when this task was created")
+
+    matrix = await _fetch_animal_variant_matrix(task, {})
+    row = matrix.get(f"{selected_rig}:{selected_orientation}")
+    try:
+        artifact = parse_matrix_animation_artifact(
+            row,
+            rig_type=selected_rig,
+            orientation=selected_orientation,
+            expected_revision=assignment[1].revision,
+        )
+    except AnimationLibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return artifact, assignment[1]
+
+
+def _animation_artifact_etag(sha256_hex: str) -> str:
+    return f'"sha256:{sha256_hex}"'
+
+
+def _request_etag_matches(request: Request, etag: str) -> bool:
+    values = [value.strip() for value in str(request.headers.get("if-none-match") or "").split(",")]
+    return "*" in values or etag in values
+
+
+def _file_sha256_hex(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _strict_animation_headers(artifact) -> Dict[str, str]:
+    return {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Access-Control-Allow-Origin": "*",
+        "Content-Encoding": "identity",
+        "ETag": _animation_artifact_etag(artifact.animation_glb_sha256),
+        "X-Animation-Library-Revision": artifact.library_revision,
+        "X-Animation-Artifact-SHA256": artifact.animation_glb_sha256,
+        "X-Animation-Clip-Count": str(artifact.animation_clip_count),
+    }
+
+
+MAX_STRICT_ANIMATION_GLB_BYTES = 512 * 1024 * 1024
+
+
+async def _fetch_strict_animation_manifest(artifact, version) -> Tuple[dict, str]:
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            upstream = await client.get(artifact.animation_manifest_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Animation manifest source unavailable: {exc}") from exc
+    if upstream.status_code == 404:
+        raise HTTPException(status_code=404, detail="Animation manifest is absent from the selected variant")
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Animation manifest source returned HTTP {upstream.status_code}")
+    if len(upstream.content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=502, detail="Animation manifest is too large")
+    try:
+        payload = upstream.json()
+        payload = validate_animation_manifest(
+            payload,
+            expected_revision=artifact.library_revision,
+            expected_rig_type=artifact.rig_type,
+            expected_orientation=artifact.orientation,
+            expected_artifact_sha256=artifact.animation_glb_sha256,
+            expected_template_skeleton_sha256=version.template_skeleton_sha256,
+        )
+    except AnimationLibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Animation manifest is not valid JSON") from exc
+    digest = calculate_animation_manifest_sha256(payload)
+    if artifact.animation_manifest_sha256 and digest != artifact.animation_manifest_sha256:
+        raise HTTPException(status_code=502, detail="Animation manifest SHA-256 does not match variant matrix")
+    return payload, digest
+
+
+async def _strict_animation_glb_response(task_id: str, artifact, manifest: dict, request: Request):
+    revision_key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", artifact.library_revision).strip("_")
+    cache_path = GLB_CACHE_DIR / (
+        f"{task_id}_animations_{artifact.rig_type}_{artifact.orientation}_"
+        f"{revision_key}_{artifact.animation_glb_sha256[:16]}.glb"
+    )
+    headers = _strict_animation_headers(artifact)
+    etag = headers["ETag"]
+
+    if cache_path.exists():
+        valid = False
+        try:
+            valid = _validate_glb_file(cache_path) and _file_sha256_hex(cache_path) == artifact.animation_glb_sha256
+            if valid:
+                validate_glb_animation_contract(cache_path, manifest)
+        except (OSError, AnimationLibraryError):
+            valid = False
+        if valid:
+            if _request_etag_matches(request, etag):
+                return Response(status_code=304, headers=headers)
+            return FileResponse(
+                path=str(cache_path),
+                media_type="model/gltf-binary",
+                filename=f"{task_id}_{artifact.rig_type}_{artifact.orientation}_animations.glb",
+                headers=headers,
+            )
+        try:
+            cache_path.unlink()
+        except OSError:
+            pass
+
+    temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            async with client.stream(
+                "GET",
+                artifact.animation_glb_url,
+                timeout=30.0,
+                headers={"Accept-Encoding": "identity"},
+            ) as upstream:
+                if upstream.status_code == 404:
+                    raise HTTPException(status_code=404, detail="Animations GLB is absent from the selected manifest")
+                if upstream.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"Animation source returned HTTP {upstream.status_code}")
+                content_length = upstream.headers.get("content-length")
+                if content_length:
+                    try:
+                        if int(content_length) > MAX_STRICT_ANIMATION_GLB_BYTES:
+                            raise HTTPException(status_code=502, detail="Animation source GLB is too large")
+                    except ValueError:
+                        pass
+                downloaded_bytes = await _stream_httpx_response_to_file(
+                    upstream,
+                    temp_path,
+                    max_bytes=MAX_STRICT_ANIMATION_GLB_BYTES,
+                )
+                if downloaded_bytes > MAX_STRICT_ANIMATION_GLB_BYTES:
+                    raise HTTPException(status_code=502, detail="Animation source GLB is too large")
+        if not _validate_glb_file(temp_path):
+            raise HTTPException(status_code=502, detail="Animation source returned an invalid GLB")
+        if _file_sha256_hex(temp_path) != artifact.animation_glb_sha256:
+            raise HTTPException(status_code=502, detail="Animation source SHA-256 does not match variant matrix")
+        try:
+            validate_glb_animation_contract(temp_path, manifest)
+        except AnimationLibraryError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        temp_path.replace(cache_path)
+    except HTTPException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=f"Animation source unavailable: {exc}") from exc
+
+    if _request_etag_matches(request, etag):
+        return Response(status_code=304, headers=headers)
+    return FileResponse(
+        path=str(cache_path),
+        media_type="model/gltf-binary",
+        filename=f"{task_id}_{artifact.rig_type}_{artifact.orientation}_animations.glb",
+        headers=headers,
+    )
+
+
+@app.get("/api/task/{task_id}/animation-manifest")
+async def api_task_animation_manifest(
+    task_id: str,
+    request: Request,
+    rig_type: Optional[str] = None,
+    orientation: str = "front",
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    artifact, version = await _resolve_task_matrix_animation_artifact(
+        task,
+        db,
+        rig_type=rig_type,
+        orientation=orientation,
+    )
+    payload, digest = await _fetch_strict_animation_manifest(artifact, version)
+    etag = _animation_artifact_etag(digest)
+    headers = {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Access-Control-Allow-Origin": "*",
+        "ETag": etag,
+        "X-Animation-Library-Revision": artifact.library_revision,
+        "X-Animation-Manifest-SHA256": digest,
+        "X-Animation-Clip-Count": str(artifact.animation_clip_count),
+    }
+    if _request_etag_matches(request, etag):
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(content=payload, headers=headers)
+
+
 @app.get("/api/task/{task_id}/animations.glb")
 async def api_proxy_animations_glb(
     task_id: str,
+    request: Request,
+    rig_type: Optional[str] = None,
+    orientation: str = "front",
     db: AsyncSession = Depends(get_db)
 ):
-    """Get animations GLB file with server-side caching"""
+    """Get a revisioned manifest artifact, with an exact legacy fallback."""
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -10875,9 +11486,29 @@ async def api_proxy_animations_glb(
     if not task.guid:
         raise HTTPException(status_code=404, detail="Model not available yet")
     
-    # Check cache first (fastest path)
+    if _is_animal_task(task):
+        selected_rig = str(rig_type or _task_animal_type_from_settings(task) or "").strip().lower()
+        try:
+            assignment = await activation_for_task(db, rig_type=selected_rig, task_created_at=task.created_at)
+        except AnimationLibraryError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        if assignment:
+            artifact, version = await _resolve_task_matrix_animation_artifact(
+                task,
+                db,
+                rig_type=selected_rig,
+                orientation=orientation,
+            )
+            manifest, _manifest_digest = await _fetch_strict_animation_manifest(artifact, version)
+            return await _strict_animation_glb_response(task.id, artifact, manifest, request)
+        # Pre-library animal tasks remain readable, but only through their
+        # exact ready URL; they are never silently assigned a later revision.
+        if rig_type is not None or str(orientation or "front").lower() != "front":
+            raise HTTPException(status_code=404, detail="Legacy task has no revisioned animation variant")
+
+    # Legacy cache for pre-library animal tasks and humanoid/T-pose tasks.
     cache_path = GLB_CACHE_DIR / f"{task_id}_animations.glb"
-    if cache_path.exists():
+    if cache_path.exists() and _validate_glb_file(cache_path):
         return FileResponse(
             path=str(cache_path),
             media_type="model/gltf-binary",
@@ -10892,15 +11523,7 @@ async def api_proxy_animations_glb(
         if result:
             return result
 
-    # Fallback: synthesize canonical all_animations path from worker root.
-    worker_base = _resolve_worker_base_from_task(task)
-    if worker_base:
-        synthesized_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations.glb"
-        result = await _get_cached_glb(task_id, synthesized_url, "animations")
-        if result:
-            return result
-
-    raise HTTPException(status_code=404, detail="Animations GLB not available yet")
+    raise HTTPException(status_code=404, detail="Animations GLB is not declared by the task")
 
 
 @app.head("/api/task/{task_id}/animations.fbx")

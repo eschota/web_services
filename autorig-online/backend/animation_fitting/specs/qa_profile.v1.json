@@ -1,0 +1,37 @@
+{
+  "schema": "autorig.animation-fitting-qa.v1",
+  "calibration_state_string": "provisional-horse-v1",
+  "candidate_policy_object": {
+    "initial_count_int": 8,
+    "top_k_int": 3,
+    "retry_batch_count_int": 8,
+    "max_count_int": 16
+  },
+  "hard_gate_metric_keys_array": [
+    "decode_ok",
+    "frame_contract_ok",
+    "single_subject_ok",
+    "identity_preserved_ok",
+    "anatomy_stable_ok",
+    "camera_locked_ok",
+    "action_semantics_ok",
+    "no_scene_cut_ok"
+  ],
+  "loop_hard_gate_metric_keys_array": [
+    "loop_seam_ok"
+  ],
+  "ranking_weights_object": {
+    "prompt_alignment_float": 0.22,
+    "track_survival_float": 0.18,
+    "silhouette_iou_float": 0.15,
+    "camera_lock_float": 0.1,
+    "contact_stability_float": 0.12,
+    "temporal_smoothness_float": 0.11,
+    "loop_seam_float": 0.12
+  },
+  "metric_contract_object": {
+    "normalized_range_array": [0.0, 1.0],
+    "missing_metric_score_float": 0.0,
+    "notes_string": "Thresholds are intentionally not production-acceptance thresholds until calibrated against trusted horse clips. Hard gates are structural; normalized metrics rank surviving candidates."
+  }
+}
