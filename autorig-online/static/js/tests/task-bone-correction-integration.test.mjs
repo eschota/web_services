@@ -12,7 +12,7 @@ const panelSource = fs.readFileSync(path.join(STATIC, 'js', 'task-bone-correctio
 
 
 test('task viewer wires corrections into the one shared mixer and playlist', () => {
-    assert.match(taskHtml, /import \{ TaskBoneCorrectionPanel \} from '\/static\/js\/task-bone-correction-panel\.js\?v=1'/);
+    assert.match(taskHtml, /import \{ TaskBoneCorrectionPanel \} from '\/static\/js\/task-bone-correction-panel\.js\?v=2'/);
     assert.match(taskHtml, /boneCorrectionPanel\?\.setActiveClip\?\.\(entry\)/);
     assert.match(taskHtml, /configureBoneCorrectionForCurrentModel\(configuredModel\)/);
     assert.doesNotMatch(panelSource, /new\s+THREE\.AnimationMixer|setInterval\s*\(/);
