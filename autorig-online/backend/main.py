@@ -89,6 +89,7 @@ from database import (
     AnimalAnimationLibraryActivation,
     AnimalAnimationLibraryArtifact,
     AnimalAnimationLibraryVersion,
+    TaskAnimationCorrection,
     reset_admin_overlay_counters,
     get_or_create_admin_overlay_counters,
     get_public_gallery_stats,
@@ -159,6 +160,21 @@ from tasks import (
     get_task_no_progress_minutes,
     resolve_prepared_glb_source_url,
     admin_requeue_task_to_created,
+)
+
+from animation_corrections import (
+    MAX_PAYLOAD_BYTES as ANIMATION_CORRECTION_MAX_PAYLOAD_BYTES,
+    AnimationCorrectionValidationError,
+    canonical_json as canonical_animation_correction_json,
+    load_json_object as load_animation_correction_json,
+    payload_sha256 as animation_correction_sha256,
+    validate_animation_corrections,
+)
+from animation_correction_exports import (
+    EXPORT_TOKEN as ANIMATION_CORRECTION_EXPORT_TOKEN,
+    apply_export_result as apply_animation_correction_export_result,
+    dispatch_animation_correction_export,
+    normalize_source_sha256 as normalize_animation_correction_source_sha256,
 )
 
 
@@ -9410,6 +9426,21 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
     return None
 
 
+def _find_exact_file_in_ready_urls(ready_urls: list, filename: str) -> Optional[str]:
+    """Find a URL whose decoded path basename exactly matches ``filename``."""
+    filename_lower = str(filename or "").strip().lower()
+    if not filename_lower:
+        return None
+    for url in ready_urls:
+        url_clean = str(url or "").strip()
+        if not url_clean:
+            continue
+        basename = Path(unquote(urlparse(url_clean).path)).name.lower()
+        if basename == filename_lower:
+            return url_clean
+    return None
+
+
 BLUEPRINT_SKELETON_SUFFIX = "_skeleton.json"
 BLUEPRINT_RIG_PREVIEW_SUFFIX = "_rig_preview.mp4"
 
@@ -9434,6 +9465,10 @@ def _find_cached_blueprint_file(task_id: str, guid: Optional[str], suffix: str) 
         path = cache_dir / name
         if path.exists() and path.is_file() and path.stat().st_size > 0:
             return path
+    # Skeleton variants such as ``dog_front_skeleton.json`` are diagnostic
+    # outputs and must never replace the task's canonical skeleton.
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        return None
     matches = sorted(cache_dir.glob(f"*{suffix}"))
     for path in matches:
         if path.is_file() and path.stat().st_size > 0:
@@ -9457,7 +9492,14 @@ async def _remote_file_exists(url: str) -> bool:
 
 async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str]:
     urls = list(task.ready_urls or []) + list(task.output_urls or [])
-    existing = _find_file_in_ready_urls(urls, suffix)
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        if not task.guid:
+            return None
+        canonical_filename = f"{task.guid}{suffix}"
+        existing = _find_exact_file_in_ready_urls(urls, canonical_filename)
+    else:
+        canonical_filename = ""
+        existing = _find_file_in_ready_urls(urls, suffix)
     if existing:
         return existing
     if not task.guid or not task.worker_api:
@@ -9493,8 +9535,15 @@ async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str
                 continue
             name = str(item.get("name") or "")
             rel_path = str(item.get("rel_path") or "")
-            if rel_path and name.lower().endswith(suffix):
-                return f"{worker_root}/{task.guid}/{rel_path}"
+            if not rel_path:
+                continue
+            if suffix == BLUEPRINT_SKELETON_SUFFIX:
+                item_basename = Path(unquote(urlparse(rel_path).path)).name
+                if item_basename.lower() != canonical_filename.lower():
+                    continue
+            elif not name.lower().endswith(suffix):
+                continue
+            return f"{worker_root}/{task.guid}/{rel_path}"
     return None
 
 
@@ -11633,12 +11682,13 @@ async def _blueprint_file_response(
 
     cached = _find_cached_blueprint_file(task_id, task.guid, suffix)
     if cached:
+        cache_control = "no-store" if suffix == BLUEPRINT_SKELETON_SUFFIX else "public, max-age=86400"
         return FileResponse(
             path=str(cached),
             media_type=media_type,
             filename=public_filename,
             headers={
-                "Cache-Control": "public, max-age=86400",
+                "Cache-Control": cache_control,
                 "Access-Control-Allow-Origin": "*",
                 "Content-Encoding": "identity",
             },
@@ -11647,7 +11697,10 @@ async def _blueprint_file_response(
     source_url = await _resolve_task_worker_file_url(task, suffix)
     if not source_url:
         raise HTTPException(status_code=404, detail="Blueprint file not available yet")
-    return await _proxy_model_file(source_url, public_filename, as_attachment=False)
+    response = await _proxy_model_file(source_url, public_filename, as_attachment=False)
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.head("/api/task/{task_id}/blueprint/skeleton.json")
@@ -12876,6 +12929,252 @@ async def api_set_viewer_default_camera(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save default camera: {e}")
     return {"ok": True, "camera": camera_settings}
+
+
+def _task_animation_correction_payload(
+    state: Optional[TaskAnimationCorrection],
+    *,
+    can_edit: bool,
+) -> Dict[str, Any]:
+    published = load_animation_correction_json(getattr(state, "published_json", None))
+    draft = load_animation_correction_json(getattr(state, "draft_json", None)) if can_edit else None
+    active = draft if can_edit and draft is not None else published
+    revision = int(getattr(state, "published_revision", 0) or 0)
+    published_at = getattr(state, "published_at", None)
+    return {
+        "schemaVersion": 1,
+        "canEdit": bool(can_edit),
+        "draft": draft,
+        "published": published,
+        "active": active,
+        "publishedRevision": revision,
+        "publishedAt": published_at.isoformat() if published_at else None,
+        "publishedSha256": animation_correction_sha256(published) if published else None,
+        "export": {
+            "status": str(getattr(state, "export_status", None) or "idle"),
+            "error": getattr(state, "export_error", None),
+            "sourceSha256": load_animation_correction_json(
+                getattr(state, "source_sha256_json", None)
+            ),
+            "correctedGlbUrl": getattr(state, "corrected_glb_url", None),
+            "correctedFbxZipUrl": getattr(state, "corrected_fbx_zip_url", None),
+        },
+    }
+
+
+async def _read_animation_correction_request(request: Request) -> Dict[str, Any]:
+    body = await request.body()
+    if len(body) > ANIMATION_CORRECTION_MAX_PAYLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Animation corrections payload too large")
+    try:
+        raw = json.loads(body.decode("utf-8"))
+        return validate_animation_corrections(raw)
+    except AnimationCorrectionValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid animation corrections JSON") from exc
+
+
+async def _task_animation_correction_state(
+    db: AsyncSession,
+    task_id: str,
+) -> Optional[TaskAnimationCorrection]:
+    return (
+        await db.execute(
+            select(TaskAnimationCorrection).where(TaskAnimationCorrection.task_id == task_id)
+        )
+    ).scalar_one_or_none()
+
+
+@app.get("/api/task/{task_id}/animation-corrections")
+async def api_get_task_animation_corrections(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Public published corrections; owner/admin additionally receives its draft."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    can_edit = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
+    state = await _task_animation_correction_state(db, task_id)
+    response.headers["Cache-Control"] = "no-store"
+    return _task_animation_correction_payload(state, can_edit=can_edit)
+
+
+@app.put("/api/task/{task_id}/animation-corrections")
+async def api_put_task_animation_corrections(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner/admin: replace the private draft without changing public preview."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to edit animation corrections")
+
+    corrections = await _read_animation_correction_request(request)
+    state = await _task_animation_correction_state(db, task_id)
+    if state is None:
+        state = TaskAnimationCorrection(task_id=task_id)
+        db.add(state)
+    state.draft_json = canonical_animation_correction_json(corrections)
+    await db.commit()
+    await db.refresh(state)
+    response.headers["Cache-Control"] = "no-store"
+    return _task_animation_correction_payload(state, can_edit=True)
+
+
+@app.post("/api/task/{task_id}/animation-corrections/publish")
+async def api_publish_task_animation_corrections(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner/admin: atomically publish the draft and enqueue revisioned exports."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to publish animation corrections")
+
+    state = await _task_animation_correction_state(db, task_id)
+    draft = load_animation_correction_json(getattr(state, "draft_json", None))
+    if state is None or draft is None:
+        raise HTTPException(status_code=409, detail="Save an animation correction draft before publishing")
+    try:
+        published = validate_animation_corrections(draft)
+    except AnimationCorrectionValidationError as exc:
+        raise HTTPException(status_code=409, detail=f"Saved draft is invalid: {exc}") from exc
+
+    state.published_json = canonical_animation_correction_json(published)
+    state.published_revision = int(state.published_revision or 0) + 1
+    state.published_at = datetime.utcnow()
+    state.export_status = "queued"
+    state.export_error = None
+    state.source_sha256_json = None
+    state.corrected_glb_url = None
+    state.corrected_fbx_zip_url = None
+    revision = int(state.published_revision)
+    await db.commit()
+    await db.refresh(state)
+    payload = _task_animation_correction_payload(state, can_edit=True)
+    return JSONResponse(
+        payload,
+        headers={"Cache-Control": "no-store"},
+        background=BackgroundTask(dispatch_animation_correction_export, task_id, revision),
+    )
+
+
+@app.post("/api/task/{task_id}/animation-corrections/export/retry")
+async def api_retry_task_animation_correction_export(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to retry correction export")
+    state = await _task_animation_correction_state(db, task_id)
+    if not state or not state.published_json or int(state.published_revision or 0) <= 0:
+        raise HTTPException(status_code=409, detail="No published correction revision")
+    state.export_status = "queued"
+    state.export_error = None
+    revision = int(state.published_revision)
+    await db.commit()
+    payload = _task_animation_correction_payload(state, can_edit=True)
+    return JSONResponse(
+        payload,
+        headers={"Cache-Control": "no-store"},
+        background=BackgroundTask(dispatch_animation_correction_export, task_id, revision),
+    )
+
+
+@app.post("/api/internal/task/{task_id}/animation-corrections/export/{revision}")
+async def api_apply_task_animation_correction_export_result(
+    task_id: str,
+    revision: int,
+    request: Request,
+):
+    expected = ANIMATION_CORRECTION_EXPORT_TOKEN
+    provided = request.headers.get("authorization", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Animation correction export callback is not configured")
+    if not provided.startswith("Bearer ") or not hmac.compare_digest(provided[7:], expected):
+        raise HTTPException(status_code=401, detail="Invalid export callback token")
+    body = await request.body()
+    if len(body) > 64 * 1024:
+        raise HTTPException(status_code=413, detail="Export result payload too large")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid export result JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Export result must be an object")
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in {"queued", "processing", "ready", "failed"}:
+        raise HTTPException(status_code=400, detail="Invalid export status")
+
+    def _optional_http_url(value: Any, field: str) -> Optional[str]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        parsed = urlparse(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=400, detail=f"{field} must be an absolute HTTP URL")
+        return raw
+
+    try:
+        source_sha256 = normalize_animation_correction_source_sha256(
+            payload.get("sourceSha256"),
+            required=status == "ready",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    applied = await apply_animation_correction_export_result(
+        task_id=task_id,
+        revision=revision,
+        status=status,
+        corrected_glb_url=_optional_http_url(payload.get("correctedGlbUrl"), "correctedGlbUrl"),
+        corrected_fbx_zip_url=_optional_http_url(payload.get("correctedFbxZipUrl"), "correctedFbxZipUrl"),
+        source_sha256=source_sha256,
+        error=str(payload.get("error") or "").strip() or None,
+    )
+    if not applied:
+        raise HTTPException(status_code=409, detail="Correction revision is no longer current")
+    return {"ok": True, "taskId": task_id, "revision": revision, "status": status}
 
 
 @app.get("/api/task/{task_id}/viewer-settings")

@@ -323,7 +323,7 @@ class Task(Base):
     @ready_urls.setter
     def ready_urls(self, value: list):
         self._ready_urls = json.dumps(value)
-    
+
     @property
     def progress(self) -> int:
         if self.total_count == 0:
@@ -332,6 +332,29 @@ class Task(Base):
         if self.status == "processing":
             return min(value, 99)
         return value
+
+
+class TaskAnimationCorrection(Base):
+    """Draft/published realtime bone corrections for one task viewer."""
+
+    __tablename__ = "task_animation_corrections"
+
+    task_id = Column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    draft_json = Column(Text, nullable=True)
+    published_json = Column(Text, nullable=True)
+    published_revision = Column(Integer, nullable=False, default=0)
+    export_status = Column(String(32), nullable=False, default="idle")
+    export_error = Column(Text, nullable=True)
+    source_sha256_json = Column(Text, nullable=True)
+    corrected_glb_url = Column(String(1024), nullable=True)
+    corrected_fbx_zip_url = Column(String(1024), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    published_at = Column(DateTime, nullable=True)
 
 
 class AnimalAnimationLibraryVersion(Base):

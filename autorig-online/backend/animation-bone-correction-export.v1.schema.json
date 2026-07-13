@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/animation-bone-correction-export.v1.schema.json",
+  "title": "AutoRig animation bone correction export v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "taskId",
+    "taskGuid",
+    "revision",
+    "createdAt",
+    "idempotencyKey",
+    "correctionsSha256",
+    "source",
+    "outputs",
+    "corrections",
+    "callback"
+  ],
+  "properties": {
+    "schema": { "const": "autorig.animation-bone-correction-export.v1" },
+    "taskId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "taskGuid": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "correctionsSha256": { "$ref": "#/$defs/sha256" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparedGlbUrl", "animationsGlbUrl", "animationManifestUrl", "integrity"],
+      "properties": {
+        "preparedGlbUrl": { "type": "string", "format": "uri" },
+        "animationsGlbUrl": { "type": "string", "format": "uri" },
+        "animationManifestUrl": { "type": "string", "format": "uri" },
+        "integrity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy", "expectedSha256", "requiredComputedSha256"],
+          "properties": {
+            "policy": { "const": "worker_compute_and_pin" },
+            "expectedSha256": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["preparedGlb", "animationsGlb", "animationManifest"],
+              "properties": {
+                "preparedGlb": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+                "animationsGlb": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+                "animationManifest": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+              }
+            },
+            "requiredComputedSha256": {
+              "const": ["preparedGlb", "animationsGlb", "animationManifest"]
+            }
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["multiClipGlb", "perClipFbxZip", "preserveOriginals"],
+      "properties": {
+        "multiClipGlb": { "const": true },
+        "perClipFbxZip": { "const": true },
+        "preserveOriginals": { "const": true }
+      }
+    },
+    "corrections": { "$ref": "#/$defs/correctionState" },
+    "callback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "auth"],
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["header", "scheme"],
+          "properties": {
+            "header": { "const": "Authorization" },
+            "scheme": { "const": "Bearer" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "vector3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rotationDeg", "positionPct", "motionScale", "enabled"],
+      "properties": {
+        "rotationDeg": {
+          "allOf": [
+            { "$ref": "#/$defs/vector3" },
+            { "items": { "type": "number", "minimum": -180, "maximum": 180 } }
+          ]
+        },
+        "positionPct": {
+          "allOf": [
+            { "$ref": "#/$defs/vector3" },
+            { "items": { "type": "number", "minimum": -100, "maximum": 100 } }
+          ]
+        },
+        "motionScale": { "type": "number", "minimum": 0, "maximum": 2 },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "correctionMap": {
+      "type": "object",
+      "maxProperties": 512,
+      "additionalProperties": { "$ref": "#/$defs/correction" }
+    },
+    "correctionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "skeletonSignature", "global", "clips"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "skeletonSignature": { "type": "string", "maxLength": 128 },
+        "global": { "$ref": "#/$defs/correctionMap" },
+        "clips": {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": { "$ref": "#/$defs/correctionMap" }
+        }
+      }
+    }
+  }
+}
