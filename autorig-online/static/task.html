@@ -11156,20 +11156,31 @@
                 const previousOverride = scene.overrideMaterial;
                 const previousSkyVisible = skyObject?.visible;
                 const previousGroundVisible = groundPlaneMesh?.visible;
+                const blueprintMaterialEntries = [];
                 if (skyObject) skyObject.visible = !texture;
                 if (texture) scene.background = texture;
                 if (rect.id === 'left' && splitViewportBlueprintMaterial) {
-                    scene.overrideMaterial = splitViewportBlueprintMaterial;
                     if (groundPlaneMesh) groundPlaneMesh.visible = false;
+                    currentModel?.traverse?.((child) => {
+                        if (!child?.isMesh || !child.material) return;
+                        blueprintMaterialEntries.push({ child, material: child.material });
+                        child.material = Array.isArray(child.material)
+                            ? child.material.map(() => splitViewportBlueprintMaterial)
+                            : splitViewportBlueprintMaterial;
+                    });
                 }
-                renderer.setViewport(rect.x, renderY, rect.width, rect.height);
-                renderer.setScissor(rect.x, renderY, rect.width, rect.height);
-                renderer.clear(true, true, true);
-                renderer.render(scene, viewCamera);
-                scene.background = previousBackground;
-                scene.overrideMaterial = previousOverride;
-                if (skyObject && previousSkyVisible !== undefined) skyObject.visible = previousSkyVisible;
-                if (groundPlaneMesh && previousGroundVisible !== undefined) groundPlaneMesh.visible = previousGroundVisible;
+                try {
+                    renderer.setViewport(rect.x, renderY, rect.width, rect.height);
+                    renderer.setScissor(rect.x, renderY, rect.width, rect.height);
+                    renderer.clear(true, true, true);
+                    renderer.render(scene, viewCamera);
+                } finally {
+                    blueprintMaterialEntries.forEach(({ child, material }) => { child.material = material; });
+                    scene.background = previousBackground;
+                    scene.overrideMaterial = previousOverride;
+                    if (skyObject && previousSkyVisible !== undefined) skyObject.visible = previousSkyVisible;
+                    if (groundPlaneMesh && previousGroundVisible !== undefined) groundPlaneMesh.visible = previousGroundVisible;
+                }
             }
 
             function renderCanonicalPerspectiveFrame() {
