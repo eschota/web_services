@@ -11670,7 +11670,11 @@
                 const blueprintMaterialEntries = [];
                 if (skyObject) skyObject.visible = !texture;
                 if (texture) scene.background = texture;
-                if (rect.id === 'left' && splitViewportBlueprintMaterial) {
+                if (
+                    rect.id === 'left'
+                    && splitViewportBlueprintMaterial
+                    && splitViewportBlueprintCard?.dataset.blueprintMode !== 'animation'
+                ) {
                     currentModel?.traverse?.((child) => {
                         if (!child?.isMesh || !child.material) return;
                         blueprintMaterialEntries.push({ child, material: child.material });
