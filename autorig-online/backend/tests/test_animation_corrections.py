@@ -42,6 +42,8 @@ class AnimationCorrectionValidationTests(unittest.TestCase):
         self.assertEqual(payload["global"]["root[0]/tail[0]"]["rotationDeg"], [0.0, 10.0, -5.0])
         self.assertEqual(payload["clips"]["walk_forward"]["root[0]/tail[0]"]["motionScale"], 0.25)
         self.assertFalse(payload["clips"]["walk_forward"]["root[0]/tail[0]"]["enabled"])
+        self.assertNotIn("rotationDeg", payload["clips"]["walk_forward"]["root[0]/tail[0]"])
+        self.assertNotIn("positionPct", payload["clips"]["walk_forward"]["root[0]/tail[0]"])
 
     def test_rejects_out_of_range_and_non_finite_values(self):
         invalid_values = [

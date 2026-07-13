@@ -69,33 +69,45 @@ def _normalize_clip_id(value: Any) -> str:
     return clip_id
 
 
-def normalize_correction(value: Any, *, field: str) -> Dict[str, Any]:
+def normalize_correction(value: Any, *, field: str, partial: bool = False) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise AnimationCorrectionValidationError(f"{field} must be an object")
-    return {
-        "rotationDeg": _vector3(
+    normalized: Dict[str, Any] = {}
+    if not partial or "rotationDeg" in value:
+        normalized["rotationDeg"] = _vector3(
             value.get("rotationDeg", [0, 0, 0]),
             field=f"{field}.rotationDeg",
             minimum=-180,
             maximum=180,
-        ),
-        "positionPct": _vector3(
+        )
+    if not partial or "positionPct" in value:
+        normalized["positionPct"] = _vector3(
             value.get("positionPct", [0, 0, 0]),
             field=f"{field}.positionPct",
             minimum=-100,
             maximum=100,
-        ),
-        "motionScale": _finite_number(
+        )
+    if not partial or "motionScale" in value:
+        normalized["motionScale"] = _finite_number(
             value.get("motionScale", 1),
             field=f"{field}.motionScale",
             minimum=0,
             maximum=2,
-        ),
-        "enabled": bool(value.get("enabled", True)),
-    }
+        )
+    if not partial or "enabled" in value:
+        normalized["enabled"] = bool(value.get("enabled", True))
+    if partial and not normalized:
+        raise AnimationCorrectionValidationError(f"{field} must contain a correction field")
+    return normalized
 
 
-def _normalize_bone_map(value: Any, *, field: str, maximum: int) -> Dict[str, Dict[str, Any]]:
+def _normalize_bone_map(
+    value: Any,
+    *,
+    field: str,
+    maximum: int,
+    partial: bool = False,
+) -> Dict[str, Dict[str, Any]]:
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -105,7 +117,11 @@ def _normalize_bone_map(value: Any, *, field: str, maximum: int) -> Dict[str, Di
     normalized: Dict[str, Dict[str, Any]] = {}
     for raw_path, raw_correction in value.items():
         path = _normalize_bone_path(raw_path)
-        normalized[path] = normalize_correction(raw_correction, field=f"{field}.{path}")
+        normalized[path] = normalize_correction(
+            raw_correction,
+            field=f"{field}.{path}",
+            partial=partial,
+        )
     return normalized
 
 
@@ -139,6 +155,7 @@ def validate_animation_corrections(payload: Any) -> Dict[str, Any]:
             raw_bones,
             field=f"clips.{clip_id}",
             maximum=MAX_BONES_PER_CLIP,
+            partial=True,
         )
 
     skeleton_signature = str(payload.get("skeletonSignature") or "").strip()

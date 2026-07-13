@@ -119,6 +119,32 @@
       "maxProperties": 512,
       "additionalProperties": { "$ref": "#/$defs/correction" }
     },
+    "partialCorrection": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "rotationDeg": {
+          "allOf": [
+            { "$ref": "#/$defs/vector3" },
+            { "items": { "type": "number", "minimum": -180, "maximum": 180 } }
+          ]
+        },
+        "positionPct": {
+          "allOf": [
+            { "$ref": "#/$defs/vector3" },
+            { "items": { "type": "number", "minimum": -100, "maximum": 100 } }
+          ]
+        },
+        "motionScale": { "type": "number", "minimum": 0, "maximum": 2 },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "partialCorrectionMap": {
+      "type": "object",
+      "maxProperties": 512,
+      "additionalProperties": { "$ref": "#/$defs/partialCorrection" }
+    },
     "correctionState": {
       "type": "object",
       "additionalProperties": false,
@@ -130,7 +156,7 @@
         "clips": {
           "type": "object",
           "maxProperties": 128,
-          "additionalProperties": { "$ref": "#/$defs/correctionMap" }
+          "additionalProperties": { "$ref": "#/$defs/partialCorrectionMap" }
         }
       }
     }
