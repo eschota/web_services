@@ -5329,6 +5329,211 @@ def _extract_animal_variant_actions(row: Dict[str, Any], animal_type: str) -> Li
     return actions
 
 
+_PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES = 256 * 1024
+_PRIMARY_ANIMAL_ANIMATION_CLIP_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_. -]{0,127}$")
+_EXACT_GUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _animal_animation_artifact_stem(
+    guid: str,
+    animal_type: str,
+    orientation: str,
+    *,
+    is_primary: bool,
+) -> str:
+    if is_primary:
+        return guid
+    return f"{guid}_{animal_type}_{orientation}"
+
+
+def _select_exact_animal_animation_manifest(
+    task: Task,
+    files: List[Dict[str, Any]],
+    animal_type: str,
+    orientation: str,
+) -> Optional[Tuple[str, str]]:
+    """Select one root manifest with the exact GUID/variant filename.
+
+    The worker file inventory is authoritative here.  Do not probe guessed URLs
+    or accept nested/similarly named files: either one canonical root artifact
+    is present or the catalog falls back to its legacy default action.
+    """
+    worker_root, inferred_guid = _infer_worker_root_and_guid(task)
+    task_guid = str(task.guid or "").strip()
+    selected_animal = _task_animal_type_from_settings(task)
+    if (
+        not worker_root
+        or not inferred_guid
+        or not task_guid
+        or inferred_guid != task_guid
+        or not _EXACT_GUID_RE.fullmatch(task_guid)
+        or animal_type not in ANIMAL_VARIANT_TYPES
+        or orientation not in ANIMAL_VARIANT_ORIENTATIONS
+    ):
+        return None
+
+    is_primary = animal_type == selected_animal and orientation == "front"
+    artifact_stem = _animal_animation_artifact_stem(
+        task_guid,
+        animal_type,
+        orientation,
+        is_primary=is_primary,
+    )
+    manifest_name = f"{artifact_stem}_all_animations.manifest.json"
+    artifact_name = f"{artifact_stem}_all_animations.glb"
+    expected_manifest_url = f"{worker_root.rstrip('/')}/{task_guid}/{manifest_name}"
+    expected_artifact_url = f"{worker_root.rstrip('/')}/{task_guid}/{artifact_name}"
+
+    exact_manifest_matches: List[Dict[str, Any]] = []
+    exact_artifact_matches: List[Dict[str, Any]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("folder") or "") != "root":
+            continue
+        size = item.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            continue
+        item_name = str(item.get("name") or "")
+        item_rel_path = str(item.get("rel_path") or "")
+        item_url = str(item.get("url") or "")
+        if (
+            item_name == manifest_name
+            and item_rel_path == manifest_name
+            and item_url == expected_manifest_url
+            and size <= _PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES
+        ):
+            exact_manifest_matches.append(item)
+        elif (
+            item_name == artifact_name
+            and item_rel_path == artifact_name
+            and item_url == expected_artifact_url
+        ):
+            exact_artifact_matches.append(item)
+
+    if len(exact_manifest_matches) != 1 or len(exact_artifact_matches) != 1:
+        return None
+    return expected_manifest_url, artifact_name
+
+
+def _parse_exact_animal_animation_manifest(
+    payload: Any,
+    *,
+    expected_artifact_name: str,
+) -> List[str]:
+    """Validate the worker's compact all-animations manifest fail closed."""
+    if not isinstance(payload, dict):
+        return []
+    schema_version = payload.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != 1
+        or payload.get("artifact_type") != "animal_all_animations_glb"
+    ):
+        return []
+    if payload.get("artifact_file") != expected_artifact_name:
+        return []
+
+    exported = payload.get("exported_clip_names")
+    clips = payload.get("clips")
+    clip_count = payload.get("clip_count")
+    if (
+        not isinstance(exported, list)
+        or not exported
+        or len(exported) > 128
+        or isinstance(clip_count, bool)
+        or not isinstance(clip_count, int)
+        or clip_count != len(exported)
+        or not isinstance(clips, list)
+        or len(clips) != len(exported)
+    ):
+        return []
+
+    actions: List[str] = []
+    normalized_names: Set[str] = set()
+    for index, raw_name in enumerate(exported):
+        if not isinstance(raw_name, str) or raw_name != raw_name.strip():
+            return []
+        if not _PRIMARY_ANIMAL_ANIMATION_CLIP_NAME_RE.fullmatch(raw_name):
+            return []
+        if raw_name.endswith("__LD_STAGE4_TUNED"):
+            return []
+        normalized = _normalize_animation_key(raw_name)
+        if not normalized or normalized in normalized_names:
+            return []
+        clip = clips[index]
+        if not isinstance(clip, dict) or clip.get("name") != raw_name:
+            return []
+        normalized_names.add(normalized)
+        actions.append(raw_name)
+    return actions
+
+
+async def _fetch_exact_animal_animation_manifest_actions(
+    task: Task,
+    files: List[Dict[str, Any]],
+    animal_type: str,
+    orientation: str,
+    *,
+    client: Optional[httpx.AsyncClient] = None,
+) -> List[str]:
+    selected = _select_exact_animal_animation_manifest(task, files, animal_type, orientation)
+    if not selected:
+        return []
+    manifest_url, expected_artifact_name = selected
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=5.0, follow_redirects=False)
+    response = None
+    try:
+        request = client.build_request("GET", manifest_url)
+        response = await client.send(request, stream=True, follow_redirects=False)
+        if response.status_code != 200:
+            return []
+        raw_content_length = str(response.headers.get("content-length") or "").strip()
+        if raw_content_length and (
+            not raw_content_length.isdigit()
+            or int(raw_content_length) <= 0
+            or int(raw_content_length) > _PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES
+        ):
+            return []
+
+        body = bytearray()
+        async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            remaining = (_PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES + 1) - len(body)
+            if remaining <= 0:
+                return []
+            body.extend(chunk[:remaining])
+            if len(body) > _PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES:
+                return []
+        if not body:
+            return []
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return []
+    finally:
+        if response is not None:
+            try:
+                await response.aclose()
+            except Exception:
+                pass
+        if owns_client:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+    return _parse_exact_animal_animation_manifest(
+        payload,
+        expected_artifact_name=expected_artifact_name,
+    )
+
+
 async def _has_animal_animation_pack_purchase(
     db: AsyncSession,
     user: Optional[User],
@@ -5415,7 +5620,19 @@ async def _build_animal_animation_catalog_response(
                 "animation_clip_ids",
             ):
                 action_row.pop(key, None)
-    actions = _extract_animal_variant_actions(action_row, normalized_animal)
+    if action_row:
+        # A concrete matrix row remains authoritative, including its legacy
+        # default behavior when the row does not declare action names.
+        actions = _extract_animal_variant_actions(action_row, normalized_animal)
+    else:
+        actions = await _fetch_exact_animal_animation_manifest_actions(
+            task,
+            files if available else [],
+            normalized_animal,
+            normalized_orientation,
+        )
+        if not actions:
+            actions = _extract_animal_variant_actions({}, normalized_animal)
     pack_purchased = await _has_animal_animation_pack_purchase(
         db,
         user,
@@ -6020,6 +6237,93 @@ async def _resolve_animal_variant_source(
     raise HTTPException(status_code=404, detail="Variant file not available yet")
 
 
+def _retryable_animal_variant_not_ready(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=detail,
+        headers={"Retry-After": "3", "Cache-Control": "no-store"},
+    )
+
+
+def _remote_file_snapshot_from_headers(
+    status_code: int,
+    headers: Any,
+) -> Optional[Dict[str, Any]]:
+    content_length: Optional[int] = None
+    if status_code == 206:
+        content_range = str(headers.get("content-range") or "")
+        match = re.fullmatch(r"bytes\s+\d+-\d+/(\d+)", content_range, re.IGNORECASE)
+        if match:
+            content_length = int(match.group(1))
+    elif status_code == 200:
+        raw_length = str(headers.get("content-length") or "").strip()
+        if raw_length.isdigit():
+            content_length = int(raw_length)
+
+    etag = str(headers.get("etag") or "").strip()
+    last_modified = str(headers.get("last-modified") or "").strip()
+    if not content_length or content_length <= 0 or not (etag or last_modified):
+        return None
+    return {
+        "content_length": content_length,
+        "etag": etag,
+        "last_modified": last_modified,
+    }
+
+
+async def _read_remote_file_snapshot(client: httpx.AsyncClient, url: str) -> Optional[Dict[str, Any]]:
+    response = await client.head(url)
+    if response.status_code == 200:
+        return _remote_file_snapshot_from_headers(response.status_code, response.headers)
+    if response.status_code not in (405, 501):
+        return None
+
+    request = client.build_request("GET", url, headers={"Range": "bytes=0-0"})
+    ranged = await client.send(request, stream=True)
+    try:
+        snapshot = _remote_file_snapshot_from_headers(ranged.status_code, ranged.headers)
+        if not snapshot:
+            return None
+        first_byte = b""
+        async for chunk in ranged.aiter_bytes(chunk_size=1):
+            if chunk:
+                first_byte = chunk
+                break
+        return snapshot if first_byte else None
+    finally:
+        await ranged.aclose()
+
+
+async def _probe_stable_remote_file(
+    url: str,
+    *,
+    client: Optional[httpx.AsyncClient] = None,
+    stability_delay_seconds: float = 1.0,
+) -> Optional[Dict[str, Any]]:
+    """Reject an obvious write race; two samples do not prove publication completeness."""
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
+            follow_redirects=False,
+        )
+    try:
+        first = await _read_remote_file_snapshot(client, url)
+        if not first:
+            return None
+        if stability_delay_seconds > 0:
+            await asyncio.sleep(min(stability_delay_seconds, 1.0))
+        second = await _read_remote_file_snapshot(client, url)
+        if not second or second != first:
+            return None
+        return first
+    except Exception:
+        return None
+    finally:
+        if owns_client:
+            await client.aclose()
+
+
 @app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/preview.fbx")
 async def api_animal_variant_preview_fbx(
     task_id: str,
@@ -6068,6 +6372,19 @@ async def api_animal_variant_download(
     if not await _has_full_task_download_purchase(db, user, task_id):
         raise HTTPException(status_code=402, detail="Full download purchase required")
     source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, kind)
+    stable_snapshot: Optional[Dict[str, Any]] = None
+    if kind == "blend":
+        stable_snapshot = await _probe_stable_remote_file(source_url)
+        if not stable_snapshot:
+            raise _retryable_animal_variant_not_ready(
+                "Variant Blend is still being written; retry the same download shortly"
+            )
+        return await _proxy_model_file(
+            source_url,
+            filename,
+            as_attachment=True,
+            required_snapshot=stable_snapshot,
+        )
     return await _proxy_model_file(source_url, filename, as_attachment=True)
 
 
@@ -10318,6 +10635,7 @@ _GLB_FILE_HTTP_HEADERS: Dict[str, str] = {
     "Access-Control-Allow-Origin": "*",
     "Content-Encoding": "identity",
 }
+_ANIMAL_VARIANT_FIRST_BYTE_TIMEOUT_SECONDS = 5.0
 
 
 async def _proxy_model_file(
@@ -10325,6 +10643,7 @@ async def _proxy_model_file(
     filename: str,
     *,
     as_attachment: bool = False,
+    required_snapshot: Optional[Dict[str, Any]] = None,
 ) -> StreamingResponse:
     """Proxy a model file from worker with streaming.
 
@@ -10344,23 +10663,37 @@ async def _proxy_model_file(
     content_type = content_types.get(ext, "application/octet-stream")
     
     # Large ZIP bundles: allow long reads from worker (nginx should use long proxy_read_timeout too).
-    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0), follow_redirects=True)
+    allow_redirects = required_snapshot is None
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0),
+        follow_redirects=allow_redirects,
+    )
     try:
         req = client.build_request("GET", url)
-        upstream = await client.send(req, stream=True)
+        upstream = await client.send(req, stream=True, follow_redirects=allow_redirects)
     except Exception as e:
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"Model source unavailable: {e}")
 
     if upstream.status_code != 200:
-        status = 404 if upstream.status_code == 404 else 502
+        status = 503 if required_snapshot is not None else (404 if upstream.status_code == 404 else 502)
         try:
             await upstream.aclose()
         finally:
             await client.aclose()
+        if required_snapshot is not None:
+            raise _retryable_animal_variant_not_ready(
+                f"Variant artifact changed before download (HTTP {upstream.status_code}); retry shortly"
+            )
         raise HTTPException(status_code=status, detail=f"Model source returned HTTP {upstream.status_code}")
 
+    resources_closed = False
+
     async def _close_stream_resources():
+        nonlocal resources_closed
+        if resources_closed:
+            return
+        resources_closed = True
         try:
             await upstream.aclose()
         finally:
@@ -10377,6 +10710,66 @@ async def _proxy_model_file(
     content_length = upstream.headers.get("content-length")
     last_modified = upstream.headers.get("last-modified")
     etag = upstream.headers.get("etag")
+    body_iterator = upstream.aiter_bytes(chunk_size=131072)
+    if required_snapshot is not None:
+        expected_length = required_snapshot.get("content_length")
+        expected_etag = str(required_snapshot.get("etag") or "")
+        expected_last_modified = str(required_snapshot.get("last_modified") or "")
+        actual_length: Optional[int] = None
+        if content_length and str(content_length).isdigit():
+            actual_length = int(str(content_length))
+        metadata_matches = (
+            isinstance(expected_length, int)
+            and expected_length > 0
+            and actual_length == expected_length
+            and (not expected_etag or str(etag or "") == expected_etag)
+            and (not expected_last_modified or str(last_modified or "") == expected_last_modified)
+        )
+        if not metadata_matches:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact metadata is empty or changed; retry the same download shortly"
+            )
+
+        async def _read_first_nonempty_chunk() -> bytes:
+            async for chunk in body_iterator:
+                if chunk:
+                    return chunk
+            return b""
+
+        try:
+            first_chunk = await asyncio.wait_for(
+                _read_first_nonempty_chunk(),
+                timeout=_ANIMAL_VARIANT_FIRST_BYTE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact did not produce a first byte in time; retry shortly"
+            )
+        except Exception:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact stream failed before the first byte; retry shortly"
+            )
+        if not first_chunk:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact returned an empty body; retry the same download shortly"
+            )
+
+        async def _verified_body_iterator():
+            try:
+                yield first_chunk
+                async for chunk in body_iterator:
+                    if chunk:
+                        yield chunk
+            finally:
+                await _close_stream_resources()
+
+        response_body = _verified_body_iterator()
+    else:
+        response_body = body_iterator
     if content_length:
         headers["Content-Length"] = content_length
     if last_modified:
@@ -10386,7 +10779,7 @@ async def _proxy_model_file(
 
     media_type = upstream.headers.get("content-type") or content_type
     return StreamingResponse(
-        upstream.aiter_bytes(chunk_size=131072),  # 128KB chunks
+        response_body,  # 128KB chunks; guarded downloads prefetch one non-empty chunk.
         media_type=media_type,
         headers=headers,
         background=BackgroundTask(_close_stream_resources),
