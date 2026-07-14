@@ -1,0 +1,81 @@
+{
+  "schema": "autorig.animation-fitting-experiment.v1",
+  "experiment_id_string": "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
+  "status_string": "prepared_for_single_controlled_generation",
+  "purpose_string": "Correct the paired-leg motion observed in semantic v2 by prescribing four non-overlapping single-hoof swing windows while retaining the same deterministic four-colour rig reference.",
+  "predecessor_experiment_object": {
+    "filename_string": "horse_walk_prompt_v2_semantic_reference_guide_080.v1.json",
+    "sha256_string": "45a040ea9b4154e1e1c069d79d64f34fa7d8ac90c621b910f9cede503c674fdb",
+    "result_video_sha256_string": "d9e0472cd35c12389d83af5527ac21fa1d4a09170f2b8d7d9164a7faa414d3a9",
+    "result_string": "semantic identity tracking passed 49 of 49 frames, but four-beat gait failed because fore and hind legs moved in paired windows"
+  },
+  "base_action_id_string": "walk_forward",
+  "species_string": "horse",
+  "generation_mode_string": "loop",
+  "frame_count_int": 49,
+  "input_fps_int": 24,
+  "output_fps_int": 30,
+  "seed_int": 4373011867009528157,
+  "reference_object": {
+    "bundle_id_string": "horse-canonical-f1-semantic-limbs-v2",
+    "source_bundle_id_string": "horse-canonical-f1",
+    "source_bundle_immutable_manifest_sha256_string": "f5e55c5073d09bc01dac90f4b7244f995fd42b0bdd37e09258cd4178e5573873",
+    "source_reference_rgb_sha256_string": "94bf47cc137c0aaee975b2a75b7cd2b28f75215e282cdb6865bdd4095630a0b1",
+    "conditioning_variant_string": "rig_semantic_four_limb_palette_topology_raster_v2",
+    "reference_png_filename_string": "reference_ltx_semantic.png",
+    "reference_png_sha256_string": "92d0c2ac9e9570d2e2b4a221842943721fec3f143fbe1a6e783459e2d8c814f2",
+    "derivation_manifest_filename_string": "semantic_reference.json",
+    "derivation_manifest_sha256_string": "ca7cd2a412aa4eebb73b2579c7157b27a95eac27477c840125c411069f12d4c1",
+    "immutable_manifest_filename_string": "immutable_manifest.json",
+    "immutable_manifest_sha256_string": "9a9ef0cebe407bad661b24ea5670a5fb76eb2b3c7a2888962a1985a516bd35b3",
+    "semantic_profile_id_string": "horse_2.semantic_limbs.v1",
+    "semantic_profile_sha256_string": "0034d84e6d1eea841d02ee13708f9f84649224c41bce4a21074a7a21eea99562",
+    "manual_painting_used_bool": false,
+    "source_blend_required_bool": false,
+    "geometry_uv_normals_mutated_bool": false
+  },
+  "workflow_object": {
+    "workflow_name_string": "autorig_ltx2_animal_loop_v1_api.json",
+    "workflow_fingerprint_sha256_string": "e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56",
+    "conditioned_frames_array": [
+      {
+        "role_string": "start",
+        "frame_index_expression_string": "0",
+        "reuse_reference_rgb_bool": true
+      },
+      {
+        "role_string": "end",
+        "frame_index_expression_string": "N-1",
+        "reuse_reference_rgb_bool": true
+      }
+    ],
+    "post_sampling_guide_crop_required_bool": true
+  },
+  "positive_prompt_string": "Locked static camera. Animate the exact supplied low-poly horse without changing identity, geometry, colours, proportions, background, ground, framing, or any bone length. Produce one slow anatomically correct four-beat walk cycle in place. This must NOT be a trot and must NOT be a pace. Never swing a diagonal pair, a lateral pair, or any two hooves together. Exactly one hoof is in swing at a time while the other three hooves remain visibly planted flat and motionless on the ground. Follow these four separate non-overlapping phases in order across the 49 frames: frames 1 through 10 move only the yellow near-hind hoof forward and land it; frames 13 through 22 move only the cyan near-fore hoof forward and land it; frames 25 through 34 move only the magenta far-hind hoof forward and land it; frames 37 through 46 move only the blue far-fore hoof forward and land it. Between those windows all four hooves are planted. Each coloured leg bends only at its anatomical joints and keeps rigid segment lengths; every hoof remains a compact solid block. Use only subtle head, neck, spine, and pelvis counter-motion and no net translation. Frame 0 and frame 48 are the same moving pass-through pose at the loop seam, with continuous pose and velocity and no pause, snap, reversal, duplicated beat, or endpoint freeze.",
+  "negative_prompt_string": "trot, pace, pacing gait, diagonal pair, lateral pair, paired leg motion, two hooves swinging together, simultaneous hoof lift, simultaneous hoof landing, hopping, gallop, suspension phase, camera movement, pan, tilt, orbit, dolly, zoom, tracking shot, handheld shake, reframing, crop, scene cut, background drift, parallax, identity change, species change, altered proportions, extra limb, missing limb, fused limb, duplicated subject, broken joint, dislocated joint, rubber leg, telescoping limb, changing segment length, curled distal limb, hooked distal limb, curled hoof, hooked hoof, hoof morphing, stretched hoof, toe elongation, toe drag, floating hoof, foot sliding, hoof skating, ground penetration, topology change, material change, colour swap, limb colour swap, flicker, motion smear, endpoint freeze, pause at seam, duplicated endpoint beat, motion reversal, text, watermark, logo",
+  "variants_array": [
+    {
+      "variant_id_string": "semantic_staggered_beats_guide_strength_0_65",
+      "start_guide_strength_float": 0.65,
+      "end_guide_strength_float": 0.65
+    }
+  ],
+  "fixed_factors_array": [
+    "same semantic v2 reference SHA-256",
+    "same pinned local RTX 4090 worker and workflow fingerprint",
+    "49-frame loop and fixed camera",
+    "one deterministic seed and one submission only"
+  ],
+  "manual_acceptance_gates_array": [
+    "all four colour identities persist through every frame",
+    "four non-overlapping single-hoof swing windows occur in the prescribed order",
+    "three stance hooves remain planted during every swing",
+    "no distal curl, hoof morph, segment-length drift, skating, or toe drag",
+    "loop seam is continuous without a pause or paired beat"
+  ],
+  "generation_authorization_object": {
+    "authorized_bool": false,
+    "required_next_action_string": "Runtime authorization must exactly match this immutable experiment id."
+  },
+  "approved_bool": false
+}

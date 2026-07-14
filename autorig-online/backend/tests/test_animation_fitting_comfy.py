@@ -2,6 +2,7 @@ import json
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 
@@ -104,6 +105,31 @@ class AnimationFittingWorkflowBindingTests(unittest.TestCase):
 
 
 class AnimationFittingComfyClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_render_timeout_defaults_to_two_hours_and_is_environment_configurable(self):
+        worker = ComfyWorker(
+            "local-4090",
+            "http://127.0.0.1:8188",
+            "workflow.json",
+            "0" * 64,
+        )
+        default_client = ComfyAnimationClient(worker, client=httpx.AsyncClient())
+        self.assertEqual(default_client.render_timeout_seconds, 7200.0)
+        await default_client._client.aclose()
+
+        with patch.dict("os.environ", {"AUTORIG_LTX_RENDER_TIMEOUT_SECONDS": "10800"}):
+            configured_http = httpx.AsyncClient()
+            configured_client = ComfyAnimationClient(worker, client=configured_http)
+            self.assertEqual(configured_client.render_timeout_seconds, 10800.0)
+            await configured_http.aclose()
+
+        with patch.dict("os.environ", {"AUTORIG_LTX_RENDER_TIMEOUT_SECONDS": "0"}):
+            invalid_http = httpx.AsyncClient()
+            try:
+                with self.assertRaisesRegex(ComfyContractError, "must be positive"):
+                    ComfyAnimationClient(worker, client=invalid_http)
+            finally:
+                await invalid_http.aclose()
+
     async def test_fetch_pins_canonical_workflow_and_submit_uses_deterministic_id(self):
         workflow = {
             "1": {

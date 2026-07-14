@@ -20,6 +20,7 @@ from .specs import WorkflowBinding, WorkflowProfile
 
 
 VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv")
+DEFAULT_RENDER_TIMEOUT_SECONDS = 7200.0
 
 
 class ComfyContractError(RuntimeError):
@@ -28,6 +29,19 @@ class ComfyContractError(RuntimeError):
 
 class ComfyTaskError(RuntimeError):
     """Raised when a submitted Comfy task fails or completes without video."""
+
+
+def _render_timeout_seconds(value: Optional[float]) -> float:
+    raw: object = value
+    if raw is None:
+        raw = os.getenv("AUTORIG_LTX_RENDER_TIMEOUT_SECONDS", str(DEFAULT_RENDER_TIMEOUT_SECONDS))
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ComfyContractError("AUTORIG_LTX_RENDER_TIMEOUT_SECONDS must be numeric") from exc
+    if timeout <= 0:
+        raise ComfyContractError("AUTORIG_LTX_RENDER_TIMEOUT_SECONDS must be positive")
+    return timeout
 
 
 @dataclass(frozen=True)
@@ -186,12 +200,12 @@ class ComfyAnimationClient:
         *,
         client: Optional[httpx.AsyncClient] = None,
         request_timeout_seconds: float = 30.0,
-        render_timeout_seconds: float = 3600.0,
+        render_timeout_seconds: Optional[float] = None,
         poll_interval_seconds: float = 3.0,
     ) -> None:
         self.worker = worker
         self.request_timeout_seconds = float(request_timeout_seconds)
-        self.render_timeout_seconds = float(render_timeout_seconds)
+        self.render_timeout_seconds = _render_timeout_seconds(render_timeout_seconds)
         self.poll_interval_seconds = float(poll_interval_seconds)
         self._owns_client = client is None
         auth = None
