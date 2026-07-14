@@ -9030,6 +9030,23 @@
             restoreRootTransform,
         } from '/static/js/animation-playlist-controller.js?v=1';
         import { TaskBoneCorrectionPanel } from '/static/js/task-bone-correction-panel.js?v=2';
+        import {
+            buildThreeAnimationClip,
+            decodeVideoFramesExact,
+            mapHorseSemanticPalette,
+        } from '/static/js/task-animation-fitting-panel.js?v=1';
+        import {
+            assessHorseWalkGait,
+            buildSemanticObservations,
+        } from '/static/js/animation-fitting-semantic-tracker.js?v=1';
+        import { normalizeHorseWalkPhases } from '/static/js/animation-fitting-horse-phase-normalizer.js?v=1';
+        import { fitBrowserAnimation } from '/static/js/animation-fitting-browser-core.js?v=1';
+        import {
+            buildHorse2BrowserFittingSkeleton,
+            HORSE_2_SEMANTIC_PROFILE,
+        } from '/static/js/animation-fitting-three-adapter.js?v=1';
+        import { resolveAnimationFittingAction } from '/static/js/animation-fitting-action-contract.js?v=1';
+        import { captureHorse2SemanticReference } from '/static/js/animation-fitting-semantic-capture.js?v=1';
 
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
@@ -10253,6 +10270,38 @@
                 }
             }
 
+            function captureAnimalLtxSemanticFrame768() {
+                try {
+                    if (!renderer?.domElement || !scene || !camera || !currentModel) return null;
+                    if (typeof renderCanonicalPerspectiveFrame === 'function') renderCanonicalPerspectiveFrame();
+                    else renderer.render(scene, camera);
+                    const source = renderer.domElement;
+                    const sourceWidth = Math.max(1, Number(source.width || source.clientWidth || 1));
+                    const sourceHeight = Math.max(1, Number(source.height || source.clientHeight || 1));
+                    const fittingSkeleton = buildHorse2BrowserFittingSkeleton({
+                        THREE,
+                        model: currentModel,
+                        camera,
+                        semanticProfile: HORSE_2_SEMANTIC_PROFILE,
+                        sourceViewport: [sourceWidth, sourceHeight],
+                        referenceResolution: [768, 448],
+                        outputResolution: [768, 448],
+                        includePositionMappings: false,
+                    });
+                    return captureHorse2SemanticReference({
+                        sourceCanvas: source,
+                        fittingSkeleton,
+                        semanticProfile: HORSE_2_SEMANTIC_PROFILE,
+                        document,
+                    });
+                } catch (error) {
+                    console.warn('[AnimationFitting] semantic reference capture failed', error);
+                    return null;
+                }
+            }
+
+            window.captureAnimalLtxSemanticFrame768 = captureAnimalLtxSemanticFrame768;
+
             function getAnimalLtxThemeContext() {
                 const selection = viewerState?.viewer_theme_selection || {};
                 const theme = activeViewerTheme || {};
@@ -10292,6 +10341,7 @@
                     module.createIdleLtxGenerator({
                         taskId,
                         captureFrame768: captureAnimalLtxFrame768,
+                        captureSemanticFrame768: captureAnimalLtxSemanticFrame768,
                         prepareBasePose: prepareAnimalLtxBasePose,
                         getThemeContext: getAnimalLtxThemeContext,
                     });
@@ -10537,7 +10587,7 @@
                 return { clip, metrics };
             }
 
-            window.startAnimalAnimationFittingFromVideo = async function startAnimalAnimationFittingFromVideo(opts = {}) {
+            async function startLegacyRgbAnimationFittingFromVideo(opts = {}) {
                 const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
                 onProgress(0, tFitting('idle_ltx_fit_loading_video', 'Loading reference video...'));
                 if (!opts.videoUrl) {
@@ -10591,6 +10641,235 @@
                     sample_count_int: motion.samples.length,
                     divergence_metrics_array: fit.metrics || [],
                 };
+            }
+
+            async function startSemanticBrowserAnimationFittingFromVideo(opts = {}) {
+                const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+                onProgress(0, tFitting('idle_ltx_fit_loading_video', 'Loading reference video...'));
+                if (!opts.videoUrl) {
+                    throw new Error(tFitting('idle_ltx_fit_video_error', 'Reference video could not be decoded for fitting.'));
+                }
+                if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
+                    await setActiveMode('animation');
+                    await waitViewerFrame();
+                }
+                if (!currentModel) {
+                    throw new Error(tFitting('idle_ltx_fit_not_animal_viewer', 'Switch to the animated animal viewer before fitting.'));
+                }
+                resetAnimalAnimationViewerToBasePose('animal LTX fitting');
+                await waitViewerFrame();
+                const sourceWidth = Math.max(1, Number(renderer?.domElement?.width || renderer?.domElement?.clientWidth || 1));
+                const sourceHeight = Math.max(1, Number(renderer?.domElement?.height || renderer?.domElement?.clientHeight || 1));
+                let fittingSkeleton;
+                try {
+                    fittingSkeleton = buildHorse2BrowserFittingSkeleton({
+                        THREE,
+                        model: currentModel,
+                        camera,
+                        semanticProfile: HORSE_2_SEMANTIC_PROFILE,
+                        sourceViewport: [sourceWidth, sourceHeight],
+                        referenceResolution: [768, 448],
+                        outputResolution: [512, 320],
+                        includePositionMappings: 'auto',
+                    });
+                } catch (error) {
+                    throw new Error(`${tFitting('idle_ltx_fit_no_skeleton', 'No compatible Horse_2 semantic skeleton was found in the viewer.')} ${error.message || error}`);
+                }
+
+                const variantName = String(opts.variantName || opts.variant_name_string || `variant_${opts.index || 0}`);
+                const actionContract = resolveAnimationFittingAction({
+                    actionId: opts.actionId || opts.action_id_string || variantName,
+                    frameCount: opts.frameCount ?? opts.frame_count_int,
+                    generationMode: opts.generationMode || opts.generation_mode_string,
+                    loop: opts.loop,
+                });
+                const actionId = actionContract.actionId;
+                const requestedFrameCount = actionContract.frameCount;
+                onProgress(12, tFitting('idle_ltx_fit_extracting_frames', 'Decoding the exact semantic frame sequence...'));
+                const decodedVideo = await decodeVideoFramesExact(opts.videoUrl, {
+                    frameCount: requestedFrameCount,
+                    fps: 30,
+                    onProgress: (event) => {
+                        const ratio = Math.max(0, Math.min(1, Number(event?.progress) || 0));
+                        onProgress(12 + Math.round(ratio * 34), tFitting('idle_ltx_fit_extracting_frames', 'Extracting semantic motion frames...'));
+                    },
+                });
+                const frames = decodedVideo?.frames;
+                if (!Array.isArray(frames) || frames.length !== requestedFrameCount) {
+                    throw new Error(tFitting('idle_ltx_fit_video_error', 'Reference video did not satisfy its exact frame contract.'));
+                }
+
+                onProgress(50, tFitting('idle_ltx_fit_tracking', 'Tracking four persistent Horse limbs...'));
+                const semanticPalette = mapHorseSemanticPalette(HORSE_2_SEMANTIC_PROFILE);
+                let observations = buildSemanticObservations(frames, semanticPalette, {
+                    fps: 30,
+                    colorTolerance: 0.24,
+                    minimumPixels: 120,
+                    contactHeightTolerancePx: 4,
+                    contactVelocityTolerancePx: 3,
+                });
+                const requiredHoofTracks = ['fore_left', 'fore_right', 'hind_left', 'hind_right']
+                    .map((label) => observations.tracks.find((track) => track.anchor_id === `${label}.hoof`));
+                const minimumVisibleFrames = Math.ceil(observations.frame_count * 0.95);
+                if (requiredHoofTracks.some((track) => !track || track.points.filter((point) => point.visible).length < minimumVisibleFrames)) {
+                    throw new Error('Semantic fitting rejected: one or more Horse hoof identities are not persistent across the video.');
+                }
+
+                const oneShot = actionContract.isOneShot;
+                const isWalk = actionId === 'walk_forward';
+                const walkGaitQaOptions = {
+                    expectedOrder: ['hind_left', 'fore_left', 'hind_right', 'fore_right'],
+                    maximumSimultaneousSwingFrames: 2,
+                };
+                const rawGaitQa = isWalk ? assessHorseWalkGait(observations, walkGaitQaOptions) : null;
+                let gaitQa = rawGaitQa;
+                let gaitNormalization = null;
+                const allowPhaseNormalization = opts.enableHorseWalkPhaseNormalization === true
+                    || opts.enable_horse_walk_phase_normalization_bool === true;
+                if (rawGaitQa && !rawGaitQa.accepted && allowPhaseNormalization) {
+                    const normalized = normalizeHorseWalkPhases(observations, {
+                        expectedOrder: walkGaitQaOptions.expectedOrder,
+                        gaitQaOptions: walkGaitQaOptions,
+                        minimumVisibleFraction: 0.95,
+                        contactHeightTolerancePx: 4,
+                        contactVelocityTolerancePx: 3,
+                    });
+                    observations = normalized.observations;
+                    gaitQa = normalized.normalizedGaitQa;
+                    gaitNormalization = normalized.provenance;
+                }
+                if (rawGaitQa && !rawGaitQa.accepted && !allowPhaseNormalization) {
+                    throw new Error(
+                        `Semantic Horse Walk rejected before fitting: four-beat order=${rawGaitQa.orderAccepted}, `
+                        + `paired swing frames=${rawGaitQa.simultaneousSwingFrameCount}.`
+                    );
+                }
+                if (gaitQa && !gaitQa.accepted) {
+                    throw new Error('Semantic Horse Walk phase normalization did not pass normalized gait QA.');
+                }
+
+                const requestedMaximumContactSlidePx = opts.maximumContactSlidePx
+                    ?? opts.max_contact_slide_px
+                    ?? 3;
+                const maximumContactSlideLimitPx = Number(requestedMaximumContactSlidePx);
+                if (!Number.isFinite(maximumContactSlideLimitPx)
+                    || maximumContactSlideLimitPx < 0
+                    || maximumContactSlideLimitPx > 10) {
+                    throw new Error('maximumContactSlidePx must be a finite number between 0 and 10 pixels.');
+                }
+
+                onProgress(72, tFitting('idle_ltx_fit_solving', 'Solving constrained skeleton motion in the browser...'));
+                const fitted = fitBrowserAnimation({
+                    skeleton: fittingSkeleton,
+                    observations,
+                    options: {
+                        loop: !oneShot,
+                        iterations: 64,
+                        tolerance: 0.05,
+                        jointAttraction: 0.12,
+                        smoothingRadius: 1,
+                        loopBlendFrames: 4,
+                    },
+                });
+                const qa = fitted.qa || {};
+                const numericAccepted = Number(qa.maximumBoneLengthErrorPx) <= 1e-4
+                    && Number(qa.maximumJointLimitViolationRad) <= 1e-5
+                    && Number(qa.finalMeanTargetErrorPx) < Number(qa.initialMeanTargetErrorPx)
+                    && Number(qa.maximumContactSlidePx) <= maximumContactSlideLimitPx
+                    && (oneShot || Number(qa.loopEndpointError) <= 1e-4);
+                if (!numericAccepted) {
+                    throw new Error(`Browser fitting rejected by numeric QA: ${JSON.stringify(qa)}`);
+                }
+
+                const clipName = `fitted_${normalizeClipKey(actionId || variantName || 'reference') || 'reference'}`;
+                const clip = buildThreeAnimationClip(fitted, THREE, { clipName });
+                clip.userData = {
+                    ...(clip.userData || {}),
+                    autorigHorseWalkGaitQa: gaitQa,
+                    autorigHorseWalkRawGaitQa: rawGaitQa,
+                    autorigHorseWalkPhaseNormalization: gaitNormalization,
+                    autorigSemanticObservations: {
+                        schema: observations.schema,
+                        frameCount: observations.frame_count,
+                        trackCount: observations.tracks.length,
+                    },
+                };
+
+                const hoofLabels = ['fore_left', 'fore_right', 'hind_left', 'hind_right'];
+                const targetMotion = [];
+                const fittedMotion = [];
+                for (let frame = 0; frame < observations.frame_count; frame++) {
+                    let target = 0;
+                    let solved = 0;
+                    hoofLabels.forEach((label) => {
+                        const track = observations.tracks.find((item) => item.anchor_id === `${label}.hoof`);
+                        const current = track?.points?.[frame];
+                        const previous = track?.points?.[Math.max(0, frame - 1)];
+                        if (current?.visible && previous?.visible) {
+                            target += Math.hypot(current.x - previous.x, current.y - previous.y);
+                        }
+                        const currentFit = fitted.frames?.[frame]?.limbs?.[label]?.points?.at?.(-1);
+                        const previousFit = fitted.frames?.[Math.max(0, frame - 1)]?.limbs?.[label]?.points?.at?.(-1);
+                        if (currentFit && previousFit) {
+                            solved += Math.hypot(currentFit[0] - previousFit[0], currentFit[1] - previousFit[1]);
+                        }
+                    });
+                    targetMotion.push(target / hoofLabels.length);
+                    fittedMotion.push(solved / hoofLabels.length);
+                }
+                const motionScale = Math.max(1e-6, ...targetMotion, ...fittedMotion);
+                const fitMetrics = targetMotion.map((target, frame) => {
+                    const target01 = target / motionScale;
+                    const fitted01 = fittedMotion[frame] / motionScale;
+                    return {
+                        time_seconds_float: frame / observations.fps,
+                        target01,
+                        fitted01,
+                        divergence01: Math.abs(target01 - fitted01),
+                    };
+                });
+                if (typeof opts.onMetrics === 'function') opts.onMetrics(fitMetrics);
+                onProgress(92, tFitting('idle_ltx_fit_applying', 'Applying fitted clip...'));
+                const nextClips = [
+                    ...(Array.isArray(animations) ? animations.filter((c) => c?.name !== clip.name) : []),
+                    clip,
+                ];
+                if (currentModelType !== 'animations') currentModelType = 'animations';
+                const applied = applyAnimationClipsToCurrentModel(nextClips, [clip.name]);
+                if (!applied) {
+                    throw new Error(tFitting('idle_ltx_fit_not_animal_viewer', 'Switch to the animated animal viewer before fitting.'));
+                }
+                if (sel) sel.value = clip.name;
+                play(clip.name, { fade: 0.08, loopOnce: oneShot, clampWhenFinished: oneShot });
+                onProgress(100, tFitting('idle_ltx_fit_done', 'Fitted bone animation applied: {clip}', { clip: clip.name }));
+                return {
+                    clip_name_string: clip.name,
+                    duration_seconds_float: fitted.durationSeconds,
+                    role_count_int: fitted.tracks.length,
+                    sample_count_int: observations.frame_count,
+                    observation_track_count_int: observations.tracks.length,
+                    divergence_metrics_array: fitMetrics,
+                    browser_fitting_qa_object: qa,
+                    gait_qa_object: gaitQa,
+                    raw_gait_qa_object: rawGaitQa,
+                    gait_normalization_object: gaitNormalization,
+                    action_id_string: actionId,
+                    generation_mode_string: actionContract.generationMode,
+                    frame_count_int: actionContract.frameCount,
+                };
+            };
+
+            window.startAnimalAnimationFittingFromVideo = async function startAnimalAnimationFittingFromVideo(opts = {}) {
+                const pipelineVersion = String(
+                    opts.pipeline_version_string ?? opts.pipelineVersion ?? '',
+                ).trim();
+                if (!pipelineVersion || pipelineVersion === 'legacy-rgb-renderfin-v1') {
+                    return startLegacyRgbAnimationFittingFromVideo(opts);
+                }
+                if (pipelineVersion === 'semantic-comfy-browser-v1') {
+                    return startSemanticBrowserAnimationFittingFromVideo(opts);
+                }
+                throw new Error(`Unsupported animation-fitting pipeline: ${pipelineVersion}`);
             };
 
             async function loadEnvironment(scene) {
