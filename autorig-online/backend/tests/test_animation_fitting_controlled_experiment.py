@@ -605,7 +605,7 @@ def test_v9_seed_series_is_exactly_allowlisted_and_keeps_one_variable(
     assert (plan.latent_width, plan.latent_height, plan.resize_longer) == (768, 448, 768)
 
 
-def test_v10_checked_in_spec_is_fail_closed_until_browser_bundle_is_pinned() -> None:
+def test_v10_checked_in_spec_pins_browser_bundle_and_stays_unapproved() -> None:
     spec_path = (
         Path(__file__).resolve().parents[1]
         / "animation_fitting"
@@ -615,16 +615,34 @@ def test_v10_checked_in_spec_is_fail_closed_until_browser_bundle_is_pinned() -> 
     )
     spec = json.loads(spec_path.read_text())
     assert spec["experiment_id_string"] == V10_EXPERIMENT_ID
-    assert spec["status_string"] == "blocked_waiting_for_browser_guide_bundle"
+    assert spec["status_string"] == "prepared_for_single_controlled_generation"
     guide = spec["guide_sequence_object"]
-    assert guide["ready_bool"] is False
-    assert guide["required_frame_indices_array"] == [0, 6, 18, 30, 42, 48]
-    assert guide["frame_zero_reference_hash_equality_required_bool"] is True
-    assert guide["cycle_endpoint_hash_equality_required_bool"] is True
-    assert guide["required_renderer_object"] == {
-        "renderer_string": "browser_threejs",
-        "blender_used_bool": False,
-    }
+    assert guide["ready_bool"] is True
+    assert guide["bundle_id_string"] == "horse-walk-v10-browser-guides-f1"
+    assert guide["immutable_manifest_sha256_string"] == (
+        "9b549fb634409a53ce8ae4f7ed7e8c7754b9bda3430bd22942b5aae433b2fdb2"
+    )
+    assert [row["frame_index_int"] for row in guide["frames_array"]] == [
+        0,
+        6,
+        18,
+        30,
+        42,
+        48,
+    ]
+    assert [row["strength_float"] for row in guide["frames_array"]] == [
+        0.8,
+        0.7,
+        0.7,
+        0.7,
+        0.7,
+        0.8,
+    ]
+    assert guide["frames_array"][0]["sha256_string"] == guide["frames_array"][-1][
+        "sha256_string"
+    ]
+    assert spec["generation_authorization_object"]["authorized_bool"] is False
+    assert spec["approved_bool"] is False
     assert "IC-LoRA" not in json.dumps(spec)
 
 
