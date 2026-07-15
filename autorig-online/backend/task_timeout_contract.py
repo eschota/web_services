@@ -11,12 +11,14 @@ def task_hard_timeout_reference(
     updated_at: Optional[datetime],
     last_progress_at: Optional[datetime],
 ) -> Optional[datetime]:
-    """Return the current dispatch/queue epoch without treating polls as progress."""
-    if str(status or "").strip().lower() == "processing":
-        return last_progress_at or created_at
+    """Return a hard-timeout epoch only after a task has reached a worker.
 
-    # admin_requeue_task_to_created intentionally refreshes updated_at.  Using
-    # only the original created_at would make an old requeued task time out
-    # immediately before it can be dispatched again.
-    candidates = [value for value in (created_at, updated_at) if value is not None]
-    return max(candidates) if candidates else None
+    ``created`` tasks are waiting in the backend queue.  When every eligible
+    converter is busy, applying the worker-processing timeout to that wait
+    incorrectly turns healthy queued work into a terminal error before it can
+    ever be dispatched.  ``updated_at`` is intentionally ignored because
+    polling/admin bookkeeping is not worker progress.
+    """
+    if str(status or "").strip().lower() != "processing":
+        return None
+    return last_progress_at or created_at
