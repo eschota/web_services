@@ -1,4 +1,6 @@
+import hashlib
 import json
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -105,6 +107,123 @@ class AnimationFittingWorkflowBindingTests(unittest.TestCase):
 
 
 class AnimationFittingComfyClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_validates_pins_and_posts_the_same_read_once_bytes(self):
+        original = b"pinned browser guide bytes\x00\x01\x02"
+        mutated = b"mutated after the upload request was built"
+        digest = hashlib.sha256(original).hexdigest()
+        captured = {"post_count": 0}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "guide_000.png"
+            image_path.write_bytes(original)
+
+            def handler(request):
+                if request.method == "POST" and request.url.path == "/upload/image":
+                    captured["post_count"] += 1
+                    image_path.write_bytes(mutated)
+                    captured["body"] = request.content
+                    captured["content_type"] = request.headers.get("content-type")
+                    return httpx.Response(
+                        200,
+                        json={
+                            "name": f"autorig_{digest[:32]}.png",
+                            "subfolder": "autorig_animation_fitting",
+                        },
+                    )
+                return httpx.Response(404)
+
+            worker = ComfyWorker(
+                "local-4090",
+                "http://127.0.0.1:8188",
+                "workflow.json",
+                "0" * 64,
+            )
+            http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            try:
+                client = ComfyAnimationClient(worker, client=http_client)
+                uploaded = await client.upload_reference_image(
+                    image_path,
+                    expected_sha256=digest,
+                    expected_size_bytes=len(original),
+                )
+                with self.assertRaisesRegex(ComfyContractError, "SHA-256 mismatch"):
+                    await client.upload_reference_image(
+                        image_path,
+                        expected_sha256=digest,
+                        expected_size_bytes=len(original),
+                    )
+            finally:
+                await http_client.aclose()
+
+        self.assertEqual(
+            uploaded,
+            f"autorig_animation_fitting/autorig_{digest[:32]}.png",
+        )
+        self.assertEqual(captured["post_count"], 1)
+        self.assertIn("multipart/form-data", captured["content_type"])
+        self.assertIn(original, captured["body"])
+        self.assertNotIn(mutated, captured["body"])
+        self.assertIn(f"autorig_{digest[:32]}.png".encode(), captured["body"])
+
+    async def test_upload_rejects_server_side_filename_or_subfolder_rebinding(self):
+        original = b"pinned browser guide bytes"
+        digest = hashlib.sha256(original).hexdigest()
+        expected_name = f"autorig_{digest[:32]}.png"
+        invalid_responses = (
+            ({"subfolder": "autorig_animation_fitting"}, "filename"),
+            (
+                {
+                    "name": f"other_{digest[:32]}.png",
+                    "subfolder": "autorig_animation_fitting",
+                },
+                "changed uploaded filename",
+            ),
+            (
+                {
+                    "name": f"nested/{expected_name}",
+                    "subfolder": "autorig_animation_fitting",
+                },
+                "path separators",
+            ),
+            ({"name": expected_name}, "subfolder"),
+            (
+                {"name": expected_name, "subfolder": "another_folder"},
+                "changed upload subfolder",
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "guide_000.png"
+            image_path.write_bytes(original)
+            worker = ComfyWorker(
+                "local-4090",
+                "http://127.0.0.1:8188",
+                "workflow.json",
+                "0" * 64,
+            )
+            for response_json, expected_message in invalid_responses:
+                with self.subTest(response=response_json):
+                    def handler(request, payload=response_json):
+                        if request.method == "POST" and request.url.path == "/upload/image":
+                            return httpx.Response(200, json=payload)
+                        return httpx.Response(404)
+
+                    http_client = httpx.AsyncClient(
+                        transport=httpx.MockTransport(handler)
+                    )
+                    try:
+                        client = ComfyAnimationClient(worker, client=http_client)
+                        with self.assertRaisesRegex(
+                            ComfyContractError, expected_message
+                        ):
+                            await client.upload_reference_image(
+                                image_path,
+                                expected_sha256=digest,
+                                expected_size_bytes=len(original),
+                            )
+                    finally:
+                        await http_client.aclose()
+
     async def test_render_timeout_defaults_to_two_hours_and_is_environment_configurable(self):
         worker = ComfyWorker(
             "local-4090",

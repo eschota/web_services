@@ -5,6 +5,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import struct
@@ -53,6 +54,10 @@ V10_EXPERIMENT_ID = (
     "horse_walk_v10_browser_rgb_swing_guides_"
     "seed_6550110377254033429_v1"
 )
+V11_EXPERIMENT_ID = (
+    "horse_walk_v11_browser_static_scene_guides_"
+    "seed_6550110377254033429_v1"
+)
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPECTED_EXPERIMENT_ID,
     "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
@@ -62,12 +67,62 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     V7_EXPERIMENT_ID,
     V8_EXPERIMENT_ID,
     V10_EXPERIMENT_ID,
+    V11_EXPERIMENT_ID,
 }) | V9_EXPERIMENT_IDS
 RESULT_SCHEMA = "autorig.animation-fitting-controlled-result.v1"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 V10_GUIDE_FRAME_INDICES = (0, 6, 18, 30, 42, 48)
 V10_INTERMEDIATE_GUIDE_FRAME_INDICES = (6, 18, 30, 42)
 V10_GUIDE_RESOLUTION = (768, 448)
+V11_GUIDE_BUNDLE_ID = "horse-walk-v11-browser-static-scene-guides-f2"
+V11_GUIDE_MANIFEST_SHA256 = (
+    "9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173"
+)
+V11_ENDPOINT_GUIDE_SHA256 = (
+    "520d0ee816de4557ab9e3f38e19b2b44be900961b62a6f05779b7b09a96474bf"
+)
+V11_STATIC_SCENE_QA_SUMMARY = {
+    "schema": "autorig-browser-static-scene-qa.v1",
+    "status": "PASS",
+    "decoded_rgb_statistics_bool": True,
+    "endpoint_byte_identical_bool": True,
+    "border_width_int": 32,
+    "background_sample_pixels_int": 73728,
+    "maximum_background_channel_delta_int": 0,
+    "background_mean_luma_range_float": 0,
+    "maximum_background_mean_luma_range_float": 0,
+    "full_frame_mean_luma_range_float": 0.044062841506246286,
+    "maximum_full_frame_mean_luma_range_float": 0.5,
+    "near_black_threshold_int": 64,
+    "maximum_near_black_pixel_fraction_float": 0,
+    "allowed_near_black_pixel_fraction_float": 0.001,
+}
+V11_STATIC_SCENE_RENDERER_SETTINGS = {
+    "contract": "v11_unified_browser_static_scene_v1",
+    "cameraSource": "immutable_fitting_bundle",
+    "clearColorHex": 7437190,
+    "backgroundHex": 7437190,
+    "outputColorSpace": "SRGBColorSpace",
+    "toneMapping": "ACESFilmicToneMapping",
+    "toneMappingExposure": 1.1,
+    "shadowsEnabled": False,
+    "hemisphere": {
+        "skyHex": 15331839,
+        "groundHex": 4146768,
+        "intensity": 2.1,
+    },
+    "key": {
+        "colorHex": 16777215,
+        "intensity": 3.5,
+        "position": [4.5, -5.5, 8.5],
+    },
+    "ground": {
+        "colorHex": 12108748,
+        "roughness": 0.92,
+        "metalness": 0,
+        "size": 50,
+    },
+}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -136,14 +191,44 @@ class ControlledExperimentResult:
         }
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_bytes_and_sha256(path: Path) -> tuple[bytes, str]:
     try:
-        parsed = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError) as exc:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise ControlledExperimentError(f"Cannot read JSON contract {path}: {exc}") from exc
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def _parse_json_bytes(path: Path, data: bytes) -> dict[str, Any]:
+    try:
+        parsed = json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ControlledExperimentError(f"Cannot read JSON contract {path}: {exc}") from exc
     if not isinstance(parsed, dict):
         raise ControlledExperimentError(f"JSON contract must be an object: {path}")
     return parsed
+
+
+def _read_json_and_sha256(path: Path) -> tuple[dict[str, Any], str]:
+    data, digest = _read_bytes_and_sha256(path)
+    return _parse_json_bytes(path, data), digest
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    parsed, _digest = _read_json_and_sha256(path)
+    return parsed
+
+
+def _read_pinned_json(
+    path: Path, expected: object, label: str
+) -> tuple[dict[str, Any], str]:
+    expected_digest = _require_sha(expected, label)
+    data, actual_digest = _read_bytes_and_sha256(path)
+    if actual_digest != expected_digest:
+        raise ControlledExperimentError(
+            f"{label} mismatch for {path}: expected {expected_digest}, got {actual_digest}"
+        )
+    return _parse_json_bytes(path, data), actual_digest
 
 
 def _sha256(path: Path) -> str:
@@ -196,14 +281,15 @@ def _guide_strength(value: object, label: str) -> float:
     return result
 
 
-def _verify_reference_manifest(bundle: Path, reference: Mapping[str, Any]) -> None:
+def _verify_reference_manifest(
+    bundle: Path, reference: Mapping[str, Any]
+) -> dict[str, Any]:
     manifest_path = bundle / str(reference.get("immutable_manifest_filename_string") or "")
-    _require_exact_sha(
+    manifest, _manifest_sha256 = _read_pinned_json(
         manifest_path,
         reference.get("immutable_manifest_sha256_string"),
         "reference immutable manifest SHA-256",
     )
-    manifest = _read_json(manifest_path)
     if manifest.get("schema") != "autorig-ltx-semantic-reference-output.v1":
         raise ControlledExperimentError("reference immutable manifest schema is invalid")
     rows = manifest.get("files")
@@ -215,6 +301,10 @@ def _verify_reference_manifest(bundle: Path, reference: Mapping[str, Any]) -> No
     }
     if {row.get("filename") for row in rows if isinstance(row, dict)} != expected_names:
         raise ControlledExperimentError("reference immutable manifest file inventory is not exact")
+    derivation_filename = str(
+        reference.get("derivation_manifest_filename_string") or ""
+    )
+    derivation: Optional[dict[str, Any]] = None
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
             raise ControlledExperimentError(f"reference manifest row {index} is invalid")
@@ -222,7 +312,16 @@ def _verify_reference_manifest(bundle: Path, reference: Mapping[str, Any]) -> No
         if not filename or Path(filename).name != filename:
             raise ControlledExperimentError("reference manifest filenames must be simple names")
         path = bundle / filename
-        digest = _require_exact_sha(path, row.get("sha256"), f"reference file {filename} SHA-256")
+        if filename == derivation_filename:
+            derivation, digest = _read_pinned_json(
+                path,
+                row.get("sha256"),
+                f"reference file {filename} SHA-256",
+            )
+        else:
+            digest = _require_exact_sha(
+                path, row.get("sha256"), f"reference file {filename} SHA-256"
+            )
         if path.stat().st_size != _positive_int(row.get("bytes"), f"reference file {filename} bytes"):
             raise ControlledExperimentError(f"reference file {filename} byte size mismatch")
         if filename == reference.get("reference_png_filename_string") and digest != reference.get(
@@ -233,6 +332,9 @@ def _verify_reference_manifest(bundle: Path, reference: Mapping[str, Any]) -> No
             "derivation_manifest_sha256_string"
         ):
             raise ControlledExperimentError("reference derivation manifest disagrees with experiment contract")
+    if derivation is None:
+        raise ControlledExperimentError("reference derivation manifest is missing")
+    return derivation
 
 
 def _verify_actionless_reference_manifest(
@@ -242,12 +344,11 @@ def _verify_actionless_reference_manifest(
     if not manifest_filename or Path(manifest_filename).name != manifest_filename:
         raise ControlledExperimentError("actionless immutable manifest filename is invalid")
     manifest_path = bundle / manifest_filename
-    _require_exact_sha(
+    manifest, _manifest_sha256 = _read_pinned_json(
         manifest_path,
         reference.get("immutable_manifest_sha256_string"),
         "actionless immutable manifest SHA-256",
     )
-    manifest = _read_json(manifest_path)
     if manifest.get("schema") != "autorig-fitting-immutable-copy.v1":
         raise ControlledExperimentError("actionless immutable manifest schema is invalid")
     rows = manifest.get("files")
@@ -256,6 +357,10 @@ def _verify_actionless_reference_manifest(
     )
     if not isinstance(rows, list) or len(rows) != expected_count:
         raise ControlledExperimentError("actionless immutable manifest file inventory is incomplete")
+    bundle_manifest_filename = str(
+        reference.get("bundle_manifest_filename_string") or ""
+    )
+    bundle_manifest: Optional[dict[str, Any]] = None
     inventory: dict[str, Mapping[str, Any]] = {}
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
@@ -264,7 +369,16 @@ def _verify_actionless_reference_manifest(
         if not filename or Path(filename).name != filename or filename in inventory:
             raise ControlledExperimentError("actionless manifest filenames must be unique simple names")
         path = bundle / filename
-        _require_exact_sha(path, row.get("sha256"), f"actionless file {filename} SHA-256")
+        if filename == bundle_manifest_filename:
+            bundle_manifest, _bundle_manifest_sha256 = _read_pinned_json(
+                path,
+                row.get("sha256"),
+                f"actionless file {filename} SHA-256",
+            )
+        else:
+            _require_exact_sha(
+                path, row.get("sha256"), f"actionless file {filename} SHA-256"
+            )
         if path.stat().st_size != _positive_int(row.get("bytes"), f"actionless file {filename} bytes"):
             raise ControlledExperimentError(f"actionless file {filename} byte size mismatch")
         inventory[filename] = row
@@ -273,7 +387,6 @@ def _verify_actionless_reference_manifest(
     image_row = inventory.get(image_filename)
     if not image_row or image_row.get("sha256") != reference.get("reference_png_sha256_string"):
         raise ControlledExperimentError("actionless RGB reference disagrees with immutable inventory")
-    bundle_manifest_filename = str(reference.get("bundle_manifest_filename_string") or "")
     bundle_manifest_row = inventory.get(bundle_manifest_filename)
     if (
         not bundle_manifest_row
@@ -281,7 +394,8 @@ def _verify_actionless_reference_manifest(
         != reference.get("bundle_manifest_sha256_string")
     ):
         raise ControlledExperimentError("actionless fitting bundle disagrees with immutable inventory")
-    bundle_manifest = _read_json(bundle / bundle_manifest_filename)
+    if bundle_manifest is None:
+        raise ControlledExperimentError("actionless fitting bundle manifest is missing")
     if bundle_manifest.get("schema") != "autorig-actionless-fitting-bundle.v1":
         raise ControlledExperimentError("actionless fitting bundle schema is invalid")
     actionless = bundle_manifest.get("actionless")
@@ -534,12 +648,11 @@ def _load_browser_guide_sequence(
     if not manifest_filename or Path(manifest_filename).name != manifest_filename:
         raise ControlledExperimentError("v10 guide manifest filename is invalid")
     manifest_path = bundle / manifest_filename
-    manifest_sha256 = _require_exact_sha(
+    manifest, manifest_sha256 = _read_pinned_json(
         manifest_path,
         sequence.get("immutable_manifest_sha256_string"),
         "v10 guide manifest SHA-256",
     )
-    manifest = _read_json(manifest_path)
     if manifest.get("schema") != "autorig-browser-ltx-guide-bundle.v1":
         raise ControlledExperimentError("v10 guide manifest schema is invalid")
     if manifest.get("source_reference_sha256_string") != reference_sha256:
@@ -643,6 +756,360 @@ def _load_browser_guide_sequence(
     return bundle, manifest_sha256, tuple(sorted(frames, key=lambda frame: frame.frame_index))
 
 
+def _finite_float(value: object, label: str) -> float:
+    if isinstance(value, bool):
+        raise ControlledExperimentError(f"{label} must be a finite number")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ControlledExperimentError(f"{label} must be a finite number") from exc
+    if not math.isfinite(result):
+        raise ControlledExperimentError(f"{label} must be a finite number")
+    return result
+
+
+def _verify_v11_planned_guide_frame(
+    frame: ControlledGuideFrame, *, decode_png: bool
+) -> None:
+    _require_exact_sha(
+        frame.image,
+        frame.sha256,
+        f"v11 guide frame {frame.frame_index} SHA-256",
+    )
+    try:
+        actual_bytes = frame.image.stat().st_size
+    except OSError as exc:
+        raise ControlledExperimentError(
+            f"Cannot stat v11 guide frame {frame.frame_index} {frame.image}: {exc}"
+        ) from exc
+    if actual_bytes != frame.size_bytes:
+        raise ControlledExperimentError(
+            f"v11 guide frame {frame.frame_index} byte size mismatch: "
+            f"expected {frame.size_bytes}, got {actual_bytes}"
+        )
+    if decode_png:
+        dimensions = _decode_png_dimensions(
+            frame.image, f"v11 guide frame {frame.frame_index}"
+        )
+        if dimensions != V10_GUIDE_RESOLUTION:
+            raise ControlledExperimentError(
+                f"v11 guide frame {frame.frame_index} must be exactly "
+                f"{V10_GUIDE_RESOLUTION[0]}x{V10_GUIDE_RESOLUTION[1]}, "
+                f"got {dimensions[0]}x{dimensions[1]}"
+            )
+
+
+def _verify_v11_static_scene_contract(
+    experiment: Mapping[str, Any], manifest: Mapping[str, Any]
+) -> None:
+    contract = experiment.get("static_scene_contract_object")
+    if not isinstance(contract, dict):
+        raise ControlledExperimentError("v11 static-scene contract is required")
+    if contract.get("qa_summary_object") != V11_STATIC_SCENE_QA_SUMMARY:
+        raise ControlledExperimentError("v11 pinned static-scene QA summary is invalid")
+    if contract.get("renderer_settings_object") != V11_STATIC_SCENE_RENDERER_SETTINGS:
+        raise ControlledExperimentError("v11 pinned static-scene renderer settings are invalid")
+
+    renderer = manifest.get("staticSceneRenderer")
+    if renderer != V11_STATIC_SCENE_RENDERER_SETTINGS:
+        raise ControlledExperimentError(
+            "v11 immutable manifest static-scene renderer settings changed"
+        )
+    qa = manifest.get("staticSceneQa")
+    if not isinstance(qa, dict):
+        raise ControlledExperimentError("v11 immutable manifest staticSceneQa is required")
+    qa_summary = {key: value for key, value in qa.items() if key != "guides_array"}
+    if qa_summary != V11_STATIC_SCENE_QA_SUMMARY:
+        raise ControlledExperimentError(
+            "v11 immutable manifest static-scene QA summary changed"
+        )
+    if (
+        qa.get("schema") != "autorig-browser-static-scene-qa.v1"
+        or qa.get("status") != "PASS"
+        or qa.get("decoded_rgb_statistics_bool") is not True
+        or qa.get("endpoint_byte_identical_bool") is not True
+    ):
+        raise ControlledExperimentError("v11 static-scene QA did not pass")
+
+    _positive_int(qa.get("border_width_int"), "v11 static-scene border width")
+    _positive_int(
+        qa.get("background_sample_pixels_int"),
+        "v11 static-scene background sample pixels",
+    )
+    background_channel_delta = _nonnegative_int(
+        qa.get("maximum_background_channel_delta_int"),
+        "v11 maximum background channel delta",
+    )
+    background_range = _finite_float(
+        qa.get("background_mean_luma_range_float"),
+        "v11 background mean luma range",
+    )
+    background_limit = _finite_float(
+        qa.get("maximum_background_mean_luma_range_float"),
+        "v11 maximum background mean luma range",
+    )
+    full_frame_range = _finite_float(
+        qa.get("full_frame_mean_luma_range_float"),
+        "v11 full-frame mean luma range",
+    )
+    full_frame_limit = _finite_float(
+        qa.get("maximum_full_frame_mean_luma_range_float"),
+        "v11 maximum full-frame mean luma range",
+    )
+    maximum_near_black = _finite_float(
+        qa.get("maximum_near_black_pixel_fraction_float"),
+        "v11 maximum near-black pixel fraction",
+    )
+    allowed_near_black = _finite_float(
+        qa.get("allowed_near_black_pixel_fraction_float"),
+        "v11 allowed near-black pixel fraction",
+    )
+    if (
+        background_channel_delta != 0
+        or background_range != 0
+        or background_limit != 0
+        or full_frame_range < 0
+        or full_frame_range > full_frame_limit
+        or maximum_near_black < 0
+        or maximum_near_black > allowed_near_black
+    ):
+        raise ControlledExperimentError("v11 static-scene background metrics failed")
+
+    guide_rows = qa.get("guides_array")
+    if not isinstance(guide_rows, list) or len(guide_rows) != len(
+        V10_GUIDE_FRAME_INDICES
+    ):
+        raise ControlledExperimentError("v11 static-scene per-guide QA is incomplete")
+    if [row.get("frame_index_int") for row in guide_rows if isinstance(row, dict)] != list(
+        V10_GUIDE_FRAME_INDICES
+    ):
+        raise ControlledExperimentError("v11 static-scene per-guide QA order is invalid")
+
+    background_luma: list[float] = []
+    full_frame_luma: list[float] = []
+    near_black_fractions: list[float] = []
+    for row in guide_rows:
+        if not isinstance(row, dict):
+            raise ControlledExperimentError("v11 static-scene per-guide QA row is invalid")
+        background_luma.append(
+            _finite_float(
+                row.get("background_mean_luma_float"),
+                "v11 guide background mean luma",
+            )
+        )
+        full_frame_luma.append(
+            _finite_float(
+                row.get("full_frame_mean_luma_float"),
+                "v11 guide full-frame mean luma",
+            )
+        )
+        near_black_fractions.append(
+            _finite_float(
+                row.get("near_black_pixel_fraction_float"),
+                "v11 guide near-black pixel fraction",
+            )
+        )
+    observed_background_range = max(background_luma) - min(background_luma)
+    observed_full_frame_range = max(full_frame_luma) - min(full_frame_luma)
+    observed_near_black = max(near_black_fractions)
+    if (
+        not math.isclose(observed_background_range, background_range, abs_tol=1e-9)
+        or not math.isclose(observed_full_frame_range, full_frame_range, abs_tol=1e-9)
+        or not math.isclose(observed_near_black, maximum_near_black, abs_tol=1e-12)
+        or any(value < 0 or value > allowed_near_black for value in near_black_fractions)
+    ):
+        raise ControlledExperimentError(
+            "v11 static-scene per-guide metrics disagree with the pinned summary"
+        )
+
+
+def _load_browser_static_scene_guide_sequence(
+    experiment: Mapping[str, Any],
+    *,
+    guide_bundle: Optional[Path],
+    reference_sha256: str,
+    frame_count: int,
+    start_strength: float,
+    end_strength: float,
+) -> tuple[Path, str, tuple[ControlledGuideFrame, ...]]:
+    sequence = experiment.get("guide_sequence_object")
+    if not isinstance(sequence, dict) or sequence.get("ready_bool") is not True:
+        raise ControlledExperimentError(
+            "v11 requires a completed pinned browser static-scene guide bundle before launch"
+        )
+    if (
+        sequence.get("guide_contract_string")
+        != "browser_rendered_static_scene_rgb_keyframes_v1"
+    ):
+        raise ControlledExperimentError("v11 browser static-scene guide contract is invalid")
+    bundle_id = str(sequence.get("bundle_id_string") or "")
+    if bundle_id != V11_GUIDE_BUNDLE_ID:
+        raise ControlledExperimentError("v11 immutable guide bundle id is invalid")
+    bundle = Path(guide_bundle).resolve() if guide_bundle is not None else None
+    if bundle is None or not bundle.is_dir() or bundle.name != bundle_id:
+        raise ControlledExperimentError(
+            f"v11 --guide-bundle must be the existing {bundle_id!r} directory"
+        )
+
+    manifest_filename = str(sequence.get("immutable_manifest_filename_string") or "")
+    if not manifest_filename or Path(manifest_filename).name != manifest_filename:
+        raise ControlledExperimentError("v11 guide manifest filename is invalid")
+    if sequence.get("immutable_manifest_sha256_string") != V11_GUIDE_MANIFEST_SHA256:
+        raise ControlledExperimentError("v11 immutable guide manifest pin is invalid")
+    manifest_path = bundle / manifest_filename
+    manifest, manifest_sha256 = _read_pinned_json(
+        manifest_path,
+        sequence.get("immutable_manifest_sha256_string"),
+        "v11 guide manifest SHA-256",
+    )
+    if manifest.get("schema") != "autorig-browser-ltx-static-scene-guide-bundle.v1":
+        raise ControlledExperimentError("v11 guide manifest schema is invalid")
+    if (
+        manifest.get("status") != "PASS"
+        or manifest.get("approvedForAnimationLibrary") is not False
+        or manifest.get("browserOnly") is not True
+        or manifest.get("blenderUsed") is not False
+    ):
+        raise ControlledExperimentError("v11 guide bundle is not browser-only PASS/unapproved")
+    if manifest.get("source_reference_sha256_string") != reference_sha256:
+        raise ControlledExperimentError("v11 guide bundle does not pin the actionless reference")
+    if manifest.get("source_reference_is_guide_bool") is not False:
+        raise ControlledExperimentError(
+            "v11 source reference must remain provenance-only, not a guide frame"
+        )
+    endpoint_guide_sha256 = _require_sha(
+        sequence.get("endpoint_guide_sha256_string"),
+        "v11 endpoint guide SHA-256",
+    )
+    if endpoint_guide_sha256 != V11_ENDPOINT_GUIDE_SHA256:
+        raise ControlledExperimentError("v11 immutable endpoint guide pin is invalid")
+    if manifest.get("endpoint_guide_sha256_string") != endpoint_guide_sha256:
+        raise ControlledExperimentError(
+            "v11 endpoint guide SHA-256 disagrees with immutable manifest"
+        )
+    if manifest.get("resolution") != list(V10_GUIDE_RESOLUTION):
+        raise ControlledExperimentError("v11 guide bundle resolution is invalid")
+    if _positive_int(manifest.get("cycle_frame_count_int"), "v11 cycle frame count") != frame_count:
+        raise ControlledExperimentError("v11 guide bundle frame count disagrees with experiment")
+    renderer = manifest.get("renderer_object")
+    if not isinstance(renderer, dict) or (
+        renderer.get("renderer_string") != "browser_threejs"
+        or renderer.get("blender_used_bool") is not False
+        or renderer.get("scene_contract_string")
+        != "v11_unified_browser_static_scene_v1"
+        or renderer.get("all_guide_frames_browser_rendered_bool") is not True
+        or renderer.get("shadows_enabled_bool") is not False
+    ):
+        raise ControlledExperimentError(
+            "v11 guide bundle must use one browser Three.js static-scene renderer without Blender"
+        )
+    _verify_v11_static_scene_contract(experiment, manifest)
+
+    post_bake = manifest.get("postBakeQa")
+    if not isinstance(post_bake, dict) or (
+        post_bake.get("status") != "PASS"
+        or post_bake.get("hierarchyBakeVerified") is not True
+        or _positive_int(post_bake.get("minimumStanceHooves"), "v11 minimum stance hooves")
+        < 3
+        or _finite_float(
+            post_bake.get("endpointMaximumErrorPx"),
+            "v11 endpoint maximum error",
+        )
+        != 0
+    ):
+        raise ControlledExperimentError("v11 guide post-bake hoof QA did not pass")
+
+    contract_rows = sequence.get("frames_array")
+    manifest_rows = manifest.get("frames_array")
+    if not isinstance(contract_rows, list) or not isinstance(manifest_rows, list):
+        raise ControlledExperimentError("v11 guide frame inventories are required")
+    if (
+        len(contract_rows) != len(V10_GUIDE_FRAME_INDICES)
+        or len(manifest_rows) != len(V10_GUIDE_FRAME_INDICES)
+        or _positive_int(manifest.get("guide_count_int"), "v11 guide count")
+        != len(V10_GUIDE_FRAME_INDICES)
+    ):
+        raise ControlledExperimentError("v11 guide bundle must contain exactly six frames")
+
+    manifest_by_index: dict[int, Mapping[str, Any]] = {}
+    for row in manifest_rows:
+        if not isinstance(row, dict):
+            raise ControlledExperimentError("v11 guide manifest frame row is invalid")
+        index = _nonnegative_int(row.get("frame_index_int"), "v11 manifest frame index")
+        if index in manifest_by_index:
+            raise ControlledExperimentError("v11 guide manifest frame indices must be unique")
+        manifest_by_index[index] = row
+
+    frames: list[ControlledGuideFrame] = []
+    seen: set[int] = set()
+    for row in contract_rows:
+        if not isinstance(row, dict):
+            raise ControlledExperimentError("v11 guide contract frame row is invalid")
+        index = _nonnegative_int(row.get("frame_index_int"), "v11 contract frame index")
+        if index in seen:
+            raise ControlledExperimentError("v11 guide contract frame indices must be unique")
+        seen.add(index)
+        filename = str(row.get("filename_string") or "")
+        if (
+            not filename
+            or Path(filename).name != filename
+            or Path(filename).suffix.lower() != ".png"
+        ):
+            raise ControlledExperimentError("v11 guide frames must be simple PNG filenames")
+        digest = _require_sha(row.get("sha256_string"), f"v11 guide frame {index} SHA-256")
+        expected_bytes = _positive_int(row.get("bytes_int"), f"v11 guide frame {index} bytes")
+        strength = _guide_strength(row.get("strength_float"), f"v11 guide frame {index} strength")
+        manifest_row = manifest_by_index.get(index)
+        if not manifest_row or (
+            manifest_row.get("filename_string") != filename
+            or manifest_row.get("sha256_string") != digest
+            or manifest_row.get("bytes_int") != expected_bytes
+            or manifest_row.get("strength_float") != strength
+        ):
+            raise ControlledExperimentError(
+                f"v11 guide frame {index} disagrees with immutable manifest"
+            )
+        frame = ControlledGuideFrame(
+            frame_index=index,
+            image=bundle / filename,
+            sha256=digest,
+            size_bytes=expected_bytes,
+            strength=strength,
+        )
+        _verify_v11_planned_guide_frame(frame, decode_png=True)
+        frames.append(frame)
+
+    if tuple(sorted(seen)) != V10_GUIDE_FRAME_INDICES:
+        raise ControlledExperimentError("v11 guide frames must be exactly 0, 6, 18, 30, 42, 48")
+    by_index = {frame.frame_index: frame for frame in frames}
+    if by_index[0].sha256 != by_index[48].sha256:
+        raise ControlledExperimentError("v11 frame 0 and frame 48 guide PNGs must be byte-identical")
+    if by_index[0].sha256 != endpoint_guide_sha256:
+        raise ControlledExperimentError("v11 endpoint guide PNG SHA-256 is invalid")
+    if by_index[0].sha256 == reference_sha256:
+        raise ControlledExperimentError(
+            "v11 endpoint guides must explicitly differ from the actionless source reference"
+        )
+    if start_strength != 0.8 or end_strength != 0.8:
+        raise ControlledExperimentError("v11 experiment endpoint guide strengths must be exactly 0.8")
+    if by_index[0].strength != 0.8 or by_index[48].strength != 0.8:
+        raise ControlledExperimentError("v11 endpoint guide strengths must be exactly 0.8")
+    intermediate_frames = [
+        by_index[index] for index in V10_INTERMEDIATE_GUIDE_FRAME_INDICES
+    ]
+    if any(frame.strength != 0.7 for frame in intermediate_frames):
+        raise ControlledExperimentError("v11 intermediate guide strengths must be exactly 0.7")
+    intermediate_hashes = [frame.sha256 for frame in intermediate_frames]
+    if (
+        len(set(intermediate_hashes)) != len(intermediate_hashes)
+        or by_index[0].sha256 in intermediate_hashes
+    ):
+        raise ControlledExperimentError(
+            "v11 intermediate guide hashes must be pairwise distinct and differ from endpoint"
+        )
+    return bundle, manifest_sha256, tuple(sorted(frames, key=lambda frame: frame.frame_index))
+
+
 def load_controlled_plan(
     *,
     experiment_path: Path,
@@ -652,7 +1119,7 @@ def load_controlled_plan(
     guide_bundle: Optional[Path] = None,
 ) -> ControlledExperimentPlan:
     path = Path(experiment_path).resolve()
-    experiment = _read_json(path)
+    experiment, experiment_sha256 = _read_json_and_sha256(path)
     if experiment.get("schema") != EXPERIMENT_SCHEMA:
         raise ControlledExperimentError(f"experiment schema must be {EXPERIMENT_SCHEMA}")
     experiment_id = str(experiment.get("experiment_id_string") or "")
@@ -728,8 +1195,9 @@ def load_controlled_plan(
         reference.get("reference_contract_string") or "semantic_reference_v1"
     )
     source_resolution: Optional[tuple[int, int]] = None
+    derivation: Optional[dict[str, Any]] = None
     if reference_contract == "semantic_reference_v1":
-        _verify_reference_manifest(bundle, reference)
+        derivation = _verify_reference_manifest(bundle, reference)
     elif reference_contract == "actionless_bundle_rgb_v1":
         source_resolution = _verify_actionless_reference_manifest(bundle, reference)
     else:
@@ -741,9 +1209,8 @@ def load_controlled_plan(
         image, reference.get("reference_png_sha256_string"), "reference PNG SHA-256"
     )
     if reference_contract == "semantic_reference_v1":
-        derivation = _read_json(
-            bundle / str(reference.get("derivation_manifest_filename_string") or "")
-        )
+        if derivation is None:
+            raise ControlledExperimentError("reference derivation manifest is missing")
         if derivation.get("schema") != "autorig-ltx-semantic-reference-derivation.v1":
             raise ControlledExperimentError("reference derivation schema is invalid")
         semantic_profile = derivation.get("semantic_profile")
@@ -761,6 +1228,17 @@ def load_controlled_plan(
     if experiment_id == V10_EXPERIMENT_ID:
         browser_guide_bundle, guide_manifest_sha256, guide_frames = (
             _load_browser_guide_sequence(
+                experiment,
+                guide_bundle=guide_bundle,
+                reference_sha256=reference_sha,
+                frame_count=frame_count,
+                start_strength=start_strength,
+                end_strength=end_strength,
+            )
+        )
+    elif experiment_id == V11_EXPERIMENT_ID:
+        browser_guide_bundle, guide_manifest_sha256, guide_frames = (
+            _load_browser_static_scene_guide_sequence(
                 experiment,
                 guide_bundle=guide_bundle,
                 reference_sha256=reference_sha,
@@ -792,7 +1270,7 @@ def load_controlled_plan(
     return ControlledExperimentPlan(
         experiment_id=experiment_id,
         experiment_path=path,
-        experiment_sha256=_sha256(path),
+        experiment_sha256=experiment_sha256,
         reference_bundle=bundle,
         reference_image=image,
         reference_sha256=reference_sha,
@@ -896,6 +1374,10 @@ def patch_browser_keyframe_guides(
     if set(uploaded_images) != expected or set(strengths) != expected:
         raise ControlledExperimentError(
             "v10 browser guide patch requires frames 0, 6, 18, 30, 42, 48"
+        )
+    if uploaded_images[48] != uploaded_images[0]:
+        raise ControlledExperimentError(
+            "browser guide frames 0 and 48 must use the same uploaded endpoint image"
         )
     for index in V10_GUIDE_FRAME_INDICES:
         if not str(uploaded_images[index] or "").strip():
@@ -1148,9 +1630,16 @@ async def run_controlled_experiment(
                     for frame in plan.guide_frames:
                         if frame.frame_index == 48:
                             continue
-                        _verify_planned_guide_frame(frame, decode_png=False)
-                        uploaded_guides[frame.frame_index] = await client.upload_reference_image(
-                            frame.image
+                        if plan.experiment_id == V11_EXPERIMENT_ID:
+                            _verify_v11_planned_guide_frame(frame, decode_png=False)
+                        else:
+                            _verify_planned_guide_frame(frame, decode_png=False)
+                        uploaded_guides[
+                            frame.frame_index
+                        ] = await client.upload_reference_image(
+                            frame.image,
+                            expected_sha256=frame.sha256,
+                            expected_size_bytes=frame.size_bytes,
                         )
                     uploaded_guides[48] = uploaded_guides[0]
                     uploaded_start = uploaded_guides[0]
@@ -1269,7 +1758,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--guide-bundle",
         type=Path,
-        help="Required by v10: immutable browser-rendered RGB keyframe bundle.",
+        help="Required by v10/v11: immutable browser-rendered RGB keyframe bundle.",
     )
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--ffmpeg", default=os.getenv("AUTORIG_FFMPEG_PATH", "ffmpeg"))

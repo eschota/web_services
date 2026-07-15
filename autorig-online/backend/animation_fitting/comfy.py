@@ -272,12 +272,37 @@ class ComfyAnimationClient:
             "system_object": system,
         }
 
-    async def upload_reference_image(self, image_path: Path) -> str:
+    async def upload_reference_image(
+        self,
+        image_path: Path,
+        *,
+        expected_sha256: Optional[str] = None,
+        expected_size_bytes: Optional[int] = None,
+    ) -> str:
         path = Path(image_path).resolve()
         data = await asyncio.to_thread(path.read_bytes)
         if not data:
             raise ComfyContractError(f"Reference image is empty: {path}")
         digest = hashlib.sha256(data).hexdigest()
+        if expected_sha256 is not None:
+            expected_digest = str(expected_sha256).strip().lower()
+            if not re.fullmatch(r"[a-f0-9]{64}", expected_digest):
+                raise ComfyContractError("expected_sha256 must be a SHA-256 hex digest")
+            if digest != expected_digest:
+                raise ComfyContractError(
+                    f"Reference image SHA-256 mismatch for {path}: "
+                    f"expected {expected_digest}, got {digest}"
+                )
+        if expected_size_bytes is not None:
+            if isinstance(expected_size_bytes, bool) or not isinstance(
+                expected_size_bytes, int
+            ) or expected_size_bytes <= 0:
+                raise ComfyContractError("expected_size_bytes must be a positive integer")
+            if len(data) != expected_size_bytes:
+                raise ComfyContractError(
+                    f"Reference image byte size mismatch for {path}: "
+                    f"expected {expected_size_bytes}, got {len(data)}"
+                )
         suffix = path.suffix.lower() if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") else ".png"
         filename = f"autorig_{digest[:32]}{suffix}"
         content_type = mimetypes.types_map.get(suffix, "application/octet-stream")
@@ -291,11 +316,30 @@ class ComfyAnimationClient:
         parsed = response.json()
         if not isinstance(parsed, dict):
             raise ComfyContractError("Comfy upload_image returned a non-object response")
-        returned_name = str(parsed.get("name") or filename).strip()
-        subfolder = str(parsed.get("subfolder") or "autorig_animation_fitting").strip().replace("\\", "/")
+        returned_name_value = parsed.get("name")
+        if not isinstance(returned_name_value, str):
+            raise ComfyContractError("Comfy upload_image did not return a filename")
+        returned_name = returned_name_value.strip()
         if not returned_name:
             raise ComfyContractError("Comfy upload_image did not return a filename")
-        return f"{subfolder}/{returned_name}".strip("/")
+        if "/" in returned_name or "\\" in returned_name:
+            raise ComfyContractError(
+                "Comfy upload_image returned a filename containing path separators"
+            )
+        if returned_name != filename:
+            raise ComfyContractError(
+                f"Comfy changed uploaded filename {filename!r} to {returned_name!r}"
+            )
+        expected_subfolder = "autorig_animation_fitting"
+        subfolder_value = parsed.get("subfolder")
+        if not isinstance(subfolder_value, str):
+            raise ComfyContractError("Comfy upload_image did not return a subfolder")
+        subfolder = subfolder_value.strip()
+        if subfolder != expected_subfolder:
+            raise ComfyContractError(
+                f"Comfy changed upload subfolder {expected_subfolder!r} to {subfolder!r}"
+            )
+        return f"{expected_subfolder}/{filename}"
 
     async def queue_load(self) -> int:
         return _queue_load(await self._get_json("/queue"))

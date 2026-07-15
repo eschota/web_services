@@ -21,6 +21,8 @@ const WIDTH = 768;
 const HEIGHT = 448;
 const GUIDE_FRAMES = Object.freeze([0, 6, 18, 30, 42, 48]);
 const SWING_FRAMES = Object.freeze([6, 18, 30, 42]);
+const MIXED_V10_SCENE_CONTRACT = 'v10_reference_endpoints_browser_intermediates';
+const UNIFIED_V11_SCENE_CONTRACT = 'v11_unified_browser_static_scene_v1';
 
 function fail(message) {
     throw new Error(message);
@@ -105,6 +107,16 @@ function parseArguments(argv) {
     return result;
 }
 
+function guideSceneContract(value) {
+    const result = String(value || MIXED_V10_SCENE_CONTRACT).trim();
+    if (result !== MIXED_V10_SCENE_CONTRACT && result !== UNIFIED_V11_SCENE_CONTRACT) {
+        fail(
+            `scene-contract must be ${MIXED_V10_SCENE_CONTRACT} or ${UNIFIED_V11_SCENE_CONTRACT}, got ${result}`,
+        );
+    }
+    return result;
+}
+
 function mime(filename) {
     if (filename.endsWith('.js')) return 'text/javascript; charset=utf-8';
     if (filename.endsWith('.json')) return 'application/json; charset=utf-8';
@@ -122,6 +134,17 @@ import { buildHorse2BrowserFittingSkeleton, bakeFittedAnimationToThreeHierarchyC
 import { authorHorseV10SwingGuidePoses, verifyHorseV10PostBakeHoofProjections } from '/author.js';
 
 const config = await (await fetch('/config.json', { cache: 'no-store' })).json();
+const STATIC_SCENE = Object.freeze({
+    clearColorHex: 0x717b86,
+    backgroundHex: 0x717b86,
+    outputColorSpace: 'SRGBColorSpace',
+    toneMapping: 'ACESFilmicToneMapping',
+    toneMappingExposure: 1.1,
+    shadowsEnabled: false,
+    hemisphere: Object.freeze({ skyHex: 0xe9f1ff, groundHex: 0x3f4650, intensity: 2.1 }),
+    key: Object.freeze({ colorHex: 0xffffff, intensity: 3.5, position: Object.freeze([4.5, -5.5, 8.5]) }),
+    ground: Object.freeze({ colorHex: 0xb8c3cc, roughness: 0.92, metalness: 0, size: 50 }),
+});
 
 function matrix4(values, field) {
     if (!Array.isArray(values) || values.length !== 16 || values.some((value) => !Number.isFinite(Number(value)))) {
@@ -274,28 +297,36 @@ function makeRenderer(width, height) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
     renderer.setPixelRatio(1);
     renderer.setSize(width, height, false);
-    renderer.setClearColor(0x717b86, 1);
+    renderer.setClearColor(STATIC_SCENE.clearColorHex, 1);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
-    renderer.shadowMap.enabled = false;
+    renderer.toneMappingExposure = STATIC_SCENE.toneMappingExposure;
+    renderer.shadowMap.enabled = STATIC_SCENE.shadowsEnabled;
     document.body.replaceChildren(renderer.domElement);
     return renderer;
 }
 
 function makeScene(model, groundHeight) {
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x717b86);
+    scene.background = new THREE.Color(STATIC_SCENE.backgroundHex);
     scene.add(model);
-    scene.add(new THREE.HemisphereLight(0xe9f1ff, 0x3f4650, 2.1));
-    const key = new THREE.DirectionalLight(0xffffff, 3.5);
-    key.position.set(4.5, -5.5, 8.5);
+    scene.add(new THREE.HemisphereLight(
+        STATIC_SCENE.hemisphere.skyHex,
+        STATIC_SCENE.hemisphere.groundHex,
+        STATIC_SCENE.hemisphere.intensity,
+    ));
+    const key = new THREE.DirectionalLight(STATIC_SCENE.key.colorHex, STATIC_SCENE.key.intensity);
+    key.position.set(...STATIC_SCENE.key.position);
     key.castShadow = false;
     scene.add(key);
     scene.add(key.target);
     const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(50, 50),
-        new THREE.MeshStandardMaterial({ color: 0xb8c3cc, roughness: 0.92, metalness: 0 }),
+        new THREE.PlaneGeometry(STATIC_SCENE.ground.size, STATIC_SCENE.ground.size),
+        new THREE.MeshStandardMaterial({
+            color: STATIC_SCENE.ground.colorHex,
+            roughness: STATIC_SCENE.ground.roughness,
+            metalness: STATIC_SCENE.ground.metalness,
+        }),
     );
     ground.position.z = Number(groundHeight);
     ground.receiveShadow = false;
@@ -399,6 +430,11 @@ async function initializeReal() {
         hierarchyQa: hierarchy.qa,
         postBakeQa,
         webgl: info,
+        staticScene: {
+            contract: config.sceneContract,
+            cameraSource: 'immutable_fitting_bundle',
+            ...STATIC_SCENE,
+        },
         model: {
             sourceBoneCount: modelState.sourceBones.length,
             vertexCount: skin.mesh.geometry.getAttribute('position').count,
@@ -632,6 +668,202 @@ function pngDimensions(buffer) {
     return [buffer.readUInt32BE(16), buffer.readUInt32BE(20)];
 }
 
+function paeth(left, above, upperLeft) {
+    const prediction = left + above - upperLeft;
+    const leftDistance = Math.abs(prediction - left);
+    const aboveDistance = Math.abs(prediction - above);
+    const upperLeftDistance = Math.abs(prediction - upperLeft);
+    if (leftDistance <= aboveDistance && leftDistance <= upperLeftDistance) return left;
+    if (aboveDistance <= upperLeftDistance) return above;
+    return upperLeft;
+}
+
+export function decodeOpaqueRgbPng(buffer, field = 'guide PNG') {
+    const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    if (!Buffer.isBuffer(buffer) || buffer.length < 33 || !buffer.subarray(0, 8).equals(signature)) {
+        fail(`${field} is not a PNG`);
+    }
+    let offset = 8;
+    let width = null;
+    let height = null;
+    let channels = null;
+    const compressed = [];
+    while (offset < buffer.length) {
+        if (offset + 12 > buffer.length) fail(`${field} has a truncated PNG chunk`);
+        const length = buffer.readUInt32BE(offset);
+        const type = buffer.toString('ascii', offset + 4, offset + 8);
+        const dataStart = offset + 8;
+        const dataEnd = dataStart + length;
+        if (dataEnd + 4 > buffer.length) fail(`${field} has a truncated ${type} chunk`);
+        const data = buffer.subarray(dataStart, dataEnd);
+        if (type === 'IHDR') {
+            if (length !== 13) fail(`${field} has an invalid IHDR`);
+            width = data.readUInt32BE(0);
+            height = data.readUInt32BE(4);
+            const bitDepth = data[8];
+            const colorType = data[9];
+            const compression = data[10];
+            const filter = data[11];
+            const interlace = data[12];
+            if (
+                bitDepth !== 8
+                || (colorType !== 2 && colorType !== 6)
+                || compression !== 0
+                || filter !== 0
+                || interlace !== 0
+            ) {
+                fail(`${field} must be a non-interlaced 8-bit RGB/RGBA PNG`);
+            }
+            channels = colorType === 6 ? 4 : 3;
+        } else if (type === 'IDAT') {
+            compressed.push(data);
+        } else if (type === 'IEND') {
+            break;
+        }
+        offset = dataEnd + 4;
+    }
+    if (!width || !height || !channels || !compressed.length) fail(`${field} is missing PNG image data`);
+    let encoded;
+    try {
+        encoded = zlib.inflateSync(Buffer.concat(compressed));
+    } catch (error) {
+        fail(`${field} has invalid compressed image data: ${error.message}`);
+    }
+    const stride = width * channels;
+    if (encoded.length !== height * (stride + 1)) fail(`${field} decoded byte count is invalid`);
+    const scanlines = Buffer.alloc(width * height * channels);
+    for (let y = 0; y < height; y += 1) {
+        const filter = encoded[y * (stride + 1)];
+        const source = y * (stride + 1) + 1;
+        const target = y * stride;
+        for (let x = 0; x < stride; x += 1) {
+            const raw = encoded[source + x];
+            const left = x >= channels ? scanlines[target + x - channels] : 0;
+            const above = y ? scanlines[target - stride + x] : 0;
+            const upperLeft = y && x >= channels ? scanlines[target - stride + x - channels] : 0;
+            let value;
+            if (filter === 0) value = raw;
+            else if (filter === 1) value = raw + left;
+            else if (filter === 2) value = raw + above;
+            else if (filter === 3) value = raw + Math.floor((left + above) / 2);
+            else if (filter === 4) value = raw + paeth(left, above, upperLeft);
+            else fail(`${field} uses unsupported PNG filter ${filter}`);
+            scanlines[target + x] = value & 0xff;
+        }
+    }
+    const rgb = Buffer.alloc(width * height * 3);
+    let opaque = true;
+    for (let pixel = 0; pixel < width * height; pixel += 1) {
+        const source = pixel * channels;
+        const target = pixel * 3;
+        rgb[target] = scanlines[source];
+        rgb[target + 1] = scanlines[source + 1];
+        rgb[target + 2] = scanlines[source + 2];
+        if (channels === 4 && scanlines[source + 3] !== 255) opaque = false;
+    }
+    if (!opaque) fail(`${field} must be fully opaque`);
+    return { width, height, rgb };
+}
+
+function luma(r, g, b) {
+    return (54 * r + 183 * g + 19 * b) / 256;
+}
+
+export function analyzeStaticSceneGuideFrames(frames, options = {}) {
+    if (!Array.isArray(frames) || frames.length !== GUIDE_FRAMES.length) {
+        fail(`static-scene QA requires exactly ${GUIDE_FRAMES.length} guide frames`);
+    }
+    const borderWidth = Number(options.borderWidth ?? 32);
+    const maximumFullFrameMeanLumaRange = Number(options.maximumFullFrameMeanLumaRange ?? 0.5);
+    const nearBlackThreshold = Number(options.nearBlackThreshold ?? 64);
+    const maximumNearBlackFraction = Number(options.maximumNearBlackFraction ?? 0.001);
+    if (!Number.isInteger(borderWidth) || borderWidth <= 0) fail('static-scene border width is invalid');
+    const decoded = frames.map((frame, index) => {
+        if (Number(frame.frameIndex) !== GUIDE_FRAMES[index]) {
+            fail(`static-scene guide frame order must be ${GUIDE_FRAMES.join(',')}`);
+        }
+        const image = frame.decoded || decodeOpaqueRgbPng(frame.buffer, `guide frame ${frame.frameIndex}`);
+        if (image.width !== WIDTH || image.height !== HEIGHT || image.rgb.length !== WIDTH * HEIGHT * 3) {
+            fail(`guide frame ${frame.frameIndex} must decode to ${WIDTH}x${HEIGHT} RGB`);
+        }
+        return { ...frame, image };
+    });
+    if (borderWidth * 2 >= WIDTH || borderWidth * 2 >= HEIGHT) fail('static-scene border width is too large');
+    const baseline = decoded[0].image.rgb;
+    let backgroundSamplePixels = 0;
+    let maximumBackgroundChannelDelta = 0;
+    const guideStats = decoded.map(({ frameIndex, image }) => {
+        let fullLumaSum = 0;
+        let backgroundLumaSum = 0;
+        let backgroundPixels = 0;
+        let nearBlackPixels = 0;
+        for (let y = 0; y < HEIGHT; y += 1) {
+            for (let x = 0; x < WIDTH; x += 1) {
+                const pixel = y * WIDTH + x;
+                const offset = pixel * 3;
+                const r = image.rgb[offset];
+                const g = image.rgb[offset + 1];
+                const b = image.rgb[offset + 2];
+                fullLumaSum += luma(r, g, b);
+                if (Math.max(r, g, b) <= nearBlackThreshold) nearBlackPixels += 1;
+                if (x < borderWidth || x >= WIDTH - borderWidth || y < borderWidth || y >= HEIGHT - borderWidth) {
+                    backgroundPixels += 1;
+                    backgroundLumaSum += luma(r, g, b);
+                    maximumBackgroundChannelDelta = Math.max(
+                        maximumBackgroundChannelDelta,
+                        Math.abs(r - baseline[offset]),
+                        Math.abs(g - baseline[offset + 1]),
+                        Math.abs(b - baseline[offset + 2]),
+                    );
+                }
+            }
+        }
+        backgroundSamplePixels = backgroundPixels;
+        return {
+            frame_index_int: frameIndex,
+            full_frame_mean_luma_float: fullLumaSum / (WIDTH * HEIGHT),
+            background_mean_luma_float: backgroundLumaSum / backgroundPixels,
+            near_black_pixel_fraction_float: nearBlackPixels / (WIDTH * HEIGHT),
+        };
+    });
+    const fullLumas = guideStats.map((row) => row.full_frame_mean_luma_float);
+    const backgroundLumas = guideStats.map((row) => row.background_mean_luma_float);
+    const fullFrameMeanLumaRange = Math.max(...fullLumas) - Math.min(...fullLumas);
+    const backgroundMeanLumaRange = Math.max(...backgroundLumas) - Math.min(...backgroundLumas);
+    const maximumObservedNearBlackFraction = Math.max(...guideStats.map((row) => row.near_black_pixel_fraction_float));
+    const endpointByteIdentical = Buffer.isBuffer(frames[0].buffer)
+        && Buffer.isBuffer(frames.at(-1).buffer)
+        && frames[0].buffer.equals(frames.at(-1).buffer);
+    const status = (
+        endpointByteIdentical
+        && maximumBackgroundChannelDelta === 0
+        && backgroundMeanLumaRange === 0
+        && fullFrameMeanLumaRange <= maximumFullFrameMeanLumaRange
+        && maximumObservedNearBlackFraction <= maximumNearBlackFraction
+    ) ? 'PASS' : 'FAIL';
+    const report = {
+        schema: 'autorig-browser-static-scene-qa.v1',
+        status,
+        decoded_rgb_statistics_bool: true,
+        endpoint_byte_identical_bool: endpointByteIdentical,
+        border_width_int: borderWidth,
+        background_sample_pixels_int: backgroundSamplePixels,
+        maximum_background_channel_delta_int: maximumBackgroundChannelDelta,
+        background_mean_luma_range_float: backgroundMeanLumaRange,
+        maximum_background_mean_luma_range_float: 0,
+        full_frame_mean_luma_range_float: fullFrameMeanLumaRange,
+        maximum_full_frame_mean_luma_range_float: maximumFullFrameMeanLumaRange,
+        near_black_threshold_int: nearBlackThreshold,
+        maximum_near_black_pixel_fraction_float: maximumObservedNearBlackFraction,
+        allowed_near_black_pixel_fraction_float: maximumNearBlackFraction,
+        guides_array: guideStats,
+    };
+    if (status !== 'PASS' && options.failClosed !== false) {
+        fail(`unified browser static-scene QA failed: ${JSON.stringify(report)}`);
+    }
+    return report;
+}
+
 function sourceVideoPin(observations, label) {
     const filename = existingFile(observations.provenance?.source_video, `${label} source video`);
     const pin = pinFile(filename, { path: filename });
@@ -680,6 +912,8 @@ async function runSyntheticSmoke(config) {
 
 async function runReal(config) {
     const output = outputDirectory(config.output);
+    const sceneContract = guideSceneContract(config.sceneContract);
+    const unifiedBrowserScene = sceneContract === UNIFIED_V11_SCENE_CONTRACT;
     const bundleDirectory = existingDirectory(config.bundle, 'bundle');
     const candidateAPath = existingFile(config.candidateA, 'candidate-a');
     const candidateBPath = existingFile(config.candidateB, 'candidate-b');
@@ -701,6 +935,7 @@ async function runReal(config) {
     const sourceVideoB = sourceVideoPin(candidateBValidated.observations, 'candidate B');
     const harnessConfig = {
         mode: 'real',
+        sceneContract,
         fittingBundle: candidateAValidated.fittingBundle,
         sourceSkeleton: candidateAValidated.skeleton,
         surfaceTopology: readGzipJson(topologyPath, 'surface topology'),
@@ -711,7 +946,11 @@ async function runReal(config) {
     const { server, url } = await startHarnessServer({ config: harnessConfig, threeModule });
     let browser;
     try {
-        browser = await runHarnessInChrome({ chromeExecutable, url, guideFrames: SWING_FRAMES });
+        browser = await runHarnessInChrome({
+            chromeExecutable,
+            url,
+            guideFrames: unifiedBrowserScene ? GUIDE_FRAMES : SWING_FRAMES,
+        });
     } finally {
         await new Promise((resolve) => server.close(resolve));
     }
@@ -731,16 +970,18 @@ async function runReal(config) {
         if (reference.length !== referenceEntry.bytes || referenceSha !== referenceEntry.sha256) fail('reference RGB pin changed after validation');
         const renderByFrame = new Map(browser.renders.map((render) => [render.frameIndex, render]));
         const guidePins = [];
+        const guideBuffers = [];
         for (const frameIndex of GUIDE_FRAMES) {
             const filename = `guide_${String(frameIndex).padStart(3, '0')}.png`;
             const destination = path.join(staging, filename);
-            const buffer = frameIndex === 0 || frameIndex === 48
+            const buffer = !unifiedBrowserScene && (frameIndex === 0 || frameIndex === 48)
                 ? reference
                 : Buffer.from(renderByFrame.get(frameIndex).dataUrl.slice('data:image/png;base64,'.length), 'base64');
             const [width, height] = pngDimensions(buffer);
             if (width !== WIDTH || height !== HEIGHT) fail(`guide ${frameIndex} is ${width}x${height}, expected ${WIDTH}x${HEIGHT}`);
             fs.writeFileSync(destination, buffer, { flag: 'wx' });
             const guide = browser.result.poseContract.guides.find((value) => value.frameIndex === frameIndex);
+            guideBuffers.push({ frameIndex, buffer });
             guidePins.push(pinFile(destination, {
                 frameIndex,
                 role: guide.role,
@@ -748,28 +989,45 @@ async function runReal(config) {
                 strength: guide.strength,
                 width,
                 height,
-                byteIdenticalReferenceCopy: frameIndex === 0 || frameIndex === 48,
+                renderSource: unifiedBrowserScene || (frameIndex !== 0 && frameIndex !== 48)
+                    ? 'browser_threejs'
+                    : 'immutable_reference_rgb',
+                byteIdenticalReferenceCopy: !unifiedBrowserScene && (frameIndex === 0 || frameIndex === 48),
             }));
         }
-        if (guidePins[0].sha256 !== referenceSha || guidePins.at(-1).sha256 !== referenceSha) {
-            fail('frame 0 and frame 48 are not byte-identical reference copies');
+        if (guidePins[0].sha256 !== guidePins.at(-1).sha256) {
+            fail('frame 0 and frame 48 are not byte-identical cycle endpoints');
+        }
+        if (!unifiedBrowserScene && (guidePins[0].sha256 !== referenceSha || guidePins.at(-1).sha256 !== referenceSha)) {
+            fail('v10 frame 0 and frame 48 are not byte-identical reference copies');
+        }
+        if (unifiedBrowserScene && guidePins.some((guide) => guide.renderSource !== 'browser_threejs')) {
+            fail('v11 unified static-scene guides must all come from the same browser renderer');
         }
         const swingHashes = guidePins.filter((guide) => SWING_FRAMES.includes(guide.frameIndex)).map((guide) => guide.sha256);
-        if (new Set(swingHashes).size !== SWING_FRAMES.length || swingHashes.includes(referenceSha)) {
-            fail(`all four swing guide PNGs must be distinct from each other and the reference: ${JSON.stringify(
+        if (new Set(swingHashes).size !== SWING_FRAMES.length || swingHashes.includes(guidePins[0].sha256)) {
+            fail(`all four swing guide PNGs must be distinct from each other and the cycle endpoint: ${JSON.stringify(
                 guidePins.map((guide) => [guide.frameIndex, guide.sha256]),
             )}`);
         }
+        const sceneQa = unifiedBrowserScene
+            ? analyzeStaticSceneGuideFrames(guideBuffers)
+            : null;
         const poseContract = {
             ...browser.result.poseContract,
-            status: 'PASS_RENDERED_BROWSER_GUIDES',
+            status: unifiedBrowserScene
+                ? 'PASS_RENDERED_UNIFIED_BROWSER_STATIC_SCENE_GUIDES'
+                : 'PASS_RENDERED_BROWSER_GUIDES',
             renderer: {
                 implementation: 'chromium_webgl_three_r160',
                 webgl: browser.result.webgl,
             },
-            browserRendererRequired: false,
+            sceneContract,
+            staticScene: browser.result.staticScene,
+            browserRendererRequired: unifiedBrowserScene,
             postBakeQa: browser.result.postBakeQa,
             hierarchyQa: browser.result.hierarchyQa,
+            staticSceneQa: sceneQa,
         };
         const posePath = path.join(staging, 'pose_contract.json');
         writeJson(posePath, poseContract);
@@ -781,7 +1039,9 @@ async function runReal(config) {
             strength_float: guide.strength,
         }));
         const manifestValue = {
-            schema: 'autorig-browser-ltx-guide-bundle.v1',
+            schema: unifiedBrowserScene
+                ? 'autorig-browser-ltx-static-scene-guide-bundle.v1'
+                : 'autorig-browser-ltx-guide-bundle.v1',
             status: 'PASS',
             approvedForAnimationLibrary: false,
             browserOnly: true,
@@ -789,11 +1049,16 @@ async function runReal(config) {
             rigType: 'HORSE_2',
             resolution: [WIDTH, HEIGHT],
             source_reference_sha256_string: referenceSha,
+            source_reference_is_guide_bool: !unifiedBrowserScene,
+            endpoint_guide_sha256_string: guidePins[0].sha256,
             cycle_frame_count_int: 49,
             guide_count_int: guidePins.length,
             renderer_object: {
                 renderer_string: 'browser_threejs',
                 blender_used_bool: false,
+                scene_contract_string: sceneContract,
+                all_guide_frames_browser_rendered_bool: unifiedBrowserScene,
+                shadows_enabled_bool: false,
             },
             frames_array: framesArray,
             source: {
@@ -824,6 +1089,8 @@ async function runReal(config) {
             model: browser.result.model,
             hierarchyQa: browser.result.hierarchyQa,
             postBakeQa: browser.result.postBakeQa,
+            staticSceneQa: sceneQa,
+            staticSceneRenderer: browser.result.staticScene,
             poseContract: pinFile(posePath),
             guides: guidePins,
         };
