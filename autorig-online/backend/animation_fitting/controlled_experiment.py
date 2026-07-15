@@ -72,6 +72,13 @@ V13_EXPERIMENT_ID = (
 V13_EXPERIMENT_SPEC_SHA256 = (
     "607d5f98b25b46666470dc09a64c740c07dce14028b5d950196b163bc61d7df7"
 )
+V14_EXPERIMENT_ID = (
+    "horse_walk_v14_browser_interval_guide_"
+    "seed_6550110377254033429_v1"
+)
+V14_EXPERIMENT_SPEC_SHA256 = (
+    "0f172076147e94099ea7c0cf3c323a46f698ea48e55b7bce9acec789e0e77c66"
+)
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPECTED_EXPERIMENT_ID,
     "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
@@ -84,6 +91,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     V11_EXPERIMENT_ID,
     V12_EXPERIMENT_ID,
     V13_EXPERIMENT_ID,
+    V14_EXPERIMENT_ID,
 }) | V9_EXPERIMENT_IDS
 RESULT_SCHEMA = "autorig.animation-fitting-controlled-result.v1"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -97,6 +105,10 @@ V13_GUIDE_STRENGTHS = (1.0,) * len(V12_GUIDE_FRAME_INDICES)
 V13_HARD_GUIDE_CONTRACT = "browser_rendered_hard_recovery_rgb_keyframes_v1"
 V13_BASE_VIDEO_LATENT_SLICES = 7
 V13_FINAL_TEMPORAL_LATENT_SLICES = 16
+V14_INTERVAL_GUIDE_CONTRACT = "browser_rendered_lossless_interval_video_v1"
+V14_BASE_VIDEO_LATENT_SLICES = 7
+V14_GUIDE_TEMPORAL_LATENT_SLICES = 7
+V14_FINAL_TEMPORAL_LATENT_SLICES = 14
 V12_GUIDE_CONTRACT = "browser_rendered_recovery_static_scene_rgb_keyframes_v1"
 V12_SCENE_CONTRACT = "v12_unified_browser_recovery_guides_v1"
 V10_GUIDE_RESOLUTION = (768, 448)
@@ -110,6 +122,15 @@ V12_ENDPOINT_GUIDE_SHA256 = (
 V12_GUIDE_CLI_SHA256 = (
     "13e1da43f47292be01e99bb32c63dd0d8ca46c88149aa58b64705503a361425d"
 )
+V14_GUIDE_BUNDLE_ID = "horse-walk-v14-browser-interval-guide-f1"
+V14_GUIDE_MANIFEST_SHA256 = (
+    "a09418a8725984126071614b8921eeffaee7cd9a91ca9d4c4ae34b49d1f3a6cb"
+)
+V14_GUIDE_VIDEO_SHA256 = (
+    "0a6f08834dd562e1200dd211842604d97fc487243a04ae3ad7838f0f948c7c05"
+)
+V14_GUIDE_VIDEO_SIZE_BYTES = 650377
+V14_GUIDE_VIDEO_FILENAME = "interval_guide.mkv"
 V11_GUIDE_BUNDLE_ID = "horse-walk-v11-browser-static-scene-guides-f2"
 V11_GUIDE_MANIFEST_SHA256 = (
     "9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173"
@@ -176,6 +197,18 @@ class ControlledGuideFrame:
 
 
 @dataclass(frozen=True)
+class ControlledGuideVideo:
+    video: Path
+    sha256: str
+    size_bytes: int
+    frame_count: int
+    width: int
+    height: int
+    fps: int
+    strength: float
+
+
+@dataclass(frozen=True)
 class BrowserRecoveryGuidePins:
     """Code-owned immutable pins required before a recovery bundle can load.
 
@@ -221,6 +254,7 @@ class ControlledExperimentPlan:
     guide_bundle: Optional[Path] = None
     guide_manifest_sha256: Optional[str] = None
     guide_frames: Sequence[ControlledGuideFrame] = ()
+    guide_video: Optional[ControlledGuideVideo] = None
 
 
 @dataclass(frozen=True)
@@ -1689,6 +1723,195 @@ def _load_browser_hard_guide_sequence(
     return bundle, manifest_sha256, hard_frames
 
 
+def _load_browser_interval_guide(
+    experiment: Mapping[str, Any],
+    *,
+    guide_bundle: Optional[Path],
+    reference_sha256: str,
+    frame_count: int,
+    start_strength: float,
+    end_strength: float,
+) -> tuple[Path, str, ControlledGuideVideo]:
+    """Load the one immutable lossless 49-frame browser guide used by v14."""
+
+    contract = experiment.get("interval_guide_contract_object")
+    if not isinstance(contract, dict) or (
+        contract.get("guide_contract_string") != V14_INTERVAL_GUIDE_CONTRACT
+        or contract.get("bundle_id_string") != V14_GUIDE_BUNDLE_ID
+        or contract.get("immutable_manifest_filename_string")
+        != "immutable_manifest.json"
+        or contract.get("immutable_manifest_sha256_string")
+        != V14_GUIDE_MANIFEST_SHA256
+        or contract.get("video_filename_string") != V14_GUIDE_VIDEO_FILENAME
+        or contract.get("video_sha256_string") != V14_GUIDE_VIDEO_SHA256
+        or contract.get("video_bytes_int") != V14_GUIDE_VIDEO_SIZE_BYTES
+        or contract.get("frame_count_int") != 49
+        or contract.get("fps_int") != 30
+        or contract.get("resolution_array") != list(V10_GUIDE_RESOLUTION)
+        or contract.get("container_string") != "matroska"
+        or contract.get("codec_string") != "png"
+        or contract.get("pixel_format_string") != "rgb24"
+        or contract.get("load_video_node_class_string") != "LoadVideo"
+        or contract.get("get_video_components_node_class_string")
+        != "GetVideoComponents"
+        or contract.get("ltxv_add_guide_count_int") != 1
+        or contract.get("ltxv_add_guide_strength_float") != 1.0
+        or contract.get("ltxv_add_guide_frame_index_int") != 0
+        or contract.get("base_video_latent_slices_int")
+        != V14_BASE_VIDEO_LATENT_SLICES
+        or contract.get("guide_temporal_latent_slices_int")
+        != V14_GUIDE_TEMPORAL_LATENT_SLICES
+        or contract.get("final_temporal_latent_slices_int")
+        != V14_FINAL_TEMPORAL_LATENT_SLICES
+        or contract.get("post_sampling_guide_crop_required_bool") is not True
+    ):
+        raise ControlledExperimentError(
+            "v14 immutable interval-guide experiment contract is invalid"
+        )
+    if start_strength != 1.0 or end_strength != 1.0:
+        raise ControlledExperimentError(
+            "v14 interval guide strength must be exactly 1.0"
+        )
+    if frame_count != 49:
+        raise ControlledExperimentError("v14 interval guide requires exactly 49 frames")
+
+    bundle = Path(guide_bundle).resolve() if guide_bundle is not None else None
+    if (
+        bundle is None
+        or not bundle.is_dir()
+        or bundle.name != V14_GUIDE_BUNDLE_ID
+    ):
+        raise ControlledExperimentError(
+            f"v14 --guide-bundle must be the existing {V14_GUIDE_BUNDLE_ID!r} directory"
+        )
+    manifest, manifest_sha256 = _read_pinned_json(
+        bundle / "immutable_manifest.json",
+        V14_GUIDE_MANIFEST_SHA256,
+        "v14 guide manifest SHA-256",
+    )
+    video_object = manifest.get("interval_guide_video_object")
+    renderer = manifest.get("renderer_object")
+    source_guides = manifest.get("sourceGuideBundle")
+    source_manifest = (
+        source_guides.get("immutableManifest")
+        if isinstance(source_guides, dict)
+        else None
+    )
+    lossless_qa = manifest.get("losslessVideoQa")
+    post_bake_qa = manifest.get("postBakeQa")
+    deterministic_qa = manifest.get("deterministicRenderQa")
+    decoded_hashes = (
+        video_object.get("decoded_rgb_sha256_array")
+        if isinstance(video_object, dict)
+        else None
+    )
+    if manifest.get("schema") != "autorig-browser-ltx-interval-guide-bundle.v1":
+        raise ControlledExperimentError("v14 guide manifest schema is invalid")
+    if (
+        manifest.get("status") != "PASS"
+        or manifest.get("approvedForAnimationLibrary") is not False
+        or manifest.get("browserOnly") is not True
+        or manifest.get("blenderUsed") is not False
+        or manifest.get("rigType") != "HORSE_2"
+        or manifest.get("resolution") != list(V10_GUIDE_RESOLUTION)
+        or manifest.get("source_reference_sha256_string") != reference_sha256
+        or manifest.get("source_reference_is_guide_bool") is not False
+        or manifest.get("endpoint_guide_sha256_string")
+        != V12_ENDPOINT_GUIDE_SHA256
+        or manifest.get("cycle_frame_count_int") != frame_count
+        or manifest.get("browser_frame_count_int") != frame_count
+        or manifest.get("guide_count_int") != 1
+        or manifest.get("source_anchor_frame_indices_array")
+        != list(V12_GUIDE_FRAME_INDICES)
+        or manifest.get("source_anchors_byte_identical_bool") is not True
+    ):
+        raise ControlledExperimentError(
+            "v14 guide bundle is not the exact browser-only PASS/unapproved contract"
+        )
+    if not isinstance(video_object, dict) or (
+        video_object.get("filename") != V14_GUIDE_VIDEO_FILENAME
+        or video_object.get("sha256") != V14_GUIDE_VIDEO_SHA256
+        or video_object.get("bytes") != V14_GUIDE_VIDEO_SIZE_BYTES
+        or video_object.get("container") != "matroska"
+        or video_object.get("codec") != "png"
+        or video_object.get("pixelFormat") != "rgb24"
+        or video_object.get("width") != V10_GUIDE_RESOLUTION[0]
+        or video_object.get("height") != V10_GUIDE_RESOLUTION[1]
+        or video_object.get("frameRate") != 30
+        or video_object.get("frameCount") != frame_count
+        or video_object.get("audioStreamCount") != 0
+        or video_object.get("exact_browser_frame_rgb_bool") is not True
+        or video_object.get("load_video_node_compatible_bool") is not True
+        or not isinstance(decoded_hashes, list)
+        or len(decoded_hashes) != frame_count
+        or any(not isinstance(value, str) or not SHA256_RE.fullmatch(value) for value in decoded_hashes)
+    ):
+        raise ControlledExperimentError("v14 lossless guide video contract is invalid")
+    if not isinstance(renderer, dict) or (
+        renderer.get("renderer_string") != "browser_threejs"
+        or renderer.get("blender_used_bool") is not False
+        or renderer.get("scene_contract_string")
+        != "v14_unified_browser_interval_guide_v1"
+        or renderer.get("all_guide_frames_browser_rendered_bool") is not True
+        or renderer.get("shadows_enabled_bool") is not False
+    ):
+        raise ControlledExperimentError("v14 browser renderer contract is invalid")
+    if not isinstance(source_guides, dict) or (
+        source_guides.get("bundleId") != V12_GUIDE_BUNDLE_ID
+        or not isinstance(source_manifest, dict)
+        or source_manifest.get("sha256") != V12_GUIDE_MANIFEST_SHA256
+    ):
+        raise ControlledExperimentError("v14 source guide provenance is invalid")
+    if not isinstance(lossless_qa, dict) or (
+        lossless_qa.get("schema")
+        != "autorig-browser-lossless-interval-video-qa.v1"
+        or lossless_qa.get("status") != "PASS"
+        or lossless_qa.get("frameCount") != frame_count
+        or lossless_qa.get("codec") != "png"
+        or lossless_qa.get("pixelFormat") != "rgb24"
+        or lossless_qa.get("decodedRgbSha256MatchesBrowserFrames") is not True
+    ):
+        raise ControlledExperimentError("v14 lossless video QA did not pass")
+    for label, qa in (
+        ("post-bake", post_bake_qa),
+        ("deterministic render", deterministic_qa),
+    ):
+        if not isinstance(qa, dict) or (
+            qa.get("status") != "PASS" or qa.get("frameCount") != frame_count
+        ):
+            raise ControlledExperimentError(f"v14 {label} QA did not pass")
+
+    video_path = bundle / V14_GUIDE_VIDEO_FILENAME
+    try:
+        video_bytes = video_path.read_bytes()
+    except OSError as exc:
+        raise ControlledExperimentError(
+            f"cannot read v14 interval guide video {video_path}: {exc}"
+        ) from exc
+    video_sha256 = hashlib.sha256(video_bytes).hexdigest()
+    if (
+        video_sha256 != V14_GUIDE_VIDEO_SHA256
+        or len(video_bytes) != V14_GUIDE_VIDEO_SIZE_BYTES
+    ):
+        raise ControlledExperimentError(
+            "v14 interval guide video does not match its code-owned SHA-256/size pin"
+        )
+    return (
+        bundle,
+        manifest_sha256,
+        ControlledGuideVideo(
+            video=video_path,
+            sha256=video_sha256,
+            size_bytes=len(video_bytes),
+            frame_count=frame_count,
+            width=V10_GUIDE_RESOLUTION[0],
+            height=V10_GUIDE_RESOLUTION[1],
+            fps=30,
+            strength=1.0,
+        ),
+    )
+
+
 def load_controlled_plan(
     *,
     experiment_path: Path,
@@ -1722,6 +1945,14 @@ def load_controlled_plan(
         raise ControlledExperimentError(
             "v13 experiment spec SHA-256 is not the exact code-owned checked-in pin: "
             f"expected {V13_EXPERIMENT_SPEC_SHA256}, got {experiment_sha256}"
+        )
+    if (
+        experiment_id == V14_EXPERIMENT_ID
+        and experiment_sha256 != V14_EXPERIMENT_SPEC_SHA256
+    ):
+        raise ControlledExperimentError(
+            "v14 experiment spec SHA-256 is not the exact code-owned checked-in pin: "
+            f"expected {V14_EXPERIMENT_SPEC_SHA256}, got {experiment_sha256}"
         )
     if authorization != experiment_id:
         raise ControlledExperimentError(
@@ -1820,6 +2051,7 @@ def load_controlled_plan(
     browser_guide_bundle: Optional[Path] = None
     guide_manifest_sha256: Optional[str] = None
     guide_frames: tuple[ControlledGuideFrame, ...] = ()
+    guide_video: Optional[ControlledGuideVideo] = None
     if experiment_id == V10_EXPERIMENT_ID:
         browser_guide_bundle, guide_manifest_sha256, guide_frames = (
             _load_browser_guide_sequence(
@@ -1866,6 +2098,17 @@ def load_controlled_plan(
                 pins=V12_GUIDE_PINS,
             )
         )
+    elif experiment_id == V14_EXPERIMENT_ID:
+        browser_guide_bundle, guide_manifest_sha256, guide_video = (
+            _load_browser_interval_guide(
+                experiment,
+                guide_bundle=guide_bundle,
+                reference_sha256=reference_sha,
+                frame_count=frame_count,
+                start_strength=start_strength,
+                end_strength=end_strength,
+            )
+        )
 
     latent_width: Optional[int] = None
     latent_height: Optional[int] = None
@@ -1910,6 +2153,7 @@ def load_controlled_plan(
         guide_bundle=browser_guide_bundle,
         guide_manifest_sha256=guide_manifest_sha256,
         guide_frames=guide_frames,
+        guide_video=guide_video,
     )
 
 
@@ -2226,6 +2470,186 @@ def patch_browser_keyframe_guides(
     return result
 
 
+def patch_browser_interval_video_guide(
+    prompt: Mapping[str, Any], *, uploaded_video: str
+) -> dict[str, Any]:
+    """Replace the two endpoint-image guides with one full-cycle video guide."""
+
+    video_name = str(uploaded_video or "").strip()
+    if not re.fullmatch(
+        r"autorig_animation_fitting/autorig_[a-f0-9]{32}\.mkv", video_name
+    ):
+        raise ControlledExperimentError(
+            "v14 uploaded interval guide must be the exact digest-named MKV input"
+        )
+    result = copy.deepcopy(dict(prompt))
+    titled: dict[str, tuple[str, dict[str, Any]]] = {}
+    for node_id, node in result.items():
+        if not isinstance(node, dict):
+            raise ControlledExperimentError("v14 workflow nodes must be objects")
+        meta = node.get("_meta")
+        title = str(meta.get("title") or "") if isinstance(meta, dict) else ""
+        if title:
+            if title in titled:
+                raise ControlledExperimentError(
+                    f"v14 workflow title is duplicated: {title}"
+                )
+            titled[title] = (str(node_id), node)
+    required = (
+        "AUTORIG_START_FRAME",
+        "AUTORIG_START_GUIDE",
+        "AUTORIG_END_GUIDE_N_MINUS_1",
+        "AUTORIG_CROP_GUIDE_LATENTS",
+    )
+    if any(title not in titled for title in required):
+        raise ControlledExperimentError("v14 pinned workflow guide nodes are missing")
+    load_id, load = titled["AUTORIG_START_FRAME"]
+    start_id, start = titled["AUTORIG_START_GUIDE"]
+    end_id, end = titled["AUTORIG_END_GUIDE_N_MINUS_1"]
+    _, crop = titled["AUTORIG_CROP_GUIDE_LATENTS"]
+
+    by_class: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for node_id, node in result.items():
+        by_class.setdefault(str(node.get("class_type") or ""), []).append(
+            (str(node_id), node)
+        )
+    if (
+        load.get("class_type") != "LoadImage"
+        or len(by_class.get("LoadImage", [])) != 1
+        or by_class.get("LoadVideo")
+        or by_class.get("GetVideoComponents")
+        or len(by_class.get("ResizeImageMaskNode", [])) != 1
+        or len(by_class.get("LTXVPreprocess", [])) != 1
+        or len(by_class.get("LTXVAddGuide", [])) != 2
+        or len(by_class.get("LTXVCropGuides", [])) != 1
+    ):
+        raise ControlledExperimentError(
+            "v14 pinned workflow is not the exact two-endpoint image-guide base"
+        )
+    resize_id, resize = by_class["ResizeImageMaskNode"][0]
+    preprocess_id, preprocess = by_class["LTXVPreprocess"][0]
+    start_inputs = start.get("inputs")
+    end_inputs = end.get("inputs")
+    resize_inputs = resize.get("inputs")
+    preprocess_inputs = preprocess.get("inputs")
+    crop_inputs = crop.get("inputs")
+    if not all(
+        isinstance(value, dict)
+        for value in (
+            start_inputs,
+            end_inputs,
+            resize_inputs,
+            preprocess_inputs,
+            crop_inputs,
+        )
+    ):
+        raise ControlledExperimentError("v14 pinned guide inputs are invalid")
+    assert isinstance(start_inputs, dict)
+    assert isinstance(end_inputs, dict)
+    assert isinstance(resize_inputs, dict)
+    assert isinstance(preprocess_inputs, dict)
+    assert isinstance(crop_inputs, dict)
+    if (
+        resize_inputs.get("input") != [load_id, 0]
+        or resize_inputs.get("resize_type") != "scale longer dimension"
+        or resize_inputs.get("resize_type.longer_size") != 768
+        or preprocess_inputs.get("image") != [resize_id, 0]
+        or preprocess_inputs.get("img_compression") != 18
+        or start.get("class_type") != "LTXVAddGuide"
+        or start_inputs.get("frame_idx") != 0
+        or start_inputs.get("strength") != 1.0
+        or start_inputs.get("image") != [preprocess_id, 0]
+        or end.get("class_type") != "LTXVAddGuide"
+        or end_inputs.get("frame_idx") != -1
+        or end_inputs.get("strength") != 1.0
+        or end_inputs.get("image") != [preprocess_id, 0]
+        or end_inputs.get("positive") != [start_id, 0]
+        or end_inputs.get("negative") != [start_id, 1]
+        or end_inputs.get("latent") != [start_id, 2]
+        or crop_inputs.get("positive") != [end_id, 0]
+        or crop_inputs.get("negative") != [end_id, 1]
+    ):
+        raise ControlledExperimentError("v14 pinned endpoint guide chain is not exact")
+
+    concat_rows = by_class.get("LTXVConcatAVLatent", [])
+    cfg_rows = by_class.get("CFGGuider", [])
+    latent_rows = by_class.get("EmptyLTXVLatentVideo", [])
+    if len(concat_rows) != 1 or len(cfg_rows) != 1 or len(latent_rows) != 1:
+        raise ControlledExperimentError("v14 pinned sampler chain is not unique")
+    concat_inputs = concat_rows[0][1].get("inputs")
+    cfg_inputs = cfg_rows[0][1].get("inputs")
+    latent_inputs = latent_rows[0][1].get("inputs")
+    if not all(isinstance(value, dict) for value in (concat_inputs, cfg_inputs, latent_inputs)):
+        raise ControlledExperimentError("v14 pinned sampler inputs are invalid")
+    assert isinstance(concat_inputs, dict)
+    assert isinstance(cfg_inputs, dict)
+    assert isinstance(latent_inputs, dict)
+    if (
+        concat_inputs.get("video_latent") != [end_id, 2]
+        or cfg_inputs.get("positive") != [end_id, 0]
+        or cfg_inputs.get("negative") != [end_id, 1]
+        or latent_inputs.get("length") != 49
+    ):
+        raise ControlledExperimentError("v14 pinned endpoint sampler wiring is not exact")
+
+    components_id = "910000"
+    if components_id in result:
+        raise ControlledExperimentError("v14 deterministic video component node id collides")
+    load["class_type"] = "LoadVideo"
+    load["_meta"] = {"title": "AUTORIG_INTERVAL_GUIDE_VIDEO"}
+    load["inputs"] = {"file": video_name}
+    result[components_id] = {
+        "class_type": "GetVideoComponents",
+        "_meta": {"title": "AUTORIG_INTERVAL_GUIDE_COMPONENTS"},
+        "inputs": {"video": [load_id, 0]},
+    }
+    resize_inputs["input"] = [components_id, 0]
+    concat_inputs["video_latent"] = [start_id, 2]
+    cfg_inputs["positive"] = [start_id, 0]
+    cfg_inputs["negative"] = [start_id, 1]
+    crop_inputs["positive"] = [start_id, 0]
+    crop_inputs["negative"] = [start_id, 1]
+    del result[end_id]
+
+    final_counts: dict[str, int] = {}
+    for node in result.values():
+        class_type = str(node.get("class_type") or "")
+        final_counts[class_type] = final_counts.get(class_type, 0) + 1
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict):
+            for value in inputs.values():
+                if (
+                    isinstance(value, list)
+                    and len(value) == 2
+                    and value[0] == end_id
+                ):
+                    raise ControlledExperimentError(
+                        "v14 removed endpoint guide remains referenced"
+                    )
+    expected_counts = {
+        "LoadImage": 0,
+        "LoadVideo": 1,
+        "GetVideoComponents": 1,
+        "ResizeImageMaskNode": 1,
+        "LTXVPreprocess": 1,
+        "LTXVAddGuide": 1,
+        "LTXVCropGuides": 1,
+    }
+    if any(final_counts.get(name, 0) != count for name, count in expected_counts.items()):
+        raise ControlledExperimentError("v14 final graph node inventory is invalid")
+    base_slices = ((int(latent_inputs["length"]) - 1) // 8) + 1
+    guide_slices = ((49 - 1) // 8) + 1
+    if (
+        base_slices != V14_BASE_VIDEO_LATENT_SLICES
+        or guide_slices != V14_GUIDE_TEMPORAL_LATENT_SLICES
+        or base_slices + guide_slices != V14_FINAL_TEMPORAL_LATENT_SLICES
+    ):
+        raise ControlledExperimentError(
+            "v14 graph violates the pinned 7+7=14 temporal latent budget"
+        )
+    return result
+
+
 def _job_identity(plan: ControlledExperimentPlan, worker: ComfyWorker) -> tuple[dict[str, Any], str, str]:
     identity = {
         "schema": "autorig.animation-fitting-controlled-job-identity.v1",
@@ -2265,6 +2689,18 @@ def _job_identity(plan: ControlledExperimentPlan, worker: ComfyWorker) -> tuple[
                 }
                 for frame in plan.guide_frames
             ],
+        }
+    if plan.guide_video is not None:
+        identity["browser_interval_guide_object"] = {
+            "guide_manifest_sha256_string": plan.guide_manifest_sha256,
+            "video_sha256_string": plan.guide_video.sha256,
+            "video_bytes_int": plan.guide_video.size_bytes,
+            "frame_count_int": plan.guide_video.frame_count,
+            "width_int": plan.guide_video.width,
+            "height_int": plan.guide_video.height,
+            "fps_int": plan.guide_video.fps,
+            "strength_float": plan.guide_video.strength,
+            "ltxv_add_guide_count_int": 1,
         }
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     job_id = hashlib.sha256(canonical.encode()).hexdigest()
@@ -2346,7 +2782,7 @@ async def run_controlled_experiment(
                 raise WorkerBusyError(
                     f"Comfy worker {selected_worker.worker_id} has {queue_load} queued/running task(s)"
                 )
-            if same_prompt_is_active and plan.guide_frames:
+            if same_prompt_is_active and (plan.guide_frames or plan.guide_video):
                 # The prompt id is deterministic and already belongs to this exact
                 # immutable job identity. Re-uploading its pinned guides cannot
                 # change the active graph and only creates redundant Comfy inputs.
@@ -2379,6 +2815,12 @@ async def run_controlled_experiment(
                             uploads_by_sha256[frame.sha256] = uploaded
                         uploaded_guides[frame.frame_index] = uploaded
                     uploaded_start = uploaded_guides[0]
+                elif plan.guide_video is not None:
+                    uploaded_start = await client.upload_reference_video(
+                        plan.guide_video.video,
+                        expected_sha256=plan.guide_video.sha256,
+                        expected_size_bytes=plan.guide_video.size_bytes,
+                    )
                 else:
                     uploaded_start = await client.upload_reference_image(plan.reference_image)
                 profile: WorkflowProfile = load_animation_fitting_specs().workflows["loop"]
@@ -2413,6 +2855,11 @@ async def run_controlled_experiment(
                         strengths={
                             frame.frame_index: frame.strength for frame in plan.guide_frames
                         },
+                    )
+                elif plan.guide_video is not None:
+                    prompt = patch_browser_interval_video_guide(
+                        prompt,
+                        uploaded_video=uploaded_start,
                     )
                 store.append_job_state(job_id, {
                     **identity,

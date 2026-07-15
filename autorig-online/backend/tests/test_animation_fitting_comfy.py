@@ -165,6 +165,142 @@ class AnimationFittingComfyClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(mutated, captured["body"])
         self.assertIn(f"autorig_{digest[:32]}.png".encode(), captured["body"])
 
+    async def test_video_upload_is_content_pinned_read_once_and_not_rebound(self):
+        original = b"\x1aE\xdf\xa3pinned lossless matroska guide"
+        mutated = b"mutated after multipart request construction"
+        digest = hashlib.sha256(original).hexdigest()
+        captured = {"post_count": 0}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video_path = Path(temp_dir) / "interval_guide.mkv"
+            video_path.write_bytes(original)
+
+            def handler(request):
+                if request.method == "POST" and request.url.path == "/upload/image":
+                    captured["post_count"] += 1
+                    video_path.write_bytes(mutated)
+                    captured["body"] = request.content
+                    captured["content_type"] = request.headers.get("content-type")
+                    return httpx.Response(
+                        200,
+                        json={
+                            "name": f"autorig_{digest[:32]}.mkv",
+                            "subfolder": "autorig_animation_fitting",
+                        },
+                    )
+                return httpx.Response(404)
+
+            worker = ComfyWorker(
+                "local-4090",
+                "http://127.0.0.1:8188",
+                "workflow.json",
+                "0" * 64,
+            )
+            http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            try:
+                client = ComfyAnimationClient(worker, client=http_client)
+                uploaded = await client.upload_reference_video(
+                    video_path,
+                    expected_sha256=digest,
+                    expected_size_bytes=len(original),
+                )
+                with self.assertRaisesRegex(ComfyContractError, "SHA-256 mismatch"):
+                    await client.upload_reference_video(
+                        video_path,
+                        expected_sha256=digest,
+                        expected_size_bytes=len(original),
+                    )
+            finally:
+                await http_client.aclose()
+
+        self.assertEqual(
+            uploaded,
+            f"autorig_animation_fitting/autorig_{digest[:32]}.mkv",
+        )
+        self.assertEqual(captured["post_count"], 1)
+        self.assertIn("multipart/form-data", captured["content_type"])
+        self.assertIn(original, captured["body"])
+        self.assertNotIn(mutated, captured["body"])
+        self.assertIn(b"video/x-matroska", captured["body"])
+
+    async def test_video_upload_rejects_extension_size_and_server_rebinding(self):
+        original = b"pinned video"
+        digest = hashlib.sha256(original).hexdigest()
+        worker = ComfyWorker(
+            "local-4090",
+            "http://127.0.0.1:8188",
+            "workflow.json",
+            "0" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            invalid_path = Path(temp_dir) / "guide.txt"
+            invalid_path.write_bytes(original)
+            http_client = httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: httpx.Response(500))
+            )
+            try:
+                client = ComfyAnimationClient(worker, client=http_client)
+                with self.assertRaisesRegex(ComfyContractError, "must use one of"):
+                    await client.upload_reference_video(
+                        invalid_path,
+                        expected_sha256=digest,
+                        expected_size_bytes=len(original),
+                    )
+            finally:
+                await http_client.aclose()
+
+            video_path = Path(temp_dir) / "guide.mkv"
+            video_path.write_bytes(original)
+            responses = (
+                (
+                    {
+                        "name": f"other_{digest[:32]}.mkv",
+                        "subfolder": "autorig_animation_fitting",
+                    },
+                    "changed uploaded filename",
+                ),
+                (
+                    {
+                        "name": f"autorig_{digest[:32]}.mkv",
+                        "subfolder": "other",
+                    },
+                    "changed upload subfolder",
+                ),
+            )
+            for response_json, message in responses:
+                with self.subTest(response=response_json):
+                    http_client = httpx.AsyncClient(
+                        transport=httpx.MockTransport(
+                            lambda request, payload=response_json: httpx.Response(
+                                200, json=payload
+                            )
+                        )
+                    )
+                    try:
+                        client = ComfyAnimationClient(worker, client=http_client)
+                        with self.assertRaisesRegex(ComfyContractError, message):
+                            await client.upload_reference_video(
+                                video_path,
+                                expected_sha256=digest,
+                                expected_size_bytes=len(original),
+                            )
+                    finally:
+                        await http_client.aclose()
+
+            http_client = httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: httpx.Response(500))
+            )
+            try:
+                client = ComfyAnimationClient(worker, client=http_client)
+                with self.assertRaisesRegex(ComfyContractError, "byte size mismatch"):
+                    await client.upload_reference_video(
+                        video_path,
+                        expected_sha256=digest,
+                        expected_size_bytes=len(original) + 1,
+                    )
+            finally:
+                await http_client.aclose()
+
     async def test_upload_rejects_server_side_filename_or_subfolder_rebinding(self):
         original = b"pinned browser guide bytes"
         digest = hashlib.sha256(original).hexdigest()

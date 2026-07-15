@@ -341,6 +341,104 @@ class ComfyAnimationClient:
             )
         return f"{expected_subfolder}/{filename}"
 
+    async def upload_reference_video(
+        self,
+        video_path: Path,
+        *,
+        expected_sha256: str,
+        expected_size_bytes: int,
+    ) -> str:
+        """Upload one content-pinned video guide without trusting server rebinding.
+
+        Comfy's upload endpoint is shared by image and video widgets.  The
+        ``LoadVideo`` node consumes the returned input-relative name, so the
+        local bytes, extension, digest, byte count, returned filename and
+        returned subfolder all have to remain exact.
+        """
+
+        path = Path(video_path).resolve()
+        suffix = path.suffix.lower()
+        if suffix not in VIDEO_EXTENSIONS:
+            raise ComfyContractError(
+                "Reference video must use one of: " + ", ".join(VIDEO_EXTENSIONS)
+            )
+        expected_digest = str(expected_sha256).strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_digest):
+            raise ComfyContractError("expected_sha256 must be a SHA-256 hex digest")
+        if (
+            isinstance(expected_size_bytes, bool)
+            or not isinstance(expected_size_bytes, int)
+            or expected_size_bytes <= 0
+        ):
+            raise ComfyContractError("expected_size_bytes must be a positive integer")
+
+        data = await asyncio.to_thread(path.read_bytes)
+        if not data:
+            raise ComfyContractError(f"Reference video is empty: {path}")
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != expected_digest:
+            raise ComfyContractError(
+                f"Reference video SHA-256 mismatch for {path}: "
+                f"expected {expected_digest}, got {digest}"
+            )
+        if len(data) != expected_size_bytes:
+            raise ComfyContractError(
+                f"Reference video byte size mismatch for {path}: "
+                f"expected {expected_size_bytes}, got {len(data)}"
+            )
+
+        filename = f"autorig_{digest[:32]}{suffix}"
+        content_types = {
+            ".mkv": "video/x-matroska",
+            ".mp4": "video/mp4",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+        }
+        response = await self._client.post(
+            self._url("/upload/image"),
+            data={
+                "type": "input",
+                "subfolder": "autorig_animation_fitting",
+                "overwrite": "true",
+            },
+            files={
+                "image": (
+                    filename,
+                    data,
+                    content_types.get(suffix, "application/octet-stream"),
+                )
+            },
+            timeout=max(self.request_timeout_seconds, 120.0),
+        )
+        response.raise_for_status()
+        parsed = response.json()
+        if not isinstance(parsed, dict):
+            raise ComfyContractError("Comfy upload_video returned a non-object response")
+        returned_name_value = parsed.get("name")
+        if not isinstance(returned_name_value, str):
+            raise ComfyContractError("Comfy upload_video did not return a filename")
+        returned_name = returned_name_value.strip()
+        if not returned_name:
+            raise ComfyContractError("Comfy upload_video did not return a filename")
+        if "/" in returned_name or "\\" in returned_name:
+            raise ComfyContractError(
+                "Comfy upload_video returned a filename containing path separators"
+            )
+        if returned_name != filename:
+            raise ComfyContractError(
+                f"Comfy changed uploaded filename {filename!r} to {returned_name!r}"
+            )
+        expected_subfolder = "autorig_animation_fitting"
+        subfolder_value = parsed.get("subfolder")
+        if not isinstance(subfolder_value, str):
+            raise ComfyContractError("Comfy upload_video did not return a subfolder")
+        subfolder = subfolder_value.strip()
+        if subfolder != expected_subfolder:
+            raise ComfyContractError(
+                f"Comfy changed upload subfolder {expected_subfolder!r} to {subfolder!r}"
+            )
+        return f"{expected_subfolder}/{filename}"
+
     async def queue_load(self) -> int:
         return _queue_load(await self._get_json("/queue"))
 
