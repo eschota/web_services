@@ -116,6 +116,90 @@ function observations({ frameCount = 7, loopMismatch = false, contact = false, e
     };
 }
 
+function orderedSkeleton() {
+    const limbs = {};
+    LABELS.forEach((label, labelIndex) => {
+        const x = labelIndex * 10;
+        limbs[label] = {
+            joints: Array.from({ length: 6 }, (_, jointIndex) => ({
+                bone: `${label}_segment_${jointIndex}`,
+                restStart: [x, jointIndex],
+                restEnd: [x, jointIndex + 1],
+                restQuaternion: [0, 0, 0, 1],
+                rotationAxis: [0, 0, 1],
+                minAngle: -Math.PI,
+                maxAngle: Math.PI,
+            })),
+            trackedJointIndex: 3,
+        };
+    });
+    return { schema: BROWSER_FITTING_SCHEMAS.skeleton, limbs };
+}
+
+function orderedObservations({ frameCount = 9, legacyOnly = false } = {}) {
+    const tracks = [];
+    LABELS.forEach((label, labelIndex) => {
+        const x = labelIndex * 10;
+        const frames = Array.from({ length: frameCount }, (_, frame) => {
+            const phase = frame / (frameCount - 1) * Math.PI * 2 + labelIndex * 0.4;
+            const points = [[x, 0]];
+            let parentAngle = 0;
+            for (let segment = 0; segment < 6; segment += 1) {
+                const localAngle = Math.PI / 2 + Math.sin(phase + segment * 0.7) * (0.12 + segment * 0.025);
+                const worldAngle = segment === 0 ? localAngle : parentAngle + localAngle - Math.PI / 2;
+                points.push([
+                    points.at(-1)[0] + Math.cos(worldAngle),
+                    points.at(-1)[1] + Math.sin(worldAngle),
+                ]);
+                parentAngle = worldAngle;
+            }
+            return points;
+        });
+        const semanticIds = Array.from({ length: 7 }, (_, headIndex) => {
+            if (headIndex === 0) return `${label}.proximal`;
+            if (headIndex === 3) return `${label}.joint`;
+            if (headIndex === 6) return `${label}.hoof`;
+            return `${label}.deformHead.${headIndex}`;
+        });
+        semanticIds.forEach((anchorId, headIndex) => {
+            if (legacyOnly && ![0, 3, 6].includes(headIndex)) return;
+            tracks.push(track(anchorId, frames.map((points) => points[headIndex])));
+        });
+    });
+    return {
+        schema: BROWSER_FITTING_SCHEMAS.observations,
+        frame_count: frameCount,
+        width: 512,
+        height: 320,
+        fps: 30,
+        tracks,
+        contacts: [],
+    };
+}
+
+function orderedTargetMean(fitted, allObservations) {
+    const targetById = new Map(allObservations.tracks.map((item) => [item.anchor_id, item.points]));
+    let sum = 0;
+    let samples = 0;
+    fitted.frames.forEach((frame, frameIndex) => {
+        LABELS.forEach((label) => {
+            const ids = Array.from({ length: 7 }, (_, headIndex) => {
+                if (headIndex === 0) return `${label}.proximal`;
+                if (headIndex === 3) return `${label}.joint`;
+                if (headIndex === 6) return `${label}.hoof`;
+                return `${label}.deformHead.${headIndex}`;
+            });
+            ids.forEach((id, headIndex) => {
+                const actual = frame.limbs[label].points[headIndex];
+                const expected = targetById.get(id)[frameIndex];
+                sum += Math.hypot(actual[0] - expected.x, actual[1] - expected.y);
+                samples += 1;
+            });
+        });
+    });
+    return sum / samples;
+}
+
 test('browser solver reduces semantic hoof target error without Blender or Three.js', () => {
     const fitted = fitBrowserAnimation({
         skeleton: skeleton(),
@@ -127,6 +211,93 @@ test('browser solver reduces semantic hoof target error without Blender or Three
     assert.equal(fitted.tracks.length, 8);
     assert.ok(fitted.qa.initialMeanTargetErrorPx > 0.2);
     assert.ok(fitted.qa.finalMeanTargetErrorPx < fitted.qa.initialMeanTargetErrorPx * 0.02);
+});
+
+test('ordered deform-head fitting uses every chain head and materially beats the legacy three-track solve', () => {
+    const allTargets = orderedObservations();
+    const legacy = fitBrowserAnimation({
+        skeleton: orderedSkeleton(),
+        observations: orderedObservations({ legacyOnly: true }),
+        options: { loop: false, smoothingRadius: 0, iterations: 64, tolerance: 1e-6 },
+    });
+    const ordered = fitBrowserAnimation({
+        skeleton: orderedSkeleton(),
+        observations: allTargets,
+        options: { loop: false, smoothingRadius: 0, iterations: 64, tolerance: 1e-6 },
+    });
+    assert.equal(legacy.qa.targetMode, 'legacy_three_track');
+    assert.equal(ordered.qa.targetMode, 'ordered_deform_heads');
+    assert.equal(ordered.qa.targetSamples, 4 * 7 * ordered.frameCount);
+    assert.ok(orderedTargetMean(ordered, allTargets) < orderedTargetMean(legacy, allTargets) * 0.35);
+    assert.ok(ordered.qa.maximumTargetErrorPx < 0.05);
+});
+
+test('ordered deform-head CCD never publishes a target regression across deterministic randomized targets', () => {
+    let state = 123456789;
+    const random = () => {
+        state = (1664525 * state + 1013904223) >>> 0;
+        return state / 2 ** 32;
+    };
+    const label = 'leg';
+    const jointCount = 6;
+    const rig = {
+        schema: BROWSER_FITTING_SCHEMAS.skeleton,
+        limbs: {
+            [label]: {
+                joints: Array.from({ length: jointCount }, (_, index) => ({
+                    bone: `random_segment_${index}`,
+                    restStart: [0, index],
+                    restEnd: [0, index + 1],
+                    restQuaternion: [0, 0, 0, 1],
+                    rotationAxis: [0, 0, 1],
+                    minAngle: -Math.PI,
+                    maxAngle: Math.PI,
+                })),
+                trackedJointIndex: 3,
+            },
+        },
+    };
+    const semanticIds = Array.from({ length: jointCount + 1 }, (_, headIndex) => {
+        if (headIndex === 0) return `${label}.proximal`;
+        if (headIndex === 3) return `${label}.joint`;
+        if (headIndex === jointCount) return `${label}.hoof`;
+        return `${label}.deformHead.${headIndex}`;
+    });
+    for (let sample = 0; sample < 1300; sample += 1) {
+        const targets = Array.from({ length: jointCount + 1 }, (_, headIndex) => (
+            headIndex === 0
+                ? [0, 0]
+                : [(random() - 0.5) * 12, (random() - 0.5) * 12]
+        ));
+        const input = {
+            schema: BROWSER_FITTING_SCHEMAS.observations,
+            frame_count: 2,
+            fps: 30,
+            tracks: semanticIds.map((anchorId, headIndex) => track(
+                anchorId,
+                [targets[headIndex], targets[headIndex]],
+            )),
+            contacts: [],
+        };
+        const fitted = fitBrowserAnimation({
+            skeleton: rig,
+            observations: input,
+            options: { loop: false, smoothingRadius: 0, iterations: 64, tolerance: 1e-8 },
+        });
+        assert.ok(
+            fitted.qa.finalMeanTargetErrorPx <= fitted.qa.initialMeanTargetErrorPx + 1e-12,
+            `sample ${sample} regressed from ${fitted.qa.initialMeanTargetErrorPx} to ${fitted.qa.finalMeanTargetErrorPx}`,
+        );
+    }
+});
+
+test('partial ordered deform-head observations fail closed instead of falling back to three tracks', () => {
+    const partial = orderedObservations();
+    partial.tracks = partial.tracks.filter((item) => item.anchor_id !== 'fore_left.deformHead.2');
+    assert.throws(
+        () => fitBrowserAnimation({ skeleton: orderedSkeleton(), observations: partial }),
+        /partial ordered deform-head chain for limb fore_left.*deformHead\.2/,
+    );
 });
 
 test('published final target error matches postprocessed debug-frame hoof targets', () => {

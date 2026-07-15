@@ -10,6 +10,7 @@ import {
 const LABELS = ['fore_left', 'fore_right', 'hind_left', 'hind_right'];
 const BUNDLE_SHA = '1'.repeat(64);
 const MANIFEST_SHA = '2'.repeat(64);
+const ORDERED_STEMS = ['upper', 'upper_twist', 'upper_stretch', 'lower_stretch', 'lower_twist', 'foot', 'hoof'];
 
 function skeleton() {
     const limbs = {};
@@ -109,6 +110,78 @@ function canonicalObservations(frameCount = 5) {
     };
 }
 
+function orderedSkeleton() {
+    const limbs = {};
+    LABELS.forEach((label, labelIndex) => {
+        const x = labelIndex * 10;
+        const sourceBoneChain = ORDERED_STEMS.map((stem) => `${label}_${stem}`);
+        const heads = sourceBoneChain.map((_, headIndex) => [x, headIndex * 2]);
+        limbs[label] = {
+            joints: heads.slice(0, -1).map((restStart, jointIndex) => ({
+                bone: sourceBoneChain[jointIndex],
+                restStart,
+                restEnd: heads[jointIndex + 1],
+                restQuaternion: [0, 0, 0, 1],
+                rotationAxis: [0, 0, 1],
+                minAngle: -Math.PI,
+                maxAngle: Math.PI,
+            })),
+            proximalTrack: `${label}.proximal`,
+            jointTrack: `${label}.joint`,
+            hoofTrack: `${label}.hoof`,
+            trackedJointIndex: 3,
+            sourceBoneChain,
+            terminalBone: sourceBoneChain.at(-1),
+        };
+    });
+    return {
+        schema: RGB_OBSERVATION_BRIDGE_CONTRACT.skeleton,
+        rigType: 'HORSE_2',
+        limbs,
+        projection: { outputResolution: [768, 448] },
+    };
+}
+
+function orderedCanonicalObservations(frameCount = 7) {
+    const tracks = [];
+    let vertex = 1000;
+    LABELS.forEach((label, labelIndex) => {
+        const x = labelIndex * 10;
+        ORDERED_STEMS.forEach((stem, headIndex) => {
+            const bone = `${label}_${stem}`;
+            tracks.push({
+                id: `tap_${label}_head_${headIndex}`,
+                anchor_id: `${bone}:${vertex++}`,
+                query_frame: 0,
+                points: Array.from({ length: frameCount }, (_, frame) => ({
+                    frame,
+                    // Surface seeds are intentionally offset from bone heads;
+                    // only their displacement is transferable to the skeleton.
+                    x: x + 40 + Math.sin(frame * 0.4 + headIndex * 0.3) * headIndex * 0.3,
+                    y: headIndex * 2 - 25 + Math.cos(frame * 0.3 + headIndex) * headIndex * 0.15,
+                    visible: true,
+                    confidence: 0.95,
+                })),
+            });
+        });
+    });
+    return {
+        schema: RGB_OBSERVATION_BRIDGE_CONTRACT.observations,
+        frame_count: frameCount,
+        width: 768,
+        height: 448,
+        fps: 30,
+        tracks,
+        contacts: [],
+        provenance: {
+            runtime: 'autorig-official-animal-tracking.v1',
+            bundle_sha256: BUNDLE_SHA,
+            immutable_manifest_sha256: MANIFEST_SHA,
+            tracker: { backend: RGB_OBSERVATION_BRIDGE_CONTRACT.trackerBackend },
+        },
+    };
+}
+
 function cameraContract() {
     return {
         outputResolution: [768, 448],
@@ -146,6 +219,46 @@ test('prepared RGB observations are accepted by the pure browser fitting solver'
     assert.equal(fitted.frameCount, 5);
     assert.equal(fitted.tracks.length, 8);
     assert.equal(fitted.qa.loopEndpointError, 0);
+});
+
+test('seven ordered Horse_2 deform heads per limb produce 28 rest-relative semantic tracks', () => {
+    const rig = orderedSkeleton();
+    const prepared = prepareRgbObservationsForBrowser({
+        observations: orderedCanonicalObservations(),
+        skeleton: rig,
+        cameraContract: cameraContract(),
+    });
+    assert.equal(prepared.tracks.length, 28);
+    assert.equal(prepared.provenance.browser_rgb_bridge.mappingMode, 'ordered_deform_heads');
+    assert.equal(prepared.provenance.browser_rgb_bridge.coordinateMode, 'rest_head_plus_query_displacement');
+    assert.deepEqual(prepared.tracks.slice(0, 7).map((track) => track.anchor_id), [
+        'fore_left.proximal',
+        'fore_left.deformHead.1',
+        'fore_left.deformHead.2',
+        'fore_left.joint',
+        'fore_left.deformHead.4',
+        'fore_left.deformHead.5',
+        'fore_left.hoof',
+    ]);
+    prepared.tracks.forEach((track) => {
+        const mapping = prepared.provenance.browser_rgb_bridge.mappings.find(
+            (item) => item.semanticAnchorId === track.anchor_id,
+        );
+        assert.ok(Math.hypot(
+            track.points[track.query_frame].x - mapping.restPoint[0],
+            track.points[track.query_frame].y - mapping.restPoint[1],
+        ) < 1e-12);
+    });
+
+    const fitted = fitRgbObservationsInBrowser({
+        observations: orderedCanonicalObservations(),
+        skeleton: rig,
+        cameraContract: cameraContract(),
+        options: { loop: false, smoothingRadius: 0, iterations: 64 },
+    });
+    assert.equal(fitted.qa.targetMode, 'ordered_deform_heads');
+    assert.ok(fitted.qa.targetSamples > 12 * fitted.frameCount);
+    assert.ok(fitted.qa.finalMeanTargetErrorPx < fitted.qa.initialMeanTargetErrorPx);
 });
 
 test('frame IDs must be a complete zero-based sequence for every RGB track', () => {

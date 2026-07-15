@@ -44,6 +44,13 @@ function resolution(value, field) {
     return value.map((item, index) => positiveInteger(item, `${field}[${index}]`));
 }
 
+function point2(value, field) {
+    if (!Array.isArray(value) || value.length !== 2) {
+        throw new Error(`${field} must be an x/y pair`);
+    }
+    return value.map((item, index) => finite(item, `${field}[${index}]`));
+}
+
 function samePair(first, second) {
     return first[0] === second[0] && first[1] === second[1];
 }
@@ -195,14 +202,39 @@ function requiredSemanticTracks(skeleton) {
         if (terminalBone !== sourceBoneChain.at(-1)) {
             throw new Error(`skeleton limb ${label} terminalBone does not match sourceBoneChain`);
         }
-        [
-            [nonEmptyString(limb.proximalTrack, `skeleton.limbs.${label}.proximalTrack`), sourceBoneChain[0]],
-            [nonEmptyString(limb.jointTrack, `skeleton.limbs.${label}.jointTrack`), sourceBoneChain[trackedJointIndex]],
-            [nonEmptyString(limb.hoofTrack, `skeleton.limbs.${label}.hoofTrack`), terminalBone],
-        ].forEach(([semanticId, sourceBone]) => {
+        if (!Array.isArray(limb.joints) || limb.joints.length + 1 !== sourceBoneChain.length) {
+            throw new Error(`skeleton limb ${label} joints do not match sourceBoneChain heads`);
+        }
+        const proximalTrack = nonEmptyString(
+            limb.proximalTrack,
+            `skeleton.limbs.${label}.proximalTrack`,
+        );
+        const jointTrack = nonEmptyString(limb.jointTrack, `skeleton.limbs.${label}.jointTrack`);
+        const hoofTrack = nonEmptyString(limb.hoofTrack, `skeleton.limbs.${label}.hoofTrack`);
+        const orderedHeads = sourceBoneChain.map((sourceBone, headIndex) => {
+            let semanticId = `${label}.deformHead.${headIndex}`;
+            if (headIndex === 0) semanticId = proximalTrack;
+            else if (headIndex === trackedJointIndex) semanticId = jointTrack;
+            else if (headIndex === sourceBoneChain.length - 1) semanticId = hoofTrack;
+            const restPoint = headIndex === sourceBoneChain.length - 1
+                ? point2(limb.joints.at(-1)?.restEnd, `skeleton.limbs.${label}.joints[last].restEnd`)
+                : point2(
+                    limb.joints[headIndex]?.restStart,
+                    `skeleton.limbs.${label}.joints[${headIndex}].restStart`,
+                );
+            return {
+                label,
+                semanticId,
+                sourceBone,
+                headIndex,
+                orderedHeadCount: sourceBoneChain.length,
+                restPoint,
+            };
+        });
+        orderedHeads.forEach(({ semanticId, sourceBone, headIndex, orderedHeadCount, restPoint }) => {
             if (semanticIds.has(semanticId)) throw new Error(`duplicate skeleton semantic track ${semanticId}`);
             semanticIds.add(semanticId);
-            requirements.push({ label, semanticId, sourceBone });
+            requirements.push({ label, semanticId, sourceBone, headIndex, orderedHeadCount, restPoint });
         });
     });
     if (!requirements.length) throw new Error('skeleton.limbs must not be empty');
@@ -274,7 +306,7 @@ export function prepareRgbObservationsForBrowser({
         normalized.tracks,
         minimumVisible,
     );
-    const semanticBySourceAnchor = new Map(selected.map((item) => [item.track.anchorId, item.semanticId]));
+    const selectionBySourceAnchor = new Map(selected.map((item) => [item.track.anchorId, item]));
 
     return {
         schema: OBSERVATION_SCHEMA,
@@ -282,32 +314,64 @@ export function prepareRgbObservationsForBrowser({
         width,
         height,
         fps,
-        tracks: selected.map(({ semanticId, track }) => ({
-            id: track.id,
-            anchor_id: semanticId,
-            query_frame: track.queryFrame,
-            points: track.points.map((point) => ({ ...point })),
-        })),
+        tracks: selected.map(({ semanticId, restPoint, track }) => {
+            const query = track.points[track.queryFrame];
+            return {
+                id: track.id,
+                anchor_id: semanticId,
+                query_frame: track.queryFrame,
+                points: track.points.map((point) => ({
+                    ...point,
+                    x: restPoint[0] + point.x - query.x,
+                    y: restPoint[1] + point.y - query.y,
+                })),
+            };
+        }),
         silhouettes: [],
         depth: [],
         contacts: contacts
-            .filter((contact) => semanticBySourceAnchor.has(contact.anchorId))
-            .map((contact) => ({
-                anchor_id: semanticBySourceAnchor.get(contact.anchorId),
-                frames: [...contact.frames],
-                ...(contact.groundHeight == null ? {} : { ground_height: contact.groundHeight }),
-                ...(contact.weight == null ? {} : { weight: contact.weight }),
-            })),
+            .filter((contact) => selectionBySourceAnchor.has(contact.anchorId))
+            .map((contact) => {
+                const selectedTrack = selectionBySourceAnchor.get(contact.anchorId);
+                const query = selectedTrack.track.points[selectedTrack.track.queryFrame];
+                return {
+                    anchor_id: selectedTrack.semanticId,
+                    frames: [...contact.frames],
+                    ...(contact.groundHeight == null ? {} : {
+                        ground_height: selectedTrack.restPoint[1] + contact.groundHeight - query.y,
+                    }),
+                    ...(contact.weight == null ? {} : { weight: contact.weight }),
+                };
+            }),
         provenance: {
             ...provenance,
             browser_rgb_bridge: {
                 schema: BRIDGE_SCHEMA,
                 trackerBackend: TAPNEXT_BACKEND,
+                coordinateMode: 'rest_head_plus_query_displacement',
                 camera,
-                mappings: selected.map(({ label, semanticId, sourceBone, track }) => ({
+                mappingMode: selected.some((item) => item.orderedHeadCount > 3)
+                    ? 'ordered_deform_heads'
+                    : 'legacy_three_track',
+                mappings: selected.map(({
+                    label,
+                    semanticId,
+                    sourceBone,
+                    headIndex,
+                    orderedHeadCount,
+                    restPoint,
+                    track,
+                }) => ({
                     limb: label,
                     semanticAnchorId: semanticId,
                     sourceBone,
+                    headIndex,
+                    orderedHeadCount,
+                    restPoint: [...restPoint],
+                    queryToRestOffsetPx: [
+                        restPoint[0] - track.points[track.queryFrame].x,
+                        restPoint[1] - track.points[track.queryFrame].y,
+                    ],
                     sourceTrackId: track.id,
                     sourceAnchorId: track.anchorId,
                 })),
