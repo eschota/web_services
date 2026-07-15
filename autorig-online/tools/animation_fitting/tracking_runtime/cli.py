@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -13,6 +14,7 @@ from ..contact_profile import load_contact_profile, validate_contact_profile_bun
 from ..errors import FittingError
 from ..rig import load_rig_bundle
 from .core import (
+    AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256,
     ObservationRuntimeConfig,
     run_observation_pipeline,
     select_anchor_seeds,
@@ -66,6 +68,17 @@ def _parser() -> argparse.ArgumentParser:
     observe.add_argument("--with-depth", action="store_true")
     observe.add_argument("--contact-profile")
     observe.add_argument("--loop", action="store_true")
+    observe.add_argument(
+        "--browser-endpoint-guide-bundle",
+        help=(
+            "Opt-in v11 browser static-scene guide bundle whose pinned frame 0 "
+            "replaces canonical RGB only for first-frame alignment"
+        ),
+    )
+    observe.add_argument(
+        "--browser-endpoint-guide-manifest-sha256",
+        help="Exact lowercase SHA-256 of <guide bundle>/immutable_manifest.json",
+    )
     observe.add_argument("--ffprobe")
     observe.add_argument("--min-alignment-correlation", type=float, default=0.65)
     observe.add_argument("--min-visible-ratio", type=float, default=0.35)
@@ -73,6 +86,34 @@ def _parser() -> argparse.ArgumentParser:
     observe.add_argument("--min-median-visible-confidence", type=float, default=0.50)
     observe.add_argument("--min-track-mask-ratio", type=float, default=0.55)
     return parser
+
+
+def _browser_reference_cli_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    bundle = args.browser_endpoint_guide_bundle
+    manifest_sha256 = args.browser_endpoint_guide_manifest_sha256
+    if bundle is None and manifest_sha256 is None:
+        return {}
+    if bundle is None or manifest_sha256 is None:
+        raise FittingError(
+            "Browser endpoint guide override requires both bundle and manifest SHA-256"
+        )
+    if re.fullmatch(r"[0-9a-f]{64}", manifest_sha256) is None:
+        raise FittingError(
+            "Browser endpoint guide manifest SHA-256 must be exact lowercase hex"
+        )
+    if manifest_sha256 not in AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256:
+        raise FittingError(
+            "Browser endpoint guide manifest SHA-256 is not authorized by this runtime"
+        )
+    root = Path(bundle).resolve()
+    if not root.is_dir() or not (root / "immutable_manifest.json").is_file():
+        raise FittingError(
+            f"Browser endpoint guide bundle/manifest does not exist: {root}"
+        )
+    return {
+        "browser_endpoint_guide_bundle": str(root),
+        "browser_endpoint_guide_manifest_sha256": manifest_sha256,
+    }
 
 
 def _paths(runtime_root: Path) -> dict[str, Path]:
@@ -232,6 +273,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "observe":
+            browser_reference_kwargs = _browser_reference_cli_kwargs(args)
+            if browser_reference_kwargs and not args.loop:
+                raise FittingError(
+                    "Browser endpoint guide override is accepted only with --loop"
+                )
             lock = load_runtime_lock(args.runtime_lock)
             paths = _paths(runtime_root)
             require_cuda = not bool(args.allow_cpu)
@@ -278,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
                 contact_profile=args.contact_profile,
                 config=config,
                 ffprobe=args.ffprobe,
+                **browser_reference_kwargs,
             )
             print(json.dumps({"observations": str(output)}, indent=2))
             return 0

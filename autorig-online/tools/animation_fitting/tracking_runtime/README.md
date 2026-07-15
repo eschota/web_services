@@ -18,6 +18,20 @@ threshold are configurable; zero-confidence visible tracks fail by default.
 Relative VDA depth is saved only in `observations.npz`; it is never mislabeled
 as metric camera depth.
 
+The canonical bundle RGB remains the default first-frame alignment reference.
+Loop candidates generated from the v11 unified browser static scene may opt in
+to that bundle's browser-rendered endpoint instead. The runtime accepts only a
+guide directory plus the exact lowercase SHA-256 of its
+`immutable_manifest.json`; that SHA must also be present in the checked-in
+authoritative allowlist. The runtime derives frame 0 and frame N-1 from the
+authorized manifest.
+Both endpoint PNGs must match their manifest SHA-256 and byte pins and be
+byte-identical. The pinned manifest must be `PASS`, browser-only, Blender-free,
+use `v11_unified_browser_static_scene_v1`, and link its canonical RGB, fitting
+bundle, immutable manifest, source-model SHA and rig type back to the actual
+actionless bundle. This override is loop-only and never permits an arbitrary
+pinned image.
+
 Create the venv with system Python 3.10, install `torch==2.7.1` and
 `torchvision==0.22.1` from the official `cu128` PyTorch wheel index, and then
 install the non-Torch versions in `environment-lock.txt`. The three model
@@ -35,6 +49,18 @@ $env:PYTHONPATH = 'R:\autorig\autorig-online\tools'
   --bundle 'R:\ComfyUI-data\autorig-fitting\horse-canonical-f1' `
   --output-dir 'R:\ComfyUI-data\autorig-fitting\observations\horse_walk_candidate_001' `
   --loop --with-depth
+```
+
+For a browser-static-scene loop, add both opt-in arguments (never just one):
+
+```powershell
+& $python -m animation_fitting.tracking_runtime observe `
+  --video 'R:\ComfyUI-data\autorig-fitting\candidates\horse_walk_v11.mp4' `
+  --bundle 'R:\ComfyUI-data\autorig-fitting\horse-canonical-f1' `
+  --output-dir 'R:\ComfyUI-data\autorig-fitting\observations\horse_walk_v11_001' `
+  --loop `
+  --browser-endpoint-guide-bundle 'R:\ComfyUI-data\autorig-fitting\canonical-candidates\experiments\horse-walk-v11-browser-static-scene-guides-f2' `
+  --browser-endpoint-guide-manifest-sha256 '9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173'
 ```
 
 Every output directory is immutable-by-convention and contains canonical JSON,

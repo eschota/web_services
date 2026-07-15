@@ -7,7 +7,7 @@ It does not call LTX, choose the best generated video, infer a tracker threshold
 ## Pipeline boundary
 
 1. `render_actionless_bundle.py` renders the default model transform and default pose with zero animation actions. Its `fitting_bundle.json`, skeleton, skin weights, anchors, camera and ground plane are the immutable rig input.
-2. LTX/Comfy generates a video from the canonical render. A loop candidate must intentionally return to its starting pose; a one-shot candidate need not.
+2. LTX/Comfy generates a video from the canonical render. A loop candidate must intentionally return to its starting pose; a one-shot candidate need not. The tracking runtime defaults to that canonical RGB; its v11 browser-static-scene override is opt-in, loop-only, manifest-pinned, and canonically bundle-linked as documented in [tracking_runtime/README.md](tracking_runtime/README.md).
 3. A tracker/segmenter/depth model runs outside this package and exports observations. The adapters normalize point tracks; masks and calibrated depth are referenced by the canonical observation JSON.
 4. This package performs bounded temporal inverse kinematics with root motion, local joint limits, observed contacts and optional loop closure.
 5. The output contains raw QA measurements and every local bone matrix. A later asset-authoring step can turn those transforms into a named glTF/GLB animation clip.

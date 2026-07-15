@@ -12,7 +12,12 @@ from PIL import Image, ImageDraw
 import pytest
 
 import animation_fitting.tracking_runtime.core as tracking_core
-from animation_fitting.errors import ContractError, DependencyUnavailableError
+import animation_fitting.tracking_runtime.cli as tracking_cli
+from animation_fitting.errors import (
+    ContractError,
+    DependencyUnavailableError,
+    FittingError,
+)
 from animation_fitting.observations import load_observations
 from animation_fitting.tracking_runtime.core import (
     ObservationRuntimeConfig,
@@ -166,6 +171,10 @@ def _bundle(root: Path) -> tuple[Path, np.ndarray]:
     reference.save(rgb_path)
     metadata = {
         "schema": "autorig-actionless-fitting-bundle.v1",
+        "source": {
+            "sha256": "a" * 64,
+            "rig_type": "HORSE_2",
+        },
         "actionless": {"actionless": True},
         "camera": {
             "resolution": [width, height],
@@ -187,6 +196,98 @@ def _bundle(root: Path) -> tuple[Path, np.ndarray]:
         [skeleton_path, skin_path, anchors_path, rgb_path, mask_path],
     )
     return bundle, np.asarray(reference)
+
+
+def _browser_guide_bundle(
+    root: Path, bundle: Path, canonical_rgb: np.ndarray
+) -> tuple[Path, np.ndarray, str]:
+    guide = root / "browser_guides"
+    guide.mkdir()
+    browser_rgb = 255 - canonical_rgb
+    first = guide / "guide_000.png"
+    Image.fromarray(browser_rgb, mode="RGB").save(first)
+    last = guide / "guide_002.png"
+    last.write_bytes(first.read_bytes())
+    metadata = json.loads((bundle / "fitting_bundle.json").read_text(encoding="utf-8"))
+    endpoint_sha256 = _sha(first)
+    endpoint_bytes = first.stat().st_size
+    manifest = {
+        "schema": "autorig-browser-ltx-static-scene-guide-bundle.v1",
+        "status": "PASS",
+        "approvedForAnimationLibrary": False,
+        "browserOnly": True,
+        "blenderUsed": False,
+        "rigType": metadata["source"]["rig_type"],
+        "resolution": [browser_rgb.shape[1], browser_rgb.shape[0]],
+        "source_reference_sha256_string": metadata["artifacts"]["rgb"]["sha256"],
+        "source_reference_is_guide_bool": False,
+        "endpoint_guide_sha256_string": endpoint_sha256,
+        "cycle_frame_count_int": 3,
+        "guide_count_int": 2,
+        "renderer_object": {
+            "renderer_string": "browser_threejs",
+            "scene_contract_string": "v11_unified_browser_static_scene_v1",
+            "all_guide_frames_browser_rendered_bool": True,
+            "blender_used_bool": False,
+            "shadows_enabled_bool": False,
+        },
+        "frames_array": [
+            {
+                "frame_index_int": 0,
+                "filename_string": first.name,
+                "sha256_string": endpoint_sha256,
+                "bytes_int": endpoint_bytes,
+                "strength_float": 0.8,
+            },
+            {
+                "frame_index_int": 2,
+                "filename_string": last.name,
+                "sha256_string": endpoint_sha256,
+                "bytes_int": endpoint_bytes,
+                "strength_float": 0.8,
+            },
+        ],
+        "source": {
+            "sourceModelSha256": metadata["source"]["sha256"],
+            "immutableManifest": {
+                "filename": "immutable_manifest.json",
+                "bytes": (bundle / "immutable_manifest.json").stat().st_size,
+                "sha256": _sha(bundle / "immutable_manifest.json"),
+            },
+            "fittingBundle": {
+                "filename": "fitting_bundle.json",
+                "bytes": (bundle / "fitting_bundle.json").stat().st_size,
+                "sha256": _sha(bundle / "fitting_bundle.json"),
+            },
+            "referenceRgb": {
+                "filename": metadata["artifacts"]["rgb"]["filename"],
+                "bytes": metadata["artifacts"]["rgb"]["bytes"],
+                "sha256": metadata["artifacts"]["rgb"]["sha256"],
+            },
+        },
+        "staticSceneQa": {
+            "schema": "autorig-browser-static-scene-qa.v1",
+            "status": "PASS",
+            "decoded_rgb_statistics_bool": True,
+            "endpoint_byte_identical_bool": True,
+        },
+        "staticSceneRenderer": {
+            "contract": "v11_unified_browser_static_scene_v1",
+        },
+    }
+    manifest_path = guide / "immutable_manifest.json"
+    _write_json(manifest_path, manifest)
+    return guide, browser_rgb, _sha(manifest_path)
+
+
+def _authorize_browser_manifest(
+    monkeypatch: pytest.MonkeyPatch, manifest_sha256: str
+) -> None:
+    monkeypatch.setattr(
+        tracking_core,
+        "AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256",
+        frozenset({manifest_sha256}),
+    )
 
 
 def _upgrade_bundle_to_v2_camera_z(bundle: Path) -> None:
@@ -394,6 +495,232 @@ def test_priority_seed_selection_never_exceeds_max_tracks(tmp_path: Path) -> Non
 
     assert seeds.anchor_ids == priority
     assert len(seeds.track_ids) == len(priority)
+
+
+def test_browser_endpoint_manifest_must_be_authoritatively_allowlisted(
+    tmp_path: Path,
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, manifest_sha256 = _browser_guide_bundle(tmp_path, bundle, canonical)
+
+    with pytest.raises(ContractError, match="authoritative allowlist"):
+        select_anchor_seeds(
+            bundle,
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=manifest_sha256,
+            loop=True,
+        )
+
+
+def test_default_seed_selection_preserves_uppercase_bundle_sha_compatibility(
+    tmp_path: Path,
+) -> None:
+    bundle, _ = _bundle(tmp_path)
+    metadata_path = bundle / "fitting_bundle.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    expected_rgb_sha256 = metadata["artifacts"]["rgb"]["sha256"]
+    metadata["artifacts"]["rgb"]["sha256"] = expected_rgb_sha256.upper()
+    metadata["source"]["sha256"] = metadata["source"]["sha256"].upper()
+    _write_json(metadata_path, metadata)
+    _write_immutable_manifest(
+        bundle,
+        [
+            bundle / "skeleton.json",
+            bundle / "skin_weights.json.gz",
+            bundle / "surface_anchors.json",
+            bundle / "reference_rgb.png",
+            bundle / "reference_mask.png",
+        ],
+    )
+
+    load_rig_bundle(bundle)
+    seeds = select_anchor_seeds(bundle)
+    assert seeds.reference_provenance["mode"] == "canonical_bundle_rgb"
+    assert seeds.reference_provenance["selected"]["sha256"] == expected_rgb_sha256
+
+
+def test_browser_endpoint_reference_is_manifest_pinned_and_bundle_linked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, browser_rgb, manifest_sha256 = _browser_guide_bundle(
+        tmp_path, bundle, canonical
+    )
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+    video = tmp_path / "browser-endpoint.mp4"
+    _video(video, browser_rgb)
+
+    with pytest.raises(ContractError, match="canonical actionless render"):
+        run_observation_pipeline(
+            video=video,
+            bundle=bundle,
+            output_dir=tmp_path / "canonical-rejected",
+            tracker=_Tracker(),
+            segmenter=_Segmenter(),
+            config=ObservationRuntimeConfig(loop=True),
+        )
+
+    output = tmp_path / "browser-accepted"
+    observations_path = run_observation_pipeline(
+        video=video,
+        bundle=bundle,
+        output_dir=output,
+        tracker=_Tracker(),
+        segmenter=_Segmenter(),
+        browser_endpoint_guide_bundle=guide,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        config=ObservationRuntimeConfig(loop=True),
+    )
+    payload = json.loads(observations_path.read_text(encoding="utf-8"))
+    provenance = payload["provenance"]["first_frame_reference"]
+    assert provenance["mode"] == "browser_static_scene_override"
+    assert provenance["selected"]["sha256"] == _sha(guide / "guide_000.png")
+    assert provenance["selected"]["bytes"] == (guide / "guide_000.png").stat().st_size
+    assert provenance["selected"]["manifest"]["sha256"] == manifest_sha256
+    assert provenance["canonical_bundle"]["bundle_sha256"] == _sha(
+        bundle / "fitting_bundle.json"
+    )
+    assert provenance["canonical_bundle"]["immutable_manifest_sha256"] == _sha(
+        bundle / "immutable_manifest.json"
+    )
+    assert provenance["canonical_bundle"]["reference_rgb"]["sha256"] == _sha(
+        bundle / "reference_rgb.png"
+    )
+
+
+def test_browser_endpoint_override_is_loop_only_and_cli_all_or_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, browser_rgb, manifest_sha256 = _browser_guide_bundle(
+        tmp_path, bundle, canonical
+    )
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+    video = tmp_path / "browser-endpoint.mp4"
+    _video(video, browser_rgb)
+    output = tmp_path / "not-loop"
+    with pytest.raises(ContractError, match="only for loop seed selection"):
+        select_anchor_seeds(
+            bundle,
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        )
+    with pytest.raises(ContractError, match="only for loop observations"):
+        run_observation_pipeline(
+            video=video,
+            bundle=bundle,
+            output_dir=output,
+            tracker=_Tracker(),
+            segmenter=_Segmenter(),
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        )
+    assert not output.exists()
+
+    args = tracking_cli._parser().parse_args(
+        [
+            "observe",
+            "--video",
+            str(video),
+            "--bundle",
+            str(bundle),
+            "--output-dir",
+            str(tmp_path / "unused"),
+            "--browser-endpoint-guide-bundle",
+            str(guide),
+        ]
+    )
+    with pytest.raises(FittingError, match="requires both"):
+        tracking_cli._browser_reference_cli_kwargs(args)
+
+
+def test_browser_endpoint_manifest_cannot_be_repinned_to_another_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, _ = _browser_guide_bundle(tmp_path, bundle, canonical)
+    manifest_path = guide / "immutable_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source_reference_sha256_string"] = "0" * 64
+    _write_json(manifest_path, manifest)
+    repinned_sha256 = _sha(manifest_path)
+    _authorize_browser_manifest(monkeypatch, repinned_sha256)
+
+    with pytest.raises(ContractError, match="canonical bundle RGB"):
+        select_anchor_seeds(
+            bundle,
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=repinned_sha256,
+            loop=True,
+        )
+
+
+def test_browser_endpoint_files_are_verified_from_manifest_pins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, manifest_sha256 = _browser_guide_bundle(tmp_path, bundle, canonical)
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+    first = guide / "guide_000.png"
+    first.write_bytes(first.read_bytes() + b"tampered")
+
+    with pytest.raises(ContractError, match="byte-size mismatch"):
+        select_anchor_seeds(
+            bundle,
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=manifest_sha256,
+            loop=True,
+        )
+
+
+def test_browser_endpoint_manifest_rejects_path_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, _ = _browser_guide_bundle(tmp_path, bundle, canonical)
+    manifest_path = guide / "immutable_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    escaped = tmp_path / "escaped.png"
+    escaped.write_bytes((guide / "guide_000.png").read_bytes())
+    manifest["frames_array"][0]["filename_string"] = "../escaped.png"
+    _write_json(manifest_path, manifest)
+    repinned_sha256 = _sha(manifest_path)
+    _authorize_browser_manifest(monkeypatch, repinned_sha256)
+
+    with pytest.raises(ContractError, match="escapes the browser guide bundle"):
+        select_anchor_seeds(
+            bundle,
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=repinned_sha256,
+            loop=True,
+        )
+
+
+def test_browser_endpoint_manifest_and_first_frame_are_each_read_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, manifest_sha256 = _browser_guide_bundle(tmp_path, bundle, canonical)
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+    manifest_path = (guide / "immutable_manifest.json").resolve()
+    first_path = (guide / "guide_000.png").resolve()
+    original = Path.read_bytes
+    reads: dict[Path, int] = {}
+
+    def counted(path: Path) -> bytes:
+        resolved = path.resolve()
+        reads[resolved] = reads.get(resolved, 0) + 1
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    select_anchor_seeds(
+        bundle,
+        browser_endpoint_guide_bundle=guide,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        loop=True,
+    )
+    assert reads[manifest_path] == 1
+    assert reads[first_path] == 1
 
 
 def test_immutable_manifest_rejects_tampered_reference_rgb(tmp_path: Path) -> None:

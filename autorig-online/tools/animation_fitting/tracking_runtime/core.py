@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 import hashlib
+import io
 import json
 import math
 import os
@@ -36,6 +37,12 @@ from .runtime_lock import sha256_file
 
 OBSERVATIONS_SCHEMA = "autorig-fitting-observations.v1"
 OUTPUT_MANIFEST_SCHEMA = "autorig-tracking-observation-bundle.v1"
+FIRST_FRAME_REFERENCE_SCHEMA = "autorig-tracking-first-frame-reference.v1"
+BROWSER_GUIDE_MANIFEST_SCHEMA = "autorig-browser-ltx-static-scene-guide-bundle.v1"
+BROWSER_STATIC_SCENE_CONTRACT = "v11_unified_browser_static_scene_v1"
+AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256 = frozenset(
+    {"9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173"}
+)
 
 
 @dataclass(frozen=True)
@@ -120,6 +127,390 @@ def _load_rgb(path: Path) -> np.ndarray:
         raise ContractError(f"Cannot read image {path}: {exc}") from exc
 
 
+def _required_lower_sha256(value: Any, field: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ContractError(f"{field} must be an exact lowercase SHA-256")
+    return value
+
+
+def _normalized_bundle_sha256(value: Any, field: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
+        raise ContractError(f"{field} must be an exact SHA-256")
+    return value.lower()
+
+
+def _required_positive_bytes(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ContractError(f"{field} must be a positive integer byte count")
+    return value
+
+
+def _read_pinned_bytes(
+    path: Path,
+    *,
+    expected_sha256: str,
+    expected_bytes: int | None,
+    field: str,
+) -> bytes:
+    source = path.resolve()
+    try:
+        payload = source.read_bytes()
+    except OSError as exc:
+        raise ContractError(f"Cannot read {field} {source}: {exc}") from exc
+    actual_bytes = len(payload)
+    if expected_bytes is not None and actual_bytes != expected_bytes:
+        raise ContractError(
+            f"{field} byte-size mismatch: expected {expected_bytes}, got {actual_bytes}"
+        )
+    actual_sha256 = hashlib.sha256(payload).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise ContractError(
+            f"{field} SHA-256 mismatch: expected {expected_sha256}, got {actual_sha256}"
+        )
+    return payload
+
+
+def _decode_pinned_png(payload: bytes, path: Path) -> np.ndarray:
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise DependencyUnavailableError(
+            "Pillow is required by the tracking runtime"
+        ) from exc
+    try:
+        with Image.open(io.BytesIO(payload)) as image:
+            if image.format != "PNG":
+                raise ContractError(
+                    f"Browser first-frame reference must be PNG, got {image.format!r}: {path}"
+                )
+            return np.asarray(image.convert("RGB"), dtype=np.uint8)
+    except ContractError:
+        raise
+    except Exception as exc:
+        raise ContractError(
+            f"Cannot decode browser first-frame reference {path}: {exc}"
+        ) from exc
+
+
+def _manifest_artifact_path(root: Path, filename: Any, field: str) -> Path:
+    if not isinstance(filename, str) or not filename:
+        raise ContractError(f"{field} must be a non-empty relative filename")
+    relative = Path(filename)
+    if relative.is_absolute() or relative.drive:
+        raise ContractError(f"{field} must be relative to the browser guide bundle")
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ContractError(f"{field} escapes the browser guide bundle") from exc
+    return candidate
+
+
+def _browser_reference_arguments(
+    *,
+    bundle: str | Path | None,
+    manifest_sha256: str | None,
+) -> tuple[Path, str] | None:
+    values = (bundle, manifest_sha256)
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise ContractError(
+            "Browser first-frame override requires both "
+            "browser_endpoint_guide_bundle and its manifest SHA-256"
+        )
+    if not isinstance(bundle, (str, Path)) or not str(bundle):
+        raise ContractError("browser_endpoint_guide_bundle must be a non-empty path")
+    pinned_sha256 = _required_lower_sha256(
+        manifest_sha256, "browser_guide_manifest_sha256"
+    )
+    if pinned_sha256 not in AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256:
+        raise ContractError(
+            "Browser endpoint guide manifest SHA-256 is not in the authoritative allowlist"
+        )
+    return (Path(bundle).resolve(), pinned_sha256)
+
+
+def _object_field(value: Any, field: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ContractError(f"{field} must be an object")
+    return value
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ContractError(f"Browser guide manifest duplicates JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def _browser_first_frame_reference(
+    rig: RigBundle,
+    canonical_rgb: np.ndarray,
+    arguments: tuple[Path, str],
+) -> tuple[np.ndarray, dict[str, Any]]:
+    guide_root, manifest_sha256 = arguments
+    if not guide_root.is_dir():
+        raise ContractError(
+            f"Browser endpoint guide bundle does not exist: {guide_root}"
+        )
+    manifest_path = (guide_root / "immutable_manifest.json").resolve()
+    try:
+        manifest_path.relative_to(guide_root)
+    except ValueError as exc:
+        raise ContractError(
+            "Browser guide manifest resolves outside the authorized guide bundle"
+        ) from exc
+    manifest_payload = _read_pinned_bytes(
+        manifest_path,
+        expected_sha256=manifest_sha256,
+        expected_bytes=None,
+        field="browser guide manifest",
+    )
+    manifest_bytes = len(manifest_payload)
+    try:
+        manifest = json.loads(
+            manifest_payload.decode("utf-8"), object_pairs_hook=_unique_json_object
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ContractError(f"Invalid browser guide manifest {manifest_path}: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise ContractError("Browser guide manifest must contain a JSON object")
+    if manifest.get("schema") != BROWSER_GUIDE_MANIFEST_SCHEMA:
+        raise ContractError(
+            "Unsupported browser guide manifest schema; expected "
+            f"{BROWSER_GUIDE_MANIFEST_SCHEMA}"
+        )
+    if manifest.get("status") != "PASS":
+        raise ContractError("Browser guide manifest status must be PASS")
+    if manifest.get("browserOnly") is not True or manifest.get("blenderUsed") is not False:
+        raise ContractError(
+            "Browser guide manifest must assert browserOnly=true and blenderUsed=false"
+        )
+    renderer = _object_field(manifest.get("renderer_object"), "renderer_object")
+    if (
+        renderer.get("renderer_string") != "browser_threejs"
+        or renderer.get("scene_contract_string") != BROWSER_STATIC_SCENE_CONTRACT
+        or renderer.get("all_guide_frames_browser_rendered_bool") is not True
+        or renderer.get("blender_used_bool") is not False
+    ):
+        raise ContractError(
+            "Browser guide manifest does not satisfy the v11 unified static-scene renderer contract"
+        )
+    static_scene_qa = _object_field(manifest.get("staticSceneQa"), "staticSceneQa")
+    if (
+        static_scene_qa.get("schema") != "autorig-browser-static-scene-qa.v1"
+        or static_scene_qa.get("status") != "PASS"
+        or static_scene_qa.get("decoded_rgb_statistics_bool") is not True
+        or static_scene_qa.get("endpoint_byte_identical_bool") is not True
+    ):
+        raise ContractError("Browser guide static-scene QA contract is not PASS")
+    static_scene_renderer = _object_field(
+        manifest.get("staticSceneRenderer"), "staticSceneRenderer"
+    )
+    if static_scene_renderer.get("contract") != BROWSER_STATIC_SCENE_CONTRACT:
+        raise ContractError("Browser guide static-scene renderer contract is invalid")
+
+    canonical_record = _object_field(
+        _object_field(rig.metadata.get("artifacts"), "bundle artifacts").get("rgb"),
+        "bundle artifacts.rgb",
+    )
+    canonical_sha256 = _normalized_bundle_sha256(
+        canonical_record.get("sha256"), "bundle artifacts.rgb.sha256"
+    )
+    canonical_bytes = _required_positive_bytes(
+        canonical_record.get("bytes"), "bundle artifacts.rgb.bytes"
+    )
+    if manifest.get("source_reference_sha256_string") != canonical_sha256:
+        raise ContractError(
+            "Browser guide manifest source reference does not match the canonical bundle RGB"
+        )
+    if manifest.get("source_reference_is_guide_bool") is not False:
+        raise ContractError(
+            "Browser guide manifest must preserve canonical RGB as provenance, not as a guide"
+        )
+    endpoint_sha256 = _required_lower_sha256(
+        manifest.get("endpoint_guide_sha256_string"),
+        "endpoint_guide_sha256_string",
+    )
+
+    source = _object_field(manifest.get("source"), "source")
+    source_reference = _object_field(source.get("referenceRgb"), "source.referenceRgb")
+    if (
+        source_reference.get("filename") != canonical_record.get("filename")
+        or source_reference.get("sha256") != canonical_sha256
+        or source_reference.get("bytes") != canonical_bytes
+    ):
+        raise ContractError(
+            "Browser guide source.referenceRgb does not match the canonical bundle"
+        )
+    source_manifest = _object_field(
+        source.get("immutableManifest"), "source.immutableManifest"
+    )
+    if (
+        source_manifest.get("filename") != rig.immutable_manifest_path.name
+        or source_manifest.get("sha256") != rig.immutable_manifest_sha256
+        or source_manifest.get("bytes") != rig.immutable_manifest_path.stat().st_size
+    ):
+        raise ContractError(
+            "Browser guide immutable-manifest provenance does not match the canonical bundle"
+        )
+    source_bundle = _object_field(source.get("fittingBundle"), "source.fittingBundle")
+    if (
+        source_bundle.get("filename") != rig.metadata_path.name
+        or source_bundle.get("sha256") != rig.metadata_sha256
+        or source_bundle.get("bytes") != rig.metadata_path.stat().st_size
+    ):
+        raise ContractError(
+            "Browser guide fitting-bundle provenance does not match the canonical bundle"
+        )
+    bundle_source = _object_field(rig.metadata.get("source"), "bundle source")
+    canonical_source_sha256 = _normalized_bundle_sha256(
+        bundle_source.get("sha256"), "bundle source.sha256"
+    )
+    if source.get("sourceModelSha256") != canonical_source_sha256:
+        raise ContractError(
+            "Browser guide source model provenance does not match the canonical bundle"
+        )
+    rig_type = bundle_source.get("rig_type")
+    if not isinstance(rig_type, str) or not rig_type or manifest.get("rigType") != rig_type:
+        raise ContractError("Browser guide rigType does not match the canonical bundle")
+
+    frames = manifest.get("frames_array")
+    if not isinstance(frames, list) or not frames:
+        raise ContractError("Browser guide frames_array must be a non-empty array")
+    cycle_frame_count = manifest.get("cycle_frame_count_int")
+    if (
+        isinstance(cycle_frame_count, bool)
+        or not isinstance(cycle_frame_count, int)
+        or cycle_frame_count < 2
+    ):
+        raise ContractError("Browser guide cycle_frame_count_int must be at least two")
+    guide_count = manifest.get("guide_count_int")
+    if (
+        isinstance(guide_count, bool)
+        or not isinstance(guide_count, int)
+        or guide_count != len(frames)
+    ):
+        raise ContractError("Browser guide guide_count_int does not match frames_array")
+    manifest_root = manifest_path.parent.resolve()
+    by_index: dict[int, dict[str, Any]] = {}
+    frame_paths: dict[int, Path] = {}
+    frame_payloads: dict[int, bytes] = {}
+    for row in frames:
+        record = _object_field(row, "frames_array item")
+        index = record.get("frame_index_int")
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < 0
+            or index >= cycle_frame_count
+        ):
+            raise ContractError(
+                "Browser guide frame_index_int must lie inside the declared cycle"
+            )
+        if index in by_index:
+            raise ContractError(f"Browser guide frame index is duplicated: {index}")
+        by_index[index] = record
+        record_sha256 = _required_lower_sha256(
+            record.get("sha256_string"), f"frames_array[{index}].sha256_string"
+        )
+        record_bytes = _required_positive_bytes(
+            record.get("bytes_int"), f"frames_array[{index}].bytes_int"
+        )
+        frame_path = _manifest_artifact_path(
+            manifest_root,
+            record.get("filename_string"),
+            f"frames_array[{index}].filename_string",
+        )
+        if frame_path.suffix.lower() != ".png":
+            raise ContractError(f"Browser guide frame {index} must be a PNG")
+        frame_paths[index] = frame_path
+        frame_payloads[index] = _read_pinned_bytes(
+            frame_path,
+            expected_sha256=record_sha256,
+            expected_bytes=record_bytes,
+            field=f"browser guide frame {index}",
+        )
+    last_index = cycle_frame_count - 1
+    if 0 not in by_index or last_index not in by_index:
+        raise ContractError(
+            f"Browser guide manifest must contain endpoint frames 0 and {last_index}"
+        )
+    reference_path: Path | None = None
+    reference_sha256: str | None = None
+    reference_bytes: int | None = None
+    reference_payload: bytes | None = None
+    for endpoint_index in (0, last_index):
+        record = by_index[endpoint_index]
+        record_sha256 = _required_lower_sha256(
+            record.get("sha256_string"),
+            f"frames_array[{endpoint_index}].sha256_string",
+        )
+        record_bytes = _required_positive_bytes(
+            record.get("bytes_int"), f"frames_array[{endpoint_index}].bytes_int"
+        )
+        if record_sha256 != endpoint_sha256:
+            raise ContractError(
+                f"Browser guide frame {endpoint_index} does not match endpoint SHA-256"
+            )
+        endpoint_path = frame_paths[endpoint_index]
+        endpoint_payload = frame_payloads[endpoint_index]
+        if endpoint_index == 0:
+            reference_path = endpoint_path
+            reference_sha256 = record_sha256
+            reference_bytes = record_bytes
+            reference_payload = endpoint_payload
+        elif record_bytes != reference_bytes or endpoint_payload != reference_payload:
+            raise ContractError(
+                "Browser guide endpoint frames are not byte-identical"
+            )
+    if (
+        reference_path is None
+        or reference_sha256 is None
+        or reference_bytes is None
+        or reference_payload is None
+    ):
+        raise ContractError("Browser guide first-frame reference was not resolved")
+    reference_rgb = _decode_pinned_png(reference_payload, reference_path)
+    if reference_rgb.shape != canonical_rgb.shape:
+        raise ContractError(
+            "Browser first-frame reference dimensions do not match canonical bundle RGB: "
+            f"{reference_rgb.shape[:2]} vs {canonical_rgb.shape[:2]}"
+        )
+    return reference_rgb, {
+        "schema": FIRST_FRAME_REFERENCE_SCHEMA,
+        "mode": "browser_static_scene_override",
+        "selected": {
+            "path": str(reference_path),
+            "sha256": reference_sha256,
+            "bytes": reference_bytes,
+            "manifest": {
+                "path": str(manifest_path),
+                "sha256": manifest_sha256,
+                "bytes": manifest_bytes,
+                "schema": BROWSER_GUIDE_MANIFEST_SCHEMA,
+                "scene_contract": BROWSER_STATIC_SCENE_CONTRACT,
+                "cycle_frame_count": cycle_frame_count,
+            },
+        },
+        "canonical_bundle": {
+            "path": str(rig.root),
+            "bundle_sha256": rig.metadata_sha256,
+            "immutable_manifest_sha256": rig.immutable_manifest_sha256,
+            "source_model_sha256": canonical_source_sha256,
+            "rig_type": rig_type,
+            "reference_rgb": {
+                "path": str(_artifact_path(rig, "rgb")),
+                "sha256": canonical_sha256,
+                "bytes": canonical_bytes,
+            },
+        },
+    }
+
+
 def _load_mask(path: Path) -> np.ndarray:
     try:
         from PIL import Image
@@ -155,6 +546,9 @@ def select_anchor_seeds(
     max_tracks: int = 64,
     minimum_pixel_separation: float = 2.0,
     priority_anchor_ids: tuple[str, ...] = (),
+    browser_endpoint_guide_bundle: str | Path | None = None,
+    browser_endpoint_guide_manifest_sha256: str | None = None,
+    loop: bool = False,
 ) -> SeedSet:
     """Select one visible, high-weight surface anchor per deform region.
 
@@ -171,13 +565,51 @@ def select_anchor_seeds(
     ):
         raise ContractError("Priority anchor IDs must be unique and fit max_tracks")
     rig = load_rig_bundle(bundle)
-    reference_rgb = _load_rgb(_artifact_path(rig, "rgb"))
+    canonical_rgb_path = _artifact_path(rig, "rgb")
+    canonical_rgb = _load_rgb(canonical_rgb_path)
     reference_mask = _load_mask(_artifact_path(rig, "mask"))
-    if reference_rgb.shape[:2] != reference_mask.shape:
+    if canonical_rgb.shape[:2] != reference_mask.shape:
         raise ContractError("Canonical RGB and mask dimensions do not match")
     if (rig.camera.height, rig.camera.width) != reference_mask.shape:
         raise ContractError(
             "Canonical camera dimensions do not match reference artifacts"
+        )
+    browser_reference = _browser_reference_arguments(
+        bundle=browser_endpoint_guide_bundle,
+        manifest_sha256=browser_endpoint_guide_manifest_sha256,
+    )
+    if not isinstance(loop, bool):
+        raise ContractError("loop must be boolean")
+    if browser_reference is not None and not loop:
+        raise ContractError(
+            "Browser endpoint guide reference override is accepted only for loop seed selection"
+        )
+    canonical_record = _object_field(
+        _object_field(rig.metadata.get("artifacts"), "bundle artifacts").get("rgb"),
+        "bundle artifacts.rgb",
+    )
+    reference_rgb = canonical_rgb
+    reference_provenance = {
+        "schema": FIRST_FRAME_REFERENCE_SCHEMA,
+        "mode": "canonical_bundle_rgb",
+        "selected": {
+            "path": str(canonical_rgb_path),
+            "sha256": _normalized_bundle_sha256(
+                canonical_record.get("sha256"), "bundle artifacts.rgb.sha256"
+            ),
+            "bytes": _required_positive_bytes(
+                canonical_record.get("bytes"), "bundle artifacts.rgb.bytes"
+            ),
+        },
+        "canonical_bundle": {
+            "path": str(rig.root),
+            "bundle_sha256": rig.metadata_sha256,
+            "immutable_manifest_sha256": rig.immutable_manifest_sha256,
+        },
+    }
+    if browser_reference is not None:
+        reference_rgb, reference_provenance = _browser_first_frame_reference(
+            rig, canonical_rgb, browser_reference
         )
 
     grouped: dict[str, list[tuple[str, np.ndarray, float, int]]] = {}
@@ -239,6 +671,7 @@ def select_anchor_seeds(
         reference_rgb=reference_rgb,
         bundle_sha256=rig.metadata_sha256,
         immutable_manifest_sha256=rig.immutable_manifest_sha256,
+        reference_provenance=reference_provenance,
     )
 
 
@@ -571,7 +1004,12 @@ def _validate_results(
     if track_count < config.min_track_count or track_count > config.max_track_count:
         failures.append("track_count")
     if alignment["combined_correlation"] < config.min_alignment_correlation:
-        failures.append("canonical_first_frame_alignment")
+        failures.append(
+            "browser_first_frame_alignment"
+            if seeds.reference_provenance.get("mode")
+            == "browser_static_scene_override"
+            else "canonical_first_frame_alignment"
+        )
     if seed_inside_ratio < config.min_seed_inside_mask_ratio:
         failures.append("canonical_seed_mask_membership")
     if visible_ratio < config.min_visible_ratio:
@@ -677,6 +1115,8 @@ def run_observation_pipeline(
     segmenter: MaskBackend,
     depth_backend: DepthBackend | None = None,
     contact_profile: str | Path | None = None,
+    browser_endpoint_guide_bundle: str | Path | None = None,
+    browser_endpoint_guide_manifest_sha256: str | None = None,
     config: ObservationRuntimeConfig | None = None,
     ffprobe: str | None = None,
 ) -> Path:
@@ -688,6 +1128,14 @@ def run_observation_pipeline(
 
     cfg = config or ObservationRuntimeConfig()
     cfg.validate()
+    browser_reference = _browser_reference_arguments(
+        bundle=browser_endpoint_guide_bundle,
+        manifest_sha256=browser_endpoint_guide_manifest_sha256,
+    )
+    if browser_reference is not None and not cfg.loop:
+        raise ContractError(
+            "Browser endpoint guide reference override is accepted only for loop observations"
+        )
     destination = Path(output_dir).resolve()
     if destination.exists():
         raise ContractError(
@@ -725,11 +1173,31 @@ def run_observation_pipeline(
         bundle,
         max_tracks=cfg.max_track_count,
         priority_anchor_ids=() if profile is None else profile.priority_anchor_ids,
+        browser_endpoint_guide_bundle=browser_endpoint_guide_bundle,
+        browser_endpoint_guide_manifest_sha256=(
+            browser_endpoint_guide_manifest_sha256
+        ),
+        loop=cfg.loop,
     )
+    if browser_reference is not None:
+        expected_frames = seeds.reference_provenance["selected"]["manifest"][
+            "cycle_frame_count"
+        ]
+        if source_video.frame_count != expected_frames:
+            raise ContractError(
+                "Browser endpoint guide cycle length does not match the video: "
+                f"manifest={expected_frames}, video={source_video.frame_count}"
+            )
     aligned_seeds, alignment = _align_seeds(seeds, source_video.frames_bgr[0])
     if alignment["combined_correlation"] < cfg.min_alignment_correlation:
+        reference_label = (
+            "the pinned browser static-scene endpoint guide"
+            if aligned_seeds.reference_provenance.get("mode")
+            == "browser_static_scene_override"
+            else "the canonical actionless render"
+        )
         raise ContractError(
-            "First video frame does not match the canonical actionless render: "
+            f"First video frame does not match {reference_label}: "
             f"correlation={alignment['combined_correlation']:.4f}, "
             f"required={cfg.min_alignment_correlation:.4f}"
         )
@@ -858,6 +1326,7 @@ def run_observation_pipeline(
             "bundle": str(Path(bundle).resolve()),
             "bundle_sha256": aligned_seeds.bundle_sha256,
             "immutable_manifest_sha256": aligned_seeds.immutable_manifest_sha256,
+            "first_frame_reference": aligned_seeds.reference_provenance,
             "alignment": alignment,
             "tracker": track_result.provenance,
             "segmenter": mask_result.provenance,

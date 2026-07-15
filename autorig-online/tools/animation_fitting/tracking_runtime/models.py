@@ -37,6 +37,7 @@ class SeedSet:
     reference_rgb: np.ndarray
     bundle_sha256: str
     immutable_manifest_sha256: str
+    reference_provenance: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
