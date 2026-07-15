@@ -1,4 +1,5 @@
 const SKELETON_SCHEMA = 'autorig-browser-fitting-skeleton.v1';
+const FITTED_SCHEMA = 'autorig-browser-fitted-animation.v1';
 const REQUIRED_LIMB_LABELS = Object.freeze([
     'fore_left',
     'fore_right',
@@ -223,6 +224,21 @@ function traverse(root, callback) {
         (node.children || []).forEach(visit);
     };
     visit(root);
+}
+
+function namedBones(model, names) {
+    const wanted = new Set(names);
+    const matches = new Map([...wanted].map((name) => [name, []]));
+    traverse(model, (node) => {
+        if (!(node?.isBone === true || node?.type === 'Bone') || !matches.has(node.name)) return;
+        matches.get(node.name).push(node);
+    });
+    const result = new Map();
+    matches.forEach((items, name) => {
+        if (items.length !== 1) throw new Error(`fitted hierarchy bone ${name} must exist exactly once`);
+        result.set(name, items[0]);
+    });
+    return result;
 }
 
 function requiredBones(model, chains) {
@@ -550,6 +566,327 @@ export function buildHorse2BrowserFittingSkeleton(options = {}) {
             terminalPolicy: 'seven_bone_heads_six_segments_to_toes_head',
             sharedBoneRoot: String(boneRoot.name || ''),
             positionMappings: positionMappingPolicy(options.includePositionMappings),
+        },
+    };
+}
+
+function multiplyQuaternion(left, right) {
+    if (typeof left?.multiply !== 'function') throw new Error('THREE.Quaternion.multiply() is required');
+    return left.multiply(right);
+}
+
+function setQuaternionFromUnitVectors(quaternion, from, to) {
+    if (typeof quaternion?.setFromUnitVectors !== 'function') {
+        throw new Error('THREE.Quaternion.setFromUnitVectors() is required');
+    }
+    return quaternion.setFromUnitVectors(from, to);
+}
+
+function assignVector(target, source, field) {
+    if (typeof target?.copy !== 'function') throw new Error(`${field}.copy() is required`);
+    target.copy(source);
+}
+
+function assignQuaternion(target, source, field) {
+    if (typeof target?.copy !== 'function') throw new Error(`${field}.copy() is required`);
+    target.copy(source);
+}
+
+function objectDepth(object) {
+    let depth = 0;
+    let cursor = object?.parent;
+    while (cursor) {
+        depth += 1;
+        cursor = cursor.parent;
+    }
+    return depth;
+}
+
+function outputPixelToNdc(pixel, projection, z = 0) {
+    const outputX = finite(pixel[0], 'fitted pixel x');
+    const outputY = finite(pixel[1], 'fitted pixel y');
+    const referenceX = (outputX - projection.ltx.pad[0]) / projection.ltx.scale;
+    const referenceY = (outputY - projection.ltx.pad[1]) / projection.ltx.scale;
+    const sourceX = (referenceX - projection.capture.pad[0]) / projection.capture.scale;
+    const sourceY = (referenceY - projection.capture.pad[1]) / projection.capture.scale;
+    return [
+        2 * sourceX / projection.sourceViewport[0] - 1,
+        1 - 2 * sourceY / projection.sourceViewport[1],
+        z,
+    ];
+}
+
+function unprojectPixel(THREE, camera, pixel, projection, z) {
+    if (typeof THREE?.Vector3 !== 'function') throw new Error('THREE.Vector3 is required');
+    const ndc = outputPixelToNdc(pixel, projection, z);
+    const value = new THREE.Vector3(ndc[0], ndc[1], ndc[2]);
+    if (typeof value.unproject !== 'function') throw new Error('THREE.Vector3.unproject() is required');
+    return value.unproject(camera);
+}
+
+function projectedPixel(world, camera, projection) {
+    if (typeof world?.clone !== 'function') throw new Error('world point clone() is required');
+    const ndc = world.clone().project(camera);
+    return projection.ndcToOutput([ndc.x, ndc.y, ndc.z]);
+}
+
+function raySpherePoint(THREE, camera, pixel, projection, center, radius, preferredDirection) {
+    const near = unprojectPixel(THREE, camera, pixel, projection, -1);
+    const far = unprojectPixel(THREE, camera, pixel, projection, 1);
+    const direction = far.clone().sub(near).normalize();
+    const offset = near.clone().sub(center);
+    const b = offset.dot(direction);
+    const discriminant = b * b - (offset.dot(offset) - radius * radius);
+    if (discriminant >= 0) {
+        const root = Math.sqrt(discriminant);
+        const candidates = [-b - root, -b + root]
+            .filter((distance) => Number.isFinite(distance) && distance >= 0)
+            .map((distance) => near.clone().add(direction.clone().multiplyScalar(distance)));
+        if (candidates.length) {
+            candidates.sort((left, right) => (
+                right.clone().sub(center).normalize().dot(preferredDirection)
+                - left.clone().sub(center).normalize().dot(preferredDirection)
+            ));
+            return { point: candidates[0], usedFallback: false };
+        }
+    }
+
+    // A clamped 2D solve can make a pixel ray geometrically unreachable by a
+    // fixed 3D segment. Keep the chain continuous and preserve its exact world
+    // length while retaining the requested screen-space direction.
+    const centerNdc = center.clone().project(camera);
+    const planeTarget = unprojectPixel(THREE, camera, pixel, projection, centerNdc.z);
+    const fallbackDirection = planeTarget.sub(center);
+    if (fallbackDirection.lengthSq() <= 1e-18) fallbackDirection.copy(preferredDirection);
+    return {
+        point: center.clone().add(fallbackDirection.normalize().multiplyScalar(radius)),
+        usedFallback: true,
+    };
+}
+
+function normalizedFittedFrames(fitted, skeleton) {
+    if (!fitted || fitted.schema !== FITTED_SCHEMA) throw new Error(`fitted.schema must be ${FITTED_SCHEMA}`);
+    if (!Number.isInteger(fitted.frameCount) || fitted.frameCount < 2) throw new Error('fitted.frameCount must be at least 2');
+    if (!Array.isArray(fitted.frames) || fitted.frames.length !== fitted.frameCount) {
+        throw new Error('fitted.frames must contain every fitted frame');
+    }
+    const labels = Object.keys(skeleton?.limbs || {});
+    if (!labels.length) throw new Error('skeleton.limbs must not be empty');
+    fitted.frames.forEach((frame, frameIndex) => labels.forEach((label) => {
+        const expected = skeleton.limbs[label].sourceBoneChain?.length;
+        const points = frame?.limbs?.[label]?.points;
+        if (!Number.isInteger(expected) || expected < 2) {
+            throw new Error(`skeleton limb ${label} is missing sourceBoneChain`);
+        }
+        if (!Array.isArray(points) || points.length !== expected) {
+            throw new Error(`fitted frame ${frameIndex} limb ${label} must contain ${expected} points`);
+        }
+        points.forEach((point, pointIndex) => {
+            if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) {
+                throw new Error(`fitted frame ${frameIndex} limb ${label} point ${pointIndex} is invalid`);
+            }
+        });
+    }));
+    return labels;
+}
+
+/**
+ * Bake the pure 2D browser solve through the real Three.js hierarchy.
+ *
+ * Horse_2 deform names form an anatomical chain, but exported helper/control
+ * parents can interrupt the Object3D parent chain. Directly assigning local
+ * quaternion tracks therefore moves logical children independently and breaks
+ * their 3D segment lengths. This bake reconstructs each fitted limb as one
+ * continuous world-space chain, then resolves every bone transform against its
+ * actual animated parent. The result remains a regular browser AnimationClip;
+ * Blender is not involved.
+ */
+export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
+    const { THREE, model, camera, skeleton, fitted } = options;
+    if (!THREE || !model || !camera || !skeleton || !fitted) {
+        throw new Error('THREE, model, camera, skeleton and fitted are required');
+    }
+    if (skeleton.schema !== SKELETON_SCHEMA) throw new Error(`skeleton.schema must be ${SKELETON_SCHEMA}`);
+    if (!THREE.AnimationClip || !THREE.QuaternionKeyframeTrack || !THREE.VectorKeyframeTrack) {
+        throw new Error('THREE animation clip and keyframe track constructors are required');
+    }
+    const labels = normalizedFittedFrames(fitted, skeleton);
+    const outputResolution = resolution(
+        options.outputResolution || skeleton.projection?.outputResolution,
+        'outputResolution',
+    );
+    const projection = createViewerToLtxProjection({
+        sourceViewport: skeleton.projection?.sourceViewport,
+        referenceResolution: skeleton.projection?.referenceResolution,
+        outputResolution,
+    });
+    model.updateWorldMatrix?.(true, true);
+    camera.updateProjectionMatrix?.();
+    camera.updateWorldMatrix?.(true, false);
+
+    const chainNames = labels.flatMap((label) => skeleton.limbs[label].sourceBoneChain);
+    const bones = namedBones(model, chainNames);
+    const uniqueBones = [...new Set(chainNames)].map((name) => bones.get(name));
+    const snapshots = new Map(uniqueBones.map((bone) => [bone, {
+        position: bone.position.clone(),
+        quaternion: bone.quaternion.clone(),
+        scale: bone.scale?.clone?.() || null,
+    }]));
+    const rest = new Map(uniqueBones.map((bone) => [bone.name, {
+        head: worldHead(THREE, bone),
+        quaternion: bone.getWorldQuaternion(new THREE.Quaternion()).clone(),
+    }]));
+    const perLimb = new Map(labels.map((label) => {
+        const names = skeleton.limbs[label].sourceBoneChain;
+        const segments = names.slice(0, -1).map((name, index) => {
+            const start = rest.get(name).head;
+            const end = rest.get(names[index + 1]).head;
+            const vector = end.clone().sub(start);
+            return { length: vector.length(), direction: vector.normalize() };
+        });
+        return [label, { names, segments }];
+    }));
+    const times = Array.from({ length: fitted.frameCount }, (_, frame) => frame / finite(fitted.fps, 'fitted.fps'));
+    const quaternionValues = new Map(uniqueBones.map((bone) => [bone.name, []]));
+    const positionValues = new Map(uniqueBones.map((bone) => [bone.name, []]));
+    let maximumSegmentLengthDriftWorld = 0;
+    let maximumHierarchyBakeReprojectionErrorPx = 0;
+    let maximumRequestedFittedPointErrorPx = 0;
+    let unreachablePixelRays = 0;
+
+    const restore = () => {
+        snapshots.forEach((snapshot, bone) => {
+            assignVector(bone.position, snapshot.position, `${bone.name}.position`);
+            assignQuaternion(bone.quaternion, snapshot.quaternion, `${bone.name}.quaternion`);
+            if (snapshot.scale && bone.scale) assignVector(bone.scale, snapshot.scale, `${bone.name}.scale`);
+        });
+        model.updateWorldMatrix?.(true, true);
+    };
+
+    try {
+        fitted.frames.forEach((frame) => {
+            restore();
+            const desired = new Map();
+            labels.forEach((label) => {
+                const { names, segments } = perLimb.get(label);
+                const pixels = frame.limbs[label].points;
+                const restRoot = rest.get(names[0]).head;
+                const rootNdcZ = restRoot.clone().project(camera).z;
+                const points = [unprojectPixel(THREE, camera, pixels[0], projection, rootNdcZ)];
+                segments.forEach((segment, index) => {
+                    const result = raySpherePoint(
+                        THREE,
+                        camera,
+                        pixels[index + 1],
+                        projection,
+                        points[index],
+                        segment.length,
+                        segment.direction,
+                    );
+                    if (result.usedFallback) unreachablePixelRays += 1;
+                    points.push(result.point);
+                });
+                names.forEach((name, index) => {
+                    const restQuaternion = rest.get(name).quaternion;
+                    const segmentIndex = Math.min(index, segments.length - 1);
+                    const desiredDirection = points[segmentIndex + 1].clone().sub(points[segmentIndex]).normalize();
+                    const delta = setQuaternionFromUnitVectors(
+                        new THREE.Quaternion(),
+                        segments[segmentIndex].direction,
+                        desiredDirection,
+                    );
+                    desired.set(name, {
+                        head: points[index],
+                        pixel: pixels[index],
+                        quaternion: multiplyQuaternion(delta, restQuaternion.clone()).normalize(),
+                    });
+                });
+            });
+
+            uniqueBones.sort((left, right) => objectDepth(left) - objectDepth(right)).forEach((bone) => {
+                model.updateWorldMatrix?.(true, true);
+                const target = desired.get(bone.name);
+                if (!target) throw new Error(`missing hierarchy target for ${bone.name}`);
+                if (!bone.parent || typeof bone.parent.worldToLocal !== 'function') {
+                    throw new Error(`${bone.name} parent.worldToLocal() is required`);
+                }
+                const localPosition = bone.parent.worldToLocal(target.head.clone());
+                const inverseParent = invertQuaternion(
+                    bone.parent.getWorldQuaternion(new THREE.Quaternion()).clone(),
+                );
+                const localQuaternion = multiplyQuaternion(inverseParent, target.quaternion.clone()).normalize();
+                assignVector(bone.position, localPosition, `${bone.name}.position`);
+                assignQuaternion(bone.quaternion, localQuaternion, `${bone.name}.quaternion`);
+            });
+            model.updateWorldMatrix?.(true, true);
+
+            uniqueBones.forEach((bone) => {
+                const quaternion = array4(bone.quaternion, `${bone.name}.bakedQuaternion`);
+                const position = array3(bone.position, `${bone.name}.bakedPosition`);
+                quaternionValues.get(bone.name).push(...quaternion);
+                positionValues.get(bone.name).push(...position);
+                const target = desired.get(bone.name);
+                const actual = worldHead(THREE, bone);
+                const actualPixel = projectedPixel(actual, camera, projection);
+                maximumHierarchyBakeReprojectionErrorPx = Math.max(
+                    maximumHierarchyBakeReprojectionErrorPx,
+                    distance2(
+                        actualPixel,
+                        projectedPixel(target.head, camera, projection),
+                    ),
+                );
+                maximumRequestedFittedPointErrorPx = Math.max(
+                    maximumRequestedFittedPointErrorPx,
+                    distance2(
+                        actualPixel,
+                        target.pixel,
+                    ),
+                );
+            });
+            labels.forEach((label) => {
+                const { names, segments } = perLimb.get(label);
+                names.slice(0, -1).forEach((name, index) => {
+                    const actualLength = worldHead(THREE, bones.get(name)).distanceTo(
+                        worldHead(THREE, bones.get(names[index + 1])),
+                    );
+                    maximumSegmentLengthDriftWorld = Math.max(
+                        maximumSegmentLengthDriftWorld,
+                        Math.abs(actualLength - segments[index].length),
+                    );
+                });
+            });
+        });
+    } finally {
+        restore();
+    }
+
+    const tracks = [];
+    uniqueBones.forEach((bone) => {
+        tracks.push(new THREE.QuaternionKeyframeTrack(
+            `${bone.name}.quaternion`,
+            times,
+            quaternionValues.get(bone.name),
+        ));
+        tracks.push(new THREE.VectorKeyframeTrack(
+            `${bone.name}.position`,
+            times,
+            positionValues.get(bone.name),
+        ));
+    });
+    const clip = new THREE.AnimationClip(
+        options.name || 'LTX_Fitted_HierarchyBake',
+        finite(fitted.durationSeconds, 'fitted.durationSeconds'),
+        tracks,
+    );
+    return {
+        clip,
+        qa: {
+            frameCount: fitted.frameCount,
+            animatedBones: uniqueBones.length,
+            maximumSegmentLengthDriftWorld,
+            maximumHierarchyBakeReprojectionErrorPx,
+            maximumRequestedFittedPointErrorPx,
+            unreachablePixelRays,
         },
     };
 }
