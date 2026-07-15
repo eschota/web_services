@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
@@ -15,8 +17,11 @@ from animation_fitting.controlled_experiment import (
     V7_EXPERIMENT_ID,
     V8_EXPERIMENT_ID,
     V9_EXPERIMENT_IDS,
+    V10_EXPERIMENT_ID,
+    V10_GUIDE_FRAME_INDICES,
     ControlledExperimentError,
     load_controlled_plan,
+    patch_browser_keyframe_guides,
     patch_guide_strengths,
     patch_native_resolution,
     run_controlled_experiment,
@@ -32,6 +37,24 @@ def write_json(path: Path, value: object) -> bytes:
     data = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
     path.write_bytes(data)
     return data
+
+
+def png_fixture(
+    *, width: int = 768, height: int = 448, rgb: tuple[int, int, int] = (32, 64, 96)
+) -> bytes:
+    def chunk(chunk_type: bytes, data: bytes) -> bytes:
+        crc = zlib.crc32(chunk_type)
+        crc = zlib.crc32(data, crc) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", crc)
+
+    scanline = b"\x00" + bytes(rgb) * width
+    raw = scanline * height
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw, level=9))
+        + chunk(b"IEND", b"")
+    )
 
 
 def build_contract(
@@ -112,7 +135,7 @@ def build_contract(
 def build_actionless_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
     bundle = tmp_path / "horse-canonical-f1"
     bundle.mkdir()
-    image_data = b"deterministic actionless RGB PNG fixture bytes"
+    image_data = png_fixture(rgb=(42, 65, 89))
     image = bundle / "reference_rgb.png"
     image.write_bytes(image_data)
     fitting_bundle_data = write_json(bundle / "fitting_bundle.json", {
@@ -180,6 +203,95 @@ def build_actionless_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
     experiment_path = tmp_path / "experiment-v8.json"
     write_json(experiment_path, experiment)
     return experiment_path, bundle, tmp_path / "artifacts-v8"
+
+
+def build_v10_contract(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    experiment_path, reference_bundle, artifacts = build_actionless_contract(tmp_path)
+    guide_bundle = tmp_path / "horse-walk-v10-browser-guides-f1"
+    guide_bundle.mkdir()
+    reference_data = (reference_bundle / "reference_rgb.png").read_bytes()
+    frame_payloads = {
+        0: reference_data,
+        6: png_fixture(rgb=(120, 40, 40)),
+        18: png_fixture(rgb=(40, 120, 40)),
+        30: png_fixture(rgb=(40, 40, 120)),
+        42: png_fixture(rgb=(120, 100, 40)),
+        48: reference_data,
+    }
+    strengths = {0: 0.8, 6: 0.7, 18: 0.7, 30: 0.7, 42: 0.7, 48: 0.8}
+    rows = []
+    for frame_index in V10_GUIDE_FRAME_INDICES:
+        filename = f"frame_{frame_index:03d}.png"
+        data = frame_payloads[frame_index]
+        (guide_bundle / filename).write_bytes(data)
+        rows.append({
+            "frame_index_int": frame_index,
+            "filename_string": filename,
+            "sha256_string": sha(data),
+            "bytes_int": len(data),
+        })
+    reference_sha = sha(reference_data)
+    manifest_data = write_json(guide_bundle / "immutable_manifest.json", {
+        "schema": "autorig-browser-ltx-guide-bundle.v1",
+        "source_reference_sha256_string": reference_sha,
+        "cycle_frame_count_int": 49,
+        "guide_count_int": 6,
+        "renderer_object": {
+            "renderer_string": "browser_threejs",
+            "blender_used_bool": False,
+        },
+        "frames_array": rows,
+    })
+    experiment = json.loads(experiment_path.read_text())
+    experiment["experiment_id_string"] = V10_EXPERIMENT_ID
+    experiment["seed_int"] = 6550110377254033429
+    experiment["guide_sequence_object"] = {
+        "ready_bool": True,
+        "guide_contract_string": "browser_rendered_rgb_keyframes_v1",
+        "bundle_id_string": guide_bundle.name,
+        "immutable_manifest_filename_string": "immutable_manifest.json",
+        "immutable_manifest_sha256_string": sha(manifest_data),
+        "frames_array": [
+            {
+                **row,
+                "strength_float": strengths[row["frame_index_int"]],
+            }
+            for row in rows
+        ],
+    }
+    write_json(experiment_path, experiment)
+    return experiment_path, reference_bundle, guide_bundle, artifacts
+
+
+def repin_v10_frames(
+    experiment_path: Path,
+    guide_bundle: Path,
+    replacements: dict[int, bytes],
+) -> None:
+    manifest_path = guide_bundle / "immutable_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for row in manifest["frames_array"]:
+        frame_index = row["frame_index_int"]
+        if frame_index not in replacements:
+            continue
+        data = replacements[frame_index]
+        (guide_bundle / row["filename_string"]).write_bytes(data)
+        row["sha256_string"] = sha(data)
+        row["bytes_int"] = len(data)
+    manifest_data = write_json(manifest_path, manifest)
+
+    contract = json.loads(experiment_path.read_text())
+    contract["guide_sequence_object"]["immutable_manifest_sha256_string"] = sha(
+        manifest_data
+    )
+    for row in contract["guide_sequence_object"]["frames_array"]:
+        frame_index = row["frame_index_int"]
+        if frame_index not in replacements:
+            continue
+        data = replacements[frame_index]
+        row["sha256_string"] = sha(data)
+        row["bytes_int"] = len(data)
+    write_json(experiment_path, contract)
 
 
 def test_v5_contract_is_exactly_allowlisted_and_arbitrary_ids_fail_closed(tmp_path: Path) -> None:
@@ -493,6 +605,237 @@ def test_v9_seed_series_is_exactly_allowlisted_and_keeps_one_variable(
     assert (plan.latent_width, plan.latent_height, plan.resize_longer) == (768, 448, 768)
 
 
+def test_v10_checked_in_spec_is_fail_closed_until_browser_bundle_is_pinned() -> None:
+    spec_path = (
+        Path(__file__).resolve().parents[1]
+        / "animation_fitting"
+        / "specs"
+        / "experiments"
+        / "horse_walk_v10_browser_rgb_swing_guides_seed_6550110377254033429.v1.json"
+    )
+    spec = json.loads(spec_path.read_text())
+    assert spec["experiment_id_string"] == V10_EXPERIMENT_ID
+    assert spec["status_string"] == "blocked_waiting_for_browser_guide_bundle"
+    guide = spec["guide_sequence_object"]
+    assert guide["ready_bool"] is False
+    assert guide["required_frame_indices_array"] == [0, 6, 18, 30, 42, 48]
+    assert guide["frame_zero_reference_hash_equality_required_bool"] is True
+    assert guide["cycle_endpoint_hash_equality_required_bool"] is True
+    assert guide["required_renderer_object"] == {
+        "renderer_string": "browser_threejs",
+        "blender_used_bool": False,
+    }
+    assert "IC-LoRA" not in json.dumps(spec)
+
+
+def test_v10_plan_requires_exact_browser_bundle_hashes_and_cycle_endpoint(
+    tmp_path: Path,
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    with pytest.raises(ControlledExperimentError, match="--guide-bundle"):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            artifact_root=artifacts,
+        )
+    plan = load_controlled_plan(
+        experiment_path=experiment,
+        authorization=V10_EXPERIMENT_ID,
+        reference_bundle=reference,
+        guide_bundle=guides,
+        artifact_root=artifacts,
+    )
+    assert plan.guide_bundle == guides.resolve()
+    assert [frame.frame_index for frame in plan.guide_frames] == [0, 6, 18, 30, 42, 48]
+    assert plan.guide_frames[0].sha256 == plan.reference_sha256
+    assert plan.guide_frames[0].sha256 == plan.guide_frames[-1].sha256
+    assert [frame.strength for frame in plan.guide_frames] == [
+        0.8,
+        0.7,
+        0.7,
+        0.7,
+        0.7,
+        0.8,
+    ]
+
+    (guides / "frame_018.png").write_bytes(b"mutated browser frame")
+    with pytest.raises(ControlledExperimentError, match="SHA-256 mismatch"):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            guide_bundle=guides,
+            artifact_root=artifacts,
+        )
+
+
+def test_v10_rejects_matching_cycle_endpoints_that_are_not_exact_reference(
+    tmp_path: Path,
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    replacement = png_fixture(rgb=(220, 180, 140))
+    repin_v10_frames(experiment, guides, {0: replacement, 48: replacement})
+
+    with pytest.raises(ControlledExperimentError, match="immutable reference_rgb"):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            guide_bundle=guides,
+            artifact_root=artifacts,
+        )
+
+
+def test_v10_rejects_corrupt_png_even_when_hash_and_size_are_pinned(
+    tmp_path: Path,
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    corrupt = b"\x89PNG\r\n\x1a\ncorrupt-but-pinned"
+    repin_v10_frames(experiment, guides, {18: corrupt})
+
+    with pytest.raises(ControlledExperimentError, match="valid decodable PNG"):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            guide_bundle=guides,
+            artifact_root=artifacts,
+        )
+
+
+def test_v10_rejects_decodable_png_with_wrong_dimensions(tmp_path: Path) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    wrong_size = png_fixture(width=767, height=448, rgb=(20, 80, 160))
+    repin_v10_frames(experiment, guides, {18: wrong_size})
+
+    with pytest.raises(ControlledExperimentError, match="must be exactly 768x448"):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            guide_bundle=guides,
+            artifact_root=artifacts,
+        )
+
+
+def test_v10_rejects_duplicate_intermediate_png_hashes(tmp_path: Path) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    duplicate = (guides / "frame_006.png").read_bytes()
+    repin_v10_frames(experiment, guides, {18: duplicate})
+
+    with pytest.raises(ControlledExperimentError, match="pairwise distinct"):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            guide_bundle=guides,
+            artifact_root=artifacts,
+        )
+
+
+@pytest.mark.parametrize(
+    ("frame_index", "strength", "message"),
+    [
+        (0, 0.79, "endpoint guide strengths must be exactly 0.8"),
+        (6, 0.69, "intermediate guide strengths must be exactly 0.7"),
+        (48, 0.81, "endpoint guide strengths must be exactly 0.8"),
+    ],
+)
+def test_v10_rejects_noncanonical_guide_strengths(
+    tmp_path: Path, frame_index: int, strength: float, message: str
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    contract = json.loads(experiment.read_text())
+    for row in contract["guide_sequence_object"]["frames_array"]:
+        if row["frame_index_int"] == frame_index:
+            row["strength_float"] = strength
+    write_json(experiment, contract)
+
+    with pytest.raises(ControlledExperimentError, match=message):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            guide_bundle=guides,
+            artifact_root=artifacts,
+        )
+
+
+def test_v10_rejects_noncanonical_experiment_endpoint_strength(
+    tmp_path: Path,
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    contract = json.loads(experiment.read_text())
+    contract["variants_array"][0]["start_guide_strength_float"] = 0.79
+    contract["variants_array"][0]["end_guide_strength_float"] = 0.79
+    contract["guide_sequence_object"]["frames_array"][0]["strength_float"] = 0.79
+    contract["guide_sequence_object"]["frames_array"][-1]["strength_float"] = 0.79
+    write_json(experiment, contract)
+
+    with pytest.raises(ControlledExperimentError, match="experiment endpoint.*exactly 0.8"):
+        load_controlled_plan(
+            experiment_path=experiment,
+            authorization=V10_EXPERIMENT_ID,
+            reference_bundle=reference,
+            guide_bundle=guides,
+            artifact_root=artifacts,
+        )
+
+
+def test_v10_patch_chains_four_single_hoof_swing_guides_without_iclora() -> None:
+    workflow_path = (
+        Path(__file__).resolve().parents[1]
+        / "animation_fitting"
+        / "specs"
+        / "workflows"
+        / "autorig_ltx2_animal_loop_v1_api.json"
+    )
+    original = json.loads(workflow_path.read_text())
+    native = patch_native_resolution(original, width=768, height=448, resize_longer=768)
+    result = patch_browser_keyframe_guides(
+        native,
+        uploaded_images={
+            0: "guides/frame_000.png",
+            6: "guides/frame_006.png",
+            18: "guides/frame_018.png",
+            30: "guides/frame_030.png",
+            42: "guides/frame_042.png",
+            48: "guides/frame_000.png",
+        },
+        strengths={0: 0.8, 6: 0.7, 18: 0.7, 30: 0.7, 42: 0.7, 48: 0.8},
+    )
+    guide_nodes = {
+        node["inputs"]["frame_idx"]: node
+        for node in result.values()
+        if node.get("class_type") == "LTXVAddGuide"
+    }
+    assert set(guide_nodes) == {0, 6, 18, 30, 42, -1}
+    assert guide_nodes[6]["inputs"]["positive"] == ["900001", 0]
+    assert guide_nodes[18]["inputs"]["positive"] == ["94006", 0]
+    assert guide_nodes[30]["inputs"]["positive"] == ["94018", 0]
+    assert guide_nodes[42]["inputs"]["positive"] == ["94030", 0]
+    assert guide_nodes[-1]["inputs"]["positive"] == ["94042", 0]
+    assert result["92006"]["inputs"]["resize_type.longer_size"] == 768
+    assert result["2004"]["inputs"]["image"] == "guides/frame_000.png"
+    assert all(node.get("class_type") != "LTXICLoRALoaderModelOnly" for node in result.values())
+    assert original["2004"]["inputs"]["image"] == "ltx_i2v_reference.png"
+
+    with pytest.raises(ControlledExperimentError, match="frame 6 strength must be exactly 0.7"):
+        patch_browser_keyframe_guides(
+            native,
+            uploaded_images={
+                0: "guides/frame_000.png",
+                6: "guides/frame_006.png",
+                18: "guides/frame_018.png",
+                30: "guides/frame_030.png",
+                42: "guides/frame_042.png",
+                48: "guides/frame_000.png",
+            },
+            strengths={0: 0.8, 6: 0.71, 18: 0.7, 30: 0.7, 42: 0.7, 48: 0.8},
+        )
+
+
 def test_controlled_plan_requires_exact_runtime_authorization_and_hashes(tmp_path: Path) -> None:
     experiment, bundle, artifacts = build_contract(tmp_path)
     with pytest.raises(ControlledExperimentError, match="explicit --authorize-experiment"):
@@ -613,6 +956,52 @@ class ActiveSamePromptClient(FakeClient):
         return True
 
 
+class V10FakeClient(FakeClient):
+    def __init__(self, worker: ComfyWorker) -> None:
+        super().__init__(worker)
+        self.uploaded_paths: list[Path] = []
+
+    async def upload_reference_image(self, path: Path) -> str:
+        self.uploaded_paths.append(path)
+        return f"autorig_animation_fitting/{path.name}"
+
+    async def submit(self, prompt, _idempotency_key: str) -> ComfySubmission:
+        guides = {
+            node["inputs"]["frame_idx"]: node["inputs"]["strength"]
+            for node in prompt.values()
+            if node.get("class_type") == "LTXVAddGuide"
+        }
+        assert guides == {
+            0: 0.8,
+            6: 0.7,
+            18: 0.7,
+            30: 0.7,
+            42: 0.7,
+            -1: 0.8,
+        }
+        assert all(
+            node.get("class_type") != "LTXICLoRALoaderModelOnly"
+            for node in prompt.values()
+        )
+        self.submitted = prompt
+        return ComfySubmission(
+            prompt_id="prompt-controlled-v10",
+            client_id="client",
+            resumed_existing_bool=False,
+        )
+
+
+class V10ActiveSamePromptClient(V10FakeClient):
+    async def queue_load(self) -> int:
+        return 1
+
+    async def prompt_exists(self, _prompt_id: str) -> bool:
+        return True
+
+    async def submit(self, _prompt, _idempotency_key: str) -> ComfySubmission:
+        raise AssertionError("active v10 prompt must resume without duplicate submission")
+
+
 def test_controlled_run_is_fail_closed_unapproved_and_idempotently_resumable(tmp_path: Path) -> None:
     experiment, bundle, artifacts = build_contract(tmp_path)
     plan = load_controlled_plan(
@@ -653,6 +1042,114 @@ def test_controlled_run_is_fail_closed_unapproved_and_idempotently_resumable(tmp
     ))
     assert resumed.job_id == result.job_id
     assert resumed.resumed_existing_result is True
+
+
+def test_v10_controlled_run_uploads_endpoint_plus_four_swing_frames_and_patches_graph(
+    tmp_path: Path,
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    plan = load_controlled_plan(
+        experiment_path=experiment,
+        authorization=V10_EXPERIMENT_ID,
+        reference_bundle=reference,
+        guide_bundle=guides,
+        artifact_root=artifacts,
+    )
+    profile = load_animation_fitting_specs().workflows["loop"]
+    worker = ComfyWorker(
+        worker_id="local-4090-v10-test",
+        base_url="http://127.0.0.1:8188",
+        workflow_name=profile.workflow_name,
+        expected_workflow_fingerprint=profile.workflow_fingerprint,
+    )
+    V10FakeClient.instances.clear()
+    result = asyncio.run(run_controlled_experiment(
+        plan,
+        worker=worker,
+        client_factory=V10FakeClient,
+        frame_extractor=FakeExtractor(),
+    ))
+    client = V10FakeClient.instances[-1]
+    assert [path.name for path in client.uploaded_paths] == [
+        "frame_000.png",
+        "frame_006.png",
+        "frame_018.png",
+        "frame_030.png",
+        "frame_042.png",
+    ]
+    assert client.submitted["2004"]["inputs"]["image"].endswith("frame_000.png")
+    assert result.prompt_id == "prompt-controlled-v10"
+    assert len(result.frames) == 49
+
+
+def test_v10_controlled_run_rechecks_pinned_guide_before_upload(
+    tmp_path: Path,
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    plan = load_controlled_plan(
+        experiment_path=experiment,
+        authorization=V10_EXPERIMENT_ID,
+        reference_bundle=reference,
+        guide_bundle=guides,
+        artifact_root=artifacts,
+    )
+    mutated_path = guides / "frame_018.png"
+    mutated = bytearray(mutated_path.read_bytes())
+    mutated[-16] ^= 0x01
+    mutated_path.write_bytes(mutated)
+
+    profile = load_animation_fitting_specs().workflows["loop"]
+    worker = ComfyWorker(
+        worker_id="local-4090-v10-mutation-test",
+        base_url="http://127.0.0.1:8188",
+        workflow_name=profile.workflow_name,
+        expected_workflow_fingerprint=profile.workflow_fingerprint,
+    )
+    V10FakeClient.instances.clear()
+    with pytest.raises(ControlledExperimentError, match="frame 18 SHA-256 mismatch"):
+        asyncio.run(run_controlled_experiment(
+            plan,
+            worker=worker,
+            client_factory=V10FakeClient,
+            frame_extractor=FakeExtractor(),
+        ))
+    assert [path.name for path in V10FakeClient.instances[-1].uploaded_paths] == [
+        "frame_000.png",
+        "frame_006.png",
+    ]
+    assert V10FakeClient.instances[-1].closed is True
+
+
+def test_v10_controlled_run_resumes_active_prompt_without_reuploading_guides(
+    tmp_path: Path,
+) -> None:
+    experiment, reference, guides, artifacts = build_v10_contract(tmp_path)
+    plan = load_controlled_plan(
+        experiment_path=experiment,
+        authorization=V10_EXPERIMENT_ID,
+        reference_bundle=reference,
+        guide_bundle=guides,
+        artifact_root=artifacts,
+    )
+    profile = load_animation_fitting_specs().workflows["loop"]
+    worker = ComfyWorker(
+        worker_id="local-4090-v10-active-test",
+        base_url="http://127.0.0.1:8188",
+        workflow_name=profile.workflow_name,
+        expected_workflow_fingerprint=profile.workflow_fingerprint,
+    )
+    V10ActiveSamePromptClient.instances.clear()
+    result = asyncio.run(run_controlled_experiment(
+        plan,
+        worker=worker,
+        client_factory=V10ActiveSamePromptClient,
+        frame_extractor=FakeExtractor(),
+    ))
+    client = V10ActiveSamePromptClient.instances[-1]
+    assert client.uploaded_paths == []
+    assert client.submitted is None
+    assert result.resumed_existing_result is False
+    assert len(result.frames) == 49
 
 
 def test_controlled_run_resumes_its_own_active_prompt_without_duplicate_submission(
