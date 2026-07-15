@@ -6,6 +6,7 @@ import {
     analyzeStaticSceneGuideFrames,
     browserGuideSceneProfile,
     buildHorseV12ContactCueVisibilityPlan,
+    buildHorseV14ContactCueVisibilityPlan,
 } from '../../../tools/animation_fitting/author_browser_horse_swing_guides.mjs';
 
 const WIDTH = 768;
@@ -78,6 +79,35 @@ test('v12 per-guide cue visibility hides only the airborne hoof and exposes all 
             assert.equal(row.hiddenCueCount, 0);
             assert.deepEqual(row.hiddenLimbs, []);
             assert.deepEqual(row.visibleLimbs, ['hind_left', 'fore_left', 'hind_right', 'fore_right']);
+        }
+    }
+});
+
+test('v14 scene profile and contact cues cover one contiguous 49-frame interval', () => {
+    const profile = browserGuideSceneProfile('v14_unified_browser_interval_guide_v1');
+    assert.equal(profile.unifiedBrowserScene, true);
+    assert.equal(profile.recoveryGuides, false);
+    assert.equal(profile.intervalGuide, true);
+    assert.equal(profile.deterministicContactCues, true);
+    assert.equal(profile.shadowsEnabled, false);
+    assert.deepEqual(profile.guideFrames, Array.from({ length: 49 }, (_, frameIndex) => frameIndex));
+
+    const rows = buildHorseV14ContactCueVisibilityPlan();
+    assert.equal(rows.length, 49);
+    assert.deepEqual(rows.map((row) => row.frameIndex), profile.guideFrames);
+    for (const frameIndex of [0, 12, 24, 36, 48]) {
+        assert.equal(rows[frameIndex].visibleCueCount, 4);
+        assert.equal(rows[frameIndex].hiddenCueCount, 0);
+    }
+    for (const [start, end, limb] of [
+        [1, 11, 'hind_left'],
+        [13, 23, 'fore_left'],
+        [25, 35, 'hind_right'],
+        [37, 47, 'fore_right'],
+    ]) {
+        for (let frameIndex = start; frameIndex <= end; frameIndex += 1) {
+            assert.deepEqual(rows[frameIndex].hiddenLimbs, [limb]);
+            assert.equal(rows[frameIndex].visibleCueCount, 3);
         }
     }
 });

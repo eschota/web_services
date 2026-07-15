@@ -3,6 +3,8 @@ const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 export const HORSE_V10_SWING_GUIDE_SCHEMA = 'autorig-browser-horse-swing-guide-poses.v1';
+export const HORSE_V14_INTERVAL_GUIDE_SCHEMA = 'autorig-browser-horse-interval-guide-poses.v1';
+export const HORSE_V14_SOURCE_GUIDE_SCHEMA = 'autorig-browser-horse-recovery-guide-poses.v1';
 export const HORSE_V10_GUIDE_FRAME_INDICES = Object.freeze([0, 6, 18, 30, 42, 48]);
 export const HORSE_V10_SWING_ORDER = Object.freeze([
     'hind_left',
@@ -10,6 +12,16 @@ export const HORSE_V10_SWING_ORDER = Object.freeze([
     'hind_right',
     'fore_right',
 ]);
+
+export const HORSE_V14_ANCHOR_FRAME_INDICES = Object.freeze([0, 6, 12, 18, 24, 30, 36, 42, 48]);
+export const HORSE_V14_BARRIER_FRAME_INDICES = Object.freeze([0, 12, 24, 36, 48]);
+export const HORSE_V14_INTERVAL_SEGMENTS = Object.freeze([
+    Object.freeze({ startFrame: 0, apexFrame: 6, endFrame: 12, swingLimb: 'hind_left' }),
+    Object.freeze({ startFrame: 12, apexFrame: 18, endFrame: 24, swingLimb: 'fore_left' }),
+    Object.freeze({ startFrame: 24, apexFrame: 30, endFrame: 36, swingLimb: 'hind_right' }),
+    Object.freeze({ startFrame: 36, apexFrame: 42, endFrame: 48, swingLimb: 'fore_right' }),
+]);
+export const HORSE_V14_FRAME_INDICES = Object.freeze(Array.from({ length: 49 }, (_, frame) => frame));
 
 export const HORSE_V10_DEFORM_CHAINS = Object.freeze({
     hind_left: Object.freeze([
@@ -567,5 +579,325 @@ export function authorHorseV10SwingGuidePoses(options = {}) {
             endpointMaximumErrorPx,
             guides: qaGuides,
         },
+    };
+}
+
+function validateHorseV14SourceContract(value) {
+    if (!value || typeof value !== 'object' || value.schema !== HORSE_V14_SOURCE_GUIDE_SCHEMA) {
+        throw new Error(`sourcePoseContract.schema must be ${HORSE_V14_SOURCE_GUIDE_SCHEMA}`);
+    }
+    if (value.rigType !== 'HORSE_2') throw new Error('sourcePoseContract.rigType must be HORSE_2');
+    if (
+        !Array.isArray(value.resolution)
+        || value.resolution[0] !== 768
+        || value.resolution[1] !== 448
+    ) {
+        throw new Error('sourcePoseContract.resolution must be exactly 768x448');
+    }
+    if (
+        !Array.isArray(value.guides)
+        || value.guides.length !== HORSE_V14_ANCHOR_FRAME_INDICES.length
+        || value.guides.some((guide, index) => (
+            integer(guide?.frameIndex, `sourcePoseContract.guides[${index}].frameIndex`)
+            !== HORSE_V14_ANCHOR_FRAME_INDICES[index]
+        ))
+    ) {
+        throw new Error('sourcePoseContract must contain the exact nine v12 anchor guides');
+    }
+    const expectedSwingLimbs = [null, 'hind_left', null, 'fore_left', null, 'hind_right', null, 'fore_right', null];
+    if (value.guides.some((guide, index) => (guide.swingLimb ?? null) !== expectedSwingLimbs[index])) {
+        throw new Error('sourcePoseContract v12 anchor swing order changed');
+    }
+    const sourceFrames = value.fitted?.frames;
+    if (
+        value.fitted?.schema !== FITTED_SCHEMA
+        || !Array.isArray(sourceFrames)
+        || sourceFrames.length !== HORSE_V14_ANCHOR_FRAME_INDICES.length
+        || integer(value.fitted.frameCount, 'sourcePoseContract.fitted.frameCount') !== sourceFrames.length
+    ) {
+        throw new Error('sourcePoseContract.fitted must contain the exact nine v12 fitted frames');
+    }
+    const pointCounts = {};
+    sourceFrames.forEach((frame, sourceIndex) => {
+        HORSE_V10_SWING_ORDER.forEach((limb) => {
+            const points = frame?.limbs?.[limb]?.points;
+            if (!Array.isArray(points) || points.length < 2) {
+                throw new Error(`sourcePoseContract.fitted.frames[${sourceIndex}].${limb}.points are required`);
+            }
+            if (pointCounts[limb] == null) pointCounts[limb] = points.length;
+            if (points.length !== pointCounts[limb]) {
+                throw new Error(`sourcePoseContract ${limb} point count changed at anchor ${sourceIndex}`);
+            }
+            points.forEach((point, pointIndex) => point2(
+                point,
+                `sourcePoseContract.fitted.frames[${sourceIndex}].${limb}.points[${pointIndex}]`,
+            ));
+        });
+    });
+    const rest = sourceFrames[0];
+    HORSE_V14_BARRIER_FRAME_INDICES.forEach((frameIndex) => {
+        const sourceIndex = HORSE_V14_ANCHOR_FRAME_INDICES.indexOf(frameIndex);
+        HORSE_V10_SWING_ORDER.forEach((limb) => {
+            if (maximumPointError(sourceFrames[sourceIndex].limbs[limb].points, rest.limbs[limb].points) !== 0) {
+                throw new Error(`sourcePoseContract barrier ${frameIndex} moved ${limb}`);
+            }
+        });
+    });
+    return value;
+}
+
+export function horseV14SinSquaredWeight(frameIndex, segment) {
+    const frame = integer(frameIndex, 'frameIndex');
+    if (!segment || typeof segment !== 'object') throw new Error('segment is required');
+    const start = integer(segment.startFrame, 'segment.startFrame');
+    const apex = integer(segment.apexFrame, 'segment.apexFrame');
+    const end = integer(segment.endFrame, 'segment.endFrame');
+    if (apex - start !== 6 || end - apex !== 6 || frame < start || frame > end) {
+        throw new Error('v14 interval segment must be a 12-frame start/apex/end span containing frameIndex');
+    }
+    if (frame === start || frame === end) return 0;
+    if (frame === apex) return 1;
+    const local = (frame - start) / (end - start);
+    const sine = Math.sin(Math.PI * local);
+    return sine * sine;
+}
+
+function horseV14FrameDescriptor(frameIndex) {
+    const frame = integer(frameIndex, 'frameIndex');
+    if (frame < 0 || frame > 48) throw new Error('v14 frameIndex must be in [0, 48]');
+    const segment = HORSE_V14_INTERVAL_SEGMENTS.find((row) => frame >= row.startFrame && frame <= row.endFrame);
+    if (!segment) throw new Error(`v14 frame ${frame} has no interval segment`);
+    const barrier = HORSE_V14_BARRIER_FRAME_INDICES.includes(frame);
+    const apex = frame === segment.apexFrame;
+    return {
+        frameIndex: frame,
+        segment,
+        intervalWeight: horseV14SinSquaredWeight(frame, segment),
+        swingLimb: barrier ? null : segment.swingLimb,
+        role: frame === 0
+            ? 'actionless_default_cycle_origin'
+            : frame === 48
+                ? 'actionless_default_cycle_endpoint'
+                : barrier
+                    ? `four_hoof_recovery_barrier_${frame}`
+                    : apex
+                        ? `${segment.swingLimb}_single_hoof_swing_apex`
+                        : `${segment.swingLimb}_smooth_swing_interval`,
+        sourceApexFrame: segment.apexFrame,
+        barrier,
+        apex,
+    };
+}
+
+/**
+ * Expand the exact nine immutable v12 browser poses into a complete 49-frame
+ * browser-side motion prior. Only one limb moves in each open 12-frame span;
+ * sin^2 gives zero velocity at every stance barrier and swing apex.
+ */
+export function authorHorseV14IntervalGuidePoses(options = {}) {
+    const source = validateHorseV14SourceContract(options.sourcePoseContract);
+    const sourceByFrame = new Map(HORSE_V14_ANCHOR_FRAME_INDICES.map((frameIndex, index) => [
+        frameIndex,
+        source.fitted.frames[index],
+    ]));
+    const rest = sourceByFrame.get(0);
+    const frames = HORSE_V14_FRAME_INDICES.map((frameIndex) => {
+        const descriptor = horseV14FrameDescriptor(frameIndex);
+        const apex = sourceByFrame.get(descriptor.sourceApexFrame);
+        const limbs = Object.fromEntries(HORSE_V10_SWING_ORDER.map((limb) => {
+            const restPointsValue = rest.limbs[limb].points;
+            const apexPoints = apex.limbs[limb].points;
+            const weight = descriptor.swingLimb === limb ? descriptor.intervalWeight : 0;
+            return [limb, {
+                points: restPointsValue.map((point, pointIndex) => [
+                    point[0] + (apexPoints[pointIndex][0] - point[0]) * weight,
+                    point[1] + (apexPoints[pointIndex][1] - point[1]) * weight,
+                ]),
+            }];
+        }));
+        return {
+            frame: frameIndex,
+            targetGuideFrame: frameIndex,
+            role: descriptor.role,
+            swingLimb: descriptor.swingLimb,
+            sourceApexFrame: descriptor.sourceApexFrame,
+            intervalWeight: descriptor.intervalWeight,
+            authoredClipFrame: frameIndex,
+            // Three.js keyframe tracks store time samples as Float32Array.
+            // Sampling the exact f32 key avoids blending infinitesimally with
+            // the preceding interval at anchors such as frame 18 (0.6 s).
+            authoredClipTimeSeconds: Math.fround(frameIndex / 30),
+            limbs,
+        };
+    });
+
+    let maximumAnchorPointErrorPx = 0;
+    let maximumBarrierPointErrorPx = 0;
+    let maximumStancePointErrorPx = 0;
+    let maximumActivePointStepPx = 0;
+    HORSE_V14_ANCHOR_FRAME_INDICES.forEach((frameIndex) => {
+        const sourceFrame = sourceByFrame.get(frameIndex);
+        HORSE_V10_SWING_ORDER.forEach((limb) => {
+            maximumAnchorPointErrorPx = Math.max(
+                maximumAnchorPointErrorPx,
+                maximumPointError(frames[frameIndex].limbs[limb].points, sourceFrame.limbs[limb].points),
+            );
+        });
+    });
+    frames.forEach((frame, frameIndex) => {
+        HORSE_V10_SWING_ORDER.forEach((limb) => {
+            if (limb !== frame.swingLimb) {
+                maximumStancePointErrorPx = Math.max(
+                    maximumStancePointErrorPx,
+                    maximumPointError(frame.limbs[limb].points, rest.limbs[limb].points),
+                );
+            }
+            if (frameIndex > 0) {
+                maximumActivePointStepPx = Math.max(
+                    maximumActivePointStepPx,
+                    maximumPointError(frame.limbs[limb].points, frames[frameIndex - 1].limbs[limb].points),
+                );
+            }
+        });
+        if (HORSE_V14_BARRIER_FRAME_INDICES.includes(frameIndex)) {
+            HORSE_V10_SWING_ORDER.forEach((limb) => {
+                maximumBarrierPointErrorPx = Math.max(
+                    maximumBarrierPointErrorPx,
+                    maximumPointError(frame.limbs[limb].points, rest.limbs[limb].points),
+                );
+            });
+        }
+    });
+    if (maximumAnchorPointErrorPx !== 0 || maximumBarrierPointErrorPx !== 0 || maximumStancePointErrorPx !== 0) {
+        throw new Error('v14 interval authoring changed an immutable anchor, barrier or stance limb');
+    }
+    const endpointMaximumErrorPx = Math.max(...HORSE_V10_SWING_ORDER.map((limb) => (
+        maximumPointError(frames[0].limbs[limb].points, frames[48].limbs[limb].points)
+    )));
+    if (endpointMaximumErrorPx !== 0) throw new Error('v14 interval endpoints differ');
+
+    const fitted = {
+        schema: FITTED_SCHEMA,
+        fps: 30,
+        frameCount: 49,
+        durationSeconds: 48 / 30,
+        frames: frames.map((frame) => ({ frame: frame.frame, limbs: frame.limbs })),
+        tracks: [],
+    };
+    return {
+        schema: HORSE_V14_INTERVAL_GUIDE_SCHEMA,
+        status: 'interval_pose_contract_ready_not_rendered',
+        rigType: 'HORSE_2',
+        resolution: [768, 448],
+        guideFrameIndices: [...HORSE_V14_FRAME_INDICES],
+        sourceAnchorFrameIndices: [...HORSE_V14_ANCHOR_FRAME_INDICES],
+        recoveryBarrierFrameIndices: [...HORSE_V14_BARRIER_FRAME_INDICES],
+        swingOrder: [...HORSE_V10_SWING_ORDER],
+        renderer: null,
+        browserRendererRequired: true,
+        blenderUsed: false,
+        guides: frames.map((frame) => ({
+            frameIndex: frame.frame,
+            role: frame.role,
+            swingLimb: frame.swingLimb,
+            sourceApexFrame: frame.sourceApexFrame,
+            intervalWeight: frame.intervalWeight,
+            authoredClipFrame: frame.authoredClipFrame,
+            authoredClipTimeSeconds: frame.authoredClipTimeSeconds,
+        })),
+        fitted,
+        qa: {
+            status: 'PASS',
+            interpolation: 'sin_squared_four_12_frame_segments_v1',
+            sourceAnchorCount: HORSE_V14_ANCHOR_FRAME_INDICES.length,
+            recoveryBarrierCount: HORSE_V14_BARRIER_FRAME_INDICES.length - 2,
+            minimumStanceHooves: 3,
+            maximumAnchorPointErrorPx,
+            maximumBarrierPointErrorPx,
+            maximumStancePointErrorPx,
+            maximumActivePointStepPx,
+            endpointMaximumErrorPx,
+        },
+    };
+}
+
+export function verifyHorseV14PostBakeHoofProjections(options = {}) {
+    const contract = options.poseContract;
+    if (!contract || contract.schema !== HORSE_V14_INTERVAL_GUIDE_SCHEMA) {
+        throw new Error(`poseContract.schema must be ${HORSE_V14_INTERVAL_GUIDE_SCHEMA}`);
+    }
+    if (!Array.isArray(contract.guides) || contract.guides.length !== 49) {
+        throw new Error('v14 poseContract must contain exactly 49 guide frames');
+    }
+    const projected = options.projectedHoovesByGuide;
+    if (!Array.isArray(projected) || projected.length !== 49) {
+        throw new Error('projectedHoovesByGuide must contain exactly 49 sampled rows');
+    }
+    const maximumStanceErrorPx = finite(options.maximumStanceErrorPx ?? 1, 'maximumStanceErrorPx');
+    const maximumRequestedErrorPx = finite(options.maximumRequestedErrorPx ?? 3, 'maximumRequestedErrorPx');
+    const minimumApexLiftPx = finite(options.minimumApexLiftPx ?? 5, 'minimumApexLiftPx');
+    const rows = projected.map((value, frameIndex) => {
+        if (integer(value?.frameIndex, `projectedHoovesByGuide[${frameIndex}].frameIndex`) !== frameIndex) {
+            throw new Error(`projected v14 frame order changed at ${frameIndex}`);
+        }
+        return {
+            frameIndex,
+            swingLimb: contract.guides[frameIndex].swingLimb,
+            hooves: projectedHoofRow(value.hooves, `projectedHoovesByGuide[${frameIndex}].hooves`),
+        };
+    });
+    const rest = rows[0].hooves;
+    const qaFrames = rows.map((row) => {
+        const desired = contract.fitted.frames[row.frameIndex];
+        const stanceLimbs = HORSE_V10_SWING_ORDER.filter((limb) => limb !== row.swingLimb);
+        const stanceErrors = stanceLimbs.map((limb) => Math.hypot(
+            row.hooves[limb][0] - rest[limb][0],
+            row.hooves[limb][1] - rest[limb][1],
+        ));
+        const requestedErrors = HORSE_V10_SWING_ORDER.map((limb) => {
+            const terminal = point2(
+                desired.limbs[limb].points.at(-1),
+                `poseContract.fitted.frames[${row.frameIndex}].${limb}.terminal`,
+            );
+            return Math.hypot(row.hooves[limb][0] - terminal[0], row.hooves[limb][1] - terminal[1]);
+        });
+        const maximumStance = Math.max(0, ...stanceErrors);
+        const maximumRequested = Math.max(...requestedErrors);
+        if (maximumStance > maximumStanceErrorPx) {
+            throw new Error(`v14 frame ${row.frameIndex} post-bake stance hoof error exceeds tolerance`);
+        }
+        if (maximumRequested > maximumRequestedErrorPx) {
+            throw new Error(`v14 frame ${row.frameIndex} post-bake requested hoof error exceeds tolerance`);
+        }
+        const swingHoofLiftPx = row.swingLimb ? rest[row.swingLimb][1] - row.hooves[row.swingLimb][1] : 0;
+        if (HORSE_V14_INTERVAL_SEGMENTS.some((segment) => segment.apexFrame === row.frameIndex)) {
+            if (swingHoofLiftPx < minimumApexLiftPx) {
+                throw new Error(`v14 frame ${row.frameIndex} post-bake apex lift is too small`);
+            }
+        }
+        return {
+            frameIndex: row.frameIndex,
+            swingLimb: row.swingLimb,
+            stanceHoofCount: stanceLimbs.length,
+            maximumStanceErrorPx: maximumStance,
+            maximumRequestedErrorPx: maximumRequested,
+            swingHoofLiftPx,
+        };
+    });
+    const endpointMaximumErrorPx = Math.max(...HORSE_V10_SWING_ORDER.map((limb) => Math.hypot(
+        rows[0].hooves[limb][0] - rows[48].hooves[limb][0],
+        rows[0].hooves[limb][1] - rows[48].hooves[limb][1],
+    )));
+    if (endpointMaximumErrorPx > maximumStanceErrorPx) throw new Error('v14 post-bake endpoints differ');
+    return {
+        status: 'PASS',
+        hierarchyBakeVerified: true,
+        frameCount: 49,
+        minimumStanceHooves: 3,
+        maximumStanceErrorPx,
+        maximumRequestedErrorPx,
+        minimumApexLiftPx,
+        endpointMaximumErrorPx,
+        frames: qaFrames,
     };
 }

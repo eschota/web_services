@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 
@@ -25,7 +25,18 @@ const RECOVERY_FRAMES = Object.freeze([12, 24, 36]);
 const MIXED_V10_SCENE_CONTRACT = 'v10_reference_endpoints_browser_intermediates';
 const UNIFIED_V11_SCENE_CONTRACT = 'v11_unified_browser_static_scene_v1';
 const RECOVERY_V12_SCENE_CONTRACT = 'v12_unified_browser_recovery_guides_v1';
+const INTERVAL_V14_SCENE_CONTRACT = 'v14_unified_browser_interval_guide_v1';
 const HORSE_LIMB_ORDER = Object.freeze(['hind_left', 'fore_left', 'hind_right', 'fore_right']);
+const V14_SOURCE_BUNDLE_ID = 'horse-walk-v12-browser-recovery-guides-f2';
+const V14_SOURCE_MANIFEST_SHA256 = '7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451';
+const V14_SOURCE_POSE_SHA256 = '2a7617c1de4cc97a7c5cea06fc8c9d7989f5528fdf7a5f21a23be11b9e7ff632';
+const V14_INTERVAL_FRAMES = Object.freeze(Array.from({ length: 49 }, (_, frameIndex) => frameIndex));
+const V14_SWING_WINDOWS = Object.freeze([
+    Object.freeze({ start: 1, end: 11, apex: 6, limb: 'hind_left' }),
+    Object.freeze({ start: 13, end: 23, apex: 18, limb: 'fore_left' }),
+    Object.freeze({ start: 25, end: 35, apex: 30, limb: 'hind_right' }),
+    Object.freeze({ start: 37, end: 47, apex: 42, limb: 'fore_right' }),
+]);
 
 export const HORSE_V12_RECOVERY_GUIDE_PLAN = Object.freeze([
     Object.freeze({ frameIndex: 0, role: 'actionless_default_cycle_origin', swingLimb: null, strength: 0.8 }),
@@ -47,6 +58,21 @@ export function buildHorseV12ContactCueVisibilityPlan() {
         visibleCueCount: guide.swingLimb ? 3 : 4,
         hiddenCueCount: guide.swingLimb ? 1 : 0,
     }));
+}
+
+export function buildHorseV14ContactCueVisibilityPlan() {
+    return V14_INTERVAL_FRAMES.map((frameIndex) => {
+        const swing = V14_SWING_WINDOWS.find((window) => frameIndex >= window.start && frameIndex <= window.end);
+        const swingLimb = swing?.limb || null;
+        return {
+            frameIndex,
+            swingLimb,
+            visibleLimbs: HORSE_LIMB_ORDER.filter((limb) => limb !== swingLimb),
+            hiddenLimbs: swingLimb ? [swingLimb] : [],
+            visibleCueCount: swingLimb ? 3 : 4,
+            hiddenCueCount: swingLimb ? 1 : 0,
+        };
+    });
 }
 
 function fail(message) {
@@ -138,9 +164,10 @@ function guideSceneContract(value) {
         result !== MIXED_V10_SCENE_CONTRACT
         && result !== UNIFIED_V11_SCENE_CONTRACT
         && result !== RECOVERY_V12_SCENE_CONTRACT
+        && result !== INTERVAL_V14_SCENE_CONTRACT
     ) {
         fail(
-            `scene-contract must be ${MIXED_V10_SCENE_CONTRACT}, ${UNIFIED_V11_SCENE_CONTRACT}, or ${RECOVERY_V12_SCENE_CONTRACT}, got ${result}`,
+            `scene-contract must be ${MIXED_V10_SCENE_CONTRACT}, ${UNIFIED_V11_SCENE_CONTRACT}, ${RECOVERY_V12_SCENE_CONTRACT}, or ${INTERVAL_V14_SCENE_CONTRACT}, got ${result}`,
         );
     }
     return result;
@@ -149,15 +176,19 @@ function guideSceneContract(value) {
 export function browserGuideSceneProfile(value) {
     const sceneContract = guideSceneContract(value);
     const recoveryGuides = sceneContract === RECOVERY_V12_SCENE_CONTRACT;
+    const intervalGuide = sceneContract === INTERVAL_V14_SCENE_CONTRACT;
     return {
         sceneContract,
         unifiedBrowserScene: sceneContract !== MIXED_V10_SCENE_CONTRACT,
         recoveryGuides,
-        guideFrames: recoveryGuides
+        intervalGuide,
+        guideFrames: intervalGuide
+            ? [...V14_INTERVAL_FRAMES]
+            : recoveryGuides
             ? HORSE_V12_RECOVERY_GUIDE_PLAN.map((guide) => guide.frameIndex)
             : [...GUIDE_FRAMES],
         recoveryFrames: recoveryGuides ? [...RECOVERY_FRAMES] : [],
-        deterministicContactCues: recoveryGuides,
+        deterministicContactCues: recoveryGuides || intervalGuide,
         shadowsEnabled: false,
     };
 }
@@ -176,11 +207,12 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#717b86}can
 </style></head><body><script type="module">
 import * as THREE from '/three.module.js';
 import { buildHorse2BrowserFittingSkeleton, bakeFittedAnimationToThreeHierarchyClip, createViewerToLtxProjection } from '/adapter.js';
-import { authorHorseV10SwingGuidePoses, verifyHorseV10PostBakeHoofProjections } from '/author.js';
+import { authorHorseV10SwingGuidePoses, authorHorseV14IntervalGuidePoses, verifyHorseV10PostBakeHoofProjections, verifyHorseV14PostBakeHoofProjections } from '/author.js';
 
 const config = await (await fetch('/config.json', { cache: 'no-store' })).json();
 const LIMB_ORDER = Object.freeze(['hind_left', 'fore_left', 'hind_right', 'fore_right']);
 const V12_SCENE_CONTRACT = 'v12_unified_browser_recovery_guides_v1';
+const V14_SCENE_CONTRACT = 'v14_unified_browser_interval_guide_v1';
 const STATIC_SCENE = Object.freeze({
     clearColorHex: 0x717b86,
     backgroundHex: 0x717b86,
@@ -192,7 +224,7 @@ const STATIC_SCENE = Object.freeze({
     key: Object.freeze({ colorHex: 0xffffff, intensity: 3.5, position: Object.freeze([4.5, -5.5, 8.5]) }),
     ground: Object.freeze({ colorHex: 0xb8c3cc, roughness: 0.92, metalness: 0, size: 50 }),
     contactCues: Object.freeze({
-        enabled: config.sceneContract === V12_SCENE_CONTRACT,
+        enabled: config.sceneContract === V12_SCENE_CONTRACT || config.sceneContract === V14_SCENE_CONTRACT,
         implementation: 'static_rest_hoof_radial_alpha_planes',
         colorHex: 0x53616b,
         opacity: 0.24,
@@ -453,7 +485,7 @@ function buildV12RecoveryPoseContract(base) {
 }
 
 function addDeterministicContactCues(scene, terminalBones, groundHeight) {
-    if (config.sceneContract !== V12_SCENE_CONTRACT) return null;
+    if (config.sceneContract !== V12_SCENE_CONTRACT && config.sceneContract !== V14_SCENE_CONTRACT) return null;
     const cue = STATIC_SCENE.contactCues;
     const geometry = new THREE.PlaneGeometry(cue.widthWorld, cue.lengthWorld, 1, 1);
     const material = new THREE.ShaderMaterial({
@@ -555,6 +587,53 @@ function verifyV12ContactCueVisibility(poseContract, projectedHoovesByGuide) {
     };
 }
 
+function verifyV14ContactCueVisibility(poseContract, projectedHoovesByGuide) {
+    if (poseContract.schema !== 'autorig-browser-horse-interval-guide-poses.v1') {
+        throw new Error('v14 interval pose contract schema is invalid');
+    }
+    if (!Array.isArray(projectedHoovesByGuide) || projectedHoovesByGuide.length !== 49) {
+        throw new Error('v14 contact-cue QA requires 49 projected frames');
+    }
+    const frames = projectedHoovesByGuide.map((row, frameIndex) => {
+        const guide = poseContract.guides[frameIndex];
+        const actual = row.contactCueVisibility;
+        const expectedVisible = LIMB_ORDER.filter((limb) => limb !== guide.swingLimb);
+        const expectedHidden = guide.swingLimb ? [guide.swingLimb] : [];
+        if (
+            row.frameIndex !== frameIndex
+            || !actual
+            || actual.frameIndex !== frameIndex
+            || JSON.stringify(actual.visibleLimbs) !== JSON.stringify(expectedVisible)
+            || JSON.stringify(actual.hiddenLimbs) !== JSON.stringify(expectedHidden)
+            || actual.visibleCueCount !== expectedVisible.length
+            || actual.hiddenCueCount !== expectedHidden.length
+        ) {
+            throw new Error('v14 contact-cue visibility does not match fitted stance at frame ' + frameIndex);
+        }
+        return {
+            frameIndex,
+            swingLimb: guide.swingLimb,
+            visibleLimbs: [...actual.visibleLimbs],
+            hiddenLimbs: [...actual.hiddenLimbs],
+            visibleCueCount: actual.visibleCueCount,
+            hiddenCueCount: actual.hiddenCueCount,
+            exactlyMatchesStance: true,
+        };
+    });
+    return {
+        schema: 'autorig-browser-contact-cue-visibility-qa.v1',
+        status: 'PASS',
+        perFrameVisibility: true,
+        swingFramesHideExactlyOneCue: frames.filter((frame) => frame.swingLimb).every((frame) => (
+            frame.visibleCueCount === 3 && frame.hiddenCueCount === 1
+        )),
+        barrierFramesShowAllFourCues: frames.filter((frame) => !frame.swingLimb).every((frame) => (
+            frame.visibleCueCount === 4 && frame.hiddenCueCount === 0
+        )),
+        frames,
+    };
+}
+
 function verifyV12PostBakeHoofProjections(poseContract, projectedHoovesByGuide, options = {}) {
     if (poseContract.schema !== 'autorig-browser-horse-recovery-guide-poses.v1') {
         throw new Error('v12 recovery pose contract schema is invalid');
@@ -633,7 +712,9 @@ async function initializeReal() {
         candidateA: config.candidateA,
         candidateB: config.candidateB,
     });
-    const poseContract = buildV12RecoveryPoseContract(basePoseContract);
+    const poseContract = config.sceneContract === V14_SCENE_CONTRACT
+        ? authorHorseV14IntervalGuidePoses({ sourcePoseContract: config.sourcePoseContract })
+        : buildV12RecoveryPoseContract(basePoseContract);
     const hierarchy = bakeFittedAnimationToThreeHierarchyClip({
         THREE,
         model: modelState.model,
@@ -641,7 +722,9 @@ async function initializeReal() {
         skeleton: fittingSkeleton,
         fitted: poseContract.fitted,
         outputResolution: [${WIDTH}, ${HEIGHT}],
-        name: config.sceneContract === V12_SCENE_CONTRACT
+        name: config.sceneContract === V14_SCENE_CONTRACT
+            ? 'Horse_Walk_v14_Browser_Interval_Guide'
+            : config.sceneContract === V12_SCENE_CONTRACT
             ? 'Horse_Walk_v12_Browser_Recovery_Guides'
             : 'Horse_Walk_v10_Browser_Swing_Guides',
     });
@@ -698,10 +781,20 @@ async function initializeReal() {
         maximumRequestedErrorPx: 3,
         minimumSwingLiftPx: 5,
     };
-    const postBakeQa = config.sceneContract === V12_SCENE_CONTRACT
+    const postBakeQa = config.sceneContract === V14_SCENE_CONTRACT
+        ? verifyHorseV14PostBakeHoofProjections({
+            poseContract,
+            projectedHoovesByGuide,
+            maximumStanceErrorPx: postBakeOptions.maximumStanceErrorPx,
+            maximumRequestedErrorPx: postBakeOptions.maximumRequestedErrorPx,
+            minimumApexLiftPx: postBakeOptions.minimumSwingLiftPx,
+        })
+        : config.sceneContract === V12_SCENE_CONTRACT
         ? verifyV12PostBakeHoofProjections(poseContract, projectedHoovesByGuide, postBakeOptions)
         : verifyHorseV10PostBakeHoofProjections({ poseContract, projectedHoovesByGuide, ...postBakeOptions });
-    const contactCueQa = config.sceneContract === V12_SCENE_CONTRACT
+    const contactCueQa = config.sceneContract === V14_SCENE_CONTRACT
+        ? verifyV14ContactCueVisibility(poseContract, projectedHoovesByGuide)
+        : config.sceneContract === V12_SCENE_CONTRACT
         ? verifyV12ContactCueVisibility(poseContract, projectedHoovesByGuide)
         : null;
     const info = webglInfo(renderer);
@@ -919,7 +1012,7 @@ async function evaluate(client, expression) {
     return result.result?.value;
 }
 
-async function runHarnessInChrome({ chromeExecutable, url, guideFrames }) {
+async function runHarnessInChrome({ chromeExecutable, url, guideFrames, deterministicRerender = false }) {
     let runtime;
     let client;
     try {
@@ -953,8 +1046,18 @@ async function runHarnessInChrome({ chromeExecutable, url, guideFrames }) {
             if (!rendered?.dataUrl?.startsWith('data:image/png;base64,')) fail(`guide ${frameIndex} did not return PNG data`);
             renders.push(rendered);
         }
+        const rerenders = [];
+        if (deterministicRerender) {
+            for (const frameIndex of guideFrames) {
+                const rendered = await evaluate(client, `window.__renderGuide(${Number(frameIndex)})`);
+                if (!rendered?.dataUrl?.startsWith('data:image/png;base64,')) {
+                    fail(`deterministic rerender ${frameIndex} did not return PNG data`);
+                }
+                rerenders.push(rendered);
+            }
+        }
         const version = await client.command('Browser.getVersion');
-        return { result, renders, browserVersion: version };
+        return { result, renders, rerenders, browserVersion: version };
     } finally {
         client?.close();
         await stopChrome(runtime);
@@ -1187,6 +1290,166 @@ function immutableEntry(manifest, filename) {
     return { filename, bytes: entry.bytes, sha256: entry.sha256 };
 }
 
+function validateV14SourceGuideBundle(value) {
+    const directory = existingDirectory(value, 'source-guide-bundle');
+    if (path.basename(directory) !== V14_SOURCE_BUNDLE_ID) {
+        fail(`v14 source-guide-bundle must be ${V14_SOURCE_BUNDLE_ID}`);
+    }
+    const manifestPath = path.join(directory, 'immutable_manifest.json');
+    const manifestPin = pinFile(existingFile(manifestPath, 'v14 source guide manifest'));
+    if (manifestPin.sha256 !== V14_SOURCE_MANIFEST_SHA256) {
+        fail(`v14 source guide manifest SHA-256 changed: ${manifestPin.sha256}`);
+    }
+    const manifest = readJson(manifestPath, 'v14 source guide manifest');
+    if (
+        manifest.schema !== 'autorig-browser-ltx-recovery-guide-bundle.v1'
+        || manifest.status !== 'PASS'
+        || manifest.browserOnly !== true
+        || manifest.blenderUsed !== false
+        || manifest.rigType !== 'HORSE_2'
+        || JSON.stringify(manifest.resolution) !== JSON.stringify([WIDTH, HEIGHT])
+        || manifest.renderer_object?.renderer_string !== 'browser_threejs'
+        || manifest.renderer_object?.scene_contract_string !== RECOVERY_V12_SCENE_CONTRACT
+        || manifest.renderer_object?.all_guide_frames_browser_rendered_bool !== true
+    ) {
+        fail('v14 source guide manifest is not the exact browser-only v12 recovery contract');
+    }
+    const poseEntry = manifest.poseContract;
+    if (
+        !poseEntry
+        || poseEntry.filename !== 'pose_contract.json'
+        || poseEntry.sha256 !== V14_SOURCE_POSE_SHA256
+    ) {
+        fail('v14 source guide pose pin changed');
+    }
+    const posePath = path.join(directory, poseEntry.filename);
+    const posePin = pinFile(existingFile(posePath, 'v14 source guide pose contract'));
+    if (posePin.sha256 !== poseEntry.sha256 || posePin.bytes !== poseEntry.bytes) {
+        fail('v14 source guide pose bytes changed');
+    }
+    const poseContract = readJson(posePath, 'v14 source guide pose contract');
+    const frameRows = manifest.frames_array;
+    if (
+        !Array.isArray(frameRows)
+        || frameRows.length !== HORSE_V12_RECOVERY_GUIDE_PLAN.length
+        || frameRows.some((row, index) => Number(row.frame_index_int) !== HORSE_V12_RECOVERY_GUIDE_PLAN[index].frameIndex)
+    ) {
+        fail('v14 source guide manifest does not contain the exact nine ordered anchors');
+    }
+    const anchors = frameRows.map((row, index) => {
+        const filename = String(row.filename_string || '');
+        if (!/^guide_[0-9]{3}\.png$/.test(filename) || path.basename(filename) !== filename) {
+            fail(`v14 source anchor ${index} filename is invalid`);
+        }
+        const framePath = path.join(directory, filename);
+        const data = fs.readFileSync(existingFile(framePath, `v14 source anchor ${index}`));
+        const pin = {
+            filename,
+            bytes: data.length,
+            sha256: sha256Buffer(data),
+            frameIndex: Number(row.frame_index_int),
+            buffer: data,
+        };
+        if (pin.bytes !== Number(row.bytes_int) || pin.sha256 !== row.sha256_string) {
+            fail(`v14 source anchor ${pin.frameIndex} bytes changed`);
+        }
+        return pin;
+    });
+    if (
+        anchors[0].sha256 !== anchors.at(-1).sha256
+        || RECOVERY_FRAMES.some((frameIndex) => anchors.find((row) => row.frameIndex === frameIndex)?.sha256 !== anchors[0].sha256)
+    ) {
+        fail('v14 source recovery barriers are not byte-identical to the endpoint');
+    }
+    return {
+        directory,
+        manifest,
+        manifestPin,
+        poseContract,
+        posePin,
+        anchors,
+    };
+}
+
+function runChecked(executable, args, field, options = {}) {
+    const result = spawnSync(executable, args, {
+        encoding: Object.prototype.hasOwnProperty.call(options, 'encoding') ? options.encoding : 'utf8',
+        windowsHide: true,
+        maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
+    });
+    if (result.error || result.status !== 0) {
+        fail(`${field} failed: ${result.error?.message || String(result.stderr || '').trim() || `exit ${result.status}`}`);
+    }
+    return result;
+}
+
+function encodeV14IntervalGuide({ staging, ffmpeg, ffprobe, frameBuffers }) {
+    if (!Array.isArray(frameBuffers) || frameBuffers.length !== 49) {
+        fail('v14 lossless encoder requires exactly 49 browser RGB frames');
+    }
+    const videoPath = path.join(staging, 'interval_guide.mkv');
+    const inputPattern = path.join(staging, 'guide_%03d.png');
+    runChecked(ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-nostdin', '-n',
+        '-framerate', '30', '-start_number', '0', '-i', inputPattern,
+        '-frames:v', '49', '-an', '-c:v', 'png', '-pix_fmt', 'rgb24', videoPath,
+    ], 'v14 PNG-in-Matroska encode');
+    const probe = JSON.parse(runChecked(ffprobe, [
+        '-v', 'error', '-count_frames', '-show_entries',
+        'format=format_name:stream=index,codec_type,codec_name,pix_fmt,width,height,r_frame_rate,nb_read_frames',
+        '-of', 'json', videoPath,
+    ], 'v14 interval guide ffprobe').stdout);
+    const streams = Array.isArray(probe.streams) ? probe.streams : [];
+    const videoStreams = streams.filter((stream) => stream.codec_type === 'video');
+    const audioStreams = streams.filter((stream) => stream.codec_type === 'audio');
+    const stream = videoStreams[0];
+    if (
+        videoStreams.length !== 1
+        || audioStreams.length !== 0
+        || !String(probe.format?.format_name || '').split(',').includes('matroska')
+        || stream.codec_name !== 'png'
+        || stream.pix_fmt !== 'rgb24'
+        || Number(stream.width) !== WIDTH
+        || Number(stream.height) !== HEIGHT
+        || stream.r_frame_rate !== '30/1'
+        || Number(stream.nb_read_frames) !== 49
+    ) {
+        fail(`v14 interval guide media contract changed: ${JSON.stringify(probe)}`);
+    }
+    const raw = runChecked(ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-nostdin', '-i', videoPath,
+        '-frames:v', '49', '-an', '-map', '0:v:0', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
+    ], 'v14 interval guide decoded RGB', { encoding: null, maxBuffer: 64 * 1024 * 1024 }).stdout;
+    const frameBytes = WIDTH * HEIGHT * 3;
+    if (!Buffer.isBuffer(raw) || raw.length !== frameBytes * 49) {
+        fail(`v14 decoded RGB byte count must be ${frameBytes * 49}, got ${raw?.length}`);
+    }
+    const decodedRgbSha256 = [];
+    frameBuffers.forEach((frame, frameIndex) => {
+        const decoded = decodeOpaqueRgbPng(frame.buffer, `v14 browser frame ${frameIndex}`);
+        const fromVideo = raw.subarray(frameIndex * frameBytes, (frameIndex + 1) * frameBytes);
+        if (!fromVideo.equals(decoded.rgb)) {
+            fail(`v14 lossless video RGB differs from browser frame ${frameIndex}`);
+        }
+        decodedRgbSha256.push(sha256Buffer(fromVideo));
+    });
+    return {
+        path: videoPath,
+        pin: pinFile(videoPath, {
+            container: 'matroska',
+            codec: 'png',
+            pixelFormat: 'rgb24',
+            width: WIDTH,
+            height: HEIGHT,
+            frameRate: 30,
+            frameCount: 49,
+            audioStreamCount: 0,
+        }),
+        decodedRgbSha256,
+        probe,
+    };
+}
+
 async function runSyntheticSmoke(config) {
     const output = outputDirectory(config.output);
     const chromeExecutable = existingFile(config.chrome, 'chrome');
@@ -1226,6 +1489,7 @@ async function runReal(config) {
         sceneContract,
         unifiedBrowserScene,
         recoveryGuides,
+        intervalGuide,
         guideFrames,
         recoveryFrames,
         deterministicContactCues,
@@ -1235,6 +1499,9 @@ async function runReal(config) {
     const candidateBPath = existingFile(config.candidateB, 'candidate-b');
     const chromeExecutable = existingFile(config.chrome, 'chrome');
     const threeModule = existingFile(config.three, 'three');
+    const sourceGuide = intervalGuide ? validateV14SourceGuideBundle(config.sourceGuideBundle) : null;
+    const ffmpeg = intervalGuide ? existingFile(config.ffmpeg, 'ffmpeg') : null;
+    const ffprobe = intervalGuide ? existingFile(config.ffprobe, 'ffprobe') : null;
     const candidateAValidated = validateImmutableInputs({ bundleDirectory, observationsPath: candidateAPath });
     const candidateBValidated = validateImmutableInputs({ bundleDirectory, observationsPath: candidateBPath });
     if (candidateAValidated.integrity.fittingBundleSha256 !== candidateBValidated.integrity.fittingBundleSha256) {
@@ -1258,8 +1525,13 @@ async function runReal(config) {
         skinWeights: readGzipJson(weightsPath, 'skin weights'),
         candidateA: candidateAValidated.observations,
         candidateB: candidateBValidated.observations,
+        sourcePoseContract: sourceGuide?.poseContract || null,
         guidePlan: recoveryGuides ? HORSE_V12_RECOVERY_GUIDE_PLAN : null,
-        contactCueVisibilityPlan: recoveryGuides ? buildHorseV12ContactCueVisibilityPlan() : null,
+        contactCueVisibilityPlan: intervalGuide
+            ? buildHorseV14ContactCueVisibilityPlan()
+            : recoveryGuides
+                ? buildHorseV12ContactCueVisibilityPlan()
+                : null,
     };
     const { server, url } = await startHarnessServer({ config: harnessConfig, threeModule });
     let browser;
@@ -1268,6 +1540,7 @@ async function runReal(config) {
             chromeExecutable,
             url,
             guideFrames: unifiedBrowserScene ? guideFrames : SWING_FRAMES,
+            deterministicRerender: intervalGuide,
         });
     } finally {
         await new Promise((resolve) => server.close(resolve));
@@ -1277,11 +1550,32 @@ async function runReal(config) {
     if (browser.result.model.vertexCount !== 344) fail('browser did not render the 344-vertex Horse_2 mesh');
     if (browser.result.model.sourceFaceCount !== 258) fail('browser did not use all 258 source faces');
     if (browser.result.postBakeQa?.status !== 'PASS') fail('post-bake hoof QA did not pass');
-    if (recoveryGuides && browser.result.contactCueQa?.status !== 'PASS') {
-        fail('v12 per-guide contact-cue visibility QA did not pass');
+    if ((recoveryGuides || intervalGuide) && browser.result.contactCueQa?.status !== 'PASS') {
+        fail(`${intervalGuide ? 'v14 per-frame' : 'v12 per-guide'} contact-cue visibility QA did not pass`);
     }
-    if (browser.result.postBakeQa.guides.filter((guide) => guide.swingLimb).some((guide) => guide.stanceHoofCount !== 3)) {
+    const postBakeRows = browser.result.postBakeQa.guides || browser.result.postBakeQa.frames;
+    if (!Array.isArray(postBakeRows) || postBakeRows.filter((guide) => guide.swingLimb).some((guide) => guide.stanceHoofCount !== 3)) {
         fail('a swing guide did not retain exactly three stance hooves');
+    }
+    let deterministicRenderQa = null;
+    if (intervalGuide) {
+        if (!Array.isArray(browser.rerenders) || browser.rerenders.length !== 49) {
+            fail('v14 deterministic rerender did not return all 49 frames');
+        }
+        const mismatches = browser.renders.flatMap((render, index) => {
+            const rerender = browser.rerenders[index];
+            return rerender?.frameIndex === render.frameIndex && rerender.dataUrl === render.dataUrl
+                ? []
+                : [render.frameIndex];
+        });
+        if (mismatches.length) fail(`v14 browser rerender changed frames ${mismatches.join(',')}`);
+        deterministicRenderQa = {
+            schema: 'autorig-browser-deterministic-rerender-qa.v1',
+            status: 'PASS',
+            frameCount: 49,
+            byteIdenticalFrameCount: 49,
+            mismatchFrameIndices: [],
+        };
     }
     const staging = `${output}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     fs.mkdirSync(staging, { recursive: false });
@@ -1300,6 +1594,13 @@ async function runReal(config) {
                 : Buffer.from(renderByFrame.get(frameIndex).dataUrl.slice('data:image/png;base64,'.length), 'base64');
             const [width, height] = pngDimensions(buffer);
             if (width !== WIDTH || height !== HEIGHT) fail(`guide ${frameIndex} is ${width}x${height}, expected ${WIDTH}x${HEIGHT}`);
+            const decoded = intervalGuide
+                ? decodeOpaqueRgbPng(buffer, `browser guide ${frameIndex}`)
+                : null;
+            const sourceAnchor = sourceGuide?.anchors.find((row) => row.frameIndex === frameIndex) || null;
+            if (sourceAnchor && !buffer.equals(sourceAnchor.buffer)) {
+                fail(`v14 browser anchor frame ${frameIndex} is not byte-identical to the immutable v12 source`);
+            }
             fs.writeFileSync(destination, buffer, { flag: 'wx' });
             const guide = browser.result.poseContract.guides.find((value) => value.frameIndex === frameIndex);
             guideBuffers.push({ frameIndex, buffer });
@@ -1310,6 +1611,10 @@ async function runReal(config) {
                 strength: guide.strength,
                 width,
                 height,
+                ...(intervalGuide ? {
+                    decodedRgbSha256: sha256Buffer(decoded.rgb),
+                    sourceAnchorByteIdentical: sourceAnchor ? true : false,
+                } : {}),
                 renderSource: unifiedBrowserScene || (frameIndex !== 0 && frameIndex !== 48)
                     ? 'browser_threejs'
                     : 'immutable_reference_rgb',
@@ -1335,12 +1640,36 @@ async function runReal(config) {
         if (recoveryGuides && recoveryGuidePins.some((guide) => guide.sha256 !== guidePins[0].sha256)) {
             fail('v12 four-hoof recovery guides must be byte-identical to the actionless cycle endpoint');
         }
+        if (intervalGuide) {
+            const sourceAnchorIndices = sourceGuide.anchors.map((row) => row.frameIndex);
+            if (
+                sourceAnchorIndices.length !== 9
+                || sourceAnchorIndices.some((frameIndex) => guidePins[frameIndex].sourceAnchorByteIdentical !== true)
+            ) {
+                fail('v14 did not preserve all nine immutable v12 browser anchors');
+            }
+            if (V14_SWING_WINDOWS.some((window) => (
+                guidePins[window.apex].sha256 === guidePins[window.start - 1].sha256
+            ))) {
+                fail('v14 swing apex collapsed to a recovery barrier');
+            }
+        }
         const sceneQa = unifiedBrowserScene
             ? analyzeStaticSceneGuideFrames(guideBuffers, { expectedFrameIndices: guideFrames })
             : null;
+        const intervalVideo = intervalGuide
+            ? encodeV14IntervalGuide({ staging, ffmpeg, ffprobe, frameBuffers: guideBuffers })
+            : null;
+        if (intervalGuide && intervalVideo.decodedRgbSha256.some((digest, frameIndex) => (
+            digest !== guidePins[frameIndex].decodedRgbSha256
+        ))) {
+            fail('v14 lossless video decoded RGB SHA-256 inventory changed');
+        }
         const poseContract = {
             ...browser.result.poseContract,
-            status: recoveryGuides
+            status: intervalGuide
+                ? 'PASS_RENDERED_UNIFIED_BROWSER_INTERVAL_GUIDE'
+                : recoveryGuides
                 ? 'PASS_RENDERED_UNIFIED_BROWSER_RECOVERY_GUIDES'
                 : unifiedBrowserScene
                     ? 'PASS_RENDERED_UNIFIED_BROWSER_STATIC_SCENE_GUIDES'
@@ -1352,8 +1681,9 @@ async function runReal(config) {
             sceneContract,
             staticScene: browser.result.staticScene,
             browserRendererRequired: unifiedBrowserScene,
-            recoveryGuideFrames: recoveryFrames,
+            recoveryGuideFrames: intervalGuide ? [...RECOVERY_FRAMES] : recoveryFrames,
             deterministicContactCues,
+            ...(intervalGuide ? { deterministicRenderQa } : {}),
             postBakeQa: browser.result.postBakeQa,
             contactCueQa: browser.result.contactCueQa,
             hierarchyQa: browser.result.hierarchyQa,
@@ -1366,10 +1696,16 @@ async function runReal(config) {
             filename_string: guide.filename,
             sha256_string: guide.sha256,
             bytes_int: guide.bytes,
-            strength_float: guide.strength,
+            ...(intervalGuide ? {
+                decoded_rgb_sha256_string: guide.decodedRgbSha256,
+                source_anchor_byte_identical_bool: guide.sourceAnchorByteIdentical,
+            } : {}),
+            ...(guide.strength == null ? {} : { strength_float: guide.strength }),
         }));
         const manifestValue = {
-            schema: recoveryGuides
+            schema: intervalGuide
+                ? 'autorig-browser-ltx-interval-guide-bundle.v1'
+                : recoveryGuides
                 ? 'autorig-browser-ltx-recovery-guide-bundle.v1'
                 : unifiedBrowserScene
                     ? 'autorig-browser-ltx-static-scene-guide-bundle.v1'
@@ -1384,11 +1720,22 @@ async function runReal(config) {
             source_reference_is_guide_bool: !unifiedBrowserScene,
             endpoint_guide_sha256_string: guidePins[0].sha256,
             cycle_frame_count_int: 49,
-            guide_count_int: guidePins.length,
-            recovery_frame_indices_array: recoveryFrames,
+            guide_count_int: intervalGuide ? 1 : guidePins.length,
+            ...(intervalGuide ? { browser_frame_count_int: guidePins.length } : {}),
+            recovery_frame_indices_array: intervalGuide ? [...RECOVERY_FRAMES] : recoveryFrames,
             recovery_guides_byte_identical_endpoint_bool: recoveryGuides
                 ? recoveryGuidePins.every((guide) => guide.sha256 === guidePins[0].sha256)
                 : null,
+            ...(intervalGuide ? {
+                source_anchor_frame_indices_array: HORSE_V12_RECOVERY_GUIDE_PLAN.map((row) => row.frameIndex),
+                source_anchors_byte_identical_bool: true,
+                interval_guide_video_object: {
+                    ...intervalVideo.pin,
+                    decoded_rgb_sha256_array: intervalVideo.decodedRgbSha256,
+                    exact_browser_frame_rgb_bool: true,
+                    load_video_node_compatible_bool: true,
+                },
+            } : {}),
             renderer_object: {
                 renderer_string: 'browser_threejs',
                 blender_used_bool: false,
@@ -1397,7 +1744,8 @@ async function runReal(config) {
                 shadows_enabled_bool: false,
                 deterministic_contact_cues_bool: deterministicContactCues,
                 per_guide_contact_cue_visibility_bool: recoveryGuides,
-                contact_cue_implementation_string: recoveryGuides
+                ...(intervalGuide ? { per_frame_contact_cue_visibility_bool: true } : {}),
+                contact_cue_implementation_string: recoveryGuides || intervalGuide
                     ? 'static_rest_hoof_radial_alpha_planes'
                     : null,
             },
@@ -1415,6 +1763,12 @@ async function runReal(config) {
                 candidateA: pinFile(candidateAPath, { sourceVideo: sourceVideoA }),
                 candidateB: pinFile(candidateBPath, { sourceVideo: sourceVideoB }),
             },
+            ...(sourceGuide ? { sourceGuideBundle: {
+                bundleId: V14_SOURCE_BUNDLE_ID,
+                immutableManifest: sourceGuide.manifestPin,
+                poseContract: sourceGuide.posePin,
+                anchorFrames: sourceGuide.anchors.map(({ buffer, ...pin }) => pin),
+            } } : {}),
             renderer: {
                 chrome: pinFile(chromeExecutable, {
                     product: browser.browserVersion.product,
@@ -1425,12 +1779,27 @@ async function runReal(config) {
                 adapter: pinFile(ADAPTER_FILE),
                 author: pinFile(AUTHOR_FILE),
                 cli: pinFile(TOOL_FILE),
+                ...(intervalGuide ? {
+                    ffmpeg: pinFile(ffmpeg),
+                    ffprobe: pinFile(ffprobe),
+                } : {}),
                 webgl: browser.result.webgl,
             },
             model: browser.result.model,
             hierarchyQa: browser.result.hierarchyQa,
             postBakeQa: browser.result.postBakeQa,
             contactCueQa: browser.result.contactCueQa,
+            ...(intervalGuide ? {
+                deterministicRenderQa,
+                losslessVideoQa: {
+                schema: 'autorig-browser-lossless-interval-video-qa.v1',
+                status: 'PASS',
+                frameCount: 49,
+                codec: 'png',
+                pixelFormat: 'rgb24',
+                decodedRgbSha256MatchesBrowserFrames: true,
+                },
+            } : {}),
             staticSceneQa: sceneQa,
             staticSceneRenderer: browser.result.staticScene,
             poseContract: pinFile(posePath),
