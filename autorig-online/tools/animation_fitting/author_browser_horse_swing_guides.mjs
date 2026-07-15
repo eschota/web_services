@@ -21,8 +21,33 @@ const WIDTH = 768;
 const HEIGHT = 448;
 const GUIDE_FRAMES = Object.freeze([0, 6, 18, 30, 42, 48]);
 const SWING_FRAMES = Object.freeze([6, 18, 30, 42]);
+const RECOVERY_FRAMES = Object.freeze([12, 24, 36]);
 const MIXED_V10_SCENE_CONTRACT = 'v10_reference_endpoints_browser_intermediates';
 const UNIFIED_V11_SCENE_CONTRACT = 'v11_unified_browser_static_scene_v1';
+const RECOVERY_V12_SCENE_CONTRACT = 'v12_unified_browser_recovery_guides_v1';
+const HORSE_LIMB_ORDER = Object.freeze(['hind_left', 'fore_left', 'hind_right', 'fore_right']);
+
+export const HORSE_V12_RECOVERY_GUIDE_PLAN = Object.freeze([
+    Object.freeze({ frameIndex: 0, role: 'actionless_default_cycle_origin', swingLimb: null, strength: 0.8 }),
+    Object.freeze({ frameIndex: 6, role: 'hind_left_single_hoof_swing_apex', swingLimb: 'hind_left', strength: 0.7 }),
+    Object.freeze({ frameIndex: 12, role: 'four_hoof_recovery_after_hind_left', swingLimb: null, strength: 0.85 }),
+    Object.freeze({ frameIndex: 18, role: 'fore_left_single_hoof_swing_apex', swingLimb: 'fore_left', strength: 0.7 }),
+    Object.freeze({ frameIndex: 24, role: 'four_hoof_recovery_after_fore_left', swingLimb: null, strength: 0.85 }),
+    Object.freeze({ frameIndex: 30, role: 'hind_right_single_hoof_swing_apex', swingLimb: 'hind_right', strength: 0.7 }),
+    Object.freeze({ frameIndex: 36, role: 'four_hoof_recovery_after_hind_right', swingLimb: null, strength: 0.85 }),
+    Object.freeze({ frameIndex: 42, role: 'fore_right_single_hoof_swing_apex', swingLimb: 'fore_right', strength: 0.7 }),
+    Object.freeze({ frameIndex: 48, role: 'actionless_default_cycle_endpoint', swingLimb: null, strength: 0.8 }),
+]);
+
+export function buildHorseV12ContactCueVisibilityPlan() {
+    return HORSE_V12_RECOVERY_GUIDE_PLAN.map((guide) => ({
+        frameIndex: guide.frameIndex,
+        visibleLimbs: HORSE_LIMB_ORDER.filter((limb) => limb !== guide.swingLimb),
+        hiddenLimbs: guide.swingLimb ? [guide.swingLimb] : [],
+        visibleCueCount: guide.swingLimb ? 3 : 4,
+        hiddenCueCount: guide.swingLimb ? 1 : 0,
+    }));
+}
 
 function fail(message) {
     throw new Error(message);
@@ -109,12 +134,32 @@ function parseArguments(argv) {
 
 function guideSceneContract(value) {
     const result = String(value || MIXED_V10_SCENE_CONTRACT).trim();
-    if (result !== MIXED_V10_SCENE_CONTRACT && result !== UNIFIED_V11_SCENE_CONTRACT) {
+    if (
+        result !== MIXED_V10_SCENE_CONTRACT
+        && result !== UNIFIED_V11_SCENE_CONTRACT
+        && result !== RECOVERY_V12_SCENE_CONTRACT
+    ) {
         fail(
-            `scene-contract must be ${MIXED_V10_SCENE_CONTRACT} or ${UNIFIED_V11_SCENE_CONTRACT}, got ${result}`,
+            `scene-contract must be ${MIXED_V10_SCENE_CONTRACT}, ${UNIFIED_V11_SCENE_CONTRACT}, or ${RECOVERY_V12_SCENE_CONTRACT}, got ${result}`,
         );
     }
     return result;
+}
+
+export function browserGuideSceneProfile(value) {
+    const sceneContract = guideSceneContract(value);
+    const recoveryGuides = sceneContract === RECOVERY_V12_SCENE_CONTRACT;
+    return {
+        sceneContract,
+        unifiedBrowserScene: sceneContract !== MIXED_V10_SCENE_CONTRACT,
+        recoveryGuides,
+        guideFrames: recoveryGuides
+            ? HORSE_V12_RECOVERY_GUIDE_PLAN.map((guide) => guide.frameIndex)
+            : [...GUIDE_FRAMES],
+        recoveryFrames: recoveryGuides ? [...RECOVERY_FRAMES] : [],
+        deterministicContactCues: recoveryGuides,
+        shadowsEnabled: false,
+    };
 }
 
 function mime(filename) {
@@ -134,6 +179,8 @@ import { buildHorse2BrowserFittingSkeleton, bakeFittedAnimationToThreeHierarchyC
 import { authorHorseV10SwingGuidePoses, verifyHorseV10PostBakeHoofProjections } from '/author.js';
 
 const config = await (await fetch('/config.json', { cache: 'no-store' })).json();
+const LIMB_ORDER = Object.freeze(['hind_left', 'fore_left', 'hind_right', 'fore_right']);
+const V12_SCENE_CONTRACT = 'v12_unified_browser_recovery_guides_v1';
 const STATIC_SCENE = Object.freeze({
     clearColorHex: 0x717b86,
     backgroundHex: 0x717b86,
@@ -144,6 +191,17 @@ const STATIC_SCENE = Object.freeze({
     hemisphere: Object.freeze({ skyHex: 0xe9f1ff, groundHex: 0x3f4650, intensity: 2.1 }),
     key: Object.freeze({ colorHex: 0xffffff, intensity: 3.5, position: Object.freeze([4.5, -5.5, 8.5]) }),
     ground: Object.freeze({ colorHex: 0xb8c3cc, roughness: 0.92, metalness: 0, size: 50 }),
+    contactCues: Object.freeze({
+        enabled: config.sceneContract === V12_SCENE_CONTRACT,
+        implementation: 'static_rest_hoof_radial_alpha_planes',
+        colorHex: 0x53616b,
+        opacity: 0.24,
+        widthWorld: 0.22,
+        lengthWorld: 0.38,
+        featherInner: 0.18,
+        featherOuter: 0.98,
+        groundOffsetWorld: 0.002,
+    }),
 });
 
 function matrix4(values, field) {
@@ -334,6 +392,229 @@ function makeScene(model, groundHeight) {
     return scene;
 }
 
+function cloneValue(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function buildV12RecoveryPoseContract(base) {
+    if (config.sceneContract !== V12_SCENE_CONTRACT) return base;
+    if (!Array.isArray(config.guidePlan) || config.guidePlan.length !== 9) {
+        throw new Error('v12 recovery guide plan must contain exactly nine guides');
+    }
+    const authoredByTargetFrame = new Map(base.guides.map((guide, index) => [
+        guide.frameIndex,
+        { guide, fitted: base.fitted.frames[index], qa: base.qa.guides[index] },
+    ]));
+    const rest = authoredByTargetFrame.get(0);
+    if (!rest) throw new Error('v12 recovery authoring requires the actionless frame 0');
+    const guides = config.guidePlan.map((guide, authoredIndex) => {
+        const source = guide.swingLimb ? authoredByTargetFrame.get(guide.frameIndex) : rest;
+        if (!source) throw new Error('missing authored swing source for v12 guide ' + guide.frameIndex);
+        return {
+            ...guide,
+            authoredClipFrame: authoredIndex,
+            authoredClipTimeSeconds: authoredIndex,
+            sourceAuthoredGuideFrame: source.guide.frameIndex,
+        };
+    });
+    const fittedFrames = guides.map((guide, frame) => {
+        const source = guide.swingLimb ? authoredByTargetFrame.get(guide.frameIndex) : rest;
+        return { frame, limbs: cloneValue(source.fitted.limbs) };
+    });
+    const qaGuides = guides.map((guide) => {
+        const source = guide.swingLimb ? authoredByTargetFrame.get(guide.frameIndex) : rest;
+        return {
+            ...cloneValue(source.qa),
+            frameIndex: guide.frameIndex,
+            swingLimb: guide.swingLimb,
+            stanceLimbs: LIMB_ORDER.filter((limb) => limb !== guide.swingLimb),
+            stanceHoofCount: guide.swingLimb ? 3 : 4,
+        };
+    });
+    return {
+        ...base,
+        schema: 'autorig-browser-horse-recovery-guide-poses.v1',
+        status: 'recovery_pose_contract_ready_not_rendered',
+        guideFrameIndices: guides.map((guide) => guide.frameIndex),
+        guides,
+        fitted: {
+            ...base.fitted,
+            fps: 1,
+            frameCount: fittedFrames.length,
+            durationSeconds: fittedFrames.length - 1,
+            frames: fittedFrames,
+        },
+        qa: {
+            ...base.qa,
+            recoveryGuideCount: 3,
+            guides: qaGuides,
+        },
+    };
+}
+
+function addDeterministicContactCues(scene, terminalBones, groundHeight) {
+    if (config.sceneContract !== V12_SCENE_CONTRACT) return null;
+    const cue = STATIC_SCENE.contactCues;
+    const geometry = new THREE.PlaneGeometry(cue.widthWorld, cue.lengthWorld, 1, 1);
+    const material = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        depthTest: true,
+        toneMapped: false,
+        uniforms: {
+            cueColor: { value: new THREE.Color(cue.colorHex) },
+            cueOpacity: { value: cue.opacity },
+            featherInner: { value: cue.featherInner },
+            featherOuter: { value: cue.featherOuter },
+        },
+        vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+        fragmentShader: 'varying vec2 vUv; uniform vec3 cueColor; uniform float cueOpacity; uniform float featherInner; uniform float featherOuter; void main(){float r=length((vUv-0.5)*2.0);float a=cueOpacity*(1.0-smoothstep(featherInner,featherOuter,r));gl_FragColor=vec4(cueColor,a);}',
+    });
+    const restPositions = {};
+    const meshesByLimb = {};
+    for (const limb of LIMB_ORDER) {
+        const world = terminalBones[limb].getWorldPosition(new THREE.Vector3());
+        const plane = new THREE.Mesh(geometry, material);
+        plane.name = 'AutoRig_V12_Contact_Cue_' + limb;
+        plane.position.set(world.x, world.y, Number(groundHeight) + cue.groundOffsetWorld);
+        plane.renderOrder = 1;
+        plane.frustumCulled = false;
+        scene.add(plane);
+        restPositions[limb] = plane.position.toArray();
+        meshesByLimb[limb] = plane;
+    }
+    return {
+        meshesByLimb,
+        metadata: {
+            ...cue,
+            count: LIMB_ORDER.length,
+            staticRestPositionsWorld: restPositions,
+            shadowMapUsed: false,
+            perGuideVisibility: true,
+        },
+    };
+}
+
+function applyContactCueVisibility(runtime, frameIndex) {
+    if (!runtime) return null;
+    const expected = config.contactCueVisibilityPlan?.find((row) => row.frameIndex === frameIndex);
+    if (!expected) throw new Error('missing contact-cue visibility contract for guide ' + frameIndex);
+    for (const limb of LIMB_ORDER) {
+        runtime.meshesByLimb[limb].visible = expected.visibleLimbs.includes(limb);
+    }
+    const visibleLimbs = LIMB_ORDER.filter((limb) => runtime.meshesByLimb[limb].visible);
+    const hiddenLimbs = LIMB_ORDER.filter((limb) => !runtime.meshesByLimb[limb].visible);
+    return {
+        frameIndex,
+        visibleLimbs,
+        hiddenLimbs,
+        visibleCueCount: visibleLimbs.length,
+        hiddenCueCount: hiddenLimbs.length,
+    };
+}
+
+function verifyV12ContactCueVisibility(poseContract, projectedHoovesByGuide) {
+    const guides = projectedHoovesByGuide.map((row, index) => {
+        const guide = poseContract.guides[index];
+        const actual = row.contactCueVisibility;
+        const expectedVisible = LIMB_ORDER.filter((limb) => limb !== guide.swingLimb);
+        const expectedHidden = guide.swingLimb ? [guide.swingLimb] : [];
+        if (
+            !actual
+            || actual.frameIndex !== guide.frameIndex
+            || JSON.stringify(actual.visibleLimbs) !== JSON.stringify(expectedVisible)
+            || JSON.stringify(actual.hiddenLimbs) !== JSON.stringify(expectedHidden)
+            || actual.visibleCueCount !== expectedVisible.length
+            || actual.hiddenCueCount !== expectedHidden.length
+        ) {
+            throw new Error('v12 contact-cue visibility does not match stance at guide ' + guide.frameIndex);
+        }
+        return {
+            frameIndex: guide.frameIndex,
+            swingLimb: guide.swingLimb,
+            visibleLimbs: [...actual.visibleLimbs],
+            hiddenLimbs: [...actual.hiddenLimbs],
+            visibleCueCount: actual.visibleCueCount,
+            hiddenCueCount: actual.hiddenCueCount,
+            exactlyMatchesStance: true,
+        };
+    });
+    return {
+        schema: 'autorig-browser-contact-cue-visibility-qa.v1',
+        status: 'PASS',
+        perGuideVisibility: true,
+        swingGuidesHideExactlyOneCue: guides.filter((guide) => guide.swingLimb).every((guide) => (
+            guide.visibleCueCount === 3
+            && guide.hiddenCueCount === 1
+            && guide.hiddenLimbs[0] === guide.swingLimb
+        )),
+        stanceGuidesShowAllFourCues: guides.filter((guide) => !guide.swingLimb).every((guide) => (
+            guide.visibleCueCount === 4 && guide.hiddenCueCount === 0
+        )),
+        guides,
+    };
+}
+
+function verifyV12PostBakeHoofProjections(poseContract, projectedHoovesByGuide, options = {}) {
+    if (poseContract.schema !== 'autorig-browser-horse-recovery-guide-poses.v1') {
+        throw new Error('v12 recovery pose contract schema is invalid');
+    }
+    if (!Array.isArray(projectedHoovesByGuide) || projectedHoovesByGuide.length !== 9) {
+        throw new Error('v12 recovery post-bake QA requires nine projected guide rows');
+    }
+    const maximumStanceErrorPx = Number(options.maximumStanceErrorPx ?? 1);
+    const maximumRequestedErrorPx = Number(options.maximumRequestedErrorPx ?? 3);
+    const minimumSwingLiftPx = Number(options.minimumSwingLiftPx ?? 5);
+    const rest = projectedHoovesByGuide[0].hooves;
+    const qaGuides = projectedHoovesByGuide.map((row, index) => {
+        const guide = poseContract.guides[index];
+        const desired = poseContract.fitted.frames[index];
+        if (row.frameIndex !== guide.frameIndex) throw new Error('v12 projected guide order changed');
+        const stanceLimbs = LIMB_ORDER.filter((limb) => limb !== guide.swingLimb);
+        const stanceErrors = Object.fromEntries(stanceLimbs.map((limb) => [
+            limb,
+            Math.hypot(row.hooves[limb][0] - rest[limb][0], row.hooves[limb][1] - rest[limb][1]),
+        ]));
+        const requestedErrors = Object.fromEntries(LIMB_ORDER.map((limb) => {
+            const target = desired.limbs[limb].points.at(-1);
+            return [limb, Math.hypot(row.hooves[limb][0] - target[0], row.hooves[limb][1] - target[1])];
+        }));
+        const maximumStance = Math.max(0, ...Object.values(stanceErrors));
+        const maximumRequested = Math.max(...Object.values(requestedErrors));
+        if (maximumStance > maximumStanceErrorPx) throw new Error('v12 post-bake stance hoof error exceeds tolerance');
+        if (maximumRequested > maximumRequestedErrorPx) throw new Error('v12 post-bake requested hoof error exceeds tolerance');
+        const swingLift = guide.swingLimb
+            ? rest[guide.swingLimb][1] - row.hooves[guide.swingLimb][1]
+            : 0;
+        if (guide.swingLimb && swingLift < minimumSwingLiftPx) throw new Error('v12 post-bake swing lift is too small');
+        return {
+            frameIndex: guide.frameIndex,
+            swingLimb: guide.swingLimb,
+            stanceLimbs,
+            stanceHoofCount: stanceLimbs.length,
+            maximumStanceErrorPx: maximumStance,
+            maximumRequestedErrorPx: maximumRequested,
+            swingHoofLiftPx: swingLift,
+        };
+    });
+    const endpointMaximumErrorPx = Math.max(...LIMB_ORDER.map((limb) => Math.hypot(
+        projectedHoovesByGuide[0].hooves[limb][0] - projectedHoovesByGuide.at(-1).hooves[limb][0],
+        projectedHoovesByGuide[0].hooves[limb][1] - projectedHoovesByGuide.at(-1).hooves[limb][1],
+    )));
+    if (endpointMaximumErrorPx > maximumStanceErrorPx) throw new Error('v12 post-bake endpoints differ');
+    return {
+        status: 'PASS',
+        hierarchyBakeVerified: true,
+        minimumStanceHooves: 3,
+        recoveryGuideCount: 3,
+        maximumStanceErrorPx,
+        maximumRequestedErrorPx,
+        minimumSwingLiftPx,
+        endpointMaximumErrorPx,
+        guides: qaGuides,
+    };
+}
+
 async function initializeReal() {
     const modelState = buildBundleModel(config.sourceSkeleton);
     const camera = buildBundleCamera(config.fittingBundle.camera);
@@ -347,11 +628,12 @@ async function initializeReal() {
         outputResolution: [${WIDTH}, ${HEIGHT}],
         includePositionMappings: 'auto',
     });
-    const poseContract = authorHorseV10SwingGuidePoses({
+    const basePoseContract = authorHorseV10SwingGuidePoses({
         skeleton: fittingSkeleton,
         candidateA: config.candidateA,
         candidateB: config.candidateB,
     });
+    const poseContract = buildV12RecoveryPoseContract(basePoseContract);
     const hierarchy = bakeFittedAnimationToThreeHierarchyClip({
         THREE,
         model: modelState.model,
@@ -359,7 +641,9 @@ async function initializeReal() {
         skeleton: fittingSkeleton,
         fitted: poseContract.fitted,
         outputResolution: [${WIDTH}, ${HEIGHT}],
-        name: 'Horse_Walk_v10_Browser_Swing_Guides',
+        name: config.sceneContract === V12_SCENE_CONTRACT
+            ? 'Horse_Walk_v12_Browser_Recovery_Guides'
+            : 'Horse_Walk_v10_Browser_Swing_Guides',
     });
     if (hierarchy.clip.validate() !== true) throw new Error('Three hierarchy clip validation failed');
     const scene = makeScene(modelState.model, config.fittingBundle.ground_plane.height);
@@ -387,33 +671,46 @@ async function initializeReal() {
         limb,
         modelState.bones.get(value.terminalBone),
     ]));
+    applyAuthoredTime(0);
+    modelState.model.updateWorldMatrix(true, true);
+    const contactCueRuntime = addDeterministicContactCues(
+        scene,
+        terminalBones,
+        config.fittingBundle.ground_plane.height,
+    );
     const sample = (guide) => {
         applyAuthoredTime(guide.authoredClipTimeSeconds);
         modelState.model.updateWorldMatrix(true, true);
+        const contactCueVisibility = applyContactCueVisibility(contactCueRuntime, guide.frameIndex);
         const hooves = Object.fromEntries(Object.entries(terminalBones).map(([limb, bone]) => {
             const world = bone.getWorldPosition(new THREE.Vector3());
             const ndc = world.project(camera);
             return [limb, projection.ndcToOutput([ndc.x, ndc.y, ndc.z])];
         }));
-        return { frameIndex: guide.frameIndex, hooves };
+        return { frameIndex: guide.frameIndex, hooves, contactCueVisibility };
     };
     const projectedHoovesByGuide = poseContract.guides.map(sample);
-    const postBakeQa = verifyHorseV10PostBakeHoofProjections({
-        poseContract,
-        projectedHoovesByGuide,
+    const postBakeOptions = {
         maximumStanceErrorPx: 1,
         // The actual canary worst-case requested terminal error is 2.27 px
         // (2.45 px across every fitted chain head). Three pixels is therefore
         // a strict, measured guard with no broad visual-error allowance.
         maximumRequestedErrorPx: 3,
         minimumSwingLiftPx: 5,
-    });
+    };
+    const postBakeQa = config.sceneContract === V12_SCENE_CONTRACT
+        ? verifyV12PostBakeHoofProjections(poseContract, projectedHoovesByGuide, postBakeOptions)
+        : verifyHorseV10PostBakeHoofProjections({ poseContract, projectedHoovesByGuide, ...postBakeOptions });
+    const contactCueQa = config.sceneContract === V12_SCENE_CONTRACT
+        ? verifyV12ContactCueVisibility(poseContract, projectedHoovesByGuide)
+        : null;
     const info = webglInfo(renderer);
     window.__renderGuide = async (frameIndex) => {
         const guide = poseContract.guides.find((value) => value.frameIndex === frameIndex);
         if (!guide) throw new Error('unknown guide frame ' + frameIndex);
         applyAuthoredTime(guide.authoredClipTimeSeconds);
         modelState.model.updateWorldMatrix(true, true);
+        applyContactCueVisibility(contactCueRuntime, guide.frameIndex);
         renderer.render(scene, camera);
         await new Promise((resolve) => requestAnimationFrame(resolve));
         renderer.render(scene, camera);
@@ -429,11 +726,13 @@ async function initializeReal() {
         poseContract,
         hierarchyQa: hierarchy.qa,
         postBakeQa,
+        contactCueQa,
         webgl: info,
         staticScene: {
             contract: config.sceneContract,
             cameraSource: 'immutable_fitting_bundle',
             ...STATIC_SCENE,
+            contactCues: contactCueRuntime?.metadata || null,
         },
         model: {
             sourceBoneCount: modelState.sourceBones.length,
@@ -770,8 +1069,17 @@ function luma(r, g, b) {
 }
 
 export function analyzeStaticSceneGuideFrames(frames, options = {}) {
-    if (!Array.isArray(frames) || frames.length !== GUIDE_FRAMES.length) {
-        fail(`static-scene QA requires exactly ${GUIDE_FRAMES.length} guide frames`);
+    const expectedFrameIndices = Array.isArray(options.expectedFrameIndices)
+        ? options.expectedFrameIndices.map(Number)
+        : [...GUIDE_FRAMES];
+    if (
+        !expectedFrameIndices.length
+        || expectedFrameIndices.some((frame, index) => !Number.isInteger(frame) || (index && frame <= expectedFrameIndices[index - 1]))
+    ) {
+        fail('static-scene expected frame indices must be strictly increasing integers');
+    }
+    if (!Array.isArray(frames) || frames.length !== expectedFrameIndices.length) {
+        fail(`static-scene QA requires exactly ${expectedFrameIndices.length} guide frames`);
     }
     const borderWidth = Number(options.borderWidth ?? 32);
     const maximumFullFrameMeanLumaRange = Number(options.maximumFullFrameMeanLumaRange ?? 0.5);
@@ -779,8 +1087,8 @@ export function analyzeStaticSceneGuideFrames(frames, options = {}) {
     const maximumNearBlackFraction = Number(options.maximumNearBlackFraction ?? 0.001);
     if (!Number.isInteger(borderWidth) || borderWidth <= 0) fail('static-scene border width is invalid');
     const decoded = frames.map((frame, index) => {
-        if (Number(frame.frameIndex) !== GUIDE_FRAMES[index]) {
-            fail(`static-scene guide frame order must be ${GUIDE_FRAMES.join(',')}`);
+        if (Number(frame.frameIndex) !== expectedFrameIndices[index]) {
+            fail(`static-scene guide frame order must be ${expectedFrameIndices.join(',')}`);
         }
         const image = frame.decoded || decodeOpaqueRgbPng(frame.buffer, `guide frame ${frame.frameIndex}`);
         if (image.width !== WIDTH || image.height !== HEIGHT || image.rgb.length !== WIDTH * HEIGHT * 3) {
@@ -844,6 +1152,7 @@ export function analyzeStaticSceneGuideFrames(frames, options = {}) {
     const report = {
         schema: 'autorig-browser-static-scene-qa.v1',
         status,
+        expected_frame_indices_array: expectedFrameIndices,
         decoded_rgb_statistics_bool: true,
         endpoint_byte_identical_bool: endpointByteIdentical,
         border_width_int: borderWidth,
@@ -912,8 +1221,15 @@ async function runSyntheticSmoke(config) {
 
 async function runReal(config) {
     const output = outputDirectory(config.output);
-    const sceneContract = guideSceneContract(config.sceneContract);
-    const unifiedBrowserScene = sceneContract === UNIFIED_V11_SCENE_CONTRACT;
+    const sceneProfile = browserGuideSceneProfile(config.sceneContract);
+    const {
+        sceneContract,
+        unifiedBrowserScene,
+        recoveryGuides,
+        guideFrames,
+        recoveryFrames,
+        deterministicContactCues,
+    } = sceneProfile;
     const bundleDirectory = existingDirectory(config.bundle, 'bundle');
     const candidateAPath = existingFile(config.candidateA, 'candidate-a');
     const candidateBPath = existingFile(config.candidateB, 'candidate-b');
@@ -942,6 +1258,8 @@ async function runReal(config) {
         skinWeights: readGzipJson(weightsPath, 'skin weights'),
         candidateA: candidateAValidated.observations,
         candidateB: candidateBValidated.observations,
+        guidePlan: recoveryGuides ? HORSE_V12_RECOVERY_GUIDE_PLAN : null,
+        contactCueVisibilityPlan: recoveryGuides ? buildHorseV12ContactCueVisibilityPlan() : null,
     };
     const { server, url } = await startHarnessServer({ config: harnessConfig, threeModule });
     let browser;
@@ -949,7 +1267,7 @@ async function runReal(config) {
         browser = await runHarnessInChrome({
             chromeExecutable,
             url,
-            guideFrames: unifiedBrowserScene ? GUIDE_FRAMES : SWING_FRAMES,
+            guideFrames: unifiedBrowserScene ? guideFrames : SWING_FRAMES,
         });
     } finally {
         await new Promise((resolve) => server.close(resolve));
@@ -959,6 +1277,9 @@ async function runReal(config) {
     if (browser.result.model.vertexCount !== 344) fail('browser did not render the 344-vertex Horse_2 mesh');
     if (browser.result.model.sourceFaceCount !== 258) fail('browser did not use all 258 source faces');
     if (browser.result.postBakeQa?.status !== 'PASS') fail('post-bake hoof QA did not pass');
+    if (recoveryGuides && browser.result.contactCueQa?.status !== 'PASS') {
+        fail('v12 per-guide contact-cue visibility QA did not pass');
+    }
     if (browser.result.postBakeQa.guides.filter((guide) => guide.swingLimb).some((guide) => guide.stanceHoofCount !== 3)) {
         fail('a swing guide did not retain exactly three stance hooves');
     }
@@ -971,7 +1292,7 @@ async function runReal(config) {
         const renderByFrame = new Map(browser.renders.map((render) => [render.frameIndex, render]));
         const guidePins = [];
         const guideBuffers = [];
-        for (const frameIndex of GUIDE_FRAMES) {
+        for (const frameIndex of guideFrames) {
             const filename = `guide_${String(frameIndex).padStart(3, '0')}.png`;
             const destination = path.join(staging, filename);
             const buffer = !unifiedBrowserScene && (frameIndex === 0 || frameIndex === 48)
@@ -1002,7 +1323,7 @@ async function runReal(config) {
             fail('v10 frame 0 and frame 48 are not byte-identical reference copies');
         }
         if (unifiedBrowserScene && guidePins.some((guide) => guide.renderSource !== 'browser_threejs')) {
-            fail('v11 unified static-scene guides must all come from the same browser renderer');
+            fail('unified static-scene guides must all come from the same browser renderer');
         }
         const swingHashes = guidePins.filter((guide) => SWING_FRAMES.includes(guide.frameIndex)).map((guide) => guide.sha256);
         if (new Set(swingHashes).size !== SWING_FRAMES.length || swingHashes.includes(guidePins[0].sha256)) {
@@ -1010,13 +1331,19 @@ async function runReal(config) {
                 guidePins.map((guide) => [guide.frameIndex, guide.sha256]),
             )}`);
         }
+        const recoveryGuidePins = guidePins.filter((guide) => recoveryFrames.includes(guide.frameIndex));
+        if (recoveryGuides && recoveryGuidePins.some((guide) => guide.sha256 !== guidePins[0].sha256)) {
+            fail('v12 four-hoof recovery guides must be byte-identical to the actionless cycle endpoint');
+        }
         const sceneQa = unifiedBrowserScene
-            ? analyzeStaticSceneGuideFrames(guideBuffers)
+            ? analyzeStaticSceneGuideFrames(guideBuffers, { expectedFrameIndices: guideFrames })
             : null;
         const poseContract = {
             ...browser.result.poseContract,
-            status: unifiedBrowserScene
-                ? 'PASS_RENDERED_UNIFIED_BROWSER_STATIC_SCENE_GUIDES'
+            status: recoveryGuides
+                ? 'PASS_RENDERED_UNIFIED_BROWSER_RECOVERY_GUIDES'
+                : unifiedBrowserScene
+                    ? 'PASS_RENDERED_UNIFIED_BROWSER_STATIC_SCENE_GUIDES'
                 : 'PASS_RENDERED_BROWSER_GUIDES',
             renderer: {
                 implementation: 'chromium_webgl_three_r160',
@@ -1025,7 +1352,10 @@ async function runReal(config) {
             sceneContract,
             staticScene: browser.result.staticScene,
             browserRendererRequired: unifiedBrowserScene,
+            recoveryGuideFrames: recoveryFrames,
+            deterministicContactCues,
             postBakeQa: browser.result.postBakeQa,
+            contactCueQa: browser.result.contactCueQa,
             hierarchyQa: browser.result.hierarchyQa,
             staticSceneQa: sceneQa,
         };
@@ -1039,8 +1369,10 @@ async function runReal(config) {
             strength_float: guide.strength,
         }));
         const manifestValue = {
-            schema: unifiedBrowserScene
-                ? 'autorig-browser-ltx-static-scene-guide-bundle.v1'
+            schema: recoveryGuides
+                ? 'autorig-browser-ltx-recovery-guide-bundle.v1'
+                : unifiedBrowserScene
+                    ? 'autorig-browser-ltx-static-scene-guide-bundle.v1'
                 : 'autorig-browser-ltx-guide-bundle.v1',
             status: 'PASS',
             approvedForAnimationLibrary: false,
@@ -1053,12 +1385,21 @@ async function runReal(config) {
             endpoint_guide_sha256_string: guidePins[0].sha256,
             cycle_frame_count_int: 49,
             guide_count_int: guidePins.length,
+            recovery_frame_indices_array: recoveryFrames,
+            recovery_guides_byte_identical_endpoint_bool: recoveryGuides
+                ? recoveryGuidePins.every((guide) => guide.sha256 === guidePins[0].sha256)
+                : null,
             renderer_object: {
                 renderer_string: 'browser_threejs',
                 blender_used_bool: false,
                 scene_contract_string: sceneContract,
                 all_guide_frames_browser_rendered_bool: unifiedBrowserScene,
                 shadows_enabled_bool: false,
+                deterministic_contact_cues_bool: deterministicContactCues,
+                per_guide_contact_cue_visibility_bool: recoveryGuides,
+                contact_cue_implementation_string: recoveryGuides
+                    ? 'static_rest_hoof_radial_alpha_planes'
+                    : null,
             },
             frames_array: framesArray,
             source: {
@@ -1089,6 +1430,7 @@ async function runReal(config) {
             model: browser.result.model,
             hierarchyQa: browser.result.hierarchyQa,
             postBakeQa: browser.result.postBakeQa,
+            contactCueQa: browser.result.contactCueQa,
             staticSceneQa: sceneQa,
             staticSceneRenderer: browser.result.staticScene,
             poseContract: pinFile(posePath),
