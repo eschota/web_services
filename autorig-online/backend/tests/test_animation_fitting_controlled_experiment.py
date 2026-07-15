@@ -14,6 +14,7 @@ from animation_fitting.controlled_experiment import (
     V6_EXPERIMENT_ID,
     V7_EXPERIMENT_ID,
     V8_EXPERIMENT_ID,
+    V9_EXPERIMENT_IDS,
     ControlledExperimentError,
     load_controlled_plan,
     patch_guide_strengths,
@@ -433,6 +434,63 @@ def test_v8_immutable_spec_records_resolution_only_rgb_followup() -> None:
         "start_guide_strength_float": 0.8,
         "end_guide_strength_float": 0.8,
     }]
+
+
+@pytest.mark.parametrize(
+    ("seed", "filename"),
+    [
+        (
+            6550110377254033429,
+            "horse_walk_prompt_v9_rgb_four_beat_seed_6550110377254033429_guide_080.v1.json",
+        ),
+        (
+            1448959135068762145,
+            "horse_walk_prompt_v9_rgb_four_beat_seed_1448959135068762145_guide_080.v1.json",
+        ),
+        (
+            6552386848790876755,
+            "horse_walk_prompt_v9_rgb_four_beat_seed_6552386848790876755_guide_080.v1.json",
+        ),
+    ],
+)
+def test_v9_seed_series_is_exactly_allowlisted_and_keeps_one_variable(
+    tmp_path: Path,
+    seed: int,
+    filename: str,
+) -> None:
+    spec_path = (
+        Path(__file__).resolve().parents[1]
+        / "animation_fitting"
+        / "specs"
+        / "experiments"
+        / filename
+    )
+    spec = json.loads(spec_path.read_text())
+    experiment_id = spec["experiment_id_string"]
+    assert experiment_id in V9_EXPERIMENT_IDS
+    assert spec["seed_int"] == seed
+    assert spec["reference_object"]["reference_contract_string"] == "actionless_bundle_rgb_v1"
+    assert spec["resolution_override_object"]["latent_width_int"] == 768
+    assert spec["resolution_override_object"]["latent_height_int"] == 448
+    assert "near hind hoof alone" in spec["positive_prompt_string"]
+    assert "far fore hoof alone" in spec["positive_prompt_string"]
+    assert spec["variants_array"][0]["start_guide_strength_float"] == 0.8
+    assert spec["variants_array"][0]["end_guide_strength_float"] == 0.8
+
+    experiment, bundle, artifacts = build_actionless_contract(tmp_path)
+    payload = json.loads(experiment.read_text())
+    payload["experiment_id_string"] = experiment_id
+    payload["seed_int"] = seed
+    write_json(experiment, payload)
+    plan = load_controlled_plan(
+        experiment_path=experiment,
+        authorization=experiment_id,
+        reference_bundle=bundle,
+        artifact_root=artifacts,
+    )
+    assert plan.experiment_id == experiment_id
+    assert plan.seed == seed
+    assert (plan.latent_width, plan.latent_height, plan.resize_longer) == (768, 448, 768)
 
 
 def test_controlled_plan_requires_exact_runtime_authorization_and_hashes(tmp_path: Path) -> None:

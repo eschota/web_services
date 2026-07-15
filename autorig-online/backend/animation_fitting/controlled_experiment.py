@@ -42,6 +42,11 @@ V8_EXPERIMENT_ID = (
     "horse_walk_prompt_v8_rgb_native_768x448_"
     "seed_4373011867009528156_guide_080_v1"
 )
+V9_EXPERIMENT_IDS = frozenset({
+    "horse_walk_prompt_v9_rgb_four_beat_seed_6550110377254033429_guide_080_v1",
+    "horse_walk_prompt_v9_rgb_four_beat_seed_1448959135068762145_guide_080_v1",
+    "horse_walk_prompt_v9_rgb_four_beat_seed_6552386848790876755_guide_080_v1",
+})
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPECTED_EXPERIMENT_ID,
     "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
@@ -50,7 +55,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     V6_EXPERIMENT_ID,
     V7_EXPERIMENT_ID,
     V8_EXPERIMENT_ID,
-})
+}) | V9_EXPERIMENT_IDS
 RESULT_SCHEMA = "autorig.animation-fitting-controlled-result.v1"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
