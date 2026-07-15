@@ -65,6 +65,13 @@ V12_EXPERIMENT_ID = (
 V12_EXPERIMENT_SPEC_SHA256 = (
     "22ee5269f14e382fbd214f23ede44130bd9409db471c97087564bb82ef7fd1e1"
 )
+V13_EXPERIMENT_ID = (
+    "horse_walk_v13_browser_hard_guides_"
+    "seed_6550110377254033429_v1"
+)
+V13_EXPERIMENT_SPEC_SHA256 = (
+    "607d5f98b25b46666470dc09a64c740c07dce14028b5d950196b163bc61d7df7"
+)
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPECTED_EXPERIMENT_ID,
     "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
@@ -76,6 +83,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     V10_EXPERIMENT_ID,
     V11_EXPERIMENT_ID,
     V12_EXPERIMENT_ID,
+    V13_EXPERIMENT_ID,
 }) | V9_EXPERIMENT_IDS
 RESULT_SCHEMA = "autorig.animation-fitting-controlled-result.v1"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -85,6 +93,10 @@ V12_GUIDE_FRAME_INDICES = (0, 6, 12, 18, 24, 30, 36, 42, 48)
 V12_SWING_GUIDE_FRAME_INDICES = (6, 18, 30, 42)
 V12_RECOVERY_GUIDE_FRAME_INDICES = (12, 24, 36)
 V12_GUIDE_STRENGTHS = (0.8, 0.7, 0.85, 0.7, 0.85, 0.7, 0.85, 0.7, 0.8)
+V13_GUIDE_STRENGTHS = (1.0,) * len(V12_GUIDE_FRAME_INDICES)
+V13_HARD_GUIDE_CONTRACT = "browser_rendered_hard_recovery_rgb_keyframes_v1"
+V13_BASE_VIDEO_LATENT_SLICES = 7
+V13_FINAL_TEMPORAL_LATENT_SLICES = 16
 V12_GUIDE_CONTRACT = "browser_rendered_recovery_static_scene_rgb_keyframes_v1"
 V12_SCENE_CONTRACT = "v12_unified_browser_recovery_guides_v1"
 V10_GUIDE_RESOLUTION = (768, 448)
@@ -1548,6 +1560,135 @@ def _load_browser_recovery_guide_sequence(
     return bundle, manifest_sha256, tuple(frames)
 
 
+def _load_browser_hard_guide_sequence(
+    experiment: Mapping[str, Any],
+    *,
+    guide_bundle: Optional[Path],
+    reference_sha256: str,
+    frame_count: int,
+    start_strength: float,
+    end_strength: float,
+    pins: BrowserRecoveryGuidePins,
+) -> tuple[Path, str, tuple[ControlledGuideFrame, ...]]:
+    """Derive nine hard generation anchors from the fully validated v12 f2 bundle.
+
+    V13 does not repin or rewrite any browser image.  It first validates the
+    source pixels, manifest, renderer, contact-cue QA and original v12
+    strengths through ``_load_browser_recovery_guide_sequence``.  Only after
+    that complete validation does it derive generation frames with strength
+    1.0.  This preserves the nine-guide latent shape required by the measured
+    RTX 4090 memory ceiling.
+    """
+
+    if start_strength != 1.0 or end_strength != 1.0:
+        raise ControlledExperimentError(
+            "v13 experiment endpoint guide strengths must be exactly 1.0"
+        )
+    hard_contract = experiment.get("hard_guide_contract_object")
+    if not isinstance(hard_contract, dict) or (
+        hard_contract.get("hard_guide_contract_string")
+        != V13_HARD_GUIDE_CONTRACT
+        or hard_contract.get("source_experiment_id_string") != V12_EXPERIMENT_ID
+        or hard_contract.get("source_guide_bundle_id_string")
+        != V12_GUIDE_BUNDLE_ID
+        or hard_contract.get("source_guide_manifest_sha256_string")
+        != V12_GUIDE_MANIFEST_SHA256
+        or hard_contract.get("frame_indices_array")
+        != list(V12_GUIDE_FRAME_INDICES)
+        or hard_contract.get("source_strengths_array")
+        != list(V12_GUIDE_STRENGTHS)
+        or hard_contract.get("generation_strengths_array")
+        != list(V13_GUIDE_STRENGTHS)
+        or _positive_int(
+            hard_contract.get("ltxv_add_guide_count_int"),
+            "v13 LTXVAddGuide count",
+        )
+        != len(V12_GUIDE_FRAME_INDICES)
+        or _positive_int(
+            hard_contract.get("base_video_latent_slices_int"),
+            "v13 base video latent slices",
+        )
+        != V13_BASE_VIDEO_LATENT_SLICES
+        or _positive_int(
+            hard_contract.get("final_temporal_latent_slices_int"),
+            "v13 final temporal latent slices",
+        )
+        != V13_FINAL_TEMPORAL_LATENT_SLICES
+        or hard_contract.get("no_additional_guide_frames_bool") is not True
+    ):
+        raise ControlledExperimentError(
+            "v13 immutable hard-guide derivation contract is invalid"
+        )
+
+    sequence = experiment.get("guide_sequence_object")
+    contract_rows = (
+        sequence.get("frames_array") if isinstance(sequence, dict) else None
+    )
+    if not isinstance(contract_rows, list) or (
+        len(contract_rows) != len(V12_GUIDE_FRAME_INDICES)
+        or any(not isinstance(row, dict) for row in contract_rows)
+        or [row.get("frame_index_int") for row in contract_rows]
+        != list(V12_GUIDE_FRAME_INDICES)
+        or [row.get("strength_float") for row in contract_rows]
+        != list(V13_GUIDE_STRENGTHS)
+    ):
+        raise ControlledExperimentError(
+            "v13 guide sequence must contain exactly the nine strength-1.0 anchors"
+        )
+    recovery_contract = experiment.get("recovery_guide_contract_object")
+    if not isinstance(recovery_contract, dict) or (
+        recovery_contract.get("strengths_array") != list(V13_GUIDE_STRENGTHS)
+    ):
+        raise ControlledExperimentError(
+            "v13 recovery guide contract must declare nine strength-1.0 anchors"
+        )
+
+    source_experiment = copy.deepcopy(dict(experiment))
+    source_recovery = source_experiment.get("recovery_guide_contract_object")
+    source_sequence = source_experiment.get("guide_sequence_object")
+    if not isinstance(source_recovery, dict) or not isinstance(source_sequence, dict):
+        raise ControlledExperimentError("v13 source recovery contract is invalid")
+    source_recovery["strengths_array"] = list(V12_GUIDE_STRENGTHS)
+    source_rows = source_sequence.get("frames_array")
+    if not isinstance(source_rows, list) or (
+        len(source_rows) != len(V12_GUIDE_STRENGTHS)
+    ):
+        raise ControlledExperimentError("v13 source guide frame inventory is invalid")
+    for row, strength in zip(source_rows, V12_GUIDE_STRENGTHS):
+        if not isinstance(row, dict):
+            raise ControlledExperimentError("v13 source guide frame row is invalid")
+        row["strength_float"] = strength
+
+    bundle, manifest_sha256, source_frames = _load_browser_recovery_guide_sequence(
+        source_experiment,
+        guide_bundle=guide_bundle,
+        reference_sha256=reference_sha256,
+        frame_count=frame_count,
+        start_strength=V12_GUIDE_STRENGTHS[0],
+        end_strength=V12_GUIDE_STRENGTHS[-1],
+        pins=pins,
+    )
+    if [frame.strength for frame in source_frames] != list(V12_GUIDE_STRENGTHS):
+        raise ControlledExperimentError(
+            "v13 source guide strengths changed after v12 validation"
+        )
+    hard_frames = tuple(
+        ControlledGuideFrame(
+            frame_index=frame.frame_index,
+            image=frame.image,
+            sha256=frame.sha256,
+            size_bytes=frame.size_bytes,
+            strength=1.0,
+        )
+        for frame in source_frames
+    )
+    if len(hard_frames) != len(V13_GUIDE_STRENGTHS) or any(
+        frame.strength != 1.0 for frame in hard_frames
+    ):
+        raise ControlledExperimentError("v13 hard-guide derivation is incomplete")
+    return bundle, manifest_sha256, hard_frames
+
+
 def load_controlled_plan(
     *,
     experiment_path: Path,
@@ -1573,6 +1714,14 @@ def load_controlled_plan(
         raise ControlledExperimentError(
             "v12 experiment spec SHA-256 is not the exact code-owned checked-in pin: "
             f"expected {V12_EXPERIMENT_SPEC_SHA256}, got {experiment_sha256}"
+        )
+    if (
+        experiment_id == V13_EXPERIMENT_ID
+        and experiment_sha256 != V13_EXPERIMENT_SPEC_SHA256
+    ):
+        raise ControlledExperimentError(
+            "v13 experiment spec SHA-256 is not the exact code-owned checked-in pin: "
+            f"expected {V13_EXPERIMENT_SPEC_SHA256}, got {experiment_sha256}"
         )
     if authorization != experiment_id:
         raise ControlledExperimentError(
@@ -1705,6 +1854,18 @@ def load_controlled_plan(
                 pins=V12_GUIDE_PINS,
             )
         )
+    elif experiment_id == V13_EXPERIMENT_ID:
+        browser_guide_bundle, guide_manifest_sha256, guide_frames = (
+            _load_browser_hard_guide_sequence(
+                experiment,
+                guide_bundle=guide_bundle,
+                reference_sha256=reference_sha,
+                frame_count=frame_count,
+                start_strength=start_strength,
+                end_strength=end_strength,
+                pins=V12_GUIDE_PINS,
+            )
+        )
 
     latent_width: Optional[int] = None
     latent_height: Optional[int] = None
@@ -1823,9 +1984,11 @@ def patch_browser_keyframe_guides(
     """Chain an exact immutable browser RGB guide profile into the LTX graph.
 
     V10/v11 retain their six-node endpoint plus four-swing graph.  The bounded
-    v12 profile adds three explicit four-hoof recovery guides, producing nine
-    ordered ``LTXVAddGuide`` nodes.  Recovery nodes reuse the endpoint's exact
-    preprocessed image instead of creating a second conditioning path.
+    v12/v13 profiles add three explicit four-hoof recovery guides, producing
+    nine ordered ``LTXVAddGuide`` nodes.  V13 keeps that exact latent shape but
+    raises every guide to the official node's hard strength 1.0.  Recovery
+    nodes reuse the endpoint's exact preprocessed image instead of creating a
+    second conditioning path.
     """
 
     image_indices = set(uploaded_images)
@@ -1845,10 +2008,29 @@ def patch_browser_keyframe_guides(
         image_indices == set(V12_GUIDE_FRAME_INDICES)
         and strength_indices == set(V12_GUIDE_FRAME_INDICES)
     ):
-        label = "v12"
         frame_indices = V12_GUIDE_FRAME_INDICES
         recovery_indices = V12_RECOVERY_GUIDE_FRAME_INDICES
-        expected_strengths = dict(zip(V12_GUIDE_FRAME_INDICES, V12_GUIDE_STRENGTHS))
+        supplied_strengths = tuple(
+            _guide_strength(
+                strengths[index], f"nine-frame guide {index} strength"
+            )
+            for index in frame_indices
+        )
+        if supplied_strengths == V12_GUIDE_STRENGTHS:
+            label = "v12"
+            expected_strengths = dict(
+                zip(V12_GUIDE_FRAME_INDICES, V12_GUIDE_STRENGTHS)
+            )
+        elif supplied_strengths == V13_GUIDE_STRENGTHS:
+            label = "v13"
+            expected_strengths = dict(
+                zip(V12_GUIDE_FRAME_INDICES, V13_GUIDE_STRENGTHS)
+            )
+        else:
+            raise ControlledExperimentError(
+                "nine-frame browser guide strengths must match exactly either "
+                "the v12 recovery profile or nine v13 strength-1.0 anchors"
+            )
     else:
         raise ControlledExperimentError(
             "browser guide patch requires exactly either frames "
@@ -1862,7 +2044,7 @@ def patch_browser_keyframe_guides(
     for index in recovery_indices:
         if uploaded_images[index] != uploaded_images[0]:
             raise ControlledExperimentError(
-                f"v12 recovery guide frame {index} must use the uploaded endpoint image"
+                f"{label} recovery guide frame {index} must use the uploaded endpoint image"
             )
     for index in frame_indices:
         if not str(uploaded_images[index] or "").strip():
@@ -2009,6 +2191,38 @@ def patch_browser_keyframe_guides(
     end_inputs["positive"] = [previous_guide_id, 0]
     end_inputs["negative"] = [previous_guide_id, 1]
     end_inputs["latent"] = [previous_guide_id, 2]
+    if label == "v13":
+        guide_nodes = [
+            node
+            for node in result.values()
+            if isinstance(node, dict) and node.get("class_type") == "LTXVAddGuide"
+        ]
+        latent_nodes = [
+            node
+            for node in result.values()
+            if isinstance(node, dict)
+            and node.get("class_type") == "EmptyLTXVLatentVideo"
+        ]
+        if len(guide_nodes) != len(V12_GUIDE_FRAME_INDICES) or len(latent_nodes) != 1:
+            raise ControlledExperimentError(
+                "v13 graph must contain exactly nine guides and one video latent"
+            )
+        latent_inputs = latent_nodes[0].get("inputs")
+        if not isinstance(latent_inputs, dict):
+            raise ControlledExperimentError("v13 video latent inputs are invalid")
+        video_frames = _positive_int(
+            latent_inputs.get("length"), "v13 video latent frame count"
+        )
+        base_slices = ((video_frames - 1) // 8) + 1
+        final_slices = base_slices + len(guide_nodes)
+        if (
+            video_frames != 49
+            or base_slices != V13_BASE_VIDEO_LATENT_SLICES
+            or final_slices != V13_FINAL_TEMPORAL_LATENT_SLICES
+        ):
+            raise ControlledExperimentError(
+                "v13 graph exceeds the pinned 7+9=16 temporal latent budget"
+            )
     return result
 
 
@@ -2146,7 +2360,10 @@ async def run_controlled_experiment(
                 if plan.guide_frames:
                     uploads_by_sha256: dict[str, str] = {}
                     for frame in plan.guide_frames:
-                        if plan.experiment_id == V12_EXPERIMENT_ID:
+                        if plan.experiment_id in (
+                            V12_EXPERIMENT_ID,
+                            V13_EXPERIMENT_ID,
+                        ):
                             _verify_v12_planned_guide_frame(frame, decode_png=False)
                         elif plan.experiment_id == V11_EXPERIMENT_ID:
                             _verify_v11_planned_guide_frame(frame, decode_png=False)

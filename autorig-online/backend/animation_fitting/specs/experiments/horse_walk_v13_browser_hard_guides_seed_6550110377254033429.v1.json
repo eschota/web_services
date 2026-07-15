@@ -1,0 +1,187 @@
+{
+  "schema": "autorig.animation-fitting-experiment.v1",
+  "experiment_id_string": "horse_walk_v13_browser_hard_guides_seed_6550110377254033429_v1",
+  "status_string": "prepared_for_single_controlled_generation",
+  "purpose_string": "Keep the exact nine immutable v12 f2 browser guide pixels and latent shape, but derive generation anchors at official LTXVAddGuide strength 1.0 so every recovery and swing apex is mandatory without exceeding the measured RTX 4090 memory ceiling.",
+  "predecessor_experiment_object": {
+    "experiment_id_string": "horse_walk_v12_browser_recovery_guides_seed_6550110377254033429_v1",
+    "result_string": "V12 generated all 49 frames but soft strengths 0.70-0.85 allowed recovery frames 12 and 36 to drift and suppressed the hind-right apex at frame 30. V13 changes only generation strengths and prompt authority while retaining the exact f2 pixels, workflow, camera, seed and nine-guide count."
+  },
+  "base_action_id_string": "walk_forward",
+  "species_string": "horse",
+  "generation_mode_string": "loop",
+  "frame_count_int": 49,
+  "input_fps_int": 24,
+  "output_fps_int": 30,
+  "seed_int": 6550110377254033429,
+  "reference_object": {
+    "reference_contract_string": "actionless_bundle_rgb_v1",
+    "bundle_id_string": "horse-canonical-f1",
+    "immutable_manifest_filename_string": "immutable_manifest.json",
+    "immutable_manifest_sha256_string": "f5e55c5073d09bc01dac90f4b7244f995fd42b0bdd37e09258cd4178e5573873",
+    "bundle_manifest_filename_string": "fitting_bundle.json",
+    "bundle_manifest_sha256_string": "e328fae0fd850a38249fb8b40c2e2766e8d90ab1ce4c1f241e926e9230d23744",
+    "reference_png_filename_string": "reference_rgb.png",
+    "reference_png_sha256_string": "94bf47cc137c0aaee975b2a75b7cd2b28f75215e282cdb6865bdd4095630a0b1",
+    "conditioning_variant_string": "canonical_actionless_provenance_plus_v12_f2_browser_guides_at_hard_strength",
+    "source_model_sha256_string": "fa75772d83c2613ddd6df6f7a305a407e12abf4a75c9083bb53df4d2619f50a1",
+    "actionless_required_bool": true,
+    "geometry_uv_normals_mutated_bool": false
+  },
+  "guide_sequence_object": {
+    "ready_bool": true,
+    "guide_contract_string": "browser_rendered_recovery_static_scene_rgb_keyframes_v1",
+    "bundle_id_string": "horse-walk-v12-browser-recovery-guides-f2",
+    "immutable_manifest_filename_string": "immutable_manifest.json",
+    "immutable_manifest_sha256_string": "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451",
+    "endpoint_guide_sha256_string": "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+    "frames_array": [
+      {
+        "frame_index_int": 0,
+        "filename_string": "guide_000.png",
+        "sha256_string": "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+        "bytes_int": 27257,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 6,
+        "filename_string": "guide_006.png",
+        "sha256_string": "95f9b17b048b2f3a0170ad81804f59c86df8c3c2b9b8670636d58bde3be5121f",
+        "bytes_int": 27686,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 12,
+        "filename_string": "guide_012.png",
+        "sha256_string": "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+        "bytes_int": 27257,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 18,
+        "filename_string": "guide_018.png",
+        "sha256_string": "c2896b21dbdc04a1c21a174a54f3db18bd3dd8fab553b2c9cf9a3067d0e97112",
+        "bytes_int": 27139,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 24,
+        "filename_string": "guide_024.png",
+        "sha256_string": "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+        "bytes_int": 27257,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 30,
+        "filename_string": "guide_030.png",
+        "sha256_string": "e30bcbfce4cacefc1894bce9992c2828592797fed5b8a43311defa291b9f43e9",
+        "bytes_int": 27210,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 36,
+        "filename_string": "guide_036.png",
+        "sha256_string": "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+        "bytes_int": 27257,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 42,
+        "filename_string": "guide_042.png",
+        "sha256_string": "2a6c54dbd77a495babb0c32fd0dd7239b6ba409efc57efd9bb6a9873af0ee036",
+        "bytes_int": 27384,
+        "strength_float": 1.0
+      },
+      {
+        "frame_index_int": 48,
+        "filename_string": "guide_048.png",
+        "sha256_string": "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+        "bytes_int": 27257,
+        "strength_float": 1.0
+      }
+    ]
+  },
+  "recovery_guide_contract_object": {
+    "scene_contract_string": "v12_unified_browser_recovery_guides_v1",
+    "frame_indices_array": [0, 6, 12, 18, 24, 30, 36, 42, 48],
+    "swing_frame_indices_array": [6, 18, 30, 42],
+    "recovery_frame_indices_array": [12, 24, 36],
+    "strengths_array": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "recovery_guides_byte_identical_endpoint_bool": true,
+    "deterministic_contact_cues_bool": true,
+    "per_guide_contact_cue_visibility_bool": true,
+    "author_cli_sha256_string": "13e1da43f47292be01e99bb32c63dd0d8ca46c88149aa58b64705503a361425d"
+  },
+  "hard_guide_contract_object": {
+    "hard_guide_contract_string": "browser_rendered_hard_recovery_rgb_keyframes_v1",
+    "source_experiment_id_string": "horse_walk_v12_browser_recovery_guides_seed_6550110377254033429_v1",
+    "source_guide_bundle_id_string": "horse-walk-v12-browser-recovery-guides-f2",
+    "source_guide_manifest_sha256_string": "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451",
+    "frame_indices_array": [0, 6, 12, 18, 24, 30, 36, 42, 48],
+    "source_strengths_array": [0.8, 0.7, 0.85, 0.7, 0.85, 0.7, 0.85, 0.7, 0.8],
+    "generation_strengths_array": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "ltxv_add_guide_count_int": 9,
+    "base_video_latent_slices_int": 7,
+    "final_temporal_latent_slices_int": 16,
+    "no_additional_guide_frames_bool": true
+  },
+  "workflow_object": {
+    "workflow_name_string": "autorig_ltx2_animal_loop_v1_api.json",
+    "workflow_fingerprint_sha256_string": "e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56",
+    "conditioning_implementation_string": "official_LTXVAddGuide_chain_only",
+    "conditioned_frames_array": [
+      {"role_string": "hard_browser_cycle_origin_four_hoof_contact", "frame_index_int": 0, "strength_float": 1.0},
+      {"role_string": "hard_hind_left_single_hoof_swing_apex", "frame_index_int": 6, "strength_float": 1.0},
+      {"role_string": "hard_four_hoof_recovery_after_hind_left", "frame_index_int": 12, "strength_float": 1.0},
+      {"role_string": "hard_fore_left_single_hoof_swing_apex", "frame_index_int": 18, "strength_float": 1.0},
+      {"role_string": "hard_four_hoof_recovery_after_fore_left", "frame_index_int": 24, "strength_float": 1.0},
+      {"role_string": "hard_hind_right_single_hoof_swing_apex", "frame_index_int": 30, "strength_float": 1.0},
+      {"role_string": "hard_four_hoof_recovery_after_hind_right", "frame_index_int": 36, "strength_float": 1.0},
+      {"role_string": "hard_fore_right_single_hoof_swing_apex", "frame_index_int": 42, "strength_float": 1.0},
+      {"role_string": "hard_browser_cycle_endpoint_four_hoof_contact", "frame_index_int": 48, "strength_float": 1.0}
+    ],
+    "post_sampling_guide_crop_required_bool": true
+  },
+  "resolution_override_object": {
+    "source_reference_width_int": 768,
+    "source_reference_height_int": 448,
+    "latent_width_int": 768,
+    "latent_height_int": 448,
+    "resize_longer_int": 768
+  },
+  "positive_prompt_string": "Locked-camera inverse skeletal fitting reference of the exact canonical actionless horse and camera. Treat all nine supplied browser Three.js images as mandatory exact frame anchors, never as loose style examples or optional references. Reproduce the supplied four-hoof planted stance at frames 0, 12, 24, 36 and 48 and reproduce each distinct required single-hoof apex at frames 6, 18, 30 and 42; never suppress, replace, shift, blend away or pre-empt an anchor. The four swing windows are hard, ordered and non-overlapping: hind-left only during frames 1-11 with apex frame 6; fore-left only during frames 13-23 with apex frame 18; hind-right only during frames 25-35 with apex frame 30; fore-right only during frames 37-47 with apex frame 42. Frames 0, 12, 24, 36 and 48 are hard four-hoof recovery barriers: all four hooves are fully planted and motionless, the preceding hoof has completed touchdown, and no next swing begins before the preceding recovery anchor is reproduced. A visible hoof contact cue means that exact hoof is planted and motionless on the ground; it never means hovering, sliding or merely near the ground. At most one hoof is in swing at any frame and at least three hooves remain planted, with no flight or suspension frame. Every leg, including each fetlock-pastern-hoof distal chain, remains one opaque connected fixed-length anatomical chain in every frame. Preserve continuous solid limb silhouette, constant segment lengths and one compact attached hoof per leg. Interpolate one smooth anatomically correct four-beat walk cycle in place through the mandatory anchors, preserve one identical horse, geometry, proportions, materials, four persistent legs, background, exposure and fixed camera, and return to the exact object-region endpoint without a seam pause or net translation.",
+  "negative_prompt_string": "ignored guide, softened guide, optional guide, guide substitution, shifted guide timing, suppressed swing apex, missing swing apex, recovery anchor drift, early next swing, late previous touchdown, camera movement, crop, zoom, scene cut, background change, background fade, ground disappearance, exposure drift, lighting flicker, duplicate horse, identity change, extra limb, missing limb, ghost limb, ghost hoof, ghost distal segment, faded limb, disappearing limb, detached limb, detached hoof, detached distal segment, wavy limb, wavy distal chain, transparent limb, translucent limb, broken silhouette, length snap, segment-length snap, changing segment length, stretched distal chain, compressed distal chain, paired hoof swing, overlapping hoof swing, swing outside frames 1-11 13-23 25-35 37-47, crossing recovery barrier, moving hoof on visible contact cue, hovering hoof on visible contact cue, foot sliding, hoof skating, diagonal pair, lateral pair, trot, pace, hop, bound, gallop, flight phase, suspension phase, fewer than three planted hooves, ground penetration, broken joint, rubber limb, curled distal limb, hoof morphing, material change, endpoint freeze, seam pause, object-region endpoint drift, text, watermark",
+  "variants_array": [
+    {
+      "variant_id_string": "browser_hard_guides_seed_a",
+      "start_guide_strength_float": 1.0,
+      "end_guide_strength_float": 1.0
+    }
+  ],
+  "controlled_variable_string": "Only the nine official LTXVAddGuide generation strengths change from v12 values 0.70-0.85 to exact 1.0, with prompt language making the same pixels mandatory; guide count remains nine and the temporal latent budget remains 7+9=16.",
+  "fixed_factors_array": [
+    "same immutable actionless Horse model and camera provenance",
+    "same exact pinned v12 f2 guide PNG bytes and manifest",
+    "same native 768x448 dimensions and 49-frame loop",
+    "same deterministic seed 6550110377254033429",
+    "same pinned LTX 19B FP8 checkpoint and static-camera LoRA",
+    "exactly nine official LTXVAddGuide nodes and no additional guide frames",
+    "no Blender and no unavailable control model"
+  ],
+  "manual_acceptance_gates_array": [
+    "the raw experiment JSON SHA-256 equals its code-owned v13 pin before reference or guide bundle access",
+    "the complete v12 f2 manifest, renderer, contact-cue, post-bake and every PNG pin validate before hard strengths are derived",
+    "job identity records exactly nine ordered frames and nine strength values equal to 1.0",
+    "the patched graph contains exactly nine LTXVAddGuide nodes at frames 0, 6, 12, 18, 24, 30, 36, 42 and N-1",
+    "the graph retains exactly seven base plus nine guide temporal latent slices for a total of sixteen",
+    "frames 0, 12, 24, 36 and 48 reproduce four-hoof planted recovery anchors and frames 6, 18, 30 and 42 reproduce all four distinct apexes",
+    "TAPNext gait QA orderAccepted and overlapAccepted are both true with no flight frame",
+    "object-region recovery, endpoint seam and distal-chain visual gates pass before browser fitting",
+    "candidate remains generated_not_approved until browser fitting and fixed-camera visual QA pass"
+  ],
+  "generation_authorization_object": {
+    "authorized_bool": false,
+    "required_next_action_string": "Runtime authorization must exactly match this immutable v13 experiment id and raw spec SHA-256."
+  },
+  "approved_bool": false
+}
