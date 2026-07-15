@@ -333,8 +333,20 @@ class ComfyAnimationClient:
     async def wait_for_output(self, prompt_id: str) -> tuple[Dict[str, Any], ComfyOutputFile]:
         deadline = time.monotonic() + self.render_timeout_seconds
         missing_polls = 0
+        last_transport_error = ""
         while time.monotonic() < deadline:
-            history_envelope = await self._get_json(f"/history/{quote(prompt_id, safe='')}")
+            try:
+                history_envelope = await self._get_json(
+                    f"/history/{quote(prompt_id, safe='')}"
+                )
+            except httpx.TransportError as exc:
+                # Comfy can temporarily stop servicing HTTP while a large LTX
+                # graph saturates VRAM/GPU. The deterministic prompt remains
+                # valid, so a transient transport timeout must not turn a live
+                # render into a failed job or cause a second submission.
+                last_transport_error = f"{type(exc).__name__}: {exc}"
+                await asyncio.sleep(self.poll_interval_seconds)
+                continue
             history = history_envelope.get(prompt_id)
             if isinstance(history, dict):
                 error = _history_error(history)
@@ -345,7 +357,12 @@ class ComfyAnimationClient:
                     return history, output
                 if _history_completed(history):
                     raise ComfyTaskError(f"Comfy task {prompt_id} completed without a video output")
-            queue = await self._get_json("/queue")
+            try:
+                queue = await self._get_json("/queue")
+            except httpx.TransportError as exc:
+                last_transport_error = f"{type(exc).__name__}: {exc}"
+                await asyncio.sleep(self.poll_interval_seconds)
+                continue
             if _queue_contains(queue, prompt_id):
                 missing_polls = 0
             else:
@@ -353,7 +370,8 @@ class ComfyAnimationClient:
                 if missing_polls >= 3:
                     raise ComfyTaskError(f"Comfy task {prompt_id} disappeared from history and queue")
             await asyncio.sleep(self.poll_interval_seconds)
-        raise ComfyTaskError(f"Comfy task {prompt_id} timed out")
+        suffix = f"; last transport error: {last_transport_error}" if last_transport_error else ""
+        raise ComfyTaskError(f"Comfy task {prompt_id} timed out{suffix}")
 
     async def download_output(self, output: ComfyOutputFile) -> bytes:
         query = urlencode(

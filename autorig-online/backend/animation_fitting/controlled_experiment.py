@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -37,6 +38,10 @@ V7_EXPERIMENT_ID = (
     "horse_walk_prompt_v7_semantic_chronological_av_"
     "seed_4891025524393280044_guide_065_v1"
 )
+V8_EXPERIMENT_ID = (
+    "horse_walk_prompt_v8_rgb_native_768x448_"
+    "seed_4373011867009528156_guide_080_v1"
+)
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPECTED_EXPERIMENT_ID,
     "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
@@ -44,6 +49,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     V5_EXPERIMENT_ID,
     V6_EXPERIMENT_ID,
     V7_EXPERIMENT_ID,
+    V8_EXPERIMENT_ID,
 })
 RESULT_SCHEMA = "autorig.animation-fitting-controlled-result.v1"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -72,6 +78,9 @@ class ControlledExperimentPlan:
     start_guide_strength: float
     end_guide_strength: float
     artifact_root: Path
+    latent_width: Optional[int] = None
+    latent_height: Optional[int] = None
+    resize_longer: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -198,6 +207,76 @@ def _verify_reference_manifest(bundle: Path, reference: Mapping[str, Any]) -> No
             raise ControlledExperimentError("reference derivation manifest disagrees with experiment contract")
 
 
+def _verify_actionless_reference_manifest(
+    bundle: Path, reference: Mapping[str, Any]
+) -> tuple[int, int]:
+    manifest_filename = str(reference.get("immutable_manifest_filename_string") or "")
+    if not manifest_filename or Path(manifest_filename).name != manifest_filename:
+        raise ControlledExperimentError("actionless immutable manifest filename is invalid")
+    manifest_path = bundle / manifest_filename
+    _require_exact_sha(
+        manifest_path,
+        reference.get("immutable_manifest_sha256_string"),
+        "actionless immutable manifest SHA-256",
+    )
+    manifest = _read_json(manifest_path)
+    if manifest.get("schema") != "autorig-fitting-immutable-copy.v1":
+        raise ControlledExperimentError("actionless immutable manifest schema is invalid")
+    rows = manifest.get("files")
+    expected_count = _positive_int(
+        manifest.get("bundle_file_count"), "actionless bundle_file_count"
+    )
+    if not isinstance(rows, list) or len(rows) != expected_count:
+        raise ControlledExperimentError("actionless immutable manifest file inventory is incomplete")
+    inventory: dict[str, Mapping[str, Any]] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ControlledExperimentError(f"actionless manifest row {index} is invalid")
+        filename = str(row.get("filename") or "")
+        if not filename or Path(filename).name != filename or filename in inventory:
+            raise ControlledExperimentError("actionless manifest filenames must be unique simple names")
+        path = bundle / filename
+        _require_exact_sha(path, row.get("sha256"), f"actionless file {filename} SHA-256")
+        if path.stat().st_size != _positive_int(row.get("bytes"), f"actionless file {filename} bytes"):
+            raise ControlledExperimentError(f"actionless file {filename} byte size mismatch")
+        inventory[filename] = row
+
+    image_filename = str(reference.get("reference_png_filename_string") or "")
+    image_row = inventory.get(image_filename)
+    if not image_row or image_row.get("sha256") != reference.get("reference_png_sha256_string"):
+        raise ControlledExperimentError("actionless RGB reference disagrees with immutable inventory")
+    bundle_manifest_filename = str(reference.get("bundle_manifest_filename_string") or "")
+    bundle_manifest_row = inventory.get(bundle_manifest_filename)
+    if (
+        not bundle_manifest_row
+        or bundle_manifest_row.get("sha256")
+        != reference.get("bundle_manifest_sha256_string")
+    ):
+        raise ControlledExperimentError("actionless fitting bundle disagrees with immutable inventory")
+    bundle_manifest = _read_json(bundle / bundle_manifest_filename)
+    if bundle_manifest.get("schema") != "autorig-actionless-fitting-bundle.v1":
+        raise ControlledExperimentError("actionless fitting bundle schema is invalid")
+    actionless = bundle_manifest.get("actionless")
+    if not isinstance(actionless, dict) or actionless.get("actionless") is not True:
+        raise ControlledExperimentError("reference bundle is not actionless")
+    rgb = (bundle_manifest.get("artifacts") or {}).get("rgb")
+    if not isinstance(rgb, dict) or (
+        rgb.get("filename") != image_filename
+        or rgb.get("sha256") != reference.get("reference_png_sha256_string")
+    ):
+        raise ControlledExperimentError("fitting bundle RGB artifact disagrees with experiment")
+    resolution = (bundle_manifest.get("camera") or {}).get("resolution")
+    if (
+        not isinstance(resolution, list)
+        or len(resolution) != 2
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in resolution)
+    ):
+        raise ControlledExperimentError("actionless camera resolution is invalid")
+    return _positive_int(resolution[0], "actionless camera width"), _positive_int(
+        resolution[1], "actionless camera height"
+    )
+
+
 def load_controlled_plan(
     *,
     experiment_path: Path,
@@ -278,22 +357,55 @@ def load_controlled_plan(
         raise ControlledExperimentError(
             f"reference bundle must be the existing {reference.get('bundle_id_string')} directory"
         )
-    _verify_reference_manifest(bundle, reference)
+    reference_contract = str(
+        reference.get("reference_contract_string") or "semantic_reference_v1"
+    )
+    source_resolution: Optional[tuple[int, int]] = None
+    if reference_contract == "semantic_reference_v1":
+        _verify_reference_manifest(bundle, reference)
+    elif reference_contract == "actionless_bundle_rgb_v1":
+        source_resolution = _verify_actionless_reference_manifest(bundle, reference)
+    else:
+        raise ControlledExperimentError(
+            f"unsupported reference contract: {reference_contract!r}"
+        )
     image = bundle / str(reference.get("reference_png_filename_string") or "")
     reference_sha = _require_exact_sha(
         image, reference.get("reference_png_sha256_string"), "reference PNG SHA-256"
     )
-    derivation = _read_json(
-        bundle / str(reference.get("derivation_manifest_filename_string") or "")
-    )
-    if derivation.get("schema") != "autorig-ltx-semantic-reference-derivation.v1":
-        raise ControlledExperimentError("reference derivation schema is invalid")
-    semantic_profile = derivation.get("semantic_profile")
-    if not isinstance(semantic_profile, dict) or (
-        semantic_profile.get("profile_id") != reference.get("semantic_profile_id_string")
-        or semantic_profile.get("sha256") != reference.get("semantic_profile_sha256_string")
-    ):
-        raise ControlledExperimentError("semantic profile provenance disagrees with experiment contract")
+    if reference_contract == "semantic_reference_v1":
+        derivation = _read_json(
+            bundle / str(reference.get("derivation_manifest_filename_string") or "")
+        )
+        if derivation.get("schema") != "autorig-ltx-semantic-reference-derivation.v1":
+            raise ControlledExperimentError("reference derivation schema is invalid")
+        semantic_profile = derivation.get("semantic_profile")
+        if not isinstance(semantic_profile, dict) or (
+            semantic_profile.get("profile_id") != reference.get("semantic_profile_id_string")
+            or semantic_profile.get("sha256") != reference.get("semantic_profile_sha256_string")
+        ):
+            raise ControlledExperimentError(
+                "semantic profile provenance disagrees with experiment contract"
+            )
+
+    latent_width: Optional[int] = None
+    latent_height: Optional[int] = None
+    resize_longer: Optional[int] = None
+    resolution = experiment.get("resolution_override_object")
+    if resolution is not None:
+        if not isinstance(resolution, dict):
+            raise ControlledExperimentError("resolution_override_object must be an object")
+        latent_width = _positive_int(resolution.get("latent_width_int"), "latent width")
+        latent_height = _positive_int(resolution.get("latent_height_int"), "latent height")
+        resize_longer = _positive_int(resolution.get("resize_longer_int"), "resize longer")
+        if latent_width % 32 or latent_height % 32:
+            raise ControlledExperimentError("LTX latent width and height must be divisible by 32")
+        if resize_longer != max(latent_width, latent_height):
+            raise ControlledExperimentError("resize longer must equal the longest latent dimension")
+        if source_resolution is None or source_resolution != (latent_width, latent_height):
+            raise ControlledExperimentError(
+                "native resolution override must match the immutable actionless camera resolution"
+            )
 
     return ControlledExperimentPlan(
         experiment_id=experiment_id,
@@ -313,6 +425,9 @@ def load_controlled_plan(
         start_guide_strength=start_strength,
         end_guide_strength=end_strength,
         artifact_root=Path(artifact_root).resolve(),
+        latent_width=latent_width,
+        latent_height=latent_height,
+        resize_longer=resize_longer,
     )
 
 
@@ -338,6 +453,46 @@ def patch_guide_strengths(
     return result
 
 
+def patch_native_resolution(
+    prompt: Mapping[str, Any], *, width: int, height: int, resize_longer: int
+) -> dict[str, Any]:
+    result = copy.deepcopy(dict(prompt))
+    latent_nodes = [
+        node
+        for node in result.values()
+        if isinstance(node, dict) and node.get("class_type") == "EmptyLTXVLatentVideo"
+    ]
+    resize_nodes = [
+        node
+        for node in result.values()
+        if isinstance(node, dict) and node.get("class_type") == "ResizeImageMaskNode"
+    ]
+    if len(latent_nodes) != 1 or len(resize_nodes) != 1:
+        raise ControlledExperimentError(
+            "pinned workflow must have exactly one video latent and one image resize node"
+        )
+    width_value = _positive_int(width, "native latent width")
+    height_value = _positive_int(height, "native latent height")
+    longer_value = _positive_int(resize_longer, "native resize longer")
+    if width_value % 32 or height_value % 32 or longer_value != max(width_value, height_value):
+        raise ControlledExperimentError("native resolution must be 32-aligned with exact longer size")
+    latent_inputs = latent_nodes[0].get("inputs")
+    resize_inputs = resize_nodes[0].get("inputs")
+    if not isinstance(latent_inputs, dict) or not isinstance(resize_inputs, dict):
+        raise ControlledExperimentError("pinned resolution nodes have invalid inputs")
+    if (
+        latent_inputs.get("width") != 512
+        or latent_inputs.get("height") != 320
+        or resize_inputs.get("resize_type") != "scale longer dimension"
+        or resize_inputs.get("resize_type.longer_size") != 512
+    ):
+        raise ControlledExperimentError("pinned workflow base resolution changed unexpectedly")
+    latent_inputs["width"] = width_value
+    latent_inputs["height"] = height_value
+    resize_inputs["resize_type.longer_size"] = longer_value
+    return result
+
+
 def _job_identity(plan: ControlledExperimentPlan, worker: ComfyWorker) -> tuple[dict[str, Any], str, str]:
     identity = {
         "schema": "autorig.animation-fitting-controlled-job-identity.v1",
@@ -360,6 +515,12 @@ def _job_identity(plan: ControlledExperimentPlan, worker: ComfyWorker) -> tuple[
         "approval_state_string": "generated_not_approved",
         "send_to_skeletal_fitting_bool": False,
     }
+    if plan.latent_width is not None:
+        identity["resolution_override_object"] = {
+            "latent_width_int": plan.latent_width,
+            "latent_height_int": plan.latent_height,
+            "resize_longer_int": plan.resize_longer,
+        }
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     job_id = hashlib.sha256(canonical.encode()).hexdigest()
     idempotency_key = f"autorig-controlled-animation-fitting:{job_id}"
@@ -433,7 +594,10 @@ async def run_controlled_experiment(
             raise ControlledExperimentError("live workflow fingerprint changed after worker validation")
         with store.worker_lease(selected_worker.worker_id, owner_id=job_id):
             queue_load = await client.queue_load()
-            if queue_load:
+            same_prompt_is_active = bool(queue_load) and await client.prompt_exists(
+                planned_prompt_id
+            )
+            if queue_load and not same_prompt_is_active:
                 raise WorkerBusyError(
                     f"Comfy worker {selected_worker.worker_id} has {queue_load} queued/running task(s)"
                 )
@@ -449,6 +613,13 @@ async def run_controlled_experiment(
                 seed=plan.seed,
                 output_prefix=f"animation_fitting/controlled/{plan.experiment_id}/{job_id[:16]}",
             )
+            if plan.latent_width is not None:
+                prompt = patch_native_resolution(
+                    prompt,
+                    width=plan.latent_width,
+                    height=int(plan.latent_height or 0),
+                    resize_longer=int(plan.resize_longer or 0),
+                )
             prompt = patch_guide_strengths(
                 prompt,
                 start_strength=plan.start_guide_strength,

@@ -1,0 +1,106 @@
+{
+  "schema": "autorig.animation-fitting-experiment.v1",
+  "experiment_id_string": "horse_walk_prompt_v8_rgb_native_768x448_seed_4373011867009528156_guide_080_v1",
+  "status_string": "prepared_for_single_controlled_generation",
+  "purpose_string": "Isolate native 768x448 LTX latent resolution on the identity-stable unaltered RGB Horse walk baseline after all full-limb semantic-colour candidates v2-v7 failed gait and the latest two seeds duplicated or morphed the subject.",
+  "predecessor_experiment_object": {
+    "filename_string": "horse_walk_prompt_v2_guide_strength_ab.v1.json",
+    "sha256_string": "268830a5c82a22165a5249d20fa1f21e2b19e31ea029e3332238f030c00e3edc",
+    "selected_matrix_cell_string": "guide_strength_0_80",
+    "result_video_sha256_string": "47133b805ff0629fb6acb1894b1159e4ab7b48f82b44582667530634b1cbef57",
+    "result_manual_qa_sha256_string": "f3c2152dac74f2ee74ac91640f4615aa8d9f3c47ad9db6f03cd70b908d5aa4f8",
+    "result_decision_sha256_string": "e914bdb77140b37d58dc870e1ba6d8f031783d706ffd30b8576fd4108639750e",
+    "result_comparison_sha256_string": "7741762c38c76ff48021dc7a3a17e85337c380be2f4076b4014945165c9c5e28",
+    "result_string": "The 512x320 RGB candidate preserved one exact subject and a locked camera but failed four-beat gait, planted contacts and rigid distal anatomy; the recorded next experiment was the same RGB contract at native resolution after semantic conditioning failed."
+  },
+  "rejected_semantic_branch_object": {
+    "latest_experiment_filename_string": "horse_walk_prompt_v7_semantic_chronological_av_seed_4891025524393280044_guide_065.v1.json",
+    "latest_experiment_sha256_string": "c6a397b25fbe83aea2573f82ff759215cf72412c734f41f2e3a47660a0a83f2e",
+    "result_video_sha256_string": "0242f584733fc91d6c4f74b8e011cfd466ca30715d7ca9069a1e7781999a165b",
+    "result_semantic_qa_sha256_string": "406698c994e87b11e9756fb0e87554048828f79051adf29496ddc8365c85d699",
+    "result_phase_contact_sheet_sha256_string": "773d198d4a06e357ba06f2709f4f7bf7d27e8871078429b06334ae6d6494eaa9",
+    "result_string": "Hard rejected: duplicate and morphed subjects, orderAccepted=false, overlapAccepted=false, and 23 simultaneous or unsupported swing frames."
+  },
+  "base_action_id_string": "walk_forward",
+  "species_string": "horse",
+  "generation_mode_string": "loop",
+  "frame_count_int": 49,
+  "input_fps_int": 24,
+  "output_fps_int": 30,
+  "seed_int": 4373011867009528156,
+  "reference_object": {
+    "reference_contract_string": "actionless_bundle_rgb_v1",
+    "bundle_id_string": "horse-canonical-f1",
+    "immutable_manifest_filename_string": "immutable_manifest.json",
+    "immutable_manifest_sha256_string": "f5e55c5073d09bc01dac90f4b7244f995fd42b0bdd37e09258cd4178e5573873",
+    "bundle_manifest_filename_string": "fitting_bundle.json",
+    "bundle_manifest_sha256_string": "e328fae0fd850a38249fb8b40c2e2766e8d90ab1ce4c1f241e926e9230d23744",
+    "reference_png_filename_string": "reference_rgb.png",
+    "reference_png_sha256_string": "94bf47cc137c0aaee975b2a75b7cd2b28f75215e282cdb6865bdd4095630a0b1",
+    "conditioning_variant_string": "unaltered_canonical_rgb_native_resolution",
+    "source_model_sha256_string": "fa75772d83c2613ddd6df6f7a305a407e12abf4a75c9083bb53df4d2619f50a1",
+    "actionless_required_bool": true,
+    "geometry_uv_normals_mutated_bool": false
+  },
+  "workflow_object": {
+    "workflow_name_string": "autorig_ltx2_animal_loop_v1_api.json",
+    "workflow_fingerprint_sha256_string": "e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56",
+    "conditioned_frames_array": [
+      {
+        "role_string": "start",
+        "frame_index_expression_string": "0",
+        "reuse_reference_rgb_bool": true
+      },
+      {
+        "role_string": "end",
+        "frame_index_expression_string": "N-1",
+        "reuse_reference_rgb_bool": true
+      }
+    ],
+    "post_sampling_guide_crop_required_bool": true
+  },
+  "resolution_override_object": {
+    "source_reference_width_int": 768,
+    "source_reference_height_int": 448,
+    "latent_width_int": 768,
+    "latent_height_int": 448,
+    "resize_longer_int": 768,
+    "base_latent_width_int": 512,
+    "base_latent_height_int": 320,
+    "base_resize_longer_int": 512
+  },
+  "positive_prompt_string": "Locked-camera inverse skeletal fitting reference of the exact low-poly horse shown in the supplied canonical render. Preserve the same individual, geometry, proportions, materials, four limbs, rigid skeleton-readable silhouette, lighting, ground plane, framing, and background. Keep the complete body and all four hooves visible. The horse performs one anatomically correct four-beat lateral-sequence walk cycle in place at an even controller-friendly cadence. Hoof contacts occur separately in this camera-readable order: near hind, near fore, far hind, far fore, then repeat, with each contact approximately one quarter-cycle apart. Natural swing phases may overlap, but paired hooves never lift or land synchronously; at least two hooves support the body continuously. Every stance hoof stays planted flat on the ground until natural lift-off, then follows a clean forward swing and lands without sliding. Maintain fixed rigid long-bone segment lengths and bend only at anatomical joints. Every hoof remains a compact solid block with unchanged shape. Use stable body mass, believable subtle head, neck, spine, and pelvis motion, and no net translation. Create exactly one seamless cyclic action. The supplied base-pose image is both frame 0 and frame N-1; treat that pose as a moving pass-through phase, never a hold. Motion phase, body pose, root velocity, and all limb velocities close smoothly across the seam without a pause, duplicate beat, reversal, teleport, or snap.",
+  "negative_prompt_string": "camera movement, pan, tilt, orbit, dolly, zoom, tracking shot, handheld shake, reframing, crop, scene cut, background drift, parallax, identity change, species change, altered proportions, extra limb, missing limb, fused limb, duplicated subject, simultaneous paired hoof strike, pacing, trotting, hopping, galloping, suspension phase, broken joint, dislocated joint, rubber leg, telescoping limb, changing segment length, curled distal limb, hooked distal limb, curled hoof, hooked hoof, hoof morphing, stretched hoof, toe elongation, toe drag, floating hoof, foot sliding, hoof skating, ground penetration, topology change, material change, flicker, motion smear, endpoint freeze, pause at seam, duplicated endpoint beat, motion reversal, text, watermark, logo",
+  "variants_array": [
+    {
+      "variant_id_string": "rgb_native_768x448_guide_strength_0_80",
+      "start_guide_strength_float": 0.8,
+      "end_guide_strength_float": 0.8
+    }
+  ],
+  "controlled_variable_string": "Native LTX latent and input-resize dimensions change from 512x320/512-longer to the immutable actionless camera resolution 768x448/768-longer. Prompt, negative prompt, RGB reference, seed, guide strengths, frame contract, model, sampler, static-camera LoRA and output settings remain fixed from the identity-stable guide-0.8 RGB matrix cell.",
+  "fixed_factors_array": [
+    "same unaltered canonical RGB reference SHA-256 as the original guide-strength A/B experiment",
+    "same positive and negative prompts byte-for-byte as the original guide-strength A/B experiment",
+    "same deterministic seed 4373011867009528156",
+    "same symmetric start/end guide strength 0.8",
+    "same 49-frame start-plus-end loop contract and fixed camera",
+    "same pinned LTX 19B FP8 model, static-camera LoRA, sampler and workflow source fingerprint",
+    "one candidate and one submission only"
+  ],
+  "manual_acceptance_gates_array": [
+    "exactly one persistent horse subject with unchanged identity and proportions",
+    "exactly four persistent limbs and four persistent compact hooves",
+    "near-hind near-fore far-hind far-fore four-beat lateral contact order",
+    "at least two supporting hooves with stance hooves visibly planted",
+    "no distal-limb curl, hoof morph, segment-length change, skating, or toe drag",
+    "stable topology, camera, background, framing, materials and ground contact",
+    "continuous motion through the loop seam without endpoint pause or reversal",
+    "motion is readable enough for TAPNext++ observations and browser skeletal fitting"
+  ],
+  "generation_authorization_object": {
+    "authorized_bool": false,
+    "required_next_action_string": "Runtime authorization must exactly match this immutable experiment id."
+  },
+  "approved_bool": false
+}

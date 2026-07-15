@@ -196,6 +196,59 @@ class AnimationFittingComfyClientTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await http_client.aclose()
 
+    async def test_wait_for_output_survives_transient_history_timeout(self):
+        prompt_id = "300625be-8b0c-431d-8060-24e33821cdbd"
+        history_calls = 0
+
+        def handler(request):
+            nonlocal history_calls
+            if request.url.path == f"/history/{prompt_id}":
+                history_calls += 1
+                if history_calls == 1:
+                    raise httpx.ReadTimeout("GPU-saturated Comfy poll", request=request)
+                return httpx.Response(200, json={
+                    prompt_id: {
+                        "status": {"completed": True, "status_str": "success"},
+                        "outputs": {
+                            "save": {
+                                "videos": [{
+                                    "filename": "horse_walk_v8.mp4",
+                                    "subfolder": "animation_fitting/controlled",
+                                    "type": "output",
+                                }],
+                            },
+                        },
+                    },
+                })
+            if request.url.path == "/queue":
+                return httpx.Response(200, json={
+                    "queue_running": [[0, prompt_id]],
+                    "queue_pending": [],
+                })
+            return httpx.Response(404)
+
+        worker = ComfyWorker(
+            "local-4090",
+            "http://127.0.0.1:8188",
+            "workflow.json",
+            "0" * 64,
+        )
+        http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            client = ComfyAnimationClient(
+                worker,
+                client=http_client,
+                render_timeout_seconds=1.0,
+                poll_interval_seconds=0.001,
+            )
+            history, output = await client.wait_for_output(prompt_id)
+        finally:
+            await http_client.aclose()
+
+        self.assertEqual(history_calls, 2)
+        self.assertTrue(history["status"]["completed"])
+        self.assertEqual(output.filename, "horse_walk_v8.mp4")
+
 
 if __name__ == "__main__":
     unittest.main()

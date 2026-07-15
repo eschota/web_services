@@ -13,9 +13,11 @@ from animation_fitting.controlled_experiment import (
     V5_EXPERIMENT_ID,
     V6_EXPERIMENT_ID,
     V7_EXPERIMENT_ID,
+    V8_EXPERIMENT_ID,
     ControlledExperimentError,
     load_controlled_plan,
     patch_guide_strengths,
+    patch_native_resolution,
     run_controlled_experiment,
 )
 from animation_fitting.specs import load_animation_fitting_specs
@@ -104,6 +106,79 @@ def build_contract(
     experiment_path = tmp_path / "experiment.json"
     write_json(experiment_path, experiment)
     return experiment_path, bundle, tmp_path / "artifacts"
+
+
+def build_actionless_contract(tmp_path: Path) -> tuple[Path, Path, Path]:
+    bundle = tmp_path / "horse-canonical-f1"
+    bundle.mkdir()
+    image_data = b"deterministic actionless RGB PNG fixture bytes"
+    image = bundle / "reference_rgb.png"
+    image.write_bytes(image_data)
+    fitting_bundle_data = write_json(bundle / "fitting_bundle.json", {
+        "schema": "autorig-actionless-fitting-bundle.v1",
+        "actionless": {"actionless": True},
+        "camera": {"resolution": [768, 448]},
+        "artifacts": {
+            "rgb": {
+                "filename": image.name,
+                "sha256": sha(image_data),
+                "bytes": len(image_data),
+            },
+        },
+    })
+    immutable_data = write_json(bundle / "immutable_manifest.json", {
+        "schema": "autorig-fitting-immutable-copy.v1",
+        "bundle_file_count": 2,
+        "files": [
+            {"filename": image.name, "sha256": sha(image_data), "bytes": len(image_data)},
+            {
+                "filename": "fitting_bundle.json",
+                "sha256": sha(fitting_bundle_data),
+                "bytes": len(fitting_bundle_data),
+            },
+        ],
+    })
+    profile = load_animation_fitting_specs().workflows["loop"]
+    experiment = {
+        "schema": "autorig.animation-fitting-experiment.v1",
+        "experiment_id_string": V8_EXPERIMENT_ID,
+        "generation_mode_string": "loop",
+        "frame_count_int": 49,
+        "input_fps_int": profile.input_fps,
+        "output_fps_int": profile.output_fps,
+        "seed_int": 4373011867009528156,
+        "positive_prompt_string": "exact RGB Horse Walk positive prompt",
+        "negative_prompt_string": "exact RGB Horse Walk negative prompt",
+        "reference_object": {
+            "reference_contract_string": "actionless_bundle_rgb_v1",
+            "bundle_id_string": bundle.name,
+            "reference_png_filename_string": image.name,
+            "reference_png_sha256_string": sha(image_data),
+            "bundle_manifest_filename_string": "fitting_bundle.json",
+            "bundle_manifest_sha256_string": sha(fitting_bundle_data),
+            "immutable_manifest_filename_string": "immutable_manifest.json",
+            "immutable_manifest_sha256_string": sha(immutable_data),
+        },
+        "workflow_object": {
+            "workflow_name_string": profile.workflow_name,
+            "workflow_fingerprint_sha256_string": profile.workflow_fingerprint,
+        },
+        "resolution_override_object": {
+            "latent_width_int": 768,
+            "latent_height_int": 448,
+            "resize_longer_int": 768,
+        },
+        "variants_array": [{
+            "variant_id_string": "rgb_native_768x448_guide_strength_0_80",
+            "start_guide_strength_float": 0.8,
+            "end_guide_strength_float": 0.8,
+        }],
+        "generation_authorization_object": {"authorized_bool": False},
+        "approved_bool": False,
+    }
+    experiment_path = tmp_path / "experiment-v8.json"
+    write_json(experiment_path, experiment)
+    return experiment_path, bundle, tmp_path / "artifacts-v8"
 
 
 def test_v5_contract_is_exactly_allowlisted_and_arbitrary_ids_fail_closed(tmp_path: Path) -> None:
@@ -315,6 +390,51 @@ def test_v7_immutable_spec_changes_only_seed_from_v5_matrix_cell() -> None:
     }
 
 
+def test_v8_actionless_rgb_contract_is_exactly_allowlisted_at_native_resolution(
+    tmp_path: Path,
+) -> None:
+    experiment, bundle, artifacts = build_actionless_contract(tmp_path)
+    plan = load_controlled_plan(
+        experiment_path=experiment,
+        authorization=V8_EXPERIMENT_ID,
+        reference_bundle=bundle,
+        artifact_root=artifacts,
+    )
+    assert plan.experiment_id == V8_EXPERIMENT_ID
+    assert plan.reference_image.name == "reference_rgb.png"
+    assert plan.seed == 4373011867009528156
+    assert (plan.latent_width, plan.latent_height, plan.resize_longer) == (768, 448, 768)
+
+
+def test_v8_immutable_spec_records_resolution_only_rgb_followup() -> None:
+    spec_path = Path(__file__).resolve().parents[1] / "animation_fitting" / "specs" / "experiments" / (
+        "horse_walk_prompt_v8_rgb_native_768x448_"
+        "seed_4373011867009528156_guide_080.v1.json"
+    )
+    spec = json.loads(spec_path.read_text())
+    assert spec["experiment_id_string"] == V8_EXPERIMENT_ID
+    assert spec["reference_object"]["reference_contract_string"] == "actionless_bundle_rgb_v1"
+    assert spec["reference_object"]["reference_png_sha256_string"] == (
+        "94bf47cc137c0aaee975b2a75b7cd2b28f75215e282cdb6865bdd4095630a0b1"
+    )
+    assert spec["resolution_override_object"] == {
+        "source_reference_width_int": 768,
+        "source_reference_height_int": 448,
+        "latent_width_int": 768,
+        "latent_height_int": 448,
+        "resize_longer_int": 768,
+        "base_latent_width_int": 512,
+        "base_latent_height_int": 320,
+        "base_resize_longer_int": 512,
+    }
+    assert spec["seed_int"] == 4373011867009528156
+    assert spec["variants_array"] == [{
+        "variant_id_string": "rgb_native_768x448_guide_strength_0_80",
+        "start_guide_strength_float": 0.8,
+        "end_guide_strength_float": 0.8,
+    }]
+
+
 def test_controlled_plan_requires_exact_runtime_authorization_and_hashes(tmp_path: Path) -> None:
     experiment, bundle, artifacts = build_contract(tmp_path)
     with pytest.raises(ControlledExperimentError, match="explicit --authorize-experiment"):
@@ -354,6 +474,30 @@ def test_patch_guide_strengths_changes_only_exact_start_and_end_nodes() -> None:
     assert result["start"]["inputs"]["strength"] == 0.8
     assert result["end"]["inputs"]["strength"] == 0.8
     assert result["other"]["inputs"]["strength"] == 0.4
+
+
+def test_patch_native_resolution_changes_only_latent_and_input_resize() -> None:
+    prompt = {
+        "latent": {
+            "class_type": "EmptyLTXVLatentVideo",
+            "inputs": {"width": 512, "height": 320, "length": 49},
+        },
+        "resize": {
+            "class_type": "ResizeImageMaskNode",
+            "inputs": {
+                "resize_type": "scale longer dimension",
+                "resize_type.longer_size": 512,
+                "scale_method": "lanczos",
+            },
+        },
+        "other": {"class_type": "Other", "inputs": {"width": 512}},
+    }
+    result = patch_native_resolution(prompt, width=768, height=448, resize_longer=768)
+    assert result["latent"]["inputs"] == {"width": 768, "height": 448, "length": 49}
+    assert result["resize"]["inputs"]["resize_type.longer_size"] == 768
+    assert result["resize"]["inputs"]["scale_method"] == "lanczos"
+    assert result["other"] == prompt["other"]
+    assert prompt["latent"]["inputs"]["width"] == 512
 
 
 class FakeClient:
@@ -403,6 +547,14 @@ class FakeExtractor:
         )
 
 
+class ActiveSamePromptClient(FakeClient):
+    async def queue_load(self) -> int:
+        return 1
+
+    async def prompt_exists(self, _prompt_id: str) -> bool:
+        return True
+
+
 def test_controlled_run_is_fail_closed_unapproved_and_idempotently_resumable(tmp_path: Path) -> None:
     experiment, bundle, artifacts = build_contract(tmp_path)
     plan = load_controlled_plan(
@@ -443,3 +595,32 @@ def test_controlled_run_is_fail_closed_unapproved_and_idempotently_resumable(tmp
     ))
     assert resumed.job_id == result.job_id
     assert resumed.resumed_existing_result is True
+
+
+def test_controlled_run_resumes_its_own_active_prompt_without_duplicate_submission(
+    tmp_path: Path,
+) -> None:
+    experiment, bundle, artifacts = build_contract(tmp_path)
+    plan = load_controlled_plan(
+        experiment_path=experiment,
+        authorization=EXPECTED_EXPERIMENT_ID,
+        reference_bundle=bundle,
+        artifact_root=artifacts,
+    )
+    profile = load_animation_fitting_specs().workflows["loop"]
+    worker = ComfyWorker(
+        worker_id="local-4090-test",
+        base_url="http://127.0.0.1:8188",
+        workflow_name=profile.workflow_name,
+        expected_workflow_fingerprint=profile.workflow_fingerprint,
+    )
+    ActiveSamePromptClient.instances.clear()
+    result = asyncio.run(run_controlled_experiment(
+        plan,
+        worker=worker,
+        client_factory=ActiveSamePromptClient,
+        frame_extractor=FakeExtractor(),
+    ))
+    assert result.prompt_id == "prompt-controlled"
+    assert len(result.frames) == 49
+    assert len(ActiveSamePromptClient.instances) == 1
