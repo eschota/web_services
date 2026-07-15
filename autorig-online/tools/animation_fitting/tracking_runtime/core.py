@@ -38,11 +38,39 @@ from .runtime_lock import sha256_file
 OBSERVATIONS_SCHEMA = "autorig-fitting-observations.v1"
 OUTPUT_MANIFEST_SCHEMA = "autorig-tracking-observation-bundle.v1"
 FIRST_FRAME_REFERENCE_SCHEMA = "autorig-tracking-first-frame-reference.v1"
-BROWSER_GUIDE_MANIFEST_SCHEMA = "autorig-browser-ltx-static-scene-guide-bundle.v1"
-BROWSER_STATIC_SCENE_CONTRACT = "v11_unified_browser_static_scene_v1"
-AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256 = frozenset(
-    {"9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173"}
+BROWSER_STATIC_SCENE_GUIDE_MANIFEST_SCHEMA = (
+    "autorig-browser-ltx-static-scene-guide-bundle.v1"
 )
+# Backward-compatible name retained for v11 callers that imported the original
+# single-profile constant before v12 was introduced.
+BROWSER_GUIDE_MANIFEST_SCHEMA = BROWSER_STATIC_SCENE_GUIDE_MANIFEST_SCHEMA
+BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA = (
+    "autorig-browser-ltx-recovery-guide-bundle.v1"
+)
+BROWSER_STATIC_SCENE_CONTRACT = "v11_unified_browser_static_scene_v1"
+BROWSER_RECOVERY_SCENE_CONTRACT = "v12_unified_browser_recovery_guides_v1"
+BROWSER_GUIDE_CONTRACTS = {
+    BROWSER_STATIC_SCENE_GUIDE_MANIFEST_SCHEMA: BROWSER_STATIC_SCENE_CONTRACT,
+    BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA: BROWSER_RECOVERY_SCENE_CONTRACT,
+}
+V12_BROWSER_GUIDE_MANIFEST_SHA256 = (
+    "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451"
+)
+AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256 = frozenset(
+    {
+        "9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173",
+        V12_BROWSER_GUIDE_MANIFEST_SHA256,
+    }
+)
+V12_BROWSER_GUIDE_FRAME_INDICES = (0, 6, 12, 18, 24, 30, 36, 42, 48)
+V12_BROWSER_RECOVERY_FRAME_INDICES = (12, 24, 36)
+V12_BROWSER_SWING_LIMBS = {
+    6: "hind_left",
+    18: "fore_left",
+    30: "hind_right",
+    42: "fore_right",
+}
+V12_BROWSER_LIMBS = ("hind_left", "fore_left", "hind_right", "fore_right")
 
 
 @dataclass(frozen=True)
@@ -246,6 +274,181 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _exact_list(value: Any, expected: tuple[Any, ...], field: str) -> None:
+    if not isinstance(value, list) or value != list(expected):
+        raise ContractError(f"{field} must be exactly {list(expected)!r}")
+
+
+def _v12_guide_rows(
+    value: Any, *, field: str, frame_key: str
+) -> dict[int, dict[str, Any]]:
+    if not isinstance(value, list) or len(value) != len(V12_BROWSER_GUIDE_FRAME_INDICES):
+        raise ContractError(
+            f"{field} must contain exactly the nine v12 guide-frame records"
+        )
+    by_index: dict[int, dict[str, Any]] = {}
+    for value_index, raw in enumerate(value):
+        row = _object_field(raw, f"{field}[{value_index}]")
+        frame_index = row.get(frame_key)
+        if (
+            isinstance(frame_index, bool)
+            or not isinstance(frame_index, int)
+            or frame_index in by_index
+        ):
+            raise ContractError(f"{field} contains an invalid or duplicate frame index")
+        by_index[frame_index] = row
+    if tuple(sorted(by_index)) != V12_BROWSER_GUIDE_FRAME_INDICES:
+        raise ContractError(
+            f"{field} must cover exactly {list(V12_BROWSER_GUIDE_FRAME_INDICES)!r}"
+        )
+    return by_index
+
+
+def _verify_v12_recovery_guide_contract(
+    manifest: dict[str, Any],
+    *,
+    by_index: dict[int, dict[str, Any]],
+    frame_payloads: dict[int, bytes],
+    endpoint_sha256: str,
+) -> None:
+    if manifest.get("cycle_frame_count_int") != 49:
+        raise ContractError("v12 browser recovery guide cycle must contain 49 frames")
+    if tuple(sorted(by_index)) != V12_BROWSER_GUIDE_FRAME_INDICES:
+        raise ContractError(
+            "v12 browser recovery manifest must contain exactly frames "
+            f"{list(V12_BROWSER_GUIDE_FRAME_INDICES)!r}"
+        )
+    _exact_list(
+        manifest.get("recovery_frame_indices_array"),
+        V12_BROWSER_RECOVERY_FRAME_INDICES,
+        "recovery_frame_indices_array",
+    )
+    if manifest.get("recovery_guides_byte_identical_endpoint_bool") is not True:
+        raise ContractError(
+            "v12 recovery guides must assert byte identity with the endpoint"
+        )
+
+    endpoint_payload = frame_payloads[0]
+    endpoint_and_recovery = (
+        0,
+        *V12_BROWSER_RECOVERY_FRAME_INDICES,
+        V12_BROWSER_GUIDE_FRAME_INDICES[-1],
+    )
+    for frame_index in endpoint_and_recovery:
+        record = by_index[frame_index]
+        expected_strength = (
+            0.85 if frame_index in V12_BROWSER_RECOVERY_FRAME_INDICES else 0.8
+        )
+        if (
+            record.get("filename_string") != f"guide_{frame_index:03d}.png"
+            or record.get("sha256_string") != endpoint_sha256
+            or record.get("strength_float") != expected_strength
+            or frame_payloads[frame_index] != endpoint_payload
+        ):
+            raise ContractError(
+                "v12 endpoint and recovery PNGs must be exact byte-identical pins"
+            )
+    swing_sha256: list[str] = []
+    for frame_index in V12_BROWSER_SWING_LIMBS:
+        record = by_index[frame_index]
+        if (
+            record.get("filename_string") != f"guide_{frame_index:03d}.png"
+            or record.get("sha256_string") == endpoint_sha256
+            or record.get("strength_float") != 0.7
+        ):
+            raise ContractError(
+                "v12 swing guides must be distinct pinned PNGs, not recovery frames"
+            )
+        swing_sha256.append(record["sha256_string"])
+    if len(set(swing_sha256)) != len(swing_sha256):
+        raise ContractError("v12 swing guide PNG pins must be pairwise distinct")
+
+    static_scene_qa = _object_field(manifest.get("staticSceneQa"), "staticSceneQa")
+    _exact_list(
+        static_scene_qa.get("expected_frame_indices_array"),
+        V12_BROWSER_GUIDE_FRAME_INDICES,
+        "staticSceneQa.expected_frame_indices_array",
+    )
+    scene_renderer = _object_field(
+        manifest.get("staticSceneRenderer"), "staticSceneRenderer"
+    )
+    contact_cues = _object_field(
+        scene_renderer.get("contactCues"), "staticSceneRenderer.contactCues"
+    )
+    if (
+        contact_cues.get("enabled") is not True
+        or contact_cues.get("implementation")
+        != "static_rest_hoof_radial_alpha_planes"
+        or contact_cues.get("count") != 4
+        or contact_cues.get("shadowMapUsed") is not False
+        or contact_cues.get("perGuideVisibility") is not True
+    ):
+        raise ContractError(
+            "v12 static-scene renderer contact-cue contract is invalid"
+        )
+
+    cue_qa = _object_field(manifest.get("contactCueQa"), "contactCueQa")
+    if (
+        cue_qa.get("schema")
+        != "autorig-browser-contact-cue-visibility-qa.v1"
+        or cue_qa.get("status") != "PASS"
+        or cue_qa.get("perGuideVisibility") is not True
+        or cue_qa.get("swingGuidesHideExactlyOneCue") is not True
+        or cue_qa.get("stanceGuidesShowAllFourCues") is not True
+    ):
+        raise ContractError("v12 contact-cue visibility QA contract is not PASS")
+    cue_rows = _v12_guide_rows(
+        cue_qa.get("guides"), field="contactCueQa.guides", frame_key="frameIndex"
+    )
+    for frame_index in V12_BROWSER_GUIDE_FRAME_INDICES:
+        row = cue_rows[frame_index]
+        swing_limb = V12_BROWSER_SWING_LIMBS.get(frame_index)
+        visible_limbs = tuple(
+            limb for limb in V12_BROWSER_LIMBS if limb != swing_limb
+        )
+        hidden_limbs = () if swing_limb is None else (swing_limb,)
+        expected_visible_count = 4 if swing_limb is None else 3
+        if (
+            row.get("swingLimb") != swing_limb
+            or row.get("visibleLimbs") != list(visible_limbs)
+            or row.get("hiddenLimbs") != list(hidden_limbs)
+            or isinstance(row.get("visibleCueCount"), bool)
+            or row.get("visibleCueCount") != expected_visible_count
+            or isinstance(row.get("hiddenCueCount"), bool)
+            or row.get("hiddenCueCount") != len(hidden_limbs)
+            or row.get("exactlyMatchesStance") is not True
+        ):
+            raise ContractError(
+                f"v12 contact-cue QA frame {frame_index} must show "
+                f"{expected_visible_count} stance cues and hide only its swing cue"
+            )
+
+    post_bake = _object_field(manifest.get("postBakeQa"), "postBakeQa")
+    if (
+        post_bake.get("status") != "PASS"
+        or post_bake.get("hierarchyBakeVerified") is not True
+        or post_bake.get("minimumStanceHooves") != 3
+        or post_bake.get("recoveryGuideCount") != 3
+    ):
+        raise ContractError("v12 recovery post-bake QA contract is not PASS")
+    post_bake_rows = _v12_guide_rows(
+        post_bake.get("guides"), field="postBakeQa.guides", frame_key="frameIndex"
+    )
+    for frame_index in V12_BROWSER_GUIDE_FRAME_INDICES:
+        swing_limb = V12_BROWSER_SWING_LIMBS.get(frame_index)
+        expected_stance_count = 4 if swing_limb is None else 3
+        row = post_bake_rows[frame_index]
+        if (
+            row.get("swingLimb") != swing_limb
+            or isinstance(row.get("stanceHoofCount"), bool)
+            or row.get("stanceHoofCount") != expected_stance_count
+        ):
+            raise ContractError(
+                f"v12 post-bake QA frame {frame_index} must retain "
+                f"{expected_stance_count} stance hooves"
+            )
+
+
 def _browser_first_frame_reference(
     rig: RigBundle,
     canonical_rgb: np.ndarray,
@@ -278,10 +481,12 @@ def _browser_first_frame_reference(
         raise ContractError(f"Invalid browser guide manifest {manifest_path}: {exc}") from exc
     if not isinstance(manifest, dict):
         raise ContractError("Browser guide manifest must contain a JSON object")
-    if manifest.get("schema") != BROWSER_GUIDE_MANIFEST_SCHEMA:
+    manifest_schema = manifest.get("schema")
+    scene_contract = BROWSER_GUIDE_CONTRACTS.get(manifest_schema)
+    if scene_contract is None:
         raise ContractError(
-            "Unsupported browser guide manifest schema; expected "
-            f"{BROWSER_GUIDE_MANIFEST_SCHEMA}"
+            "Unsupported browser guide manifest schema; expected one of "
+            f"{sorted(BROWSER_GUIDE_CONTRACTS)!r}"
         )
     if manifest.get("status") != "PASS":
         raise ContractError("Browser guide manifest status must be PASS")
@@ -292,12 +497,24 @@ def _browser_first_frame_reference(
     renderer = _object_field(manifest.get("renderer_object"), "renderer_object")
     if (
         renderer.get("renderer_string") != "browser_threejs"
-        or renderer.get("scene_contract_string") != BROWSER_STATIC_SCENE_CONTRACT
+        or renderer.get("scene_contract_string") != scene_contract
         or renderer.get("all_guide_frames_browser_rendered_bool") is not True
         or renderer.get("blender_used_bool") is not False
     ):
         raise ContractError(
-            "Browser guide manifest does not satisfy the v11 unified static-scene renderer contract"
+            "Browser guide manifest does not satisfy its authorized unified "
+            "browser scene contract"
+        )
+    if manifest_schema == BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA and (
+        renderer.get("deterministic_contact_cues_bool") is not True
+        or renderer.get("per_guide_contact_cue_visibility_bool") is not True
+        or renderer.get("shadows_enabled_bool") is not False
+        or renderer.get("contact_cue_implementation_string")
+        != "static_rest_hoof_radial_alpha_planes"
+    ):
+        raise ContractError(
+            "v12 browser recovery renderer must provide deterministic per-guide "
+            "contact cues"
         )
     static_scene_qa = _object_field(manifest.get("staticSceneQa"), "staticSceneQa")
     if (
@@ -310,7 +527,7 @@ def _browser_first_frame_reference(
     static_scene_renderer = _object_field(
         manifest.get("staticSceneRenderer"), "staticSceneRenderer"
     )
-    if static_scene_renderer.get("contract") != BROWSER_STATIC_SCENE_CONTRACT:
+    if static_scene_renderer.get("contract") != scene_contract:
         raise ContractError("Browser guide static-scene renderer contract is invalid")
 
     canonical_record = _object_field(
@@ -335,6 +552,13 @@ def _browser_first_frame_reference(
         manifest.get("endpoint_guide_sha256_string"),
         "endpoint_guide_sha256_string",
     )
+    if (
+        manifest_schema == BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA
+        and endpoint_sha256 == canonical_sha256
+    ):
+        raise ContractError(
+            "v12 endpoint guide must remain distinct from the canonical source RGB"
+        )
 
     source = _object_field(manifest.get("source"), "source")
     source_reference = _object_field(source.get("referenceRgb"), "source.referenceRgb")
@@ -474,6 +698,13 @@ def _browser_first_frame_reference(
         or reference_payload is None
     ):
         raise ContractError("Browser guide first-frame reference was not resolved")
+    if manifest_schema == BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA:
+        _verify_v12_recovery_guide_contract(
+            manifest,
+            by_index=by_index,
+            frame_payloads=frame_payloads,
+            endpoint_sha256=endpoint_sha256,
+        )
     reference_rgb = _decode_pinned_png(reference_payload, reference_path)
     if reference_rgb.shape != canonical_rgb.shape:
         raise ContractError(
@@ -491,8 +722,8 @@ def _browser_first_frame_reference(
                 "path": str(manifest_path),
                 "sha256": manifest_sha256,
                 "bytes": manifest_bytes,
-                "schema": BROWSER_GUIDE_MANIFEST_SCHEMA,
-                "scene_contract": BROWSER_STATIC_SCENE_CONTRACT,
+                "schema": manifest_schema,
+                "scene_contract": scene_contract,
                 "cycle_frame_count": cycle_frame_count,
             },
         },

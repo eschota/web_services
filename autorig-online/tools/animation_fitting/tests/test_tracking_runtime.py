@@ -280,6 +280,164 @@ def _browser_guide_bundle(
     return guide, browser_rgb, _sha(manifest_path)
 
 
+def _browser_recovery_guide_bundle(
+    root: Path, bundle: Path, canonical_rgb: np.ndarray
+) -> tuple[Path, np.ndarray, str]:
+    guide = root / "browser_recovery_guides"
+    guide.mkdir()
+    browser_rgb = 255 - canonical_rgb
+    metadata = json.loads((bundle / "fitting_bundle.json").read_text(encoding="utf-8"))
+    frame_indices = (0, 6, 12, 18, 24, 30, 36, 42, 48)
+    recovery_indices = (12, 24, 36)
+    swing_limbs = {
+        6: "hind_left",
+        18: "fore_left",
+        30: "hind_right",
+        42: "fore_right",
+    }
+    limbs = ("hind_left", "fore_left", "hind_right", "fore_right")
+
+    endpoint = guide / "guide_000.png"
+    Image.fromarray(browser_rgb, mode="RGB").save(endpoint)
+    endpoint_payload = endpoint.read_bytes()
+    for frame_index in frame_indices[1:]:
+        target = guide / f"guide_{frame_index:03d}.png"
+        if frame_index in recovery_indices or frame_index == 48:
+            target.write_bytes(endpoint_payload)
+            continue
+        swing_rgb = browser_rgb.copy()
+        swing_rgb[0, frame_index // 6, 0] = (
+            int(swing_rgb[0, frame_index // 6, 0]) + frame_index
+        ) % 256
+        Image.fromarray(swing_rgb, mode="RGB").save(target)
+
+    endpoint_sha256 = _sha(endpoint)
+    frames = []
+    cue_guides = []
+    post_bake_guides = []
+    for frame_index in frame_indices:
+        path = guide / f"guide_{frame_index:03d}.png"
+        swing_limb = swing_limbs.get(frame_index)
+        visible_limbs = [limb for limb in limbs if limb != swing_limb]
+        hidden_limbs = [] if swing_limb is None else [swing_limb]
+        frames.append(
+            {
+                "frame_index_int": frame_index,
+                "filename_string": path.name,
+                "sha256_string": _sha(path),
+                "bytes_int": path.stat().st_size,
+                "strength_float": (
+                    0.85
+                    if frame_index in recovery_indices
+                    else 0.7
+                    if swing_limb is not None
+                    else 0.8
+                ),
+            }
+        )
+        cue_guides.append(
+            {
+                "frameIndex": frame_index,
+                "swingLimb": swing_limb,
+                "visibleLimbs": visible_limbs,
+                "hiddenLimbs": hidden_limbs,
+                "visibleCueCount": len(visible_limbs),
+                "hiddenCueCount": len(hidden_limbs),
+                "exactlyMatchesStance": True,
+            }
+        )
+        post_bake_guides.append(
+            {
+                "frameIndex": frame_index,
+                "swingLimb": swing_limb,
+                "stanceHoofCount": len(visible_limbs),
+            }
+        )
+
+    manifest = {
+        "schema": "autorig-browser-ltx-recovery-guide-bundle.v1",
+        "status": "PASS",
+        "approvedForAnimationLibrary": False,
+        "browserOnly": True,
+        "blenderUsed": False,
+        "rigType": metadata["source"]["rig_type"],
+        "resolution": [browser_rgb.shape[1], browser_rgb.shape[0]],
+        "source_reference_sha256_string": metadata["artifacts"]["rgb"]["sha256"],
+        "source_reference_is_guide_bool": False,
+        "endpoint_guide_sha256_string": endpoint_sha256,
+        "cycle_frame_count_int": 49,
+        "guide_count_int": len(frame_indices),
+        "recovery_frame_indices_array": list(recovery_indices),
+        "recovery_guides_byte_identical_endpoint_bool": True,
+        "renderer_object": {
+            "renderer_string": "browser_threejs",
+            "scene_contract_string": "v12_unified_browser_recovery_guides_v1",
+            "all_guide_frames_browser_rendered_bool": True,
+            "blender_used_bool": False,
+            "shadows_enabled_bool": False,
+            "deterministic_contact_cues_bool": True,
+            "per_guide_contact_cue_visibility_bool": True,
+            "contact_cue_implementation_string": (
+                "static_rest_hoof_radial_alpha_planes"
+            ),
+        },
+        "frames_array": frames,
+        "source": {
+            "sourceModelSha256": metadata["source"]["sha256"],
+            "immutableManifest": {
+                "filename": "immutable_manifest.json",
+                "bytes": (bundle / "immutable_manifest.json").stat().st_size,
+                "sha256": _sha(bundle / "immutable_manifest.json"),
+            },
+            "fittingBundle": {
+                "filename": "fitting_bundle.json",
+                "bytes": (bundle / "fitting_bundle.json").stat().st_size,
+                "sha256": _sha(bundle / "fitting_bundle.json"),
+            },
+            "referenceRgb": {
+                "filename": metadata["artifacts"]["rgb"]["filename"],
+                "bytes": metadata["artifacts"]["rgb"]["bytes"],
+                "sha256": metadata["artifacts"]["rgb"]["sha256"],
+            },
+        },
+        "staticSceneQa": {
+            "schema": "autorig-browser-static-scene-qa.v1",
+            "status": "PASS",
+            "expected_frame_indices_array": list(frame_indices),
+            "decoded_rgb_statistics_bool": True,
+            "endpoint_byte_identical_bool": True,
+        },
+        "staticSceneRenderer": {
+            "contract": "v12_unified_browser_recovery_guides_v1",
+            "contactCues": {
+                "enabled": True,
+                "implementation": "static_rest_hoof_radial_alpha_planes",
+                "count": 4,
+                "shadowMapUsed": False,
+                "perGuideVisibility": True,
+            },
+        },
+        "contactCueQa": {
+            "schema": "autorig-browser-contact-cue-visibility-qa.v1",
+            "status": "PASS",
+            "perGuideVisibility": True,
+            "swingGuidesHideExactlyOneCue": True,
+            "stanceGuidesShowAllFourCues": True,
+            "guides": cue_guides,
+        },
+        "postBakeQa": {
+            "status": "PASS",
+            "hierarchyBakeVerified": True,
+            "minimumStanceHooves": 3,
+            "recoveryGuideCount": 3,
+            "guides": post_bake_guides,
+        },
+    }
+    manifest_path = guide / "immutable_manifest.json"
+    _write_json(manifest_path, manifest)
+    return guide, browser_rgb, _sha(manifest_path)
+
+
 def _authorize_browser_manifest(
     monkeypatch: pytest.MonkeyPatch, manifest_sha256: str
 ) -> None:
@@ -721,6 +879,182 @@ def test_browser_endpoint_manifest_and_first_frame_are_each_read_once(
     )
     assert reads[manifest_path] == 1
     assert reads[first_path] == 1
+
+
+def test_v12_browser_recovery_endpoint_is_pinned_and_preserves_v11_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, browser_rgb, manifest_sha256 = _browser_recovery_guide_bundle(
+        tmp_path, bundle, canonical
+    )
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+
+    seeds = select_anchor_seeds(
+        bundle,
+        browser_endpoint_guide_bundle=guide,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        loop=True,
+    )
+
+    assert np.array_equal(seeds.reference_rgb, browser_rgb)
+    selected = seeds.reference_provenance["selected"]
+    assert selected["sha256"] == _sha(guide / "guide_000.png")
+    assert selected["manifest"]["schema"] == (
+        "autorig-browser-ltx-recovery-guide-bundle.v1"
+    )
+    assert selected["manifest"]["scene_contract"] == (
+        "v12_unified_browser_recovery_guides_v1"
+    )
+    assert selected["manifest"]["cycle_frame_count"] == 49
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    (
+        ("recovery_indices", "recovery_frame_indices_array"),
+        ("swing_cue_count", "must show 3 stance cues"),
+        ("recovery_endpoint", "byte-identical pins"),
+        ("path_escape", "escapes the browser guide bundle"),
+    ),
+)
+def test_v12_browser_recovery_contract_rejects_repinned_semantic_tamper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    error: str,
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, _ = _browser_recovery_guide_bundle(tmp_path, bundle, canonical)
+    manifest_path = guide / "immutable_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if mutation == "recovery_indices":
+        manifest["recovery_frame_indices_array"] = [12, 24, 42]
+    elif mutation == "swing_cue_count":
+        row = next(
+            row
+            for row in manifest["contactCueQa"]["guides"]
+            if row["frameIndex"] == 6
+        )
+        row["visibleCueCount"] = 4
+    elif mutation == "recovery_endpoint":
+        recovery_path = guide / "guide_012.png"
+        recovery_path.write_bytes(recovery_path.read_bytes() + b"not-the-endpoint")
+        row = next(
+            row
+            for row in manifest["frames_array"]
+            if row["frame_index_int"] == 12
+        )
+        row["sha256_string"] = _sha(recovery_path)
+        row["bytes_int"] = recovery_path.stat().st_size
+    elif mutation == "path_escape":
+        escaped = tmp_path / "escaped-v12.png"
+        escaped.write_bytes((guide / "guide_006.png").read_bytes())
+        row = next(
+            row
+            for row in manifest["frames_array"]
+            if row["frame_index_int"] == 6
+        )
+        row["filename_string"] = "../escaped-v12.png"
+    else:  # pragma: no cover - guarded by the parametrization
+        raise AssertionError(mutation)
+    _write_json(manifest_path, manifest)
+    repinned_sha256 = _sha(manifest_path)
+    _authorize_browser_manifest(monkeypatch, repinned_sha256)
+
+    with pytest.raises(ContractError, match=error):
+        select_anchor_seeds(
+            bundle,
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=repinned_sha256,
+            loop=True,
+        )
+
+
+def test_v12_browser_manifest_and_all_nine_guides_are_read_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, manifest_sha256 = _browser_recovery_guide_bundle(
+        tmp_path, bundle, canonical
+    )
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+    manifest_path = (guide / "immutable_manifest.json").resolve()
+    guide_paths = {
+        (guide / f"guide_{frame_index:03d}.png").resolve()
+        for frame_index in (0, 6, 12, 18, 24, 30, 36, 42, 48)
+    }
+    original = Path.read_bytes
+    reads: dict[Path, int] = {}
+
+    def counted(path: Path) -> bytes:
+        resolved = path.resolve()
+        reads[resolved] = reads.get(resolved, 0) + 1
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    select_anchor_seeds(
+        bundle,
+        browser_endpoint_guide_bundle=guide,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        loop=True,
+    )
+
+    assert reads[manifest_path] == 1
+    assert {path: reads[path] for path in guide_paths} == {
+        path: 1 for path in guide_paths
+    }
+
+
+def test_v12_exact_f2_bundle_validates_against_real_canonical_bundle() -> None:
+    canonical_bundle = Path(
+        r"R:\ComfyUI-data\autorig-fitting\horse-canonical-f1"
+    )
+    guide_bundle = Path(
+        r"R:\ComfyUI-data\autorig-fitting\canonical-candidates\experiments"
+        r"\horse-walk-v12-browser-recovery-guides-f2"
+    )
+    if not canonical_bundle.is_dir() or not guide_bundle.is_dir():
+        pytest.skip("Exact local v12 f2/canonical bundles are not installed")
+
+    manifest_sha256 = (
+        "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451"
+    )
+    assert _sha(guide_bundle / "immutable_manifest.json") == manifest_sha256
+    seeds = select_anchor_seeds(
+        canonical_bundle,
+        browser_endpoint_guide_bundle=guide_bundle,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        loop=True,
+    )
+
+    selected = seeds.reference_provenance["selected"]
+    assert selected["sha256"] == (
+        "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3"
+    )
+    assert selected["manifest"]["schema"] == (
+        "autorig-browser-ltx-recovery-guide-bundle.v1"
+    )
+    assert selected["manifest"]["scene_contract"] == (
+        "v12_unified_browser_recovery_guides_v1"
+    )
+
+
+def test_tracking_cli_help_names_v11_and_v12_browser_guide_profiles() -> None:
+    parser = tracking_cli._parser()
+    subparsers = next(
+        action
+        for action in parser._actions
+        if isinstance(action, tracking_cli.argparse._SubParsersAction)
+    )
+    observe_help = subparsers.choices["observe"].format_help()
+    assert "v11 static-scene" in observe_help
+    assert "v12 recovery-" in observe_help
+    assert "guide browser bundle" in observe_help
+    assert (
+        "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451"
+        in tracking_core.AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256
+    )
 
 
 def test_immutable_manifest_rejects_tampered_reference_rgb(tmp_path: Path) -> None:
