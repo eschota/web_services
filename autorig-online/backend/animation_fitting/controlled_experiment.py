@@ -58,6 +58,13 @@ V11_EXPERIMENT_ID = (
     "horse_walk_v11_browser_static_scene_guides_"
     "seed_6550110377254033429_v1"
 )
+V12_EXPERIMENT_ID = (
+    "horse_walk_v12_browser_recovery_guides_"
+    "seed_6550110377254033429_v1"
+)
+V12_EXPERIMENT_SPEC_SHA256 = (
+    "22ee5269f14e382fbd214f23ede44130bd9409db471c97087564bb82ef7fd1e1"
+)
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPECTED_EXPERIMENT_ID,
     "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
@@ -68,12 +75,29 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     V8_EXPERIMENT_ID,
     V10_EXPERIMENT_ID,
     V11_EXPERIMENT_ID,
+    V12_EXPERIMENT_ID,
 }) | V9_EXPERIMENT_IDS
 RESULT_SCHEMA = "autorig.animation-fitting-controlled-result.v1"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 V10_GUIDE_FRAME_INDICES = (0, 6, 18, 30, 42, 48)
 V10_INTERMEDIATE_GUIDE_FRAME_INDICES = (6, 18, 30, 42)
+V12_GUIDE_FRAME_INDICES = (0, 6, 12, 18, 24, 30, 36, 42, 48)
+V12_SWING_GUIDE_FRAME_INDICES = (6, 18, 30, 42)
+V12_RECOVERY_GUIDE_FRAME_INDICES = (12, 24, 36)
+V12_GUIDE_STRENGTHS = (0.8, 0.7, 0.85, 0.7, 0.85, 0.7, 0.85, 0.7, 0.8)
+V12_GUIDE_CONTRACT = "browser_rendered_recovery_static_scene_rgb_keyframes_v1"
+V12_SCENE_CONTRACT = "v12_unified_browser_recovery_guides_v1"
 V10_GUIDE_RESOLUTION = (768, 448)
+V12_GUIDE_BUNDLE_ID = "horse-walk-v12-browser-recovery-guides-f2"
+V12_GUIDE_MANIFEST_SHA256 = (
+    "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451"
+)
+V12_ENDPOINT_GUIDE_SHA256 = (
+    "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3"
+)
+V12_GUIDE_CLI_SHA256 = (
+    "13e1da43f47292be01e99bb32c63dd0d8ca46c88149aa58b64705503a361425d"
+)
 V11_GUIDE_BUNDLE_ID = "horse-walk-v11-browser-static-scene-guides-f2"
 V11_GUIDE_MANIFEST_SHA256 = (
     "9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173"
@@ -137,6 +161,27 @@ class ControlledGuideFrame:
     sha256: str
     size_bytes: int
     strength: float
+
+
+@dataclass(frozen=True)
+class BrowserRecoveryGuidePins:
+    """Code-owned immutable pins required before a recovery bundle can load.
+
+    Accepting these values from the experiment JSON would make an arbitrary
+    repin launchable, so the allowlisted v12 loader receives only this
+    code-owned instance.
+    """
+
+    bundle_id: str
+    manifest_sha256: str
+    endpoint_sha256: str
+
+
+V12_GUIDE_PINS = BrowserRecoveryGuidePins(
+    bundle_id=V12_GUIDE_BUNDLE_ID,
+    manifest_sha256=V12_GUIDE_MANIFEST_SHA256,
+    endpoint_sha256=V12_ENDPOINT_GUIDE_SHA256,
+)
 
 
 @dataclass(frozen=True)
@@ -799,6 +844,37 @@ def _verify_v11_planned_guide_frame(
             )
 
 
+def _verify_v12_planned_guide_frame(
+    frame: ControlledGuideFrame, *, decode_png: bool
+) -> None:
+    _require_exact_sha(
+        frame.image,
+        frame.sha256,
+        f"v12 guide frame {frame.frame_index} SHA-256",
+    )
+    try:
+        actual_bytes = frame.image.stat().st_size
+    except OSError as exc:
+        raise ControlledExperimentError(
+            f"Cannot stat v12 guide frame {frame.frame_index} {frame.image}: {exc}"
+        ) from exc
+    if actual_bytes != frame.size_bytes:
+        raise ControlledExperimentError(
+            f"v12 guide frame {frame.frame_index} byte size mismatch: "
+            f"expected {frame.size_bytes}, got {actual_bytes}"
+        )
+    if decode_png:
+        dimensions = _decode_png_dimensions(
+            frame.image, f"v12 guide frame {frame.frame_index}"
+        )
+        if dimensions != V10_GUIDE_RESOLUTION:
+            raise ControlledExperimentError(
+                f"v12 guide frame {frame.frame_index} must be exactly "
+                f"{V10_GUIDE_RESOLUTION[0]}x{V10_GUIDE_RESOLUTION[1]}, "
+                f"got {dimensions[0]}x{dimensions[1]}"
+            )
+
+
 def _verify_v11_static_scene_contract(
     experiment: Mapping[str, Any], manifest: Mapping[str, Any]
 ) -> None:
@@ -1110,6 +1186,368 @@ def _load_browser_static_scene_guide_sequence(
     return bundle, manifest_sha256, tuple(sorted(frames, key=lambda frame: frame.frame_index))
 
 
+def _verify_v12_recovery_manifest(manifest: Mapping[str, Any]) -> None:
+    renderer = manifest.get("renderer_object")
+    if not isinstance(renderer, dict) or (
+        renderer.get("renderer_string") != "browser_threejs"
+        or renderer.get("blender_used_bool") is not False
+        or renderer.get("scene_contract_string") != V12_SCENE_CONTRACT
+        or renderer.get("all_guide_frames_browser_rendered_bool") is not True
+        or renderer.get("shadows_enabled_bool") is not False
+        or renderer.get("deterministic_contact_cues_bool") is not True
+        or renderer.get("per_guide_contact_cue_visibility_bool") is not True
+        or renderer.get("contact_cue_implementation_string")
+        != "static_rest_hoof_radial_alpha_planes"
+    ):
+        raise ControlledExperimentError(
+            "v12 guide bundle must use the pinned browser recovery scene and contact cues"
+        )
+
+    if manifest.get("recovery_frame_indices_array") != list(
+        V12_RECOVERY_GUIDE_FRAME_INDICES
+    ) or manifest.get("recovery_guides_byte_identical_endpoint_bool") is not True:
+        raise ControlledExperimentError(
+            "v12 recovery frame inventory/equality declaration is invalid"
+        )
+
+    post_bake = manifest.get("postBakeQa")
+    if not isinstance(post_bake, dict) or (
+        post_bake.get("status") != "PASS"
+        or post_bake.get("hierarchyBakeVerified") is not True
+        or _positive_int(
+            post_bake.get("minimumStanceHooves"), "v12 minimum stance hooves"
+        )
+        < 3
+        or _positive_int(
+            post_bake.get("recoveryGuideCount"), "v12 recovery guide count"
+        )
+        != len(V12_RECOVERY_GUIDE_FRAME_INDICES)
+        or _finite_float(
+            post_bake.get("endpointMaximumErrorPx"),
+            "v12 endpoint maximum error",
+        )
+        != 0
+    ):
+        raise ControlledExperimentError("v12 guide post-bake hoof QA did not pass")
+
+    contact_qa = manifest.get("contactCueQa")
+    contact_rows = contact_qa.get("guides") if isinstance(contact_qa, dict) else None
+    if not isinstance(contact_qa, dict) or (
+        contact_qa.get("schema")
+        != "autorig-browser-contact-cue-visibility-qa.v1"
+        or contact_qa.get("status") != "PASS"
+        or contact_qa.get("perGuideVisibility") is not True
+        or contact_qa.get("swingGuidesHideExactlyOneCue") is not True
+        or contact_qa.get("stanceGuidesShowAllFourCues") is not True
+        or not isinstance(contact_rows, list)
+        or [
+            row.get("frameIndex") for row in contact_rows if isinstance(row, dict)
+        ]
+        != list(V12_GUIDE_FRAME_INDICES)
+    ):
+        raise ControlledExperimentError("v12 contact-cue visibility QA did not pass")
+    for row in contact_rows:
+        if not isinstance(row, dict):
+            raise ControlledExperimentError("v12 contact-cue QA row is invalid")
+        frame_index = _nonnegative_int(
+            row.get("frameIndex"), "v12 contact-cue frame index"
+        )
+        swing = frame_index in V12_SWING_GUIDE_FRAME_INDICES
+        if (
+            row.get("exactlyMatchesStance") is not True
+            or _positive_int(
+                row.get("visibleCueCount"), "v12 visible contact-cue count"
+            )
+            != (3 if swing else 4)
+            or _nonnegative_int(
+                row.get("hiddenCueCount"), "v12 hidden contact-cue count"
+            )
+            != (1 if swing else 0)
+        ):
+            raise ControlledExperimentError(
+                f"v12 contact-cue visibility is invalid at frame {frame_index}"
+            )
+
+    static_qa = manifest.get("staticSceneQa")
+    static_rows = static_qa.get("guides_array") if isinstance(static_qa, dict) else None
+    if not isinstance(static_qa, dict) or (
+        static_qa.get("schema") != "autorig-browser-static-scene-qa.v1"
+        or static_qa.get("status") != "PASS"
+        or static_qa.get("decoded_rgb_statistics_bool") is not True
+        or static_qa.get("endpoint_byte_identical_bool") is not True
+        or static_qa.get("expected_frame_indices_array")
+        != list(V12_GUIDE_FRAME_INDICES)
+        or not isinstance(static_rows, list)
+        or [
+            row.get("frame_index_int") for row in static_rows if isinstance(row, dict)
+        ]
+        != list(V12_GUIDE_FRAME_INDICES)
+    ):
+        raise ControlledExperimentError("v12 static-scene QA did not pass")
+    if (
+        _nonnegative_int(
+            static_qa.get("maximum_background_channel_delta_int"),
+            "v12 maximum background channel delta",
+        )
+        != 0
+        or _finite_float(
+            static_qa.get("background_mean_luma_range_float"),
+            "v12 background mean luma range",
+        )
+        != 0
+        or _finite_float(
+            static_qa.get("full_frame_mean_luma_range_float"),
+            "v12 full-frame mean luma range",
+        )
+        > _finite_float(
+            static_qa.get("maximum_full_frame_mean_luma_range_float"),
+            "v12 maximum full-frame mean luma range",
+        )
+        or _finite_float(
+            static_qa.get("maximum_near_black_pixel_fraction_float"),
+            "v12 maximum near-black pixel fraction",
+        )
+        > _finite_float(
+            static_qa.get("allowed_near_black_pixel_fraction_float"),
+            "v12 allowed near-black pixel fraction",
+        )
+    ):
+        raise ControlledExperimentError("v12 static-scene background metrics failed")
+
+    static_scene = manifest.get("staticSceneRenderer")
+    contact_cues = (
+        static_scene.get("contactCues") if isinstance(static_scene, dict) else None
+    )
+    if not isinstance(static_scene, dict) or (
+        static_scene.get("contract") != V12_SCENE_CONTRACT
+        or static_scene.get("shadowsEnabled") is not False
+        or not isinstance(contact_cues, dict)
+        or contact_cues.get("enabled") is not True
+        or contact_cues.get("implementation")
+        != "static_rest_hoof_radial_alpha_planes"
+        or contact_cues.get("perGuideVisibility") is not True
+    ):
+        raise ControlledExperimentError("v12 static-scene renderer contract is invalid")
+
+
+def _load_browser_recovery_guide_sequence(
+    experiment: Mapping[str, Any],
+    *,
+    guide_bundle: Optional[Path],
+    reference_sha256: str,
+    frame_count: int,
+    start_strength: float,
+    end_strength: float,
+    pins: BrowserRecoveryGuidePins,
+) -> tuple[Path, str, tuple[ControlledGuideFrame, ...]]:
+    """Load a nine-frame recovery bundle against code-owned immutable pins.
+
+    The caller must pass the code-owned pins selected by the separately
+    allowlisted experiment id; contract JSON cannot select or replace them.
+    """
+
+    bundle_id = str(pins.bundle_id or "")
+    if not bundle_id or Path(bundle_id).name != bundle_id:
+        raise ControlledExperimentError("v12 immutable guide bundle id is invalid")
+    manifest_pin = _require_sha(
+        pins.manifest_sha256, "v12 code-owned guide manifest SHA-256"
+    )
+    endpoint_pin = _require_sha(
+        pins.endpoint_sha256, "v12 code-owned endpoint guide SHA-256"
+    )
+    recovery_contract = experiment.get("recovery_guide_contract_object")
+    if not isinstance(recovery_contract, dict) or (
+        recovery_contract.get("scene_contract_string") != V12_SCENE_CONTRACT
+        or recovery_contract.get("frame_indices_array")
+        != list(V12_GUIDE_FRAME_INDICES)
+        or recovery_contract.get("swing_frame_indices_array")
+        != list(V12_SWING_GUIDE_FRAME_INDICES)
+        or recovery_contract.get("recovery_frame_indices_array")
+        != list(V12_RECOVERY_GUIDE_FRAME_INDICES)
+        or recovery_contract.get("strengths_array") != list(V12_GUIDE_STRENGTHS)
+        or recovery_contract.get("recovery_guides_byte_identical_endpoint_bool")
+        is not True
+        or recovery_contract.get("deterministic_contact_cues_bool") is not True
+        or recovery_contract.get("per_guide_contact_cue_visibility_bool") is not True
+        or recovery_contract.get("author_cli_sha256_string")
+        != V12_GUIDE_CLI_SHA256
+    ):
+        raise ControlledExperimentError(
+            "v12 immutable recovery-guide experiment contract is invalid"
+        )
+    sequence = experiment.get("guide_sequence_object")
+    if not isinstance(sequence, dict) or sequence.get("ready_bool") is not True:
+        raise ControlledExperimentError(
+            "v12 requires a completed pinned browser recovery guide bundle before launch"
+        )
+    if sequence.get("guide_contract_string") != V12_GUIDE_CONTRACT:
+        raise ControlledExperimentError("v12 browser recovery guide contract is invalid")
+    if sequence.get("bundle_id_string") != bundle_id:
+        raise ControlledExperimentError("v12 immutable guide bundle id is invalid")
+    bundle = Path(guide_bundle).resolve() if guide_bundle is not None else None
+    if bundle is None or not bundle.is_dir() or bundle.name != bundle_id:
+        raise ControlledExperimentError(
+            f"v12 --guide-bundle must be the existing {bundle_id!r} directory"
+        )
+
+    manifest_filename = str(sequence.get("immutable_manifest_filename_string") or "")
+    if not manifest_filename or Path(manifest_filename).name != manifest_filename:
+        raise ControlledExperimentError("v12 guide manifest filename is invalid")
+    if sequence.get("immutable_manifest_sha256_string") != manifest_pin:
+        raise ControlledExperimentError("v12 immutable guide manifest pin is invalid")
+    if sequence.get("endpoint_guide_sha256_string") != endpoint_pin:
+        raise ControlledExperimentError("v12 immutable endpoint guide pin is invalid")
+    manifest, manifest_sha256 = _read_pinned_json(
+        bundle / manifest_filename,
+        manifest_pin,
+        "v12 guide manifest SHA-256",
+    )
+    if manifest.get("schema") != "autorig-browser-ltx-recovery-guide-bundle.v1":
+        raise ControlledExperimentError("v12 guide manifest schema is invalid")
+    if (
+        manifest.get("status") != "PASS"
+        or manifest.get("approvedForAnimationLibrary") is not False
+        or manifest.get("browserOnly") is not True
+        or manifest.get("blenderUsed") is not False
+    ):
+        raise ControlledExperimentError(
+            "v12 guide bundle is not browser-only PASS/unapproved"
+        )
+    renderer_provenance = manifest.get("renderer")
+    cli_provenance = (
+        renderer_provenance.get("cli")
+        if isinstance(renderer_provenance, dict)
+        else None
+    )
+    if not isinstance(cli_provenance, dict) or (
+        cli_provenance.get("sha256") != V12_GUIDE_CLI_SHA256
+    ):
+        raise ControlledExperimentError("v12 immutable browser author CLI pin is invalid")
+    if manifest.get("source_reference_sha256_string") != reference_sha256:
+        raise ControlledExperimentError(
+            "v12 guide bundle does not pin the actionless reference"
+        )
+    if manifest.get("source_reference_is_guide_bool") is not False:
+        raise ControlledExperimentError(
+            "v12 source reference must remain provenance-only, not a guide frame"
+        )
+    if manifest.get("endpoint_guide_sha256_string") != endpoint_pin:
+        raise ControlledExperimentError(
+            "v12 endpoint guide SHA-256 disagrees with immutable manifest"
+        )
+    if manifest.get("resolution") != list(V10_GUIDE_RESOLUTION):
+        raise ControlledExperimentError("v12 guide bundle resolution is invalid")
+    if (
+        _positive_int(manifest.get("cycle_frame_count_int"), "v12 cycle frame count")
+        != frame_count
+    ):
+        raise ControlledExperimentError(
+            "v12 guide bundle frame count disagrees with experiment"
+        )
+    _verify_v12_recovery_manifest(manifest)
+
+    contract_rows = sequence.get("frames_array")
+    manifest_rows = manifest.get("frames_array")
+    if not isinstance(contract_rows, list) or not isinstance(manifest_rows, list):
+        raise ControlledExperimentError("v12 guide frame inventories are required")
+    if (
+        len(contract_rows) != len(V12_GUIDE_FRAME_INDICES)
+        or len(manifest_rows) != len(V12_GUIDE_FRAME_INDICES)
+        or _positive_int(manifest.get("guide_count_int"), "v12 guide count")
+        != len(V12_GUIDE_FRAME_INDICES)
+    ):
+        raise ControlledExperimentError("v12 guide bundle must contain exactly nine frames")
+    if [
+        row.get("frame_index_int") for row in contract_rows if isinstance(row, dict)
+    ] != list(V12_GUIDE_FRAME_INDICES) or [
+        row.get("frame_index_int") for row in manifest_rows if isinstance(row, dict)
+    ] != list(V12_GUIDE_FRAME_INDICES):
+        raise ControlledExperimentError(
+            "v12 guide frames must be ordered exactly 0, 6, 12, 18, 24, 30, 36, 42, 48"
+        )
+
+    manifest_by_index = {
+        _nonnegative_int(row.get("frame_index_int"), "v12 manifest frame index"): row
+        for row in manifest_rows
+        if isinstance(row, dict)
+    }
+    if len(manifest_by_index) != len(V12_GUIDE_FRAME_INDICES):
+        raise ControlledExperimentError("v12 guide manifest frame indices must be unique")
+    expected_strengths = dict(zip(V12_GUIDE_FRAME_INDICES, V12_GUIDE_STRENGTHS))
+    frames: list[ControlledGuideFrame] = []
+    seen: set[int] = set()
+    for row in contract_rows:
+        if not isinstance(row, dict):
+            raise ControlledExperimentError("v12 guide contract frame row is invalid")
+        index = _nonnegative_int(row.get("frame_index_int"), "v12 contract frame index")
+        if index in seen:
+            raise ControlledExperimentError("v12 guide contract frame indices must be unique")
+        seen.add(index)
+        filename = str(row.get("filename_string") or "")
+        if (
+            not filename
+            or Path(filename).name != filename
+            or Path(filename).suffix.lower() != ".png"
+        ):
+            raise ControlledExperimentError("v12 guide frames must be simple PNG filenames")
+        digest = _require_sha(
+            row.get("sha256_string"), f"v12 guide frame {index} SHA-256"
+        )
+        expected_bytes = _positive_int(
+            row.get("bytes_int"), f"v12 guide frame {index} bytes"
+        )
+        strength = _guide_strength(
+            row.get("strength_float"), f"v12 guide frame {index} strength"
+        )
+        manifest_row = manifest_by_index.get(index)
+        if not manifest_row or (
+            manifest_row.get("filename_string") != filename
+            or manifest_row.get("sha256_string") != digest
+            or manifest_row.get("bytes_int") != expected_bytes
+            or manifest_row.get("strength_float") != strength
+        ):
+            raise ControlledExperimentError(
+                f"v12 guide frame {index} disagrees with immutable manifest"
+            )
+        if strength != expected_strengths[index]:
+            raise ControlledExperimentError(
+                f"v12 guide frame {index} strength must be exactly "
+                f"{expected_strengths[index]}"
+            )
+        frame = ControlledGuideFrame(
+            frame_index=index,
+            image=bundle / filename,
+            sha256=digest,
+            size_bytes=expected_bytes,
+            strength=strength,
+        )
+        _verify_v12_planned_guide_frame(frame, decode_png=True)
+        frames.append(frame)
+
+    by_index = {frame.frame_index: frame for frame in frames}
+    endpoint_and_recovery = (0, *V12_RECOVERY_GUIDE_FRAME_INDICES, 48)
+    if any(by_index[index].sha256 != endpoint_pin for index in endpoint_and_recovery):
+        raise ControlledExperimentError(
+            "v12 endpoint and recovery guide PNGs must be byte-identical"
+        )
+    if endpoint_pin == reference_sha256:
+        raise ControlledExperimentError(
+            "v12 endpoint guides must explicitly differ from the actionless source reference"
+        )
+    if start_strength != 0.8 or end_strength != 0.8:
+        raise ControlledExperimentError(
+            "v12 experiment endpoint guide strengths must be exactly 0.8"
+        )
+    swing_hashes = [
+        by_index[index].sha256 for index in V12_SWING_GUIDE_FRAME_INDICES
+    ]
+    if len(set(swing_hashes)) != len(swing_hashes) or endpoint_pin in swing_hashes:
+        raise ControlledExperimentError(
+            "v12 swing guide hashes must be pairwise distinct and differ from recovery"
+        )
+    return bundle, manifest_sha256, tuple(frames)
+
+
 def load_controlled_plan(
     *,
     experiment_path: Path,
@@ -1127,6 +1565,14 @@ def load_controlled_plan(
         raise ControlledExperimentError(
             "controlled runner does not allow this experiment id: "
             f"{experiment_id!r}; supported={sorted(SUPPORTED_EXPERIMENT_IDS)}"
+        )
+    if (
+        experiment_id == V12_EXPERIMENT_ID
+        and experiment_sha256 != V12_EXPERIMENT_SPEC_SHA256
+    ):
+        raise ControlledExperimentError(
+            "v12 experiment spec SHA-256 is not the exact code-owned checked-in pin: "
+            f"expected {V12_EXPERIMENT_SPEC_SHA256}, got {experiment_sha256}"
         )
     if authorization != experiment_id:
         raise ControlledExperimentError(
@@ -1247,6 +1693,18 @@ def load_controlled_plan(
                 end_strength=end_strength,
             )
         )
+    elif experiment_id == V12_EXPERIMENT_ID:
+        browser_guide_bundle, guide_manifest_sha256, guide_frames = (
+            _load_browser_recovery_guide_sequence(
+                experiment,
+                guide_bundle=guide_bundle,
+                reference_sha256=reference_sha,
+                frame_count=frame_count,
+                start_strength=start_strength,
+                end_strength=end_strength,
+                pins=V12_GUIDE_PINS,
+            )
+        )
 
     latent_width: Optional[int] = None
     latent_height: Optional[int] = None
@@ -1362,43 +1820,78 @@ def patch_browser_keyframe_guides(
     uploaded_images: Mapping[int, str],
     strengths: Mapping[int, float],
 ) -> dict[str, Any]:
-    """Chain immutable browser-rendered single-hoof swing RGB guides into LTX.
+    """Chain an exact immutable browser RGB guide profile into the LTX graph.
 
-    The pinned graph remains the source contract. Runtime patching only clones
-    its existing LoadImage -> Resize -> LTXVPreprocess path and official
-    LTXVAddGuide node for frames 6/18/30/42. Frames 0 and 48 share the same
-    preprocessed image; their byte equality is enforced while loading the plan.
+    V10/v11 retain their six-node endpoint plus four-swing graph.  The bounded
+    v12 profile adds three explicit four-hoof recovery guides, producing nine
+    ordered ``LTXVAddGuide`` nodes.  Recovery nodes reuse the endpoint's exact
+    preprocessed image instead of creating a second conditioning path.
     """
 
-    expected = set(V10_GUIDE_FRAME_INDICES)
-    if set(uploaded_images) != expected or set(strengths) != expected:
+    image_indices = set(uploaded_images)
+    strength_indices = set(strengths)
+    if (
+        image_indices == set(V10_GUIDE_FRAME_INDICES)
+        and strength_indices == set(V10_GUIDE_FRAME_INDICES)
+    ):
+        label = "v10"
+        frame_indices = V10_GUIDE_FRAME_INDICES
+        recovery_indices: tuple[int, ...] = ()
+        expected_strengths = {
+            index: (0.7 if index in V10_INTERMEDIATE_GUIDE_FRAME_INDICES else 0.8)
+            for index in frame_indices
+        }
+    elif (
+        image_indices == set(V12_GUIDE_FRAME_INDICES)
+        and strength_indices == set(V12_GUIDE_FRAME_INDICES)
+    ):
+        label = "v12"
+        frame_indices = V12_GUIDE_FRAME_INDICES
+        recovery_indices = V12_RECOVERY_GUIDE_FRAME_INDICES
+        expected_strengths = dict(zip(V12_GUIDE_FRAME_INDICES, V12_GUIDE_STRENGTHS))
+    else:
         raise ControlledExperimentError(
-            "v10 browser guide patch requires frames 0, 6, 18, 30, 42, 48"
+            "browser guide patch requires exactly either frames "
+            "0, 6, 18, 30, 42, 48 or "
+            "0, 6, 12, 18, 24, 30, 36, 42, 48"
         )
     if uploaded_images[48] != uploaded_images[0]:
         raise ControlledExperimentError(
             "browser guide frames 0 and 48 must use the same uploaded endpoint image"
         )
-    for index in V10_GUIDE_FRAME_INDICES:
+    for index in recovery_indices:
+        if uploaded_images[index] != uploaded_images[0]:
+            raise ControlledExperimentError(
+                f"v12 recovery guide frame {index} must use the uploaded endpoint image"
+            )
+    for index in frame_indices:
         if not str(uploaded_images[index] or "").strip():
-            raise ControlledExperimentError(f"v10 uploaded guide frame {index} is empty")
-        strength = _guide_strength(strengths[index], f"v10 guide frame {index} strength")
-        expected_strength = 0.7 if index in V10_INTERMEDIATE_GUIDE_FRAME_INDICES else 0.8
+            raise ControlledExperimentError(
+                f"{label} uploaded guide frame {index} is empty"
+            )
+        strength = _guide_strength(
+            strengths[index], f"{label} guide frame {index} strength"
+        )
+        expected_strength = expected_strengths[index]
         if strength != expected_strength:
             raise ControlledExperimentError(
-                f"v10 guide frame {index} strength must be exactly {expected_strength}"
+                f"{label} guide frame {index} strength must be exactly {expected_strength}"
             )
 
     result = copy.deepcopy(dict(prompt))
     titled: dict[str, tuple[str, dict[str, Any]]] = {}
     for node_id, node in result.items():
         if not isinstance(node, dict):
-            raise ControlledExperimentError(f"v10 workflow node {node_id} is invalid")
+            raise ControlledExperimentError(
+                f"{label} workflow node {node_id} is invalid"
+            )
         meta = node.get("_meta")
         title = str(meta.get("title") or "") if isinstance(meta, dict) else ""
         if title:
             if title in titled:
-                raise ControlledExperimentError(f"v10 workflow title is duplicated: {title}")
+                raise ControlledExperimentError(
+                    f"{label} workflow title is duplicated: {title}"
+                )
             titled[title] = (str(node_id), node)
 
     required_titles = (
@@ -1407,12 +1900,16 @@ def patch_browser_keyframe_guides(
         "AUTORIG_END_GUIDE_N_MINUS_1",
     )
     if any(title not in titled for title in required_titles):
-        raise ControlledExperimentError("v10 pinned workflow guide nodes are missing")
+        raise ControlledExperimentError(
+            f"{label} pinned workflow guide nodes are missing"
+        )
     start_load_id, start_load = titled["AUTORIG_START_FRAME"]
     start_guide_id, start_guide = titled["AUTORIG_START_GUIDE"]
     _, end_guide = titled["AUTORIG_END_GUIDE_N_MINUS_1"]
     if start_load.get("class_type") != "LoadImage":
-        raise ControlledExperimentError("v10 start-frame node must be LoadImage")
+        raise ControlledExperimentError(
+            f"{label} start-frame node must be LoadImage"
+        )
 
     resize_matches = [
         (str(node_id), node)
@@ -1422,7 +1919,9 @@ def patch_browser_keyframe_guides(
         and node.get("inputs", {}).get("input") == [start_load_id, 0]
     ]
     if len(resize_matches) != 1:
-        raise ControlledExperimentError("v10 start-frame resize path is not exact")
+        raise ControlledExperimentError(
+            f"{label} start-frame resize path is not exact"
+        )
     resize_id, resize_template = resize_matches[0]
     preprocess_matches = [
         (str(node_id), node)
@@ -1432,7 +1931,9 @@ def patch_browser_keyframe_guides(
         and node.get("inputs", {}).get("image") == [resize_id, 0]
     ]
     if len(preprocess_matches) != 1:
-        raise ControlledExperimentError("v10 start-frame preprocess path is not exact")
+        raise ControlledExperimentError(
+            f"{label} start-frame preprocess path is not exact"
+        )
     preprocess_id, preprocess_template = preprocess_matches[0]
     if (
         start_guide.get("class_type") != "LTXVAddGuide"
@@ -1440,55 +1941,71 @@ def patch_browser_keyframe_guides(
         or start_guide.get("inputs", {}).get("image") != [preprocess_id, 0]
         or end_guide.get("inputs", {}).get("image") != [preprocess_id, 0]
     ):
-        raise ControlledExperimentError("v10 endpoint guide chain is not exact")
+        raise ControlledExperimentError(
+            f"{label} endpoint guide chain is not exact"
+        )
 
     start_load["inputs"]["image"] = str(uploaded_images[0])
     start_guide["inputs"]["strength"] = float(strengths[0])
     end_guide["inputs"]["strength"] = float(strengths[48])
     previous_guide_id = start_guide_id
 
-    for frame_index in V10_INTERMEDIATE_GUIDE_FRAME_INDICES:
+    for frame_index in frame_indices[1:-1]:
         suffix = f"{frame_index:03d}"
         load_id = f"91{suffix}"
         guide_resize_id = f"92{suffix}"
         guide_preprocess_id = f"93{suffix}"
         guide_id = f"94{suffix}"
-        generated_ids = (load_id, guide_resize_id, guide_preprocess_id, guide_id)
+        generated_ids = (
+            (guide_id,)
+            if frame_index in recovery_indices
+            else (load_id, guide_resize_id, guide_preprocess_id, guide_id)
+        )
         if any(node_id in result for node_id in generated_ids):
             raise ControlledExperimentError(
-                f"v10 deterministic guide node ids collide at frame {frame_index}"
+                f"{label} deterministic guide node ids collide at frame {frame_index}"
             )
 
-        load_node = copy.deepcopy(start_load)
-        load_node["_meta"] = {"title": f"AUTORIG_BROWSER_GUIDE_FRAME_{suffix}"}
-        load_node["inputs"]["image"] = str(uploaded_images[frame_index])
-        resize_node = copy.deepcopy(resize_template)
-        resize_node["_meta"] = {"title": f"AUTORIG_BROWSER_GUIDE_RESIZE_{suffix}"}
-        resize_node["inputs"]["input"] = [load_id, 0]
-        preprocess_node = copy.deepcopy(preprocess_template)
-        preprocess_node["_meta"] = {
-            "title": f"AUTORIG_BROWSER_GUIDE_PREPROCESS_{suffix}"
-        }
-        preprocess_node["inputs"]["image"] = [guide_resize_id, 0]
         guide_node = copy.deepcopy(start_guide)
         guide_node["_meta"] = {"title": f"AUTORIG_BROWSER_GUIDE_ADD_{suffix}"}
+        if frame_index in recovery_indices:
+            guide_image = [preprocess_id, 0]
+        else:
+            load_node = copy.deepcopy(start_load)
+            load_node["_meta"] = {
+                "title": f"AUTORIG_BROWSER_GUIDE_FRAME_{suffix}"
+            }
+            load_node["inputs"]["image"] = str(uploaded_images[frame_index])
+            resize_node = copy.deepcopy(resize_template)
+            resize_node["_meta"] = {
+                "title": f"AUTORIG_BROWSER_GUIDE_RESIZE_{suffix}"
+            }
+            resize_node["inputs"]["input"] = [load_id, 0]
+            preprocess_node = copy.deepcopy(preprocess_template)
+            preprocess_node["_meta"] = {
+                "title": f"AUTORIG_BROWSER_GUIDE_PREPROCESS_{suffix}"
+            }
+            preprocess_node["inputs"]["image"] = [guide_resize_id, 0]
+            result[load_id] = load_node
+            result[guide_resize_id] = resize_node
+            result[guide_preprocess_id] = preprocess_node
+            guide_image = [guide_preprocess_id, 0]
         guide_node["inputs"].update({
             "positive": [previous_guide_id, 0],
             "negative": [previous_guide_id, 1],
             "latent": [previous_guide_id, 2],
-            "image": [guide_preprocess_id, 0],
+            "image": guide_image,
             "frame_idx": frame_index,
             "strength": float(strengths[frame_index]),
         })
-        result[load_id] = load_node
-        result[guide_resize_id] = resize_node
-        result[guide_preprocess_id] = preprocess_node
         result[guide_id] = guide_node
         previous_guide_id = guide_id
 
     end_inputs = end_guide.get("inputs")
     if not isinstance(end_inputs, dict):
-        raise ControlledExperimentError("v10 end guide inputs are invalid")
+        raise ControlledExperimentError(
+            f"{label} end guide inputs are invalid"
+        )
     end_inputs["positive"] = [previous_guide_id, 0]
     end_inputs["negative"] = [previous_guide_id, 1]
     end_inputs["latent"] = [previous_guide_id, 2]
@@ -1617,7 +2134,7 @@ async def run_controlled_experiment(
                 )
             if same_prompt_is_active and plan.guide_frames:
                 # The prompt id is deterministic and already belongs to this exact
-                # immutable job identity. Re-uploading its six pinned guides cannot
+                # immutable job identity. Re-uploading its pinned guides cannot
                 # change the active graph and only creates redundant Comfy inputs.
                 submission = ComfySubmission(
                     prompt_id=planned_prompt_id,
@@ -1627,21 +2144,23 @@ async def run_controlled_experiment(
             else:
                 uploaded_guides: dict[int, str] = {}
                 if plan.guide_frames:
+                    uploads_by_sha256: dict[str, str] = {}
                     for frame in plan.guide_frames:
-                        if frame.frame_index == 48:
-                            continue
-                        if plan.experiment_id == V11_EXPERIMENT_ID:
+                        if plan.experiment_id == V12_EXPERIMENT_ID:
+                            _verify_v12_planned_guide_frame(frame, decode_png=False)
+                        elif plan.experiment_id == V11_EXPERIMENT_ID:
                             _verify_v11_planned_guide_frame(frame, decode_png=False)
                         else:
                             _verify_planned_guide_frame(frame, decode_png=False)
-                        uploaded_guides[
-                            frame.frame_index
-                        ] = await client.upload_reference_image(
-                            frame.image,
-                            expected_sha256=frame.sha256,
-                            expected_size_bytes=frame.size_bytes,
-                        )
-                    uploaded_guides[48] = uploaded_guides[0]
+                        uploaded = uploads_by_sha256.get(frame.sha256)
+                        if uploaded is None:
+                            uploaded = await client.upload_reference_image(
+                                frame.image,
+                                expected_sha256=frame.sha256,
+                                expected_size_bytes=frame.size_bytes,
+                            )
+                            uploads_by_sha256[frame.sha256] = uploaded
+                        uploaded_guides[frame.frame_index] = uploaded
                     uploaded_start = uploaded_guides[0]
                 else:
                     uploaded_start = await client.upload_reference_image(plan.reference_image)
@@ -1758,7 +2277,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--guide-bundle",
         type=Path,
-        help="Required by v10/v11: immutable browser-rendered RGB keyframe bundle.",
+        help="Required by v10/v11/v12: immutable browser-rendered RGB keyframe bundle.",
     )
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--ffmpeg", default=os.getenv("AUTORIG_FFMPEG_PATH", "ffmpeg"))
