@@ -30,6 +30,11 @@ EXPECTED_TAXONOMY_REVISION = "animal-base-30-v1"
 EXPECTED_PROMPT_SCHEMA = "autorig.animation-fitting-prompts.v1"
 EXPECTED_BUNDLE_SCHEMA = "autorig-actionless-fitting-bundle.v1"
 EXPECTED_IMMUTABLE_MANIFEST_SCHEMA = "autorig-fitting-immutable-copy.v1"
+NATIVE_IMMUTABLE_MANIFEST_SCHEMA = "autorig-fitting-immutable-bundle.v1"
+SUPPORTED_IMMUTABLE_MANIFEST_SCHEMAS = {
+    EXPECTED_IMMUTABLE_MANIFEST_SCHEMA,
+    NATIVE_IMMUTABLE_MANIFEST_SCHEMA,
+}
 EXPECTED_RIG_TYPES = (
     "dog",
     "bear",
@@ -538,38 +543,87 @@ def _validate_source_contract(
     rig_type: str,
     species: str,
 ) -> dict[str, Any]:
-    if immutable_manifest_value.get("schema") != EXPECTED_IMMUTABLE_MANIFEST_SCHEMA:
+    manifest_schema = immutable_manifest_value.get("schema")
+    if manifest_schema not in SUPPORTED_IMMUTABLE_MANIFEST_SCHEMAS:
         raise PlanCompileError("Unsupported immutable manifest schema")
-    manifest_model = immutable_manifest_value.get("source_model")
     manifest_bundle = immutable_manifest_value.get("bundle_manifest")
     manifest_files = immutable_manifest_value.get("files")
-    if not isinstance(manifest_model, dict) or not isinstance(manifest_bundle, dict):
-        raise PlanCompileError("Immutable manifest source model/bundle pins are missing")
-    if manifest_model.get("sha256") != source_model_sha256:
-        raise PlanCompileError("Immutable manifest source model SHA-256 does not match the external pin")
-    if manifest_model.get("copied") is not False:
-        raise PlanCompileError("Immutable manifest must declare source_model.copied=false")
+    native_manifest = manifest_schema == NATIVE_IMMUTABLE_MANIFEST_SCHEMA
+    if not isinstance(manifest_bundle, dict):
+        raise PlanCompileError("Immutable manifest fitting bundle pin is missing")
+    if native_manifest:
+        _exact_keys(
+            immutable_manifest_value,
+            {
+                "schema",
+                "revision",
+                "bundle_file_count",
+                "bundle_total_bytes",
+                "bundle_manifest",
+                "files",
+            },
+            "native immutable manifest",
+        )
+        _exact_keys(
+            manifest_bundle,
+            {"filename", "bytes", "sha256"},
+            "native immutable manifest bundle_manifest",
+        )
+    else:
+        manifest_model = immutable_manifest_value.get("source_model")
+        if not isinstance(manifest_model, dict):
+            raise PlanCompileError("Immutable manifest source model/bundle pins are missing")
+        if manifest_model.get("sha256") != source_model_sha256:
+            raise PlanCompileError(
+                "Immutable manifest source model SHA-256 does not match the external pin"
+            )
+        if manifest_model.get("copied") is not False:
+            raise PlanCompileError("Immutable manifest must declare source_model.copied=false")
     if manifest_bundle.get("sha256") != bundle.sha256:
         raise PlanCompileError("Immutable manifest fitting bundle SHA-256 does not match the external pin")
     if not isinstance(manifest_files, list) or not manifest_files:
         raise PlanCompileError("Immutable manifest files inventory is missing")
     file_rows: dict[str, dict[str, Any]] = {}
+    casefolded_filenames: set[str] = set()
     for index, row in enumerate(manifest_files):
         if not isinstance(row, dict):
             raise PlanCompileError(f"Immutable manifest files[{index}] is invalid")
+        if native_manifest:
+            _exact_keys(
+                row,
+                {"filename", "bytes", "sha256"},
+                f"native immutable manifest files[{index}]",
+            )
         filename = row.get("filename")
-        if not isinstance(filename, str) or not filename or filename in file_rows:
+        identity = filename.casefold() if isinstance(filename, str) else ""
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or filename in file_rows
+            or (native_manifest and identity in casefolded_filenames)
+        ):
             raise PlanCompileError("Immutable manifest filenames must be unique non-empty strings")
         digest = row.get("sha256")
         if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
             raise PlanCompileError(f"Immutable manifest file {filename} has an invalid SHA-256")
         _positive_int(row.get("bytes"), f"immutable manifest {filename}.bytes")
         file_rows[filename] = row
+        casefolded_filenames.add(identity)
     if immutable_manifest_value.get("bundle_file_count") != len(manifest_files):
         raise PlanCompileError("Immutable manifest bundle_file_count disagrees with its inventory")
     if immutable_manifest_value.get("bundle_total_bytes") != sum(row["bytes"] for row in manifest_files):
         raise PlanCompileError("Immutable manifest bundle_total_bytes disagrees with its inventory")
-    bundle_row = file_rows.get(str(manifest_bundle.get("filename") or ""))
+    manifest_bundle_filename = str(manifest_bundle.get("filename") or "")
+    if native_manifest:
+        if manifest_bundle_filename != "fitting_bundle.json":
+            raise PlanCompileError(
+                "Native immutable manifest bundle_manifest filename must be fitting_bundle.json"
+            )
+        if manifest_bundle.get("bytes") != bundle.size_bytes:
+            raise PlanCompileError(
+                "Native immutable manifest fitting bundle byte size does not match pinned bytes"
+            )
+    bundle_row = file_rows.get(manifest_bundle_filename)
     if not bundle_row or bundle_row.get("sha256") != bundle.sha256 or bundle_row.get("bytes") != bundle.size_bytes:
         raise PlanCompileError("Immutable manifest fitting bundle inventory row does not match pinned bytes")
 
@@ -582,6 +636,7 @@ def _validate_source_contract(
     artifacts = value.get("artifacts")
     if not isinstance(source, dict) or not isinstance(artifacts, dict):
         raise PlanCompileError("Fitting bundle source/artifacts contract is missing")
+    source_filename = _single_line(source.get("filename"), "bundle.source.filename", max_length=255)
     if source.get("sha256") != source_model_sha256:
         raise PlanCompileError("Fitting bundle source model SHA-256 does not match the external pin")
     bundle_species = _single_line(source.get("species"), "bundle.source.species", max_length=80)
@@ -590,6 +645,72 @@ def _validate_source_contract(
     if source.get("orientation") != "canonical":
         raise PlanCompileError("Fitting bundle source orientation must be canonical")
     source_rig_type = _single_line(source.get("rig_type"), "bundle.source.rig_type", max_length=80)
+    if native_manifest:
+        bundle_revision = _single_line(
+            value.get("revision"), "fitting bundle revision", max_length=128
+        )
+        manifest_revision = _single_line(
+            immutable_manifest_value.get("revision"),
+            "native immutable manifest revision",
+            max_length=128,
+        )
+        if manifest_revision != bundle_revision:
+            raise PlanCompileError(
+                "Native immutable manifest revision does not match the fitting bundle revision"
+            )
+
+        artifact_filenames: set[str] = set()
+        artifact_filename_identities: set[str] = set()
+        for artifact_name, artifact_pin in artifacts.items():
+            if not isinstance(artifact_name, str) or not artifact_name:
+                raise PlanCompileError("Fitting bundle artifact names must be non-empty strings")
+            if not isinstance(artifact_pin, dict):
+                raise PlanCompileError(f"Fitting bundle artifact {artifact_name} pin is invalid")
+            _exact_keys(
+                artifact_pin,
+                {"filename", "bytes", "sha256"},
+                f"fitting bundle artifact {artifact_name}",
+            )
+            artifact_filename = artifact_pin.get("filename")
+            if not isinstance(artifact_filename, str) or not artifact_filename:
+                raise PlanCompileError(
+                    f"Fitting bundle artifact {artifact_name} filename is invalid"
+                )
+            artifact_identity = artifact_filename.casefold()
+            if artifact_identity in artifact_filename_identities:
+                raise PlanCompileError(
+                    "More than one fitting bundle artifact references the same filename"
+                )
+            artifact_digest = artifact_pin.get("sha256")
+            if not isinstance(artifact_digest, str) or not SHA256_RE.fullmatch(artifact_digest):
+                raise PlanCompileError(
+                    f"Fitting bundle artifact {artifact_name} has an invalid SHA-256"
+                )
+            artifact_bytes = _positive_int(
+                artifact_pin.get("bytes"), f"fitting bundle artifact {artifact_name}.bytes"
+            )
+            artifact_row = file_rows.get(artifact_filename)
+            if (
+                not artifact_row
+                or artifact_row.get("sha256") != artifact_digest
+                or artifact_row.get("bytes") != artifact_bytes
+            ):
+                raise PlanCompileError(
+                    f"Native immutable manifest disagrees with fitting bundle artifact {artifact_name}"
+                )
+            artifact_filenames.add(artifact_filename)
+            artifact_filename_identities.add(artifact_identity)
+
+        if source_filename.casefold() in casefolded_filenames:
+            raise PlanCompileError(
+                "Native immutable manifest must not include the external source model file"
+            )
+        expected_inventory = {manifest_bundle_filename, *artifact_filenames}
+        if set(file_rows) != expected_inventory:
+            raise PlanCompileError(
+                "Native immutable manifest inventory must contain exactly fitting_bundle.json "
+                "and the declared fitting bundle artifacts"
+            )
     skeleton_pin = artifacts.get("skeleton")
     if not isinstance(skeleton_pin, dict):
         raise PlanCompileError("Fitting bundle has no skeleton artifact pin")
@@ -614,7 +735,7 @@ def _validate_source_contract(
         if not isinstance(bones, list) or not bones:
             raise PlanCompileError(f"Pinned skeleton armature {index} has no bones")
         bone_count += len(bones)
-    return {
+    source_contract = {
         "immutable_manifest_schema": immutable_manifest_value["schema"],
         "immutable_manifest_sha256": immutable_manifest.sha256,
         "bundle_schema": value["schema"],
@@ -628,6 +749,11 @@ def _validate_source_contract(
         "source_orientation": "canonical",
         "bone_count": bone_count,
     }
+    if native_manifest:
+        source_contract["source_model_copied"] = None
+        source_contract["source_model_in_bundle"] = False
+        source_contract["source_provenance_mode"] = "external_sha256_native_bundle"
+    return source_contract
 
 
 def _render_prompt(template: str, species: str, label: str) -> str:
@@ -777,6 +903,15 @@ def compile_animal_library_plan(
         species_value,
     )
 
+    source_model_pin = {
+        "sha256": source_model_digest,
+        "copied": source_contract["source_model_copied"],
+        "local_file_required": False,
+    }
+    if source_contract["immutable_manifest_schema"] == NATIVE_IMMUTABLE_MANIFEST_SCHEMA:
+        source_model_pin["in_bundle"] = False
+        source_model_pin["provenance_mode"] = "external_sha256_native_bundle"
+
     input_pins = {
         "taxonomy": taxonomy_source.public_pin(),
         "prompts": prompt_source.public_pin(),
@@ -785,11 +920,7 @@ def compile_animal_library_plan(
         "immutable_manifest": immutable_manifest_source.public_pin(),
         "fitting_bundle": bundle_source.public_pin(),
         "skeleton": skeleton_source.public_pin(),
-        "source_model": {
-            "sha256": source_model_digest,
-            "copied": False,
-            "local_file_required": False,
-        },
+        "source_model": source_model_pin,
     }
     workflow_contracts = {
         "loop": {

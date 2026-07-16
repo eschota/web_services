@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
     V14_PIPELINE_SPEC_SCHEMA,
+    V14_PIPELINE_STATE_SCHEMA,
     V14_PIPELINE_TOOL_SOURCE_PATHS,
     evaluateContactDiagnosticReport,
     evaluateObjectGateReport,
@@ -19,6 +20,13 @@ import { buildHorseVisualPhaseEvidence } from '../browser_horse_visual_phase_qa.
 
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 const jsonBuffer = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+const CONTROLLED_JOB = Object.freeze({
+    jobId: 'c4d04cf43ae38e92a75b4bfe3f9763c00e4c8ef1d4d2915ed4ed9ff1d41e961e',
+    promptId: '0472b8ba-385d-403d-886e-ff1f8d8bb46c',
+    experimentId: 'horse_walk_v14_browser_interval_guide_seed_6550110377254033429_v1',
+    experimentSha256: '0f172076147e94099ea7c0cf3c323a46f698ea48e55b7bce9acec789e0e77c66',
+    workflowFingerprint: 'e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56',
+});
 
 function write(filename, bufferValue) {
     const buffer = Buffer.isBuffer(bufferValue) ? bufferValue : Buffer.from(String(bufferValue));
@@ -33,7 +41,19 @@ function writeJson(filename, value) {
 
 function fixture() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v14-pipeline-'));
-    const candidate = write(path.join(root, 'candidate.mp4'), Buffer.from('49-frame-ltx-v14-candidate'));
+    const artifactRoot = path.join(root, 'controlled-artifacts');
+    const candidateBuffer = Buffer.from('49-frame-ltx-v14-candidate');
+    const candidateSha256 = sha256(candidateBuffer);
+    const candidate = write(path.join(
+        artifactRoot, 'raw', candidateSha256.slice(0, 2), `${candidateSha256}.mp4`,
+    ), candidateBuffer);
+    const generationFrames = Array.from({ length: 49 }, (_, frameIndex) => write(
+        path.join(
+            artifactRoot, 'frames', candidate.sha256,
+            `frame_${String(frameIndex).padStart(6, '0')}.png`,
+        ),
+        Buffer.from(`controlled-candidate-frame-${frameIndex}`),
+    ));
 
     const guideRoot = path.join(root, 'guide');
     fs.mkdirSync(guideRoot);
@@ -65,6 +85,7 @@ function fixture() {
     const bundleRoot = path.join(root, 'canonical');
     fs.mkdirSync(bundleRoot);
     const sourceModelSha256 = 'a'.repeat(64);
+    const referenceRgb = write(path.join(bundleRoot, 'reference_rgb.png'), Buffer.from('canonical-rgb'));
     const skeleton = writeJson(path.join(bundleRoot, 'skeleton.json'), { armatures: [] });
     const skinWeights = write(path.join(bundleRoot, 'skin_weights.json.gz'), Buffer.from('synthetic-skin-weights'));
     const topology = write(path.join(bundleRoot, 'surface_topology.json.gz'), Buffer.from('synthetic-surface-topology'));
@@ -74,12 +95,13 @@ function fixture() {
         actionless: { actionless: true },
         camera: { name: 'fixed', resolution: [768, 448] },
         artifacts: {
+            rgb: { filename: 'reference_rgb.png', bytes: referenceRgb.bytes, sha256: referenceRgb.sha256 },
             skeleton: { filename: 'skeleton.json', bytes: skeleton.bytes, sha256: skeleton.sha256 },
             skin_weights: { filename: 'skin_weights.json.gz', bytes: skinWeights.bytes, sha256: skinWeights.sha256 },
             surface_topology: { filename: 'surface_topology.json.gz', bytes: topology.bytes, sha256: topology.sha256 },
         },
     });
-    const bundleFiles = [fitting, skeleton, skinWeights, topology];
+    const bundleFiles = [fitting, referenceRgb, skeleton, skinWeights, topology];
     const immutable = writeJson(path.join(bundleRoot, 'immutable_manifest.json'), {
         schema: 'autorig-fitting-immutable-copy.v1',
         bundle_file_count: bundleFiles.length,
@@ -101,6 +123,50 @@ function fixture() {
     const outputRoot = path.join(root, 'run');
     const specPath = path.join(root, 'pipeline-spec.json');
     const descriptor = (pin) => ({ path: pin.path, bytes: pin.bytes, sha256: pin.sha256 });
+    const generationStateValue = {
+        schema: 'autorig.animation-fitting-controlled-job-identity.v1', sequence_int: 3,
+        recorded_at_unix_float: 1784130000.25,
+        status_string: 'completed',
+        experiment_id_string: CONTROLLED_JOB.experimentId,
+        experiment_sha256_string: CONTROLLED_JOB.experimentSha256,
+        runtime_authorization_string: `explicit_cli:${CONTROLLED_JOB.experimentId}`,
+        reference_sha256_string: referenceRgb.sha256,
+        positive_prompt_sha256_string: '91719b6d9196c70f86f7fa264393f5e373112014b415e51a0266c2383720ff3e',
+        negative_prompt_sha256_string: '0b83e99c26922bc3170cfa5ff3b4a7f2caae40aabf3fdaa2de292354344483fb',
+        seed_int: '__EXACT_V14_SEED__',
+        frame_count_int: 49, input_fps_int: 24, output_fps_int: 30,
+        start_guide_strength_float: 1, end_guide_strength_float: 1,
+        worker_id_string: 'local-4090', worker_base_url_string: 'http://127.0.0.1:8188',
+        workflow_name_string: 'autorig_ltx2_animal_loop_v1_api.json',
+        workflow_fingerprint_string: CONTROLLED_JOB.workflowFingerprint,
+        approval_state_string: 'generated_not_approved', send_to_skeletal_fitting_bool: false,
+        resolution_override_object: {
+            latent_width_int: 768, latent_height_int: 448, resize_longer_int: 768,
+        },
+        browser_interval_guide_object: {
+            guide_manifest_sha256_string: guideManifest.sha256,
+            video_sha256_string: interval.sha256, video_bytes_int: interval.bytes,
+            frame_count_int: 49, width_int: 768, height_int: 448, fps_int: 30,
+            strength_float: 1, ltxv_add_guide_count_int: 1,
+        },
+        prompt_id_string: CONTROLLED_JOB.promptId,
+        raw_video_path_string: candidate.path,
+        raw_video_sha256_string: candidate.sha256,
+        raw_video_bytes_int: candidate.bytes,
+        frame_paths_array: generationFrames.map((pin) => pin.path),
+        frame_sha256_array: generationFrames.map((pin) => pin.sha256),
+        backend_output_object: {
+            filename_string: `${CONTROLLED_JOB.jobId.slice(0, 16)}_00001.mp4`,
+            subfolder_string: `animation_fitting/controlled/${CONTROLLED_JOB.experimentId}`,
+            type_string: 'output',
+        },
+    };
+    const generationStateJson = JSON.stringify(generationStateValue, null, 2)
+        .replace('"__EXACT_V14_SEED__"', '6550110377254033429');
+    const generationStateBuffer = Buffer.from(`${generationStateJson}\n`, 'utf8');
+    const generationState = write(path.join(
+        artifactRoot, 'jobs', CONTROLLED_JOB.jobId, '000003.json',
+    ), generationStateBuffer);
     const spec = {
         schema: V14_PIPELINE_SPEC_SCHEMA,
         browserOnly: true,
@@ -110,6 +176,17 @@ function fixture() {
         clipName: 'Horse_Walk_LTX_V14_Browser_Contact_Refit',
         outputRoot,
         candidate: descriptor(candidate),
+        controlledGeneration: {
+            schema: 'autorig.v14-controlled-generation-binding.v1',
+            jobId: CONTROLLED_JOB.jobId,
+            promptId: CONTROLLED_JOB.promptId,
+            experimentId: CONTROLLED_JOB.experimentId,
+            experimentSha256: CONTROLLED_JOB.experimentSha256,
+            workflowFingerprint: CONTROLLED_JOB.workflowFingerprint,
+            state: descriptor(generationState),
+            candidate: descriptor(candidate),
+            frames: generationFrames.map((pin, frameIndex) => ({ frameIndex, ...descriptor(pin) })),
+        },
         guide: {
             bundleDirectory: guideRoot,
             immutableManifestSha256: guideManifest.sha256,
@@ -138,7 +215,8 @@ function fixture() {
     };
     const specPin = writeJson(specPath, spec);
     return {
-        root, candidate, guideManifest, fitting, immutable, skeleton, skinWeights, topology, sourceModelSha256,
+        root, candidate, generationState, generationFrames, guideManifest, fitting, immutable,
+        skeleton, skinWeights, topology, sourceModelSha256,
         outputRoot, specPath, specSha256: specPin.sha256, spec,
     };
 }
@@ -180,15 +258,23 @@ test('fresh pinned V14 run authors one exact object-gate command without executi
     context.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
     const state = inspectV14Pipeline({ specPath: f.specPath, expectedSpecSha256: f.specSha256 });
     assert.equal(state.status, 'READY_OBJECT_REGION_GATE');
+    assert.equal(state.schema, V14_PIPELINE_STATE_SCHEMA);
     assert.equal(state.next.stage, 'object_region_gate');
     assert.equal(state.orchestratorExecutesSubprocesses, false);
     assert.equal(state.blenderUsed, false);
     assert.equal(state.fittingMixerUsed, false);
     assert.equal(state.qaAnimationMixerUsed, true);
+    assert.equal(state.controlledGeneration.jobId, CONTROLLED_JOB.jobId);
+    assert.equal(state.controlledGeneration.promptId, CONTROLLED_JOB.promptId);
+    assert.equal(state.controlledGeneration.state.sha256, f.generationState.sha256);
+    assert.equal(state.controlledGeneration.frames.length, 49);
     assert.ok(state.next.command.argv.includes(f.candidate.sha256));
     assert.ok(state.next.command.argv.includes(f.guideManifest.sha256));
     assert.ok(state.next.command.argv.includes(path.join(f.outputRoot, '01-object-region-gate')));
     assert.ok(Object.values(f.spec.toolSources).every((pin) => (
+        state.next.command.preconditions.some((row) => row.path === pin.path && row.sha256 === pin.sha256)
+    )));
+    assert.ok([f.generationState, f.candidate, ...f.generationFrames].every((pin) => (
         state.next.command.preconditions.some((row) => row.path === pin.path && row.sha256 === pin.sha256)
     )));
     assert.match(state.next.command.powershell, /animation_fitting\.object_region_video_gate/);
@@ -234,7 +320,89 @@ test('partial gate publication and candidate mutation fail closed', (context) =>
     fs.appendFileSync(f.candidate.path, 'tamper');
     assert.throws(
         () => inspectV14Pipeline({ specPath: f.specPath, expectedSpecSha256: f.specSha256 }),
-        /spec\.candidate SHA-256 mismatch|byte count mismatch/,
+        /spec\.(?:controlledGeneration\.)?candidate SHA-256 mismatch|byte count mismatch/,
+    );
+});
+
+test('direct/self-repinned candidates, foreign completed state and generation tampering fail closed', (context) => {
+    const direct = fixture();
+    const repinned = fixture();
+    const foreign = fixture();
+    const identityRepin = fixture();
+    const stateTamper = fixture();
+    const frameTamper = fixture();
+    context.after(() => [direct, repinned, foreign, identityRepin, stateTamper, frameTamper].forEach((f) => (
+        fs.rmSync(f.root, { recursive: true, force: true })
+    )));
+
+    const directSpec = structuredClone(direct.spec);
+    directSpec.controlledGeneration = null;
+    const directPin = writeJson(path.join(direct.root, 'direct-candidate-spec.json'), directSpec);
+    assert.throws(
+        () => inspectV14Pipeline({ specPath: directPin.path, expectedSpecSha256: directPin.sha256 }),
+        /controlledGeneration is required; direct candidate MP4 specs are forbidden/,
+    );
+
+    const replacementBuffer = Buffer.from('self-repinned-but-not-controlled-v14-video');
+    const replacementSha = sha256(replacementBuffer);
+    const generationRoot = path.dirname(path.dirname(path.dirname(repinned.generationState.path)));
+    const replacement = write(path.join(
+        generationRoot, 'raw', replacementSha.slice(0, 2), `${replacementSha}.mp4`,
+    ), replacementBuffer);
+    const replacementDescriptor = {
+        path: replacement.path, bytes: replacement.bytes, sha256: replacement.sha256,
+    };
+    const repinnedSpec = structuredClone(repinned.spec);
+    repinnedSpec.candidate = replacementDescriptor;
+    repinnedSpec.controlledGeneration.candidate = replacementDescriptor;
+    const repinnedPin = writeJson(path.join(repinned.root, 'self-repinned-candidate-spec.json'), repinnedSpec);
+    assert.throws(
+        () => inspectV14Pipeline({ specPath: repinnedPin.path, expectedSpecSha256: repinnedPin.sha256 }),
+        /candidate does not match the controlled completed raw video/,
+    );
+
+    const foreignState = fs.readFileSync(foreign.generationState.path, 'utf8')
+        .replace(CONTROLLED_JOB.promptId, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+    const foreignPin = write(path.join(
+        foreign.root, 'foreign-artifacts', 'jobs', CONTROLLED_JOB.jobId, '000003.json',
+    ), Buffer.from(foreignState, 'utf8'));
+    const foreignSpec = structuredClone(foreign.spec);
+    foreignSpec.controlledGeneration.state = {
+        path: foreignPin.path, bytes: foreignPin.bytes, sha256: foreignPin.sha256,
+    };
+    const foreignSpecPin = writeJson(path.join(foreign.root, 'foreign-state-spec.json'), foreignSpec);
+    assert.throws(
+        () => inspectV14Pipeline({ specPath: foreignSpecPin.path, expectedSpecSha256: foreignSpecPin.sha256 }),
+        /job state identity does not match the authorized V14 job/,
+    );
+
+    const identityStatePayload = fs.readFileSync(identityRepin.generationState.path, 'utf8')
+        .replace(
+            '91719b6d9196c70f86f7fa264393f5e373112014b415e51a0266c2383720ff3e',
+            'f'.repeat(64),
+        );
+    const identityStatePin = write(
+        identityRepin.generationState.path, Buffer.from(identityStatePayload, 'utf8'),
+    );
+    const identitySpec = structuredClone(identityRepin.spec);
+    identitySpec.controlledGeneration.state = {
+        path: identityStatePin.path, bytes: identityStatePin.bytes, sha256: identityStatePin.sha256,
+    };
+    const identitySpecPin = writeJson(path.join(identityRepin.root, 'self-repinned-state-spec.json'), identitySpec);
+    assert.throws(
+        () => inspectV14Pipeline({ specPath: identitySpecPin.path, expectedSpecSha256: identitySpecPin.sha256 }),
+        /completed state lost its exact V14 generation contract/,
+    );
+
+    fs.appendFileSync(stateTamper.generationState.path, 'tampered-state');
+    assert.throws(
+        () => inspectV14Pipeline({ specPath: stateTamper.specPath, expectedSpecSha256: stateTamper.specSha256 }),
+        /controlledGeneration\.state SHA-256 mismatch|byte count mismatch/,
+    );
+    fs.appendFileSync(frameTamper.generationFrames[17].path, 'tampered-frame');
+    assert.throws(
+        () => inspectV14Pipeline({ specPath: frameTamper.specPath, expectedSpecSha256: frameTamper.specSha256 }),
+        /controlledGeneration\.frames\[17\] SHA-256 mismatch|byte count mismatch/,
     );
 });
 

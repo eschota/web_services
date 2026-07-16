@@ -159,6 +159,57 @@ class CompileAnimalLibraryPlanTests(unittest.TestCase):
             "output_path": self.root / output_name,
         }
 
+    def _native_arguments(
+        self,
+        output_name: str,
+        *,
+        bundle_value: dict | None = None,
+        manifest_mutator=None,
+    ) -> dict:
+        stem = Path(output_name).stem
+        native_bundle = self.root / f"{stem}-fitting-bundle.json"
+        native_manifest = self.root / f"{stem}-immutable-manifest.json"
+        value = bundle_value or json.loads(self.bundle.read_text(encoding="utf-8"))
+        native_bundle.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+        bundle_sha = _sha256(native_bundle)
+        bundle_bytes = native_bundle.stat().st_size
+        skeleton_sha = _sha256(self.skeleton)
+        skeleton_bytes = self.skeleton.stat().st_size
+        manifest = {
+            "schema": "autorig-fitting-immutable-bundle.v1",
+            "revision": value.get("revision"),
+            "bundle_manifest": {
+                "filename": "fitting_bundle.json",
+                "bytes": bundle_bytes,
+                "sha256": bundle_sha,
+            },
+            "bundle_file_count": 2,
+            "bundle_total_bytes": bundle_bytes + skeleton_bytes,
+            "files": [
+                {
+                    "filename": "fitting_bundle.json",
+                    "bytes": bundle_bytes,
+                    "sha256": bundle_sha,
+                },
+                {
+                    "filename": self.skeleton.name,
+                    "bytes": skeleton_bytes,
+                    "sha256": skeleton_sha,
+                },
+            ],
+        }
+        if manifest_mutator is not None:
+            manifest_mutator(manifest)
+        native_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        args = self._arguments(output_name)
+        args.update(
+            immutable_manifest_path=native_manifest,
+            immutable_manifest_sha256=_sha256(native_manifest),
+            fitting_bundle_path=native_bundle,
+            fitting_bundle_sha256=bundle_sha,
+        )
+        return args
+
     def test_real_specs_compile_deterministically_with_one_read_per_input(self) -> None:
         args = self._arguments("plan-a.json")
         source_paths = {
@@ -239,6 +290,122 @@ class CompileAnimalLibraryPlanTests(unittest.TestCase):
         self.assertEqual(result_a.plan_identity_sha256, result_b.plan_identity_sha256)
         self.assertEqual(result_a.output_sha256, result_b.output_sha256)
         self.assertEqual(plan_a_bytes, result_b.output_path.read_bytes())
+
+    def test_native_renderer_manifest_compiles_without_fabricating_copy_state(self) -> None:
+        args = self._native_arguments("native-plan.json")
+        result = compile_animal_library_plan(**args)
+        plan = json.loads(result.output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            plan["source_contract"]["immutable_manifest_schema"],
+            "autorig-fitting-immutable-bundle.v1",
+        )
+        self.assertIsNone(plan["source_contract"]["source_model_copied"])
+        self.assertFalse(plan["source_contract"]["source_model_in_bundle"])
+        self.assertEqual(
+            plan["source_contract"]["source_provenance_mode"],
+            "external_sha256_native_bundle",
+        )
+        self.assertIsNone(plan["input_pins"]["source_model"]["copied"])
+        self.assertFalse(plan["input_pins"]["source_model"]["in_bundle"])
+        self.assertFalse(plan["input_pins"]["source_model"]["local_file_required"])
+        self.assertEqual(result.job_count, 30)
+        self.assertEqual(result.candidate_count, 240)
+
+    def test_native_manifest_rejects_missing_or_repinned_source(self) -> None:
+        missing_source = json.loads(self.bundle.read_text(encoding="utf-8"))
+        del missing_source["source"]
+        missing_args = self._native_arguments(
+            "native-missing-source.json", bundle_value=missing_source
+        )
+        with self.assertRaisesRegex(
+            PlanCompileError, "Fitting bundle source/artifacts contract is missing"
+        ):
+            compile_animal_library_plan(**missing_args)
+
+        repinned_source = json.loads(self.bundle.read_text(encoding="utf-8"))
+        repinned_source["source"]["sha256"] = "1" * 64
+        repinned_args = self._native_arguments(
+            "native-repinned-source.json", bundle_value=repinned_source
+        )
+        with self.assertRaisesRegex(
+            PlanCompileError, "Fitting bundle source model SHA-256 does not match"
+        ):
+            compile_animal_library_plan(**repinned_args)
+
+        self.assertFalse(Path(missing_args["output_path"]).exists())
+        self.assertFalse(Path(repinned_args["output_path"]).exists())
+
+    def test_native_manifest_rejects_revision_and_bundle_byte_drift(self) -> None:
+        revision_args = self._native_arguments(
+            "native-revision-drift.json",
+            manifest_mutator=lambda manifest: manifest.__setitem__(
+                "revision", "autorig_actionless_bundle_rewritten"
+            ),
+        )
+        with self.assertRaisesRegex(
+            PlanCompileError, "revision does not match the fitting bundle revision"
+        ):
+            compile_animal_library_plan(**revision_args)
+
+        def drift_bundle_bytes(manifest):
+            manifest["bundle_manifest"]["bytes"] += 1
+
+        byte_args = self._native_arguments(
+            "native-bundle-byte-drift.json", manifest_mutator=drift_bundle_bytes
+        )
+        with self.assertRaisesRegex(
+            PlanCompileError, "fitting bundle byte size does not match pinned bytes"
+        ):
+            compile_animal_library_plan(**byte_args)
+
+        self.assertFalse(Path(revision_args["output_path"]).exists())
+        self.assertFalse(Path(byte_args["output_path"]).exists())
+
+    def test_native_manifest_rejects_source_model_inventory_and_schema_confusion(self) -> None:
+        def add_source_model(manifest):
+            source_row = {
+                "filename": "Horse_2.blend",
+                "bytes": 123,
+                "sha256": self.model_sha,
+            }
+            manifest["files"].append(source_row)
+            manifest["bundle_file_count"] += 1
+            manifest["bundle_total_bytes"] += source_row["bytes"]
+
+        source_file_args = self._native_arguments(
+            "native-source-file.json", manifest_mutator=add_source_model
+        )
+        with self.assertRaisesRegex(
+            PlanCompileError, "must not include the external source model file"
+        ):
+            compile_animal_library_plan(**source_file_args)
+
+        def add_copy_fields(manifest):
+            manifest["source_model"] = {
+                "filename": "Horse_2.blend",
+                "sha256": self.model_sha,
+                "copied": False,
+            }
+
+        native_with_copy_fields = self._native_arguments(
+            "native-copy-field-confusion.json", manifest_mutator=add_copy_fields
+        )
+        with self.assertRaisesRegex(PlanCompileError, "native immutable manifest fields drifted"):
+            compile_animal_library_plan(**native_with_copy_fields)
+
+        copy_with_native_shape = self._native_arguments(
+            "copy-native-shape-confusion.json",
+            manifest_mutator=lambda manifest: manifest.__setitem__(
+                "schema", "autorig-fitting-immutable-copy.v1"
+            ),
+        )
+        with self.assertRaisesRegex(PlanCompileError, "source model/bundle pins are missing"):
+            compile_animal_library_plan(**copy_with_native_shape)
+
+        self.assertFalse(Path(source_file_args["output_path"]).exists())
+        self.assertFalse(Path(native_with_copy_fields["output_path"]).exists())
+        self.assertFalse(Path(copy_with_native_shape["output_path"]).exists())
 
     def test_existing_output_is_never_overwritten(self) -> None:
         args = self._arguments("existing.json")

@@ -18,8 +18,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validateContactRefitInputs } from './browser_contact_refit.mjs';
 import { validateHorse2QaInputs } from './browser_horse_visual_phase_qa.mjs';
 
-export const V14_PIPELINE_SPEC_SCHEMA = 'autorig.v14-browser-fitting-pipeline-spec.v1';
-export const V14_PIPELINE_STATE_SCHEMA = 'autorig.v14-browser-fitting-pipeline-state.v1';
+export const V14_PIPELINE_SPEC_SCHEMA = 'autorig.v14-browser-fitting-pipeline-spec.v2';
+export const V14_PIPELINE_STATE_SCHEMA = 'autorig.v14-browser-fitting-pipeline-state.v2';
+
+const V14_CONTROLLED_GENERATION_BINDING_SCHEMA = 'autorig.v14-controlled-generation-binding.v1';
+const V14_CONTROLLED_JOB = Object.freeze({
+    jobId: 'c4d04cf43ae38e92a75b4bfe3f9763c00e4c8ef1d4d2915ed4ed9ff1d41e961e',
+    promptId: '0472b8ba-385d-403d-886e-ff1f8d8bb46c',
+    experimentId: 'horse_walk_v14_browser_interval_guide_seed_6550110377254033429_v1',
+    experimentSha256: '0f172076147e94099ea7c0cf3c323a46f698ea48e55b7bce9acec789e0e77c66',
+    workflowName: 'autorig_ltx2_animal_loop_v1_api.json',
+    workflowFingerprint: 'e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56',
+    positivePromptSha256: '91719b6d9196c70f86f7fa264393f5e373112014b415e51a0266c2383720ff3e',
+    negativePromptSha256: '0b83e99c26922bc3170cfa5ff3b4a7f2caae40aabf3fdaa2de292354344483fb',
+    seed: '6550110377254033429',
+});
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const TOOLS_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
@@ -157,6 +170,19 @@ function parseJsonSnapshot(snapshot, field) {
     }
 }
 
+function rawJsonNumber(snapshot, key, field) {
+    const escaped = key.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(
+        `"${escaped}"\\s*:\\s*(-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)`,
+        'g',
+    );
+    const matches = [...snapshot.buffer.toString('utf8').matchAll(pattern)];
+    if (matches.length !== 1 || !Number.isFinite(Number(matches[0][1]))) {
+        throw new Error(`${field} must occur exactly once as a finite JSON number`);
+    }
+    return matches[0][1];
+}
+
 function pinnedSnapshot({ base, descriptor, field, requireBytes = true }) {
     const row = object(descriptor, field);
     const expectedSha256 = sha256(row.sha256, `${field}.sha256`);
@@ -169,6 +195,202 @@ function pinnedSnapshot({ base, descriptor, field, requireBytes = true }) {
 
 function evidence(snapshot) {
     return { path: snapshot.path, bytes: snapshot.bytes, sha256: snapshot.sha256 };
+}
+
+function requireExactKeys(value, expectedKeys, field) {
+    const actual = Object.keys(object(value, field)).sort();
+    const expected = [...expectedKeys].sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(`${field} must contain exactly: ${expected.join(', ')}`);
+    }
+}
+
+function requireDescriptorMatchesSnapshot({ base, descriptor, snapshot, field }) {
+    requireExactKeys(descriptor, ['path', 'bytes', 'sha256'], field);
+    const expectedPath = resolveFrom(base, descriptor.path, `${field}.path`);
+    const expectedBytes = integer(descriptor.bytes, `${field}.bytes`, 1);
+    const expectedSha256 = sha256(descriptor.sha256, `${field}.sha256`);
+    if (!samePath(expectedPath, snapshot.path)
+        || expectedBytes !== snapshot.bytes || expectedSha256 !== snapshot.sha256) {
+        throw new Error(`${field} does not match its immutable snapshot`);
+    }
+}
+
+function validateControlledGeneration(specBase, controlledValue, topLevelCandidateValue) {
+    const controlled = object(controlledValue, 'spec.controlledGeneration');
+    requireExactKeys(controlled, [
+        'schema', 'jobId', 'promptId', 'experimentId', 'experimentSha256',
+        'workflowFingerprint', 'state', 'candidate', 'frames',
+    ], 'spec.controlledGeneration');
+    if (controlled.schema !== V14_CONTROLLED_GENERATION_BINDING_SCHEMA) {
+        throw new Error('spec.controlledGeneration schema changed');
+    }
+    const jobId = sha256(controlled.jobId, 'spec.controlledGeneration.jobId');
+    const promptId = string(controlled.promptId, 'spec.controlledGeneration.promptId');
+    const experimentId = string(controlled.experimentId, 'spec.controlledGeneration.experimentId');
+    const experimentSha256 = sha256(
+        controlled.experimentSha256, 'spec.controlledGeneration.experimentSha256',
+    );
+    const workflowFingerprint = sha256(
+        controlled.workflowFingerprint, 'spec.controlledGeneration.workflowFingerprint',
+    );
+    if (jobId !== V14_CONTROLLED_JOB.jobId || promptId !== V14_CONTROLLED_JOB.promptId
+        || experimentId !== V14_CONTROLLED_JOB.experimentId
+        || experimentSha256 !== V14_CONTROLLED_JOB.experimentSha256
+        || workflowFingerprint !== V14_CONTROLLED_JOB.workflowFingerprint) {
+        throw new Error('spec.controlledGeneration is not the exact authorized V14 controlled job');
+    }
+
+    requireExactKeys(controlled.state, ['path', 'bytes', 'sha256'], 'spec.controlledGeneration.state');
+    const stateSnapshot = pinnedSnapshot({
+        base: specBase,
+        descriptor: controlled.state,
+        field: 'spec.controlledGeneration.state',
+    });
+    const stateFilename = path.basename(stateSnapshot.path);
+    if (!/^\d{6}\.json$/.test(stateFilename)) {
+        throw new Error('controlled generation state must be an immutable six-digit job revision');
+    }
+    const jobDirectory = path.dirname(stateSnapshot.path);
+    const jobsDirectory = path.dirname(jobDirectory);
+    if (path.basename(jobDirectory).toLowerCase() !== jobId
+        || path.basename(jobsDirectory).toLowerCase() !== 'jobs') {
+        throw new Error('controlled generation state path does not bind the exact jobId');
+    }
+    const revisions = fs.readdirSync(jobDirectory, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && /^\d{6}\.json$/.test(entry.name))
+        .map((entry) => entry.name).sort();
+    if (!revisions.length || revisions.at(-1) !== stateFilename) {
+        throw new Error('controlled generation state is not the latest immutable job revision');
+    }
+    const state = parseJsonSnapshot(stateSnapshot, 'controlled generation job state');
+    const sequence = integer(state.sequence_int, 'controlled generation state.sequence_int', 1);
+    // append_job_state spreads the controlled identity payload after its generic
+    // envelope, so the persisted completed record intentionally carries the
+    // controlled-job identity schema while retaining sequence/timestamp fields.
+    if (sequence !== Number(stateFilename.slice(0, 6))
+        || state.schema !== 'autorig.animation-fitting-controlled-job-identity.v1'
+        || state.status_string !== 'completed'
+        || !Number.isFinite(Number(state.recorded_at_unix_float))) {
+        throw new Error('controlled generation job state is not an exact completed immutable revision');
+    }
+    if (state.experiment_id_string !== experimentId
+        || state.experiment_sha256_string !== experimentSha256
+        || state.prompt_id_string !== promptId
+        || state.workflow_name_string !== V14_CONTROLLED_JOB.workflowName
+        || state.workflow_fingerprint_string !== workflowFingerprint
+        || state.runtime_authorization_string !== `explicit_cli:${experimentId}`
+        || state.worker_id_string !== 'local-4090'
+        || state.worker_base_url_string !== 'http://127.0.0.1:8188') {
+        throw new Error('controlled generation job state identity does not match the authorized V14 job');
+    }
+    const seedToken = rawJsonNumber(stateSnapshot, 'seed_int', 'controlled generation seed');
+    if (state.positive_prompt_sha256_string !== V14_CONTROLLED_JOB.positivePromptSha256
+        || state.negative_prompt_sha256_string !== V14_CONTROLLED_JOB.negativePromptSha256
+        || seedToken !== V14_CONTROLLED_JOB.seed
+        || state.frame_count_int !== 49 || state.input_fps_int !== 24 || state.output_fps_int !== 30
+        || state.start_guide_strength_float !== 1 || state.end_guide_strength_float !== 1
+        || state.approval_state_string !== 'generated_not_approved'
+        || state.send_to_skeletal_fitting_bool !== false) {
+        throw new Error('controlled generation completed state lost its exact V14 generation contract');
+    }
+    const resolution = object(state.resolution_override_object, 'controlled generation resolution override');
+    if (resolution.latent_width_int !== 768 || resolution.latent_height_int !== 448
+        || resolution.resize_longer_int !== 768) {
+        throw new Error('controlled generation resolution override changed');
+    }
+    const interval = object(state.browser_interval_guide_object, 'controlled generation interval guide');
+    const generationGuideManifestSha256 = sha256(
+        interval.guide_manifest_sha256_string, 'controlled generation guide manifest SHA-256',
+    );
+    const generationGuideVideoSha256 = sha256(
+        interval.video_sha256_string, 'controlled generation guide video SHA-256',
+    );
+    const generationReferenceSha256 = sha256(
+        state.reference_sha256_string, 'controlled generation reference SHA-256',
+    );
+    const generationGuideVideoBytes = integer(
+        interval.video_bytes_int, 'controlled generation guide video bytes', 1,
+    );
+    if (interval.frame_count_int !== 49 || interval.width_int !== 768 || interval.height_int !== 448
+        || interval.fps_int !== 30 || interval.strength_float !== 1
+        || interval.ltxv_add_guide_count_int !== 1) {
+        throw new Error('controlled generation interval guide provenance changed');
+    }
+
+    const candidate = pinnedSnapshot({
+        base: specBase,
+        descriptor: controlled.candidate,
+        field: 'spec.controlledGeneration.candidate',
+    });
+    requireDescriptorMatchesSnapshot({
+        base: specBase,
+        descriptor: topLevelCandidateValue,
+        snapshot: candidate,
+        field: 'spec.candidate',
+    });
+    const artifactRoot = path.dirname(jobsDirectory);
+    const expectedRawPath = path.join(
+        artifactRoot, 'raw', candidate.sha256.slice(0, 2), `${candidate.sha256}.mp4`,
+    );
+    if (!samePath(candidate.path, expectedRawPath)
+        || !samePath(state.raw_video_path_string, candidate.path)
+        || state.raw_video_sha256_string !== candidate.sha256
+        || state.raw_video_bytes_int !== candidate.bytes) {
+        throw new Error('spec candidate does not match the controlled completed raw video');
+    }
+
+    const stateFramePaths = Array.isArray(state.frame_paths_array) ? state.frame_paths_array : [];
+    const stateFrameHashes = Array.isArray(state.frame_sha256_array) ? state.frame_sha256_array : [];
+    const frameDescriptors = Array.isArray(controlled.frames) ? controlled.frames : [];
+    if (stateFramePaths.length !== 49 || stateFrameHashes.length !== 49
+        || frameDescriptors.length !== 49) {
+        throw new Error('controlled generation must bind the full exact 49-frame inventory');
+    }
+    const frames = frameDescriptors.map((descriptor, frameIndex) => {
+        requireExactKeys(
+            descriptor, ['frameIndex', 'path', 'bytes', 'sha256'],
+            `spec.controlledGeneration.frames[${frameIndex}]`,
+        );
+        if (descriptor.frameIndex !== frameIndex) {
+            throw new Error(`controlled generation frame ${frameIndex} lost chronology`);
+        }
+        const snapshot = pinnedSnapshot({
+            base: specBase,
+            descriptor,
+            field: `spec.controlledGeneration.frames[${frameIndex}]`,
+        });
+        const expectedPath = path.join(
+            artifactRoot, 'frames', candidate.sha256,
+            `frame_${String(frameIndex).padStart(6, '0')}.png`,
+        );
+        if (!samePath(snapshot.path, expectedPath)
+            || !samePath(stateFramePaths[frameIndex], snapshot.path)
+            || sha256(stateFrameHashes[frameIndex], `controlled generation frame ${frameIndex} state SHA-256`)
+                !== snapshot.sha256) {
+            throw new Error(`controlled generation frame ${frameIndex} does not match its completed state pin`);
+        }
+        return { frameIndex, snapshot };
+    });
+    const backendOutput = object(state.backend_output_object, 'controlled generation backend output');
+    const backendFilename = string(backendOutput.filename_string, 'controlled generation output filename');
+    const backendSubfolder = string(backendOutput.subfolder_string, 'controlled generation output subfolder');
+    const backendType = string(backendOutput.type_string, 'controlled generation output type');
+    if (!backendFilename.toLowerCase().endsWith('.mp4')
+        || !backendFilename.toLowerCase().startsWith(jobId.slice(0, 16))
+        || backendSubfolder.replaceAll('\\', '/')
+            !== `animation_fitting/controlled/${experimentId}`
+        || backendType !== 'output') {
+        throw new Error('controlled generation backend output is not an exact MP4 output');
+    }
+    return {
+        schema: V14_CONTROLLED_GENERATION_BINDING_SCHEMA,
+        jobId, promptId, experimentId, experimentSha256, workflowFingerprint,
+        generationGuideManifestSha256, generationGuideVideoSha256,
+        generationGuideVideoBytes, generationReferenceSha256,
+        stateSnapshot, candidate, frames,
+        preconditions: [stateSnapshot, candidate, ...frames.map((row) => row.snapshot)],
+    };
 }
 
 function safeBundleFilename(value, field) {
@@ -1015,10 +1237,23 @@ function validateSpecSnapshot(specPathValue, expectedSpecSha256) {
     if (semanticId !== 'walk_forward') throw new Error('V14 Horse canary semanticId must be walk_forward');
     const clipName = string(spec.clipName, 'spec.clipName');
     const outputRoot = resolveFrom(path.dirname(specPath), spec.outputRoot, 'spec.outputRoot');
-    const candidate = pinnedSnapshot({ base: path.dirname(specPath), descriptor: spec.candidate, field: 'spec.candidate' });
+    if (spec.controlledGeneration == null) {
+        throw new Error('spec.controlledGeneration is required; direct candidate MP4 specs are forbidden');
+    }
+    const controlledGeneration = validateControlledGeneration(
+        path.dirname(specPath), spec.controlledGeneration, spec.candidate,
+    );
+    const candidate = controlledGeneration.candidate;
     if (isInside(outputRoot, candidate.path)) throw new Error('candidate must be outside outputRoot');
     const guide = validateGuide(path.dirname(specPath), spec.guide);
     const canonical = validateCanonicalBundle(path.dirname(specPath), spec.canonicalBundle);
+    const canonicalRgb = object(canonical.fitting.artifacts?.rgb, 'canonical fitting bundle RGB artifact');
+    if (controlledGeneration.generationGuideManifestSha256 !== guide.manifestSnapshot.sha256
+        || controlledGeneration.generationGuideVideoSha256 !== guide.interval.sha256
+        || controlledGeneration.generationGuideVideoBytes !== guide.interval.bytes
+        || controlledGeneration.generationReferenceSha256 !== canonicalRgb.sha256) {
+        throw new Error('controlled generation state does not bind the exact V14 guide/canonical reference inputs');
+    }
     const runtime = validateRuntime(path.dirname(specPath), spec.runtime);
     const toolSources = validateToolSources(path.dirname(specPath), spec.toolSources);
     const externalPinsValue = spec.externalPins == null ? {} : object(spec.externalPins, 'spec.externalPins');
@@ -1031,7 +1266,7 @@ function validateSpecSnapshot(specPathValue, expectedSpecSha256) {
     return {
         snapshot,
         spec: { ...spec, semanticId, clipName, outputRoot, externalPins },
-        validated: { candidate, guide, canonical, runtime, toolSources },
+        validated: { candidate, controlledGeneration, guide, canonical, runtime, toolSources },
     };
 }
 
@@ -1056,6 +1291,19 @@ export function inspectV14Pipeline({ specPath, expectedSpecSha256 }, dependencie
         qaAnimationMixerUsed: true,
         orchestratorExecutesSubprocesses: false,
         spec: evidence(loaded.snapshot),
+        controlledGeneration: {
+            schema: validated.controlledGeneration.schema,
+            jobId: validated.controlledGeneration.jobId,
+            promptId: validated.controlledGeneration.promptId,
+            experimentId: validated.controlledGeneration.experimentId,
+            experimentSha256: validated.controlledGeneration.experimentSha256,
+            workflowFingerprint: validated.controlledGeneration.workflowFingerprint,
+            state: evidence(validated.controlledGeneration.stateSnapshot),
+            candidate: evidence(validated.controlledGeneration.candidate),
+            frames: validated.controlledGeneration.frames.map(({ frameIndex, snapshot }) => ({
+                frameIndex, ...evidence(snapshot),
+            })),
+        },
         immutableInputs: {
             candidate: evidence(validated.candidate),
             guideManifest: evidence(validated.guide.manifestSnapshot),
@@ -1076,7 +1324,11 @@ export function inspectV14Pipeline({ specPath, expectedSpecSha256 }, dependencie
         stage,
         command: withAdditionalPreconditions(
             baseCommand,
-            [evidence(loaded.snapshot), ...artifactEvidence.map(({ stage: _stage, ...pin }) => pin)],
+            [
+                evidence(loaded.snapshot),
+                ...validated.controlledGeneration.preconditions.map(evidence),
+                ...artifactEvidence.map(({ stage: _stage, ...pin }) => pin),
+            ],
         ),
     });
 
@@ -1213,7 +1465,10 @@ pinned clip with Three.AnimationMixer.
 
 Spec schema: ${V14_PIPELINE_SPEC_SCHEMA}
 Required top-level fields: browserOnly=true, blenderUsed=false,
-orchestratorExecutesSubprocesses=false, candidate{path,bytes,sha256},
+orchestratorExecutesSubprocesses=false,
+controlledGeneration{schema,jobId,promptId,experimentId,experimentSha256,
+workflowFingerprint,state{path,bytes,sha256},candidate{path,bytes,sha256},
+frames[49]{frameIndex,path,bytes,sha256}}, candidate{path,bytes,sha256},
 guide{bundleDirectory,immutableManifestSha256,endpointGuide{path,bytes,sha256}},
 canonicalBundle{directory,immutableManifestSha256,fittingBundleSha256,
 sourceModelSha256}, runtime{executables.{python,node,chrome,ffmpeg,ffprobe},
