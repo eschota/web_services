@@ -91,11 +91,11 @@ test('task viewer imports the complete browser-first fitting pipeline from real 
     );
     assert.match(
         taskHtml,
-        /import\s*\{\s*fitBrowserAnimation\s*\}\s*from '\/static\/js\/animation-fitting-browser-core\.js\?v=1'/,
+        /import\s*\{\s*fitBrowserAnimation\s*\}\s*from '\/static\/js\/animation-fitting-browser-core\.js\?v=2'/,
     );
     assert.match(
         taskHtml,
-        /import\s*\{[\s\S]*?buildHorse2BrowserFittingSkeleton[\s\S]*?\}\s*from '\/static\/js\/animation-fitting-three-adapter\.js\?v=1'/,
+        /import\s*\{[\s\S]*?buildHorse2BrowserFittingSkeleton[\s\S]*?\}\s*from '\/static\/js\/animation-fitting-three-adapter\.js\?v=2'/,
     );
     assert.match(
         taskHtml,
