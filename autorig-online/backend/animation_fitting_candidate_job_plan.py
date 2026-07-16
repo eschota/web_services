@@ -79,7 +79,7 @@ PROMPT_SPEC_SHA256 = "e9ba8e7a28a233d93d56b6ea65600dd9c9b7b2fcac014b884ec1fef528
 WORKFLOW_CONTRACT_SCHEMA = "autorig.animation-fitting-workflows.v1"
 WORKFLOW_CONTRACT_RELATIVE_PATH = "animation_fitting/specs/workflow_contracts.v1.json"
 WORKFLOW_CONTRACT_SHA256 = (
-    "d13f792728ce59cfd00387cb8a6ba0e9a57a0b21b9c0086142a39af7d9b7c83c"
+    "a27b8ea387f048b07e188d6f7d486eb4f548e06850645b7d7dc6429212a560ab"
 )
 TAXONOMY_SCHEMA = "animal-animation-taxonomy.v1"
 TAXONOMY_REVISION = "animal-base-30-v1"
@@ -102,12 +102,12 @@ CANONICAL_SOURCE_RIG_SPECIES = {
 }
 CANONICAL_WORKFLOWS = {
     "loop": (
-        "autorig_ltx2_animal_loop_v1_api.json",
-        "e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56",
+        "autorig_animal_loop_ltx2_19b_v1_api.json",
+        "6c81e125c466ce0e4a3951ee30b125babc70650f3efbbf05f8ad3ae900cac0f9",
     ),
     "one_shot": (
-        "autorig_ltx2_animal_one_shot_v1_api.json",
-        "3ad06e73aefe81f7613b9a922812e749ed4d4f422d5da6592c43b0dbcf38200c",
+        "autorig_animal_oneshot_ltx2_19b_v1_api.json",
+        "b8f53e0dcd456fcfbe86a23113089d8954793308133e6353094e33b4e01d7bae",
     ),
 }
 

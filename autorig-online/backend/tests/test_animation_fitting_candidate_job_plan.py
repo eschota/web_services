@@ -771,14 +771,14 @@ class CandidateJobPlanTests(unittest.TestCase):
                 "walk_forward",
                 True,
                 "loop",
-                "autorig_ltx2_animal_loop_v1_api.json",
+                "autorig_animal_loop_ltx2_19b_v1_api.json",
                 plan.CANONICAL_WORKFLOWS["loop"][1],
             ),
             (
                 "attack_primary",
                 False,
                 "one_shot",
-                "autorig_ltx2_animal_one_shot_v1_api.json",
+                "autorig_animal_oneshot_ltx2_19b_v1_api.json",
                 plan.CANONICAL_WORKFLOWS["one_shot"][1],
             ),
         )

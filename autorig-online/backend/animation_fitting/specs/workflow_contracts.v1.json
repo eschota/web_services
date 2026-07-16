@@ -6,8 +6,8 @@
   "output_fps_int": 30,
   "workflows_object": {
     "loop": {
-      "workflow_name_string": "autorig_ltx2_animal_loop_v1_api.json",
-      "workflow_fingerprint_sha256_string": "e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56",
+      "workflow_name_string": "autorig_animal_loop_ltx2_19b_v1_api.json",
+      "workflow_fingerprint_sha256_string": "6c81e125c466ce0e4a3951ee30b125babc70650f3efbbf05f8ad3ae900cac0f9",
       "generation_mode_string": "loop",
       "post_sampling_guide_crop_required_bool": true,
       "conditioned_frames_array": [
@@ -77,8 +77,8 @@
       }
     },
     "one_shot": {
-      "workflow_name_string": "autorig_ltx2_animal_one_shot_v1_api.json",
-      "workflow_fingerprint_sha256_string": "3ad06e73aefe81f7613b9a922812e749ed4d4f422d5da6592c43b0dbcf38200c",
+      "workflow_name_string": "autorig_animal_oneshot_ltx2_19b_v1_api.json",
+      "workflow_fingerprint_sha256_string": "b8f53e0dcd456fcfbe86a23113089d8954793308133e6353094e33b4e01d7bae",
       "generation_mode_string": "one_shot",
       "post_sampling_guide_crop_required_bool": true,
       "conditioned_frames_array": [

@@ -105,10 +105,10 @@ class AnimationFittingWorkflowBuilderTests(unittest.TestCase):
 
     def test_versioned_templates_pin_19b_static_lora_and_distinct_guide_modes(self):
         loop = json.loads(
-            (WORKFLOW_ROOT / "autorig_ltx2_animal_loop_v1_api.json").read_text(encoding="utf-8")
+            (WORKFLOW_ROOT / "autorig_animal_loop_ltx2_19b_v1_api.json").read_text(encoding="utf-8")
         )
         one_shot = json.loads(
-            (WORKFLOW_ROOT / "autorig_ltx2_animal_one_shot_v1_api.json").read_text(encoding="utf-8")
+            (WORKFLOW_ROOT / "autorig_animal_oneshot_ltx2_19b_v1_api.json").read_text(encoding="utf-8")
         )
         manifest = json.loads(
             (WORKFLOW_ROOT / "workflow_manifest.v1.json").read_text(encoding="utf-8")
@@ -125,6 +125,17 @@ class AnimationFittingWorkflowBuilderTests(unittest.TestCase):
             self.assertEqual(lora["inputs"]["lora_name"], STATIC_CAMERA_LORA)
             self.assertEqual(lora["inputs"]["strength_model"], 1.0)
             self.assertEqual((save["inputs"]["format"], save["inputs"]["codec"]), ("mp4", "h264"))
+            latent = next(
+                node for node in prompt.values()
+                if node["class_type"] == "EmptyLTXVLatentVideo"
+            )
+            self.assertEqual(
+                (latent["inputs"]["width"], latent["inputs"]["height"]),
+                (384, 224),
+            )
+            self.assertEqual(
+                latent["inputs"]["length"], 97 if mode == "loop" else 65
+            )
             self.assertEqual(
                 workflow_fingerprint(prompt),
                 rows[mode]["workflow_fingerprint_sha256_string"],
@@ -163,6 +174,13 @@ class AnimationFittingWorkflowBuilderTests(unittest.TestCase):
         self.assertEqual({node["inputs"]["frame_idx"] for node in loop_guides}, {0, -1})
         self.assertEqual(len({tuple(node["inputs"]["image"]) for node in loop_guides}), 1)
         self.assertEqual([node["inputs"]["frame_idx"] for node in one_shot_guides], [0])
+        one_shot_texts = [
+            node["inputs"]["text"]
+            for node in one_shot.values()
+            if node["class_type"] == "CLIPTextEncode"
+        ]
+        self.assertTrue(any("one complete non-looping action" in text for text in one_shot_texts))
+        self.assertTrue(any("return to start" in text for text in one_shot_texts))
 
     def test_installer_verifies_server_round_trip_fingerprint(self):
         prompt = {"1": {"class_type": "Test", "inputs": {"value": 1}}}

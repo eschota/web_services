@@ -89,8 +89,8 @@ EXPECTED_ACTION_IDS = tuple(row[0] for row in AUTHORITATIVE_ACTION_CONTRACT)
 EXPECTED_POSE_IDS = ("default_pose", "locomotion_contact", "airborne", "death_end")
 ALLOWED_FRAME_COUNTS = (33, 49, 65, 97)
 WORKFLOW_NAMES = {
-    "loop": "autorig_ltx2_animal_loop_v1_api.json",
-    "one_shot": "autorig_ltx2_animal_one_shot_v1_api.json",
+    "loop": "autorig_animal_loop_ltx2_19b_v1_api.json",
+    "one_shot": "autorig_animal_oneshot_ltx2_19b_v1_api.json",
 }
 HORSE_PRIORITY_ACTIONS = (
     "idle_neutral",

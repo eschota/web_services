@@ -18,8 +18,8 @@ from .comfy import canonical_workflow_bytes, workflow_fingerprint
 BASE_CHECKPOINT = "ltx-2-19b-distilled-fp8.safetensors"
 STATIC_CAMERA_LORA = "ltx-2-19b-lora-camera-control-static.safetensors"
 API_WORKFLOW_NAMES = {
-    "loop": "autorig_ltx2_animal_loop_v1_api.json",
-    "one_shot": "autorig_ltx2_animal_one_shot_v1_api.json",
+    "loop": "autorig_animal_loop_ltx2_19b_v1_api.json",
+    "one_shot": "autorig_animal_oneshot_ltx2_19b_v1_api.json",
 }
 PRIMITIVE_NODE_TYPES = {
     "PrimitiveBoolean",
@@ -306,14 +306,37 @@ def patch_animation_fitting_guides(
     _set_title(prompt, create_video_id, "AUTORIG_OUTPUT_VIDEO")
     _set_title(prompt, save_video_id, "AUTORIG_OUTPUT")
 
-    prompt[video_latent_id]["inputs"]["length"] = 49
-    prompt[audio_latent_id]["inputs"]["frames_number"] = 49
+    if mode == "one_shot":
+        prompt[positive_id]["inputs"]["text"] = (
+            "A quiet cinematic image-to-video shot based on the reference image. "
+            "The main subject performs one complete non-looping action and ends in "
+            "its final pose. The camera remains completely static in place, with no "
+            "pan, no tilt, no dolly, no zoom, and no scene cuts."
+        )
+        prompt[negative_id]["inputs"]["text"] = (
+            "camera movement, pan, tilt, dolly, zoom, handheld shake, scene cut, "
+            "loop, return to start, cartoon, low quality, distorted details"
+        )
+
+    default_frame_count = 97 if mode == "loop" else 65
+    prompt[video_latent_id]["inputs"].update(
+        {
+            "width": 384,
+            "height": 224,
+            "length": default_frame_count,
+        }
+    )
+    prompt[audio_latent_id]["inputs"]["frames_number"] = default_frame_count
     prompt[condition_id]["inputs"]["frame_rate"] = 24.0
     prompt[audio_latent_id]["inputs"]["frame_rate"] = 24
     prompt[create_video_id]["inputs"]["fps"] = 30.0
     prompt[save_video_id]["inputs"].update(
         {
-            "filename_prefix": "animation_fitting/unbound/candidate",
+            "filename_prefix": (
+                "animation_fitting/unbound/candidate_ltx2_19b_v1"
+                if mode == "loop"
+                else "animation_fitting/unbound/candidate_oneshot_ltx2_19b_v1"
+            ),
             "format": "mp4",
             "codec": "h264",
         }

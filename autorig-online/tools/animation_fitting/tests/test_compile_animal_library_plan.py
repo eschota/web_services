@@ -26,8 +26,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3] / "backend"
 TAXONOMY = BACKEND_ROOT / "animal_animation_taxonomy.v1.json"
 PROMPTS = BACKEND_ROOT / "animation_fitting" / "specs" / "action_prompts.v1.json"
 WORKFLOWS = BACKEND_ROOT / "animation_fitting" / "specs" / "workflows"
-LOOP_WORKFLOW = WORKFLOWS / "autorig_ltx2_animal_loop_v1_api.json"
-ONE_SHOT_WORKFLOW = WORKFLOWS / "autorig_ltx2_animal_one_shot_v1_api.json"
+LOOP_WORKFLOW = WORKFLOWS / "autorig_animal_loop_ltx2_19b_v1_api.json"
+ONE_SHOT_WORKFLOW = WORKFLOWS / "autorig_animal_oneshot_ltx2_19b_v1_api.json"
 
 
 def _sha256(path: Path) -> str:
