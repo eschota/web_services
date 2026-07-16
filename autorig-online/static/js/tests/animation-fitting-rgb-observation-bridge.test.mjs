@@ -205,7 +205,136 @@ test('TAPNext++ rig anchors map deterministically to the 12 browser semantic tra
     assert.equal(prepared.contacts.length, 1);
     assert.equal(prepared.contacts[0].anchor_id, 'hind_right.hoof');
     assert.equal(prepared.provenance.browser_rgb_bridge.mappings.length, 12);
+    assert.deepEqual(prepared.provenance.browser_rgb_bridge.confidenceFilter, {
+        enabled: false,
+        minimumVisibleConfidence: null,
+        sourceVisiblePointCount: 60,
+        filteredLowConfidencePointCount: 0,
+        retainedVisiblePointCount: 60,
+    });
+    assert.deepEqual(prepared.provenance.browser_rgb_bridge.restSegmentConsistencyFilter, {
+        enabled: false,
+        maximumRestSegmentScale: null,
+        evaluatedAdjacentSegmentSampleCount: 0,
+        filteredDistalPointCount: 0,
+        retainedVisiblePointCount: 60,
+        maximumObservedRestSegmentScale: null,
+    });
     assert.equal(source.tracks[0].anchor_id.endsWith(':100'), true, 'source is not mutated');
+});
+
+test('optional visible-confidence filter hides only low-confidence copies and reports deterministic counts', () => {
+    const source = canonicalObservations();
+    const sourceTrack = source.tracks.find((track) => track.id === 'tap_fore_left_2');
+    sourceTrack.points[2].confidence = 0.4;
+    const sourceBefore = structuredClone(source);
+    const prepared = prepareRgbObservationsForBrowser({
+        observations: source,
+        skeleton: skeleton(),
+        cameraContract: cameraContract(),
+        minimumVisiblePoints: 4,
+        minimumVisibleConfidence: 0.8,
+    });
+
+    assert.deepEqual(source, sourceBefore, 'confidence filtering must not mutate source observations');
+    const preparedTrack = prepared.tracks.find((track) => track.id === sourceTrack.id);
+    assert.equal(preparedTrack.points[2].visible, false);
+    assert.equal(preparedTrack.points[2].confidence, 0.4, 'source confidence remains available for QA');
+    assert.deepEqual(prepared.provenance.browser_rgb_bridge.confidenceFilter, {
+        enabled: true,
+        minimumVisibleConfidence: 0.8,
+        sourceVisiblePointCount: 60,
+        filteredLowConfidencePointCount: 1,
+        retainedVisiblePointCount: 59,
+    });
+    const mapping = prepared.provenance.browser_rgb_bridge.mappings.find(
+        (item) => item.sourceTrackId === sourceTrack.id,
+    );
+    assert.equal(mapping.sourceVisiblePointCount, 5);
+    assert.equal(mapping.filteredLowConfidencePointCount, 1);
+    assert.equal(mapping.retainedVisiblePointCount, 4);
+
+    assert.throws(() => prepareRgbObservationsForBrowser({
+        observations: source,
+        skeleton: skeleton(),
+        cameraContract: cameraContract(),
+        minimumVisiblePoints: 5,
+        minimumVisibleConfidence: 0.8,
+    }), /RGB track tap_fore_left_2 has only 4 visible frames/);
+});
+
+test('visible-confidence threshold is constrained to the normalized confidence range', () => {
+    [-0.01, 1.01].forEach((minimumVisibleConfidence) => {
+        assert.throws(() => prepareRgbObservationsForBrowser({
+            observations: canonicalObservations(),
+            skeleton: skeleton(),
+            cameraContract: cameraContract(),
+            minimumVisibleConfidence,
+        }), /minimumVisibleConfidence must be between 0 and 1/);
+    });
+});
+
+test('ordered rest-segment filter masks only inconsistent distal copies before minimum-visible QA', () => {
+    const source = orderedCanonicalObservations();
+    const distalSourceTrack = source.tracks.find((track) => track.id === 'tap_fore_left_head_6');
+    distalSourceTrack.points[3].x += 100;
+    const sourceBefore = structuredClone(source);
+    const prepared = prepareRgbObservationsForBrowser({
+        observations: source,
+        skeleton: orderedSkeleton(),
+        cameraContract: cameraContract(),
+        minimumVisiblePoints: 6,
+        maximumRestSegmentScale: 2.5,
+    });
+
+    assert.deepEqual(source, sourceBefore, 'rest-segment filtering must not mutate source observations');
+    const distal = prepared.tracks.find((track) => track.id === distalSourceTrack.id);
+    const proximal = prepared.tracks.find((track) => track.id === 'tap_fore_left_head_5');
+    assert.equal(distal.points[3].visible, false);
+    assert.equal(distal.points[3].confidence, 0.95);
+    assert.equal(proximal.points[3].visible, true, 'only the inconsistent distal sample is hidden');
+    assert.deepEqual(
+        Object.fromEntries(Object.entries(
+            prepared.provenance.browser_rgb_bridge.restSegmentConsistencyFilter,
+        ).filter(([key]) => key !== 'maximumObservedRestSegmentScale')),
+        {
+            enabled: true,
+            maximumRestSegmentScale: 2.5,
+            evaluatedAdjacentSegmentSampleCount: 168,
+            filteredDistalPointCount: 1,
+            retainedVisiblePointCount: 195,
+        },
+    );
+    assert.ok(
+        prepared.provenance.browser_rgb_bridge.restSegmentConsistencyFilter
+            .maximumObservedRestSegmentScale > 40,
+    );
+    const mapping = prepared.provenance.browser_rgb_bridge.mappings.find(
+        (item) => item.sourceTrackId === distalSourceTrack.id,
+    );
+    assert.equal(mapping.maximumRestSegmentScale, 2.5);
+    assert.equal(mapping.projectedRestSegmentLengthPx, 2);
+    assert.equal(mapping.restSegmentEvaluatedPointCount, 7);
+    assert.equal(mapping.filteredRestSegmentOutlierPointCount, 1);
+    assert.equal(mapping.postObservationQaVisiblePointCount, 6);
+    assert.ok(mapping.maximumObservedRestSegmentScale > 40);
+
+    assert.throws(() => prepareRgbObservationsForBrowser({
+        observations: source,
+        skeleton: orderedSkeleton(),
+        cameraContract: cameraContract(),
+        minimumVisiblePoints: 7,
+        maximumRestSegmentScale: 2.5,
+    }), /RGB track tap_fore_left_head_6 has only 6 visible frames/);
+});
+
+test('rest-segment scale threshold is opt-in and cannot be smaller than rest length', () => {
+    assert.throws(() => prepareRgbObservationsForBrowser({
+        observations: orderedCanonicalObservations(),
+        skeleton: orderedSkeleton(),
+        cameraContract: cameraContract(),
+        maximumRestSegmentScale: 0.99,
+    }), /maximumRestSegmentScale must be at least 1/);
 });
 
 test('prepared RGB observations are accepted by the pure browser fitting solver', () => {

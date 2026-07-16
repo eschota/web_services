@@ -19,6 +19,20 @@ function finite(value, field) {
     return number;
 }
 
+function optionalUnitInterval(value, field) {
+    if (value == null) return null;
+    const number = finite(value, field);
+    if (number < 0 || number > 1) throw new Error(`${field} must be between 0 and 1`);
+    return number;
+}
+
+function optionalMaximumScale(value, field) {
+    if (value == null) return null;
+    const number = finite(value, field);
+    if (number < 1) throw new Error(`${field} must be at least 1`);
+    return number;
+}
+
 function positiveInteger(value, field, minimum = 1) {
     if (!Number.isInteger(value) || value < minimum) {
         throw new Error(`${field} must be an integer of at least ${minimum}`);
@@ -241,7 +255,7 @@ function requiredSemanticTracks(skeleton) {
     return requirements;
 }
 
-function selectTracks(requirements, tracks, minimumVisiblePoints) {
+function selectTracks(requirements, tracks) {
     const selectedSourceAnchors = new Set();
     return requirements.map((requirement) => {
         const matches = tracks.filter((track) => track.sourceAnchor.bone === requirement.sourceBone);
@@ -255,6 +269,12 @@ function selectTracks(requirements, tracks, minimumVisiblePoints) {
             throw new Error(`RGB anchor ${track.anchorId} is assigned to more than one semantic track`);
         }
         selectedSourceAnchors.add(track.anchorId);
+        return { ...requirement, track };
+    });
+}
+
+function enforceSelectedTrackAvailability(selected, minimumVisiblePoints) {
+    selected.forEach(({ track }) => {
         if (!track.points[track.queryFrame].visible) {
             throw new Error(`RGB track ${track.id} is not visible on its query frame`);
         }
@@ -262,8 +282,110 @@ function selectTracks(requirements, tracks, minimumVisiblePoints) {
         if (visiblePoints < minimumVisiblePoints) {
             throw new Error(`RGB track ${track.id} has only ${visiblePoints} visible frames`);
         }
-        return { ...requirement, track };
     });
+}
+
+function filterTracksByVisibleConfidence(tracks, minimumVisibleConfidence) {
+    return tracks.map((track) => {
+        let sourceVisiblePointCount = 0;
+        let filteredLowConfidencePointCount = 0;
+        const points = track.points.map((point) => {
+            if (point.visible) sourceVisiblePointCount += 1;
+            const filtered = point.visible
+                && minimumVisibleConfidence != null
+                && point.confidence < minimumVisibleConfidence;
+            if (filtered) filteredLowConfidencePointCount += 1;
+            return {
+                ...point,
+                visible: point.visible && !filtered,
+            };
+        });
+        return {
+            ...track,
+            points,
+            confidenceFilterCounts: {
+                sourceVisiblePointCount,
+                filteredLowConfidencePointCount,
+                retainedVisiblePointCount: sourceVisiblePointCount - filteredLowConfidencePointCount,
+            },
+        };
+    });
+}
+
+function translatedObservationPoint(item, point) {
+    const query = item.track.points[item.track.queryFrame];
+    return [
+        item.restPoint[0] + point.x - query.x,
+        item.restPoint[1] + point.y - query.y,
+    ];
+}
+
+function distance2(first, second) {
+    return Math.hypot(second[0] - first[0], second[1] - first[1]);
+}
+
+function filterSelectedByRestSegmentConsistency(selected, maximumRestSegmentScale) {
+    const filtered = selected.map((item) => ({
+        ...item,
+        track: {
+            ...item.track,
+            points: item.track.points.map((point) => ({ ...point })),
+        },
+        restSegmentFilterCounts: {
+            maximumRestSegmentScale,
+            projectedRestSegmentLengthPx: null,
+            restSegmentEvaluatedPointCount: 0,
+            filteredRestSegmentOutlierPointCount: 0,
+            postObservationQaVisiblePointCount: item.track.points.filter((point) => point.visible).length,
+            maximumObservedRestSegmentScale: null,
+        },
+    }));
+    if (maximumRestSegmentScale == null) return filtered;
+
+    const filteredBySemanticId = new Map(filtered.map((item) => [item.semanticId, item]));
+    const byLimb = new Map();
+    selected.forEach((item) => {
+        if (!byLimb.has(item.label)) byLimb.set(item.label, []);
+        byLimb.get(item.label).push(item);
+    });
+    byLimb.forEach((items) => {
+        const ordered = [...items].sort((first, second) => first.headIndex - second.headIndex);
+        if (!ordered.some((item) => item.orderedHeadCount > 3)) return;
+        for (let index = 1; index < ordered.length; index += 1) {
+            const proximal = ordered[index - 1];
+            const distal = ordered[index];
+            const filteredDistal = filteredBySemanticId.get(distal.semanticId);
+            const restSegmentLength = distance2(proximal.restPoint, distal.restPoint);
+            if (!(restSegmentLength > 0)) {
+                throw new Error(`ordered rest segment ${proximal.semanticId} -> ${distal.semanticId} has zero projected length`);
+            }
+            filteredDistal.restSegmentFilterCounts.projectedRestSegmentLengthPx = restSegmentLength;
+            distal.track.points.forEach((distalPoint, frame) => {
+                const proximalPoint = proximal.track.points[frame];
+                if (!proximalPoint.visible || !distalPoint.visible) return;
+                const observedSegmentLength = distance2(
+                    translatedObservationPoint(proximal, proximalPoint),
+                    translatedObservationPoint(distal, distalPoint),
+                );
+                const observedScale = observedSegmentLength / restSegmentLength;
+                const counts = filteredDistal.restSegmentFilterCounts;
+                counts.restSegmentEvaluatedPointCount += 1;
+                counts.maximumObservedRestSegmentScale = Math.max(
+                    counts.maximumObservedRestSegmentScale ?? 0,
+                    observedScale,
+                );
+                if (observedScale > maximumRestSegmentScale) {
+                    filteredDistal.track.points[frame].visible = false;
+                    counts.filteredRestSegmentOutlierPointCount += 1;
+                }
+            });
+        }
+    });
+    filtered.forEach((item) => {
+        item.restSegmentFilterCounts.postObservationQaVisiblePointCount = item.track.points
+            .filter((point) => point.visible).length;
+    });
+    return filtered;
 }
 
 /**
@@ -276,6 +398,8 @@ export function prepareRgbObservationsForBrowser({
     skeleton: skeletonValue,
     cameraContract,
     minimumVisiblePoints = 2,
+    minimumVisibleConfidence = null,
+    maximumRestSegmentScale = null,
 } = {}) {
     const observations = object(observationValue, 'observations');
     if (observations.schema !== OBSERVATION_SCHEMA) {
@@ -292,6 +416,14 @@ export function prepareRgbObservationsForBrowser({
     if (fps <= 0) throw new Error('observations.fps must be positive');
     const minimumVisible = positiveInteger(minimumVisiblePoints, 'minimumVisiblePoints');
     if (minimumVisible > frameCount) throw new Error('minimumVisiblePoints exceeds frame_count');
+    const confidenceThreshold = optionalUnitInterval(
+        minimumVisibleConfidence,
+        'minimumVisibleConfidence',
+    );
+    const restSegmentScaleThreshold = optionalMaximumScale(
+        maximumRestSegmentScale,
+        'maximumRestSegmentScale',
+    );
 
     const provenance = object(observations.provenance, 'observations.provenance');
     const tracker = object(provenance.tracker, 'observations.provenance.tracker');
@@ -301,12 +433,54 @@ export function prepareRgbObservationsForBrowser({
     const camera = normalizeCameraContract(cameraContract, skeleton, { ...observations, width, height });
     const normalized = normalizeTracks(observations.tracks, frameCount);
     const contacts = normalizeContacts(observations.contacts, frameCount, normalized.anchorIds);
-    const selected = selectTracks(
-        requiredSemanticTracks(skeleton),
+    const confidenceFilteredTracks = filterTracksByVisibleConfidence(
         normalized.tracks,
-        minimumVisible,
+        confidenceThreshold,
     );
+    const selectedByConfidence = selectTracks(
+        requiredSemanticTracks(skeleton),
+        confidenceFilteredTracks,
+    );
+    const selected = filterSelectedByRestSegmentConsistency(
+        selectedByConfidence,
+        restSegmentScaleThreshold,
+    );
+    enforceSelectedTrackAvailability(selected, minimumVisible);
     const selectionBySourceAnchor = new Map(selected.map((item) => [item.track.anchorId, item]));
+    const confidenceFilterCounts = selected.reduce((counts, { track }) => ({
+        sourceVisiblePointCount:
+            counts.sourceVisiblePointCount + track.confidenceFilterCounts.sourceVisiblePointCount,
+        filteredLowConfidencePointCount:
+            counts.filteredLowConfidencePointCount + track.confidenceFilterCounts.filteredLowConfidencePointCount,
+        retainedVisiblePointCount:
+            counts.retainedVisiblePointCount + track.confidenceFilterCounts.retainedVisiblePointCount,
+    }), {
+        sourceVisiblePointCount: 0,
+        filteredLowConfidencePointCount: 0,
+        retainedVisiblePointCount: 0,
+    });
+    const restSegmentFilterCounts = selected.reduce((counts, item) => {
+        const itemMaximum = item.restSegmentFilterCounts.maximumObservedRestSegmentScale;
+        return {
+            evaluatedAdjacentSegmentSampleCount:
+                counts.evaluatedAdjacentSegmentSampleCount
+                + item.restSegmentFilterCounts.restSegmentEvaluatedPointCount,
+            filteredDistalPointCount:
+                counts.filteredDistalPointCount
+                + item.restSegmentFilterCounts.filteredRestSegmentOutlierPointCount,
+            retainedVisiblePointCount:
+                counts.retainedVisiblePointCount
+                + item.restSegmentFilterCounts.postObservationQaVisiblePointCount,
+            maximumObservedRestSegmentScale: itemMaximum == null
+                ? counts.maximumObservedRestSegmentScale
+                : Math.max(counts.maximumObservedRestSegmentScale ?? itemMaximum, itemMaximum),
+        };
+    }, {
+        evaluatedAdjacentSegmentSampleCount: 0,
+        filteredDistalPointCount: 0,
+        retainedVisiblePointCount: 0,
+        maximumObservedRestSegmentScale: null,
+    });
 
     return {
         schema: OBSERVATION_SCHEMA,
@@ -353,6 +527,16 @@ export function prepareRgbObservationsForBrowser({
                 mappingMode: selected.some((item) => item.orderedHeadCount > 3)
                     ? 'ordered_deform_heads'
                     : 'legacy_three_track',
+                confidenceFilter: {
+                    enabled: confidenceThreshold != null,
+                    minimumVisibleConfidence: confidenceThreshold,
+                    ...confidenceFilterCounts,
+                },
+                restSegmentConsistencyFilter: {
+                    enabled: restSegmentScaleThreshold != null,
+                    maximumRestSegmentScale: restSegmentScaleThreshold,
+                    ...restSegmentFilterCounts,
+                },
                 mappings: selected.map(({
                     label,
                     semanticId,
@@ -361,6 +545,7 @@ export function prepareRgbObservationsForBrowser({
                     orderedHeadCount,
                     restPoint,
                     track,
+                    restSegmentFilterCounts: mappingRestSegmentFilterCounts,
                 }) => ({
                     limb: label,
                     semanticAnchorId: semanticId,
@@ -374,6 +559,8 @@ export function prepareRgbObservationsForBrowser({
                     ],
                     sourceTrackId: track.id,
                     sourceAnchorId: track.anchorId,
+                    ...track.confidenceFilterCounts,
+                    ...mappingRestSegmentFilterCounts,
                 })),
             },
         },
@@ -386,6 +573,8 @@ export function fitRgbObservationsInBrowser({
     skeleton,
     cameraContract,
     minimumVisiblePoints = 2,
+    minimumVisibleConfidence = null,
+    maximumRestSegmentScale = null,
     options = {},
 } = {}) {
     const prepared = prepareRgbObservationsForBrowser({
@@ -393,6 +582,8 @@ export function fitRgbObservationsInBrowser({
         skeleton,
         cameraContract,
         minimumVisiblePoints,
+        minimumVisibleConfidence,
+        maximumRestSegmentScale,
     });
     return fitBrowserAnimation({ skeleton, observations: prepared, options });
 }

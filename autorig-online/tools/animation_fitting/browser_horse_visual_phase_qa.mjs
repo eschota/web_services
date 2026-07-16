@@ -140,6 +140,7 @@ function validateThreeClip(clip, clipPin, boneNames) {
     const names = new Set();
     let timeline = null;
     let maximumLoopEndpointError = 0;
+    const durationTimelineTolerance = Math.max(Number.EPSILON, Math.abs(duration) * (2 ** -23));
     for (const [index, raw] of clip.tracks.entries()) {
         const track = object(raw, `threeClip.tracks[${index}]`);
         const trackName = string(track.name, `threeClip.tracks[${index}].name`);
@@ -151,7 +152,7 @@ function validateThreeClip(clip, clipPin, boneNames) {
             fail(`${trackName}.times must contain the exact 49-frame Horse_2 fitting interval`);
         }
         const times = track.times.map((entry, timeIndex) => finite(entry, `${trackName}.times[${timeIndex}]`));
-        if (times[0] !== 0 || Math.abs(times.at(-1) - duration) > 1e-8
+        if (times[0] !== 0 || Math.abs(times.at(-1) - duration) > durationTimelineTolerance
             || times.some((time, timeIndex) => timeIndex && time <= times[timeIndex - 1])) {
             fail(`${trackName}.times do not preserve a 0..duration chronology`);
         }
@@ -183,6 +184,7 @@ function validateThreeClip(clip, clipPin, boneNames) {
         fps: (timeline.length - 1) / duration,
         trackCount: clip.tracks.length,
         maximumLoopEndpointError,
+        durationTimelineTolerance,
         pin: clipPin,
     };
 }

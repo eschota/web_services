@@ -6,7 +6,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-import { fitBrowserAnimation } from '../../static/js/animation-fitting-browser-core.js';
+import {
+    applyC1PeriodicClosureToTrackSet,
+    BROWSER_FITTING_SCHEMAS,
+    fitBrowserAnimation,
+} from '../../static/js/animation-fitting-browser-core.js';
 import { prepareRgbObservationsForBrowser } from '../../static/js/animation-fitting-rgb-observation-bridge.js';
 import { fitBrowserAnimationWithPinnedHoofContacts } from '../../static/js/animation-fitting-hoof-contact-inference.js';
 import {
@@ -19,9 +23,14 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const IMMUTABLE_MANIFEST_SCHEMA = 'autorig-fitting-immutable-copy.v1';
 const FITTING_BUNDLE_SCHEMA = 'autorig-actionless-fitting-bundle.v1';
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
+const LOOP_VELOCITY_SEAM_SCHEMA = 'autorig-browser-loop-velocity-seam.v1';
+const FLOAT32_LOOP_INVARIANT_GATE_SCHEMA = 'autorig-browser-float32-loop-velocity-invariant-gate.v1';
 
 export const BROWSER_FIT_CANARY_DEFAULTS = Object.freeze({
     minimumVisibleRatio: 0.7,
+    minimumVisibleConfidence: null,
+    maximumRestSegmentScale: null,
+    c1ClosureWindow: null,
     positionMappings: 'auto',
     fit: Object.freeze({
         loop: true,
@@ -44,6 +53,8 @@ export const BROWSER_FIT_CANARY_DEFAULTS = Object.freeze({
         maximumHierarchyBakeReprojectionErrorPx: 1e-6,
         maximumRequestedFittedPointErrorPx: 2,
         maximumUnreachablePixelRayRatio: 0.1,
+        maximumQuaternionAngularVelocitySeamRadPerSecond: null,
+        maximumPositionVelocitySeamWorldPerSecond: null,
         requireTargetErrorImprovement: true,
         requireOrderedDeformHeads: true,
         requireFourLimbContacts: false,
@@ -74,6 +85,24 @@ function positive(value, field) {
     return result;
 }
 
+function nonNegative(value, field) {
+    const result = finite(value, field);
+    if (result < 0) throw new Error(`${field} must not be negative`);
+    return result;
+}
+
+function unitInterval(value, field) {
+    const result = finite(value, field);
+    if (result < 0 || result > 1) throw new Error(`${field} must be between 0 and 1`);
+    return result;
+}
+
+function maximumScale(value, field) {
+    const result = finite(value, field);
+    if (result < 1) throw new Error(`${field} must be at least 1`);
+    return result;
+}
+
 function integer(value, field, minimum = 0) {
     const result = Number(value);
     if (!Number.isInteger(result) || result < minimum) {
@@ -97,6 +126,203 @@ function sha256File(filename) {
     const hash = crypto.createHash('sha256');
     hash.update(fs.readFileSync(filename));
     return hash.digest('hex');
+}
+
+function normalizeQuaternion(values, field) {
+    const result = values.map((value, index) => finite(value, `${field}[${index}]`));
+    const length = Math.hypot(...result);
+    if (!(length > 1e-12)) throw new Error(`${field} must be a nonzero quaternion`);
+    return result.map((value) => value / length);
+}
+
+function multiplyQuaternions(first, second) {
+    return [
+        first[3] * second[0] + first[0] * second[3] + first[1] * second[2] - first[2] * second[1],
+        first[3] * second[1] - first[0] * second[2] + first[1] * second[3] + first[2] * second[0],
+        first[3] * second[2] + first[0] * second[1] - first[1] * second[0] + first[2] * second[3],
+        first[3] * second[3] - first[0] * second[0] - first[1] * second[1] - first[2] * second[2],
+    ];
+}
+
+function quaternionAngularVelocity(firstValue, secondValue, deltaSeconds, field) {
+    const first = normalizeQuaternion(firstValue, `${field}.first`);
+    const second = normalizeQuaternion(secondValue, `${field}.second`);
+    let delta = normalizeQuaternion(multiplyQuaternions(
+        [-first[0], -first[1], -first[2], first[3]],
+        second,
+    ), `${field}.delta`);
+    if (delta[3] < 0) delta = delta.map((value) => -value);
+    const sine = Math.hypot(delta[0], delta[1], delta[2]);
+    if (sine <= 1e-12) return [0, 0, 0];
+    const angle = 2 * Math.atan2(sine, Math.min(1, Math.max(-1, delta[3])));
+    return delta.slice(0, 3).map((value) => (value / sine) * angle / deltaSeconds);
+}
+
+function vectorVelocity(first, second, deltaSeconds, field) {
+    return first.map((value, index) => (
+        finite(second[index], `${field}.second[${index}]`)
+        - finite(value, `${field}.first[${index}]`)
+    ) / deltaSeconds);
+}
+
+function vectorDistance(first, second) {
+    return Math.hypot(...first.map((value, index) => value - second[index]));
+}
+
+/** Measure one-sided first/last interval velocity continuity on a baked Three clip. */
+export function measureLoopVelocitySeam(clipValue) {
+    const clip = object(clipValue, 'clip');
+    if (!Array.isArray(clip.tracks) || !clip.tracks.length) throw new Error('clip.tracks must not be empty');
+    const metrics = {
+        schema: LOOP_VELOCITY_SEAM_SCHEMA,
+        method: 'local_shortest_path_rotation_vector_and_position_first_last_interval_difference',
+        coordinateSpace: 'bone_local',
+        positionUnits: 'model_local_units',
+        quaternionAngularVelocitySeamRadPerSecond: {
+            sampleCount: 0,
+            maximum: 0,
+            trackName: null,
+            startVelocity: null,
+            endVelocity: null,
+        },
+        positionVelocitySeamWorldPerSecond: {
+            sampleCount: 0,
+            maximum: 0,
+            trackName: null,
+            startVelocity: null,
+            endVelocity: null,
+        },
+        quaternionPoseSeamRad: { sampleCount: 0, maximum: 0, trackName: null },
+        positionPoseSeamWorld: { sampleCount: 0, maximum: 0, trackName: null },
+    };
+    clip.tracks.forEach((trackValue, trackIndex) => {
+        const track = object(trackValue, `clip.tracks[${trackIndex}]`);
+        const name = nonEmptyString(track.name, `clip.tracks[${trackIndex}].name`);
+        const quaternion = name.endsWith('.quaternion');
+        const position = name.endsWith('.position');
+        if (!quaternion && !position) throw new Error(`unsupported loop velocity track ${name}`);
+        const times = Array.from(track.times || [], (value, index) => finite(value, `${name}.times[${index}]`));
+        if (times.length < 3) throw new Error(`${name}.times must contain at least 3 samples`);
+        const startDeltaSeconds = times[1] - times[0];
+        const endDeltaSeconds = times.at(-1) - times.at(-2);
+        if (!(startDeltaSeconds > 0) || !(endDeltaSeconds > 0)) {
+            throw new Error(`${name}.times must increase at both loop boundaries`);
+        }
+        const itemSize = quaternion ? 4 : 3;
+        const values = Array.from(track.values || [], (value, index) => finite(value, `${name}.values[${index}]`));
+        if (values.length !== times.length * itemSize) throw new Error(`${name}.values do not match its timeline`);
+        const sample = (index) => values.slice(index * itemSize, (index + 1) * itemSize);
+        const poseSeam = quaternion
+            ? Math.hypot(...quaternionAngularVelocity(
+                sample(0),
+                sample(times.length - 1),
+                1,
+                `${name}.poseSeam`,
+            ))
+            : vectorDistance(sample(0), sample(times.length - 1));
+        const poseOutput = quaternion ? metrics.quaternionPoseSeamRad : metrics.positionPoseSeamWorld;
+        poseOutput.sampleCount += 1;
+        if (poseOutput.trackName == null || poseSeam > poseOutput.maximum) {
+            poseOutput.maximum = poseSeam;
+            poseOutput.trackName = name;
+        }
+        const startVelocity = quaternion
+            ? quaternionAngularVelocity(sample(0), sample(1), startDeltaSeconds, `${name}.startVelocity`)
+            : vectorVelocity(sample(0), sample(1), startDeltaSeconds, `${name}.startVelocity`);
+        const endVelocity = quaternion
+            ? quaternionAngularVelocity(sample(times.length - 2), sample(times.length - 1), endDeltaSeconds, `${name}.endVelocity`)
+            : vectorVelocity(sample(times.length - 2), sample(times.length - 1), endDeltaSeconds, `${name}.endVelocity`);
+        const seam = vectorDistance(startVelocity, endVelocity);
+        const output = quaternion
+            ? metrics.quaternionAngularVelocitySeamRadPerSecond
+            : metrics.positionVelocitySeamWorldPerSecond;
+        output.sampleCount += 1;
+        if (output.trackName == null || seam > output.maximum) {
+            output.maximum = seam;
+            output.trackName = name;
+            output.startVelocity = startVelocity;
+            output.endVelocity = endVelocity;
+        }
+    });
+    return metrics;
+}
+
+/**
+ * Derive a non-artistic Float32 continuity tolerance from the clip's stored
+ * precision and boundary sampling interval. sqrt(epsilon) is the conventional
+ * forward-error scale for stable nonlinear operations such as quaternion
+ * normalize/log; positions additionally scale by their largest local value.
+ */
+export function deriveFloat32LoopVelocityInvariantGate(clipValue) {
+    const clip = object(clipValue, 'clip');
+    if (!Array.isArray(clip.tracks) || !clip.tracks.length) throw new Error('clip.tracks must not be empty');
+    let minimumBoundaryDeltaSeconds = Number.POSITIVE_INFINITY;
+    let maximumAbsoluteLocalPosition = 0;
+    let quaternionTrackCount = 0;
+    let positionTrackCount = 0;
+    clip.tracks.forEach((trackValue, trackIndex) => {
+        const track = object(trackValue, `clip.tracks[${trackIndex}]`);
+        const name = nonEmptyString(track.name, `clip.tracks[${trackIndex}].name`);
+        const quaternion = name.endsWith('.quaternion');
+        const position = name.endsWith('.position');
+        if (!quaternion && !position) throw new Error(`unsupported loop invariant track ${name}`);
+        const times = Array.from(track.times || [], (value, index) => finite(value, `${name}.times[${index}]`));
+        if (times.length < 3) throw new Error(`${name}.times must contain at least 3 samples`);
+        const startDeltaSeconds = times[1] - times[0];
+        const endDeltaSeconds = times.at(-1) - times.at(-2);
+        if (!(startDeltaSeconds > 0) || !(endDeltaSeconds > 0)) {
+            throw new Error(`${name}.times must increase at both loop boundaries`);
+        }
+        minimumBoundaryDeltaSeconds = Math.min(
+            minimumBoundaryDeltaSeconds,
+            startDeltaSeconds,
+            endDeltaSeconds,
+        );
+        if (quaternion) {
+            quaternionTrackCount += 1;
+        } else {
+            positionTrackCount += 1;
+            Array.from(track.values || [], (value, index) => finite(value, `${name}.values[${index}]`))
+                .forEach((value) => { maximumAbsoluteLocalPosition = Math.max(maximumAbsoluteLocalPosition, Math.abs(value)); });
+        }
+    });
+    const machineEpsilon = 2 ** -23;
+    const relativeTolerance = Math.sqrt(machineEpsilon);
+    const positionMagnitudeScale = Math.max(1, maximumAbsoluteLocalPosition);
+    return {
+        schema: FLOAT32_LOOP_INVARIANT_GATE_SCHEMA,
+        enabled: true,
+        precision: 'IEEE_754_binary32_clip_storage',
+        machineEpsilon,
+        relativeTolerance,
+        relativeToleranceFormula: 'sqrt(2^-23)',
+        minimumBoundaryDeltaSeconds,
+        maximumAbsoluteLocalPosition,
+        positionMagnitudeScale,
+        thresholdFormula: 'sqrt(binary32_machine_epsilon) * magnitude_scale / minimum_boundary_delta_seconds',
+        quaternionTrackCount,
+        positionTrackCount,
+        maximumQuaternionAngularVelocitySeamRadPerSecond:
+            relativeTolerance / minimumBoundaryDeltaSeconds,
+        maximumPositionVelocitySeamWorldPerSecond:
+            relativeTolerance * positionMagnitudeScale / minimumBoundaryDeltaSeconds,
+    };
+}
+
+function loopVelocityGateContract(gatesValue = {}) {
+    const gates = object(gatesValue, 'gates');
+    const quaternion = gates.maximumQuaternionAngularVelocitySeamRadPerSecond;
+    const position = gates.maximumPositionVelocitySeamWorldPerSecond;
+    if ((quaternion == null) !== (position == null)) {
+        throw new Error('quaternion and position loop velocity seam thresholds must be provided together');
+    }
+    return {
+        enabled: quaternion != null,
+        maximumQuaternionAngularVelocitySeamRadPerSecond:
+            quaternion == null ? null : nonNegative(quaternion, 'maximumQuaternionAngularVelocitySeamRadPerSecond'),
+        maximumPositionVelocitySeamWorldPerSecond:
+            position == null ? null : nonNegative(position, 'maximumPositionVelocitySeamWorldPerSecond'),
+    };
 }
 
 function readJson(filename, field) {
@@ -442,9 +668,11 @@ export function evaluateBrowserFitGates({
     clipValid,
     allTracksBound,
     minimumTargetSamples,
+    loopVelocitySeam = null,
     gates: gateOverrides = {},
 }) {
     const gates = { ...BROWSER_FIT_CANARY_DEFAULTS.gates, ...gateOverrides };
+    const loopVelocityGate = loopVelocityGateContract(gates);
     const results = [];
     gate('head_reconstruction_world', maximumHeadReconstructionErrorWorld, gates.maximumHeadReconstructionErrorWorld, results);
     gate('rest_seed_alignment_px', restSeedAlignment.maximumErrorPx, gates.maximumRestSeedAlignmentErrorPx, results);
@@ -457,6 +685,21 @@ export function evaluateBrowserFitGates({
     gate('hierarchy_segment_drift_world', hierarchyQa.maximumSegmentLengthDriftWorld, gates.maximumSegmentLengthDriftWorld, results);
     gate('hierarchy_reprojection_error_px', hierarchyQa.maximumHierarchyBakeReprojectionErrorPx, gates.maximumHierarchyBakeReprojectionErrorPx, results);
     gate('requested_fitted_point_error_px', hierarchyQa.maximumRequestedFittedPointErrorPx, gates.maximumRequestedFittedPointErrorPx, results);
+    if (loopVelocityGate.enabled) {
+        const seam = object(loopVelocitySeam, 'loopVelocitySeam');
+        gate(
+            'quaternion_angular_velocity_seam_rad_per_second',
+            seam.quaternionAngularVelocitySeamRadPerSecond?.maximum,
+            loopVelocityGate.maximumQuaternionAngularVelocitySeamRadPerSecond,
+            results,
+        );
+        gate(
+            'position_velocity_seam_world_per_second',
+            seam.positionVelocitySeamWorldPerSecond?.maximum,
+            loopVelocityGate.maximumPositionVelocitySeamWorldPerSecond,
+            results,
+        );
+    }
     gate(
         'unreachable_pixel_ray_ratio',
         hierarchyQa.unreachablePixelRays / Math.max(hierarchyRayCount, 1),
@@ -546,7 +789,9 @@ function serializeThreeClip(THREE, clip) {
     if (typeof THREE.AnimationClip?.toJSON !== 'function') {
         throw new Error('THREE.AnimationClip.toJSON() is required to emit a hierarchy clip');
     }
-    return THREE.AnimationClip.toJSON(clip);
+    const serialized = THREE.AnimationClip.toJSON(clip);
+    if (clip.userData && Object.keys(clip.userData).length) serialized.userData = clip.userData;
+    return serialized;
 }
 
 /** Run the reusable Node/V8 implementation of the browser fitting canary. */
@@ -574,6 +819,12 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
     );
     if (minimumVisibleRatio > 1) throw new Error('minimumVisibleRatio must be <= 1');
     const minimumVisiblePoints = Math.ceil(frameCount * minimumVisibleRatio);
+    const minimumVisibleConfidence = config.minimumVisibleConfidence == null
+        ? BROWSER_FIT_CANARY_DEFAULTS.minimumVisibleConfidence
+        : unitInterval(config.minimumVisibleConfidence, 'minimumVisibleConfidence');
+    const maximumRestSegmentScale = config.maximumRestSegmentScale == null
+        ? BROWSER_FIT_CANARY_DEFAULTS.maximumRestSegmentScale
+        : maximumScale(config.maximumRestSegmentScale, 'maximumRestSegmentScale');
     const positionMappings = config.positionMappings ?? BROWSER_FIT_CANARY_DEFAULTS.positionMappings;
     if (!['auto', 'all', false].includes(positionMappings)) {
         throw new Error('positionMappings must be auto, all, or false');
@@ -597,6 +848,8 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         skeleton,
         cameraContract,
         minimumVisiblePoints,
+        minimumVisibleConfidence,
+        maximumRestSegmentScale,
     });
     const restSeedAlignment = selectedRestSeedAlignment({
         THREE,
@@ -610,6 +863,26 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         ...BROWSER_FIT_CANARY_DEFAULTS.fit,
         ...(config.fit || {}),
     };
+    const c1ClosureWindow = config.c1ClosureWindow == null
+        ? BROWSER_FIT_CANARY_DEFAULTS.c1ClosureWindow
+        : integer(config.c1ClosureWindow, 'c1ClosureWindow', 1);
+    const useFloat32LoopVelocityInvariantGates = config.float32LoopVelocityInvariantGates === true;
+    const explicitLoopVelocityGate = loopVelocityGateContract({
+        ...BROWSER_FIT_CANARY_DEFAULTS.gates,
+        ...(config.gates || {}),
+    });
+    if (useFloat32LoopVelocityInvariantGates && explicitLoopVelocityGate.enabled) {
+        throw new Error('Float32-derived and explicit loop velocity seam thresholds are mutually exclusive');
+    }
+    if (useFloat32LoopVelocityInvariantGates && c1ClosureWindow == null) {
+        throw new Error('Float32 loop velocity invariant gates require C1 periodic closure');
+    }
+    if ((explicitLoopVelocityGate.enabled || useFloat32LoopVelocityInvariantGates) && fitOptions.loop === false) {
+        throw new Error('loop velocity seam thresholds require loop fitting');
+    }
+    if (c1ClosureWindow != null && fitOptions.loop === false) {
+        throw new Error('C1 periodic closure requires loop fitting');
+    }
     let preparedForFit = prepared;
     let contactRefit = null;
     let fitted;
@@ -638,7 +911,46 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         outputResolution: [width, height],
         name: clipName,
     });
+    const c1PeriodicClosure = c1ClosureWindow == null
+        ? {
+            schema: BROWSER_FITTING_SCHEMAS.c1PeriodicClosure,
+            enabled: false,
+            windowFrames: null,
+        }
+        : applyC1PeriodicClosureToTrackSet({
+            tracks: hierarchy.clip.tracks,
+            windowFrames: c1ClosureWindow,
+        });
+    if (c1PeriodicClosure.enabled) {
+        hierarchy.clip.userData = {
+            ...(hierarchy.clip.userData || {}),
+            autorigC1PeriodicClosure: c1PeriodicClosure,
+        };
+    }
     const clipValid = typeof hierarchy.clip.validate === 'function' && hierarchy.clip.validate() === true;
+    const loopVelocitySeam = measureLoopVelocitySeam(hierarchy.clip);
+    const float32LoopVelocityInvariantGate = useFloat32LoopVelocityInvariantGates
+        ? deriveFloat32LoopVelocityInvariantGate(hierarchy.clip)
+        : {
+            schema: FLOAT32_LOOP_INVARIANT_GATE_SCHEMA,
+            enabled: false,
+        };
+    const effectiveGateOverrides = {
+        ...(config.gates || {}),
+        ...(useFloat32LoopVelocityInvariantGates ? {
+            maximumQuaternionAngularVelocitySeamRadPerSecond:
+                float32LoopVelocityInvariantGate.maximumQuaternionAngularVelocitySeamRadPerSecond,
+            maximumPositionVelocitySeamWorldPerSecond:
+                float32LoopVelocityInvariantGate.maximumPositionVelocitySeamWorldPerSecond,
+        } : {}),
+    };
+    const loopVelocityGate = {
+        ...loopVelocityGateContract({
+            ...BROWSER_FIT_CANARY_DEFAULTS.gates,
+            ...effectiveGateOverrides,
+        }),
+        derivation: float32LoopVelocityInvariantGate,
+    };
     const boneNames = new Set();
     modelState.model.traverse((node) => {
         if (node.isBone === true || node.type === 'Bone') {
@@ -671,10 +983,25 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         clipValid,
         allTracksBound,
         minimumTargetSamples,
+        loopVelocitySeam,
         gates: contactRefit
-            ? { ...(config.gates || {}), requireFourLimbContacts: true }
-            : config.gates,
+            ? { ...effectiveGateOverrides, requireFourLimbContacts: true }
+            : effectiveGateOverrides,
     });
+    if (c1PeriodicClosure.enabled) {
+        gate(
+            'c1_quaternion_pose_seam_rad',
+            loopVelocitySeam.quaternionPoseSeamRad.maximum,
+            c1PeriodicClosure.poseEpsilon,
+            gateEvaluation.results,
+        );
+        gate(
+            'c1_position_pose_seam_world',
+            loopVelocitySeam.positionPoseSeamWorld.maximum,
+            c1PeriodicClosure.poseEpsilon,
+            gateEvaluation.results,
+        );
+    }
     if (contactRefit) {
         gateEvaluation.results.push({
             name: 'pinned_contact_schedule',
@@ -697,8 +1024,8 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
             comparator: '<=',
             threshold: contactRefit.fittedWalkQa.thresholdRatio,
         });
-        gateEvaluation.passed = gateEvaluation.results.every((result) => result.passed);
     }
+    gateEvaluation.passed = gateEvaluation.results.every((result) => result.passed);
     const fittingMode = contactRefit ? 'contact_constrained_refit' : 'unconstrained_diagnostic';
     const bridgeReport = {
         schema: 'autorig-browser-fit-canary-bridge-report.v1',
@@ -716,12 +1043,19 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         mappingMode: prepared.provenance.browser_rgb_bridge.mappingMode,
         minimumVisibleRatio,
         minimumVisiblePoints,
+        minimumVisibleConfidence,
+        confidenceFilter: prepared.provenance.browser_rgb_bridge.confidenceFilter,
+        maximumRestSegmentScale,
+        restSegmentConsistencyFilter:
+            prepared.provenance.browser_rgb_bridge.restSegmentConsistencyFilter,
         sourceTrackCount: observations.tracks.length,
         selectedTrackCount: prepared.tracks.length,
         mappings: prepared.provenance.browser_rgb_bridge.mappings,
         sourceContacts: Array.isArray(observations.contacts) ? observations.contacts.length : 0,
         preparedContacts: preparedForFit.contacts.length,
         restSeedAlignment,
+        loopVelocityGate,
+        c1PeriodicClosure,
     };
     const fitSummary = {
         schema: 'autorig-browser-fit-canary-summary.v1',
@@ -762,6 +1096,9 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
             mappingMode: bridgeReport.mappingMode,
             selectedTrackCount: preparedForFit.tracks.length,
             contactCount: preparedForFit.contacts.length,
+            confidenceFilter: prepared.provenance.browser_rgb_bridge.confidenceFilter,
+            restSegmentConsistencyFilter:
+                prepared.provenance.browser_rgb_bridge.restSegmentConsistencyFilter,
             restSeedAlignment,
         },
         fit: {
@@ -779,7 +1116,22 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
             validate: clipValid,
             allTracksBound,
             qa: hierarchy.qa,
+            qaStage: c1PeriodicClosure.enabled ? 'pre_c1_hierarchy_bake' : 'final_clip',
             segmentRayCount: hierarchyRayCount,
+            loopVelocitySeam,
+            loopVelocityGate,
+            c1PeriodicClosure,
+            postC1Validation: c1PeriodicClosure.enabled ? {
+                poseSeamGateNames: [
+                    'c1_quaternion_pose_seam_rad',
+                    'c1_position_pose_seam_world',
+                ],
+                velocitySeamGateNames: loopVelocityGate.enabled ? [
+                    'quaternion_angular_velocity_seam_rad_per_second',
+                    'position_velocity_seam_world_per_second',
+                ] : [],
+                hierarchyBakeQaReevaluation: 'required_by_fixed_camera_visual_phase_qa',
+            } : null,
         },
         gates: gateEvaluation,
         ...(contactRefit ? {
@@ -831,18 +1183,26 @@ Required:
 Options:
   --clip-name NAME
   --minimum-visible-ratio N      Default 0.7
+  --minimum-visible-confidence N Optional 0..1 threshold; disabled by default
+  --maximum-rest-segment-scale N Optional ordered-head outlier limit; disabled by default
   --position-mappings MODE       auto, all, or disabled
   --iterations N                 Default 64
   --tolerance N                  Default 0.05
   --joint-attraction N           Default 0.15
   --smoothing-radius N           Default 1
   --loop-blend-frames N          Default 4
+  --c1-closure-window N          Optional local-track C1 loop window; disabled by default
+  --float32-loop-velocity-invariant-gates
+                                Derive velocity gates from binary32 epsilon and clip scale
   --no-loop
   --require-four-limb-contacts
   --allow-legacy-three-track
   --max-final-mean-target-error-px N
   --max-target-error-px N
   --max-requested-point-error-px N
+  --max-quaternion-angular-velocity-seam-rad-per-second N
+  --max-position-velocity-seam-world-per-second N
+                                Optional pair; velocity gates disabled by default
   --emit-fitted-animation        Written only when all browser-fit gates PASS
   --emit-three-clip              Written only when all browser-fit gates PASS
   --help
@@ -874,6 +1234,8 @@ export function parseCanaryArgs(argv) {
         else if (flag === '--output-dir') config.outputDirectory = take();
         else if (flag === '--clip-name') config.clipName = take();
         else if (flag === '--minimum-visible-ratio') config.minimumVisibleRatio = positive(take(), flag);
+        else if (flag === '--minimum-visible-confidence') config.minimumVisibleConfidence = unitInterval(take(), flag);
+        else if (flag === '--maximum-rest-segment-scale') config.maximumRestSegmentScale = maximumScale(take(), flag);
         else if (flag === '--position-mappings') {
             const value = take();
             if (!['auto', 'all', 'disabled'].includes(value)) throw new Error(`${flag} must be auto, all, or disabled`);
@@ -883,12 +1245,21 @@ export function parseCanaryArgs(argv) {
         else if (flag === '--joint-attraction') config.fit.jointAttraction = finite(take(), flag);
         else if (flag === '--smoothing-radius') config.fit.smoothingRadius = integer(take(), flag);
         else if (flag === '--loop-blend-frames') config.fit.loopBlendFrames = integer(take(), flag, 1);
+        else if (flag === '--c1-closure-window') config.c1ClosureWindow = integer(take(), flag, 1);
+        else if (flag === '--float32-loop-velocity-invariant-gates') {
+            config.float32LoopVelocityInvariantGates = true;
+        }
         else if (flag === '--no-loop') config.fit.loop = false;
         else if (flag === '--require-four-limb-contacts') config.gates.requireFourLimbContacts = true;
         else if (flag === '--allow-legacy-three-track') config.gates.requireOrderedDeformHeads = false;
         else if (flag === '--max-final-mean-target-error-px') config.gates.maximumFinalMeanTargetErrorPx = positive(take(), flag);
         else if (flag === '--max-target-error-px') config.gates.maximumTargetErrorPx = positive(take(), flag);
         else if (flag === '--max-requested-point-error-px') config.gates.maximumRequestedFittedPointErrorPx = positive(take(), flag);
+        else if (flag === '--max-quaternion-angular-velocity-seam-rad-per-second') {
+            config.gates.maximumQuaternionAngularVelocitySeamRadPerSecond = nonNegative(take(), flag);
+        } else if (flag === '--max-position-velocity-seam-world-per-second') {
+            config.gates.maximumPositionVelocitySeamWorldPerSecond = nonNegative(take(), flag);
+        }
         else if (flag === '--emit-fitted-animation') config.emitFittedAnimation = true;
         else if (flag === '--emit-three-clip') config.emitThreeClip = true;
         else throw new Error(`unknown option ${flag}`);
@@ -897,6 +1268,16 @@ export function parseCanaryArgs(argv) {
     ['bundleDirectory', 'observationsPath', 'threeModule', 'outputDirectory'].forEach((field) => {
         if (!config[field]) throw new Error(`missing required option ${field}`);
     });
+    const explicitLoopVelocityGate = loopVelocityGateContract({
+        ...BROWSER_FIT_CANARY_DEFAULTS.gates,
+        ...config.gates,
+    });
+    if (config.float32LoopVelocityInvariantGates === true && explicitLoopVelocityGate.enabled) {
+        throw new Error('Float32-derived and explicit loop velocity seam thresholds are mutually exclusive');
+    }
+    if (config.float32LoopVelocityInvariantGates === true && config.c1ClosureWindow == null) {
+        throw new Error('Float32 loop velocity invariant gates require --c1-closure-window');
+    }
     return config;
 }
 

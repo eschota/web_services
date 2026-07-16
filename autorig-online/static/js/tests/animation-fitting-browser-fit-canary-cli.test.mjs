@@ -5,8 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { applyC1PeriodicClosureToTrackSet } from '../animation-fitting-browser-core.js';
+
 import {
     evaluateBrowserFitGates,
+    deriveFloat32LoopVelocityInvariantGate,
+    measureLoopVelocitySeam,
     parseCanaryArgs,
     runCli,
     validateImmutableInputs,
@@ -85,7 +89,12 @@ test('canary CLI parser requires immutable inputs and preserves explicit browser
         '--output-dir', 'output',
         '--position-mappings', 'disabled',
         '--minimum-visible-ratio', '0.8',
+        '--minimum-visible-confidence', '0.82',
+        '--maximum-rest-segment-scale', '2.5',
         '--iterations', '72',
+        '--c1-closure-window', '6',
+        '--max-quaternion-angular-velocity-seam-rad-per-second', '0.4',
+        '--max-position-velocity-seam-world-per-second', '0.2',
         '--no-loop',
         '--require-four-limb-contacts',
         '--emit-three-clip',
@@ -93,7 +102,12 @@ test('canary CLI parser requires immutable inputs and preserves explicit browser
     assert.equal(parsed.bundleDirectory, 'bundle');
     assert.equal(parsed.positionMappings, false);
     assert.equal(parsed.minimumVisibleRatio, 0.8);
+    assert.equal(parsed.minimumVisibleConfidence, 0.82);
+    assert.equal(parsed.maximumRestSegmentScale, 2.5);
     assert.equal(parsed.fit.iterations, 72);
+    assert.equal(parsed.c1ClosureWindow, 6);
+    assert.equal(parsed.gates.maximumQuaternionAngularVelocitySeamRadPerSecond, 0.4);
+    assert.equal(parsed.gates.maximumPositionVelocitySeamWorldPerSecond, 0.2);
     assert.equal(parsed.fit.loop, false);
     assert.equal(parsed.gates.requireFourLimbContacts, true);
     assert.equal(parsed.emitThreeClip, true);
@@ -101,6 +115,37 @@ test('canary CLI parser requires immutable inputs and preserves explicit browser
     assert.throws(() => parseCanaryArgs([
         '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x', '--guess', 'yes',
     ]), /unknown option --guess/);
+    assert.throws(() => parseCanaryArgs([
+        '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x',
+        '--minimum-visible-confidence', '1.1',
+    ]), /must be between 0 and 1/);
+    assert.throws(() => parseCanaryArgs([
+        '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x',
+        '--maximum-rest-segment-scale', '0.9',
+    ]), /must be at least 1/);
+    assert.throws(() => parseCanaryArgs([
+        '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x',
+        '--max-quaternion-angular-velocity-seam-rad-per-second', '0.4',
+    ]), /quaternion and position loop velocity seam thresholds must be provided together/);
+    assert.throws(() => parseCanaryArgs([
+        '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x',
+        '--c1-closure-window', '0',
+    ]), /must be an integer >= 1/);
+    const derived = parseCanaryArgs([
+        '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x',
+        '--c1-closure-window', '4', '--float32-loop-velocity-invariant-gates',
+    ]);
+    assert.equal(derived.float32LoopVelocityInvariantGates, true);
+    assert.throws(() => parseCanaryArgs([
+        '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x',
+        '--float32-loop-velocity-invariant-gates',
+    ]), /require --c1-closure-window/);
+    assert.throws(() => parseCanaryArgs([
+        '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x',
+        '--c1-closure-window', '4', '--float32-loop-velocity-invariant-gates',
+        '--max-quaternion-angular-velocity-seam-rad-per-second', '0.4',
+        '--max-position-velocity-seam-world-per-second', '0.2',
+    ]), /mutually exclusive/);
 });
 
 test('immutable input validation pins every byte and rejects bundle-root drift', (context) => {
@@ -166,6 +211,137 @@ test('browser-fit gates pass structure without granting gait or release approval
     assert.equal(result.passed, true);
     assert.equal(result.results.find((item) => item.name === 'four_limb_contacts').passed, true);
     assert.equal(result.results.find((item) => item.name === 'unreachable_pixel_ray_ratio').actual, 0.04);
+    assert.equal(
+        result.results.some((item) => item.name.includes('velocity_seam')),
+        false,
+        'velocity gates remain backward-compatible and opt-in',
+    );
+});
+
+test('loop velocity seam uses quaternion rotation vectors and position derivatives', () => {
+    const quaternion = (angle) => [0, 0, Math.sin(angle / 2), Math.cos(angle / 2)];
+    const measured = measureLoopVelocitySeam({
+        tracks: [
+            {
+                name: 'hoof.quaternion',
+                times: [0, 1, 2],
+                values: [quaternion(0), quaternion(0.1), quaternion(0)].flat(),
+            },
+            {
+                name: 'hoof.position',
+                times: [0, 1, 2],
+                values: [0, 0, 0, 1, 0, 0, 0, 0, 0],
+            },
+        ],
+    });
+    assert.equal(measured.schema, 'autorig-browser-loop-velocity-seam.v1');
+    assert.equal(measured.quaternionAngularVelocitySeamRadPerSecond.sampleCount, 1);
+    assert.ok(Math.abs(measured.quaternionAngularVelocitySeamRadPerSecond.maximum - 0.2) < 1e-12);
+    assert.equal(measured.quaternionAngularVelocitySeamRadPerSecond.trackName, 'hoof.quaternion');
+    assert.equal(measured.positionVelocitySeamWorldPerSecond.sampleCount, 1);
+    assert.equal(measured.positionVelocitySeamWorldPerSecond.maximum, 2);
+    assert.equal(measured.positionVelocitySeamWorldPerSecond.trackName, 'hoof.position');
+    assert.equal(measured.quaternionPoseSeamRad.maximum, 0);
+    assert.equal(measured.positionPoseSeamWorld.maximum, 0);
+});
+
+test('Float32 invariant thresholds are derived only from precision, sampling, and clip scale', () => {
+    const quaternion = (angle) => [0, 0, Math.sin(angle / 2), Math.cos(angle / 2)];
+    const derived = deriveFloat32LoopVelocityInvariantGate({
+        tracks: [
+            {
+                name: 'hoof.quaternion',
+                times: [0, 0.04, 0.08],
+                values: [quaternion(0), quaternion(0.1), quaternion(0)].flat(),
+            },
+            {
+                name: 'hoof.position',
+                times: [0, 0.04, 0.08],
+                values: [0, 0, 0, 2, 0, 0, 0, 0, 0],
+            },
+        ],
+    });
+    const expectedQuaternion = Math.sqrt(2 ** -23) / 0.04;
+    assert.equal(derived.schema, 'autorig-browser-float32-loop-velocity-invariant-gate.v1');
+    assert.ok(Math.abs(derived.maximumQuaternionAngularVelocitySeamRadPerSecond - expectedQuaternion) < 1e-15);
+    assert.ok(Math.abs(derived.maximumPositionVelocitySeamWorldPerSecond - expectedQuaternion * 2) < 1e-15);
+    assert.equal(derived.relativeToleranceFormula, 'sqrt(2^-23)');
+});
+
+test('C1 closure stays inside derived invariants for noncommuting Float32 quaternions and unequal dt', () => {
+    const multiply = (a, b) => [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ];
+    const axisAngle = (axis, angle) => {
+        const length = Math.hypot(...axis);
+        const sine = Math.sin(angle / 2) / length;
+        return [axis[0] * sine, axis[1] * sine, axis[2] * sine, Math.cos(angle / 2)];
+    };
+    const base = multiply(axisAngle([1, 0, 0], 0.37), axisAngle([0, 1, 0], -0.21));
+    const samples = [
+        base,
+        multiply(base, multiply(axisAngle([1, 1, 0], 0.31), axisAngle([0, 0, 1], -0.13))),
+        multiply(base, axisAngle([0, 1, 1], 0.42)),
+        multiply(base, axisAngle([1, 0, 1], -0.24)),
+        multiply(base, axisAngle([1, 1, 1], 0.17)),
+        multiply(base, axisAngle([0, 1, 0], -0.33)),
+        multiply(base, axisAngle([1, 0, 1], 0.28)),
+        multiply(base, multiply(axisAngle([1, 0, 0], -0.22), axisAngle([0, 1, 0], 0.19))),
+        base.map((value) => -value),
+    ];
+    const clip = {
+        tracks: [
+            {
+                name: 'hoof.quaternion',
+                times: new Float32Array([0, 0.03, 0.09, 0.16, 0.24, 0.33, 0.4, 0.43, 0.5]),
+                values: new Float32Array(samples.flat()),
+            },
+            {
+                name: 'hoof.position',
+                times: new Float32Array([0, 0.03, 0.09, 0.16, 0.24, 0.33, 0.4, 0.43, 0.5]),
+                values: new Float32Array([0, 0, 0, 0.9, -0.2, 0.3, 1.1, 0.4, -0.2, 0.7, 0.5, 0.1,
+                    0.2, 0.1, 0, -0.4, 0.2, 0.3, 0.5, -0.1, 0.2, 0.3, 0.2, -0.2, 0, 0, 0]),
+            },
+        ],
+    };
+    applyC1PeriodicClosureToTrackSet({ tracks: clip.tracks, windowFrames: 3 });
+    const measured = measureLoopVelocitySeam(clip);
+    const threshold = deriveFloat32LoopVelocityInvariantGate(clip);
+    assert.ok(measured.quaternionAngularVelocitySeamRadPerSecond.maximum
+        <= threshold.maximumQuaternionAngularVelocitySeamRadPerSecond);
+    assert.ok(measured.positionVelocitySeamWorldPerSecond.maximum
+        <= threshold.maximumPositionVelocitySeamWorldPerSecond);
+    assert.equal(measured.quaternionPoseSeamRad.maximum, 0);
+    assert.equal(measured.positionPoseSeamWorld.maximum, 0);
+});
+
+test('explicit loop velocity thresholds add fail-closed numeric gates', () => {
+    const loopVelocitySeam = {
+        quaternionAngularVelocitySeamRadPerSecond: { maximum: 0.3 },
+        positionVelocitySeamWorldPerSecond: { maximum: 0.1 },
+    };
+    const gates = {
+        requireFourLimbContacts: true,
+        maximumQuaternionAngularVelocitySeamRadPerSecond: 0.4,
+        maximumPositionVelocitySeamWorldPerSecond: 0.2,
+    };
+    const passed = evaluateBrowserFitGates(gateFixture({ loopVelocitySeam, gates }));
+    assert.equal(passed.results.find(
+        (item) => item.name === 'quaternion_angular_velocity_seam_rad_per_second',
+    ).passed, true);
+    assert.equal(passed.results.find(
+        (item) => item.name === 'position_velocity_seam_world_per_second',
+    ).passed, true);
+
+    loopVelocitySeam.quaternionAngularVelocitySeamRadPerSecond.maximum = 0.5;
+    const failed = evaluateBrowserFitGates(gateFixture({ loopVelocitySeam, gates }));
+    assert.equal(failed.passed, false);
+    assert.equal(failed.results.find(
+        (item) => item.name === 'quaternion_angular_velocity_seam_rad_per_second',
+    ).passed, false);
 });
 
 test('browser-fit gates fail closed for legacy mappings, target regression, and missing contacts', () => {
@@ -192,4 +368,10 @@ test('CLI help is side-effect free and documents browser-only approval boundarie
     assert.equal(stderr, '');
     assert.match(stdout, /never grants final animation approval/);
     assert.match(stdout, /--emit-three-clip/);
+    assert.match(stdout, /--minimum-visible-confidence/);
+    assert.match(stdout, /--maximum-rest-segment-scale/);
+    assert.match(stdout, /--c1-closure-window/);
+    assert.match(stdout, /--float32-loop-velocity-invariant-gates/);
+    assert.match(stdout, /--max-quaternion-angular-velocity-seam-rad-per-second/);
+    assert.match(stdout, /--max-position-velocity-seam-world-per-second/);
 });

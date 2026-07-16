@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    applyC1PeriodicClosureToTrackSet,
     BROWSER_FITTING_SCHEMAS,
     fitBrowserAnimation,
     fittedTracksToThreeClip,
@@ -376,6 +377,64 @@ test('loop closure makes quaternion and root endpoints identical', () => {
         assert.deepEqual(track.values.slice(0, 4), track.values.slice(-4));
     });
     assert.deepEqual(fitted.rootTrack.values.slice(0, 3), fitted.rootTrack.values.slice(-3));
+});
+
+test('opt-in C1 closure matches local quaternion and position boundary velocities', () => {
+    const quaternion = (angle) => [0, 0, Math.sin(angle / 2), Math.cos(angle / 2)];
+    const quaternionAngles = [0, 0.4, 0.5, 0.2, -0.1, -0.3, 0.4, 0.2, 0];
+    const positions = [0, 1, 1.5, 0.8, 0.2, -0.4, 0.3, 0.2, 0];
+    const tracks = [
+        {
+            name: 'hoof.quaternion',
+            times: Array.from({ length: 9 }, (_, index) => index),
+            values: quaternionAngles.flatMap(quaternion),
+        },
+        {
+            name: 'hoof.position',
+            times: Array.from({ length: 9 }, (_, index) => index),
+            values: positions.flatMap((value) => [value, 0, 0]),
+        },
+    ];
+    const untouchedQuaternion = tracks[0].values.slice(4 * 4, 5 * 4);
+    const untouchedPosition = tracks[1].values.slice(4 * 3, 5 * 3);
+    const report = applyC1PeriodicClosureToTrackSet({ tracks, windowFrames: 3 });
+
+    const closedAngle = (index) => {
+        const offset = index * 4;
+        return 2 * Math.atan2(tracks[0].values[offset + 2], tracks[0].values[offset + 3]);
+    };
+    assert.ok(Math.abs((closedAngle(1) - closedAngle(0)) - (closedAngle(8) - closedAngle(7))) < 1e-12);
+    assert.ok(Math.abs(
+        (tracks[1].values[3] - tracks[1].values[0])
+        - (tracks[1].values[24] - tracks[1].values[21]),
+    ) < 1e-12);
+    assert.deepEqual(tracks[0].values.slice(0, 4), tracks[0].values.slice(-4));
+    assert.deepEqual(tracks[1].values.slice(0, 3), tracks[1].values.slice(-3));
+    assert.deepEqual(tracks[0].values.slice(4 * 4, 5 * 4), untouchedQuaternion);
+    assert.deepEqual(tracks[1].values.slice(4 * 3, 5 * 3), untouchedPosition);
+    assert.equal(report.schema, BROWSER_FITTING_SCHEMAS.c1PeriodicClosure);
+    assert.equal(report.windowFrames, 3);
+    assert.equal(report.quaternionTrackCount, 1);
+    assert.equal(report.positionTrackCount, 1);
+    assert.ok(report.maximumQuaternionCorrectionRad > 0);
+    assert.ok(report.maximumPositionCorrection > 0);
+    assert.equal(report.maximumOutputQuaternionPoseSeamRad, 0);
+    assert.equal(report.maximumOutputPositionPoseSeam, 0);
+});
+
+test('C1 closure preflights every track before mutation and rejects overlapping windows', () => {
+    const valid = {
+        name: 'hoof.position',
+        times: [0, 1, 2, 3, 4, 5, 6],
+        values: [0, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 2, 0, 0, 1, 0, 0, 0, 0, 0],
+    };
+    const before = valid.values.slice();
+    assert.throws(() => applyC1PeriodicClosureToTrackSet({
+        tracks: [valid, { name: 'bad.scale', times: valid.times, values: valid.values }],
+        windowFrames: 2,
+    }), /unsupported C1 closure track/);
+    assert.deepEqual(valid.values, before, 'a later invalid track must not leave earlier tracks partially closed');
+    assert.throws(() => applyC1PeriodicClosureToTrackSet({ tracks: [valid], windowFrames: 3 }), /cannot use C1 closure window/);
 });
 
 test('Three.js adapter creates one shared AnimationClip without a mixer', () => {

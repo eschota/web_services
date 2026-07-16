@@ -127,7 +127,7 @@ function writeBundleFixture() {
     };
     const immutableBuffer = jsonBuffer(immutable);
     fs.writeFileSync(path.join(bundleDirectory, 'immutable_manifest.json'), immutableBuffer);
-    const times = Array.from({ length: 49 }, (_, index) => index / 30);
+    const times = Array.from(new Float32Array(Array.from({ length: 49 }, (_, index) => index / 30)));
     const clip = {
         name: 'Horse_Walk_BrowserFit',
         duration: 48 / 30,
@@ -181,6 +181,7 @@ test('immutable Horse_2 and fitted Three clip validation pins every byte', (cont
     assert.equal(validated.skinWeights.vertices.length, 344);
     assert.equal(validated.skeleton.armatures[0].bones.length, 304);
     assert.equal(validated.clipContract.frameCount, 49);
+    assert.equal(validated.clipContract.durationTimelineTolerance, (48 / 30) * (2 ** -23));
     assert.equal(validated.clipContract.pin.sha256, fixture.clipSha256);
     assert.throws(() => validateHorse2QaInputs({
         ...fixture,

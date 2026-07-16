@@ -1,6 +1,7 @@
 const SKELETON_SCHEMA = 'autorig-browser-fitting-skeleton.v1';
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const FITTED_SCHEMA = 'autorig-browser-fitted-animation.v1';
+const C1_PERIODIC_CLOSURE_SCHEMA = 'autorig-browser-c1-periodic-closure.v1';
 
 const EPSILON = 1e-9;
 
@@ -110,6 +111,46 @@ function multiplyQuaternions(a, b) {
         aw * bz + ax * by - ay * bx + az * bw,
         aw * bw - ax * bx - ay * by - az * bz,
     ];
+}
+
+function inverseQuaternion(value) {
+    return [-value[0], -value[1], -value[2], value[3]];
+}
+
+function shortestQuaternionLogVector(value, field) {
+    let quaternion = normalizeQuaternion(value, field);
+    if (quaternion[3] < 0) quaternion = quaternion.map((item) => -item);
+    const sine = Math.hypot(quaternion[0], quaternion[1], quaternion[2]);
+    if (sine <= EPSILON) return [0, 0, 0];
+    const angle = 2 * Math.atan2(sine, clamp(quaternion[3], -1, 1));
+    return quaternion.slice(0, 3).map((item) => item * angle / sine);
+}
+
+function quaternionExpVector(value, field) {
+    const vector = vec3(value, field);
+    const angle = Math.hypot(...vector);
+    if (angle <= EPSILON) return [0, 0, 0, 1];
+    const scale = Math.sin(angle / 2) / angle;
+    return normalizeQuaternion([
+        vector[0] * scale,
+        vector[1] * scale,
+        vector[2] * scale,
+        Math.cos(angle / 2),
+    ], `${field}.quaternion`);
+}
+
+function relativeQuaternionLog(from, to, field) {
+    return shortestQuaternionLogVector(multiplyQuaternions(
+        inverseQuaternion(normalizeQuaternion(from, `${field}.from`)),
+        normalizeQuaternion(to, `${field}.to`),
+    ), `${field}.relative`);
+}
+
+function quaternionFromRelativeLog(base, vector, field) {
+    return normalizeQuaternion(multiplyQuaternions(
+        normalizeQuaternion(base, `${field}.base`),
+        quaternionExpVector(vector, `${field}.vector`),
+    ), `${field}.result`);
 }
 
 function axisAngleQuaternion(axisValue, angle) {
@@ -894,6 +935,252 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
     };
 }
 
+function mutableNumericTrackArray(value, field) {
+    if (!Array.isArray(value) && !ArrayBuffer.isView(value)) {
+        throw new Error(`${field} must be a mutable numeric array`);
+    }
+    return value;
+}
+
+function trackSample(values, index, itemSize, field) {
+    return Array.from(
+        values.slice(index * itemSize, (index + 1) * itemSize),
+        (value, component) => finite(value, `${field}[${index}][${component}]`),
+    );
+}
+
+function assignTrackSample(values, index, itemSize, sample) {
+    sample.forEach((value, component) => { values[index * itemSize + component] = value; });
+}
+
+function c1ClosureFalloff(offset, windowFrames) {
+    if (windowFrames === 1) return 1;
+    const ratio = (offset - 1) / (windowFrames - 1);
+    const smoothstep = ratio * ratio * (3 - 2 * ratio);
+    return 1 - smoothstep;
+}
+
+/**
+ * Apply opt-in discrete C1 periodic closure to already endpoint-closed local
+ * quaternion/position tracks. Quaternion corrections are authored in the
+ * seam pose's shortest-path logarithmic tangent space; position corrections
+ * are authored in local track coordinates. The first forward and last
+ * backward finite-difference velocities become identical before Float32
+ * storage rounding.
+ */
+export function applyC1PeriodicClosureToTrackSet({
+    tracks: trackValues,
+    windowFrames: windowValue,
+    poseEpsilon = 1e-5,
+} = {}) {
+    if (!Array.isArray(trackValues) || !trackValues.length) {
+        throw new Error('tracks must be a non-empty array');
+    }
+    const windowFrames = Number(windowValue);
+    if (!Number.isInteger(windowFrames) || windowFrames < 1) {
+        throw new Error('windowFrames must be an integer >= 1');
+    }
+    const endpointEpsilon = positive(poseEpsilon, 'poseEpsilon');
+    const report = {
+        schema: C1_PERIODIC_CLOSURE_SCHEMA,
+        enabled: true,
+        windowFrames,
+        method: 'symmetric_discrete_c1_local_position_and_shortest_path_quaternion_log_exp',
+        falloff: 'one_minus_cubic_smoothstep_from_boundary_neighbor_to_window_edge',
+        windowDefinition: 'inclusive_offsets_1_through_windowFrames_with_zero_weight_outer_anchor',
+        poseEpsilon: endpointEpsilon,
+        quaternionTrackCount: 0,
+        positionTrackCount: 0,
+        maximumInputQuaternionPoseSeamRad: 0,
+        maximumInputPositionPoseSeam: 0,
+        maximumOutputQuaternionPoseSeamRad: 0,
+        maximumOutputPositionPoseSeam: 0,
+        maximumQuaternionCorrectionRad: 0,
+        maximumPositionCorrection: 0,
+    };
+    // Fail before the first write: C1 closure is atomic with respect to invalid
+    // track contracts, endpoint seams, timelines, and principal-log wrapping.
+    trackValues.forEach((trackValue, trackIndex) => {
+        if (!trackValue || typeof trackValue !== 'object') {
+            throw new Error(`tracks[${trackIndex}] must be an object`);
+        }
+        const name = String(trackValue.name || '');
+        if (!name) throw new Error(`tracks[${trackIndex}].name must not be empty`);
+        const quaternion = name.endsWith('.quaternion');
+        const position = name.endsWith('.position');
+        if (!quaternion && !position) throw new Error(`unsupported C1 closure track ${name}`);
+        const times = mutableNumericTrackArray(trackValue.times, `${name}.times`);
+        const values = mutableNumericTrackArray(trackValue.values, `${name}.values`);
+        const frameCount = times.length;
+        if (frameCount < 4 || windowFrames > Math.floor((frameCount - 2) / 2)) {
+            throw new Error(`${name} cannot use C1 closure window ${windowFrames} across ${frameCount} frames`);
+        }
+        const itemSize = quaternion ? 4 : 3;
+        if (values.length !== frameCount * itemSize) throw new Error(`${name}.values do not match its timeline`);
+        for (let frame = 0; frame < frameCount; frame += 1) {
+            finite(times[frame], `${name}.times[${frame}]`);
+            if (frame && !(times[frame] > times[frame - 1])) {
+                throw new Error(`${name}.times must be strictly increasing`);
+            }
+            trackSample(values, frame, itemSize, name);
+        }
+        const startDeltaSeconds = times[1] - times[0];
+        const endDeltaSeconds = times[frameCount - 1] - times[frameCount - 2];
+        const base = trackSample(values, 0, itemSize, name);
+        const last = trackSample(values, frameCount - 1, itemSize, name);
+        const poseSeam = quaternion
+            ? Math.hypot(...relativeQuaternionLog(base, last, `${name}.preflightPoseSeam`))
+            : Math.hypot(...base.map((value, axis) => value - last[axis]));
+        if (poseSeam > endpointEpsilon) {
+            throw new Error(`${name} ${quaternion ? 'quaternion ' : 'position '}pose seam ${poseSeam} exceeds ${endpointEpsilon}`);
+        }
+        if (quaternion) {
+            const first = trackSample(values, 1, itemSize, name);
+            const penultimate = trackSample(values, frameCount - 2, itemSize, name);
+            const startVelocity = relativeQuaternionLog(base, first, `${name}.preflightStartVelocity`)
+                .map((value) => value / startDeltaSeconds);
+            const endVelocity = relativeQuaternionLog(penultimate, base, `${name}.preflightEndVelocity`)
+                .map((value) => value / endDeltaSeconds);
+            const targetVelocity = startVelocity.map((value, axis) => (value + endVelocity[axis]) / 2);
+            if (Math.hypot(...targetVelocity) * Math.max(startDeltaSeconds, endDeltaSeconds) >= Math.PI) {
+                throw new Error(`${name} C1 target increment leaves the shortest-path quaternion logarithm`);
+            }
+        }
+    });
+    trackValues.forEach((trackValue, trackIndex) => {
+        if (!trackValue || typeof trackValue !== 'object') {
+            throw new Error(`tracks[${trackIndex}] must be an object`);
+        }
+        const name = String(trackValue.name || '');
+        if (!name) throw new Error(`tracks[${trackIndex}].name must not be empty`);
+        const quaternion = name.endsWith('.quaternion');
+        const position = name.endsWith('.position');
+        if (!quaternion && !position) throw new Error(`unsupported C1 closure track ${name}`);
+        const times = mutableNumericTrackArray(trackValue.times, `${name}.times`);
+        const values = mutableNumericTrackArray(trackValue.values, `${name}.values`);
+        const frameCount = times.length;
+        if (frameCount < 4 || windowFrames > Math.floor((frameCount - 2) / 2)) {
+            throw new Error(`${name} cannot use C1 closure window ${windowFrames} across ${frameCount} frames`);
+        }
+        const itemSize = quaternion ? 4 : 3;
+        if (values.length !== frameCount * itemSize) throw new Error(`${name}.values do not match its timeline`);
+        const startDeltaSeconds = finite(times[1], `${name}.times[1]`)
+            - finite(times[0], `${name}.times[0]`);
+        const endDeltaSeconds = finite(times[frameCount - 1], `${name}.times[last]`)
+            - finite(times[frameCount - 2], `${name}.times[penultimate]`);
+        if (!(startDeltaSeconds > 0) || !(endDeltaSeconds > 0)) {
+            throw new Error(`${name}.times must increase at both loop boundaries`);
+        }
+        const base = trackSample(values, 0, itemSize, name);
+        const last = trackSample(values, frameCount - 1, itemSize, name);
+        if (quaternion) {
+            report.quaternionTrackCount += 1;
+            const poseSeam = Math.hypot(...relativeQuaternionLog(base, last, `${name}.poseSeam`));
+            report.maximumInputQuaternionPoseSeamRad = Math.max(
+                report.maximumInputQuaternionPoseSeamRad,
+                poseSeam,
+            );
+            if (poseSeam > endpointEpsilon) {
+                throw new Error(`${name} quaternion pose seam ${poseSeam} exceeds ${endpointEpsilon}`);
+            }
+            assignTrackSample(values, frameCount - 1, itemSize, base);
+            const first = trackSample(values, 1, itemSize, name);
+            const penultimate = trackSample(values, frameCount - 2, itemSize, name);
+            const startVelocity = relativeQuaternionLog(base, first, `${name}.startVelocity`)
+                .map((value) => value / startDeltaSeconds);
+            const endVelocity = relativeQuaternionLog(penultimate, base, `${name}.endVelocity`)
+                .map((value) => value / endDeltaSeconds);
+            const targetVelocity = startVelocity.map((value, axis) => (value + endVelocity[axis]) / 2);
+            const startCorrection = relativeQuaternionLog(base, first, `${name}.startRelative`)
+                .map((value, axis) => targetVelocity[axis] * startDeltaSeconds - value);
+            const endCorrection = relativeQuaternionLog(base, penultimate, `${name}.endRelative`)
+                .map((value, axis) => -targetVelocity[axis] * endDeltaSeconds - value);
+            for (let offset = 1; offset <= windowFrames; offset += 1) {
+                const weight = c1ClosureFalloff(offset, windowFrames);
+                const startIndex = offset;
+                const endIndex = frameCount - 1 - offset;
+                const startRelative = relativeQuaternionLog(
+                    base,
+                    trackSample(values, startIndex, itemSize, name),
+                    `${name}.start[${offset}]`,
+                ).map((value, axis) => value + startCorrection[axis] * weight);
+                const endRelative = relativeQuaternionLog(
+                    base,
+                    trackSample(values, endIndex, itemSize, name),
+                    `${name}.end[${offset}]`,
+                ).map((value, axis) => value + endCorrection[axis] * weight);
+                assignTrackSample(values, startIndex, itemSize, quaternionFromRelativeLog(
+                    base,
+                    startRelative,
+                    `${name}.closedStart[${offset}]`,
+                ));
+                assignTrackSample(values, endIndex, itemSize, quaternionFromRelativeLog(
+                    base,
+                    endRelative,
+                    `${name}.closedEnd[${offset}]`,
+                ));
+                report.maximumQuaternionCorrectionRad = Math.max(
+                    report.maximumQuaternionCorrectionRad,
+                    Math.hypot(...startCorrection.map((value) => value * weight)),
+                    Math.hypot(...endCorrection.map((value) => value * weight)),
+                );
+            }
+            assignTrackSample(values, frameCount - 1, itemSize, base);
+            report.maximumOutputQuaternionPoseSeamRad = Math.max(
+                report.maximumOutputQuaternionPoseSeamRad,
+                Math.hypot(...relativeQuaternionLog(
+                    trackSample(values, 0, itemSize, name),
+                    trackSample(values, frameCount - 1, itemSize, name),
+                    `${name}.outputPoseSeam`,
+                )),
+            );
+        } else {
+            report.positionTrackCount += 1;
+            const poseSeam = Math.hypot(...base.map((value, axis) => value - last[axis]));
+            report.maximumInputPositionPoseSeam = Math.max(report.maximumInputPositionPoseSeam, poseSeam);
+            if (poseSeam > endpointEpsilon) {
+                throw new Error(`${name} position pose seam ${poseSeam} exceeds ${endpointEpsilon}`);
+            }
+            assignTrackSample(values, frameCount - 1, itemSize, base);
+            const first = trackSample(values, 1, itemSize, name);
+            const penultimate = trackSample(values, frameCount - 2, itemSize, name);
+            const startVelocity = first.map((value, axis) => (value - base[axis]) / startDeltaSeconds);
+            const endVelocity = base.map((value, axis) => (value - penultimate[axis]) / endDeltaSeconds);
+            const targetVelocity = startVelocity.map((value, axis) => (value + endVelocity[axis]) / 2);
+            const startCorrection = first.map((value, axis) => (
+                base[axis] + targetVelocity[axis] * startDeltaSeconds - value
+            ));
+            const endCorrection = penultimate.map((value, axis) => (
+                base[axis] - targetVelocity[axis] * endDeltaSeconds - value
+            ));
+            for (let offset = 1; offset <= windowFrames; offset += 1) {
+                const weight = c1ClosureFalloff(offset, windowFrames);
+                const startIndex = offset;
+                const endIndex = frameCount - 1 - offset;
+                const start = trackSample(values, startIndex, itemSize, name)
+                    .map((value, axis) => value + startCorrection[axis] * weight);
+                const end = trackSample(values, endIndex, itemSize, name)
+                    .map((value, axis) => value + endCorrection[axis] * weight);
+                assignTrackSample(values, startIndex, itemSize, start);
+                assignTrackSample(values, endIndex, itemSize, end);
+                report.maximumPositionCorrection = Math.max(
+                    report.maximumPositionCorrection,
+                    Math.hypot(...startCorrection.map((value) => value * weight)),
+                    Math.hypot(...endCorrection.map((value) => value * weight)),
+                );
+            }
+            assignTrackSample(values, frameCount - 1, itemSize, base);
+            report.maximumOutputPositionPoseSeam = Math.max(
+                report.maximumOutputPositionPoseSeam,
+                Math.hypot(...trackSample(values, 0, itemSize, name).map(
+                    (value, axis) => value - trackSample(values, frameCount - 1, itemSize, name)[axis],
+                )),
+            );
+        }
+    });
+    return report;
+}
+
 export function fittedTracksToThreeClip(fitted, THREE, name = 'LTX_Fitted') {
     if (!fitted || fitted.schema !== FITTED_SCHEMA) throw new Error(`fitted.schema must be ${FITTED_SCHEMA}`);
     if (!THREE?.AnimationClip || !THREE?.QuaternionKeyframeTrack || !THREE?.VectorKeyframeTrack) {
@@ -921,4 +1208,5 @@ export const BROWSER_FITTING_SCHEMAS = Object.freeze({
     skeleton: SKELETON_SCHEMA,
     observations: OBSERVATION_SCHEMA,
     fitted: FITTED_SCHEMA,
+    c1PeriodicClosure: C1_PERIODIC_CLOSURE_SCHEMA,
 });
