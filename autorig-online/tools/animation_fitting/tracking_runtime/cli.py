@@ -16,6 +16,8 @@ from ..rig import load_rig_bundle
 from .core import (
     AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256,
     ObservationRuntimeConfig,
+    REFERENCE_GEOMETRY_ASPECT_STRICT,
+    REFERENCE_GEOMETRY_MODES,
     run_observation_pipeline,
     select_anchor_seeds,
 )
@@ -81,6 +83,16 @@ def _parser() -> argparse.ArgumentParser:
         help="Exact lowercase SHA-256 of <guide bundle>/immutable_manifest.json",
     )
     observe.add_argument("--ffprobe")
+    observe.add_argument(
+        "--reference-geometry-mode",
+        choices=sorted(REFERENCE_GEOMETRY_MODES),
+        default=REFERENCE_GEOMETRY_ASPECT_STRICT,
+        help=(
+            "Explicit pinned-reference transform. Keep aspect_strict_resize by "
+            "default; use center_crop_cover only when the upstream video "
+            "workflow declares centered image-conditioning crop."
+        ),
+    )
     observe.add_argument("--min-alignment-correlation", type=float, default=0.65)
     observe.add_argument("--min-visible-ratio", type=float, default=0.35)
     observe.add_argument("--min-visible-confidence", type=float, default=0.05)
@@ -309,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             config = ObservationRuntimeConfig(
                 loop=bool(args.loop),
+                reference_geometry_mode=args.reference_geometry_mode,
                 min_alignment_correlation=args.min_alignment_correlation,
                 min_visible_ratio=args.min_visible_ratio,
                 min_visible_confidence=args.min_visible_confidence,

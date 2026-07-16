@@ -21,6 +21,8 @@ from animation_fitting.errors import (
 from animation_fitting.observations import load_observations
 from animation_fitting.tracking_runtime.core import (
     ObservationRuntimeConfig,
+    REFERENCE_GEOMETRY_ASPECT_STRICT,
+    REFERENCE_GEOMETRY_CENTER_CROP,
     run_observation_pipeline,
     select_anchor_seeds,
 )
@@ -1552,6 +1554,104 @@ def test_first_frame_mismatch_fails_without_publishing_output(tmp_path: Path) ->
             config=ObservationRuntimeConfig(min_alignment_correlation=0.65),
         )
     assert not output.exists()
+
+
+def test_center_crop_reference_geometry_is_explicit_and_provenanced(
+    tmp_path: Path,
+) -> None:
+    import cv2
+
+    bundle, reference = _bundle(tmp_path)
+    target_width, target_height = 240, 240
+    crop_width = 240
+    crop_x = (reference.shape[1] - crop_width) // 2
+    target = cv2.resize(
+        reference[:, crop_x : crop_x + crop_width],
+        (target_width, target_height),
+        interpolation=cv2.INTER_LINEAR,
+    )
+    video = tmp_path / "center-cropped.mp4"
+    _video(video, target)
+
+    strict_output = tmp_path / "strict-aspect-rejected"
+    with pytest.raises(ContractError, match="aspect ratio"):
+        run_observation_pipeline(
+            video=video,
+            bundle=bundle,
+            output_dir=strict_output,
+            tracker=_Tracker(),
+            segmenter=_Segmenter(),
+        )
+    assert not strict_output.exists()
+
+    output = tmp_path / "center-crop-accepted"
+    observations_path = run_observation_pipeline(
+        video=video,
+        bundle=bundle,
+        output_dir=output,
+        tracker=_Tracker(),
+        segmenter=_Segmenter(),
+        config=ObservationRuntimeConfig(
+            reference_geometry_mode=REFERENCE_GEOMETRY_CENTER_CROP,
+        ),
+    )
+    payload = json.loads(observations_path.read_text(encoding="utf-8"))
+    geometry = payload["provenance"]["first_frame_reference"][
+        "geometry_transform"
+    ]
+    assert geometry == {
+        "mode": REFERENCE_GEOMETRY_CENTER_CROP,
+        "source_resolution": [320, 240],
+        "target_resolution": [240, 240],
+        "crop_pixels": {"x": 40, "y": 0, "width": 240, "height": 240},
+        "scale_xy": [1.0, 1.0],
+        "coordinate_transform": "half_pixel_centers",
+        "rgb_interpolation": "opencv_bilinear",
+        "mask_interpolation": "opencv_nearest",
+    }
+    assert payload["provenance"]["alignment"]["combined_correlation"] >= 0.65
+    assert payload["provenance"]["alignment"]["combined_correlation"] <= 1.0
+
+    seeds = select_anchor_seeds(bundle)
+    _, _, mapped_points, mapped_geometry = (
+        tracking_core._reference_geometry_transform(
+            seeds,
+            width=120,
+            height=120,
+            mode=REFERENCE_GEOMETRY_CENTER_CROP,
+        )
+    )
+    expected_points = (
+        (seeds.points_xy - np.asarray((40.0, 0.0)) + 0.5) * 0.5 - 0.5
+    )
+    np.testing.assert_allclose(mapped_points, expected_points, atol=1e-6)
+    assert mapped_geometry["coordinate_transform"] == "half_pixel_centers"
+
+
+def test_reference_geometry_mode_is_fail_closed_and_cli_defaults_strict() -> None:
+    with pytest.raises(ContractError, match="reference_geometry_mode"):
+        ObservationRuntimeConfig(
+            reference_geometry_mode="stretch_anything"
+        ).validate()
+
+    parser = tracking_cli._parser()
+    base = [
+        "observe",
+        "--video",
+        "candidate.mp4",
+        "--bundle",
+        "bundle",
+        "--output-dir",
+        "observations",
+    ]
+    assert parser.parse_args(base).reference_geometry_mode == (
+        REFERENCE_GEOMETRY_ASPECT_STRICT
+    )
+    assert parser.parse_args(
+        [*base, "--reference-geometry-mode", REFERENCE_GEOMETRY_CENTER_CROP]
+    ).reference_geometry_mode == REFERENCE_GEOMETRY_CENTER_CROP
+    with pytest.raises(SystemExit):
+        parser.parse_args([*base, "--reference-geometry-mode", "stretch_anything"])
 
 
 def test_visible_zero_confidence_tracks_fail_without_publishing_output(

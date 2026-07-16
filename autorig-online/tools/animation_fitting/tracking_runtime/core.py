@@ -82,6 +82,14 @@ V12_BROWSER_SWING_LIMBS = {
 V12_BROWSER_LIMBS = ("hind_left", "fore_left", "hind_right", "fore_right")
 V14_BROWSER_FRAME_INDICES = tuple(range(49))
 V14_BROWSER_BARRIER_FRAME_INDICES = (0, 12, 24, 36, 48)
+REFERENCE_GEOMETRY_ASPECT_STRICT = "aspect_strict_resize"
+REFERENCE_GEOMETRY_CENTER_CROP = "center_crop_cover"
+REFERENCE_GEOMETRY_MODES = frozenset(
+    {
+        REFERENCE_GEOMETRY_ASPECT_STRICT,
+        REFERENCE_GEOMETRY_CENTER_CROP,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -103,8 +111,14 @@ class ObservationRuntimeConfig:
     min_visible_track_inside_mask_ratio: float = 0.55
     loop_max_endpoint_diagonal: float = 0.16
     loop: bool = False
+    reference_geometry_mode: str = REFERENCE_GEOMETRY_ASPECT_STRICT
 
     def validate(self) -> None:
+        if self.reference_geometry_mode not in REFERENCE_GEOMETRY_MODES:
+            raise ContractError(
+                "reference_geometry_mode must be one of: "
+                + ", ".join(sorted(REFERENCE_GEOMETRY_MODES))
+            )
         if self.min_frame_count < 2 or self.max_frame_count < self.min_frame_count:
             raise ContractError("Invalid frame-count QA bounds")
         if self.min_track_count < 1 or self.max_track_count < self.min_track_count:
@@ -1388,8 +1402,123 @@ def _pearson(left: np.ndarray, right: np.ndarray) -> float:
     return 0.0 if denominator <= 1e-12 else float(np.dot(a, b) / denominator)
 
 
+def _reference_geometry_transform(
+    seeds: SeedSet,
+    *,
+    width: int,
+    height: int,
+    mode: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Map the pinned reference, mask, and semantic seeds into video pixels.
+
+    ``center_crop_cover`` is an explicit opt-in for image-conditioned video
+    workflows whose declared preprocessing is a centered cover crop.  The
+    default remains fail-closed on aspect-ratio changes.
+    """
+
+    try:
+        import cv2
+    except ImportError as exc:
+        raise DependencyUnavailableError(
+            "opencv-python-headless is required for alignment"
+        ) from exc
+    if mode not in REFERENCE_GEOMETRY_MODES:
+        raise ContractError(f"Unsupported reference geometry mode: {mode}")
+    source_height, source_width = seeds.reference_rgb.shape[:2]
+    if width < 1 or height < 1 or source_width < 1 or source_height < 1:
+        raise ContractError("Reference/video geometry must be positive")
+
+    source_aspect = source_width / source_height
+    target_aspect = width / height
+    if mode == REFERENCE_GEOMETRY_ASPECT_STRICT:
+        if abs(source_aspect - target_aspect) / source_aspect > 0.01:
+            raise ContractError(
+                f"Video aspect ratio {width}x{height} does not match canonical "
+                f"{source_width}x{source_height}"
+            )
+        crop_x = 0
+        crop_y = 0
+        crop_width = source_width
+        crop_height = source_height
+    else:
+        if target_aspect < source_aspect:
+            crop_width = max(
+                1,
+                min(source_width, int(round(source_height * target_aspect))),
+            )
+            crop_height = source_height
+            crop_x = (source_width - crop_width) // 2
+            crop_y = 0
+        else:
+            crop_width = source_width
+            crop_height = max(
+                1,
+                min(source_height, int(round(source_width / target_aspect))),
+            )
+            crop_x = 0
+            crop_y = (source_height - crop_height) // 2
+
+    crop_rgb = seeds.reference_rgb[
+        crop_y : crop_y + crop_height,
+        crop_x : crop_x + crop_width,
+    ]
+    crop_mask = seeds.canonical_mask[
+        crop_y : crop_y + crop_height,
+        crop_x : crop_x + crop_width,
+    ]
+    rgb_interpolation = (
+        cv2.INTER_LINEAR
+        if mode == REFERENCE_GEOMETRY_CENTER_CROP
+        else cv2.INTER_AREA
+    )
+    reference = cv2.resize(
+        crop_rgb,
+        (width, height),
+        interpolation=rgb_interpolation,
+    )
+    mask = cv2.resize(
+        crop_mask.astype(np.uint8),
+        (width, height),
+        interpolation=cv2.INTER_NEAREST,
+    ).astype(bool)
+    scale = np.asarray(
+        (width / crop_width, height / crop_height), dtype=np.float32
+    )
+    offset = np.asarray((crop_x, crop_y), dtype=np.float32)
+    if mode == REFERENCE_GEOMETRY_CENTER_CROP:
+        points = np.asarray(
+            (seeds.points_xy - offset + 0.5) * scale - 0.5,
+            dtype=np.float32,
+        )
+        coordinate_transform = "half_pixel_centers"
+        rgb_interpolation_name = "opencv_bilinear"
+    else:
+        points = np.asarray((seeds.points_xy - offset) * scale, dtype=np.float32)
+        coordinate_transform = "legacy_edge_scale"
+        rgb_interpolation_name = "opencv_inter_area"
+    geometry = {
+        "mode": mode,
+        "source_resolution": [source_width, source_height],
+        "target_resolution": [width, height],
+        "crop_pixels": {
+            "x": crop_x,
+            "y": crop_y,
+            "width": crop_width,
+            "height": crop_height,
+        },
+        "scale_xy": [float(scale[0]), float(scale[1])],
+        "coordinate_transform": coordinate_transform,
+        "rgb_interpolation": rgb_interpolation_name,
+        "mask_interpolation": "opencv_nearest",
+    }
+    return reference, mask, points, geometry
+
+
 def _align_seeds(
-    seeds: SeedSet, frame_bgr: np.ndarray
+    seeds: SeedSet,
+    frame_bgr: np.ndarray,
+    *,
+    reference_geometry_mode: str = REFERENCE_GEOMETRY_ASPECT_STRICT,
 ) -> tuple[SeedSet, dict[str, float]]:
     try:
         import cv2
@@ -1398,20 +1527,12 @@ def _align_seeds(
             "opencv-python-headless is required for alignment"
         ) from exc
     height, width = frame_bgr.shape[:2]
-    source_height, source_width = seeds.reference_rgb.shape[:2]
-    source_aspect, target_aspect = source_width / source_height, width / height
-    if abs(source_aspect - target_aspect) / source_aspect > 0.01:
-        raise ContractError(
-            f"Video aspect ratio {width}x{height} does not match canonical {source_width}x{source_height}"
-        )
-    reference = cv2.resize(
-        seeds.reference_rgb, (width, height), interpolation=cv2.INTER_AREA
+    reference, mask, points, geometry = _reference_geometry_transform(
+        seeds,
+        width=width,
+        height=height,
+        mode=reference_geometry_mode,
     )
-    mask = cv2.resize(
-        seeds.canonical_mask.astype(np.uint8),
-        (width, height),
-        interpolation=cv2.INTER_NEAREST,
-    ).astype(bool)
     target_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     ys, xs = np.nonzero(mask)
     margin = max(4, int(round(0.04 * max(width, height))))
@@ -1424,12 +1545,15 @@ def _align_seeds(
     target_edges = cv2.Canny(target_gray, 40, 120)
     edges = max(0.0, _pearson(reference_edges, target_edges))
     correlation = 0.55 * intensity + 0.45 * edges
-    scale = np.asarray((width / source_width, height / source_height), dtype=np.float32)
     aligned = replace(
         seeds,
-        points_xy=np.asarray(seeds.points_xy * scale, dtype=np.float32),
+        points_xy=points,
         canonical_mask=mask,
         reference_rgb=reference,
+        reference_provenance={
+            **seeds.reference_provenance,
+            "geometry_transform": geometry,
+        },
     )
     return aligned, {
         "combined_correlation": correlation,
@@ -1776,7 +1900,11 @@ def run_observation_pipeline(
                 "Browser endpoint guide cycle length does not match the video: "
                 f"manifest={expected_frames}, video={source_video.frame_count}"
             )
-    aligned_seeds, alignment = _align_seeds(seeds, source_video.frames_bgr[0])
+    aligned_seeds, alignment = _align_seeds(
+        seeds,
+        source_video.frames_bgr[0],
+        reference_geometry_mode=cfg.reference_geometry_mode,
+    )
     if alignment["combined_correlation"] < cfg.min_alignment_correlation:
         reference_label = (
             "the pinned browser static-scene endpoint guide"
