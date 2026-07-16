@@ -69,7 +69,7 @@ AUTHORITATIVE_ACTION_CONTRACT = (
     ("turn_around_180", "locomotion", False, 33, "default_pose", "default_pose"),
     ("stop_brake", "locomotion", False, 33, "locomotion_contact", "default_pose"),
     ("jump_air", "air", True, 49, "airborne", "airborne"),
-    ("fall", "air", True, 49, "airborne", "airborne"),
+    ("fall", "air", False, 49, "airborne", "death_end"),
     ("jump_start", "air", False, 33, "default_pose", "airborne"),
     ("jump_land", "air", False, 33, "airborne", "default_pose"),
     ("jump_full", "air", False, 49, "default_pose", "default_pose"),
@@ -341,8 +341,8 @@ def _validate_taxonomy(value: dict[str, Any], rig_type: str) -> tuple[list[dict[
         parsed.append(dict(raw))
     if tuple(ids) != EXPECTED_ACTION_IDS:
         raise PlanCompileError("Canonical 30-action IDs/order drifted")
-    if sum(1 for row in parsed if row["loop"]) != 14 or sum(1 for row in parsed if not row["loop"]) != 16:
-        raise PlanCompileError("Canonical action modes must be exactly 14 loop and 16 one-shot")
+    if sum(1 for row in parsed if row["loop"]) != 13 or sum(1 for row in parsed if not row["loop"]) != 17:
+        raise PlanCompileError("Canonical action modes must be exactly 13 loop and 17 one-shot")
     return parsed, source_fps, output_fps
 
 

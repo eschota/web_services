@@ -34,11 +34,11 @@ test('legacy four-button ids resolve to exact canonical action contracts', () =>
     assert.equal(resolveAnimationFittingAction('die').actionId, 'death');
 });
 
-test('fall stays looped and caller contract mismatches fail closed', () => {
-    assert.equal(resolveAnimationFittingAction('fall').isLoop, true);
+test('fall stays one-shot and caller contract mismatches fail closed', () => {
+    assert.equal(resolveAnimationFittingAction('fall').isOneShot, true);
     assert.throws(
-        () => resolveAnimationFittingAction('fall', { loop: false }),
-        /requires loop/,
+        () => resolveAnimationFittingAction('fall', { loop: true }),
+        /requires one_shot/,
     );
     assert.throws(
         () => resolveAnimationFittingAction('death', { frameCount: 49 }),

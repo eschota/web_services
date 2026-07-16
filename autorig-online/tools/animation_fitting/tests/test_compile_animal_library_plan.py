@@ -267,6 +267,15 @@ class CompileAnimalLibraryPlanTests(unittest.TestCase):
             [job["semantic_id"] for job in plan["jobs"] if job["priority_wave"] == 1],
             expected_wave_one,
         )
+        fall_job = next(job for job in plan["jobs"] if job["semantic_id"] == "fall")
+        self.assertFalse(fall_job["loop"])
+        self.assertEqual(fall_job["generation_mode"], "one_shot")
+        self.assertEqual(
+            fall_job["workflow_name"],
+            plan["workflow_contracts"]["one_shot"]["workflow_name"],
+        )
+        self.assertEqual(fall_job["start_pose_id"], "airborne")
+        self.assertEqual(fall_job["end_pose_id"], "death_end")
         all_seeds = []
         for job in plan["jobs"]:
             self.assertEqual((job["frame_count"] - 1) % 8, 0)

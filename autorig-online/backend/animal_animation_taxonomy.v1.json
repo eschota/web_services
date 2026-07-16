@@ -42,7 +42,7 @@
     {"id": "stop_brake", "category": "locomotion", "order": 14, "loop": false, "frame_profile": 33, "start_pose_id": "locomotion_contact", "end_pose_id": "default_pose", "legacy_aliases": ["stop", "brake"]},
 
     {"id": "jump_air", "category": "air", "order": 15, "loop": true, "frame_profile": 49, "start_pose_id": "airborne", "end_pose_id": "airborne", "legacy_aliases": ["air_loop"]},
-    {"id": "fall", "category": "air", "order": 16, "loop": true, "frame_profile": 49, "start_pose_id": "airborne", "end_pose_id": "airborne", "legacy_aliases": ["fall_loop"]},
+    {"id": "fall", "category": "air", "order": 16, "loop": false, "frame_profile": 49, "start_pose_id": "airborne", "end_pose_id": "death_end", "legacy_aliases": ["falling", "air_fall"]},
     {"id": "jump_start", "category": "air", "order": 17, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "airborne", "legacy_aliases": ["jump_takeoff"]},
     {"id": "jump_land", "category": "air", "order": 18, "loop": false, "frame_profile": 33, "start_pose_id": "airborne", "end_pose_id": "default_pose", "legacy_aliases": ["land", "landing"]},
     {"id": "jump_full", "category": "air", "order": 19, "loop": false, "frame_profile": 49, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["jump"]},

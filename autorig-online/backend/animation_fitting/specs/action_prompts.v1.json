@@ -117,9 +117,9 @@
     {
       "action_id_string": "fall",
       "family_string": "jump",
-      "generation_mode_string": "loop",
+      "generation_mode_string": "one_shot",
       "frame_count_int": 49,
-      "motion_prompt_string": "The {{species}} performs a controlled falling air-state loop with subtle gravity-driven body and limb motion, readable orientation, no ground impact, and no uncontrolled tumbling unless species-appropriate."
+      "motion_prompt_string": "The {{species}} begins airborne and falls once under gravity into a readable lower terminal pose appropriate to the requested air-state transition. Show believable mass, orientation, and limb response. Do not loop, reverse, recover, or return to the supplied starting pose."
     },
     {
       "action_id_string": "jump_start",

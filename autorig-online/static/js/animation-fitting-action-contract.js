@@ -14,7 +14,7 @@ const ACTION_CONTRACTS = Object.freeze({
     turn_around_180: Object.freeze({ generationMode: 'one_shot', frameCount: 33 }),
     stop_brake: Object.freeze({ generationMode: 'one_shot', frameCount: 33 }),
     jump_air: Object.freeze({ generationMode: 'loop', frameCount: 49 }),
-    fall: Object.freeze({ generationMode: 'loop', frameCount: 49 }),
+    fall: Object.freeze({ generationMode: 'one_shot', frameCount: 49 }),
     jump_start: Object.freeze({ generationMode: 'one_shot', frameCount: 33 }),
     jump_land: Object.freeze({ generationMode: 'one_shot', frameCount: 33 }),
     jump_full: Object.freeze({ generationMode: 'one_shot', frameCount: 49 }),
