@@ -137,9 +137,77 @@ The output contract is [schemas/fitted-animation.v1.schema.json](schemas/fitted-
 
 QA contains only measured values: point visibility/survival, reprojection errors, behind-camera count, calibrated depth error, silhouette outside distance, contact height/slide, joint-limit violation, temporal jerk, loop seams and rigid bone-origin-distance error. `qa.decision` is always `null`; acceptance thresholds belong to the reviewed clip specification/admin approval flow, not this numerical engine.
 
-## Blender motion authoring and game exports
+## Browser-native V14 continuation and library packaging
+
+The production library path does not require Blender for fitting or for the
+multi-clip GLB. `drive_v14_browser_fitting_pipeline.mjs` consumes only the exact
+command authored by `run_v14_browser_fitting_pipeline.mjs`, rechecks every
+input pin, and launches it with `shell=false`. CPU/browser stages are allowed;
+TAPNext++/SAM2 stays paused until `--allow-cuda-tracking` is explicit. LTX
+generation, Blender, production and DB commands are not in the executable
+allowlist. The driver also authors immutable spec revisions at the contact
+manifest and Three clip external-SHA barriers.
+
+```powershell
+node R:\autorig\autorig-online\tools\animation_fitting\drive_v14_browser_fitting_pipeline.mjs `
+  --spec C:\fitting\v14\pipeline-spec.json `
+  --spec-sha256 <exact-spec-sha256> `
+  --revision-dir C:\fitting\v14\spec-revisions `
+  --journal-dir C:\fitting\v14\driver-journal
+```
+
+`animation_fitting_candidate_ingest.py` accepts only bounded raw byte/file
+streams for the browser artifact set (`fitted-animation.json`, Three clip,
+fixed-camera video, camera/deformation reports and three phase PNGs). It
+computes SHA-256/bytes on the server, checks structural cross-links, nonzero
+motion and normalized quaternions, and publishes an immutable bundle under
+`ANIMATION_FITTING_JOBS_ROOT`. The uploaded QA assertions remain explicitly
+untrusted: the state is `uploaded_pending_server_validation`, with task
+model/skeleton binding, media decode, deformation recomputation and visual
+review still required. This module exposes no base64/JSON transport, creates no
+DB candidate and grants no approval; a future bounded multipart admin route
+must perform those later transitions.
+
+Once all 30 clips have been reviewed, `package_browser_animation_glb.py`
+injects their pinned `THREE.AnimationClip.toJSON()` tracks directly into one
+already-oriented actionless skinned GLB. It preserves the original BIN as an
+exact prefix and preserves mesh, material, image, UV, node and skin JSON. Run
+it separately for pinned `front` and `back` source GLBs; there is no orientation
+relabel or retarget option.
+
+```powershell
+python R:\autorig\autorig-online\tools\animation_fitting\package_browser_animation_glb.py `
+  --input-manifest C:\fitting\horse-front\package-input.json `
+  --input-manifest-sha256 <exact-input-manifest-sha256> `
+  --output C:\fitting\horse-front\animations.glb `
+  --result-manifest C:\fitting\horse-front\package-result.json
+```
+
+The package input uses schema
+`autorig.browser-animation-glb-package-input.v1`; it pins the checked-in animal
+taxonomy and an independent canonical `library_revision`. `rig_type` must be a
+non-T-pose member of that taxonomy. The source GLB is actionless, uses no
+`JOINTS_1`/`WEIGHTS_1`, and its `asset.extras` must carry the exact provenance
+keys `sourceRigType`, `sourceOrientation`, and `templateSkeletonSha256` matching
+the package input; additional existing asset extras are preserved.
+
+Exactly 30 clip rows appear in taxonomy order. Each row pins
+`{semantic_id,path,bytes,sha256,candidate_id,candidate_bundle_sha256,human_review_sha256}`.
+Clip content hashes, candidate UUIDs, immutable candidate-bundle hashes and
+human-review receipt hashes must each be unique across the library. Those
+approval pins are copied into the result manifest. Both output files are
+create-exclusive and the result manifest is published last, so consumers use
+that manifest as the completion marker.
+
+## Optional Blender one-clip derivatives
 
 `apply_fitted_motion.py` consumes `autorig-fitted-animation.v1` and runs only inside Blender background mode. Current compatibility contract is Blender 4.3 through 5.x; it handles both legacy 4.3 F-Curves and the layered Action/slot API used by 5.x.
+
+This is not the browser fitting engine and it is not required to build the
+canonical 30-clip GLB used by the site viewer. The current backend
+`animal-animation-manifest.v1` still requires an `fbx_url`, however, so an FBX
+derivative remains required for library activation until that separate backend
+contract is migrated to a browser-native clip artifact.
 
 The motion JSON now carries an explicit `autorig-fitted-transform-contract.v1`:
 
