@@ -79,6 +79,10 @@ const semanticFittingBody = extractFunctionBody(
     taskHtml,
     'async function startSemanticBrowserAnimationFittingFromVideo',
 );
+const pinnedRgbFittingBody = extractFunctionBody(
+    taskHtml,
+    'async function startPinnedRgbBrowserAnimationFitting',
+);
 
 test('task viewer imports the complete browser-first fitting pipeline from real modules', () => {
     assert.match(
@@ -101,6 +105,43 @@ test('task viewer imports the complete browser-first fitting pipeline from real 
         taskHtml,
         /import\s*\{\s*resolveAnimationFittingAction\s*\}\s*from '\/static\/js\/animation-fitting-action-contract\.js\?v=1'/,
     );
+    assert.match(
+        taskHtml,
+        /import\s*\{\s*runTaskAnimationFittingInBrowser\s*\}\s*from '\/static\/js\/task-animation-fitting-browser-controller\.js\?v=2'/,
+    );
+});
+
+test('pinned RGB entrypoint enforces canonical full-body browser fitting on the shared playlist', () => {
+    const expectedCalls = [
+        'resolveAnimationFittingAction',
+        'resetAnimalAnimationViewerToBasePose',
+        'runTaskAnimationFittingInBrowser',
+        'applyAnimationClipsToCurrentModel',
+        'play',
+    ];
+    let previousIndex = -1;
+    for (const functionName of expectedCalls) {
+        const callIndex = pinnedRgbFittingBody.search(new RegExp(`\\b${functionName}\\s*\\(`));
+        assert.ok(callIndex >= 0, `pinned RGB entrypoint must call ${functionName}`);
+        assert.ok(callIndex > previousIndex, `${functionName} must preserve browser fitting/apply order`);
+        previousIndex = callIndex;
+    }
+    assert.match(pinnedRgbFittingBody, /frameCount:\s*observations\.frame_count/);
+    assert.match(pinnedRgbFittingBody, /includeFullBody:\s*true/);
+    assert.match(pinnedRgbFittingBody, /fittingReference\.source_viewport_array/);
+    assert.match(pinnedRgbFittingBody, /fittingReference\.reference_resolution_array/);
+    assert.match(pinnedRgbFittingBody, /referenceSourceSha256\s*!==\s*pinnedSourceSha256/);
+    assert.match(pinnedRgbFittingBody, /model:\s*fittingModel/);
+    assert.match(pinnedRgbFittingBody, /camera:\s*fittingCamera/);
+    assert.match(pinnedRgbFittingBody, /missingTrackTargets\.length/);
+    assert.match(pinnedRgbFittingBody, /loop:\s*actionContract\.isLoop/);
+    assert.match(pinnedRgbFittingBody, /blenderUsed:\s*false/);
+    assert.match(
+        pinnedRgbFittingBody,
+        /const\s+nextClips\s*=\s*\[[\s\S]*?animations\.filter[\s\S]*?clip[\s\S]*?\];/,
+    );
+    assert.doesNotMatch(pinnedRgbFittingBody, /new\s+(?:THREE\.)?AnimationMixer\s*\(/);
+    assert.doesNotMatch(pinnedRgbFittingBody, /\bfetch\s*\(/);
 });
 
 test('semantic entrypoint executes decode, tracking, constrained fitting, and shared-model apply in order', () => {
@@ -172,12 +213,13 @@ test('legacy RGB entrypoint preserves production motion-proxy behavior without s
     assert.doesNotMatch(legacyFittingBody, /new\s+(?:THREE\.)?AnimationMixer\s*\(/);
 });
 
-test('version dispatcher keeps unversioned 41-frame callers legacy and requires explicit semantic v1', async () => {
+test('version dispatcher keeps unversioned callers legacy and exposes explicit semantic and pinned RGB routes', async () => {
     const AsyncFunction = Object.getPrototypeOf(async function empty() {}).constructor;
     const dispatch = new AsyncFunction(
         'opts',
         'startLegacyRgbAnimationFittingFromVideo',
         'startSemanticBrowserAnimationFittingFromVideo',
+        'startPinnedRgbBrowserAnimationFitting',
         dispatcherBody,
     );
     const calls = [];
@@ -189,14 +231,18 @@ test('version dispatcher keeps unversioned 41-frame callers legacy and requires 
         calls.push({ route: 'semantic', opts });
         return 'semantic-result';
     };
+    const pinnedRgb = async (opts) => {
+        calls.push({ route: 'pinned-rgb', opts });
+        return 'pinned-rgb-result';
+    };
 
     const oldCaller = { videoUrl: '/legacy-41.mp4', frame_count_int: 41, variantName: 'walk' };
-    assert.equal(await dispatch(oldCaller, legacy, semantic), 'legacy-result');
+    assert.equal(await dispatch(oldCaller, legacy, semantic, pinnedRgb), 'legacy-result');
     assert.equal(calls.at(-1).route, 'legacy');
     assert.equal(calls.at(-1).opts, oldCaller);
 
     const explicitLegacy = { ...oldCaller, pipeline_version_string: 'legacy-rgb-renderfin-v1' };
-    assert.equal(await dispatch(explicitLegacy, legacy, semantic), 'legacy-result');
+    assert.equal(await dispatch(explicitLegacy, legacy, semantic, pinnedRgb), 'legacy-result');
     assert.equal(calls.at(-1).route, 'legacy');
 
     const explicitSemantic = {
@@ -205,13 +251,30 @@ test('version dispatcher keeps unversioned 41-frame callers legacy and requires 
         action_id_string: 'walk_forward',
         pipeline_version_string: 'semantic-comfy-browser-v1',
     };
-    assert.equal(await dispatch(explicitSemantic, legacy, semantic), 'semantic-result');
+    assert.equal(await dispatch(explicitSemantic, legacy, semantic, pinnedRgb), 'semantic-result');
     assert.equal(calls.at(-1).route, 'semantic');
     assert.equal(calls.at(-1).opts, explicitSemantic);
 
+    const explicitPinnedRgb = {
+        observations_object: { frame_count: 49 },
+        action_id_string: 'walk_forward',
+        pipeline_version_string: 'pinned-rgb-browser-v1',
+    };
+    assert.equal(
+        await dispatch(explicitPinnedRgb, legacy, semantic, pinnedRgb),
+        'pinned-rgb-result',
+    );
+    assert.equal(calls.at(-1).route, 'pinned-rgb');
+    assert.equal(calls.at(-1).opts, explicitPinnedRgb);
+
     const callsBeforeUnknown = calls.length;
     await assert.rejects(
-        dispatch({ ...oldCaller, pipeline_version_string: 'future-unknown-v9' }, legacy, semantic),
+        dispatch(
+            { ...oldCaller, pipeline_version_string: 'future-unknown-v9' },
+            legacy,
+            semantic,
+            pinnedRgb,
+        ),
         /Unsupported animation-fitting pipeline: future-unknown-v9/,
     );
     assert.equal(calls.length, callsBeforeUnknown);
@@ -220,6 +283,7 @@ test('version dispatcher keeps unversioned 41-frame callers legacy and requires 
 test('legacy and semantic implementations remain isolated behind the dispatcher', () => {
     assert.match(dispatcherBody, /!pipelineVersion\s*\|\|\s*pipelineVersion\s*===\s*'legacy-rgb-renderfin-v1'/);
     assert.match(dispatcherBody, /pipelineVersion\s*===\s*'semantic-comfy-browser-v1'/);
+    assert.match(dispatcherBody, /pipelineVersion\s*===\s*'pinned-rgb-browser-v1'/);
     assert.match(dispatcherBody, /throw\s+new\s+Error\(`Unsupported animation-fitting pipeline:/);
     assert.doesNotMatch(dispatcherBody, /\b(?:decodeVideoFramesExact|extractVideoMotionProxy|fitBrowserAnimation)\s*\(/);
     assert.doesNotMatch(semanticFittingBody, /\b(?:loadFittingVideo|extractVideoMotionProxy|buildFittedClipFromMotionProxy)\s*\(/);

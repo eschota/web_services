@@ -9047,6 +9047,7 @@
         } from '/static/js/animation-fitting-three-adapter.js?v=2';
         import { resolveAnimationFittingAction } from '/static/js/animation-fitting-action-contract.js?v=1';
         import { captureHorse2SemanticReference } from '/static/js/animation-fitting-semantic-capture.js?v=1';
+        import { runTaskAnimationFittingInBrowser } from '/static/js/task-animation-fitting-browser-controller.js?v=2';
 
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
@@ -10859,6 +10860,161 @@
                 };
             };
 
+            async function startPinnedRgbBrowserAnimationFitting(opts = {}) {
+                const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+                onProgress(0, tFitting('idle_ltx_fit_loading_video', 'Loading pinned RGB observations...'));
+                if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
+                    await setActiveMode('animation');
+                    await waitViewerFrame();
+                }
+                if (!currentModel) {
+                    throw new Error(tFitting('idle_ltx_fit_not_animal_viewer', 'Switch to the animated animal viewer before fitting.'));
+                }
+                const observations = opts.observations_object ?? opts.observations;
+                if (!observations || typeof observations !== 'object' || Array.isArray(observations)) {
+                    throw new Error('Pinned RGB browser fitting requires an observations object.');
+                }
+                const pins = opts.pins_object ?? opts.pins;
+                const fittingReference = opts.fitting_reference_object ?? opts.fittingReference;
+                if (!fittingReference || typeof fittingReference !== 'object' || Array.isArray(fittingReference)) {
+                    throw new Error('Pinned RGB browser fitting requires an immutable fitting reference object.');
+                }
+                const fittingModel = fittingReference.model;
+                const fittingCamera = fittingReference.camera;
+                if (!fittingModel?.traverse || !fittingCamera) {
+                    throw new Error('The immutable fitting reference must provide a Three.js model and camera.');
+                }
+                const sourceViewport = fittingReference.source_viewport_array ?? fittingReference.sourceViewport;
+                const referenceResolution = (
+                    fittingReference.reference_resolution_array
+                    ?? fittingReference.referenceResolution
+                );
+                const validResolution = (value) => (
+                    Array.isArray(value)
+                    && value.length === 2
+                    && value.every((item) => Number.isFinite(Number(item)) && Number(item) > 0)
+                );
+                if (!validResolution(sourceViewport) || !validResolution(referenceResolution)) {
+                    throw new Error('The immutable fitting reference must pin source and reference resolutions.');
+                }
+                const referenceSourceSha256 = String(
+                    fittingReference.source_model_sha256_string
+                    ?? fittingReference.sourceModelSha256
+                    ?? '',
+                ).trim();
+                const pinnedSourceSha256 = String(pins?.sourceModelSha256 || '').trim();
+                if (!/^[0-9a-f]{64}$/.test(referenceSourceSha256)
+                    || referenceSourceSha256 !== pinnedSourceSha256) {
+                    throw new Error('The immutable fitting reference does not match pins.sourceModelSha256.');
+                }
+                const actionContract = resolveAnimationFittingAction({
+                    actionId: opts.action_id_string ?? opts.actionId ?? opts.variantName,
+                    frameCount: observations.frame_count,
+                    generationMode: opts.generation_mode_string ?? opts.generationMode,
+                    loop: opts.fit_options_object?.loop ?? opts.fitOptions?.loop,
+                });
+                const clipName = String(
+                    opts.clip_name_string
+                    ?? opts.clipName
+                    ?? `fitted_${actionContract.actionId}`,
+                ).trim();
+                if (!clipName) throw new Error('Pinned RGB browser fitting clip name is required.');
+
+                resetAnimalAnimationViewerToBasePose('pinned RGB browser fitting');
+                await waitViewerFrame();
+                const mode = String(opts.mode_string ?? opts.mode ?? (
+                    opts.pinned_contact_schedule_object || opts.pinnedContactSchedule
+                        ? 'pinned-contact'
+                        : 'diagnostic'
+                ));
+                const fitOptions = {
+                    ...(opts.fit_options_object || opts.fitOptions || {}),
+                    loop: actionContract.isLoop,
+                };
+                onProgress(20, tFitting('idle_ltx_fit_solving', 'Solving pinned full-body motion in the browser...'));
+                const result = await runTaskAnimationFittingInBrowser({
+                    mode,
+                    semanticId: actionContract.actionId,
+                    clipName,
+                    THREE,
+                    model: fittingModel,
+                    camera: fittingCamera,
+                    observations,
+                    pins,
+                    pinnedContactSchedule:
+                        opts.pinned_contact_schedule_object ?? opts.pinnedContactSchedule,
+                    minimumVisiblePoints:
+                        opts.minimum_visible_points_int ?? opts.minimumVisiblePoints,
+                    gaitQaOptions: opts.gait_qa_options_object ?? opts.gaitQaOptions,
+                    fitOptions,
+                    skeletonOptions: {
+                        ...(opts.skeleton_options_object || opts.skeletonOptions || {}),
+                        includeFullBody: true,
+                        sourceViewport: sourceViewport.map(Number),
+                        referenceResolution: referenceResolution.map(Number),
+                    },
+                    applyClips: async ([clip], evidence) => {
+                        const viewerNodeNames = new Set();
+                        currentModel.traverse((node) => {
+                            if (node?.name) viewerNodeNames.add(node.name);
+                        });
+                        const missingTrackTargets = [...new Set(
+                            (clip.tracks || [])
+                                .map((track) => String(track?.name || '').split('.')[0])
+                                .filter((name) => name && !viewerNodeNames.has(name)),
+                        )];
+                        if (missingTrackTargets.length) {
+                            throw new Error(
+                                `Fitted clip targets are absent from the viewer skeleton: ${missingTrackTargets.join(', ')}`,
+                            );
+                        }
+                        clip.userData = {
+                            ...(clip.userData || {}),
+                            autorigBrowserFitting: {
+                                schema: evidence.schema,
+                                browserOnly: true,
+                                blenderUsed: false,
+                                semanticId: actionContract.actionId,
+                                mode,
+                                pins: { ...evidence.pins },
+                                fittingReferenceSourceModelSha256: referenceSourceSha256,
+                            },
+                        };
+                        const nextClips = [
+                            ...(Array.isArray(animations) ? animations.filter((item) => item?.name !== clip.name) : []),
+                            clip,
+                        ];
+                        if (currentModelType !== 'animations') currentModelType = 'animations';
+                        const applied = applyAnimationClipsToCurrentModel(nextClips, [clip.name]);
+                        if (!applied) return false;
+                        if (sel) sel.value = clip.name;
+                        play(clip.name, {
+                            fade: 0.08,
+                            loopOnce: actionContract.isOneShot,
+                            clampWhenFinished: actionContract.isOneShot,
+                        });
+                        return true;
+                    },
+                });
+                if (typeof opts.onMetrics === 'function') {
+                    opts.onMetrics(result?.fitted?.qa ? [result.fitted.qa] : []);
+                }
+                onProgress(100, tFitting('idle_ltx_fit_done', 'Fitted bone animation applied: {clip}', { clip: clipName }));
+                return {
+                    clip_name_string: clipName,
+                    duration_seconds_float: result.fitted.durationSeconds,
+                    role_count_int: result.evidence.skeleton.selectedTrackCount,
+                    sample_count_int: result.evidence.observations.frameCount,
+                    action_id_string: actionContract.actionId,
+                    generation_mode_string: actionContract.generationMode,
+                    frame_count_int: actionContract.frameCount,
+                    browser_fitting_qa_object: result.fitted.qa,
+                    browser_fitting_evidence_object: result.evidence,
+                };
+            }
+
+            window.startAnimalAnimationFittingFromPinnedObservations = startPinnedRgbBrowserAnimationFitting;
+
             window.startAnimalAnimationFittingFromVideo = async function startAnimalAnimationFittingFromVideo(opts = {}) {
                 const pipelineVersion = String(
                     opts.pipeline_version_string ?? opts.pipelineVersion ?? '',
@@ -10868,6 +11024,9 @@
                 }
                 if (pipelineVersion === 'semantic-comfy-browser-v1') {
                     return startSemanticBrowserAnimationFittingFromVideo(opts);
+                }
+                if (pipelineVersion === 'pinned-rgb-browser-v1') {
+                    return startPinnedRgbBrowserAnimationFitting(opts);
                 }
                 throw new Error(`Unsupported animation-fitting pipeline: ${pipelineVersion}`);
             };
