@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    assessHorsePlantedIdle,
     assessHorseTrotGait,
     assessHorseWalkGait,
     buildSemanticObservations,
@@ -293,4 +294,68 @@ test('Horse trot gate handles a duplicated start/end frame explicitly', () => {
     assert.equal(qa.status, 'PASS');
     assert.equal(qa.sourceFrameCount, 49);
     assert.equal(qa.uniqueFrameCount, 48);
+});
+
+function plantedIdleObservations({ driftingFoot = null, brokenVelocitySeam = false } = {}) {
+    const frameCount = 49;
+    const tracks = [];
+    for (const label of ['fore_left', 'fore_right', 'hind_left', 'hind_right']) {
+        tracks.push({
+            anchor_id: `${label}.hoof`,
+            points: Array.from({ length: frameCount }, (_, frame) => {
+                const phase = (frame / (frameCount - 1)) * Math.PI * 2;
+                const drift = driftingFoot === label ? frame * 0.15 : 0;
+                const seam = brokenVelocitySeam && label === 'fore_left' && frame === frameCount - 1 ? 3 : 0;
+                return {
+                    frame,
+                    x: 100 + Math.sin(phase) * 0.2 + drift + seam,
+                    y: 120 + Math.cos(phase) * 0.15,
+                    visible: true,
+                    confidence: 0.95,
+                };
+            }),
+        });
+    }
+    tracks.push({
+        anchor_id: 'body.reference',
+        points: Array.from({ length: frameCount }, (_, frame) => ({
+            frame,
+            x: 180 + Math.sin((frame / (frameCount - 1)) * Math.PI * 2),
+            y: 80,
+            visible: true,
+            confidence: 1,
+        })),
+    });
+    return {
+        schema: 'autorig-fitting-observations.v1',
+        frame_count: frameCount,
+        width: 384,
+        height: 224,
+        fps: 30,
+        tracks,
+        contacts: [],
+    };
+}
+
+test('Horse planted idle gate accepts four stable hooves and a periodic body seam', () => {
+    const qa = assessHorsePlantedIdle(plantedIdleObservations());
+    assert.equal(qa.status, 'PASS');
+    assert.equal(qa.accepted, true);
+    assert.equal(qa.profile.id, 'horse.all_hooves_planted_idle.v1');
+    assert.equal(qa.profile.distinctFromWalkAndTrotProfiles, true);
+    assert.ok(Object.values(qa.feet).every((foot) => foot.accepted));
+    assert.ok(Object.values(qa.feet).every((foot) => foot.contactFrames.length === 49));
+});
+
+test('Horse planted idle gate rejects a sliding hoof', () => {
+    const qa = assessHorsePlantedIdle(plantedIdleObservations({ driftingFoot: 'hind_left' }));
+    assert.equal(qa.status, 'FAIL');
+    assert.ok(qa.failures.includes('hind_left:horizontal_slide'));
+    assert.ok(qa.failures.includes('hind_left:endpoint_pose'));
+});
+
+test('Horse planted idle gate rejects a broken hoof velocity seam', () => {
+    const qa = assessHorsePlantedIdle(plantedIdleObservations({ brokenVelocitySeam: true }));
+    assert.equal(qa.status, 'FAIL');
+    assert.ok(qa.failures.includes('fore_left:velocity_seam'));
 });
