@@ -1,5 +1,5 @@
-import { fitBrowserAnimation } from './animation-fitting-browser-core.js';
-import { assessHorseWalkGait } from './animation-fitting-semantic-tracker.js';
+import { fitBrowserAnimation } from './animation-fitting-browser-core.js?v=2';
+import { assessHorseWalkGait } from './animation-fitting-semantic-tracker.js?v=1';
 
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const GROUND_EVIDENCE_SCHEMA = 'autorig-browser-sam2-ground-evidence.v1';
