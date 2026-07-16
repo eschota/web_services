@@ -25,6 +25,19 @@ const FITTING_BUNDLE_SCHEMA = 'autorig-actionless-fitting-bundle.v1';
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const LOOP_VELOCITY_SEAM_SCHEMA = 'autorig-browser-loop-velocity-seam.v1';
 const FLOAT32_LOOP_INVARIANT_GATE_SCHEMA = 'autorig-browser-float32-loop-velocity-invariant-gate.v1';
+const HORSE_2_FULL_BODY_CONFIDENCE_PROFILE = Object.freeze({
+    schema: 'horse_2.full_body_confidence.ref33.v1',
+    thresholds: Object.freeze({
+        fore_left: 0.7,
+        fore_right: 0.7,
+        hind_left: 0.7,
+        hind_right: 0.7,
+        body_neck_head: 0.7,
+        head_left_ear: 0.7,
+        ear_right: 0.5,
+        tail_base: 0.3,
+    }),
+});
 
 export const BROWSER_FIT_CANARY_DEFAULTS = Object.freeze({
     minimumVisibleRatio: 0.7,
@@ -840,6 +853,7 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         outputResolution: [width, height],
         geometryTransform,
         includePositionMappings: positionMappings,
+        includeFullBody: config.includeFullBody === true,
     });
     const cameraContract = {
         outputResolution: [width, height],
@@ -852,6 +866,9 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         cameraContract,
         minimumVisiblePoints,
         minimumVisibleConfidence,
+        minimumVisibleConfidenceByChain: config.includeFullBody === true
+            ? HORSE_2_FULL_BODY_CONFIDENCE_PROFILE.thresholds
+            : null,
         maximumRestSegmentScale,
     });
     const restSeedAlignment = selectedRestSeedAlignment({
@@ -974,8 +991,12 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
     });
     const mappingCount = prepared.provenance.browser_rgb_bridge.mappings.length;
     const minimumTargetSamples = mappingCount * minimumVisiblePoints;
-    const hierarchyRayCount = fitted.frameCount * Object.values(skeleton.limbs)
-        .reduce((sum, limb) => sum + limb.sourceBoneChain.length - 1, 0);
+    const selectedChains = [
+        ...Object.values(skeleton.limbs),
+        ...Object.values(skeleton.auxiliaryChains || {}),
+    ];
+    const hierarchyRayCount = fitted.frameCount * selectedChains
+        .reduce((sum, chain) => sum + chain.sourceBoneChain.length - 1, 0);
     const gateEvaluation = evaluateBrowserFitGates({
         maximumHeadReconstructionErrorWorld: modelState.maximumHeadReconstructionErrorWorld,
         restSeedAlignment,
@@ -1044,6 +1065,16 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         },
         camera: prepared.provenance.browser_rgb_bridge.camera,
         mappingMode: prepared.provenance.browser_rgb_bridge.mappingMode,
+        fullBody: {
+            ...skeleton.provenance.fullBody,
+            confidenceProfile: config.includeFullBody === true
+                ? HORSE_2_FULL_BODY_CONFIDENCE_PROFILE
+                : null,
+            selectedUniqueSourceTrackCount:
+                prepared.provenance.browser_rgb_bridge.selection.selectedUniqueSourceTrackCount,
+            unusedSourceTracks:
+                prepared.provenance.browser_rgb_bridge.selection.unusedSourceTracks,
+        },
         minimumVisibleRatio,
         minimumVisiblePoints,
         minimumVisibleConfidence,
@@ -1089,7 +1120,15 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         realBundle: {
             armature: modelState.armatureName,
             sourceBoneCount: modelState.sourceBoneCount,
-            fittedChainBones: new Set(Object.values(skeleton.limbs).flatMap((limb) => limb.sourceBoneChain)).size,
+            fittedChainBones: new Set(selectedChains.flatMap((chain) => chain.sourceBoneChain)).size,
+            selectedChainCount: selectedChains.length,
+            selectedAnimatedBoneCount: skeleton.provenance.fullBody.selectedAnimatedBoneCount,
+            fullBody: {
+                ...skeleton.provenance.fullBody,
+                confidenceProfile: config.includeFullBody === true
+                    ? HORSE_2_FULL_BODY_CONFIDENCE_PROFILE
+                    : null,
+            },
             maximumHeadReconstructionErrorWorld: modelState.maximumHeadReconstructionErrorWorld,
             positionMappingPolicy: skeleton.provenance.positionMappings,
         },
@@ -1098,6 +1137,10 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
             fps: observations.fps,
             mappingMode: bridgeReport.mappingMode,
             selectedTrackCount: preparedForFit.tracks.length,
+            selectedUniqueSourceTrackCount:
+                prepared.provenance.browser_rgb_bridge.selection.selectedUniqueSourceTrackCount,
+            unusedSourceTracks:
+                prepared.provenance.browser_rgb_bridge.selection.unusedSourceTracks,
             contactCount: preparedForFit.contacts.length,
             confidenceFilter: prepared.provenance.browser_rgb_bridge.confidenceFilter,
             restSegmentConsistencyFilter:
@@ -1219,6 +1262,8 @@ Options:
   --clip-name NAME
   --minimum-visible-ratio N      Default 0.7
   --minimum-visible-confidence N Optional 0..1 threshold; disabled by default
+  --include-full-body            Add canonical body/neck/head/ears/tail auxiliary chains;
+                                 uses the pinned Horse_2 per-chain confidence profile
   --maximum-rest-segment-scale N Optional ordered-head outlier limit; disabled by default
   --position-mappings MODE       auto, all, or disabled
   --iterations N                 Default 64
@@ -1272,6 +1317,7 @@ export function parseCanaryArgs(argv) {
         else if (flag === '--clip-name') config.clipName = take();
         else if (flag === '--minimum-visible-ratio') config.minimumVisibleRatio = positive(take(), flag);
         else if (flag === '--minimum-visible-confidence') config.minimumVisibleConfidence = unitInterval(take(), flag);
+        else if (flag === '--include-full-body') config.includeFullBody = true;
         else if (flag === '--maximum-rest-segment-scale') config.maximumRestSegmentScale = maximumScale(take(), flag);
         else if (flag === '--position-mappings') {
             const value = take();

@@ -386,12 +386,28 @@ function decodeGrayscalePng(input, filename, frame) {
     return { frame, width, height, channels: 1, data: output };
 }
 
-export function prepareBridgeObservations(raw, report) {
+function isDeclaredHeadEarBranchDuplicate(first, second) {
+    const semantics = new Set([first.semanticAnchorId, second.semanticAnchorId]);
+    return semantics.size === 2
+        && semantics.has('body_neck_head.terminal')
+        && semantics.has('head_left_ear.proximal')
+        && first.collection === 'auxiliaryChains'
+        && second.collection === 'auxiliaryChains'
+        && first.sourceBone === 'head.x'
+        && second.sourceBone === 'head.x'
+        && first.sourceTrackId === second.sourceTrackId
+        && first.sourceAnchorId === 'head.x:5'
+        && second.sourceAnchorId === 'head.x:5';
+}
+
+export function prepareBridgeObservations(raw, report, options = {}) {
     const mappings = report?.mappings;
     if (!Array.isArray(mappings)) throw new Error('bridge report has no mappings');
+    const includeAllSelectedMappings = options.includeAllSelectedMappings === true;
+    const allowDeclaredBranchDuplicate = options.allowDeclaredBranchDuplicate === true;
     const mappingBySemantic = new Map();
-    const mappedSourceTrackIds = new Set();
-    const mappedSourceAnchorIds = new Set();
+    const mappedSourceTrackIds = new Map();
+    const mappedSourceAnchorIds = new Map();
     mappings.forEach((mappingValue, index) => {
         const mapping = requireObject(mappingValue, `bridge mapping[${index}]`);
         const semanticAnchorId = requireString(mapping.semanticAnchorId, `bridge mapping[${index}].semanticAnchorId`);
@@ -399,16 +415,26 @@ export function prepareBridgeObservations(raw, report) {
         const sourceAnchorId = requireString(mapping.sourceAnchorId, `bridge mapping[${index}].sourceAnchorId`);
         const sourceBone = requireString(mapping.sourceBone, `bridge mapping[${index}].sourceBone`);
         if (mappingBySemantic.has(semanticAnchorId)) throw new Error(`duplicate bridge semantic mapping ${semanticAnchorId}`);
-        if (mappedSourceTrackIds.has(sourceTrackId)) throw new Error(`duplicate bridge source track ${sourceTrackId}`);
-        if (mappedSourceAnchorIds.has(sourceAnchorId)) throw new Error(`duplicate bridge source anchor ${sourceAnchorId}`);
+        const previousTrackMapping = mappedSourceTrackIds.get(sourceTrackId);
+        const previousAnchorMapping = mappedSourceAnchorIds.get(sourceAnchorId);
+        const declaredBranchDuplicate = allowDeclaredBranchDuplicate
+            && previousTrackMapping
+            && previousTrackMapping === previousAnchorMapping
+            && isDeclaredHeadEarBranchDuplicate(previousTrackMapping, mapping);
+        if (previousTrackMapping && !declaredBranchDuplicate) {
+            throw new Error(`duplicate bridge source track ${sourceTrackId}`);
+        }
+        if (previousAnchorMapping && !declaredBranchDuplicate) {
+            throw new Error(`duplicate bridge source anchor ${sourceAnchorId}`);
+        }
         const separator = sourceAnchorId.lastIndexOf(':');
         if (separator <= 0 || !/^\d+$/.test(sourceAnchorId.slice(separator + 1))
             || sourceAnchorId.slice(0, separator) !== sourceBone) {
             throw new Error(`bridge source anchor ${sourceAnchorId} does not match sourceBone ${sourceBone}`);
         }
         mappingBySemantic.set(semanticAnchorId, mapping);
-        mappedSourceTrackIds.add(sourceTrackId);
-        mappedSourceAnchorIds.add(sourceAnchorId);
+        if (!previousTrackMapping) mappedSourceTrackIds.set(sourceTrackId, mapping);
+        if (!previousAnchorMapping) mappedSourceAnchorIds.set(sourceAnchorId, mapping);
     });
     if (!Array.isArray(raw.tracks)) throw new Error('raw observations.tracks must be an array');
     const sourceById = new Map();
@@ -422,9 +448,11 @@ export function prepareBridgeObservations(raw, report) {
         sourceById.set(id, track);
         sourceAnchorIds.add(anchorId);
     });
-    const semanticIds = HOOF_CONTACT_INFERENCE_CONTRACT.footOrder.flatMap((foot) => [
-        `${foot}.proximal`, `${foot}.joint`, `${foot}.hoof`,
-    ]);
+    const semanticIds = includeAllSelectedMappings
+        ? mappings.map((mapping) => mapping.semanticAnchorId)
+        : HOOF_CONTACT_INFERENCE_CONTRACT.footOrder.flatMap((foot) => [
+            `${foot}.proximal`, `${foot}.joint`, `${foot}.hoof`,
+        ]);
     const tracks = semanticIds.map((semanticId) => {
         const mapping = mappingBySemantic.get(semanticId);
         if (!mapping || mapping.limb !== semanticId.split('.')[0]) {
@@ -446,7 +474,7 @@ export function prepareBridgeObservations(raw, report) {
         provenance: {
             ...structuredClone(raw.provenance),
             browser_rgb_bridge: {
-                source: 'mappings',
+                source: includeAllSelectedMappings ? 'all_selected_mappings' : 'hoof_contact_mappings',
                 mappings: semanticIds.map((semanticId) => structuredClone(mappingBySemantic.get(semanticId))),
             },
         },

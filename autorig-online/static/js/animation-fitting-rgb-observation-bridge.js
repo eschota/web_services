@@ -26,6 +26,27 @@ function optionalUnitInterval(value, field) {
     return number;
 }
 
+function confidenceThresholdsByChain(value, skeleton) {
+    if (value == null) return {};
+    const source = object(value, 'minimumVisibleConfidenceByChain');
+    const labels = new Set([
+        ...Object.keys(skeleton.limbs || {}),
+        ...Object.keys(skeleton.auxiliaryChains || {}),
+    ]);
+    const result = {};
+    Object.entries(source).forEach(([label, threshold]) => {
+        if (!labels.has(label)) throw new Error(`minimumVisibleConfidenceByChain has unknown chain ${label}`);
+        result[label] = optionalUnitInterval(
+            threshold,
+            `minimumVisibleConfidenceByChain.${label}`,
+        );
+        if (result[label] == null) {
+            throw new Error(`minimumVisibleConfidenceByChain.${label} must not be null`);
+        }
+    });
+    return result;
+}
+
 function optionalMaximumScale(value, field) {
     if (value == null) return null;
     const number = finite(value, field);
@@ -198,38 +219,98 @@ function normalizeCameraContract(value, skeleton, observations) {
 
 function requiredSemanticTracks(skeleton) {
     const limbs = object(skeleton.limbs, 'skeleton.limbs');
+    const auxiliaryChains = skeleton.auxiliaryChains == null
+        ? {}
+        : object(skeleton.auxiliaryChains, 'skeleton.auxiliaryChains');
     const requirements = [];
     const semanticIds = new Set();
-    Object.entries(limbs).forEach(([label, limbValue]) => {
-        const limb = object(limbValue, `skeleton.limbs.${label}`);
-        if (!Array.isArray(limb.sourceBoneChain) || limb.sourceBoneChain.length < 3) {
-            throw new Error(`skeleton limb ${label} needs the Three adapter sourceBoneChain`);
+    const records = [
+        ...Object.entries(limbs).map(([label, value]) => ({ collection: 'limbs', label, value })),
+        ...Object.entries(auxiliaryChains).map(([label, value]) => ({ collection: 'auxiliaryChains', label, value })),
+    ];
+    const recordByLabel = new Map(records.map((record) => [record.label, record]));
+    if (recordByLabel.size !== records.length) throw new Error('skeleton chain labels must be globally unique');
+    records.forEach(({ collection, label, value: limbValue }) => {
+        const limb = object(limbValue, `skeleton.${collection}.${label}`);
+        if (!Array.isArray(limb.sourceBoneChain) || limb.sourceBoneChain.length < 2) {
+            throw new Error(`skeleton chain ${label} needs the Three adapter sourceBoneChain`);
         }
         const sourceBoneChain = limb.sourceBoneChain.map((bone, index) => (
-            nonEmptyString(bone, `skeleton.limbs.${label}.sourceBoneChain[${index}]`)
+            nonEmptyString(bone, `skeleton.${collection}.${label}.sourceBoneChain[${index}]`)
         ));
-        const trackedJointIndex = limb.trackedJointIndex;
-        if (!Number.isInteger(trackedJointIndex) || trackedJointIndex < 1 || trackedJointIndex >= sourceBoneChain.length - 1) {
-            throw new Error(`skeleton limb ${label} has an incompatible trackedJointIndex`);
+        const sourceAnchorIds = limb.sourceAnchorIds == null
+            ? null
+            : limb.sourceAnchorIds.map((anchorId, index) => {
+                const normalizedAnchorId = nonEmptyString(
+                    anchorId,
+                    `skeleton.${collection}.${label}.sourceAnchorIds[${index}]`,
+                );
+                const normalized = splitRigAnchor(
+                    normalizedAnchorId,
+                    `skeleton.${collection}.${label}.sourceAnchorIds[${index}]`,
+                );
+                if (normalized.bone !== sourceBoneChain[index]) {
+                    throw new Error(`skeleton chain ${label} sourceAnchorIds do not match sourceBoneChain`);
+                }
+                return normalizedAnchorId;
+            });
+        if (sourceAnchorIds && sourceAnchorIds.length !== sourceBoneChain.length) {
+            throw new Error(`skeleton chain ${label} sourceAnchorIds do not match sourceBoneChain`);
         }
-        const terminalBone = nonEmptyString(limb.terminalBone, `skeleton.limbs.${label}.terminalBone`);
+        const trackedJointIndex = limb.trackedJointIndex;
+        if (sourceBoneChain.length === 2) {
+            if (trackedJointIndex != null) {
+                throw new Error(`one-joint skeleton chain ${label} must use a null trackedJointIndex`);
+            }
+        } else if (!Number.isInteger(trackedJointIndex)
+            || trackedJointIndex < 1
+            || trackedJointIndex >= sourceBoneChain.length - 1) {
+            throw new Error(`skeleton chain ${label} has an incompatible trackedJointIndex`);
+        }
+        const terminalBone = nonEmptyString(limb.terminalBone, `skeleton.${collection}.${label}.terminalBone`);
         if (terminalBone !== sourceBoneChain.at(-1)) {
-            throw new Error(`skeleton limb ${label} terminalBone does not match sourceBoneChain`);
+            throw new Error(`skeleton chain ${label} terminalBone does not match sourceBoneChain`);
         }
         if (!Array.isArray(limb.joints) || limb.joints.length + 1 !== sourceBoneChain.length) {
-            throw new Error(`skeleton limb ${label} joints do not match sourceBoneChain heads`);
+            throw new Error(`skeleton chain ${label} joints do not match sourceBoneChain heads`);
         }
         const proximalTrack = nonEmptyString(
             limb.proximalTrack,
-            `skeleton.limbs.${label}.proximalTrack`,
+            `skeleton.${collection}.${label}.proximalTrack`,
         );
-        const jointTrack = nonEmptyString(limb.jointTrack, `skeleton.limbs.${label}.jointTrack`);
-        const hoofTrack = nonEmptyString(limb.hoofTrack, `skeleton.limbs.${label}.hoofTrack`);
+        const jointTrack = nonEmptyString(limb.jointTrack, `skeleton.${collection}.${label}.jointTrack`);
+        const hoofTrack = nonEmptyString(limb.hoofTrack, `skeleton.${collection}.${label}.hoofTrack`);
+        let branchConnector = null;
+        if (limb.branchConnector != null) {
+            const connector = object(limb.branchConnector, `skeleton.${collection}.${label}.branchConnector`);
+            branchConnector = {
+                schema: nonEmptyString(connector.schema, `${label}.branchConnector.schema`),
+                bone: nonEmptyString(connector.bone, `${label}.branchConnector.bone`),
+                fromChain: nonEmptyString(connector.fromChain, `${label}.branchConnector.fromChain`),
+                fromHeadIndex: positiveInteger(connector.fromHeadIndex + 1, `${label}.branchConnector.fromHeadIndex+1`) - 1,
+                toHeadIndex: positiveInteger(connector.toHeadIndex + 1, `${label}.branchConnector.toHeadIndex+1`) - 1,
+            };
+            const sourceRecord = recordByLabel.get(branchConnector.fromChain);
+            const sourceBones = sourceRecord?.value?.sourceBoneChain;
+            const isExactHeadEarConnector = collection === 'auxiliaryChains'
+                && label === 'head_left_ear'
+                && branchConnector.schema === 'autorig-browser-fitting-branch-connector.v1'
+                && branchConnector.bone === 'head.x'
+                && branchConnector.fromChain === 'body_neck_head'
+                && branchConnector.toHeadIndex === 0
+                && sourceBoneChain[0] === branchConnector.bone
+                && Array.isArray(sourceBones)
+                && branchConnector.fromHeadIndex === sourceBones.length - 1
+                && sourceBones[branchConnector.fromHeadIndex] === branchConnector.bone;
+            if (!isExactHeadEarConnector) {
+                throw new Error(`unsupported skeleton branch connector on ${label}`);
+            }
+        }
         const orderedHeads = sourceBoneChain.map((sourceBone, headIndex) => {
             let semanticId = `${label}.deformHead.${headIndex}`;
             if (headIndex === 0) semanticId = proximalTrack;
-            else if (headIndex === trackedJointIndex) semanticId = jointTrack;
             else if (headIndex === sourceBoneChain.length - 1) semanticId = hoofTrack;
+            else if (headIndex === trackedJointIndex) semanticId = jointTrack;
             const restPoint = headIndex === sourceBoneChain.length - 1
                 ? point2(limb.joints.at(-1)?.restEnd, `skeleton.limbs.${label}.joints[last].restEnd`)
                 : point2(
@@ -243,12 +324,30 @@ function requiredSemanticTracks(skeleton) {
                 headIndex,
                 orderedHeadCount: sourceBoneChain.length,
                 restPoint,
+                collection,
+                branchConnector: branchConnector && headIndex === branchConnector.toHeadIndex
+                    ? branchConnector
+                    : null,
+                sourceAnchorId: sourceAnchorIds?.[headIndex] || null,
             };
         });
-        orderedHeads.forEach(({ semanticId, sourceBone, headIndex, orderedHeadCount, restPoint }) => {
+        orderedHeads.forEach(({
+            semanticId, sourceBone, headIndex, orderedHeadCount, restPoint,
+            collection: chainCollection, branchConnector: connector, sourceAnchorId,
+        }) => {
             if (semanticIds.has(semanticId)) throw new Error(`duplicate skeleton semantic track ${semanticId}`);
             semanticIds.add(semanticId);
-            requirements.push({ label, semanticId, sourceBone, headIndex, orderedHeadCount, restPoint });
+            requirements.push({
+                label,
+                collection: chainCollection,
+                semanticId,
+                sourceBone,
+                headIndex,
+                orderedHeadCount,
+                restPoint,
+                branchConnector: connector,
+                sourceAnchorId,
+            });
         });
     });
     if (!requirements.length) throw new Error('skeleton.limbs must not be empty');
@@ -256,19 +355,31 @@ function requiredSemanticTracks(skeleton) {
 }
 
 function selectTracks(requirements, tracks) {
-    const selectedSourceAnchors = new Set();
+    const selectedSourceAnchors = new Map();
     return requirements.map((requirement) => {
-        const matches = tracks.filter((track) => track.sourceAnchor.bone === requirement.sourceBone);
+        const matches = requirement.sourceAnchorId
+            ? tracks.filter((track) => track.anchorId === requirement.sourceAnchorId)
+            : tracks.filter((track) => track.sourceAnchor.bone === requirement.sourceBone);
         if (matches.length !== 1) {
             throw new Error(
-                `${requirement.semanticId} requires exactly one RGB anchor on ${requirement.sourceBone}; found ${matches.length}`,
+                requirement.sourceAnchorId
+                    ? `${requirement.semanticId} requires pinned RGB anchor ${requirement.sourceAnchorId}; found ${matches.length}`
+                    : `${requirement.semanticId} requires exactly one RGB anchor on ${requirement.sourceBone}; found ${matches.length}`,
             );
         }
         const track = matches[0];
-        if (selectedSourceAnchors.has(track.anchorId)) {
-            throw new Error(`RGB anchor ${track.anchorId} is assigned to more than one semantic track`);
+        const previous = selectedSourceAnchors.get(track.anchorId);
+        if (previous) {
+            const connector = requirement.branchConnector;
+            const allowed = connector
+                && connector.bone === requirement.sourceBone
+                && connector.fromChain === previous.label
+                && previous.sourceBone === requirement.sourceBone;
+            if (!allowed) {
+                throw new Error(`RGB anchor ${track.anchorId} is assigned to more than one semantic track`);
+            }
         }
-        selectedSourceAnchors.add(track.anchorId);
+        if (!previous) selectedSourceAnchors.set(track.anchorId, requirement);
         return { ...requirement, track };
     });
 }
@@ -285,15 +396,17 @@ function enforceSelectedTrackAvailability(selected, minimumVisiblePoints) {
     });
 }
 
-function filterTracksByVisibleConfidence(tracks, minimumVisibleConfidence) {
-    return tracks.map((track) => {
+function filterSelectedByVisibleConfidence(selected, minimumVisibleConfidence, confidenceByChain) {
+    return selected.map((item) => {
+        const threshold = confidenceByChain[item.label] ?? minimumVisibleConfidence;
+        const track = item.track;
         let sourceVisiblePointCount = 0;
         let filteredLowConfidencePointCount = 0;
         const points = track.points.map((point) => {
             if (point.visible) sourceVisiblePointCount += 1;
             const filtered = point.visible
-                && minimumVisibleConfidence != null
-                && point.confidence < minimumVisibleConfidence;
+                && threshold != null
+                && point.confidence < threshold;
             if (filtered) filteredLowConfidencePointCount += 1;
             return {
                 ...point,
@@ -301,12 +414,16 @@ function filterTracksByVisibleConfidence(tracks, minimumVisibleConfidence) {
             };
         });
         return {
-            ...track,
-            points,
-            confidenceFilterCounts: {
-                sourceVisiblePointCount,
-                filteredLowConfidencePointCount,
-                retainedVisiblePointCount: sourceVisiblePointCount - filteredLowConfidencePointCount,
+            ...item,
+            track: {
+                ...track,
+                points,
+                confidenceFilterCounts: {
+                    minimumVisibleConfidence: threshold,
+                    sourceVisiblePointCount,
+                    filteredLowConfidencePointCount,
+                    retainedVisiblePointCount: sourceVisiblePointCount - filteredLowConfidencePointCount,
+                },
             },
         };
     });
@@ -399,6 +516,7 @@ export function prepareRgbObservationsForBrowser({
     cameraContract,
     minimumVisiblePoints = 2,
     minimumVisibleConfidence = null,
+    minimumVisibleConfidenceByChain = null,
     maximumRestSegmentScale = null,
 } = {}) {
     const observations = object(observationValue, 'observations');
@@ -420,6 +538,10 @@ export function prepareRgbObservationsForBrowser({
         minimumVisibleConfidence,
         'minimumVisibleConfidence',
     );
+    const confidenceByChain = confidenceThresholdsByChain(
+        minimumVisibleConfidenceByChain,
+        skeleton,
+    );
     const restSegmentScaleThreshold = optionalMaximumScale(
         maximumRestSegmentScale,
         'maximumRestSegmentScale',
@@ -433,13 +555,14 @@ export function prepareRgbObservationsForBrowser({
     const camera = normalizeCameraContract(cameraContract, skeleton, { ...observations, width, height });
     const normalized = normalizeTracks(observations.tracks, frameCount);
     const contacts = normalizeContacts(observations.contacts, frameCount, normalized.anchorIds);
-    const confidenceFilteredTracks = filterTracksByVisibleConfidence(
-        normalized.tracks,
-        confidenceThreshold,
-    );
-    const selectedByConfidence = selectTracks(
+    const selectedRaw = selectTracks(
         requiredSemanticTracks(skeleton),
-        confidenceFilteredTracks,
+        normalized.tracks,
+    );
+    const selectedByConfidence = filterSelectedByVisibleConfidence(
+        selectedRaw,
+        confidenceThreshold,
+        confidenceByChain,
     );
     const selected = filterSelectedByRestSegmentConsistency(
         selectedByConfidence,
@@ -447,6 +570,10 @@ export function prepareRgbObservationsForBrowser({
     );
     enforceSelectedTrackAvailability(selected, minimumVisible);
     const selectionBySourceAnchor = new Map(selected.map((item) => [item.track.anchorId, item]));
+    const selectedSourceAnchorIds = new Set(selected.map((item) => item.track.anchorId));
+    const unusedSourceTracks = normalized.tracks
+        .filter((track) => !selectedSourceAnchorIds.has(track.anchorId))
+        .map((track) => ({ id: track.id, anchorId: track.anchorId }));
     const confidenceFilterCounts = selected.reduce((counts, { track }) => ({
         sourceVisiblePointCount:
             counts.sourceVisiblePointCount + track.confidenceFilterCounts.sourceVisiblePointCount,
@@ -528,9 +655,18 @@ export function prepareRgbObservationsForBrowser({
                     ? 'ordered_deform_heads'
                     : 'legacy_three_track',
                 confidenceFilter: {
-                    enabled: confidenceThreshold != null,
+                    enabled: confidenceThreshold != null || Object.keys(confidenceByChain).length > 0,
                     minimumVisibleConfidence: confidenceThreshold,
+                    ...(Object.keys(confidenceByChain).length ? {
+                        minimumVisibleConfidenceByChain: { ...confidenceByChain },
+                    } : {}),
                     ...confidenceFilterCounts,
+                },
+                selection: {
+                    selectedSemanticTrackCount: selected.length,
+                    selectedUniqueSourceTrackCount: selectedSourceAnchorIds.size,
+                    unusedSourceTrackCount: unusedSourceTracks.length,
+                    unusedSourceTracks,
                 },
                 restSegmentConsistencyFilter: {
                     enabled: restSegmentScaleThreshold != null,
@@ -539,8 +675,10 @@ export function prepareRgbObservationsForBrowser({
                 },
                 mappings: selected.map(({
                     label,
+                    collection,
                     semanticId,
                     sourceBone,
+                    sourceAnchorId,
                     headIndex,
                     orderedHeadCount,
                     restPoint,
@@ -548,8 +686,10 @@ export function prepareRgbObservationsForBrowser({
                     restSegmentFilterCounts: mappingRestSegmentFilterCounts,
                 }) => ({
                     limb: label,
+                    collection,
                     semanticAnchorId: semanticId,
                     sourceBone,
+                    sourceAnchorPin: sourceAnchorId,
                     headIndex,
                     orderedHeadCount,
                     restPoint: [...restPoint],

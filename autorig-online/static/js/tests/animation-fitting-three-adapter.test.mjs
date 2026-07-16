@@ -4,6 +4,9 @@ import test from 'node:test';
 import { fitBrowserAnimation } from '../animation-fitting-browser-core.js';
 import {
     HORSE_2_SEMANTIC_PROFILE,
+    HORSE_2_FULL_BODY_CHAINS,
+    HORSE_2_FULL_BODY_JOINT_LIMITS,
+    HORSE_2_FULL_BODY_SOURCE_ANCHORS,
     buildHorse2BrowserFittingSkeleton,
     computeContainScaleAndPad,
     computeLongDimensionScaleAndPad,
@@ -174,7 +177,7 @@ class Camera extends Object3D {
 
 const THREE = { Vector3, Quaternion };
 
-function horseFixture() {
+function horseFixture({ fullBody = false } = {}) {
     const model = new Object3D('Model');
     const sharedRoot = new Bone('c_pos');
     model.add(sharedRoot);
@@ -196,6 +199,37 @@ function horseFixture() {
         }
         chainByLabel[label] = chain;
     });
+    if (fullBody) {
+        const body = HORSE_2_FULL_BODY_CHAINS.body_neck_head.map((name) => new Bone(name));
+        body[0].position.set(-2, 0, 0);
+        sharedRoot.add(body[0]);
+        for (let index = 1; index < body.length; index += 1) {
+            body[index].position.set(0.6, 0.25, 0);
+            body[index - 1].add(body[index]);
+        }
+        const head = body.at(-1);
+        const leftEar = HORSE_2_FULL_BODY_CHAINS.head_left_ear.slice(1).map((name) => new Bone(name));
+        leftEar[0].position.set(0.2, 0.5, 0);
+        leftEar[1].position.set(0, 0.5, 0);
+        head.add(leftEar[0]);
+        leftEar[0].add(leftEar[1]);
+        const rightEar = HORSE_2_FULL_BODY_CHAINS.ear_right.map((name) => new Bone(name));
+        rightEar[0].position.set(-0.2, 0.5, 0);
+        rightEar[1].position.set(0, 0.5, 0);
+        head.add(rightEar[0]);
+        rightEar[0].add(rightEar[1]);
+        const tail = HORSE_2_FULL_BODY_CHAINS.tail_base.map((name) => new Bone(name));
+        tail[0].position.set(-2.5, 0.25, 0);
+        sharedRoot.add(tail[0]);
+        for (let index = 1; index < tail.length; index += 1) {
+            tail[index].position.set(-0.35, -0.2, 0);
+            tail[index - 1].add(tail[index]);
+        }
+        chainByLabel.body_neck_head = body;
+        chainByLabel.head_left_ear = [head, ...leftEar];
+        chainByLabel.ear_right = rightEar;
+        chainByLabel.tail_base = tail;
+    }
     return { model, sharedRoot, chainByLabel, camera: new Camera('Camera') };
 }
 
@@ -331,6 +365,62 @@ test('Three adapter auto-maps only chain roots in directly connected chains', ()
     assert.equal(skeleton.provenance.positionMappings, 'auto_chain_roots_and_parent_breaks');
     close(skeleton.projection.sourceToOutputScale, 0.5);
     close(skeleton.projection.ltxCenterPad[1], 5);
+    assert.equal('auxiliaryChains' in skeleton, false);
+    assert.equal(skeleton.provenance.fullBody.enabled, false);
+    assert.equal(skeleton.provenance.fullBody.selectedChainCount, 4);
+});
+
+test('opt-in Horse_2 full-body adapter keeps four locomotion limbs and exposes exact auxiliary chains', () => {
+    const { model, camera, chainByLabel } = horseFixture({ fullBody: true });
+    // The head's declared tail belongs to the axial head bone, not to either
+    // ear branch. Only the exact versioned head -> left-ear connector may
+    // bypass the ordinary parent-chain tail continuity check.
+    chainByLabel.body_neck_head.at(-1).userData.tailWorld = [99, 99, 99];
+    const skeleton = buildHorse2BrowserFittingSkeleton({
+        THREE,
+        model,
+        camera,
+        sourceViewport: [100, 80],
+        referenceResolution: [100, 80],
+        outputResolution: [50, 50],
+        includeFullBody: true,
+    });
+    assert.deepEqual(Object.keys(skeleton.limbs), [
+        'fore_left', 'fore_right', 'hind_left', 'hind_right',
+    ]);
+    assert.deepEqual(Object.keys(skeleton.auxiliaryChains), [
+        'body_neck_head', 'head_left_ear', 'ear_right', 'tail_base',
+    ]);
+    Object.entries(HORSE_2_FULL_BODY_CHAINS).forEach(([label, names]) => {
+        const chain = skeleton.auxiliaryChains[label];
+        assert.deepEqual(chain.sourceBoneChain, names);
+        assert.deepEqual(chain.sourceAnchorIds, HORSE_2_FULL_BODY_SOURCE_ANCHORS[label]);
+        chain.joints.forEach((joint) => {
+            assert.deepEqual(
+                [joint.minAngle, joint.maxAngle],
+                HORSE_2_FULL_BODY_JOINT_LIMITS[joint.bone],
+            );
+        });
+    });
+    assert.equal(skeleton.auxiliaryChains.ear_right.joints.length, 1);
+    assert.equal(skeleton.auxiliaryChains.ear_right.trackedJointIndex, null);
+    assert.deepEqual(skeleton.auxiliaryChains.head_left_ear.branchConnector, {
+        schema: 'autorig-browser-fitting-branch-connector.v1',
+        bone: 'head.x',
+        fromChain: 'body_neck_head',
+        fromHeadIndex: 8,
+        toHeadIndex: 0,
+    });
+    assert.deepEqual(skeleton.provenance.fullBody, {
+        schema: 'horse_2.semantic_full_body.v1',
+        enabled: true,
+        locomotionChainCount: 4,
+        auxiliaryChainCount: 4,
+        selectedChainCount: 8,
+        selectedSourceBoneCount: 47,
+        selectedAnimatedBoneCount: 40,
+        auxiliaryChainLabels: ['body_neck_head', 'head_left_ear', 'ear_right', 'tail_base'],
+    });
 });
 
 function constantObservations(skeleton, frameCount = 5) {
@@ -461,6 +551,14 @@ test('adapter fails closed for missing, zero-length, declared-tail and root disc
         assert.throws(
             () => buildHorse2BrowserFittingSkeleton({ THREE, model, camera }),
             /declared tail does not connect/,
+        );
+    }
+    {
+        const { model, camera, chainByLabel } = horseFixture({ fullBody: true });
+        chainByLabel.ear_right[0].userData.tailWorld = [9, 9, 9];
+        assert.throws(
+            () => buildHorse2BrowserFittingSkeleton({ THREE, model, camera, includeFullBody: true }),
+            /ear_right declared tail does not connect/,
         );
     }
     {

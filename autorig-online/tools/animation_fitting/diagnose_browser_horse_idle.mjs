@@ -111,8 +111,28 @@ export function buildIdleDiagnosticReport({
     };
 }
 
-function buildContactObservations({ raw, prepared, report, reportSnapshot, integrity }) {
-    if (report.status !== 'PASS') {
+const BODY_LOOP_HOLD_FAILURES = new Set([
+    'body:endpoint_p95',
+    'body:velocity_seam_p95',
+]);
+
+export function plantedHoofBodyLoopHoldEligible(report) {
+    const feet = Object.values(report?.qa?.feet || {});
+    const failures = report?.qa?.failures;
+    return feet.length === 4
+        && feet.every((foot) => foot?.accepted === true)
+        && Array.isArray(failures)
+        && failures.length > 0
+        && failures.every((failure) => BODY_LOOP_HOLD_FAILURES.has(failure));
+}
+
+function buildContactObservations({
+    raw, prepared, report, reportSnapshot, integrity, allowBodyLoopHold = false,
+}) {
+    const bodyLoopHold = report.status !== 'PASS'
+        && allowBodyLoopHold
+        && plantedHoofBodyLoopHoldEligible(report);
+    if (report.status !== 'PASS' && !bodyLoopHold) {
         throw new Error('contact observations may be authored only from a PASS planted-idle report');
     }
     const mappings = prepared.provenance?.browser_rgb_bridge?.mappings || [];
@@ -151,6 +171,9 @@ function buildContactObservations({ raw, prepared, report, reportSnapshot, integ
                 schema: CONTACT_PROVENANCE_SCHEMA,
                 profile: report.profile.id,
                 diagnostic: reportSnapshot,
+                diagnosticStatus: report.status,
+                bodyLoopHold,
+                bodyLoopFailures: bodyLoopHold ? [...report.qa.failures] : [],
                 observationsSha256: integrity.observations.sha256,
                 bridgeReportSha256: integrity.bridgeReport.sha256,
                 sourceVideoSha256: integrity.sourceVideo.sha256,
@@ -168,6 +191,10 @@ function buildContactObservations({ raw, prepared, report, reportSnapshot, integ
 
 export function main(argv = process.argv.slice(2)) {
     const args = parseArguments(argv);
+    const contactPolicy = args['contact-policy'] || 'full_idle_pass';
+    if (!['full_idle_pass', 'planted_hooves_with_body_loop_hold'].includes(contactPolicy)) {
+        throw new Error('--contact-policy must be full_idle_pass or planted_hooves_with_body_loop_hold');
+    }
     const observationSnapshot = snapshotJson(args.observations, 'observations');
     const bridgeSnapshot = snapshotJson(args['bridge-report'], 'bridge report');
     const integrity = validateBridgeAndRawPins({
@@ -180,7 +207,10 @@ export function main(argv = process.argv.slice(2)) {
         || integrity.bridgeReport.sha256 !== bridgeSnapshot.sha256) {
         throw new Error('idle diagnostic input changed after its immutable snapshot was parsed');
     }
-    const observations = prepareBridgeObservations(observationSnapshot.json, bridgeSnapshot.json);
+    const observations = prepareBridgeObservations(observationSnapshot.json, bridgeSnapshot.json, {
+        includeAllSelectedMappings: true,
+        allowDeclaredBranchDuplicate: true,
+    });
     const report = buildIdleDiagnosticReport({
         observations,
         integrity,
@@ -197,15 +227,24 @@ export function main(argv = process.argv.slice(2)) {
             cli: snapshotFile(fileURLToPath(import.meta.url)),
         },
     });
+    const bodyLoopHold = contactPolicy === 'planted_hooves_with_body_loop_hold'
+        && plantedHoofBodyLoopHoldEligible(report);
+    report.decision.contactAuthoringPolicy = contactPolicy;
+    report.decision.fourHoofContactEvidenceAccepted = Object.values(report.qa.feet)
+        .every((foot) => foot?.accepted === true);
+    report.decision.bodyLoopHold = bodyLoopHold;
+    report.decision.eligibleForContactConstrainedDiagnosticFit = report.status === 'PASS'
+        || bodyLoopHold;
     const reportSnapshot = writeNewJson(args.output, report);
     let contactSnapshot = null;
-    if (report.status === 'PASS') {
+    if (report.status === 'PASS' || bodyLoopHold) {
         const contactObservations = buildContactObservations({
             raw: observationSnapshot.json,
             prepared: observations,
             report,
             reportSnapshot,
             integrity,
+            allowBodyLoopHold: bodyLoopHold,
         });
         contactSnapshot = writeNewJson(args['contact-observations-output'], contactObservations);
     }
@@ -226,7 +265,7 @@ export function main(argv = process.argv.slice(2)) {
         }])),
         body: report.qa.body,
     }, null, 2)}\n`);
-    return report.status === 'PASS' ? 0 : 2;
+    return contactSnapshot ? 0 : 2;
 }
 
 const invokedUrl = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;

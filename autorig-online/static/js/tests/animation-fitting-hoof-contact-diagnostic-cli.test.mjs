@@ -166,6 +166,25 @@ test('bridge mappings preserve one-to-one semantic, source-track and source-anch
     const wrongBone = structuredClone(report);
     wrongBone.mappings[0].sourceBone = 'different-bone';
     assert.throws(() => prepareBridgeObservations(raw, wrongBone), /does not match sourceBone/);
+
+    raw.tracks.push({ id: 'track-head', anchor_id: 'head.x:5', points: [] });
+    const fullBody = structuredClone(report);
+    fullBody.mappings.push({
+        limb: 'body_neck_head', collection: 'auxiliaryChains',
+        semanticAnchorId: 'body_neck_head.terminal', sourceTrackId: 'track-head',
+        sourceAnchorId: 'head.x:5', sourceBone: 'head.x',
+    }, {
+        limb: 'head_left_ear', collection: 'auxiliaryChains',
+        semanticAnchorId: 'head_left_ear.proximal', sourceTrackId: 'track-head',
+        sourceAnchorId: 'head.x:5', sourceBone: 'head.x',
+    });
+    assert.throws(() => prepareBridgeObservations(raw, fullBody), /duplicate bridge source track/);
+    const selected = prepareBridgeObservations(raw, fullBody, {
+        includeAllSelectedMappings: true,
+        allowDeclaredBranchDuplicate: true,
+    });
+    assert.equal(selected.tracks.length, semanticIds.length + 2);
+    assert.equal(selected.provenance.browser_rgb_bridge.source, 'all_selected_mappings');
 });
 
 test('SAM2 mask manifest binds chronological declared paths, bytes and hashes', (t) => {

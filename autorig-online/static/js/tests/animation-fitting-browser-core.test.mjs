@@ -233,6 +233,121 @@ test('ordered deform-head fitting uses every chain head and materially beats the
     assert.ok(ordered.qa.maximumTargetErrorPx < 0.05);
 });
 
+test('one-joint auxiliary chain is ordered, emits one track, and stays outside locomotion root averaging', () => {
+    const rig = orderedSkeleton();
+    rig.root = {
+        bone: 'HorseRoot',
+        restPosition: [0, 0, 0],
+        xAxisPerPixel: [0.01, 0, 0],
+        yAxisPerPixel: [0, -0.01, 0],
+        motionScale: 1,
+    };
+    rig.auxiliaryChains = {
+        ear_right: {
+            joints: [{
+                bone: 'c_ear_01.r',
+                restStart: [50, 10],
+                restEnd: [50, 11],
+                restQuaternion: [0, 0, 0, 1],
+                rotationAxis: [0, 0, 1],
+                minAngle: -0.4,
+                maxAngle: 0.4,
+            }],
+            proximalTrack: 'ear_right.proximal',
+            jointTrack: 'ear_right.joint',
+            hoofTrack: 'ear_right.terminal',
+            trackedJointIndex: null,
+        },
+    };
+    const input = orderedObservations();
+    input.tracks.push(track('ear_right.proximal', Array.from(
+        { length: input.frame_count },
+        (_, frame) => [50 + frame * 25, 10],
+    )));
+    input.tracks.push(track('ear_right.terminal', Array.from(
+        { length: input.frame_count },
+        (_, frame) => [50 + frame * 25 + Math.sin(frame * 0.2) * 0.2, 11],
+    )));
+    const fitted = fitBrowserAnimation({
+        skeleton: rig,
+        observations: input,
+        options: { loop: false, smoothingRadius: 0, iterations: 64 },
+    });
+    assert.equal(fitted.qa.targetMode, 'ordered_deform_heads');
+    assert.equal(fitted.tracks.filter((item) => item.bone === 'c_ear_01.r').length, 1);
+    assert.equal(fitted.frames[0].auxiliaryChains.ear_right.points.length, 2);
+    assert.ok(fitted.frames.every((frame) => Object.keys(frame.limbs).length === 4));
+    // The ear root moves hundreds of pixels, but the shared rig root remains
+    // locked because only the four locomotion roots contribute to averaging.
+    assert.ok(fitted.rootTrack.values.every((value) => Math.abs(value) < 1e-12));
+});
+
+test('declared head-to-ear branch reuses the solved axial terminal without a second root solve', () => {
+    const rig = orderedSkeleton();
+    const bodyNames = [
+        'spine_01.x', 'spine_02.x', 'spine_03.x', 'c_subneck_1.x',
+        'c_subneck_2.x', 'c_subneck_3.x', 'c_subneck_4.x', 'neck.x', 'head.x',
+    ];
+    const chain = (names) => names.slice(0, -1).map((bone, index) => ({
+        bone,
+        restStart: [index, 0],
+        restEnd: [index + 1, 0],
+        restQuaternion: [0, 0, 0, 1],
+        rotationAxis: [0, 0, 1],
+        minAngle: -Math.PI,
+        maxAngle: Math.PI,
+    }));
+    rig.auxiliaryChains = {
+        body_neck_head: {
+            joints: chain(bodyNames),
+            sourceBoneChain: bodyNames,
+            proximalTrack: 'body_neck_head.proximal',
+            jointTrack: 'body_neck_head.joint',
+            hoofTrack: 'body_neck_head.terminal',
+            trackedJointIndex: 4,
+        },
+        head_left_ear: {
+            joints: chain(['head.x', 'c_ear_01.l', 'c_ear_02.l']),
+            sourceBoneChain: ['head.x', 'c_ear_01.l', 'c_ear_02.l'],
+            proximalTrack: 'head_left_ear.proximal',
+            jointTrack: 'head_left_ear.joint',
+            hoofTrack: 'head_left_ear.terminal',
+            trackedJointIndex: 1,
+            branchConnector: {
+                schema: 'autorig-browser-fitting-branch-connector.v1',
+                bone: 'head.x',
+                fromChain: 'body_neck_head',
+                fromHeadIndex: 8,
+                toHeadIndex: 0,
+            },
+        },
+    };
+    const input = orderedObservations({ frameCount: 3 });
+    const bodyIds = Array.from({ length: 9 }, (_, index) => {
+        if (index === 0) return 'body_neck_head.proximal';
+        if (index === 4) return 'body_neck_head.joint';
+        if (index === 8) return 'body_neck_head.terminal';
+        return `body_neck_head.deformHead.${index}`;
+    });
+    bodyIds.forEach((id, index) => input.tracks.push(track(
+        id,
+        Array.from({ length: 3 }, (_, frame) => [index, Math.sin(frame + index * 0.2) * 0.25]),
+    )));
+    input.tracks.push(track('head_left_ear.proximal', [[40, 40], [41, 40], [42, 40]]));
+    input.tracks.push(track('head_left_ear.joint', [[8.5, 0.5], [8.6, 0.5], [8.7, 0.5]]));
+    input.tracks.push(track('head_left_ear.terminal', [[9, 1], [9.1, 1], [9.2, 1]]));
+
+    const fitted = fitBrowserAnimation({
+        skeleton: rig,
+        observations: input,
+        options: { loop: false, smoothingRadius: 0, iterations: 64, tolerance: 1e-6 },
+    });
+    fitted.frames.forEach((frame) => assert.deepEqual(
+        frame.auxiliaryChains.head_left_ear.points[0],
+        frame.auxiliaryChains.body_neck_head.points.at(-1),
+    ));
+});
+
 test('ordered deform-head CCD never publishes a target regression across deterministic randomized targets', () => {
     let state = 123456789;
     const random = () => {

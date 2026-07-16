@@ -833,7 +833,12 @@ test('synthetic complete chain pauses at both external pins then reaches visual 
         semanticId: 'walk_forward',
         validated: {
             fittingBundle: { source: { filename: 'Horse_2.blend', sha256: f.sourceModelSha256 } },
-            clipContract: { frameCount: 49, pin: threeClip },
+            clipContract: {
+                frameCount: 49,
+                temporalMode: 'loop',
+                loop: true,
+                pin: threeClip,
+            },
             immutablePin: f.immutable,
             fittingBundlePin: f.fitting,
             skeletonPin: f.skeleton,

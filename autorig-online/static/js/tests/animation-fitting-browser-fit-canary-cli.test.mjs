@@ -90,6 +90,7 @@ test('canary CLI parser requires immutable inputs and preserves explicit browser
         '--position-mappings', 'disabled',
         '--minimum-visible-ratio', '0.8',
         '--minimum-visible-confidence', '0.82',
+        '--include-full-body',
         '--maximum-rest-segment-scale', '2.5',
         '--iterations', '72',
         '--c1-closure-window', '6',
@@ -104,6 +105,7 @@ test('canary CLI parser requires immutable inputs and preserves explicit browser
     assert.equal(parsed.positionMappings, false);
     assert.equal(parsed.minimumVisibleRatio, 0.8);
     assert.equal(parsed.minimumVisibleConfidence, 0.82);
+    assert.equal(parsed.includeFullBody, true);
     assert.equal(parsed.maximumRestSegmentScale, 2.5);
     assert.equal(parsed.fit.iterations, 72);
     assert.equal(parsed.c1ClosureWindow, 6);

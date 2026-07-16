@@ -16,6 +16,107 @@ const CHAIN_STEMS = Object.freeze([
     'toes_01',
 ]);
 
+const FULL_BODY_PROFILE_ID = 'horse_2.semantic_full_body.v1';
+const FULL_BODY_CHAIN_LABELS = Object.freeze([
+    'body_neck_head',
+    'head_left_ear',
+    'ear_right',
+    'tail_base',
+]);
+
+const HORSE_2_HEAD_LEFT_EAR_BRANCH = Object.freeze({
+    schema: 'autorig-browser-fitting-branch-connector.v1',
+    bone: 'head.x',
+    fromChain: 'body_neck_head',
+    fromHeadIndex: 8,
+    toHeadIndex: 0,
+});
+
+export const HORSE_2_FULL_BODY_CHAINS = Object.freeze({
+    body_neck_head: Object.freeze([
+        'spine_01.x',
+        'spine_02.x',
+        'spine_03.x',
+        'c_subneck_1.x',
+        'c_subneck_2.x',
+        'c_subneck_3.x',
+        'c_subneck_4.x',
+        'neck.x',
+        'head.x',
+    ]),
+    head_left_ear: Object.freeze([
+        'head.x',
+        'c_ear_01.l',
+        'c_ear_02.l',
+    ]),
+    ear_right: Object.freeze([
+        'c_ear_01.r',
+        'c_ear_02.r',
+    ]),
+    tail_base: Object.freeze([
+        'c_tail_00.x',
+        'c_tail_01.x',
+        'c_tail_02.x',
+        'c_tail_03.x',
+        'c_tail_04.x',
+        'c_tail_05.x',
+    ]),
+});
+
+export const HORSE_2_FULL_BODY_SOURCE_ANCHORS = Object.freeze({
+    body_neck_head: Object.freeze([
+        'spine_01.x:82',
+        'spine_02.x:117',
+        'spine_03.x:185',
+        'c_subneck_1.x:148',
+        'c_subneck_2.x:312',
+        'c_subneck_3.x:321',
+        'c_subneck_4.x:329',
+        'neck.x:337',
+        'head.x:5',
+    ]),
+    head_left_ear: Object.freeze([
+        'head.x:5',
+        'c_ear_01.l:4',
+        'c_ear_02.l:8',
+    ]),
+    ear_right: Object.freeze([
+        'c_ear_01.r:56',
+        'c_ear_02.r:60',
+    ]),
+    tail_base: Object.freeze([
+        'c_tail_00.x:195',
+        'c_tail_01.x:197',
+        'c_tail_02.x:85',
+        'c_tail_03.x:2',
+        'c_tail_04.x:291',
+        'c_tail_05.x:301',
+    ]),
+});
+
+// Planar limits are deliberately conservative. Every animated full-body bone
+// has an exact entry so opting in can never fall through to the generic +/-pi
+// browser-solver default.
+export const HORSE_2_FULL_BODY_JOINT_LIMITS = Object.freeze({
+    'spine_01.x': Object.freeze([-0.13962634015954636, 0.13962634015954636]), // +/-8 deg
+    'spine_02.x': Object.freeze([-0.17453292519943295, 0.17453292519943295]), // +/-10 deg
+    'spine_03.x': Object.freeze([-0.17453292519943295, 0.17453292519943295]),
+    'c_subneck_1.x': Object.freeze([-0.20943951023931953, 0.20943951023931953]), // +/-12 deg
+    'c_subneck_2.x': Object.freeze([-0.20943951023931953, 0.20943951023931953]),
+    'c_subneck_3.x': Object.freeze([-0.20943951023931953, 0.20943951023931953]),
+    'c_subneck_4.x': Object.freeze([-0.20943951023931953, 0.20943951023931953]),
+    'neck.x': Object.freeze([-0.2617993877991494, 0.2617993877991494]), // +/-15 deg
+    'head.x': Object.freeze([-0.3141592653589793, 0.3141592653589793]), // +/-18 deg
+    'c_ear_01.l': Object.freeze([-0.4363323129985824, 0.4363323129985824]), // +/-25 deg
+    'c_ear_01.r': Object.freeze([-0.4363323129985824, 0.4363323129985824]),
+    'c_tail_00.x': Object.freeze([-0.3141592653589793, 0.3141592653589793]),
+    'c_tail_01.x': Object.freeze([-0.3490658503988659, 0.3490658503988659]), // +/-20 deg
+    'c_tail_02.x': Object.freeze([-0.3839724354387525, 0.3839724354387525]), // +/-22 deg
+    'c_tail_03.x': Object.freeze([-0.41887902047863906, 0.41887902047863906]), // +/-24 deg
+    'c_tail_04.x': Object.freeze([-0.4537856055185257, 0.4537856055185257]), // +/-26 deg
+    'c_tail_05.x': Object.freeze([-0.4886921905584123, 0.4886921905584123]), // +/-28 deg
+});
+
 export const HORSE_2_SEMANTIC_PROFILE = Object.freeze({
     profile_id: 'horse_2.semantic_limbs.v1',
     reference_resolution: Object.freeze([768, 448]),
@@ -507,11 +608,116 @@ function jointLimits(profile, options, boneName) {
         || optionLimits[stem]
         || profileLimits[boneName]
         || profileLimits[stem]
+        || HORSE_2_FULL_BODY_JOINT_LIMITS[boneName]
         || HORSE_2_JOINT_LIMITS[stem]
         || [-Math.PI, Math.PI];
     const [minimum, maximum] = limitValue(raw, `joint limits for ${boneName}`);
     if (minimum > maximum) throw new Error(`joint limits are reversed for ${boneName}`);
     return [minimum, maximum];
+}
+
+function fullBodyChainContracts(enabled) {
+    if (!enabled) return {};
+    const contracts = Object.fromEntries(FULL_BODY_CHAIN_LABELS.map((label) => [
+        label,
+        [...HORSE_2_FULL_BODY_CHAINS[label]],
+    ]));
+    FULL_BODY_CHAIN_LABELS.forEach((label) => {
+        const anchors = HORSE_2_FULL_BODY_SOURCE_ANCHORS[label];
+        if (!Array.isArray(anchors) || anchors.length !== contracts[label].length) {
+            throw new Error(`Horse_2 full-body source anchors do not match ${label}`);
+        }
+        anchors.forEach((anchorId, index) => {
+            if (!anchorId.startsWith(`${contracts[label][index]}:`)) {
+                throw new Error(`Horse_2 full-body source anchor order does not match ${label}`);
+            }
+        });
+    });
+    const occurrences = new Map();
+    Object.entries(contracts).forEach(([label, names]) => names.forEach((name, headIndex) => {
+        if (!occurrences.has(name)) occurrences.set(name, []);
+        occurrences.get(name).push({ label, headIndex });
+    }));
+    occurrences.forEach((items, name) => {
+        if (items.length === 1) return;
+        const allowed = name === 'head.x'
+            && items.length === 2
+            && items.some((item) => item.label === 'body_neck_head'
+                && item.headIndex === contracts.body_neck_head.length - 1)
+            && items.some((item) => item.label === 'head_left_ear' && item.headIndex === 0);
+        if (!allowed) throw new Error(`unsupported Horse_2 full-body chain overlap at ${name}`);
+    });
+    return contracts;
+}
+
+function semanticChainContract({ THREE, options, profile, label, names, bones, worldByBone, projectedByBone }) {
+    const minimumWorldLength = finite(options.minimumWorldSegmentLength ?? 1e-7, 'minimumWorldSegmentLength');
+    const minimumPixelLength = finite(options.minimumProjectedSegmentLengthPx ?? 0.25, 'minimumProjectedSegmentLengthPx');
+    const tailTolerance = finite(options.connectionToleranceWorld ?? 1e-4, 'connectionToleranceWorld');
+    const motionScale = finite(options.positionMotionScale ?? profile.position_motion_scale ?? 1, 'positionMotionScale');
+    const joints = [];
+    for (let index = 0; index < names.length - 1; index += 1) {
+        const name = names[index];
+        const nextName = names[index + 1];
+        const bone = bones.get(name);
+        const worldStart = worldByBone.get(name);
+        const worldEnd = worldByBone.get(nextName);
+        const restStart = projectedByBone.get(name).pixel;
+        const restEnd = projectedByBone.get(nextName).pixel;
+        if (distance3(worldStart, worldEnd) <= minimumWorldLength) {
+            throw new Error(`${label} rest chain is disconnected or zero-length at ${name}`);
+        }
+        if (distance2(restStart, restEnd) <= minimumPixelLength) {
+            throw new Error(`${label} projected rest chain is disconnected at ${name}`);
+        }
+        const declaredTail = declaredTailWorld(THREE, bone);
+        const connector = options.branchConnector;
+        const declaredBranchEdge = label === 'head_left_ear'
+            && index === HORSE_2_HEAD_LEFT_EAR_BRANCH.toHeadIndex
+            && name === HORSE_2_HEAD_LEFT_EAR_BRANCH.bone
+            && nextName === 'c_ear_01.l'
+            && connector?.schema === HORSE_2_HEAD_LEFT_EAR_BRANCH.schema
+            && connector?.bone === HORSE_2_HEAD_LEFT_EAR_BRANCH.bone
+            && connector?.fromChain === HORSE_2_HEAD_LEFT_EAR_BRANCH.fromChain
+            && connector?.fromHeadIndex === HORSE_2_HEAD_LEFT_EAR_BRANCH.fromHeadIndex
+            && connector?.toHeadIndex === HORSE_2_HEAD_LEFT_EAR_BRANCH.toHeadIndex;
+        if (declaredTail && distance3(declaredTail, worldEnd) > tailTolerance && !declaredBranchEdge) {
+            throw new Error(`${label} declared tail does not connect ${name} to ${nextName}`);
+        }
+        const [minAngle, maxAngle] = jointLimits(profile, options, name);
+        const joint = {
+            bone: name,
+            restStart: [...restStart],
+            restEnd: [...restEnd],
+            restQuaternion: array4(bone.quaternion, `${name}.quaternion`),
+            rotationAxis: localCameraPlaneAxis(THREE, bone, options.camera),
+            minAngle,
+            maxAngle,
+        };
+        const previousBone = index > 0 ? bones.get(names[index - 1]) : null;
+        if (includePositionMapping(options, bone, label, index, previousBone)) {
+            joint.positionMapping = positionMappingForBone(
+                THREE,
+                bone,
+                options.camera,
+                options.projection,
+                projectedByBone.get(name),
+                motionScale,
+            );
+        }
+        joints.push(joint);
+    }
+    const oneJoint = joints.length === 1;
+    const terminalRole = REQUIRED_LIMB_LABELS.includes(label) ? 'hoof' : 'terminal';
+    return {
+        joints,
+        proximalTrack: `${label}.proximal`,
+        jointTrack: `${label}.joint`,
+        hoofTrack: `${label}.${terminalRole}`,
+        trackedJointIndex: oneJoint ? null : Math.max(1, Math.floor(joints.length / 2)),
+        sourceBoneChain: [...names],
+        terminalBone: names.at(-1),
+    };
 }
 
 function projectionOptions(options, profile) {
@@ -536,11 +742,17 @@ function projectionOptions(options, profile) {
 export function buildHorse2BrowserFittingSkeleton(options = {}) {
     const { THREE, model, camera } = options;
     if (!THREE || !model || !camera) throw new Error('THREE, model and camera are required');
+    if (options.includeFullBody != null && typeof options.includeFullBody !== 'boolean') {
+        throw new Error('includeFullBody must be a boolean');
+    }
+    const fullBodyEnabled = options.includeFullBody === true;
     const profile = semanticProfile(options.semanticProfile || HORSE_2_SEMANTIC_PROFILE);
-    const chains = Object.fromEntries(REQUIRED_LIMB_LABELS.map((label) => [
+    const limbChains = Object.fromEntries(REQUIRED_LIMB_LABELS.map((label) => [
         label,
         horseDeformChainNames(profile, label),
     ]));
+    const auxiliaryChainNames = fullBodyChainContracts(fullBodyEnabled);
+    const chains = { ...limbChains, ...auxiliaryChainNames };
     model.updateWorldMatrix?.(true, true);
     camera.updateProjectionMatrix?.();
     camera.updateWorldMatrix?.(true, false);
@@ -556,66 +768,36 @@ export function buildHorse2BrowserFittingSkeleton(options = {}) {
         projectedByBone.set(name, { ...projected, world });
     });
 
-    const minimumWorldLength = finite(options.minimumWorldSegmentLength ?? 1e-7, 'minimumWorldSegmentLength');
-    const minimumPixelLength = finite(options.minimumProjectedSegmentLengthPx ?? 0.25, 'minimumProjectedSegmentLengthPx');
-    const tailTolerance = finite(options.connectionToleranceWorld ?? 1e-4, 'connectionToleranceWorld');
-    const motionScale = finite(options.positionMotionScale ?? profile.position_motion_scale ?? 1, 'positionMotionScale');
     const limbs = {};
     REQUIRED_LIMB_LABELS.forEach((label) => {
-        const names = chains[label];
-        const joints = [];
-        // Seven ordered bone heads define six non-fabricated deform segments;
-        // toes_01 is the terminal hoof target because GLTF does not encode tail length.
-        for (let index = 0; index < names.length - 1; index += 1) {
-            const name = names[index];
-            const nextName = names[index + 1];
-            const bone = bones.get(name);
-            const worldStart = worldByBone.get(name);
-            const worldEnd = worldByBone.get(nextName);
-            const restStart = projectedByBone.get(name).pixel;
-            const restEnd = projectedByBone.get(nextName).pixel;
-            if (distance3(worldStart, worldEnd) <= minimumWorldLength) {
-                throw new Error(`${label} rest chain is disconnected or zero-length at ${name}`);
-            }
-            if (distance2(restStart, restEnd) <= minimumPixelLength) {
-                throw new Error(`${label} projected rest chain is disconnected at ${name}`);
-            }
-            const declaredTail = declaredTailWorld(THREE, bone);
-            if (declaredTail && distance3(declaredTail, worldEnd) > tailTolerance) {
-                throw new Error(`${label} declared tail does not connect ${name} to ${nextName}`);
-            }
-            const [minAngle, maxAngle] = jointLimits(profile, options, name);
-            const joint = {
-                bone: name,
-                restStart: [...restStart],
-                restEnd: [...restEnd],
-                restQuaternion: array4(bone.quaternion, `${name}.quaternion`),
-                rotationAxis: localCameraPlaneAxis(THREE, bone, camera),
-                minAngle,
-                maxAngle,
-            };
-            const previousBone = index > 0 ? bones.get(names[index - 1]) : null;
-            if (includePositionMapping(options, bone, label, index, previousBone)) {
-                joint.positionMapping = positionMappingForBone(
-                    THREE,
-                    bone,
-                    camera,
-                    projection,
-                    projectedByBone.get(name),
-                    motionScale,
-                );
-            }
-            joints.push(joint);
-        }
-        limbs[label] = {
-            joints,
-            proximalTrack: `${label}.proximal`,
-            jointTrack: `${label}.joint`,
-            hoofTrack: `${label}.hoof`,
-            trackedJointIndex: Math.max(1, Math.floor(joints.length / 2)),
-            sourceBoneChain: [...names],
-            terminalBone: names.at(-1),
-        };
+        limbs[label] = semanticChainContract({
+            THREE,
+            options: { ...options, camera, projection },
+            profile,
+            label,
+            names: limbChains[label],
+            bones,
+            worldByBone,
+            projectedByBone,
+        });
+    });
+    const auxiliaryChains = {};
+    Object.entries(auxiliaryChainNames).forEach(([label, names]) => {
+        const branchConnector = label === 'head_left_ear'
+            ? { ...HORSE_2_HEAD_LEFT_EAR_BRANCH }
+            : null;
+        auxiliaryChains[label] = semanticChainContract({
+            THREE,
+            options: { ...options, camera, projection, branchConnector },
+            profile,
+            label,
+            names,
+            bones,
+            worldByBone,
+            projectedByBone,
+        });
+        auxiliaryChains[label].sourceAnchorIds = [...HORSE_2_FULL_BODY_SOURCE_ANCHORS[label]];
+        if (branchConnector) auxiliaryChains[label].branchConnector = branchConnector;
     });
 
     let root = null;
@@ -650,6 +832,7 @@ export function buildHorse2BrowserFittingSkeleton(options = {}) {
         schema: SKELETON_SCHEMA,
         rigType: 'HORSE_2',
         limbs,
+        ...(fullBodyEnabled ? { auxiliaryChains } : {}),
         ...(root ? { root } : {}),
         projection: {
             sourceViewport: [...projection.sourceViewport],
@@ -678,6 +861,20 @@ export function buildHorse2BrowserFittingSkeleton(options = {}) {
             terminalPolicy: 'seven_bone_heads_six_segments_to_toes_head',
             sharedBoneRoot: String(boneRoot.name || ''),
             positionMappings: positionMappingPolicy(options.includePositionMappings),
+            fullBody: {
+                schema: FULL_BODY_PROFILE_ID,
+                enabled: fullBodyEnabled,
+                locomotionChainCount: REQUIRED_LIMB_LABELS.length,
+                auxiliaryChainCount: fullBodyEnabled ? FULL_BODY_CHAIN_LABELS.length : 0,
+                selectedChainCount: REQUIRED_LIMB_LABELS.length
+                    + (fullBodyEnabled ? FULL_BODY_CHAIN_LABELS.length : 0),
+                selectedSourceBoneCount: new Set(Object.values(chains).flat()).size,
+                selectedAnimatedBoneCount: new Set([
+                    ...Object.values(limbs).flatMap((limb) => limb.joints.map((joint) => joint.bone)),
+                    ...Object.values(auxiliaryChains).flatMap((chain) => chain.joints.map((joint) => joint.bone)),
+                ]).size,
+                auxiliaryChainLabels: fullBodyEnabled ? [...FULL_BODY_CHAIN_LABELS] : [],
+            },
         },
     };
 }
@@ -775,24 +972,31 @@ function normalizedFittedFrames(fitted, skeleton) {
     if (!Array.isArray(fitted.frames) || fitted.frames.length !== fitted.frameCount) {
         throw new Error('fitted.frames must contain every fitted frame');
     }
-    const labels = Object.keys(skeleton?.limbs || {});
-    if (!labels.length) throw new Error('skeleton.limbs must not be empty');
-    fitted.frames.forEach((frame, frameIndex) => labels.forEach((label) => {
-        const expected = skeleton.limbs[label].sourceBoneChain?.length;
-        const points = frame?.limbs?.[label]?.points;
+    const chains = [
+        ...Object.entries(skeleton?.limbs || {}).map(([label, contract]) => ({
+            key: `limbs:${label}`, collection: 'limbs', label, contract,
+        })),
+        ...Object.entries(skeleton?.auxiliaryChains || {}).map(([label, contract]) => ({
+            key: `auxiliaryChains:${label}`, collection: 'auxiliaryChains', label, contract,
+        })),
+    ];
+    if (!Object.keys(skeleton?.limbs || {}).length) throw new Error('skeleton.limbs must not be empty');
+    fitted.frames.forEach((frame, frameIndex) => chains.forEach(({ collection, label, contract }) => {
+        const expected = contract.sourceBoneChain?.length;
+        const points = frame?.[collection]?.[label]?.points;
         if (!Number.isInteger(expected) || expected < 2) {
-            throw new Error(`skeleton limb ${label} is missing sourceBoneChain`);
+            throw new Error(`skeleton chain ${label} is missing sourceBoneChain`);
         }
         if (!Array.isArray(points) || points.length !== expected) {
-            throw new Error(`fitted frame ${frameIndex} limb ${label} must contain ${expected} points`);
+            throw new Error(`fitted frame ${frameIndex} chain ${label} must contain ${expected} points`);
         }
         points.forEach((point, pointIndex) => {
             if (!Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)) {
-                throw new Error(`fitted frame ${frameIndex} limb ${label} point ${pointIndex} is invalid`);
+                throw new Error(`fitted frame ${frameIndex} chain ${label} point ${pointIndex} is invalid`);
             }
         });
     }));
-    return labels;
+    return chains;
 }
 
 /**
@@ -815,7 +1019,7 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
     if (!THREE.AnimationClip || !THREE.QuaternionKeyframeTrack || !THREE.VectorKeyframeTrack) {
         throw new Error('THREE animation clip and keyframe track constructors are required');
     }
-    const labels = normalizedFittedFrames(fitted, skeleton);
+    const chains = normalizedFittedFrames(fitted, skeleton);
     const outputResolution = resolution(
         options.outputResolution || skeleton.projection?.outputResolution,
         'outputResolution',
@@ -830,7 +1034,7 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
     camera.updateProjectionMatrix?.();
     camera.updateWorldMatrix?.(true, false);
 
-    const chainNames = labels.flatMap((label) => skeleton.limbs[label].sourceBoneChain);
+    const chainNames = chains.flatMap(({ contract }) => contract.sourceBoneChain);
     const bones = namedBones(model, chainNames);
     const uniqueBones = [...new Set(chainNames)].map((name) => bones.get(name));
     const snapshots = new Map(uniqueBones.map((bone) => [bone, {
@@ -842,15 +1046,15 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
         head: worldHead(THREE, bone),
         quaternion: bone.getWorldQuaternion(new THREE.Quaternion()).clone(),
     }]));
-    const perLimb = new Map(labels.map((label) => {
-        const names = skeleton.limbs[label].sourceBoneChain;
+    const perChain = new Map(chains.map(({ key, contract }) => {
+        const names = contract.sourceBoneChain;
         const segments = names.slice(0, -1).map((name, index) => {
             const start = rest.get(name).head;
             const end = rest.get(names[index + 1]).head;
             const vector = end.clone().sub(start);
             return { length: vector.length(), direction: vector.normalize() };
         });
-        return [label, { names, segments }];
+        return [key, { names, segments }];
     }));
     const times = Array.from({ length: fitted.frameCount }, (_, frame) => frame / finite(fitted.fps, 'fitted.fps'));
     const quaternionValues = new Map(uniqueBones.map((bone) => [bone.name, []]));
@@ -873,12 +1077,24 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
         fitted.frames.forEach((frame) => {
             restore();
             const desired = new Map();
-            labels.forEach((label) => {
-                const { names, segments } = perLimb.get(label);
-                const pixels = frame.limbs[label].points;
+            chains.forEach(({ key, collection, label, contract }) => {
+                const { names, segments } = perChain.get(key);
+                const pixels = frame[collection][label].points;
                 const restRoot = rest.get(names[0]).head;
                 const rootNdcZ = restRoot.clone().project(camera).z;
-                const points = [unprojectPixel(THREE, camera, pixels[0], projection, rootNdcZ)];
+                let rootPoint = unprojectPixel(THREE, camera, pixels[0], projection, rootNdcZ);
+                if (contract.branchConnector) {
+                    const connector = contract.branchConnector;
+                    if (connector.bone !== names[0] || connector.toHeadIndex !== 0) {
+                        throw new Error(`unsupported hierarchy branch connector on ${label}`);
+                    }
+                    const connectedTarget = desired.get(connector.bone);
+                    if (!connectedTarget) {
+                        throw new Error(`hierarchy branch source ${connector.fromChain} must precede ${label}`);
+                    }
+                    rootPoint = connectedTarget.head.clone();
+                }
+                const points = [rootPoint];
                 segments.forEach((segment, index) => {
                     const result = raySpherePoint(
                         THREE,
@@ -949,8 +1165,8 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
                     ),
                 );
             });
-            labels.forEach((label) => {
-                const { names, segments } = perLimb.get(label);
+            chains.forEach(({ key }) => {
+                const { names, segments } = perChain.get(key);
                 names.slice(0, -1).forEach((name, index) => {
                     const actualLength = worldHead(THREE, bones.get(name)).distanceTo(
                         worldHead(THREE, bones.get(names[index + 1])),

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     buildIdleDiagnosticReport,
     HORSE_PLANTED_IDLE_DIAGNOSTIC_SCHEMA,
+    plantedHoofBodyLoopHoldEligible,
 } from '../diagnose_browser_horse_idle.mjs';
 
 const FRAME_COUNT = 49;
@@ -81,4 +82,28 @@ test('planted-idle report fail-closes a sliding hoof', () => {
     assert.equal(report.status, 'FAIL');
     assert.equal(report.decision.eligibleForContactConstrainedFit, false);
     assert.ok(report.qa.failures.includes('fore_right:horizontal_slide'));
+    assert.equal(plantedHoofBodyLoopHoldEligible(report), false);
+});
+
+test('four planted hooves may author diagnostic contacts while full-body loop remains HOLD', () => {
+    const input = observations();
+    input.tracks.push({
+        anchor_id: 'body_neck_head.terminal',
+        points: Array.from({ length: FRAME_COUNT }, (_, frame) => ({
+            frame,
+            x: 50 + frame * 0.2,
+            y: 60,
+            visible: true,
+            confidence: 0.95,
+        })),
+    });
+    const report = buildIdleDiagnosticReport({
+        observations: input,
+        integrity: integrity(),
+        candidateId: 'synthetic-body-loop-hold',
+        sourceReference: 'synthetic',
+    });
+    assert.equal(report.status, 'FAIL');
+    assert.deepEqual(report.qa.failures, ['body:endpoint_p95']);
+    assert.equal(plantedHoofBodyLoopHoldEligible(report), true);
 });

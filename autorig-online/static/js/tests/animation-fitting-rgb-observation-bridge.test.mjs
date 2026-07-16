@@ -390,6 +390,104 @@ test('seven ordered Horse_2 deform heads per limb produce 28 rest-relative seman
     assert.ok(fitted.qa.finalMeanTargetErrorPx < fitted.qa.initialMeanTargetErrorPx);
 });
 
+test('full-body bridge pins duplicate anchors, permits only declared head branch, and applies per-chain confidence', () => {
+    const rig = skeleton();
+    const joint = (bone, start, end) => ({
+        bone,
+        restStart: start,
+        restEnd: end,
+        restQuaternion: [0, 0, 0, 1],
+        rotationAxis: [0, 0, 1],
+        minAngle: -0.4,
+        maxAngle: 0.4,
+    });
+    rig.auxiliaryChains = {
+        body_neck_head: {
+            joints: [joint('body.x', [20, 0], [21, 0])],
+            proximalTrack: 'body_neck_head.proximal',
+            jointTrack: 'body_neck_head.joint',
+            hoofTrack: 'body_neck_head.terminal',
+            trackedJointIndex: null,
+            sourceBoneChain: ['body.x', 'head.x'],
+            sourceAnchorIds: ['body.x:1', 'head.x:5'],
+            terminalBone: 'head.x',
+        },
+        head_left_ear: {
+            joints: [
+                joint('head.x', [21, 0], [21, 1]),
+                joint('c_ear_01.l', [21, 1], [21, 2]),
+            ],
+            proximalTrack: 'head_left_ear.proximal',
+            jointTrack: 'head_left_ear.joint',
+            hoofTrack: 'head_left_ear.terminal',
+            trackedJointIndex: 1,
+            sourceBoneChain: ['head.x', 'c_ear_01.l', 'c_ear_02.l'],
+            sourceAnchorIds: ['head.x:5', 'c_ear_01.l:4', 'c_ear_02.l:8'],
+            terminalBone: 'c_ear_02.l',
+            branchConnector: {
+                schema: 'autorig-browser-fitting-branch-connector.v1',
+                bone: 'head.x',
+                fromChain: 'body_neck_head',
+                fromHeadIndex: 1,
+                toHeadIndex: 0,
+            },
+        },
+        ear_right: {
+            joints: [joint('c_ear_01.r', [22, 1], [22, 2])],
+            proximalTrack: 'ear_right.proximal',
+            jointTrack: 'ear_right.joint',
+            hoofTrack: 'ear_right.terminal',
+            trackedJointIndex: null,
+            sourceBoneChain: ['c_ear_01.r', 'c_ear_02.r'],
+            sourceAnchorIds: ['c_ear_01.r:56', 'c_ear_02.r:60'],
+            terminalBone: 'c_ear_02.r',
+        },
+    };
+    const source = canonicalObservations();
+    const add = (id, anchorId, x, y, confidence = 0.95) => source.tracks.push({
+        id,
+        anchor_id: anchorId,
+        query_frame: 0,
+        points: Array.from({ length: source.frame_count }, (_, frame) => ({
+            frame, x, y, visible: true, confidence,
+        })),
+    });
+    add('body', 'body.x:1', 20, 0);
+    add('head_primary', 'head.x:5', 21, 0);
+    add('head_unused_orientation', 'head.x:189', 21.2, 0);
+    add('left_ear_base', 'c_ear_01.l:4', 21, 1);
+    add('left_ear_tip', 'c_ear_02.l:8', 21, 2);
+    add('left_ear_unused_orientation', 'c_ear_02.l:7', 21.2, 2);
+    add('right_ear_base', 'c_ear_01.r:56', 22, 1, 0.55);
+    add('right_ear_tip', 'c_ear_02.r:60', 22, 2, 0.55);
+    const prepared = prepareRgbObservationsForBrowser({
+        observations: source,
+        skeleton: rig,
+        cameraContract: cameraContract(),
+        minimumVisibleConfidence: 0.7,
+        minimumVisibleConfidenceByChain: { ear_right: 0.5 },
+    });
+    const bridge = prepared.provenance.browser_rgb_bridge;
+    assert.equal(prepared.tracks.filter((item) => item.id === 'head_primary').length, 2);
+    assert.deepEqual(
+        bridge.mappings.filter((item) => item.sourceAnchorId === 'head.x:5')
+            .map((item) => item.semanticAnchorId),
+        ['body_neck_head.terminal', 'head_left_ear.proximal'],
+    );
+    assert.ok(prepared.tracks.find((item) => item.id === 'right_ear_tip').points.every((point) => point.visible));
+    assert.deepEqual(bridge.confidenceFilter.minimumVisibleConfidenceByChain, { ear_right: 0.5 });
+    assert.ok(bridge.selection.unusedSourceTracks.some((item) => item.anchorId === 'head.x:189'));
+    assert.ok(bridge.selection.unusedSourceTracks.some((item) => item.anchorId === 'c_ear_02.l:7'));
+
+    const undeclared = structuredClone(rig);
+    delete undeclared.auxiliaryChains.head_left_ear.branchConnector;
+    assert.throws(() => prepareRgbObservationsForBrowser({
+        observations: source,
+        skeleton: undeclared,
+        cameraContract: cameraContract(),
+    }), /RGB anchor head\.x:5 is assigned to more than one semantic track/);
+});
+
 test('frame IDs must be a complete zero-based sequence for every RGB track', () => {
     const missing = canonicalObservations();
     missing.tracks[0].points.pop();

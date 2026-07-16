@@ -228,13 +228,19 @@ function normalizeSkeleton(value) {
     if (!value.limbs || typeof value.limbs !== 'object' || Array.isArray(value.limbs)) {
         throw new Error('skeleton.limbs must be an object');
     }
+    if (value.auxiliaryChains != null && (
+        typeof value.auxiliaryChains !== 'object' || Array.isArray(value.auxiliaryChains)
+    )) {
+        throw new Error('skeleton.auxiliaryChains must be an object');
+    }
     const usedBones = new Set();
-    const limbs = {};
-    Object.entries(value.limbs).forEach(([label, limbValue]) => {
+    const normalizeChains = (chainValues, collection) => {
+        const result = {};
+        Object.entries(chainValues || {}).forEach(([label, limbValue]) => {
         if (!limbValue || typeof limbValue !== 'object') throw new Error(`limb ${label} must be an object`);
         const joints = limbValue.joints;
-        if (!Array.isArray(joints) || joints.length < 2) {
-            throw new Error(`limb ${label} must contain at least two joints`);
+        if (!Array.isArray(joints) || joints.length < 1) {
+            throw new Error(`limb ${label} must contain at least one joint`);
         }
         const normalizedJoints = joints.map((joint, index) => {
             const bone = joint?.bone;
@@ -298,34 +304,80 @@ function normalizeSkeleton(value) {
                 throw new Error(`limb ${label}.${field} must be a non-empty string`);
             }
         });
-        const trackedJointIndex = clamp(
-            Math.trunc(finite(limbValue.trackedJointIndex ?? 1, `limb ${label}.trackedJointIndex`)),
-            1,
-            normalizedJoints.length - 1,
-        );
+        let trackedJointIndex = null;
+        if (normalizedJoints.length > 1) {
+            trackedJointIndex = clamp(
+                Math.trunc(finite(limbValue.trackedJointIndex ?? 1, `limb ${label}.trackedJointIndex`)),
+                1,
+                normalizedJoints.length - 1,
+            );
+        } else if (limbValue.trackedJointIndex != null) {
+            throw new Error(`one-joint chain ${label} must use a null trackedJointIndex`);
+        }
         const orderedHeadTracks = Array.from(
             { length: normalizedJoints.length + 1 },
             (_, headIndex) => {
                 if (headIndex === 0) return proximalTrack;
-                if (headIndex === trackedJointIndex) return jointTrack;
                 if (headIndex === normalizedJoints.length) return hoofTrack;
+                if (headIndex === trackedJointIndex) return jointTrack;
                 return `${label}.deformHead.${headIndex}`;
             },
         );
         if (new Set(orderedHeadTracks).size !== orderedHeadTracks.length) {
             throw new Error(`limb ${label} semantic head tracks must be unique`);
         }
-        limbs[label] = {
+        let sourceBoneChain = null;
+        if (limbValue.sourceBoneChain != null) {
+            if (!Array.isArray(limbValue.sourceBoneChain)
+                || limbValue.sourceBoneChain.length !== normalizedJoints.length + 1) {
+                throw new Error(`limb ${label}.sourceBoneChain must contain every ordered head`);
+            }
+            sourceBoneChain = limbValue.sourceBoneChain.map((bone, index) => {
+                if (typeof bone !== 'string' || !bone) {
+                    throw new Error(`limb ${label}.sourceBoneChain[${index}] must be a non-empty string`);
+                }
+                if (index < normalizedJoints.length && bone !== normalizedJoints[index].bone) {
+                    throw new Error(`limb ${label}.sourceBoneChain does not match its joints`);
+                }
+                return bone;
+            });
+        }
+        result[label] = {
             label,
+            collection,
             joints: normalizedJoints,
             proximalTrack,
             jointTrack,
             hoofTrack,
             trackedJointIndex,
             orderedHeadTracks,
+            sourceBoneChain,
+            branchConnector: limbValue.branchConnector == null
+                ? null
+                : { ...limbValue.branchConnector },
         };
-    });
+        });
+        return result;
+    };
+    const limbs = normalizeChains(value.limbs, 'limbs');
+    const auxiliaryChains = normalizeChains(value.auxiliaryChains || {}, 'auxiliaryChains');
     if (!Object.keys(limbs).length) throw new Error('skeleton.limbs must not be empty');
+    const duplicateLabels = Object.keys(auxiliaryChains).filter((label) => label in limbs);
+    if (duplicateLabels.length) throw new Error(`skeleton chain label is duplicated: ${duplicateLabels[0]}`);
+    Object.entries(auxiliaryChains).forEach(([label, chain]) => {
+        const connector = chain.branchConnector;
+        if (!connector) return;
+        const source = auxiliaryChains[connector.fromChain];
+        const exactHeadEarBranch = label === 'head_left_ear'
+            && connector.schema === 'autorig-browser-fitting-branch-connector.v1'
+            && connector.bone === 'head.x'
+            && connector.fromChain === 'body_neck_head'
+            && connector.fromHeadIndex === 8
+            && connector.toHeadIndex === 0
+            && chain.sourceBoneChain?.[0] === connector.bone
+            && source?.sourceBoneChain?.[connector.fromHeadIndex] === connector.bone;
+        if (!exactHeadEarBranch) throw new Error(`unsupported skeleton branch connector on ${label}`);
+    });
 
     let root = null;
     if (value.root) {
@@ -338,7 +390,7 @@ function normalizeSkeleton(value) {
             motionScale: finite(value.root.motionScale ?? 0, 'skeleton.root.motionScale'),
         };
     }
-    return { limbs, root };
+    return { limbs, auxiliaryChains, root };
 }
 
 function pointFor(points, frame, fallback) {
@@ -456,6 +508,15 @@ function solveFabrik(root, target, lengths, initial, options) {
 }
 
 function orderedHeadObservationMode(observations, limb) {
+    if (limb.collection === 'auxiliaryChains') {
+        const missing = limb.orderedHeadTracks.filter((trackId) => !observations.tracks.has(trackId));
+        if (missing.length) {
+            throw new Error(
+                `observations are missing ordered deform-head tracks for auxiliary chain ${limb.label}; missing ${missing.join(', ')}`,
+            );
+        }
+        return true;
+    }
     const legacyIds = new Set([limb.proximalTrack, limb.jointTrack, limb.hoofTrack]);
     const extraIds = limb.orderedHeadTracks.filter((trackId) => !legacyIds.has(trackId));
     const presentExtra = extraIds.filter((trackId) => observations.tracks.has(trackId));
@@ -683,7 +744,12 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
     const smoothingRadius = Math.max(0, Math.trunc(finite(options.smoothingRadius ?? 1, 'options.smoothingRadius')));
     const loop = options.loop !== false;
     const loopBlendFrames = Math.max(1, Math.trunc(finite(options.loopBlendFrames ?? 4, 'options.loopBlendFrames')));
-    const labels = Object.keys(skeleton.limbs);
+    const locomotionLabels = Object.keys(skeleton.limbs);
+    const chainEntries = [
+        ...Object.entries(skeleton.limbs),
+        ...Object.entries(skeleton.auxiliaryChains),
+    ];
+    const labels = chainEntries.map(([label]) => label);
     const frameRoots = Array.from({ length: observations.frameCount }, () => ({}));
     const restRoots = {};
     const solved = {};
@@ -692,27 +758,39 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
     let targetSamples = 0;
     let orderedHeadLimbCount = 0;
 
-    labels.forEach((label) => {
-        const limb = skeleton.limbs[label];
+    chainEntries.forEach(([label, limb]) => {
         const proximalPoints = observations.tracks.get(limb.proximalTrack);
-        const jointPoints = observations.tracks.get(limb.jointTrack);
+        const jointPoints = limb.trackedJointIndex == null
+            ? null
+            : observations.tracks.get(limb.jointTrack);
         const hoofPoints = observations.tracks.get(limb.hoofTrack);
-        if (!proximalPoints || !jointPoints || !hoofPoints) {
+        if (!proximalPoints || !hoofPoints || (limb.trackedJointIndex != null && !jointPoints)) {
             throw new Error(`observations are missing semantic tracks for limb ${label}`);
         }
         const useOrderedHeads = orderedHeadObservationMode(observations, limb);
         if (useOrderedHeads) orderedHeadLimbCount += 1;
         const rest = initialRestPoints(limb);
-        const pins = contactPins(observations, limb, loop);
+        const pins = limb.collection === 'limbs'
+            ? contactPins(observations, limb, loop)
+            : new Map();
         const rawAngles = [];
         const rawRoots = [];
         const rawHeadTargets = [];
         let previous = rest;
         for (let frame = 0; frame < observations.frameCount; frame += 1) {
-            const root = pointFor(proximalPoints, frame, previous[0]);
+            const connector = limb.branchConnector;
+            const sourceSolve = connector ? solved[connector.fromChain] : null;
+            if (connector && !sourceSolve) {
+                throw new Error(`branch source chain ${connector.fromChain} must be solved before ${label}`);
+            }
+            const root = connector
+                ? [...sourceSolve.points[frame][connector.fromHeadIndex]]
+                : pointFor(proximalPoints, frame, previous[0]);
             const observedHoof = pointFor(hoofPoints, frame, previous.at(-1));
             const target = pins.get(frame) ?? observedHoof;
-            const observedJoint = pointFor(jointPoints, frame, previous[limb.trackedJointIndex]);
+            const observedJoint = limb.trackedJointIndex == null
+                ? null
+                : pointFor(jointPoints, frame, previous[limb.trackedJointIndex]);
             const translatedRest = rest.map((point) => add2(point, sub2(root, rest[0])));
             const initial = previous.map((point) => add2(point, sub2(root, previous[0])));
             const baseline = frame ? initial : translatedRest;
@@ -744,14 +822,16 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
             rawAngles.push(angles);
             rawRoots.push(root);
             rawHeadTargets.push(headTargets);
-            frameRoots[frame][label] = root;
+            if (limb.collection === 'limbs') frameRoots[frame][label] = root;
             previous = points;
         }
         let angles = smoothAngles(rawAngles, smoothingRadius)
             .map((frame) => clampLocalDeltas(frame, limb));
         if (loop) angles = closeLoopAngles(angles, loopBlendFrames)
             .map((frame) => clampLocalDeltas(frame, limb));
-        const roots = loop ? closeLoopVectors(rawRoots, loopBlendFrames) : rawRoots;
+        const roots = limb.branchConnector
+            ? rawRoots
+            : (loop ? closeLoopVectors(rawRoots, loopBlendFrames) : rawRoots);
         pins.forEach((pin, frame) => {
             const current = localDeltasToPoints(roots[frame], angles[frame], limb);
             if (useOrderedHeads) {
@@ -795,7 +875,7 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
         solved[label] = { limb, angles, roots, points, pins, useOrderedHeads, rawHeadTargets };
     });
 
-    let displacements = averageRoots(frameRoots, labels, Object.fromEntries(labels.map((label) => [
+    let displacements = averageRoots(frameRoots, locomotionLabels, Object.fromEntries(locomotionLabels.map((label) => [
         label,
         skeleton.limbs[label].joints[0].restStart,
     ])));
@@ -806,7 +886,7 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
     const times = Array.from({ length: observations.frameCount }, (_, frame) => frame / observations.fps);
     const tracks = [];
     const positionTracks = [];
-    labels.forEach((label) => {
+    chainEntries.forEach(([label]) => {
         const { limb, angles, points } = solved[label];
         limb.joints.forEach((joint, jointIndex) => {
             const values = [];
@@ -860,8 +940,12 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
     let maximumSlide = 0;
     let loopEndpointError = 0;
     let maximumTargetError = 0;
-    const debugFrames = Array.from({ length: observations.frameCount }, (_, frame) => ({ frame, limbs: {} }));
-    labels.forEach((label) => {
+    const debugFrames = Array.from({ length: observations.frameCount }, (_, frame) => ({
+        frame,
+        limbs: {},
+        ...(Object.keys(skeleton.auxiliaryChains).length ? { auxiliaryChains: {} } : {}),
+    }));
+    chainEntries.forEach(([label, chain]) => {
         const { limb, angles, points, pins, useOrderedHeads, rawHeadTargets } = solved[label];
         const hoofPoints = observations.tracks.get(limb.hoofTrack);
         points.forEach((framePoints, frame) => {
@@ -883,7 +967,9 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
                     Math.max(limb.joints[index].minimum - angles[frame][index], 0),
                     Math.max(angles[frame][index] - limb.joints[index].maximum, 0));
             });
-            debugFrames[frame].limbs[label] = { points: framePoints.map((point) => [...point]) };
+            debugFrames[frame][chain.collection][label] = {
+                points: framePoints.map((point) => [...point]),
+            };
         });
         maximumSlide = Math.max(maximumSlide, maximumContactSlide(points, pins));
         if (loop) {
