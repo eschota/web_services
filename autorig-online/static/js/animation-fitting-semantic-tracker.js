@@ -454,4 +454,307 @@ export function assessHorseWalkGait(observations, options = {}) {
     };
 }
 
+const HORSE_TROT_DIAGONAL_PAIRS = Object.freeze([
+    Object.freeze({
+        id: 'left_fore_right_hind',
+        feet: Object.freeze(['fore_left', 'hind_right']),
+    }),
+    Object.freeze({
+        id: 'right_fore_left_hind',
+        feet: Object.freeze(['fore_right', 'hind_left']),
+    }),
+]);
+
+function binaryDice(first, second) {
+    let firstCount = 0;
+    let secondCount = 0;
+    let intersection = 0;
+    first.forEach((value, frame) => {
+        if (value) firstCount += 1;
+        if (second[frame]) secondCount += 1;
+        if (value && second[frame]) intersection += 1;
+    });
+    return firstCount + secondCount ? (2 * intersection) / (firstCount + secondCount) : 0;
+}
+
+function correlation(first, second, shift = 0) {
+    const count = first.length;
+    const firstMean = first.reduce((sum, value) => sum + value, 0) / count;
+    const secondMean = second.reduce((sum, value) => sum + value, 0) / count;
+    let covariance = 0;
+    let firstVariance = 0;
+    let secondVariance = 0;
+    first.forEach((value, frame) => {
+        const firstDelta = value - firstMean;
+        const secondDelta = second[(frame + shift + count) % count] - secondMean;
+        covariance += firstDelta * secondDelta;
+        firstVariance += firstDelta * firstDelta;
+        secondVariance += secondDelta * secondDelta;
+    });
+    const denominator = Math.sqrt(firstVariance * secondVariance);
+    return denominator > 1e-12 ? covariance / denominator : 0;
+}
+
+function circularGap(first, second, frameCount) {
+    return ((second - first) % frameCount + frameCount) % frameCount;
+}
+
+/**
+ * Release gate for a controller-friendly diagonal-pair Horse trot.
+ *
+ * This is deliberately separate from assessHorseWalkGait: a trot requires
+ * LF+RH and RF+LH to swing/contact as two diagonal pairs, permits a short
+ * suspension phase, and requires the two pair events to alternate.  It never
+ * relaxes the four-beat WALK contract or reinterprets a lateral/bound gait as
+ * a trot.
+ */
+export function assessHorseTrotGait(observations, options = {}) {
+    if (!observations || observations.schema !== OBSERVATION_SCHEMA) {
+        throw new Error(`observations.schema must be ${OBSERVATION_SCHEMA}`);
+    }
+    const sourceFrameCount = Number(observations.frame_count);
+    if (!Number.isInteger(sourceFrameCount) || sourceFrameCount < 8) {
+        throw new Error('Horse trot gait QA requires at least eight frames');
+    }
+    const loopEndpointDuplicated = options.loopEndpointDuplicated === true;
+    const frameCount = sourceFrameCount - (loopEndpointDuplicated ? 1 : 0);
+    if (frameCount < 8) throw new Error('Horse trot gait QA requires at least eight unique frames');
+    const minimumVisibleFraction = clamp(finiteNumber(
+        options.minimumVisibleFraction ?? 0.95,
+        'minimumVisibleFraction',
+    ), 0, 1);
+    const minimumLiftPx = Math.max(0, finiteNumber(options.minimumLiftPx ?? 3, 'minimumLiftPx'));
+    const relativeSwingThreshold = clamp(finiteNumber(
+        options.relativeSwingThreshold ?? 0.3,
+        'relativeSwingThreshold',
+    ), 0.05, 0.8);
+    const relativeContactThreshold = clamp(finiteNumber(
+        options.relativeContactThreshold ?? 0.12,
+        'relativeContactThreshold',
+    ), 0, relativeSwingThreshold);
+    const minimumContactHeightPx = Math.max(0, finiteNumber(
+        options.minimumContactHeightPx ?? 1.5,
+        'minimumContactHeightPx',
+    ));
+    const minimumSwingFrames = Math.max(1, Math.trunc(finiteNumber(
+        options.minimumSwingFrames ?? 2,
+        'minimumSwingFrames',
+    )));
+    const maximumSwingIntervals = Math.max(1, Math.trunc(finiteNumber(
+        options.maximumSwingIntervals ?? 3,
+        'maximumSwingIntervals',
+    )));
+    const minimumDiagonalSwingDice = clamp(finiteNumber(
+        options.minimumDiagonalSwingDice ?? 0.55,
+        'minimumDiagonalSwingDice',
+    ), 0, 1);
+    const minimumDiagonalContactDice = clamp(finiteNumber(
+        options.minimumDiagonalContactDice ?? 0.7,
+        'minimumDiagonalContactDice',
+    ), 0, 1);
+    const minimumDiagonalLiftCorrelation = clamp(finiteNumber(
+        options.minimumDiagonalLiftCorrelation ?? 0.45,
+        'minimumDiagonalLiftCorrelation',
+    ), -1, 1);
+    const maximumDiagonalLagPhase = clamp(finiteNumber(
+        options.maximumDiagonalLagPhase ?? 0.1,
+        'maximumDiagonalLagPhase',
+    ), 0, 0.25);
+    const maximumSuspensionFraction = clamp(finiteNumber(
+        options.maximumSuspensionFraction ?? 0.15,
+        'maximumSuspensionFraction',
+    ), 0, 1);
+    const minimumEventSpacingFactor = clamp(finiteNumber(
+        options.minimumEventSpacingFactor ?? 0.5,
+        'minimumEventSpacingFactor',
+    ), 0, 1);
+    const maximumEventSpacingFactor = Math.max(1, finiteNumber(
+        options.maximumEventSpacingFactor ?? 1.5,
+        'maximumEventSpacingFactor',
+    ));
+
+    const footOrder = ['fore_left', 'hind_right', 'fore_right', 'hind_left'];
+    const trackByAnchor = new Map((observations.tracks || []).map((track) => [track.anchor_id, track]));
+    const limbs = {};
+    footOrder.forEach((label) => {
+        const track = trackByAnchor.get(`${label}.hoof`);
+        if (!track || !Array.isArray(track.points)) {
+            throw new Error(`Horse trot gait QA is missing ${label}.hoof`);
+        }
+        const points = Array.from({ length: frameCount }, (_, frame) => {
+            const point = track.points.find((item) => Number(item?.frame) === frame) || track.points[frame];
+            return point?.visible ? point : null;
+        });
+        const visible = points.filter(Boolean);
+        const visibleFraction = visible.length / frameCount;
+        const groundY = visible.length ? quantile(visible.map((point) => Number(point.y)), 0.9) : 0;
+        const liftPx = points.map((point) => point ? Math.max(0, groundY - Number(point.y)) : 0);
+        const maximumLiftPx = Math.max(...liftPx);
+        const swingThresholdPx = Math.max(minimumLiftPx, maximumLiftPx * relativeSwingThreshold);
+        const contactThresholdPx = Math.max(minimumContactHeightPx, maximumLiftPx * relativeContactThreshold);
+        const rawSwingMask = liftPx.map((lift, frame) => Boolean(points[frame] && lift >= swingThresholdPx));
+        const swingRuns = cyclicRuns(rawSwingMask).filter((run) => run.length >= minimumSwingFrames);
+        const acceptedSwingFrames = new Set(swingRuns.flat());
+        const swingMask = rawSwingMask.map((_value, frame) => acceptedSwingFrames.has(frame));
+        const contactMask = liftPx.map((lift, frame) => Boolean(points[frame] && lift <= contactThresholdPx));
+        limbs[label] = {
+            visibleFraction,
+            groundY,
+            maximumLiftPx,
+            swingThresholdPx,
+            contactThresholdPx,
+            swingFrames: swingMask.flatMap((value, frame) => value ? [frame] : []),
+            contactFrames: contactMask.flatMap((value, frame) => value ? [frame] : []),
+            swingIntervals: swingRuns.map((run) => [...run]),
+            swingCenterPhases: swingRuns.map((run) => circularCenter(run, frameCount)),
+            accepted: visibleFraction >= minimumVisibleFraction
+                && maximumLiftPx >= minimumLiftPx
+                && swingRuns.length >= 1
+                && swingRuns.length <= maximumSwingIntervals,
+            liftPx,
+            swingMask,
+            contactMask,
+        };
+    });
+
+    const pairs = {};
+    HORSE_TROT_DIAGONAL_PAIRS.forEach(({ id, feet }) => {
+        const [first, second] = feet;
+        const firstLimb = limbs[first];
+        const secondLimb = limbs[second];
+        const correlations = Array.from({ length: frameCount }, (_, shift) => (
+            correlation(firstLimb.liftPx, secondLimb.liftPx, shift)
+        ));
+        const bestCorrelation = Math.max(...correlations);
+        const bestShift = correlations.indexOf(bestCorrelation);
+        const signedBestShift = bestShift > frameCount / 2 ? bestShift - frameCount : bestShift;
+        const consensusSwingMask = firstLimb.swingMask.map((value, frame) => value && secondLimb.swingMask[frame]);
+        const consensusSwingRuns = cyclicRuns(consensusSwingMask).filter((run) => run.length >= minimumSwingFrames);
+        const swingDice = binaryDice(firstLimb.swingMask, secondLimb.swingMask);
+        const contactDice = binaryDice(firstLimb.contactMask, secondLimb.contactMask);
+        const zeroLagCorrelation = correlations[0];
+        const lagPhase = Math.abs(signedBestShift) / frameCount;
+        const accepted = firstLimb.accepted
+            && secondLimb.accepted
+            && swingDice >= minimumDiagonalSwingDice
+            && contactDice >= minimumDiagonalContactDice
+            && zeroLagCorrelation >= minimumDiagonalLiftCorrelation
+            && lagPhase <= maximumDiagonalLagPhase
+            && consensusSwingRuns.length >= 1
+            && consensusSwingRuns.length <= maximumSwingIntervals;
+        pairs[id] = {
+            feet: [...feet],
+            swingDice,
+            contactDice,
+            zeroLagLiftCorrelation: zeroLagCorrelation,
+            bestLiftCorrelation: bestCorrelation,
+            bestLagFrames: signedBestShift,
+            bestLagPhase: lagPhase,
+            swingIntervals: consensusSwingRuns.map((run) => [...run]),
+            swingCenterPhases: consensusSwingRuns.map((run) => circularCenter(run, frameCount)),
+            accepted,
+        };
+    });
+
+    const events = Object.entries(pairs).flatMap(([pair, detail]) => (
+        detail.swingCenterPhases.map((phase) => ({ pair, phase, frame: phase * frameCount }))
+    )).sort((first, second) => first.phase - second.phase);
+    const expectedEventGap = events.length ? frameCount / events.length : frameCount;
+    const eventGaps = events.map((event, index) => {
+        const next = events[(index + 1) % events.length];
+        const frames = circularGap(event.frame, next.frame, frameCount);
+        return {
+            from: event.pair,
+            to: next.pair,
+            frames,
+            factorOfExpected: frames / expectedEventGap,
+        };
+    });
+    const eventCounts = Object.fromEntries(Object.keys(pairs).map((id) => [
+        id,
+        events.filter((event) => event.pair === id).length,
+    ]));
+    const alternating = events.length >= 2
+        && new Set(Object.values(eventCounts)).size === 1
+        && events.every((event, index) => event.pair !== events[(index + 1) % events.length].pair);
+    const eventSpacingAccepted = events.length >= 2 && eventGaps.every((gap) => (
+        gap.factorOfExpected >= minimumEventSpacingFactor
+        && gap.factorOfExpected <= maximumEventSpacingFactor
+    ));
+    const allSwingFrames = Array.from({ length: frameCount }, (_, frame) => (
+        footOrder.every((foot) => limbs[foot].swingMask[frame]) ? frame : null
+    )).filter((frame) => frame != null);
+    const suspensionFraction = allSwingFrames.length / frameCount;
+    const failures = [];
+    footOrder.forEach((foot) => {
+        if (!limbs[foot].accepted) failures.push(`${foot}:invalid_swing_evidence`);
+    });
+    Object.entries(pairs).forEach(([pair, detail]) => {
+        if (detail.swingDice < minimumDiagonalSwingDice) failures.push(`${pair}:diagonal_swing_mismatch`);
+        if (detail.contactDice < minimumDiagonalContactDice) failures.push(`${pair}:diagonal_contact_mismatch`);
+        if (detail.zeroLagLiftCorrelation < minimumDiagonalLiftCorrelation) failures.push(`${pair}:diagonal_lift_correlation`);
+        if (detail.bestLagPhase > maximumDiagonalLagPhase) failures.push(`${pair}:diagonal_phase_lag`);
+        if (!detail.swingIntervals.length) failures.push(`${pair}:no_diagonal_swing_event`);
+    });
+    if (!alternating) failures.push('trot_diagonal_events_do_not_alternate');
+    if (!eventSpacingAccepted) failures.push('trot_diagonal_event_spacing');
+    if (suspensionFraction > maximumSuspensionFraction) failures.push('trot_excess_suspension');
+
+    const uniqueFailures = [...new Set(failures)];
+    const publicLimbs = Object.fromEntries(Object.entries(limbs).map(([foot, detail]) => [foot, {
+        visibleFraction: detail.visibleFraction,
+        groundY: detail.groundY,
+        maximumLiftPx: detail.maximumLiftPx,
+        swingThresholdPx: detail.swingThresholdPx,
+        contactThresholdPx: detail.contactThresholdPx,
+        swingFrames: detail.swingFrames,
+        contactFrames: detail.contactFrames,
+        swingIntervals: detail.swingIntervals,
+        swingCenterPhases: detail.swingCenterPhases,
+        accepted: detail.accepted,
+    }]));
+    return {
+        schema: 'autorig-horse-trot-contact-gait-qa.v1',
+        profile: {
+            id: 'horse.diagonal_pair_trot.v1',
+            gait: 'diagonal_pair_trot',
+            diagonalPairs: HORSE_TROT_DIAGONAL_PAIRS.map(({ id, feet }) => ({ id, feet: [...feet] })),
+            distinctFromWalkProfile: true,
+        },
+        accepted: uniqueFailures.length === 0,
+        status: uniqueFailures.length ? 'FAIL' : 'PASS',
+        sourceFrameCount,
+        uniqueFrameCount: frameCount,
+        loopEndpointDuplicated,
+        limbs: publicLimbs,
+        pairs,
+        events,
+        eventGaps,
+        alternating,
+        eventSpacingAccepted,
+        suspension: {
+            frames: allSwingFrames,
+            fraction: suspensionFraction,
+            accepted: suspensionFraction <= maximumSuspensionFraction,
+        },
+        failures: uniqueFailures,
+        gates: {
+            minimumVisibleFraction,
+            minimumLiftPx,
+            relativeSwingThreshold,
+            relativeContactThreshold,
+            minimumContactHeightPx,
+            minimumSwingFrames,
+            maximumSwingIntervals,
+            minimumDiagonalSwingDice,
+            minimumDiagonalContactDice,
+            minimumDiagonalLiftCorrelation,
+            maximumDiagonalLagPhase,
+            maximumSuspensionFraction,
+            minimumEventSpacingFactor,
+            maximumEventSpacingFactor,
+        },
+    };
+}
+
 export const SEMANTIC_LIMB_LABELS = DEFAULT_LIMB_LABELS;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    assessHorseTrotGait,
     assessHorseWalkGait,
     buildSemanticObservations,
     extractSemanticFrame,
@@ -227,4 +228,69 @@ test('Horse gait gate rejects incomplete hoof visibility', () => {
     }, { missingLabel: 'hind_right' }));
     assert.equal(qa.accepted, false);
     assert.ok(qa.limbs.hind_right.visibleFraction < qa.gates.minimumVisibleFraction);
+});
+
+test('Horse trot gate accepts only alternating diagonal LF+RH and RF+LH pairs', () => {
+    const qa = assessHorseTrotGait(gaitObservations({
+        fore_left: 4,
+        hind_right: 4,
+        fore_right: 28,
+        hind_left: 28,
+    }));
+    assert.equal(qa.status, 'PASS');
+    assert.equal(qa.accepted, true);
+    assert.equal(qa.profile.id, 'horse.diagonal_pair_trot.v1');
+    assert.equal(qa.profile.distinctFromWalkProfile, true);
+    assert.deepEqual(qa.profile.diagonalPairs.map((pair) => pair.feet), [
+        ['fore_left', 'hind_right'],
+        ['fore_right', 'hind_left'],
+    ]);
+    assert.equal(qa.alternating, true);
+    assert.ok(Object.values(qa.pairs).every((pair) => pair.accepted));
+    assert.ok(Object.values(qa.pairs).every((pair) => pair.swingDice === 1));
+});
+
+test('Horse trot gate rejects lateral pace and does not weaken the WALK gate', () => {
+    const pace = gaitObservations({
+        fore_left: 4,
+        hind_left: 4,
+        fore_right: 28,
+        hind_right: 28,
+    });
+    const trotQa = assessHorseTrotGait(pace);
+    assert.equal(trotQa.status, 'FAIL');
+    assert.equal(trotQa.accepted, false);
+    assert.ok(trotQa.failures.some((failure) => failure.endsWith(':diagonal_swing_mismatch')));
+
+    const walkQa = assessHorseWalkGait(pace, { maximumSimultaneousSwingFrames: 0 });
+    assert.equal(walkQa.accepted, false);
+    assert.equal(walkQa.overlapAccepted, false);
+});
+
+test('Horse trot gate rejects a four-hoof bound despite internally synchronized diagonals', () => {
+    const qa = assessHorseTrotGait(gaitObservations({
+        fore_left: 8,
+        hind_right: 8,
+        fore_right: 8,
+        hind_left: 8,
+    }));
+    assert.equal(qa.status, 'FAIL');
+    assert.ok(qa.failures.includes('trot_diagonal_event_spacing'));
+});
+
+test('Horse trot gate handles a duplicated start/end frame explicitly', () => {
+    const source = gaitObservations({
+        fore_left: 4,
+        hind_right: 4,
+        fore_right: 28,
+        hind_left: 28,
+    });
+    source.frame_count = 49;
+    source.tracks.forEach((track) => {
+        track.points.push({ ...track.points[0], frame: 48 });
+    });
+    const qa = assessHorseTrotGait(source, { loopEndpointDuplicated: true });
+    assert.equal(qa.status, 'PASS');
+    assert.equal(qa.sourceFrameCount, 49);
+    assert.equal(qa.uniqueFrameCount, 48);
 });
