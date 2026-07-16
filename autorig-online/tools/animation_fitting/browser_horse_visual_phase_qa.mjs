@@ -25,6 +25,14 @@ export const HORSE_VISUAL_PHASE_THRESHOLDS = Object.freeze({
     zeroWeightVertices: 0,
     coincidentRestSeparationM: 0.04,
 });
+export const HORSE_ONE_SHOT_FINAL_POSE_THRESHOLDS = Object.freeze({
+    windowFrames: 3,
+    maximumP99AdjacentDisplacementModelDiagonal: 0.03,
+    maximumMedianAdjacentDisplacementModelDiagonal: 0.01,
+    minimumCentroidDropModelHeight: 0.15,
+    groundContactToleranceModelHeight: 0.05,
+    maximumGroundPenetrationModelHeight: 0.10,
+});
 
 const IMMUTABLE_SCHEMA = 'autorig-fitting-immutable-copy.v1';
 const BUNDLE_SCHEMA = 'autorig-actionless-fitting-bundle.v1';
@@ -132,7 +140,7 @@ function vector3(value, field) {
     return value.map((entry, index) => finite(entry, `${field}[${index}]`));
 }
 
-function validateThreeClip(clip, clipPin, boneNames) {
+function validateThreeClip(clip, clipPin, boneNames, { loop = true } = {}) {
     const name = string(clip.name, 'threeClip.name');
     const duration = finite(clip.duration, 'threeClip.duration');
     if (duration <= 0) fail('threeClip.duration must be positive');
@@ -175,7 +183,9 @@ function validateThreeClip(clip, clipPin, boneNames) {
             : Math.hypot(...first.map((entry, component) => entry - last[component]));
         maximumLoopEndpointError = Math.max(maximumLoopEndpointError, endpointError);
     }
-    if (maximumLoopEndpointError > 1e-5) fail(`Three clip loop endpoint error ${maximumLoopEndpointError} exceeds 1e-5`);
+    if (loop && maximumLoopEndpointError > 1e-5) {
+        fail(`Three clip loop endpoint error ${maximumLoopEndpointError} exceeds 1e-5`);
+    }
     return {
         name,
         duration,
@@ -183,6 +193,8 @@ function validateThreeClip(clip, clipPin, boneNames) {
         frameCount: timeline.length,
         fps: (timeline.length - 1) / duration,
         trackCount: clip.tracks.length,
+        loop,
+        temporalMode: loop ? 'loop' : 'one_shot',
         maximumLoopEndpointError,
         durationTimelineTolerance,
         pin: clipPin,
@@ -196,6 +208,7 @@ export function validateHorse2QaInputs({
     expectedImmutableManifestSha256,
     expectedFittingBundleSha256,
     expectedSourceModelSha256,
+    expectedLoop = true,
 }) {
     for (const [value, field] of [
         [expectedImmutableManifestSha256, 'expectedImmutableManifestSha256'],
@@ -317,7 +330,7 @@ export function validateHorse2QaInputs({
         path: clipSnapshot.path,
         bytes: clipSnapshot.bytes,
         sha256: clipSnapshot.sha256,
-    }, boneNames);
+    }, boneNames, { loop: expectedLoop === true });
     const camera = object(fittingBundle.camera, 'fittingBundle.camera');
     if (JSON.stringify(camera.resolution) !== JSON.stringify([WIDTH, HEIGHT])) fail(`Horse_2 camera resolution must be ${WIDTH}x${HEIGHT}`);
     matrixValues(camera.camera_to_world, 'camera.camera_to_world');
@@ -378,7 +391,13 @@ function coincidentRestGroups(restPositions, toleranceM = 1e-6) {
  * Measure every frame of browser-deformed world vertices. Stretch is symmetric
  * (max(current/rest, rest/current)), so both tears and collapses are blocked.
  */
-export function measureHorse2Deformation({ skinWeights, topology, frames, thresholds = HORSE_VISUAL_PHASE_THRESHOLDS }) {
+export function measureHorse2Deformation({
+    skinWeights,
+    topology,
+    frames,
+    thresholds = HORSE_VISUAL_PHASE_THRESHOLDS,
+    requireRootMotionLocked = true,
+}) {
     const vertices = skinWeights?.vertices;
     if (!Array.isArray(vertices) || !vertices.length) fail('skinWeights.vertices must not be empty');
     if (!Array.isArray(frames) || frames.length < 5) fail('deformation frames must contain every fitted frame');
@@ -447,7 +466,7 @@ export function measureHorse2Deformation({ skinWeights, topology, frames, thresh
         zeroWeightVertices: zeroWeightVertices <= integer(thresholds.zeroWeightVertices, 'threshold zeroWeightVertices'),
         coincidentRestSeparation: maximumCoincidentRestSeparationM
             <= finite(thresholds.coincidentRestSeparationM, 'threshold coincidentRestSeparationM'),
-        rootMotionLocked,
+        rootMotionLocked: requireRootMotionLocked ? rootMotionLocked : true,
         cameraStatic,
     };
     return {
@@ -466,10 +485,111 @@ export function measureHorse2Deformation({ skinWeights, topology, frames, thresh
         maximumCoincidentRestSeparationM,
         thresholds: { ...thresholds },
         rootMotionLocked,
+        rootMotionLockRequired: requireRootMotionLocked,
         cameraStatic,
         gates,
         passed: Object.values(gates).every(Boolean),
         frames: perFrame,
+    };
+}
+
+/**
+ * One-shot actions are not looped.  Their terminal contract instead requires a
+ * materially lowered body, real ground contact without deep penetration, and a
+ * settled final three-frame window.  All thresholds scale from the immutable
+ * Horse_2 rest bounds so this gate is resolution- and framerate-independent.
+ */
+export function measureHorseOneShotFinalPose({
+    skinWeights,
+    frames,
+    groundHeight,
+    thresholds = HORSE_ONE_SHOT_FINAL_POSE_THRESHOLDS,
+}) {
+    const rest = skinWeights?.vertices?.map((vertex, index) => vector3(vertex.world, `vertex ${index}.world`));
+    if (!Array.isArray(rest) || !rest.length) fail('skinWeights.vertices must not be empty');
+    if (!Array.isArray(frames) || frames.length < 5) fail('one-shot frames must contain every fitted frame');
+    const windowFrames = integer(thresholds.windowFrames, 'one-shot windowFrames', 2);
+    if (windowFrames > frames.length) fail('one-shot windowFrames exceeds frame count');
+    const axes = [0, 1, 2].map((axis) => rest.map((position) => position[axis]));
+    const minimum = axes.map((values) => Math.min(...values));
+    const maximum = axes.map((values) => Math.max(...values));
+    const modelHeight = maximum[2] - minimum[2];
+    const modelDiagonal = distance3(minimum, maximum);
+    if (!(modelHeight > 1e-9) || !(modelDiagonal > 1e-9)) fail('immutable horse rest bounds are degenerate');
+    const normalized = frames.map((raw, frameIndex) => {
+        const frame = object(raw, `oneShot.frames[${frameIndex}]`);
+        if (frame.frameIndex !== frameIndex || !Array.isArray(frame.positions) || frame.positions.length !== rest.length) {
+            fail(`one-shot frame ${frameIndex} lost chronology or vertex inventory`);
+        }
+        return {
+            frameIndex,
+            positions: frame.positions.map((position, vertexIndex) => vector3(position, `one-shot frame ${frameIndex} vertex ${vertexIndex}`)),
+            cameraStatic: frame.cameraStatic === true,
+        };
+    });
+    const centroidZ = (positions) => positions.reduce((total, position) => total + position[2], 0) / positions.length;
+    const finalWindow = normalized.slice(-windowFrames);
+    const transitions = [];
+    for (let index = 1; index < finalWindow.length; index += 1) {
+        const previous = finalWindow[index - 1];
+        const current = finalWindow[index];
+        const displacements = current.positions.map((position, vertexIndex) => distance3(position, previous.positions[vertexIndex]));
+        transitions.push({
+            fromFrame: previous.frameIndex,
+            toFrame: current.frameIndex,
+            medianDisplacementM: percentileNearestRank(displacements, 0.5),
+            p99DisplacementM: percentileNearestRank(displacements, 0.99),
+            maximumDisplacementM: Math.max(...displacements),
+        });
+    }
+    const finalPositions = normalized.at(-1).positions;
+    const initialCentroidZ = centroidZ(normalized[0].positions);
+    const finalCentroidZ = centroidZ(finalPositions);
+    const centroidDropM = initialCentroidZ - finalCentroidZ;
+    const finalMinimumZ = Math.min(...finalPositions.map((position) => position[2]));
+    const ground = finite(groundHeight, 'groundHeight');
+    const maximumP99AdjacentDisplacementM = Math.max(...transitions.map((row) => row.p99DisplacementM));
+    const maximumMedianAdjacentDisplacementM = Math.max(...transitions.map((row) => row.medianDisplacementM));
+    const resolved = {
+        maximumP99AdjacentDisplacementM: finite(
+            thresholds.maximumP99AdjacentDisplacementModelDiagonal,
+            'maximumP99AdjacentDisplacementModelDiagonal',
+        ) * modelDiagonal,
+        maximumMedianAdjacentDisplacementM: finite(
+            thresholds.maximumMedianAdjacentDisplacementModelDiagonal,
+            'maximumMedianAdjacentDisplacementModelDiagonal',
+        ) * modelDiagonal,
+        minimumCentroidDropM: finite(thresholds.minimumCentroidDropModelHeight, 'minimumCentroidDropModelHeight') * modelHeight,
+        groundContactToleranceM: finite(thresholds.groundContactToleranceModelHeight, 'groundContactToleranceModelHeight') * modelHeight,
+        maximumGroundPenetrationM: finite(thresholds.maximumGroundPenetrationModelHeight, 'maximumGroundPenetrationModelHeight') * modelHeight,
+    };
+    const gates = {
+        finalP99Motion: maximumP99AdjacentDisplacementM <= resolved.maximumP99AdjacentDisplacementM,
+        finalMedianMotion: maximumMedianAdjacentDisplacementM <= resolved.maximumMedianAdjacentDisplacementM,
+        centroidDrop: centroidDropM >= resolved.minimumCentroidDropM,
+        groundContact: finalMinimumZ <= ground + resolved.groundContactToleranceM,
+        groundPenetration: finalMinimumZ >= ground - resolved.maximumGroundPenetrationM,
+        cameraStatic: normalized.every((frame) => frame.cameraStatic),
+    };
+    return {
+        schema: 'autorig.browser-horse-one-shot-final-pose-qa.v1',
+        temporalMode: 'one_shot',
+        frameCount: normalized.length,
+        finalWindowFrames: finalWindow.map((frame) => frame.frameIndex),
+        modelHeightM: modelHeight,
+        modelDiagonalM: modelDiagonal,
+        groundHeightM: ground,
+        initialCentroidZM: initialCentroidZ,
+        finalCentroidZM: finalCentroidZ,
+        centroidDropM,
+        finalMinimumZM: finalMinimumZ,
+        maximumP99AdjacentDisplacementM,
+        maximumMedianAdjacentDisplacementM,
+        transitions,
+        thresholds: { ...thresholds },
+        resolvedThresholds: resolved,
+        gates,
+        passed: Object.values(gates).every(Boolean),
     };
 }
 
@@ -490,6 +610,8 @@ export function buildHorseVisualPhaseEvidence({
     videoPin,
     renderer,
     cameraSettingsPin,
+    finalPoseReport = null,
+    finalPoseReportPin = null,
 }) {
     const semantic = string(semanticId, 'semanticId').trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9_]{0,63}$/.test(semantic)) fail('semanticId is invalid');
@@ -513,7 +635,15 @@ export function buildHorseVisualPhaseEvidence({
     if (!deformationReportPin || !SHA256_RE.test(deformationReportPin.sha256) || deformationReportPin.bytes <= 0) {
         fail('deformation report pin is invalid');
     }
-    const machinePassed = deformationReport.passed === true;
+    const oneShot = validated.clipContract.temporalMode === 'one_shot';
+    if (oneShot && (finalPoseReport?.schema !== 'autorig.browser-horse-one-shot-final-pose-qa.v1'
+        || !finalPoseReportPin || !SHA256_RE.test(finalPoseReportPin.sha256) || finalPoseReportPin.bytes <= 0)) {
+        fail('one-shot evidence requires a pinned final-pose stability report');
+    }
+    if (!oneShot && (finalPoseReport != null || finalPoseReportPin != null)) {
+        fail('loop evidence must not attach a one-shot final-pose report');
+    }
+    const machinePassed = deformationReport.passed === true && (!oneShot || finalPoseReport.passed === true);
     const visualPhaseGate = {
         schema: HORSE_VISUAL_PHASE_QA_SCHEMA,
         version: 1,
@@ -525,7 +655,7 @@ export function buildHorseVisualPhaseEvidence({
             static: true,
             projection: 'perspective',
             view: 'canonical_fitting_bundle',
-            root_motion_locked: true,
+            root_motion_locked: validated.clipContract.loop,
             settings_sha256: cameraSettingsPin.sha256,
         },
         coincident_rest_vertex_separation: {
@@ -552,6 +682,7 @@ export function buildHorseVisualPhaseEvidence({
         visual_phase_gate: visualPhaseGate,
         local_evidence: {
             source_rig_type: 'HORSE_2',
+            temporal_mode: validated.clipContract.temporalMode,
             browser_only: true,
             blender_used: false,
             animation_evaluation: 'Three.AnimationMixer',
@@ -594,7 +725,21 @@ export function buildHorseVisualPhaseEvidence({
                 report: deformationReportPin,
             },
             phase_frames: localFrames,
-            video: { ...videoPin, fixed_camera: true, root_motion_locked: true },
+            one_shot_final_pose_qa: oneShot ? {
+                passed: finalPoseReport.passed === true,
+                final_window_frames: finalPoseReport.finalWindowFrames,
+                maximum_p99_adjacent_displacement_m: finalPoseReport.maximumP99AdjacentDisplacementM,
+                centroid_drop_m: finalPoseReport.centroidDropM,
+                final_minimum_z_m: finalPoseReport.finalMinimumZM,
+                gates: finalPoseReport.gates,
+                report: finalPoseReportPin,
+            } : null,
+            video: {
+                ...videoPin,
+                fixed_camera: true,
+                root_motion_locked: validated.clipContract.loop,
+                root_motion_policy: validated.clipContract.loop ? 'suppress' : 'allow_one_shot',
+            },
             renderer,
             human_review: { decision: null, reviewer_id: null, reviewed_at: null, required: true },
             approvals: {
@@ -604,7 +749,9 @@ export function buildHorseVisualPhaseEvidence({
                 release_ready: false,
                 fail_closed_reason: machinePassed
                     ? 'human_visual_phase_decision_and_public_urls_unset'
-                    : 'machine_target_deformation_qa_failed',
+                    : (deformationReport.passed !== true
+                        ? 'machine_target_deformation_qa_failed'
+                        : 'machine_one_shot_final_pose_qa_failed'),
             },
         },
     };
@@ -677,7 +824,7 @@ try{
   const state=buildModel(),skin=buildSkin(state),camera=buildCamera(),renderer=buildRenderer(),scene=buildScene(state.model);
   const roots=new Set(state.sources.filter((source)=>source.parent==null||/(^|[._])(root|c_pos|c_traj|traj)([._]|$)/i.test(source.name)).map((source)=>source.name));
   const parsed=THREE.AnimationClip.parse(config.threeClip),suppressedRootTracks=[];
-  const tracks=parsed.tracks.filter((track)=>{const match=track.name.match(/^(.*)\.(quaternion|position)$/);if(!match||!state.bones.has(match[1]))throw new Error('unbound track '+track.name);if(roots.has(match[1])||/(^|[._])(root|c_pos)([._]|$)/i.test(match[1])){suppressedRootTracks.push(track.name);return false}return true});
+  const tracks=parsed.tracks.filter((track)=>{const match=track.name.match(/^(.*)\.(quaternion|position)$/);if(!match||!state.bones.has(match[1]))throw new Error('unbound track '+track.name);if(config.suppressRootMotion===true&&(roots.has(match[1])||/(^|[._])(root|c_pos)([._]|$)/i.test(match[1]))){suppressedRootTracks.push(track.name);return false}return true});
   state.model.updateWorldMatrix(true,true);skin.skeleton.update();
   const animatedNonRootBoneNames=[...new Set(tracks.map((track)=>track.name.match(/^(.*)\.(quaternion|position)$/)[1]))].sort();
   const animatedRestHeads=new Map(animatedNonRootBoneNames.map((name)=>[name,state.bones.get(name).getWorldPosition(new THREE.Vector3()).clone()]));
@@ -699,7 +846,7 @@ try{
     const maximumAnimatedBoneHeadDisplacementWorld=animatedNonRootBoneNames.reduce((maximum,name)=>Math.max(maximum,state.bones.get(name).getWorldPosition(new THREE.Vector3()).distanceTo(animatedRestHeads.get(name))),0);
     return {frameIndex,timeSeconds:Number(config.timeline[frameIndex]),positions,rootMotionLocked,cameraStatic,maximumAnimatedBoneHeadDisplacementWorld,width:renderer.domElement.width,height:renderer.domElement.height,dataUrl:renderer.domElement.toDataURL('image/png')};
   };
-  window.__AUTORIG_RESULT__={threeRevision:String(THREE.REVISION),vertexCount:positionAttribute.count,faceCount:config.topology.faces.length,boneCount:state.sources.length,skinBoneCount:skin.skeleton.bones.length,zeroWeightVertices:skin.zeroWeightVertices,maximumHeadReconstructionErrorWorld:state.maximumHeadReconstructionErrorWorld,maximumRestVertexErrorWorld,animatedNonRootBoneNames,suppressedRootTracks,rootBoneNames:[...roots],animationEvaluation:'Three.AnimationMixer',renderer:{webgl2:renderer.capabilities.isWebGL2===true,outputColorSpace:'SRGBColorSpace',toneMapping:'ACESFilmicToneMapping',toneMappingExposure:1.1,shadowsEnabled:false}};
+  window.__AUTORIG_RESULT__={threeRevision:String(THREE.REVISION),vertexCount:positionAttribute.count,faceCount:config.topology.faces.length,boneCount:state.sources.length,skinBoneCount:skin.skeleton.bones.length,zeroWeightVertices:skin.zeroWeightVertices,maximumHeadReconstructionErrorWorld:state.maximumHeadReconstructionErrorWorld,maximumRestVertexErrorWorld,animatedNonRootBoneNames,suppressedRootTracks,rootBoneNames:[...roots],rootMotionPolicy:config.suppressRootMotion===true?'suppress':'allow_one_shot',animationEvaluation:'Three.AnimationMixer',renderer:{webgl2:renderer.capabilities.isWebGL2===true,outputColorSpace:'SRGBColorSpace',toneMapping:'ACESFilmicToneMapping',toneMappingExposure:1.1,shadowsEnabled:false}};
   window.__AUTORIG_READY__=true;
 }catch(error){window.__AUTORIG_ERROR__=String(error?.stack||error);console.error(error)}
 </script></body></html>`;
@@ -822,6 +969,7 @@ export async function renderHorse2QaFramesInBrowser({
         topology: validated.topology,
         threeClip: validated.threeClip,
         timeline: validated.clipContract.timeline,
+        suppressRootMotion: validated.clipContract.loop,
         camera: validated.fittingBundle.camera,
         groundHeight: validated.fittingBundle.ground_plane.height,
     };
@@ -951,6 +1099,7 @@ export async function runHorseVisualPhaseQa(configuration, dependencies = {}) {
         expectedImmutableManifestSha256: config.expectedImmutableManifestSha256,
         expectedFittingBundleSha256: config.expectedFittingBundleSha256,
         expectedSourceModelSha256: config.expectedSourceModelSha256,
+        expectedLoop: config.loop !== false,
     });
     if (!SHA256_RE.test(config.expectedThreeClipSha256)
         || validated.clipContract.pin.sha256 !== config.expectedThreeClipSha256) {
@@ -1006,6 +1155,7 @@ export async function runHorseVisualPhaseQa(configuration, dependencies = {}) {
             frames: rendered.frames.map(({ frameIndex, timeSeconds, positions, rootMotionLocked, cameraStatic }) => ({
                 frameIndex, timeSeconds, positions, rootMotionLocked, cameraStatic,
             })),
+            requireRootMotionLocked: validated.clipContract.loop,
         });
         if (deformation.zeroWeightVertices !== validated.zeroWeightVertices) fail('browser/numeric zero-weight inventories disagree');
         const deformationPath = path.join(staging, 'deformation-report.json');
@@ -1020,6 +1170,30 @@ export async function runHorseVisualPhaseQa(configuration, dependencies = {}) {
         }));
         const finalDeformationPath = path.join(outputDirectory, 'deformation-report.json');
         const deformationPin = { ...pinFile(deformationPath), path: finalDeformationPath };
+        let finalPose = null;
+        let finalPosePin = null;
+        if (!validated.clipContract.loop) {
+            finalPose = measureHorseOneShotFinalPose({
+                skinWeights: validated.skinWeights,
+                frames: rendered.frames.map(({ frameIndex, positions, cameraStatic }) => ({
+                    frameIndex, positions, cameraStatic,
+                })),
+                groundHeight: validated.fittingBundle.ground_plane.height,
+            });
+            const finalPosePath = path.join(staging, 'final-pose-stability-report.json');
+            writeNew(finalPosePath, canonicalJsonBuffer({
+                ...finalPose,
+                inputs: {
+                    fittingBundleSha256: validated.fittingBundlePin.sha256,
+                    threeClipSha256: validated.clipContract.pin.sha256,
+                    skinWeightsSha256: validated.skinWeightsPin.sha256,
+                },
+            }));
+            finalPosePin = {
+                ...pinFile(finalPosePath),
+                path: path.join(outputDirectory, 'final-pose-stability-report.json'),
+            };
+        }
         const videoPath = path.join(staging, 'fixed-camera-preview.mp4');
         const encoder = dependencies.encodeAndValidateMp4 || encodeAndValidateMp4;
         const stagedVideoPin = encoder({
@@ -1045,7 +1219,10 @@ export async function runHorseVisualPhaseQa(configuration, dependencies = {}) {
         const cameraContract = {
             schema: 'autorig.browser-horse-fixed-camera.v1',
             camera: validated.fittingBundle.camera,
-            rootMotionPolicy: 'suppress_armature_root_tracks_and_lock_model_transform',
+            temporalMode: validated.clipContract.temporalMode,
+            rootMotionPolicy: validated.clipContract.loop
+                ? 'suppress_armature_root_tracks_and_lock_model_transform'
+                : 'allow_one_shot_root_tracks_keep_camera_static',
             resolution: [WIDTH, HEIGHT],
             renderer: rendered.runtimeReport?.renderer,
         };
@@ -1069,6 +1246,8 @@ export async function runHorseVisualPhaseQa(configuration, dependencies = {}) {
                 three_module: rendered.threeModulePin,
                 runtime: rendered.runtimeReport,
             },
+            finalPoseReport: finalPose,
+            finalPoseReportPin: finalPosePin,
         });
         const evidencePath = path.join(staging, 'visual-phase-qa.json');
         writeNew(evidencePath, canonicalJsonBuffer(evidence));
@@ -1089,11 +1268,12 @@ export async function runHorseVisualPhaseQa(configuration, dependencies = {}) {
             throw error;
         }
         return {
-            passedMachineQa: deformation.passed,
+            passedMachineQa: deformation.passed && (validated.clipContract.loop || finalPose?.passed === true),
             approvedForAnimationLibrary: false,
             outputDirectory,
             evidencePath: path.join(outputDirectory, 'visual-phase-qa.json'),
             deformationPath: finalDeformationPath,
+            finalPosePath: finalPosePin?.path || null,
             videoPath: videoPin.path,
             evidence,
         };
@@ -1127,6 +1307,7 @@ export function parseHorseVisualPhaseQaArgs(argv) {
         else if (flag === '--ffmpeg') config.ffmpeg = take(index++, flag);
         else if (flag === '--ffprobe') config.ffprobe = take(index++, flag);
         else if (flag === '--output-dir') config.outputDirectory = take(index++, flag);
+        else if (flag === '--one-shot') config.loop = false;
         else fail(`unknown option ${flag}`);
     }
     if (help) return { help: true };
@@ -1146,11 +1327,12 @@ function helpText() {
     --source-model-sha256 SHA256 --three-clip FILE --three-clip-sha256 SHA256 \\
     --semantic-id walk_forward --three-module FILE --three-module-sha256 SHA256 \\
     --three-revision 160 --chrome FILE --ffmpeg FILE --ffprobe FILE \\
-    --output-dir EMPTY_DIR
+    --output-dir EMPTY_DIR [--one-shot]
 
 Reconstructs the immutable 344-vertex Horse_2 mesh in Three.js, evaluates and
-measures every fitted keyframe, locks the canonical camera and root motion, and
-emits pinned start/middle/three_quarter PNGs, MP4, deformation report, and
+measures every fitted keyframe and locks the canonical camera. Loop clips also
+lock root motion; --one-shot clips allow root motion and require a settled,
+grounded final-pose report. The command emits pinned phase PNGs, MP4, reports, and
 autorig.animation-visual-phase-qa.v1 evidence. Bundle/model/clip/Three runtime
 identities must be supplied externally; self-computed trust is rejected.
 Blender is never used. Human

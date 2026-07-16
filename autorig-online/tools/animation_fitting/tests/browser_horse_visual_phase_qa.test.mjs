@@ -10,6 +10,7 @@ import {
     HORSE_VISUAL_PHASE_QA_SCHEMA,
     buildHorseVisualPhaseEvidence,
     measureHorse2Deformation,
+    measureHorseOneShotFinalPose,
     parseHorseVisualPhaseQaArgs,
     renderHorse2QaFramesInBrowser,
     runHorseVisualPhaseQa,
@@ -172,6 +173,14 @@ test('CLI requires pinned local browser inputs and accepts help without values',
     assert.equal(parsed.expectedImmutableManifestSha256, '1'.repeat(64));
     assert.equal(parsed.expectedThreeModuleSha256, 'b'.repeat(64));
     assert.equal(parsed.expectedThreeRevision, '160');
+    assert.equal(parseHorseVisualPhaseQaArgs([
+        '--bundle-dir', 'bundle', '--immutable-manifest-sha256', '1'.repeat(64),
+        '--fitting-bundle-sha256', '2'.repeat(64), '--source-model-sha256', '3'.repeat(64),
+        '--three-clip', 'clip.json', '--three-clip-sha256', 'a'.repeat(64),
+        '--semantic-id', 'death_fall', '--three-module', 'three.js', '--chrome', 'chrome.exe',
+        '--three-module-sha256', 'b'.repeat(64), '--three-revision', '160',
+        '--ffmpeg', 'ffmpeg.exe', '--ffprobe', 'ffprobe.exe', '--output-dir', 'out', '--one-shot',
+    ]).loop, false);
 });
 
 test('immutable Horse_2 and fitted Three clip validation pins every byte', (context) => {
@@ -193,6 +202,21 @@ test('immutable Horse_2 and fitted Three clip validation pins every byte', (cont
     }), /model provenance/);
     fs.appendFileSync(path.join(fixture.bundleDirectory, 'skeleton.json'), 'tamper');
     assert.throws(() => validateHorse2QaInputs(fixture), /does not match its immutable pin/);
+});
+
+test('one-shot validation preserves chronology without requiring loop endpoint closure', (context) => {
+    const fixture = writeBundleFixture();
+    context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+    const clip = JSON.parse(fs.readFileSync(fixture.threeClipPath, 'utf8'));
+    clip.tracks[1].values[clip.tracks[1].values.length - 3] = 0.5;
+    const buffer = jsonBuffer(clip);
+    fs.writeFileSync(fixture.threeClipPath, buffer);
+    const changed = { ...fixture, clipSha256: sha256(buffer) };
+    assert.throws(() => validateHorse2QaInputs(changed), /loop endpoint error/);
+    const validated = validateHorse2QaInputs({ ...changed, expectedLoop: false });
+    assert.equal(validated.clipContract.loop, false);
+    assert.equal(validated.clipContract.temporalMode, 'one_shot');
+    assert.ok(validated.clipContract.maximumLoopEndpointError > 0.49);
 });
 
 test('real non-identity Horse_2 hierarchy reconstructs every head and animates a non-root bone in Chrome r160', async (context) => {
@@ -302,6 +326,32 @@ test('all-frame target deformation gate measures stretch, zero weights and coinc
     const separationReport = measureHorse2Deformation(separated);
     assert.equal(separationReport.gates.coincidentRestSeparation, false);
     assert.equal(separationReport.passed, false);
+});
+
+test('one-shot final pose gate requires a settled lowered body at the ground plane', () => {
+    const rest = [
+        [-1, -1, 0], [1, -1, 0], [-1, 1, 0], [1, 1, 0],
+        [-1, -1, 2], [1, -1, 2], [-1, 1, 2], [1, 1, 2],
+    ];
+    const settled = rest.map((position, index) => index < 4 ? [...position] : [position[0], position[1], 0.2]);
+    const frames = Array.from({ length: 5 }, (_, frameIndex) => ({
+        frameIndex,
+        positions: frameIndex < 2 ? rest.map((position) => [...position]) : settled.map((position) => [...position]),
+        cameraStatic: true,
+    }));
+    const skinWeights = { vertices: rest.map((world) => ({ world })) };
+    const report = measureHorseOneShotFinalPose({ skinWeights, frames, groundHeight: 0 });
+    assert.equal(report.passed, true);
+    assert.deepEqual(report.finalWindowFrames, [2, 3, 4]);
+    assert.ok(report.centroidDropM > report.resolvedThresholds.minimumCentroidDropM);
+    const moving = structuredClone(frames);
+    moving[4].positions[7][0] += 1;
+    assert.equal(measureHorseOneShotFinalPose({ skinWeights, frames: moving, groundHeight: 0 }).passed, false);
+    const standing = structuredClone(frames);
+    standing.forEach((frame) => { frame.positions = rest.map((position) => [...position]); });
+    const standingReport = measureHorseOneShotFinalPose({ skinWeights, frames: standing, groundHeight: 0 });
+    assert.equal(standingReport.gates.centroidDrop, false);
+    assert.equal(standingReport.passed, false);
 });
 
 test('visual phase evidence is pinned but cannot approve without a human decision', () => {
