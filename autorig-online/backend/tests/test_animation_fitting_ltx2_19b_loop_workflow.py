@@ -40,7 +40,7 @@ def _matching_input_paths(
             )
 
 
-def test_ltx2_19b_loop_workflow_is_pinned_to_canonical_horse_contract() -> None:
+def test_ltx2_19b_loop_workflow_is_pinned_to_dynamic_last_frame_contract() -> None:
     workflow = json.loads(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
     titled = {
@@ -65,7 +65,7 @@ def test_ltx2_19b_loop_workflow_is_pinned_to_canonical_horse_contract() -> None:
     start_guide = workflow["900001"]["inputs"]
     end_guide = workflow["900002"]["inputs"]
     assert start_guide["frame_idx"] == 0
-    assert end_guide["frame_idx"] == 96
+    assert end_guide["frame_idx"] == -1
     assert start_guide["image"] == end_guide["image"]
 
     guide_nodes = [
@@ -96,7 +96,7 @@ def test_ltx2_19b_loop_workflow_is_pinned_to_canonical_horse_contract() -> None:
         ("4849", "fps"): 30.0,
         ("4982", "last_frame_fix"): False,
         ("900001", "frame_idx"): 0,
-        ("900002", "frame_idx"): 96,
+        ("900002", "frame_idx"): -1,
     }
 
     seed_inputs = {

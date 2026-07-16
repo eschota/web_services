@@ -359,7 +359,7 @@
     },
     "class_type": "LTXVAddGuide",
     "inputs": {
-      "frame_idx": 96,
+      "frame_idx": -1,
       "image": [
         "3336",
         0
