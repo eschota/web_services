@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autorig.online/schemas/animal-animation-manifest.v2.json",
+  "title": "AutoRig animal animation manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "library_revision",
+    "rig_type",
+    "orientation",
+    "template_skeleton_sha256",
+    "artifact_sha256",
+    "package_result_sha256",
+    "clips",
+    "poses"
+  ],
+  "properties": {
+    "schema": {"const": "animal-animation-manifest.v2"},
+    "library_revision": {"type": "string", "minLength": 1, "maxLength": 128},
+    "rig_type": {"enum": ["dog", "bear", "cat", "cow", "deer", "elephant", "giraffe", "horse", "mouse", "pig", "rabbit", "turtle"]},
+    "orientation": {"enum": ["front", "back"]},
+    "template_skeleton_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "package_result_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "clips": {
+      "type": "array",
+      "minItems": 30,
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "category", "order", "loop", "duration", "fps", "start_pose_id", "end_pose_id", "root_motion_available", "qa_profile_revision", "provenance", "clip_artifact"],
+        "properties": {
+          "id": {"type": "string"},
+          "category": {"enum": ["idle", "locomotion", "air", "combat", "behavior"]},
+          "order": {"type": "integer", "minimum": 1, "maximum": 30},
+          "loop": {"type": "boolean"},
+          "duration": {"type": "number", "exclusiveMinimum": 0},
+          "fps": {"type": "number", "exclusiveMinimum": 0},
+          "start_pose_id": {"type": "string"},
+          "end_pose_id": {"type": "string"},
+          "root_motion_available": {"type": "boolean"},
+          "qa_profile_revision": {"type": "string", "minLength": 1},
+          "provenance": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["candidate_id", "candidate_bundle_sha256", "human_review_sha256"],
+            "properties": {
+              "candidate_id": {"type": "string", "format": "uuid"},
+              "candidate_bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "human_review_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          },
+          "clip_artifact": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["format", "sha256"],
+            "properties": {
+              "format": {"enum": ["fbx", "threejs-animation-json.v1"]},
+              "url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        }
+      }
+    },
+    "poses": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id"],
+        "properties": {"id": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

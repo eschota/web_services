@@ -7,7 +7,7 @@ import json
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
-    UniqueConstraint, ForeignKey, create_engine, event, Index, text,
+    UniqueConstraint, ForeignKey, create_engine, event, Index, inspect, text,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -403,6 +403,8 @@ class AnimalAnimationLibraryArtifact(Base):
     animation_clip_count = Column(Integer, nullable=False)
     package_zip_url = Column(String(2048), nullable=True)
     package_zip_path = Column(String(2048), nullable=True)
+    package_result_path = Column(String(2048), nullable=True)
+    package_result_sha256 = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -489,6 +491,9 @@ class AnimalAnimationCandidate(Base):
     fitted_clip_url = Column(String(2048), nullable=True)
     fitted_clip_path = Column(String(2048), nullable=True)
     fitted_clip_sha256 = Column(String(64), nullable=True)
+    fitted_clip_format = Column(String(64), nullable=False, default="fbx")
+    candidate_bundle_sha256 = Column(String(64), nullable=True)
+    human_review_sha256 = Column(String(64), nullable=True)
     duration = Column(Float, nullable=True)
     fps = Column(Float, nullable=True)
     root_motion_available = Column(Boolean, nullable=False, default=False)
@@ -537,6 +542,21 @@ class AnimalAnimationApprovedClip(Base):
     end_pose_id = Column(String(128), nullable=False)
     root_motion_available = Column(Boolean, nullable=False, default=False)
     qa_profile_revision = Column(String(128), nullable=False)
+    clip_artifact_format = Column(String(64), nullable=False, default="fbx")
+    clip_artifact_url = Column(String(2048), nullable=True)
+    clip_artifact_path = Column(String(2048), nullable=True)
+    clip_artifact_sha256 = Column(
+        String(64),
+        nullable=False,
+        # Existing ORM writers provide only fbx_sha256.  Preserve that API
+        # while making the generic SHA non-null for every newly inserted row.
+        default=lambda context: context.get_current_parameters().get("fbx_sha256"),
+    )
+    candidate_bundle_sha256 = Column(String(64), nullable=True)
+    human_review_sha256 = Column(String(64), nullable=True)
+    # Backward-compatible aliases.  New writers mirror the generic artifact
+    # into these columns so old readers keep working while
+    # clip_artifact_format remains the authoritative description of the bytes.
     fbx_url = Column(String(2048), nullable=True)
     fbx_path = Column(String(2048), nullable=True)
     fbx_sha256 = Column(String(64), nullable=False)
@@ -1041,10 +1061,110 @@ async def reset_admin_overlay_counters(db: AsyncSession) -> None:
     await db.commit()
 
 
+_ANIMAL_ANIMATION_CONTRACT_COLUMNS = {
+    "animal_animation_candidates": {
+        "fitted_clip_format": "VARCHAR(64) NOT NULL DEFAULT 'fbx'",
+        "candidate_bundle_sha256": "VARCHAR(64)",
+        "human_review_sha256": "VARCHAR(64)",
+    },
+    "animal_animation_approved_clips": {
+        "clip_artifact_format": "VARCHAR(64) NOT NULL DEFAULT 'fbx'",
+        "clip_artifact_url": "VARCHAR(2048)",
+        "clip_artifact_path": "VARCHAR(2048)",
+        # SQLite cannot add a NOT NULL column to a populated legacy table in a
+        # single ALTER.  The migration backfills it immediately; the ORM model
+        # and activation contract remain fail-closed/non-null.
+        "clip_artifact_sha256": "VARCHAR(64)",
+        "candidate_bundle_sha256": "VARCHAR(64)",
+        "human_review_sha256": "VARCHAR(64)",
+    },
+    "animal_animation_library_artifacts": {
+        "package_result_path": "VARCHAR(2048)",
+        "package_result_sha256": "VARCHAR(64)",
+    },
+}
+
+
+def _table_column_names(sync_conn, table_name: str) -> Optional[set[str]]:
+    inspector = inspect(sync_conn)
+    if not inspector.has_table(table_name):
+        return None
+    return {str(column["name"]) for column in inspector.get_columns(table_name)}
+
+
+async def migrate_animal_animation_contract(conn) -> None:
+    """Idempotently add and backfill the generic animal clip contract.
+
+    This remains a small in-repository migration because the service currently
+    has no external migration runner.  Column existence is inspected before
+    every ALTER and rechecked after a concurrent-add error; unrelated database
+    failures are not hidden.
+    """
+    for table_name, required_columns in _ANIMAL_ANIMATION_CONTRACT_COLUMNS.items():
+        column_names = await conn.run_sync(
+            lambda sync_conn, name=table_name: _table_column_names(sync_conn, name)
+        )
+        if column_names is None:
+            continue
+        for column_name, column_ddl in required_columns.items():
+            if column_name in column_names:
+                continue
+            try:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}"
+                )
+            except Exception:
+                refreshed = await conn.run_sync(
+                    lambda sync_conn, name=table_name: _table_column_names(sync_conn, name)
+                )
+                if refreshed is None or column_name not in refreshed:
+                    raise
+            column_names.add(column_name)
+
+    candidate_columns = await conn.run_sync(
+        lambda sync_conn: _table_column_names(sync_conn, "animal_animation_candidates")
+    )
+    if candidate_columns and "fitted_clip_format" in candidate_columns:
+        await conn.exec_driver_sql(
+            """
+            UPDATE animal_animation_candidates
+            SET fitted_clip_format = 'fbx'
+            WHERE fitted_clip_format IS NULL OR TRIM(fitted_clip_format) = ''
+            """
+        )
+
+    approved_columns = await conn.run_sync(
+        lambda sync_conn: _table_column_names(sync_conn, "animal_animation_approved_clips")
+    )
+    if approved_columns and {
+        "clip_artifact_format",
+        "clip_artifact_url",
+        "clip_artifact_path",
+        "clip_artifact_sha256",
+        "fbx_url",
+        "fbx_path",
+        "fbx_sha256",
+    }.issubset(approved_columns):
+        await conn.exec_driver_sql(
+            """
+            UPDATE animal_animation_approved_clips
+            SET clip_artifact_format = CASE
+                    WHEN clip_artifact_format IS NULL
+                         OR TRIM(clip_artifact_format) = '' THEN 'fbx'
+                    ELSE clip_artifact_format
+                END,
+                clip_artifact_url = COALESCE(clip_artifact_url, fbx_url),
+                clip_artifact_path = COALESCE(clip_artifact_path, fbx_path),
+                clip_artifact_sha256 = COALESCE(clip_artifact_sha256, fbx_sha256)
+            """
+        )
+
+
 async def init_db():
     """Create all tables"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_animal_animation_contract(conn)
 
         # Lightweight sqlite "migration" to add new columns without a migration framework.
         # Safe to run repeatedly (errors are ignored when column already exists).
