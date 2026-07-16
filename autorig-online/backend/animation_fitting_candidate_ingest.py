@@ -22,6 +22,7 @@ import shutil
 import stat
 import tempfile
 from typing import Any, BinaryIO, Dict, Mapping, Sequence, Union
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +42,39 @@ from database import (
 
 
 JOB_BINDING_SCHEMA = "autorig.browser-animation-candidate-job-binding.v1"
+JOB_BINDING_SCHEMA_V2 = "autorig.browser-animation-candidate-job-binding.v2"
+CONTROLLED_RECEIPT_SCHEMA_V2 = (
+    "autorig.animation-fitting-controlled-generation-receipt-descriptor.v2"
+)
+CONTROLLED_GENERATION_V2_KEYS = (
+    "job_id",
+    "prompt_id",
+    "semantic_id",
+    "generation_mode",
+    "task",
+    "prompt_contract",
+    "reference_manifest",
+    "experiment_id",
+    "experiment_sha256",
+    "experiment_spec",
+    "worker_id",
+    "worker_base_url",
+    "workflow_name",
+    "workflow_fingerprint_sha256",
+    "trusted_latest_state",
+    "retry_authorization_sha256",
+)
+TRUSTED_LATEST_STATE_KEYS = (
+    "schema",
+    "status",
+    "latest",
+    "job_id",
+    "state_schema",
+    "sequence",
+    "filename",
+    "pin",
+)
+PROMPT_SCHEMA = "autorig.animation-fitting-prompts.v1"
 BUNDLE_SCHEMA = "autorig.browser-animation-candidate-bundle.v1"
 VISUAL_QA_ENVELOPE_SCHEMA = "autorig.browser-horse-visual-phase-evidence-envelope.v1"
 VISUAL_QA_SCHEMA = "autorig.animation-visual-phase-qa.v1"
@@ -89,6 +123,15 @@ class BrowserCandidateArtifactSet:
     deformation_report_json: ArtifactSource
     fixed_camera_preview_mp4: ArtifactSource
     phase_frames: Mapping[str, ArtifactSource]
+
+
+@dataclass(frozen=True)
+class BrowserCandidatePlanTrust:
+    """Independent resolver output; never reconstruct this from job.config_json."""
+
+    reference_manifest: Mapping[str, Any] | None
+    latest_states: Sequence[Mapping[str, Any]]
+    retry_authorization: Mapping[str, Any] | None = None
 
 
 def _error(message: str, status_code: int = 409) -> BrowserCandidateIngestError:
@@ -188,6 +231,394 @@ def _candidate_seed(value: Any) -> int:
     ):
         raise _error("candidate seed must fit an unsigned SQL BigInteger range")
     return value
+
+
+def _normalize_worker_url(value: Any, field: str) -> str:
+    raw = str(value or "").strip()
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise _error(f"{field} is not a valid worker base URL") from exc
+    if (
+        parsed.scheme.lower() not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise _error(f"{field} is not a canonical worker base URL")
+    host = parsed.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    netloc = host if port is None else f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme.lower(), netloc, path, "", ""))
+
+
+def derive_browser_candidate_seed(
+    task_id: str, semantic_id: str, candidate_index: int
+) -> int:
+    """Canonical server-side seed used by the multi-candidate slot plan."""
+    task_id = _uuid(task_id, "task_id")
+    action = str(semantic_id or "").strip().lower()
+    taxonomy_clip(action)
+    if (
+        isinstance(candidate_index, bool)
+        or not isinstance(candidate_index, int)
+        or not 0 <= candidate_index < 16
+    ):
+        raise _error("candidate_index must be in 0..15")
+    material = f"{task_id}\n{action}\n{candidate_index}\n{PROMPT_SCHEMA}"
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return int(digest[:16], 16) & ((1 << 63) - 1)
+
+
+def _verify_server_owned_job_plan(
+    config: Mapping[str, Any],
+    *,
+    binding: Mapping[str, Any],
+    slots: Sequence[Mapping[str, Any]],
+    semantic_id: str,
+    candidate_target: int | None,
+    candidate_limit: int,
+    workflow_name: str | None,
+    workflow_fingerprint: str | None,
+    prompt_id: str | None,
+    worker_url: str | None,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None,
+    trusted_store_root: str | Path | None,
+) -> tuple[Dict[str, Any], ...]:
+    """Rebuild V2 from its server-owned inputs and bind it to the DB job.
+
+    A syntactically valid ``browser_candidate_ingest`` object is not an
+    authority.  Production consumers must reproduce the canonical plan from
+    the pinned task/controlled-generation descriptors and compare the complete
+    config plus the immutable fitting-job fields.
+    """
+    plan_binding = config.get("browser_candidate_job_plan")
+    if binding.get("schema") == JOB_BINDING_SCHEMA and plan_binding is None:
+        # Historical V14 canary jobs predate the server-plan envelope.  They
+        # remain readable, but can never use the production V2 path.
+        return tuple(dict(row) for row in slots)
+    if not isinstance(plan_binding, dict):
+        raise _error("server-owned browser_candidate_job_plan is missing")
+    if trusted_plan_inputs is None or trusted_store_root is None:
+        raise _error("independent browser candidate plan resolver inputs are required")
+    if candidate_target is None or workflow_name is None or workflow_fingerprint is None or prompt_id is None or worker_url is None:
+        raise _error("canonical fitting-job fields are required to verify the server plan")
+
+    _verify_trusted_plan_files(Path(trusted_store_root), trusted_plan_inputs)
+
+    try:
+        import animation_fitting_candidate_job_plan as job_plan
+
+        configured_receipts = plan_binding.get(
+            "verified_controlled_generation_receipts"
+        )
+        receipts = (
+            [
+                {
+                    key: item
+                    for key, item in row.items()
+                    if key != "trusted_latest_state"
+                }
+                for row in configured_receipts
+            ]
+            if isinstance(configured_receipts, list)
+            and all(isinstance(row, Mapping) for row in configured_receipts)
+            else configured_receipts
+        )
+
+        if binding.get("schema") == JOB_BINDING_SCHEMA_V2:
+            if candidate_target != 8 or candidate_limit != 16:
+                raise _error("production browser candidate policy must be target=8 limit=16")
+            request = {
+                "schema": job_plan.PLAN_REQUEST_SCHEMA,
+                "semantic_id": str(semantic_id or "").strip().lower(),
+                "candidate_target": candidate_target,
+                "candidate_limit": candidate_limit,
+            }
+            rebuilt = job_plan.build_production_browser_candidate_job_plan(
+                request,
+                trusted_task=plan_binding.get("trusted_task"),
+                trusted_reference_manifest=trusted_plan_inputs.reference_manifest,
+                trusted_latest_states=trusted_plan_inputs.latest_states,
+                trusted_retry_authorization=trusted_plan_inputs.retry_authorization,
+                verified_receipts=receipts,
+            )
+        elif binding.get("schema") == JOB_BINDING_SCHEMA:
+            if not isinstance(receipts, list) or len(receipts) != 1:
+                raise _error("V14 canary server plan must pin exactly one receipt")
+            rebuilt = job_plan.build_v14_nonproduction_canary_job_plan(
+                trusted_task=plan_binding.get("trusted_task"),
+                trusted_latest_state=(
+                    trusted_plan_inputs.latest_states[0]
+                    if len(trusted_plan_inputs.latest_states) == 1
+                    else None
+                ),
+                verified_receipt=receipts[0],
+            )
+        else:  # pragma: no cover - the structural parser rejects this first.
+            raise _error("browser candidate ingest schema is invalid")
+    except BrowserCandidateIngestError:
+        raise
+    except (TypeError, ValueError, KeyError) as exc:
+        raise _error(f"server-owned browser candidate job plan is invalid: {exc}") from exc
+
+    expected_job_fields = {
+        "semantic_id": rebuilt.semantic_id,
+        "workflow_name": rebuilt.workflow_name,
+        "workflow_fingerprint": rebuilt.workflow_fingerprint,
+        "candidate_target": rebuilt.candidate_target,
+        "candidate_limit": rebuilt.candidate_limit,
+        "prompt_id": rebuilt.prompt_id,
+    }
+    actual_job_fields = {
+        "semantic_id": str(semantic_id or "").strip().lower(),
+        "workflow_name": str(workflow_name or "").strip(),
+        "workflow_fingerprint": str(workflow_fingerprint or "").strip().lower(),
+        "candidate_target": candidate_target,
+        "candidate_limit": candidate_limit,
+        "prompt_id": str(prompt_id or "").strip(),
+    }
+    if config != rebuilt.config or actual_job_fields != expected_job_fields:
+        raise _error(
+            "fitting job differs from the canonical server-owned browser candidate plan"
+        )
+
+    receipts_by_index = {
+        row["candidate_index"]: row
+        for row in rebuilt.config["browser_candidate_job_plan"][
+            "verified_controlled_generation_receipts"
+        ]
+    }
+    result = []
+    normalized_worker_url = _normalize_worker_url(worker_url, "fitting_job.worker_url")
+    for slot in slots:
+        receipt = receipts_by_index.get(slot["candidate_index"])
+        if receipt is None:
+            raise _error("planned slot has no verified controlled-generation receipt")
+        worker_id = str(receipt.get("worker_id") or "").strip()
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}", worker_id)
+            or _normalize_worker_url(
+                receipt.get("worker_base_url"),
+                "verified_receipt.worker_base_url",
+            )
+            != normalized_worker_url
+        ):
+            raise _error("verified controlled generation is pinned to another worker")
+        controlled = slot.get("controlled_generation") or {}
+        if (
+            controlled.get("worker_id") != worker_id
+            or _normalize_worker_url(
+                controlled.get("worker_base_url"),
+                "controlled_generation.worker_base_url",
+            )
+            != normalized_worker_url
+        ):
+            raise _error("candidate slot worker binding differs from its verified receipt")
+        result.append(
+            {
+                **dict(slot),
+                "verified_generation_receipt": (
+                    receipt["trusted_latest_state"]["pin"]
+                    if binding.get("schema") == JOB_BINDING_SCHEMA_V2
+                    else receipt["receipt"]
+                ),
+                "verified_generation": receipt,
+            }
+        )
+    return tuple(result)
+
+
+def parse_browser_candidate_plan(
+    config: Mapping[str, Any],
+    *,
+    semantic_id: str,
+    candidate_limit: int,
+    candidate_target: int | None = None,
+    workflow_name: str | None = None,
+    workflow_fingerprint: str | None = None,
+    prompt_id: str | None = None,
+    worker_url: str | None = None,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
+    trusted_store_root: str | Path | None = None,
+) -> tuple[Dict[str, Any], tuple[Dict[str, Any], ...]]:
+    """Return an immutable, server-planned slot inventory from job config.
+
+    V1 remains readable as one immutable legacy/canary slot.  V2 is the only
+    multi-candidate contract and derives every seed from task/action/index.
+    """
+    raw = config.get("browser_candidate_ingest") if isinstance(config, Mapping) else None
+    if not isinstance(raw, dict):
+        raise _error("job.config.browser_candidate_ingest is missing")
+    schema = raw.get("schema")
+    common_keys = (
+        "schema",
+        "task_id",
+        "task_guid",
+        "source_rig_type",
+        "source_model_sha256",
+        "source_skeleton_sha256",
+        "frame_count",
+    )
+    if schema == JOB_BINDING_SCHEMA:
+        # Historical V1 upload-only jobs predate the server-owned timing pin.
+        # A V1 plan envelope, however, is canonical and must carry input_fps.
+        timing_keys = (
+            (*common_keys, "input_fps", "output_fps")
+            if config.get("browser_candidate_job_plan") is not None
+            else (*common_keys, "output_fps")
+        )
+        binding = _exact_object(
+            raw,
+            "job.config.browser_candidate_ingest",
+            (
+                *timing_keys,
+                "candidate_seed",
+                "source_video",
+                "controlled_generation",
+            ),
+        )
+        slots = (
+            {
+                "candidate_index": 0,
+                "seed": _candidate_seed(binding["candidate_seed"]),
+                "source_video": binding["source_video"],
+                "controlled_generation": binding["controlled_generation"],
+            },
+        )
+        verified = _verify_server_owned_job_plan(
+            config,
+            binding=binding,
+            slots=slots,
+            semantic_id=semantic_id,
+            candidate_target=candidate_target,
+            candidate_limit=candidate_limit,
+            workflow_name=workflow_name,
+            workflow_fingerprint=workflow_fingerprint,
+            prompt_id=prompt_id,
+            worker_url=worker_url,
+            trusted_plan_inputs=trusted_plan_inputs,
+            trusted_store_root=trusted_store_root,
+        )
+        return dict(binding), verified
+    if schema != JOB_BINDING_SCHEMA_V2:
+        raise _error("fitting job browser ingest binding schema is invalid")
+    binding = _exact_object(
+        raw,
+        "job.config.browser_candidate_ingest",
+        (
+            *common_keys,
+            "input_fps",
+            "output_fps",
+            "semantic_id",
+            "generation_mode",
+            "task",
+            "prompt_contract",
+            "reference_manifest",
+            "workflow_name",
+            "workflow_fingerprint_sha256",
+            "candidate_slots",
+        ),
+    )
+    task_id = _uuid(binding["task_id"], "binding.task_id")
+    slots_raw = binding.get("candidate_slots")
+    if not isinstance(slots_raw, list) or not slots_raw:
+        raise _error("candidate_slots must be a non-empty array")
+    if len(slots_raw) > candidate_limit:
+        raise _error("candidate slot plan exceeds candidate_limit")
+    slots = []
+    indices = set()
+    seeds = set()
+    for offset, raw_slot in enumerate(slots_raw):
+        slot = _exact_object(
+            raw_slot,
+            f"candidate_slots[{offset}]",
+            (
+                "candidate_index",
+                "seed",
+                "source_video",
+                "controlled_generation",
+            ),
+        )
+        index = slot.get("candidate_index")
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or not 0 <= index < candidate_limit
+        ):
+            raise _error(f"candidate_slots[{offset}].candidate_index is invalid")
+        seed = _candidate_seed(slot.get("seed"))
+        expected_seed = derive_browser_candidate_seed(task_id, semantic_id, index)
+        if seed != expected_seed:
+            raise _error(f"candidate_slots[{offset}].seed is not server-derived")
+        if index in indices or seed in seeds:
+            raise _error("candidate slot plan has duplicate index or seed")
+        indices.add(index)
+        seeds.add(seed)
+        slots.append(
+            {
+                "candidate_index": index,
+                "seed": seed,
+                "source_video": slot["source_video"],
+                "controlled_generation": slot["controlled_generation"],
+            }
+        )
+    slots.sort(key=lambda row: row["candidate_index"])
+    verified = _verify_server_owned_job_plan(
+        config,
+        binding=binding,
+        slots=slots,
+        semantic_id=semantic_id,
+        candidate_target=candidate_target,
+        candidate_limit=candidate_limit,
+        workflow_name=workflow_name,
+        workflow_fingerprint=workflow_fingerprint,
+        prompt_id=prompt_id,
+        worker_url=worker_url,
+        trusted_plan_inputs=trusted_plan_inputs,
+        trusted_store_root=trusted_store_root,
+    )
+    return dict(binding), verified
+
+
+def resolve_browser_candidate_slot(
+    config: Mapping[str, Any],
+    *,
+    semantic_id: str,
+    candidate_limit: int,
+    candidate_target: int | None = None,
+    workflow_name: str | None = None,
+    workflow_fingerprint: str | None = None,
+    prompt_id: str | None = None,
+    worker_url: str | None = None,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
+    trusted_store_root: str | Path | None = None,
+    seed: int,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    binding, slots = parse_browser_candidate_plan(
+        config,
+        semantic_id=semantic_id,
+        candidate_limit=candidate_limit,
+        candidate_target=candidate_target,
+        workflow_name=workflow_name,
+        workflow_fingerprint=workflow_fingerprint,
+        prompt_id=prompt_id,
+        worker_url=worker_url,
+        trusted_plan_inputs=trusted_plan_inputs,
+        trusted_store_root=trusted_store_root,
+    )
+    seed = _candidate_seed(seed)
+    matches = [slot for slot in slots if slot["seed"] == seed]
+    if len(matches) != 1:
+        raise _error(
+            "candidate request does not match the pinned job binding or immutable planned slot"
+        )
+    return binding, matches[0]
 
 
 def _positive_float(value: Any, field: str) -> float:
@@ -542,15 +973,29 @@ def _secure_directory_chain(root: Path, directory: Path, *, create: bool) -> Pat
 
 
 def _read_source_video(
-    root: Path, row: Mapping[str, Any], generation_job_id: str
+    root: Path,
+    row: Mapping[str, Any],
+    generation_job_id: str,
+    generation_receipt: Mapping[str, Any] | None,
+    *,
+    verified_generation: Mapping[str, Any] | None,
+    generation: Mapping[str, Any],
+    seed: int,
+    binding: Mapping[str, Any],
+    worker_url: str,
+    workflow_name: str,
 ) -> tuple[Path, Dict[str, Any]]:
     path_value = str(row.get("path") or "")
     candidate = Path(path_value)
     if not candidate.is_absolute():
         candidate = root / candidate
     path, relative_parts = _secure_existing_file(root, candidate, "pinned source video")
-    if generation_job_id not in relative_parts[:-1]:
-        raise _error("pinned source video is not under the controlled generation job")
+    video_sha = normalize_sha256(row.get("sha256"), "source_video.sha256")
+    expected_tail = ("raw", video_sha[:2], f"{video_sha}.mp4")
+    if tuple(relative_parts[-3:]) != expected_tail:
+        raise _error(
+            "pinned source video must use raw/<sha-prefix>/<sha>.mp4 content addressing"
+        )
     expected_bytes = row.get("bytes")
     if (
         isinstance(expected_bytes, bool)
@@ -581,7 +1026,220 @@ def _read_source_video(
         raise _error(
             "server-computed source video integrity differs from the job binding"
         )
+    if generation_receipt is not None:
+        if verified_generation is None:
+            raise _error("verified controlled-generation descriptor is missing")
+        _verify_controlled_generation_receipt(
+            root,
+            generation_receipt,
+            generation_job_id,
+            verified_generation=verified_generation,
+            generation=generation,
+            seed=seed,
+            binding=binding,
+            worker_url=worker_url,
+            workflow_name=workflow_name,
+            source_video_path=path,
+            source_video_pin=pin,
+        )
     return path, pin
+
+
+def _verify_controlled_generation_receipt(
+    root: Path,
+    row: Mapping[str, Any],
+    generation_job_id: str,
+    *,
+    verified_generation: Mapping[str, Any],
+    generation: Mapping[str, Any],
+    seed: int,
+    binding: Mapping[str, Any],
+    worker_url: str,
+    workflow_name: str,
+    source_video_path: Path,
+    source_video_pin: Mapping[str, Any],
+) -> Dict[str, Any]:
+    pin = _exact_object(
+        row,
+        "verified controlled-generation receipt",
+        ("path", "sha256", "bytes"),
+    )
+    job_id = normalize_sha256(generation_job_id, "controlled_generation.job_id")
+    digest = normalize_sha256(pin.get("sha256"), "generation_receipt.sha256")
+    size = pin.get("bytes")
+    if (
+        isinstance(size, bool)
+        or not isinstance(size, int)
+        or size <= 0
+        or size > MAX_JSON_BYTES
+    ):
+        raise _error("controlled-generation receipt byte count is invalid")
+    path_value = str(pin.get("path") or "")
+    candidate = Path(path_value)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    path, relative_parts = _secure_existing_file(
+        root, candidate, "verified controlled-generation receipt"
+    )
+    is_v2 = verified_generation.get("schema") == CONTROLLED_RECEIPT_SCHEMA_V2
+    expected_filename = (
+        str((generation.get("trusted_latest_state") or {}).get("filename") or "")
+        if is_v2
+        else relative_parts[-1] if relative_parts else ""
+    )
+    if tuple(relative_parts) != ("jobs", job_id, expected_filename) or not re.fullmatch(
+        r"\d{6}\.json", expected_filename
+    ):
+        raise _error(
+            "controlled-generation receipt must use jobs/<job_id>/<6-digit>.json"
+        )
+    if is_v2:
+        state_binding = _exact_object(
+            generation.get("trusted_latest_state"),
+            "controlled_generation.trusted_latest_state",
+            TRUSTED_LATEST_STATE_KEYS,
+        )
+        expected_sequence = _positive_int(
+            state_binding.get("sequence"),
+            "controlled_generation.trusted_latest_state.sequence",
+        )
+        if expected_filename != f"{expected_sequence:06d}.json":
+            raise _error("controlled-generation state filename differs from its sequence")
+        revisions = []
+        for sibling in path.parent.iterdir():
+            if re.fullmatch(r"\d{6}\.json", sibling.name):
+                if sibling.is_symlink():
+                    raise _error("controlled-generation state revision must not be a symlink")
+                revisions.append(int(sibling.stem))
+        if not revisions or max(revisions) != expected_sequence:
+            raise _error("controlled-generation receipt is not the latest state revision")
+    payload = _read_existing_bounded(path, size)
+    if _sha256(payload) != digest:
+        raise _error("controlled-generation receipt integrity differs from the job plan")
+    state = _json_object(payload, "controlled-generation receipt state")
+    mutable_keys = {
+        "sequence_int",
+        "recorded_at_unix_float",
+        "status_string",
+        "prompt_id_string",
+        "resumed_existing_prompt_bool",
+        "raw_video_path_string",
+        "raw_video_sha256_string",
+        "raw_video_bytes_int",
+        "frame_paths_array",
+        "frame_sha256_array",
+        "backend_output_object",
+    }
+    identity = {key: value for key, value in state.items() if key not in mutable_keys}
+    if _sha256(_canonical_json(identity)) != job_id:
+        raise _error("controlled-generation state deterministic job identity drifted")
+    prompt_material = f"autorig-controlled-animation-fitting:{job_id}"
+    prompt_raw = hashlib.sha256(prompt_material.encode("utf-8")).hexdigest()[:32]
+    deterministic_prompt = (
+        f"{prompt_raw[:8]}-{prompt_raw[8:12]}-4{prompt_raw[13:16]}-"
+        f"8{prompt_raw[17:20]}-{prompt_raw[20:32]}"
+    )
+    expected_worker_url = _normalize_worker_url(
+        worker_url, "fitting_job.worker_url"
+    )
+    state_video_value = str(state.get("raw_video_path_string") or "")
+    state_video_candidate = Path(state_video_value)
+    if not state_video_candidate.is_absolute():
+        state_video_candidate = root / state_video_candidate
+    state_video_path, _ = _secure_existing_file(
+        root, state_video_candidate, "controlled-generation state raw video"
+    )
+    v2_state_differs = False
+    if is_v2:
+        state_binding = generation["trusted_latest_state"]
+        prompt_contract = generation.get("prompt_contract") or {}
+        reference_manifest = generation.get("reference_manifest") or {}
+        reference_content = reference_manifest.get("content") or {}
+        reference_artifact = reference_content.get("reference_artifact") or {}
+        experiment_spec = generation.get("experiment_spec") or {}
+        experiment_content = experiment_spec.get("content") or {}
+        experiment_pin = experiment_spec.get("pin") or {}
+        experiment_differs = (
+            generation.get("experiment_id")
+            != experiment_content.get("experiment_id_string")
+            or generation.get("experiment_sha256") != experiment_pin.get("sha256")
+            or state.get("experiment_id_string") != generation.get("experiment_id")
+            or state.get("experiment_sha256_string")
+            != generation.get("experiment_sha256")
+        )
+        v2_state_differs = (
+            state.get("schema") != state_binding.get("state_schema")
+            or state.get("sequence_int") != state_binding.get("sequence")
+            or state_binding.get("filename") != relative_parts[-1]
+            or generation.get("semantic_id") != binding.get("semantic_id")
+            or generation.get("generation_mode") != binding.get("generation_mode")
+            or generation.get("task") != binding.get("task")
+            or generation.get("prompt_contract") != binding.get("prompt_contract")
+            or generation.get("reference_manifest")
+            != binding.get("reference_manifest")
+            or generation.get("workflow_name") != binding.get("workflow_name")
+            or generation.get("workflow_fingerprint_sha256")
+            != binding.get("workflow_fingerprint_sha256")
+            or state.get("reference_sha256_string")
+            != reference_artifact.get("sha256")
+            or state.get("positive_prompt_sha256_string")
+            != prompt_contract.get("positive_prompt_sha256")
+            or state.get("negative_prompt_sha256_string")
+            != prompt_contract.get("negative_prompt_sha256")
+            or state.get("approval_state_string") != "generated_not_approved"
+            or state.get("send_to_skeletal_fitting_bool") is not False
+            or experiment_differs
+        )
+    legacy_experiment_differs = False
+    if not is_v2:
+        legacy_experiment_differs = (
+            state.get("experiment_id_string") != generation.get("experiment_id")
+            or normalize_sha256(
+                state.get("experiment_sha256_string"),
+                "state.experiment_sha256_string",
+            )
+            != normalize_sha256(
+                generation.get("experiment_sha256"),
+                "controlled_generation.experiment_sha256",
+            )
+        )
+    if (
+        state.get("status_string") != "completed"
+        or state.get("prompt_id_string") != deterministic_prompt
+        or state.get("prompt_id_string") != generation.get("prompt_id")
+        or state.get("worker_id_string") != generation.get("worker_id")
+        or state.get("worker_id_string") != verified_generation.get("worker_id")
+        or _normalize_worker_url(
+            state.get("worker_base_url_string"), "state.worker_base_url_string"
+        )
+        != expected_worker_url
+        or _normalize_worker_url(
+            verified_generation.get("worker_base_url"),
+            "verified_generation.worker_base_url",
+        )
+        != expected_worker_url
+        or state.get("workflow_name_string") != workflow_name
+        or state.get("workflow_name_string") != verified_generation.get("workflow_name")
+        or normalize_sha256(
+            state.get("workflow_fingerprint_string"),
+            "state.workflow_fingerprint_string",
+        )
+        != normalize_sha256(
+            generation.get("workflow_fingerprint_sha256"),
+            "controlled_generation.workflow_fingerprint_sha256",
+        )
+        or state.get("seed_int") != seed
+        or legacy_experiment_differs
+        or state_video_path != source_video_path
+        or state.get("raw_video_sha256_string") != source_video_pin["sha256"]
+        or state.get("raw_video_bytes_int") != source_video_pin["bytes"]
+        or state.get("frame_count_int") != binding.get("frame_count")
+        or state.get("input_fps_int") != binding.get("input_fps")
+        or state.get("output_fps_int") != binding.get("output_fps")
+        or v2_state_differs
+    ):
+        raise _error("controlled-generation state differs from its canonical job plan")
+    return {"filename": relative_parts[-1], "bytes": size, "sha256": digest}
 
 
 def _write_file(path: Path, payload: bytes) -> None:
@@ -628,6 +1286,92 @@ def _read_existing_bounded(path: Path, expected_bytes: int) -> bytes:
     return payload
 
 
+def _read_trusted_pin(
+    root: Path,
+    value: Any,
+    field: str,
+    *,
+    maximum: int = MAX_JSON_BYTES,
+) -> tuple[Path, bytes]:
+    pin = _exact_object(value, field, ("path", "sha256", "bytes"))
+    digest = normalize_sha256(pin.get("sha256"), f"{field}.sha256")
+    size = pin.get("bytes")
+    if isinstance(size, bool) or not isinstance(size, int) or not 0 < size <= maximum:
+        raise _error(f"{field}.bytes is outside the trusted store limit")
+    candidate = Path(str(pin.get("path") or ""))
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    path, _ = _secure_existing_file(root, candidate, field)
+    payload = _read_existing_bounded(path, size)
+    if _sha256(payload) != digest:
+        raise _error(f"{field} integrity differs from the independent resolver")
+    return path, payload
+
+
+def _verify_canonical_trusted_wrapper(
+    root: Path, value: Any, field: str
+) -> Mapping[str, Any]:
+    wrapper = _exact_object(value, field, ("content", "pin"))
+    content = wrapper.get("content")
+    if not isinstance(content, Mapping):
+        raise _error(f"{field}.content must be an object")
+    _, payload = _read_trusted_pin(root, wrapper.get("pin"), f"{field}.pin")
+    if payload != _canonical_json(content):
+        raise _error(f"{field} file is not the exact canonical resolver content")
+    return wrapper
+
+
+def _verify_trusted_plan_files(
+    root_input: Path, trust: BrowserCandidatePlanTrust
+) -> None:
+    if root_input.is_symlink() or not root_input.is_dir():
+        raise _error("trusted browser candidate store root must be a real directory")
+    root = root_input.resolve(strict=True)
+    if trust.reference_manifest is not None:
+        reference = _verify_canonical_trusted_wrapper(
+            root, trust.reference_manifest, "trusted_reference_manifest"
+        )
+        content = reference.get("content") or {}
+        _read_trusted_pin(
+            root,
+            content.get("reference_artifact"),
+            "trusted_reference_manifest.reference_artifact",
+            maximum=MAX_PREVIEW_BYTES,
+        )
+    if isinstance(trust.latest_states, (str, bytes, bytearray)) or not isinstance(
+        trust.latest_states, Sequence
+    ):
+        raise _error("trusted latest-state resolver output must be a sequence")
+    for index, state in enumerate(trust.latest_states):
+        if not isinstance(state, Mapping):
+            raise _error(f"trusted_latest_states[{index}] must be an object")
+        _, payload = _read_trusted_pin(
+            root,
+            state.get("pin"),
+            f"trusted_latest_states[{index}].pin",
+        )
+        parsed = _json_object(payload, f"trusted_latest_states[{index}] state")
+        if parsed.get("schema") != state.get("state_schema"):
+            raise _error("trusted latest-state file schema differs from its resolver")
+        if parsed.get("sequence_int") != state.get("sequence"):
+            raise _error("trusted latest-state file sequence differs from its resolver")
+    if trust.retry_authorization is not None:
+        authorization = _verify_canonical_trusted_wrapper(
+            root, trust.retry_authorization, "trusted_retry_authorization"
+        )
+        content = authorization.get("content") or {}
+        for key in (
+            "first_batch_selection_closure",
+            "first_batch_qa_closure",
+        ):
+            _, payload = _read_trusted_pin(
+                root,
+                content.get(key),
+                f"trusted_retry_authorization.{key}",
+            )
+            _json_object(payload, f"trusted_retry_authorization.{key}")
+
+
 def _verify_existing(
     directory: Path,
     manifest_bytes: bytes,
@@ -662,45 +1406,49 @@ def _verify_existing(
 
 
 async def _recheck_publish_lifecycle(
-    db: AsyncSession, job_id: str, version_id: int, rig_type: str
-) -> None:
+    db: AsyncSession,
+    job_id: str,
+    version_id: int,
+    rig_type: str,
+    *,
+    allow_review_transition: bool,
+) -> bool:
     # SQLite runs in WAL mode, so end the earlier read snapshot before the
     # publication query.  The public entry point requires a clean session.
     await db.rollback()
     row = (
         await db.execute(
-            select(
-                AnimalAnimationFittingJob.status,
-                AnimalAnimationFittingJob.library_version_id,
-                AnimalAnimationFittingJob.rig_type,
-                AnimalAnimationLibraryVersion.status,
-                AnimalAnimationLibraryVersion.rig_type,
-            )
+            select(AnimalAnimationFittingJob, AnimalAnimationLibraryVersion)
             .join(
                 AnimalAnimationLibraryVersion,
                 AnimalAnimationLibraryVersion.id
                 == AnimalAnimationFittingJob.library_version_id,
             )
             .where(AnimalAnimationFittingJob.id == job_id)
+            .with_for_update()
         )
     ).one_or_none()
     if row is None:
         raise _error("fitting job disappeared before immutable publication")
-    (
-        job_status,
-        current_version_id,
-        job_rig_type,
-        version_status,
-        version_rig_type,
-    ) = row
+    current_job, current_version = row
+    allowed_statuses = (
+        {"queued", "generating", "review"}
+        if allow_review_transition
+        else {"review"}
+    )
     if (
-        job_status != "review"
-        or current_version_id != version_id
-        or version_status != "draft"
-        or normalize_rig_type(job_rig_type) != rig_type
-        or normalize_rig_type(version_rig_type) != rig_type
+        current_job.status not in allowed_statuses
+        or current_job.library_version_id != version_id
+        or current_version.status != "draft"
+        or normalize_rig_type(current_job.rig_type) != rig_type
+        or normalize_rig_type(current_version.rig_type) != rig_type
     ):
         raise _error("fitting job or draft library changed before publication")
+    transitioned = current_job.status in {"queued", "generating"}
+    if transitioned:
+        current_job.status = "review"
+        await db.flush()
+    return transitioned
 
 
 async def ingest_browser_candidate_artifacts(
@@ -710,6 +1458,7 @@ async def ingest_browser_candidate_artifacts(
     seed: int,
     artifacts: BrowserCandidateArtifactSet,
     fitting_jobs_root: str = ANIMATION_FITTING_JOBS_ROOT,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
 ) -> IngestedBrowserCandidate:
     """Structurally validate and atomically capture an untrusted upload bundle."""
     if db.new or db.dirty or db.deleted:
@@ -733,7 +1482,7 @@ async def ingest_browser_candidate_artifacts(
         )
     ).scalar_one()
     if (
-        job.status != "review"
+        job.status not in {"queued", "generating", "review"}
         or version.status != "draft"
         or version.rig_type != job.rig_type
     ):
@@ -742,28 +1491,32 @@ async def ingest_browser_candidate_artifacts(
         )
     rig_type = normalize_rig_type(job.rig_type)
     clip_contract = taxonomy_clip(job.semantic_id)
+    root_input = Path(fitting_jobs_root)
+    if root_input.is_symlink():
+        raise _error("ANIMATION_FITTING_JOBS_ROOT must not be a symlink")
+    root_input.mkdir(parents=True, exist_ok=True)
+    if root_input.is_symlink() or not root_input.is_dir():
+        raise _error("ANIMATION_FITTING_JOBS_ROOT must be a real directory")
+    root = root_input.resolve(strict=True)
     config = _json_object(
         (job.config_json or "{}").encode("utf-8"), "fitting job config"
     )
-    binding = _exact_object(
-        config.get("browser_candidate_ingest") if isinstance(config, dict) else None,
-        "job.config.browser_candidate_ingest",
-        (
-            "schema",
-            "task_id",
-            "task_guid",
-            "candidate_seed",
-            "source_rig_type",
-            "source_model_sha256",
-            "source_skeleton_sha256",
-            "frame_count",
-            "output_fps",
-            "source_video",
-            "controlled_generation",
-        ),
+    binding, candidate_slot = resolve_browser_candidate_slot(
+        config,
+        semantic_id=job.semantic_id,
+        candidate_limit=int(job.candidate_limit),
+        candidate_target=int(job.candidate_target),
+        workflow_name=job.workflow_name,
+        workflow_fingerprint=job.workflow_fingerprint,
+        prompt_id=job.prompt_id,
+        worker_url=job.worker_url,
+        trusted_plan_inputs=trusted_plan_inputs,
+        trusted_store_root=root,
+        seed=seed,
     )
-    if binding["schema"] != JOB_BINDING_SCHEMA or binding["candidate_seed"] != seed:
-        raise _error("candidate request does not match the pinned job binding")
+    if job.status != "review" and binding.get("schema") != JOB_BINDING_SCHEMA_V2:
+        raise _error("only a resolver-verified V2 job may enter review on admission")
+    candidate_index = candidate_slot["candidate_index"]
     task_id = _uuid(binding["task_id"], "binding.task_id")
     task_guid = _uuid(binding["task_guid"], "binding.task_guid")
     task = (
@@ -792,20 +1545,39 @@ async def ingest_browser_candidate_artifacts(
     frame_count = _positive_int(binding["frame_count"], "binding.frame_count")
     if frame_count != int(clip_contract["frame_profile"]):
         raise _error("job frame_count does not match the canonical action profile")
+    input_fps = None
+    if "input_fps" in binding:
+        input_fps = _positive_int(binding["input_fps"], "binding.input_fps")
+        if input_fps != 24:
+            raise _error("job input_fps must match the canonical 24 fps source timing")
     output_fps = _positive_float(binding["output_fps"], "binding.output_fps")
-    generation = _exact_object(
-        binding["controlled_generation"],
-        "binding.controlled_generation",
-        (
-            "job_id",
-            "prompt_id",
-            "experiment_id",
-            "experiment_sha256",
-            "workflow_fingerprint_sha256",
+    verified_generation = candidate_slot.get("verified_generation")
+    is_v2 = (
+        isinstance(verified_generation, Mapping)
+        and verified_generation.get("schema") == CONTROLLED_RECEIPT_SCHEMA_V2
+    )
+    generation_keys = CONTROLLED_GENERATION_V2_KEYS if is_v2 else (
+        "job_id",
+        "prompt_id",
+        "experiment_id",
+        "experiment_sha256",
+        "workflow_fingerprint_sha256",
+        *(
+            ("worker_id", "worker_base_url")
+            if verified_generation is not None
+            else ()
         ),
     )
+    generation = _exact_object(
+        candidate_slot["controlled_generation"],
+        "binding.controlled_generation",
+        generation_keys,
+    )
     generation = dict(generation)
-    for field in ("job_id", "experiment_sha256", "workflow_fingerprint_sha256"):
+    digest_fields = ["job_id", "workflow_fingerprint_sha256"]
+    if not is_v2:
+        digest_fields.append("experiment_sha256")
+    for field in digest_fields:
         generation[field] = normalize_sha256(
             generation[field], f"controlled_generation.{field}"
         )
@@ -813,25 +1585,70 @@ async def ingest_browser_candidate_artifacts(
         job.workflow_fingerprint, "fitting_job.workflow_fingerprint"
     ):
         raise _error("controlled generation workflow differs from the fitting job")
-    if (
-        not str(generation["prompt_id"] or "").strip()
-        or not str(generation["experiment_id"] or "").strip()
-    ):
-        raise _error("controlled generation prompt/experiment identity is missing")
+    if not str(generation["prompt_id"] or "").strip():
+        raise _error("controlled generation prompt identity is missing")
+    if not is_v2 and not str(generation["experiment_id"] or "").strip():
+        raise _error("controlled generation experiment identity is missing")
+    if is_v2:
+        expected_mode = "loop" if clip_contract.get("loop") is True else "one_shot"
+        state_binding = _exact_object(
+            generation.get("trusted_latest_state"),
+            "controlled_generation.trusted_latest_state",
+            TRUSTED_LATEST_STATE_KEYS,
+        )
+        state_pin = _exact_object(
+            state_binding.get("pin"),
+            "controlled_generation.trusted_latest_state.pin",
+            ("path", "sha256", "bytes"),
+        )
+        if (
+            generation.get("semantic_id") != job.semantic_id
+            or generation.get("semantic_id") != binding.get("semantic_id")
+            or generation.get("generation_mode") != expected_mode
+            or generation.get("generation_mode") != binding.get("generation_mode")
+            or generation.get("task") != binding.get("task")
+            or generation.get("prompt_contract") != binding.get("prompt_contract")
+            or generation.get("reference_manifest")
+            != binding.get("reference_manifest")
+            or generation.get("workflow_name") != job.workflow_name
+            or generation.get("workflow_name") != binding.get("workflow_name")
+            or generation.get("workflow_fingerprint_sha256")
+            != binding.get("workflow_fingerprint_sha256")
+            or state_binding != verified_generation.get("trusted_latest_state")
+            or state_pin != candidate_slot.get("verified_generation_receipt")
+        ):
+            raise _error("controlled generation provenance differs from its V2 receipt")
+        _verify_canonical_trusted_wrapper(
+            root,
+            generation.get("experiment_spec"),
+            "controlled_generation.experiment_spec",
+        )
+    if verified_generation is not None:
+        if (
+            not str(generation.get("worker_id") or "").strip()
+            or _normalize_worker_url(
+                generation.get("worker_base_url"),
+                "controlled_generation.worker_base_url",
+            )
+            != _normalize_worker_url(job.worker_url, "fitting_job.worker_url")
+        ):
+            raise _error("controlled generation worker differs from the fitting job")
 
-    root_input = Path(fitting_jobs_root)
-    if root_input.is_symlink():
-        raise _error("ANIMATION_FITTING_JOBS_ROOT must not be a symlink")
-    root_input.mkdir(parents=True, exist_ok=True)
-    if root_input.is_symlink() or not root_input.is_dir():
-        raise _error("ANIMATION_FITTING_JOBS_ROOT must be a real directory")
-    root = root_input.resolve(strict=True)
     source_path, source_pin = _read_source_video(
         root,
         _exact_object(
-            binding["source_video"], "binding.source_video", ("path", "sha256", "bytes")
+            candidate_slot["source_video"],
+            "candidate_slot.source_video",
+            ("path", "sha256", "bytes"),
         ),
         generation["job_id"],
+        candidate_slot.get("verified_generation_receipt"),
+        verified_generation=verified_generation,
+        generation=generation,
+        seed=seed,
+        binding=binding,
+        worker_url=job.worker_url,
+        workflow_name=job.workflow_name,
     )
     fitted_bytes = _read_artifact(
         artifacts.fitted_animation_json, "fitted_animation_json", MAX_JSON_BYTES
@@ -924,11 +1741,13 @@ async def ingest_browser_candidate_artifacts(
         },
         "source_task": {"id": task_id, "guid": task_guid},
         "candidate": {
+            "candidate_index": candidate_index,
             "seed": seed,
             "source_rig_type": source_rig_type,
             "source_model_sha256": source_model_sha,
             "source_skeleton_sha256": skeleton_sha,
             "frame_count": frame_count,
+            **({"input_fps": input_fps} if input_fps is not None else {}),
             "fps": output_fps,
             "duration_seconds": duration,
             "track_count": len(tracks),
@@ -958,53 +1777,82 @@ async def ingest_browser_candidate_artifacts(
         create=True,
     )
     target = target_parent / identity
-    if target.is_symlink():
-        raise _error("immutable browser candidate target must not be a symlink")
-    if target.exists():
-        await _recheck_publish_lifecycle(db, job.id, version.id, rig_type)
-        _secure_directory_chain(root, target.parent, create=False)
-        _verify_existing(target, manifest_bytes, files, source_pin)
+    staging_parent = _secure_directory_chain(
+        root,
+        root / job.id / "browser-candidate-upload-staging",
+        create=True,
+    )
+    staging = Path(tempfile.mkdtemp(prefix=f".{identity}.", dir=str(staging_parent)))
+    try:
+        for filename, payload in files.items():
+            _write_file(staging / filename, payload)
+        _copy_file(source_path, staging / source_pin["filename"], source_pin)
+        _write_file(staging / "candidate-manifest.json", manifest_bytes)
+        # Lazy import avoids the review -> ingest -> selection import cycle.
+        import animation_fitting_candidate_selection as candidate_selection
+
+        async with candidate_selection.async_candidate_publication_lock(
+            job_id=job_id, fitting_jobs_root=str(root)
+        ):
+            candidate_selection.assert_candidate_publication_open(
+                job_id=job_id, fitting_jobs_root=str(root)
+            )
+            transitioned = await _recheck_publish_lifecycle(
+                db,
+                job_id,
+                version.id,
+                rig_type,
+                allow_review_transition=binding.get("schema") == JOB_BINDING_SCHEMA_V2,
+            )
+            selection_snapshot = await candidate_selection._load_job(
+                db,
+                job_id,
+                fitting_jobs_root=str(root),
+                trusted_plan_inputs=trusted_plan_inputs,
+            )
+            _secure_directory_chain(root, target.parent, create=False)
+            if target.is_symlink():
+                raise _error("immutable browser candidate target must not be a symlink")
+            created = False
+            if target.exists():
+                _verify_existing(target, manifest_bytes, files, source_pin)
+            else:
+                try:
+                    staging.rename(target)
+                    created = True
+                except OSError:
+                    if not target.is_dir():
+                        raise
+                    _verify_existing(target, manifest_bytes, files, source_pin)
+            admission = None
+            try:
+                admission = candidate_selection._admit_browser_candidate_locked(
+                    root=root,
+                    snapshot=selection_snapshot,
+                    candidate_index=candidate_index,
+                    candidate_identity_sha256=identity,
+                )
+                if transitioned:
+                    await db.commit()
+            except Exception:
+                await db.rollback()
+                if admission is not None and admission.created:
+                    shutil.rmtree(admission.directory, ignore_errors=True)
+                # Bundle and admission are one logical publication.  If this
+                # invocation performed the rename, move it back to staging so
+                # FINAL can never observe an unadmitted late bundle.
+                if created and target.is_dir() and not target.is_symlink():
+                    target.rename(staging)
+                raise
+        shutil.rmtree(staging, ignore_errors=True)
         return IngestedBrowserCandidate(
             identity,
             target,
             target / "candidate-manifest.json",
             manifest_sha,
             manifest,
-            False,
+            created,
         )
-    staging = Path(tempfile.mkdtemp(prefix=f".{identity}.", dir=str(target.parent)))
-    try:
-        for filename, payload in files.items():
-            _write_file(staging / filename, payload)
-        _copy_file(source_path, staging / source_pin["filename"], source_pin)
-        _write_file(staging / "candidate-manifest.json", manifest_bytes)
-        try:
-            await _recheck_publish_lifecycle(db, job.id, version.id, rig_type)
-            _secure_directory_chain(root, target.parent, create=False)
-            if target.is_symlink():
-                raise _error("immutable browser candidate target must not be a symlink")
-            staging.rename(target)
-        except OSError:
-            if not target.is_dir():
-                raise
-            _verify_existing(target, manifest_bytes, files, source_pin)
-            shutil.rmtree(staging)
-            return IngestedBrowserCandidate(
-                identity,
-                target,
-                target / "candidate-manifest.json",
-                manifest_sha,
-                manifest,
-                False,
-            )
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return IngestedBrowserCandidate(
-        identity,
-        target,
-        target / "candidate-manifest.json",
-        manifest_sha,
-        manifest,
-        True,
-    )

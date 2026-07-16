@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import uuid
 
 
@@ -39,6 +40,7 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
         if backend not in sys.path:
             sys.path.insert(0, backend)
         for name in (
+            "animation_fitting_candidate_selection",
             "animation_fitting_candidate_ingest",
             "animal_animation_library",
             "database",
@@ -47,6 +49,12 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
             sys.modules.pop(name, None)
         cls.database = importlib.import_module("database")
         cls.ingest = importlib.import_module("animation_fitting_candidate_ingest")
+        cls.job_plan = importlib.import_module(
+            "animation_fitting_candidate_job_plan"
+        )
+        cls.selection = importlib.import_module(
+            "animation_fitting_candidate_selection"
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -63,13 +71,70 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
         self.model_sha = "4" * 64
         self.workflow_sha = "e" * 64
         self.generation_job_id = "c" * 64
+        self.production_task = {
+            "schema": self.job_plan.TRUSTED_TASK_PINS_SCHEMA,
+            "task_id": self.task_id,
+            "task_guid": self.task_guid,
+            "status": "done",
+            "input_type": "animal",
+            "source_rig_type": "HORSE_2",
+            "source_model_sha256": self.model_sha,
+            "source_skeleton_sha256": self.skeleton_sha,
+        }
+        clip, _ = self.job_plan._load_taxonomy_clip("walk_forward")
+        (
+            self.production_prompt_contract,
+            self.production_workflow_contract,
+        ) = self.job_plan._canonical_prompt_and_workflow_contract(
+            semantic_id="walk_forward", clip=clip, species="horse"
+        )
+        reference_artifact = b"trusted-actionless-reference-rgb"
+        reference_path = (
+            self.root / "jobs" / "references" / self.task_id / "reference_rgb.png"
+        )
+        reference_path.parent.mkdir(parents=True, exist_ok=True)
+        reference_path.write_bytes(reference_artifact)
+        reference_content = {
+            "schema": self.job_plan.REFERENCE_MANIFEST_SCHEMA,
+            "task_id": self.task_id,
+            "task_guid": self.task_guid,
+            "source_rig_type": "HORSE_2",
+            "species": "horse",
+            "source_model_sha256": self.model_sha,
+            "source_skeleton_sha256": self.skeleton_sha,
+            "actionless": True,
+            "geometry_uv_normals_mutated": False,
+            "reference_artifact": {
+                "path": f"references/{self.task_id}/reference_rgb.png",
+                "sha256": _sha(reference_artifact),
+                "bytes": len(reference_artifact),
+            },
+        }
+        reference_bytes = self.job_plan.canonical_json_bytes(reference_content)
+        reference_sha = _sha(reference_bytes)
+        self.production_reference_manifest = {
+            "content": reference_content,
+            "pin": {
+                "path": (
+                    f"reference-manifests/{self.task_id}/{reference_sha}.json"
+                ),
+                "sha256": reference_sha,
+                "bytes": len(reference_bytes),
+            },
+        }
+        reference_manifest_path = (
+            self.root
+            / "jobs"
+            / self.production_reference_manifest["pin"]["path"]
+        )
+        reference_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        reference_manifest_path.write_bytes(reference_bytes)
+        self.production_latest_states = {}
         video = b"synthetic-ltx-video" * 20
         video_sha = _sha(video)
         video_path = (
             self.root
             / "jobs"
-            / "controlled-generation"
-            / self.generation_job_id
             / "raw"
             / video_sha[:2]
             / f"{video_sha}.mp4"
@@ -130,6 +195,8 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
                 worker_url="https://worker.example",
                 prompt_id=uuid.uuid4().hex,
                 prompt="horse walk",
+                candidate_target=1,
+                candidate_limit=1,
                 config_json=json.dumps(
                     {
                         "browser_candidate_ingest": self.binding,
@@ -298,6 +365,228 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
             phase_frames=phases,
         )
 
+    def _production_receipt(
+        self,
+        index: int,
+        *,
+        state_input_fps: int = 24,
+        descriptor_input_fps: int = 24,
+    ) -> dict:
+        seed = self.ingest.derive_browser_candidate_seed(
+            self.task_id, "walk_forward", index
+        )
+        worker_id = "local-4090"
+        worker_url = "http://127.0.0.1:8188"
+        workflow_name = self.production_workflow_contract["workflow_name"]
+        workflow_sha = self.production_workflow_contract[
+            "workflow_fingerprint_sha256"
+        ]
+        experiment_id = f"horse-walk-production-{index}"
+        prompt_doc = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "animation_fitting"
+                / "specs"
+                / "action_prompts.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        prompt_row = next(
+            row
+            for row in prompt_doc["actions_array"]
+            if row["action_id_string"] == "walk_forward"
+        )
+        positive_prompt = self.job_plan._render_prompt(
+            " ".join(
+                (
+                    prompt_doc["common_positive_prefix_string"],
+                    prompt_row["motion_prompt_string"],
+                    prompt_doc["loop_instruction_string"],
+                )
+            ),
+            "horse",
+            "positive prompt",
+        )
+        negative_prompt = self.job_plan._render_prompt(
+            prompt_doc["common_negative_prompt_string"],
+            "horse",
+            "negative prompt",
+        )
+        experiment_content = {
+            "schema": "autorig.animation-fitting-experiment.v1",
+            "experiment_id_string": experiment_id,
+            "base_action_id_string": "walk_forward",
+            "species_string": "horse",
+            "generation_mode_string": "loop",
+            "frame_count_int": 49,
+            "input_fps_int": descriptor_input_fps,
+            "output_fps_int": 30,
+            "seed_int": seed,
+            "positive_prompt_string": positive_prompt,
+            "negative_prompt_string": negative_prompt,
+            "reference_object": {
+                "immutable_manifest_sha256_string": (
+                    self.production_reference_manifest["pin"]["sha256"]
+                ),
+                "source_model_sha256_string": self.model_sha,
+            },
+            "workflow_object": {
+                "workflow_name_string": workflow_name,
+                "workflow_fingerprint_sha256_string": workflow_sha,
+            },
+        }
+        experiment_bytes = self.job_plan.canonical_json_bytes(experiment_content)
+        experiment_sha = _sha(experiment_bytes)
+        experiment_spec = {
+            "content": experiment_content,
+            "pin": {
+                "path": f"animation_fitting/specs/experiments/{experiment_id}.json",
+                "sha256": experiment_sha,
+                "bytes": len(experiment_bytes),
+            },
+        }
+        experiment_path = self.root / "jobs" / experiment_spec["pin"]["path"]
+        experiment_path.parent.mkdir(parents=True, exist_ok=True)
+        experiment_path.write_bytes(experiment_bytes)
+        identity = {
+            "schema": "autorig.animation-fitting-controlled-job-identity.v1",
+            "experiment_id_string": experiment_id,
+            "experiment_sha256_string": experiment_sha,
+            "runtime_authorization_string": f"explicit_cli:{experiment_id}",
+            "reference_sha256_string": self.production_reference_manifest[
+                "content"
+            ]["reference_artifact"]["sha256"],
+            "positive_prompt_sha256_string": self.production_prompt_contract[
+                "positive_prompt_sha256"
+            ],
+            "negative_prompt_sha256_string": self.production_prompt_contract[
+                "negative_prompt_sha256"
+            ],
+            "seed_int": seed,
+            "frame_count_int": 49,
+            "input_fps_int": state_input_fps,
+            "output_fps_int": 30,
+            "start_guide_strength_float": 0.8,
+            "end_guide_strength_float": 0.8,
+            "worker_id_string": worker_id,
+            "worker_base_url_string": worker_url,
+            "workflow_name_string": workflow_name,
+            "workflow_fingerprint_string": workflow_sha,
+            "approval_state_string": "generated_not_approved",
+            "send_to_skeletal_fitting_bool": False,
+        }
+        generation_job_id = _sha(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        )
+        prompt_raw = hashlib.sha256(
+            f"autorig-controlled-animation-fitting:{generation_job_id}".encode()
+        ).hexdigest()[:32]
+        prompt_id = (
+            f"{prompt_raw[:8]}-{prompt_raw[8:12]}-4{prompt_raw[13:16]}-"
+            f"8{prompt_raw[17:20]}-{prompt_raw[20:32]}"
+        )
+        video = f"production-controlled-video-{index}".encode() * 20
+        video_sha = _sha(video)
+        video_path = (
+            self.root
+            / "jobs"
+            / "raw"
+            / video_sha[:2]
+            / f"{video_sha}.mp4"
+        )
+        video_path.parent.mkdir(parents=True, exist_ok=True)
+        video_path.write_bytes(video)
+        state = {
+            **identity,
+            "sequence_int": 3,
+            "recorded_at_unix_float": 1.0,
+            "status_string": "completed",
+            "prompt_id_string": prompt_id,
+            "resumed_existing_prompt_bool": False,
+            "raw_video_path_string": str(video_path),
+            "raw_video_sha256_string": video_sha,
+            "raw_video_bytes_int": len(video),
+            "frame_paths_array": [],
+            "frame_sha256_array": [],
+            "backend_output_object": {
+                "filename_string": "candidate.mp4",
+                "subfolder_string": "",
+                "type_string": "output",
+            },
+        }
+        state_bytes = json.dumps(state, indent=2, sort_keys=True).encode() + b"\n"
+        state_path = (
+            self.root
+            / "jobs"
+            / "jobs"
+            / generation_job_id
+            / "000003.json"
+        )
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_bytes(state_bytes)
+        self.production_latest_states[generation_job_id] = {
+            "schema": self.job_plan.TRUSTED_LATEST_STATE_SCHEMA,
+            "status": "completed",
+            "latest": True,
+            "job_id": generation_job_id,
+            "state_schema": self.job_plan.CONTROLLED_STATE_SCHEMA,
+            "sequence": 3,
+            "filename": "000003.json",
+            "pin": {
+                "path": str(state_path.relative_to(self.root / "jobs")).replace(
+                    "\\", "/"
+                ),
+                "sha256": _sha(state_bytes),
+                "bytes": len(state_bytes),
+            },
+        }
+        self.assertEqual(
+            str(video_path.relative_to(self.root / "jobs")).replace("\\", "/"),
+            f"raw/{video_sha[:2]}/{video_sha}.mp4",
+        )
+        self.assertEqual(
+            str(state_path.relative_to(self.root / "jobs")).replace("\\", "/"),
+            f"jobs/{generation_job_id}/000003.json",
+        )
+        return {
+            "schema": self.job_plan.CONTROLLED_RECEIPT_SCHEMA_V2,
+            "status": "completed",
+            "candidate_index": index,
+            "seed": seed,
+            "job_id": generation_job_id,
+            "prompt_id": prompt_id,
+            "semantic_id": "walk_forward",
+            "generation_mode": "loop",
+            "task": self.production_task,
+            "prompt_contract": self.production_prompt_contract,
+            "reference_manifest": self.production_reference_manifest,
+            "experiment_id": experiment_id,
+            "experiment_sha256": experiment_sha,
+            "experiment_spec": experiment_spec,
+            "worker_id": worker_id,
+            "worker_base_url": worker_url,
+            "workflow_name": workflow_name,
+            "workflow_fingerprint_sha256": workflow_sha,
+            "frame_count": 49,
+            "input_fps": descriptor_input_fps,
+            "output_fps": 30,
+            "source_video": {
+                "path": str(video_path.relative_to(self.root / "jobs")).replace(
+                    "\\", "/"
+                ),
+                "sha256": video_sha,
+                "bytes": len(video),
+            },
+        }
+
+    def _production_trust(self, receipts: list[dict]):
+        return self.ingest.BrowserCandidatePlanTrust(
+            reference_manifest=self.production_reference_manifest,
+            latest_states=tuple(
+                self.production_latest_states[row["job_id"]] for row in receipts
+            ),
+            retry_authorization=None,
+        )
+
     async def test_server_computes_pins_publishes_atomically_and_replays(self):
         artifacts = self._artifacts()
         async with self.database.AsyncSessionLocal() as db:
@@ -354,6 +643,429 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
             [],
             "machine evidence must not create an approvable DB candidate",
         )
+
+    async def test_concurrent_replay_and_generation_closure_do_not_deadlock(self):
+        async with self.database.AsyncSessionLocal() as db:
+            await self.ingest.ingest_browser_candidate_artifacts(
+                db,
+                job_id=self.job_id,
+                seed=self.seed,
+                artifacts=self._artifacts(),
+                fitting_jobs_root=str(self.root / "jobs"),
+            )
+
+        async def replay():
+            async with self.database.AsyncSessionLocal() as db:
+                return await self.ingest.ingest_browser_candidate_artifacts(
+                    db,
+                    job_id=self.job_id,
+                    seed=self.seed,
+                    artifacts=self._artifacts(),
+                    fitting_jobs_root=str(self.root / "jobs"),
+                )
+
+        async def close():
+            async with self.database.AsyncSessionLocal() as db:
+                return await self.selection.close_candidate_generation(
+                    db,
+                    job_id=self.job_id,
+                    fitting_jobs_root=str(self.root / "jobs"),
+                )
+
+        replay_result, close_result = await asyncio.wait_for(
+            asyncio.gather(replay(), close(), return_exceptions=True), timeout=5
+        )
+        self.assertFalse(isinstance(close_result, Exception), close_result)
+        if isinstance(replay_result, Exception):
+            self.assertEqual(getattr(replay_result, "status_code", None), 409)
+            self.assertRegex(str(replay_result), "closed|FINAL")
+        else:
+            self.assertFalse(replay_result.created)
+
+    async def test_rename_before_admission_crash_is_reconciled_at_closure(self):
+        class SimulatedProcessCrash(BaseException):
+            pass
+
+        original = self.selection._admit_browser_candidate_locked
+        with unittest.mock.patch.object(
+            self.selection,
+            "_admit_browser_candidate_locked",
+            side_effect=SimulatedProcessCrash("crash after rename"),
+        ):
+            async with self.database.AsyncSessionLocal() as db:
+                with self.assertRaises(SimulatedProcessCrash):
+                    await self.ingest.ingest_browser_candidate_artifacts(
+                        db,
+                        job_id=self.job_id,
+                        seed=self.seed,
+                        artifacts=self._artifacts(),
+                        fitting_jobs_root=str(self.root / "jobs"),
+                    )
+        self.assertIs(self.selection._admit_browser_candidate_locked, original)
+        bundle_root = self.root / "jobs" / self.job_id / "browser-candidates"
+        self.assertEqual(len(list(bundle_root.glob("*/*"))), 1)
+        admissions = (
+            self.root
+            / "jobs"
+            / self.job_id
+            / "browser-candidate-selection"
+            / "admissions"
+        )
+        self.assertFalse(admissions.exists())
+        async with self.database.AsyncSessionLocal() as db:
+            closure = await self.selection.close_candidate_generation(
+                db,
+                job_id=self.job_id,
+                fitting_jobs_root=str(self.root / "jobs"),
+            )
+        self.assertTrue(closure.created)
+        self.assertTrue((admissions / "00" / "admission.json").is_file())
+        self.assertEqual(len(closure.receipt["admissions"]), 1)
+
+    async def test_v2_multi_slot_plan_publishes_bundle_and_admission_together(self):
+        receipts = [self._production_receipt(index) for index in range(8)]
+        trust = self._production_trust(receipts)
+        plan = self.job_plan.build_production_browser_candidate_job_plan(
+            {
+                "schema": self.job_plan.PLAN_REQUEST_SCHEMA,
+                "semantic_id": "walk_forward",
+                "candidate_target": 8,
+                "candidate_limit": 16,
+            },
+            trusted_task=self.production_task,
+            trusted_reference_manifest=self.production_reference_manifest,
+            trusted_latest_states=trust.latest_states,
+            trusted_retry_authorization=None,
+            verified_receipts=receipts,
+        )
+        seeds = [row["seed"] for row in receipts[:2]]
+        async with self.database.AsyncSessionLocal() as db:
+            job = (
+                await db.execute(
+                    self.ingest.select(self.database.AnimalAnimationFittingJob).where(
+                        self.database.AnimalAnimationFittingJob.id == self.job_id
+                    )
+                )
+            ).scalar_one()
+            job.config_json = plan.config_json
+            job.candidate_target = 8
+            job.candidate_limit = 16
+            job.workflow_name = plan.workflow_name
+            job.workflow_fingerprint = plan.workflow_fingerprint
+            job.worker_url = "http://127.0.0.1:8188"
+            job.prompt_id = plan.prompt_id
+            await db.commit()
+        results = []
+        for seed in seeds:
+            async with self.database.AsyncSessionLocal() as db:
+                results.append(
+                    await self.ingest.ingest_browser_candidate_artifacts(
+                        db,
+                        job_id=self.job_id,
+                        seed=seed,
+                        artifacts=self._artifacts(),
+                        fitting_jobs_root=str(self.root / "jobs"),
+                        trusted_plan_inputs=trust,
+                    )
+                )
+        self.assertEqual(
+            [row.manifest["candidate"]["candidate_index"] for row in results],
+            [0, 1],
+        )
+        for index, row in enumerate(results):
+            admission_path = (
+                self.root
+                / "jobs"
+                / self.job_id
+                / "browser-candidate-selection"
+                / "admissions"
+                / f"{index:02d}"
+                / "admission.json"
+            )
+            admission = json.loads(admission_path.read_bytes())
+            self.assertEqual(admission["candidate_identity_sha256"], row.identity_sha256)
+            self.assertEqual(admission["seed"], seeds[index])
+
+        forged_receipts = json.loads(json.dumps(receipts))
+        forged_video = b"alternate-server-owned-video"
+        forged_sha = _sha(forged_video)
+        forged_receipts[0]["source_video"] = {
+            "path": f"raw/{forged_sha[:2]}/{forged_sha}.mp4",
+            "sha256": forged_sha,
+            "bytes": len(forged_video),
+        }
+        forged = self.job_plan.build_production_browser_candidate_job_plan(
+            {
+                "schema": self.job_plan.PLAN_REQUEST_SCHEMA,
+                "semantic_id": "walk_forward",
+                "candidate_target": 8,
+                "candidate_limit": 16,
+            },
+            trusted_task=plan.config["browser_candidate_job_plan"]["trusted_task"],
+            trusted_reference_manifest=self.production_reference_manifest,
+            trusted_latest_states=trust.latest_states,
+            trusted_retry_authorization=None,
+            verified_receipts=forged_receipts,
+        )
+        async with self.database.AsyncSessionLocal() as db:
+            job = (
+                await db.execute(
+                    self.ingest.select(self.database.AnimalAnimationFittingJob).where(
+                        self.database.AnimalAnimationFittingJob.id == self.job_id
+                    )
+                )
+            ).scalar_one()
+            job.config_json = forged.config_json
+            await db.commit()
+            with self.assertRaisesRegex(
+                self.ingest.BrowserCandidateIngestError,
+                "canonical server-owned browser candidate plan",
+            ):
+                await self.ingest.ingest_browser_candidate_artifacts(
+                    db,
+                    job_id=self.job_id,
+                    seed=seeds[0],
+                    artifacts=self._artifacts(),
+                    fitting_jobs_root=str(self.root / "jobs"),
+                    trusted_plan_inputs=trust,
+                )
+
+    async def test_v2_rejects_completed_state_with_30_input_fps(self):
+        receipts = [
+            self._production_receipt(
+                index,
+                state_input_fps=30 if index == 0 else 24,
+            )
+            for index in range(8)
+        ]
+        trust = self._production_trust(receipts)
+        plan = self.job_plan.build_production_browser_candidate_job_plan(
+            {
+                "schema": self.job_plan.PLAN_REQUEST_SCHEMA,
+                "semantic_id": "walk_forward",
+                "candidate_target": 8,
+                "candidate_limit": 16,
+            },
+            trusted_task=self.production_task,
+            trusted_reference_manifest=self.production_reference_manifest,
+            trusted_latest_states=trust.latest_states,
+            trusted_retry_authorization=None,
+            verified_receipts=receipts,
+        )
+        async with self.database.AsyncSessionLocal() as db:
+            job = (
+                await db.execute(
+                    self.ingest.select(self.database.AnimalAnimationFittingJob).where(
+                        self.database.AnimalAnimationFittingJob.id == self.job_id
+                    )
+                )
+            ).scalar_one()
+            job.config_json = plan.config_json
+            job.candidate_target = 8
+            job.candidate_limit = 16
+            job.workflow_name = plan.workflow_name
+            job.workflow_fingerprint = plan.workflow_fingerprint
+            job.worker_url = "http://127.0.0.1:8188"
+            job.prompt_id = plan.prompt_id
+            await db.commit()
+            with self.assertRaisesRegex(
+                self.ingest.BrowserCandidateIngestError,
+                "controlled-generation state differs",
+            ):
+                await self.ingest.ingest_browser_candidate_artifacts(
+                    db,
+                    job_id=self.job_id,
+                    seed=receipts[0]["seed"],
+                    artifacts=self._artifacts(),
+                    fitting_jobs_root=str(self.root / "jobs"),
+                    trusted_plan_inputs=trust,
+                )
+
+    async def test_v2_trust_gate_and_first_admission_transition_are_atomic(self):
+        receipts = [self._production_receipt(index) for index in range(8)]
+        trust = self._production_trust(receipts)
+        plan = self.job_plan.build_production_browser_candidate_job_plan(
+            {
+                "schema": self.job_plan.PLAN_REQUEST_SCHEMA,
+                "semantic_id": "walk_forward",
+                "candidate_target": 8,
+                "candidate_limit": 16,
+            },
+            trusted_task=self.production_task,
+            trusted_reference_manifest=self.production_reference_manifest,
+            trusted_latest_states=trust.latest_states,
+            trusted_retry_authorization=None,
+            verified_receipts=receipts,
+        )
+        async with self.database.AsyncSessionLocal() as db:
+            job = (
+                await db.execute(
+                    self.ingest.select(self.database.AnimalAnimationFittingJob).where(
+                        self.database.AnimalAnimationFittingJob.id == self.job_id
+                    )
+                )
+            ).scalar_one()
+            job.status = "generating"
+            job.config_json = plan.config_json
+            job.candidate_target = 8
+            job.candidate_limit = 16
+            job.workflow_name = plan.workflow_name
+            job.workflow_fingerprint = plan.workflow_fingerprint
+            job.worker_url = "http://127.0.0.1:8188"
+            job.prompt_id = plan.prompt_id
+            await db.commit()
+
+        async with self.database.AsyncSessionLocal() as db:
+            with self.assertRaisesRegex(
+                self.ingest.BrowserCandidateIngestError, "resolver inputs are required"
+            ):
+                await self.ingest.ingest_browser_candidate_artifacts(
+                    db,
+                    job_id=self.job_id,
+                    seed=receipts[0]["seed"],
+                    artifacts=self._artifacts(),
+                    fitting_jobs_root=str(self.root / "jobs"),
+                )
+
+        reference_path = (
+            self.root / "jobs" / self.production_reference_manifest["pin"]["path"]
+        )
+        reference_bytes = self.job_plan.canonical_json_bytes(
+            self.production_reference_manifest["content"]
+        )
+        reference_path.write_bytes(b"tampered-reference-manifest")
+        async with self.database.AsyncSessionLocal() as db:
+            with self.assertRaisesRegex(
+                self.ingest.BrowserCandidateIngestError,
+                "immutable browser candidate artifact changed|trusted_reference_manifest",
+            ):
+                await self.ingest.ingest_browser_candidate_artifacts(
+                    db,
+                    job_id=self.job_id,
+                    seed=receipts[0]["seed"],
+                    artifacts=self._artifacts(),
+                    fitting_jobs_root=str(self.root / "jobs"),
+                    trusted_plan_inputs=trust,
+                )
+        reference_path.write_bytes(reference_bytes)
+
+        async with self.database.AsyncSessionLocal() as db:
+            job = await db.get(self.database.AnimalAnimationFittingJob, self.job_id)
+            self.assertEqual(job.status, "generating")
+        self.assertEqual(
+            self.selection._scan_bundle_identities(
+                self.root / "jobs", self.job_id
+            ),
+            set(),
+        )
+        self.assertFalse(
+            (self.root / "jobs" / self.job_id / "selection" / "admissions").exists()
+        )
+
+        with unittest.mock.patch.object(
+            self.selection,
+            "_admit_browser_candidate_locked",
+            side_effect=RuntimeError("simulated admission failure"),
+        ):
+            async with self.database.AsyncSessionLocal() as db:
+                with self.assertRaisesRegex(RuntimeError, "simulated admission failure"):
+                    await self.ingest.ingest_browser_candidate_artifacts(
+                        db,
+                        job_id=self.job_id,
+                        seed=receipts[0]["seed"],
+                        artifacts=self._artifacts(),
+                        fitting_jobs_root=str(self.root / "jobs"),
+                        trusted_plan_inputs=trust,
+                    )
+        async with self.database.AsyncSessionLocal() as db:
+            job = await db.get(self.database.AnimalAnimationFittingJob, self.job_id)
+            self.assertEqual(job.status, "generating")
+        self.assertEqual(
+            self.selection._scan_bundle_identities(
+                self.root / "jobs", self.job_id
+            ),
+            set(),
+        )
+        self.assertFalse(
+            (self.root / "jobs" / self.job_id / "selection" / "admissions").exists()
+        )
+
+        async with self.database.AsyncSessionLocal() as db:
+            result = await self.ingest.ingest_browser_candidate_artifacts(
+                db,
+                job_id=self.job_id,
+                seed=receipts[0]["seed"],
+                artifacts=self._artifacts(),
+                fitting_jobs_root=str(self.root / "jobs"),
+                trusted_plan_inputs=trust,
+            )
+        self.assertTrue(result.created)
+        async with self.database.AsyncSessionLocal() as db:
+            job = await db.get(self.database.AnimalAnimationFittingJob, self.job_id)
+            self.assertEqual(job.status, "review")
+
+    async def test_v2_rejects_newer_state_revision_and_worker_db_drift(self):
+        receipts = [self._production_receipt(index) for index in range(8)]
+        trust = self._production_trust(receipts)
+        plan = self.job_plan.build_production_browser_candidate_job_plan(
+            {
+                "schema": self.job_plan.PLAN_REQUEST_SCHEMA,
+                "semantic_id": "walk_forward",
+                "candidate_target": 8,
+                "candidate_limit": 16,
+            },
+            trusted_task=self.production_task,
+            trusted_reference_manifest=self.production_reference_manifest,
+            trusted_latest_states=trust.latest_states,
+            trusted_retry_authorization=None,
+            verified_receipts=receipts,
+        )
+        async with self.database.AsyncSessionLocal() as db:
+            job = await db.get(self.database.AnimalAnimationFittingJob, self.job_id)
+            job.config_json = plan.config_json
+            job.candidate_target = 8
+            job.candidate_limit = 16
+            job.workflow_name = plan.workflow_name
+            job.workflow_fingerprint = plan.workflow_fingerprint
+            job.worker_url = "http://127.0.0.1:8188"
+            job.prompt_id = plan.prompt_id
+            await db.commit()
+
+        state_path = (
+            self.root / "jobs" / trust.latest_states[0]["pin"]["path"]
+        )
+        newer = state_path.with_name("000004.json")
+        newer.write_text("{}", encoding="utf-8")
+        async with self.database.AsyncSessionLocal() as db:
+            with self.assertRaisesRegex(
+                self.ingest.BrowserCandidateIngestError, "not the latest state revision"
+            ):
+                await self.ingest.ingest_browser_candidate_artifacts(
+                    db,
+                    job_id=self.job_id,
+                    seed=receipts[0]["seed"],
+                    artifacts=self._artifacts(),
+                    fitting_jobs_root=str(self.root / "jobs"),
+                    trusted_plan_inputs=trust,
+                )
+        newer.unlink()
+
+        async with self.database.AsyncSessionLocal() as db:
+            job = await db.get(self.database.AnimalAnimationFittingJob, self.job_id)
+            job.worker_url = "http://127.0.0.1:8288"
+            await db.commit()
+        async with self.database.AsyncSessionLocal() as db:
+            with self.assertRaisesRegex(
+                self.ingest.BrowserCandidateIngestError, "another worker"
+            ):
+                await self.ingest.ingest_browser_candidate_artifacts(
+                    db,
+                    job_id=self.job_id,
+                    seed=receipts[0]["seed"],
+                    artifacts=self._artifacts(),
+                    fitting_jobs_root=str(self.root / "jobs"),
+                    trusted_plan_inputs=trust,
+                )
 
     async def test_rejects_cross_candidate_visual_clip_before_publish(self):
         artifacts = self._artifacts()
@@ -426,7 +1138,8 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
             job.config_json = json.dumps(config)
             await db.commit()
             with self.assertRaisesRegex(
-                self.ingest.BrowserCandidateIngestError, "source video integrity"
+                self.ingest.BrowserCandidateIngestError,
+                "source video integrity|content addressing",
             ):
                 await self.ingest.ingest_browser_candidate_artifacts(
                     db,
@@ -496,14 +1209,14 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
                     fitting_jobs_root=str(self.root / "jobs"),
                 )
 
-    async def test_rejects_source_video_from_foreign_generation_job(self):
+    async def test_rejects_non_content_addressed_source_video_path(self):
         foreign_job_id = "b" * 64
         foreign_path = (
             self.root
             / "jobs"
             / "controlled-generation"
-            / foreign_job_id
             / "raw"
+            / foreign_job_id[:2]
             / self.video_path.name
         )
         foreign_path.parent.mkdir(parents=True)
@@ -524,7 +1237,7 @@ class BrowserCandidateIngestTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             with self.assertRaisesRegex(
                 self.ingest.BrowserCandidateIngestError,
-                "controlled generation job",
+                "content addressing",
             ):
                 await self.ingest.ingest_browser_candidate_artifacts(
                     db,

@@ -41,9 +41,13 @@ from animal_animation_library import (
 )
 from animation_fitting_candidate_ingest import (
     BUNDLE_SCHEMA,
-    JOB_BINDING_SCHEMA,
+    BrowserCandidatePlanTrust,
+    CONTROLLED_GENERATION_V2_KEYS,
+    CONTROLLED_RECEIPT_SCHEMA_V2,
     MAX_TOTAL_INGEST_BYTES,
     PHASES,
+    parse_browser_candidate_plan,
+    _normalize_worker_url,
 )
 from config import ANIMATION_FITTING_JOBS_ROOT
 from database import AnimalAnimationFittingJob, AnimalAnimationLibraryVersion, Task
@@ -509,28 +513,16 @@ def _parse_job_config(value: str) -> Dict[str, Any]:
     payload = (value or "{}").encode("utf-8")
     if len(payload) > MAX_MANIFEST_BYTES:
         raise _error("fitting job config exceeds the server size limit")
-    config = _strict_object(payload, "fitting job config")
-    return _exact_object(
-        config.get("browser_candidate_ingest"),
-        "job.config.browser_candidate_ingest",
-        (
-            "schema",
-            "task_id",
-            "task_guid",
-            "candidate_seed",
-            "source_rig_type",
-            "source_model_sha256",
-            "source_skeleton_sha256",
-            "frame_count",
-            "output_fps",
-            "source_video",
-            "controlled_generation",
-        ),
-    )
+    return _strict_object(payload, "fitting job config")
 
 
 async def _load_lifecycle(
-    db: AsyncSession, job_id: str, bundle: _BundleSnapshot
+    db: AsyncSession,
+    job_id: str,
+    bundle: _BundleSnapshot,
+    *,
+    fitting_jobs_root: str = ANIMATION_FITTING_JOBS_ROOT,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
 ) -> _LifecycleSnapshot:
     job = (
         await db.execute(
@@ -585,17 +577,40 @@ async def _load_lifecycle(
         or str(task.input_type or "").strip().lower() != "animal"
     ):
         raise _error("source task is not the exact completed animal task")
-    binding = _parse_job_config(job.config_json)
-    if binding.get("schema") != JOB_BINDING_SCHEMA:
-        raise _error("fitting job browser ingest binding schema is invalid")
+    config = _parse_job_config(job.config_json)
+    binding, planned_slots = parse_browser_candidate_plan(
+        config,
+        semantic_id=semantic_id,
+        candidate_limit=int(job.candidate_limit),
+        candidate_target=int(job.candidate_target),
+        workflow_name=job.workflow_name,
+        workflow_fingerprint=job.workflow_fingerprint,
+        prompt_id=job.prompt_id,
+        worker_url=job.worker_url,
+        trusted_plan_inputs=trusted_plan_inputs,
+        trusted_store_root=fitting_jobs_root,
+    )
     if (
         _uuid(binding.get("task_id"), "binding.task_id") != task_id
         or _uuid(binding.get("task_guid"), "binding.task_guid") != task_guid
     ):
         raise _error("fitting job task binding drifted")
     seed = candidate_manifest.get("seed")
-    if isinstance(seed, bool) or not isinstance(seed, int) or binding.get("candidate_seed") != seed:
+    candidate_index = candidate_manifest.get("candidate_index")
+    slot_matches = [
+        slot
+        for slot in planned_slots
+        if slot["candidate_index"] == candidate_index and slot["seed"] == seed
+    ]
+    if (
+        isinstance(seed, bool)
+        or not isinstance(seed, int)
+        or isinstance(candidate_index, bool)
+        or not isinstance(candidate_index, int)
+        or len(slot_matches) != 1
+    ):
         raise _error("fitting job candidate seed binding drifted")
+    candidate_slot = slot_matches[0]
     source_model_sha = normalize_sha256(
         binding.get("source_model_sha256"), "source_model_sha256"
     )
@@ -605,6 +620,17 @@ async def _load_lifecycle(
     binding_frame_count = _positive_int(
         binding.get("frame_count"), "binding.frame_count"
     )
+    binding_input_fps = None
+    candidate_input_fps = None
+    if "input_fps" in binding:
+        binding_input_fps = _positive_int(
+            binding.get("input_fps"), "binding.input_fps"
+        )
+        candidate_input_fps = _positive_int(
+            candidate_manifest.get("input_fps"), "candidate.input_fps"
+        )
+        if binding_input_fps != 24:
+            raise _error("fitting job input_fps is not the canonical 24 fps timing")
     binding_fps = _positive_number(binding.get("output_fps"), "binding.output_fps")
     candidate_frame_count = _positive_int(
         candidate_manifest.get("frame_count"), "candidate.frame_count"
@@ -616,11 +642,14 @@ async def _load_lifecycle(
         or source_skeleton_sha != skeleton_sha
         or binding.get("source_rig_type") != candidate_manifest.get("source_rig_type")
         or binding_frame_count != candidate_frame_count
+        or binding_input_fps != candidate_input_fps
         or binding_fps != candidate_fps
     ):
         raise _error("fitting job model, skeleton, rig, or timing binding drifted")
     source_video = _exact_object(
-        binding.get("source_video"), "binding.source_video", ("path", "sha256", "bytes")
+        candidate_slot.get("source_video"),
+        "candidate_slot.source_video",
+        ("path", "sha256", "bytes"),
     )
     source_video_pin = bundle.artifacts["source-video.mp4"]
     if (
@@ -629,16 +658,27 @@ async def _load_lifecycle(
         or source_video.get("bytes") != source_video_pin["bytes"]
     ):
         raise _error("fitting job source video SHA binding drifted")
-    controlled = _exact_object(
-        binding.get("controlled_generation"),
-        "binding.controlled_generation",
-        (
-            "job_id",
-            "prompt_id",
-            "experiment_id",
-            "experiment_sha256",
-            "workflow_fingerprint_sha256",
+    verified_generation = candidate_slot.get("verified_generation")
+    is_v2 = (
+        isinstance(verified_generation, Mapping)
+        and verified_generation.get("schema") == CONTROLLED_RECEIPT_SCHEMA_V2
+    )
+    controlled_keys = CONTROLLED_GENERATION_V2_KEYS if is_v2 else (
+        "job_id",
+        "prompt_id",
+        "experiment_id",
+        "experiment_sha256",
+        "workflow_fingerprint_sha256",
+        *(
+            ("worker_id", "worker_base_url")
+            if verified_generation is not None
+            else ()
         ),
+    )
+    controlled = _exact_object(
+        candidate_slot.get("controlled_generation"),
+        "candidate_slot.controlled_generation",
+        controlled_keys,
     )
     if controlled != manifest.get("controlled_generation"):
         raise _error("controlled generation provenance drifted")
@@ -647,6 +687,15 @@ async def _load_lifecycle(
         "controlled_generation.workflow_fingerprint_sha256",
     ) != normalize_sha256(job.workflow_fingerprint, "job.workflow_fingerprint"):
         raise _error("controlled generation workflow binding drifted")
+    if verified_generation is not None and (
+        not str(controlled.get("worker_id") or "").strip()
+        or _normalize_worker_url(
+            controlled.get("worker_base_url"),
+            "controlled_generation.worker_base_url",
+        )
+        != _normalize_worker_url(job.worker_url, "job.worker_url")
+    ):
+        raise _error("controlled generation worker binding drifted")
     lifecycle_binding = {
         "job": {
             "id": job.id,
@@ -931,10 +980,17 @@ async def _recheck_all(
     resolver: TaskArtifactResolver,
     qa_runtime: TrustedQARuntime | None = None,
     expected_runtime_pins: Mapping[str, Any] | None = None,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
 ) -> tuple[_BundleSnapshot, _LifecycleSnapshot, TrustedTaskArtifacts]:
     await db.rollback()
     bundle = _load_bundle(root, job_id, candidate_identity)
-    lifecycle = await _load_lifecycle(db, job_id, bundle)
+    lifecycle = await _load_lifecycle(
+        db,
+        job_id,
+        bundle,
+        fitting_jobs_root=str(root),
+        trusted_plan_inputs=trusted_plan_inputs,
+    )
     if lifecycle.binding_sha256 != expected_lifecycle_sha:
         raise _error("job, library, or task lifecycle changed before publication")
     task_artifacts, task_pins = await _resolve_task_artifacts(
@@ -960,6 +1016,7 @@ async def create_server_validation_receipt(
     qa_runner: TrustedQARunner,
     qa_runtime: TrustedQARuntime,
     fitting_jobs_root: str = ANIMATION_FITTING_JOBS_ROOT,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
 ) -> ImmutableReceipt:
     """Recompute and immutably pin trusted server evidence for one upload."""
     if db.new or db.dirty or db.deleted:
@@ -970,7 +1027,13 @@ async def create_server_validation_receipt(
     )
     root = _root(fitting_jobs_root)
     bundle = _load_bundle(root, job_id, candidate_identity)
-    lifecycle = await _load_lifecycle(db, job_id, bundle)
+    lifecycle = await _load_lifecycle(
+        db,
+        job_id,
+        bundle,
+        fitting_jobs_root=fitting_jobs_root,
+        trusted_plan_inputs=trusted_plan_inputs,
+    )
     task_artifacts, task_pins = await _resolve_task_artifacts(
         task_artifact_resolver, lifecycle.task_request
     )
@@ -1056,6 +1119,7 @@ async def create_server_validation_receipt(
         resolver=task_artifact_resolver,
         qa_runtime=resolved_runtime,
         expected_runtime_pins=runtime_pins,
+        trusted_plan_inputs=trusted_plan_inputs,
     )
     target = (
         root
@@ -1255,8 +1319,46 @@ async def create_human_review_receipt(
     review: HumanReviewDecision,
     task_artifact_resolver: TaskArtifactResolver,
     fitting_jobs_root: str = ANIMATION_FITTING_JOBS_ROOT,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
 ) -> ImmutableReceipt:
-    """Pin a human decision; PASS can only use the trusted validation receipt."""
+    """Pin a human decision under the shared candidate publication lock.
+
+    The import is deliberately local: candidate selection imports the immutable
+    review readers from this module.  At call time both modules are initialized,
+    and the shared lock serializes this publication with OPEN/FINAL selection,
+    candidate admission, and generation closure.
+    """
+    from animation_fitting_candidate_selection import (
+        async_candidate_publication_lock,
+    )
+
+    async with async_candidate_publication_lock(
+        job_id=job_id, fitting_jobs_root=fitting_jobs_root
+    ):
+        return await _create_human_review_receipt_locked(
+            db,
+            job_id=job_id,
+            candidate_identity_sha256=candidate_identity_sha256,
+            server_validation_identity_sha256=server_validation_identity_sha256,
+            review=review,
+            task_artifact_resolver=task_artifact_resolver,
+            fitting_jobs_root=fitting_jobs_root,
+            trusted_plan_inputs=trusted_plan_inputs,
+        )
+
+
+async def _create_human_review_receipt_locked(
+    db: AsyncSession,
+    *,
+    job_id: str,
+    candidate_identity_sha256: str,
+    server_validation_identity_sha256: str,
+    review: HumanReviewDecision,
+    task_artifact_resolver: TaskArtifactResolver,
+    fitting_jobs_root: str = ANIMATION_FITTING_JOBS_ROOT,
+    trusted_plan_inputs: BrowserCandidatePlanTrust | None = None,
+) -> ImmutableReceipt:
+    """Build and publish a human review while the publication lock is held."""
     if db.new or db.dirty or db.deleted:
         raise _error("human review requires a clean database session")
     job_id = _uuid(job_id, "job_id")
@@ -1269,7 +1371,13 @@ async def create_human_review_receipt(
     review_value = _review_value(review)
     root = _root(fitting_jobs_root)
     bundle = _load_bundle(root, job_id, candidate_identity)
-    lifecycle = await _load_lifecycle(db, job_id, bundle)
+    lifecycle = await _load_lifecycle(
+        db,
+        job_id,
+        bundle,
+        fitting_jobs_root=fitting_jobs_root,
+        trusted_plan_inputs=trusted_plan_inputs,
+    )
     _, validation, metrics, validation_bytes, _ = _load_server_validation(
         root, job_id, candidate_identity, validation_identity
     )
@@ -1376,6 +1484,7 @@ async def create_human_review_receipt(
         expected_lifecycle_sha=lifecycle.binding_sha256,
         expected_task_pins=task_pins,
         resolver=task_artifact_resolver,
+        trusted_plan_inputs=trusted_plan_inputs,
     )
     _load_server_validation(root, job_id, candidate_identity, validation_identity)
     target = (
