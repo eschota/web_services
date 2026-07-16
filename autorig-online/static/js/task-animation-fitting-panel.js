@@ -342,7 +342,7 @@ export class TaskAnimationFittingPanel {
         this.decoder = options.decoder || decodeVideoFramesExact;
         this.tracker = options.tracker || null;
         this.solver = options.solver || null;
-        this.trackerLoader = options.trackerLoader || (() => import('./animation-fitting-semantic-tracker.js'));
+        this.trackerLoader = options.trackerLoader || (() => import('./animation-fitting-semantic-tracker.js?v=2'));
         this.solverLoader = options.solverLoader || (() => import('./animation-fitting-browser-core.js'));
         this.frameCount = positiveInteger(options.frameCount ?? DEFAULT_FRAME_COUNT, 'frameCount');
         this.fps = finiteNumber(options.fps ?? DEFAULT_FPS, 'fps');

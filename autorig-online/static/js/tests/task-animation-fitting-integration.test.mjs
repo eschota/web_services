@@ -83,11 +83,11 @@ const semanticFittingBody = extractFunctionBody(
 test('task viewer imports the complete browser-first fitting pipeline from real modules', () => {
     assert.match(
         taskHtml,
-        /import\s*\{[\s\S]*?buildThreeAnimationClip[\s\S]*?decodeVideoFramesExact[\s\S]*?mapHorseSemanticPalette[\s\S]*?\}\s*from '\/static\/js\/task-animation-fitting-panel\.js\?v=1'/,
+        /import\s*\{[\s\S]*?buildThreeAnimationClip[\s\S]*?decodeVideoFramesExact[\s\S]*?mapHorseSemanticPalette[\s\S]*?\}\s*from '\/static\/js\/task-animation-fitting-panel\.js\?v=2'/,
     );
     assert.match(
         taskHtml,
-        /import\s*\{[\s\S]*?assessHorseWalkGait[\s\S]*?buildSemanticObservations[\s\S]*?\}\s*from '\/static\/js\/animation-fitting-semantic-tracker\.js\?v=1'/,
+        /import\s*\{[\s\S]*?assessHorseWalkGait[\s\S]*?buildSemanticObservations[\s\S]*?\}\s*from '\/static\/js\/animation-fitting-semantic-tracker\.js\?v=2'/,
     );
     assert.match(
         taskHtml,
