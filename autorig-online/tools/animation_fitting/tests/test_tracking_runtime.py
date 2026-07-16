@@ -438,6 +438,255 @@ def _browser_recovery_guide_bundle(
     return guide, browser_rgb, _sha(manifest_path)
 
 
+def _browser_interval_guide_bundle(
+    root: Path, bundle: Path, canonical_rgb: np.ndarray
+) -> tuple[Path, np.ndarray, str]:
+    guide = root / "browser_interval_guides"
+    guide.mkdir()
+    browser_rgb = 255 - canonical_rgb
+    metadata = json.loads((bundle / "fitting_bundle.json").read_text(encoding="utf-8"))
+    frame_indices = tuple(range(49))
+    source_anchor_indices = (0, 6, 12, 18, 24, 30, 36, 42, 48)
+    barrier_indices = (0, 12, 24, 36, 48)
+    recovery_indices = (12, 24, 36)
+    limbs = ("hind_left", "fore_left", "hind_right", "fore_right")
+
+    endpoint = guide / "guide_000.png"
+    Image.fromarray(browser_rgb, mode="RGB").save(endpoint)
+    endpoint_payload = endpoint.read_bytes()
+    frame_arrays: dict[int, np.ndarray] = {0: browser_rgb.copy()}
+    for frame_index in frame_indices[1:]:
+        target = guide / f"guide_{frame_index:03d}.png"
+        if frame_index in barrier_indices:
+            target.write_bytes(endpoint_payload)
+            frame_arrays[frame_index] = browser_rgb.copy()
+            continue
+        frame = browser_rgb.copy()
+        column = 1 + (frame_index % (frame.shape[1] - 1))
+        frame[0, column, 0] = (int(frame[0, column, 0]) + frame_index) % 256
+        Image.fromarray(frame, mode="RGB").save(target)
+        frame_arrays[frame_index] = frame
+
+    def swing_limb(frame_index: int) -> str | None:
+        if 1 <= frame_index <= 11:
+            return "hind_left"
+        if 13 <= frame_index <= 23:
+            return "fore_left"
+        if 25 <= frame_index <= 35:
+            return "hind_right"
+        if 37 <= frame_index <= 47:
+            return "fore_right"
+        return None
+
+    frames = []
+    guides = []
+    cue_frames = []
+    post_bake_frames = []
+    decoded_pins = []
+    for frame_index in frame_indices:
+        path = guide / f"guide_{frame_index:03d}.png"
+        decoded_sha256 = hashlib.sha256(
+            np.ascontiguousarray(frame_arrays[frame_index]).tobytes()
+        ).hexdigest()
+        decoded_pins.append(decoded_sha256)
+        is_source_anchor = frame_index in source_anchor_indices
+        swing = swing_limb(frame_index)
+        visible_limbs = [limb for limb in limbs if limb != swing]
+        hidden_limbs = [] if swing is None else [swing]
+        frames.append(
+            {
+                "frame_index_int": frame_index,
+                "filename_string": path.name,
+                "sha256_string": _sha(path),
+                "bytes_int": path.stat().st_size,
+                "decoded_rgb_sha256_string": decoded_sha256,
+                "source_anchor_byte_identical_bool": is_source_anchor,
+            }
+        )
+        guides.append(
+            {
+                "filename": path.name,
+                "bytes": path.stat().st_size,
+                "sha256": _sha(path),
+                "frameIndex": frame_index,
+                "role": "interval_fixture",
+                "swingLimb": swing,
+                "width": browser_rgb.shape[1],
+                "height": browser_rgb.shape[0],
+                "decodedRgbSha256": decoded_sha256,
+                "sourceAnchorByteIdentical": is_source_anchor,
+                "renderSource": "browser_threejs",
+                "byteIdenticalReferenceCopy": False,
+            }
+        )
+        cue_frames.append(
+            {
+                "frameIndex": frame_index,
+                "swingLimb": swing,
+                "visibleLimbs": visible_limbs,
+                "hiddenLimbs": hidden_limbs,
+                "visibleCueCount": len(visible_limbs),
+                "hiddenCueCount": len(hidden_limbs),
+                "exactlyMatchesStance": True,
+            }
+        )
+        post_bake_frames.append(
+            {
+                "frameIndex": frame_index,
+                "swingLimb": swing,
+                "stanceHoofCount": len(visible_limbs),
+            }
+        )
+
+    interval_video = guide / "interval_guide.mkv"
+    interval_video.write_bytes(b"synthetic-png-in-matroska-interval-guide")
+    pose_contract = guide / "pose_contract.json"
+    _write_json(pose_contract, {"schema": "synthetic-v14-pose-contract.v1"})
+    endpoint_sha256 = _sha(endpoint)
+    source_anchors = [
+        {
+            "filename": frames[index]["filename_string"],
+            "bytes": frames[index]["bytes_int"],
+            "sha256": frames[index]["sha256_string"],
+            "frameIndex": index,
+        }
+        for index in source_anchor_indices
+    ]
+    manifest = {
+        "schema": "autorig-browser-ltx-interval-guide-bundle.v1",
+        "status": "PASS",
+        "approvedForAnimationLibrary": False,
+        "browserOnly": True,
+        "blenderUsed": False,
+        "rigType": metadata["source"]["rig_type"],
+        "resolution": [browser_rgb.shape[1], browser_rgb.shape[0]],
+        "source_reference_sha256_string": metadata["artifacts"]["rgb"]["sha256"],
+        "source_reference_is_guide_bool": False,
+        "endpoint_guide_sha256_string": endpoint_sha256,
+        "cycle_frame_count_int": 49,
+        "guide_count_int": 1,
+        "browser_frame_count_int": 49,
+        "recovery_frame_indices_array": list(recovery_indices),
+        "recovery_guides_byte_identical_endpoint_bool": None,
+        "source_anchor_frame_indices_array": list(source_anchor_indices),
+        "source_anchors_byte_identical_bool": True,
+        "interval_guide_video_object": {
+            "filename": interval_video.name,
+            "bytes": interval_video.stat().st_size,
+            "sha256": _sha(interval_video),
+            "container": "matroska",
+            "codec": "png",
+            "pixelFormat": "rgb24",
+            "width": browser_rgb.shape[1],
+            "height": browser_rgb.shape[0],
+            "frameRate": 30,
+            "frameCount": 49,
+            "audioStreamCount": 0,
+            "decoded_rgb_sha256_array": decoded_pins,
+            "exact_browser_frame_rgb_bool": True,
+            "load_video_node_compatible_bool": True,
+        },
+        "renderer_object": {
+            "renderer_string": "browser_threejs",
+            "scene_contract_string": "v14_unified_browser_interval_guide_v1",
+            "all_guide_frames_browser_rendered_bool": True,
+            "blender_used_bool": False,
+            "shadows_enabled_bool": False,
+            "deterministic_contact_cues_bool": True,
+            "per_guide_contact_cue_visibility_bool": False,
+            "per_frame_contact_cue_visibility_bool": True,
+            "contact_cue_implementation_string": (
+                "static_rest_hoof_radial_alpha_planes"
+            ),
+        },
+        "frames_array": frames,
+        "source": {
+            "sourceModelSha256": metadata["source"]["sha256"],
+            "immutableManifest": {
+                "filename": "immutable_manifest.json",
+                "bytes": (bundle / "immutable_manifest.json").stat().st_size,
+                "sha256": _sha(bundle / "immutable_manifest.json"),
+            },
+            "fittingBundle": {
+                "filename": "fitting_bundle.json",
+                "bytes": (bundle / "fitting_bundle.json").stat().st_size,
+                "sha256": _sha(bundle / "fitting_bundle.json"),
+            },
+            "referenceRgb": {
+                "filename": metadata["artifacts"]["rgb"]["filename"],
+                "bytes": metadata["artifacts"]["rgb"]["bytes"],
+                "sha256": metadata["artifacts"]["rgb"]["sha256"],
+            },
+        },
+        "sourceGuideBundle": {
+            "bundleId": "horse-walk-v12-browser-recovery-guides-f2",
+            "immutableManifest": {
+                "filename": "immutable_manifest.json",
+                "bytes": 1,
+                "sha256": tracking_core.V12_BROWSER_GUIDE_MANIFEST_SHA256,
+            },
+            "poseContract": {
+                "filename": "pose_contract.json",
+                "bytes": 1,
+                "sha256": "1" * 64,
+            },
+            "anchorFrames": source_anchors,
+        },
+        "staticSceneQa": {
+            "schema": "autorig-browser-static-scene-qa.v1",
+            "status": "PASS",
+            "expected_frame_indices_array": list(frame_indices),
+            "decoded_rgb_statistics_bool": True,
+            "endpoint_byte_identical_bool": True,
+        },
+        "staticSceneRenderer": {
+            "contract": "v14_unified_browser_interval_guide_v1",
+            "contactCues": {
+                "enabled": True,
+                "implementation": "static_rest_hoof_radial_alpha_planes",
+                "count": 4,
+                "shadowMapUsed": False,
+                "perGuideVisibility": True,
+            },
+        },
+        "contactCueQa": {
+            "schema": "autorig-browser-contact-cue-visibility-qa.v1",
+            "status": "PASS",
+            "perFrameVisibility": True,
+            "swingFramesHideExactlyOneCue": True,
+            "barrierFramesShowAllFourCues": True,
+            "frames": cue_frames,
+        },
+        "postBakeQa": {
+            "status": "PASS",
+            "hierarchyBakeVerified": True,
+            "frameCount": 49,
+            "minimumStanceHooves": 3,
+            "frames": post_bake_frames,
+        },
+        "deterministicRenderQa": {
+            "schema": "autorig-browser-deterministic-rerender-qa.v1",
+            "status": "PASS",
+            "frameCount": 49,
+            "byteIdenticalFrameCount": 49,
+            "mismatchFrameIndices": [],
+        },
+        "losslessVideoQa": {
+            "schema": "autorig-browser-lossless-interval-video-qa.v1",
+            "status": "PASS",
+            "frameCount": 49,
+            "codec": "png",
+            "pixelFormat": "rgb24",
+            "decodedRgbSha256MatchesBrowserFrames": True,
+        },
+        "poseContract": _artifact_record(pose_contract),
+        "guides": guides,
+    }
+    manifest_path = guide / "immutable_manifest.json"
+    _write_json(manifest_path, manifest)
+    return guide, browser_rgb, _sha(manifest_path)
+
+
 def _authorize_browser_manifest(
     monkeypatch: pytest.MonkeyPatch, manifest_sha256: str
 ) -> None:
@@ -1040,7 +1289,148 @@ def test_v12_exact_f2_bundle_validates_against_real_canonical_bundle() -> None:
     )
 
 
-def test_tracking_cli_help_names_v11_and_v12_browser_guide_profiles() -> None:
+def test_v14_browser_interval_endpoint_validates_all_49_frames_and_video(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, browser_rgb, manifest_sha256 = _browser_interval_guide_bundle(
+        tmp_path, bundle, canonical
+    )
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+
+    seeds = select_anchor_seeds(
+        bundle,
+        browser_endpoint_guide_bundle=guide,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        loop=True,
+    )
+
+    assert np.array_equal(seeds.reference_rgb, browser_rgb)
+    selected = seeds.reference_provenance["selected"]
+    assert selected["sha256"] == _sha(guide / "guide_000.png")
+    assert selected["manifest"]["schema"] == (
+        "autorig-browser-ltx-interval-guide-bundle.v1"
+    )
+    assert selected["manifest"]["scene_contract"] == (
+        "v14_unified_browser_interval_guide_v1"
+    )
+    assert selected["manifest"]["cycle_frame_count"] == 49
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    (
+        ("guide_count", "exactly one video guide"),
+        ("cue_interval", "does not match its swing interval"),
+        ("source_anchor", "does not match output"),
+        ("interval_video", "mismatch"),
+    ),
+)
+def test_v14_browser_interval_contract_rejects_semantic_or_file_tamper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    error: str,
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, manifest_sha256 = _browser_interval_guide_bundle(
+        tmp_path, bundle, canonical
+    )
+    manifest_path = guide / "immutable_manifest.json"
+    if mutation == "interval_video":
+        (guide / "interval_guide.mkv").write_bytes(b"tampered-video")
+    else:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if mutation == "guide_count":
+            manifest["guide_count_int"] = 49
+        elif mutation == "cue_interval":
+            manifest["contactCueQa"]["frames"][1]["swingLimb"] = "fore_left"
+        elif mutation == "source_anchor":
+            manifest["sourceGuideBundle"]["anchorFrames"][1]["sha256"] = "2" * 64
+        else:  # pragma: no cover - guarded by parametrization
+            raise AssertionError(mutation)
+        _write_json(manifest_path, manifest)
+        manifest_sha256 = _sha(manifest_path)
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+
+    with pytest.raises(ContractError, match=error):
+        select_anchor_seeds(
+            bundle,
+            browser_endpoint_guide_bundle=guide,
+            browser_endpoint_guide_manifest_sha256=manifest_sha256,
+            loop=True,
+        )
+
+
+def test_v14_browser_manifest_frames_video_and_pose_are_each_read_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, canonical = _bundle(tmp_path)
+    guide, _, manifest_sha256 = _browser_interval_guide_bundle(
+        tmp_path, bundle, canonical
+    )
+    _authorize_browser_manifest(monkeypatch, manifest_sha256)
+    expected_paths = {
+        (guide / "immutable_manifest.json").resolve(),
+        (guide / "interval_guide.mkv").resolve(),
+        (guide / "pose_contract.json").resolve(),
+        *{
+            (guide / f"guide_{frame_index:03d}.png").resolve()
+            for frame_index in range(49)
+        },
+    }
+    original = Path.read_bytes
+    reads: dict[Path, int] = {}
+
+    def counted(path: Path) -> bytes:
+        resolved = path.resolve()
+        reads[resolved] = reads.get(resolved, 0) + 1
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    select_anchor_seeds(
+        bundle,
+        browser_endpoint_guide_bundle=guide,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        loop=True,
+    )
+
+    assert {path: reads[path] for path in expected_paths} == {
+        path: 1 for path in expected_paths
+    }
+
+
+def test_v14_exact_f1_bundle_validates_against_real_canonical_bundle() -> None:
+    canonical_bundle = Path(r"R:\ComfyUI-data\autorig-fitting\horse-canonical-f1")
+    guide_bundle = Path(
+        r"R:\ComfyUI-data\autorig-fitting\canonical-candidates\experiments"
+        r"\horse-walk-v14-browser-interval-guide-f1"
+    )
+    if not canonical_bundle.is_dir() or not guide_bundle.is_dir():
+        pytest.skip("Exact local v14 f1/canonical bundles are not installed")
+
+    manifest_sha256 = tracking_core.V14_BROWSER_GUIDE_MANIFEST_SHA256
+    assert _sha(guide_bundle / "immutable_manifest.json") == manifest_sha256
+    seeds = select_anchor_seeds(
+        canonical_bundle,
+        browser_endpoint_guide_bundle=guide_bundle,
+        browser_endpoint_guide_manifest_sha256=manifest_sha256,
+        loop=True,
+    )
+
+    selected = seeds.reference_provenance["selected"]
+    assert selected["sha256"] == (
+        "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3"
+    )
+    assert selected["manifest"]["schema"] == (
+        "autorig-browser-ltx-interval-guide-bundle.v1"
+    )
+    assert selected["manifest"]["scene_contract"] == (
+        "v14_unified_browser_interval_guide_v1"
+    )
+
+
+def test_tracking_cli_help_names_v11_v12_and_v14_browser_guide_profiles() -> None:
     parser = tracking_cli._parser()
     subparsers = next(
         action
@@ -1050,9 +1440,14 @@ def test_tracking_cli_help_names_v11_and_v12_browser_guide_profiles() -> None:
     observe_help = subparsers.choices["observe"].format_help()
     assert "v11 static-scene" in observe_help
     assert "v12 recovery-" in observe_help
+    assert "v14 lossless interval-" in observe_help
     assert "guide browser bundle" in observe_help
     assert (
         "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451"
+        in tracking_core.AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256
+    )
+    assert (
+        "a09418a8725984126071614b8921eeffaee7cd9a91ca9d4c4ae34b49d1f3a6cb"
         in tracking_core.AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256
     )
 

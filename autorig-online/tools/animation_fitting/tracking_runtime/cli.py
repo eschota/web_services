@@ -71,9 +71,9 @@ def _parser() -> argparse.ArgumentParser:
     observe.add_argument(
         "--browser-endpoint-guide-bundle",
         help=(
-            "Opt-in authorized v11 static-scene or v12 recovery-guide browser "
-            "bundle whose pinned frame 0 replaces canonical RGB only for "
-            "first-frame alignment"
+            "Opt-in authorized v11 static-scene, v12 recovery-guide, or v14 "
+            "lossless interval-guide browser bundle whose pinned frame 0 "
+            "replaces canonical RGB only for first-frame alignment"
         ),
     )
     observe.add_argument(

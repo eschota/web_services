@@ -47,19 +47,28 @@ BROWSER_GUIDE_MANIFEST_SCHEMA = BROWSER_STATIC_SCENE_GUIDE_MANIFEST_SCHEMA
 BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA = (
     "autorig-browser-ltx-recovery-guide-bundle.v1"
 )
+BROWSER_INTERVAL_GUIDE_MANIFEST_SCHEMA = (
+    "autorig-browser-ltx-interval-guide-bundle.v1"
+)
 BROWSER_STATIC_SCENE_CONTRACT = "v11_unified_browser_static_scene_v1"
 BROWSER_RECOVERY_SCENE_CONTRACT = "v12_unified_browser_recovery_guides_v1"
+BROWSER_INTERVAL_SCENE_CONTRACT = "v14_unified_browser_interval_guide_v1"
 BROWSER_GUIDE_CONTRACTS = {
     BROWSER_STATIC_SCENE_GUIDE_MANIFEST_SCHEMA: BROWSER_STATIC_SCENE_CONTRACT,
     BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA: BROWSER_RECOVERY_SCENE_CONTRACT,
+    BROWSER_INTERVAL_GUIDE_MANIFEST_SCHEMA: BROWSER_INTERVAL_SCENE_CONTRACT,
 }
 V12_BROWSER_GUIDE_MANIFEST_SHA256 = (
     "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451"
+)
+V14_BROWSER_GUIDE_MANIFEST_SHA256 = (
+    "a09418a8725984126071614b8921eeffaee7cd9a91ca9d4c4ae34b49d1f3a6cb"
 )
 AUTHORIZED_BROWSER_GUIDE_MANIFEST_SHA256 = frozenset(
     {
         "9290e2c5c95ab0a24175f1ba873f4af6f221ce963a315e933bcc97aa540ec173",
         V12_BROWSER_GUIDE_MANIFEST_SHA256,
+        V14_BROWSER_GUIDE_MANIFEST_SHA256,
     }
 )
 V12_BROWSER_GUIDE_FRAME_INDICES = (0, 6, 12, 18, 24, 30, 36, 42, 48)
@@ -71,6 +80,8 @@ V12_BROWSER_SWING_LIMBS = {
     42: "fore_right",
 }
 V12_BROWSER_LIMBS = ("hind_left", "fore_left", "hind_right", "fore_right")
+V14_BROWSER_FRAME_INDICES = tuple(range(49))
+V14_BROWSER_BARRIER_FRAME_INDICES = (0, 12, 24, 36, 48)
 
 
 @dataclass(frozen=True)
@@ -449,6 +460,331 @@ def _verify_v12_recovery_guide_contract(
             )
 
 
+def _v14_frame_rows(
+    value: Any, *, field: str, frame_key: str
+) -> dict[int, dict[str, Any]]:
+    if not isinstance(value, list) or len(value) != len(V14_BROWSER_FRAME_INDICES):
+        raise ContractError(f"{field} must contain exactly 49 v14 frame records")
+    by_index: dict[int, dict[str, Any]] = {}
+    for value_index, raw in enumerate(value):
+        row = _object_field(raw, f"{field}[{value_index}]")
+        frame_index = row.get(frame_key)
+        if (
+            isinstance(frame_index, bool)
+            or not isinstance(frame_index, int)
+            or frame_index in by_index
+        ):
+            raise ContractError(f"{field} contains an invalid or duplicate frame index")
+        by_index[frame_index] = row
+    if tuple(sorted(by_index)) != V14_BROWSER_FRAME_INDICES:
+        raise ContractError(f"{field} must cover every v14 frame from 0 through 48")
+    return by_index
+
+
+def _v14_swing_limb(frame_index: int) -> str | None:
+    if 1 <= frame_index <= 11:
+        return "hind_left"
+    if 13 <= frame_index <= 23:
+        return "fore_left"
+    if 25 <= frame_index <= 35:
+        return "hind_right"
+    if 37 <= frame_index <= 47:
+        return "fore_right"
+    return None
+
+
+def _verify_v14_interval_guide_contract(
+    manifest: dict[str, Any],
+    *,
+    manifest_root: Path,
+    by_index: dict[int, dict[str, Any]],
+    frame_payloads: dict[int, bytes],
+    endpoint_sha256: str,
+) -> None:
+    if manifest.get("cycle_frame_count_int") != 49:
+        raise ContractError("v14 browser interval guide cycle must contain 49 frames")
+    if manifest.get("browser_frame_count_int") != 49:
+        raise ContractError("v14 browser interval guide must declare 49 browser frames")
+    if manifest.get("guide_count_int") != 1:
+        raise ContractError("v14 browser interval bundle must contain exactly one video guide")
+    if tuple(sorted(by_index)) != V14_BROWSER_FRAME_INDICES:
+        raise ContractError("v14 browser interval manifest must contain every frame 0..48")
+    _exact_list(
+        manifest.get("recovery_frame_indices_array"),
+        V12_BROWSER_RECOVERY_FRAME_INDICES,
+        "recovery_frame_indices_array",
+    )
+    _exact_list(
+        manifest.get("source_anchor_frame_indices_array"),
+        V12_BROWSER_GUIDE_FRAME_INDICES,
+        "source_anchor_frame_indices_array",
+    )
+    if manifest.get("recovery_guides_byte_identical_endpoint_bool") is not None:
+        raise ContractError(
+            "v14 interval mode must not claim the legacy multi-guide recovery flag"
+        )
+    if manifest.get("source_anchors_byte_identical_bool") is not True:
+        raise ContractError("v14 source anchor frames must retain their exact source-guide pins")
+
+    endpoint_payload = frame_payloads[0]
+    for frame_index in V14_BROWSER_FRAME_INDICES:
+        record = by_index[frame_index]
+        if record.get("filename_string") != f"guide_{frame_index:03d}.png":
+            raise ContractError(f"v14 frame {frame_index} has an invalid filename")
+        decoded_sha256 = _required_lower_sha256(
+            record.get("decoded_rgb_sha256_string"),
+            f"frames_array[{frame_index}].decoded_rgb_sha256_string",
+        )
+        if not decoded_sha256:
+            raise ContractError(f"v14 frame {frame_index} has no decoded RGB pin")
+        is_source_anchor = frame_index in V12_BROWSER_GUIDE_FRAME_INDICES
+        if record.get("source_anchor_byte_identical_bool") is not is_source_anchor:
+            raise ContractError(
+                f"v14 frame {frame_index} source-anchor identity flag is invalid"
+            )
+        if frame_index in V14_BROWSER_BARRIER_FRAME_INDICES and (
+            record.get("sha256_string") != endpoint_sha256
+            or frame_payloads[frame_index] != endpoint_payload
+        ):
+            raise ContractError(
+                "v14 endpoint and recovery barrier PNGs must be byte-identical pins"
+            )
+
+    resolution = manifest.get("resolution")
+    if (
+        not isinstance(resolution, list)
+        or len(resolution) != 2
+        or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in resolution)
+    ):
+        raise ContractError("v14 resolution must contain two positive integers")
+    width, height = resolution
+
+    guide_rows = _v14_frame_rows(
+        manifest.get("guides"), field="guides", frame_key="frameIndex"
+    )
+    for frame_index in V14_BROWSER_FRAME_INDICES:
+        frame_record = by_index[frame_index]
+        guide_record = guide_rows[frame_index]
+        swing_limb = _v14_swing_limb(frame_index)
+        if (
+            guide_record.get("filename") != frame_record.get("filename_string")
+            or guide_record.get("bytes") != frame_record.get("bytes_int")
+            or guide_record.get("sha256") != frame_record.get("sha256_string")
+            or guide_record.get("decodedRgbSha256")
+            != frame_record.get("decoded_rgb_sha256_string")
+            or guide_record.get("sourceAnchorByteIdentical")
+            is not frame_record.get("source_anchor_byte_identical_bool")
+            or guide_record.get("swingLimb") != swing_limb
+            or guide_record.get("width") != width
+            or guide_record.get("height") != height
+            or guide_record.get("renderSource") != "browser_threejs"
+        ):
+            raise ContractError(f"v14 guide record {frame_index} does not match its frame pin")
+
+    source_guide = _object_field(manifest.get("sourceGuideBundle"), "sourceGuideBundle")
+    source_manifest = _object_field(
+        source_guide.get("immutableManifest"),
+        "sourceGuideBundle.immutableManifest",
+    )
+    if (
+        source_guide.get("bundleId") != "horse-walk-v12-browser-recovery-guides-f2"
+        or source_manifest.get("filename") != "immutable_manifest.json"
+        or source_manifest.get("sha256") != V12_BROWSER_GUIDE_MANIFEST_SHA256
+    ):
+        raise ContractError("v14 source guide provenance must pin the authorized v12 f2 bundle")
+    _required_positive_bytes(
+        source_manifest.get("bytes"), "sourceGuideBundle.immutableManifest.bytes"
+    )
+    source_pose = _object_field(
+        source_guide.get("poseContract"), "sourceGuideBundle.poseContract"
+    )
+    if source_pose.get("filename") != "pose_contract.json":
+        raise ContractError("v14 source guide pose-contract filename is invalid")
+    _required_positive_bytes(
+        source_pose.get("bytes"), "sourceGuideBundle.poseContract.bytes"
+    )
+    _required_lower_sha256(
+        source_pose.get("sha256"), "sourceGuideBundle.poseContract.sha256"
+    )
+    source_anchor_rows = source_guide.get("anchorFrames")
+    if not isinstance(source_anchor_rows, list) or len(source_anchor_rows) != 9:
+        raise ContractError("v14 sourceGuideBundle.anchorFrames must contain nine pins")
+    source_anchors: dict[int, dict[str, Any]] = {}
+    for item_index, raw in enumerate(source_anchor_rows):
+        record = _object_field(raw, f"sourceGuideBundle.anchorFrames[{item_index}]")
+        frame_index = record.get("frameIndex")
+        if (
+            isinstance(frame_index, bool)
+            or not isinstance(frame_index, int)
+            or frame_index in source_anchors
+        ):
+            raise ContractError("v14 source anchor frame index is invalid or duplicated")
+        source_anchors[frame_index] = record
+    if tuple(sorted(source_anchors)) != V12_BROWSER_GUIDE_FRAME_INDICES:
+        raise ContractError("v14 source anchor pins must cover the exact nine v12 frames")
+    for frame_index in V12_BROWSER_GUIDE_FRAME_INDICES:
+        source_record = source_anchors[frame_index]
+        frame_record = by_index[frame_index]
+        if (
+            source_record.get("filename") != frame_record.get("filename_string")
+            or source_record.get("bytes") != frame_record.get("bytes_int")
+            or source_record.get("sha256") != frame_record.get("sha256_string")
+        ):
+            raise ContractError(f"v14 source anchor pin {frame_index} does not match output")
+
+    scene_qa = _object_field(manifest.get("staticSceneQa"), "staticSceneQa")
+    _exact_list(
+        scene_qa.get("expected_frame_indices_array"),
+        V14_BROWSER_FRAME_INDICES,
+        "staticSceneQa.expected_frame_indices_array",
+    )
+    scene_renderer = _object_field(
+        manifest.get("staticSceneRenderer"), "staticSceneRenderer"
+    )
+    contact_cues = _object_field(
+        scene_renderer.get("contactCues"), "staticSceneRenderer.contactCues"
+    )
+    if (
+        contact_cues.get("enabled") is not True
+        or contact_cues.get("implementation")
+        != "static_rest_hoof_radial_alpha_planes"
+        or contact_cues.get("count") != 4
+        or contact_cues.get("shadowMapUsed") is not False
+        or contact_cues.get("perGuideVisibility") is not True
+    ):
+        raise ContractError("v14 static-scene contact-cue contract is invalid")
+
+    cue_qa = _object_field(manifest.get("contactCueQa"), "contactCueQa")
+    if (
+        cue_qa.get("schema") != "autorig-browser-contact-cue-visibility-qa.v1"
+        or cue_qa.get("status") != "PASS"
+        or cue_qa.get("perFrameVisibility") is not True
+        or cue_qa.get("swingFramesHideExactlyOneCue") is not True
+        or cue_qa.get("barrierFramesShowAllFourCues") is not True
+    ):
+        raise ContractError("v14 contact-cue visibility QA contract is not PASS")
+    cue_rows = _v14_frame_rows(
+        cue_qa.get("frames"), field="contactCueQa.frames", frame_key="frameIndex"
+    )
+    for frame_index in V14_BROWSER_FRAME_INDICES:
+        row = cue_rows[frame_index]
+        swing_limb = _v14_swing_limb(frame_index)
+        visible_limbs = tuple(limb for limb in V12_BROWSER_LIMBS if limb != swing_limb)
+        hidden_limbs = () if swing_limb is None else (swing_limb,)
+        if (
+            row.get("swingLimb") != swing_limb
+            or row.get("visibleLimbs") != list(visible_limbs)
+            or row.get("hiddenLimbs") != list(hidden_limbs)
+            or row.get("visibleCueCount") != len(visible_limbs)
+            or row.get("hiddenCueCount") != len(hidden_limbs)
+            or row.get("exactlyMatchesStance") is not True
+        ):
+            raise ContractError(
+                f"v14 contact-cue QA frame {frame_index} does not match its swing interval"
+            )
+
+    post_bake = _object_field(manifest.get("postBakeQa"), "postBakeQa")
+    if (
+        post_bake.get("status") != "PASS"
+        or post_bake.get("hierarchyBakeVerified") is not True
+        or post_bake.get("frameCount") != 49
+        or post_bake.get("minimumStanceHooves") != 3
+    ):
+        raise ContractError("v14 interval post-bake QA contract is not PASS")
+    post_bake_rows = _v14_frame_rows(
+        post_bake.get("frames"), field="postBakeQa.frames", frame_key="frameIndex"
+    )
+    for frame_index in V14_BROWSER_FRAME_INDICES:
+        swing_limb = _v14_swing_limb(frame_index)
+        expected_stance_count = 4 if swing_limb is None else 3
+        row = post_bake_rows[frame_index]
+        if (
+            row.get("swingLimb") != swing_limb
+            or row.get("stanceHoofCount") != expected_stance_count
+        ):
+            raise ContractError(
+                f"v14 post-bake QA frame {frame_index} has an invalid stance contract"
+            )
+
+    deterministic_qa = _object_field(
+        manifest.get("deterministicRenderQa"), "deterministicRenderQa"
+    )
+    if (
+        deterministic_qa.get("schema") != "autorig-browser-deterministic-rerender-qa.v1"
+        or deterministic_qa.get("status") != "PASS"
+        or deterministic_qa.get("frameCount") != 49
+        or deterministic_qa.get("byteIdenticalFrameCount") != 49
+        or deterministic_qa.get("mismatchFrameIndices") != []
+    ):
+        raise ContractError("v14 deterministic rerender QA contract is not PASS")
+    lossless_qa = _object_field(manifest.get("losslessVideoQa"), "losslessVideoQa")
+    if (
+        lossless_qa.get("schema") != "autorig-browser-lossless-interval-video-qa.v1"
+        or lossless_qa.get("status") != "PASS"
+        or lossless_qa.get("frameCount") != 49
+        or lossless_qa.get("codec") != "png"
+        or lossless_qa.get("pixelFormat") != "rgb24"
+        or lossless_qa.get("decodedRgbSha256MatchesBrowserFrames") is not True
+    ):
+        raise ContractError("v14 lossless interval-video QA contract is not PASS")
+
+    interval_video = _object_field(
+        manifest.get("interval_guide_video_object"), "interval_guide_video_object"
+    )
+    video_sha256 = _required_lower_sha256(
+        interval_video.get("sha256"), "interval_guide_video_object.sha256"
+    )
+    video_bytes = _required_positive_bytes(
+        interval_video.get("bytes"), "interval_guide_video_object.bytes"
+    )
+    decoded_pins = interval_video.get("decoded_rgb_sha256_array")
+    expected_decoded_pins = [
+        by_index[index]["decoded_rgb_sha256_string"] for index in V14_BROWSER_FRAME_INDICES
+    ]
+    if (
+        interval_video.get("filename") != "interval_guide.mkv"
+        or interval_video.get("container") != "matroska"
+        or interval_video.get("codec") != "png"
+        or interval_video.get("pixelFormat") != "rgb24"
+        or interval_video.get("width") != width
+        or interval_video.get("height") != height
+        or interval_video.get("frameCount") != 49
+        or interval_video.get("audioStreamCount") != 0
+        or interval_video.get("exact_browser_frame_rgb_bool") is not True
+        or interval_video.get("load_video_node_compatible_bool") is not True
+        or decoded_pins != expected_decoded_pins
+    ):
+        raise ContractError("v14 interval guide video contract is invalid")
+    video_path = _manifest_artifact_path(
+        manifest_root,
+        interval_video.get("filename"),
+        "interval_guide_video_object.filename",
+    )
+    _read_pinned_bytes(
+        video_path,
+        expected_sha256=video_sha256,
+        expected_bytes=video_bytes,
+        field="v14 interval guide video",
+    )
+
+    pose_contract = _object_field(manifest.get("poseContract"), "poseContract")
+    pose_sha256 = _required_lower_sha256(
+        pose_contract.get("sha256"), "poseContract.sha256"
+    )
+    pose_bytes = _required_positive_bytes(pose_contract.get("bytes"), "poseContract.bytes")
+    if pose_contract.get("filename") != "pose_contract.json":
+        raise ContractError("v14 pose contract filename is invalid")
+    pose_path = _manifest_artifact_path(
+        manifest_root, pose_contract.get("filename"), "poseContract.filename"
+    )
+    _read_pinned_bytes(
+        pose_path,
+        expected_sha256=pose_sha256,
+        expected_bytes=pose_bytes,
+        field="v14 pose contract",
+    )
+
+
 def _browser_first_frame_reference(
     rig: RigBundle,
     canonical_rgb: np.ndarray,
@@ -516,6 +852,18 @@ def _browser_first_frame_reference(
             "v12 browser recovery renderer must provide deterministic per-guide "
             "contact cues"
         )
+    if manifest_schema == BROWSER_INTERVAL_GUIDE_MANIFEST_SCHEMA and (
+        renderer.get("deterministic_contact_cues_bool") is not True
+        or renderer.get("per_guide_contact_cue_visibility_bool") is not False
+        or renderer.get("per_frame_contact_cue_visibility_bool") is not True
+        or renderer.get("shadows_enabled_bool") is not False
+        or renderer.get("contact_cue_implementation_string")
+        != "static_rest_hoof_radial_alpha_planes"
+    ):
+        raise ContractError(
+            "v14 browser interval renderer must provide deterministic per-frame "
+            "contact cues"
+        )
     static_scene_qa = _object_field(manifest.get("staticSceneQa"), "staticSceneQa")
     if (
         static_scene_qa.get("schema") != "autorig-browser-static-scene-qa.v1"
@@ -552,12 +900,12 @@ def _browser_first_frame_reference(
         manifest.get("endpoint_guide_sha256_string"),
         "endpoint_guide_sha256_string",
     )
-    if (
-        manifest_schema == BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA
-        and endpoint_sha256 == canonical_sha256
-    ):
+    if manifest_schema in {
+        BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA,
+        BROWSER_INTERVAL_GUIDE_MANIFEST_SCHEMA,
+    } and endpoint_sha256 == canonical_sha256:
         raise ContractError(
-            "v12 endpoint guide must remain distinct from the canonical source RGB"
+            "Browser contact-guide endpoint must remain distinct from canonical RGB"
         )
 
     source = _object_field(manifest.get("source"), "source")
@@ -613,11 +961,12 @@ def _browser_first_frame_reference(
     ):
         raise ContractError("Browser guide cycle_frame_count_int must be at least two")
     guide_count = manifest.get("guide_count_int")
-    if (
-        isinstance(guide_count, bool)
-        or not isinstance(guide_count, int)
-        or guide_count != len(frames)
-    ):
+    if isinstance(guide_count, bool) or not isinstance(guide_count, int):
+        raise ContractError("Browser guide guide_count_int must be an integer")
+    if manifest_schema == BROWSER_INTERVAL_GUIDE_MANIFEST_SCHEMA:
+        if guide_count != 1:
+            raise ContractError("v14 interval bundle must declare exactly one video guide")
+    elif guide_count != len(frames):
         raise ContractError("Browser guide guide_count_int does not match frames_array")
     manifest_root = manifest_path.parent.resolve()
     by_index: dict[int, dict[str, Any]] = {}
@@ -701,6 +1050,14 @@ def _browser_first_frame_reference(
     if manifest_schema == BROWSER_RECOVERY_GUIDE_MANIFEST_SCHEMA:
         _verify_v12_recovery_guide_contract(
             manifest,
+            by_index=by_index,
+            frame_payloads=frame_payloads,
+            endpoint_sha256=endpoint_sha256,
+        )
+    elif manifest_schema == BROWSER_INTERVAL_GUIDE_MANIFEST_SCHEMA:
+        _verify_v14_interval_guide_contract(
+            manifest,
+            manifest_root=manifest_root,
             by_index=by_index,
             frame_payloads=frame_payloads,
             endpoint_sha256=endpoint_sha256,

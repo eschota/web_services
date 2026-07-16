@@ -20,6 +20,7 @@ from .errors import ContractError
 
 SCHEMA = "autorig.animation-fitting.object-region-video-gate.v1"
 GUIDE_SCHEMA = "autorig-browser-ltx-recovery-guide-bundle.v1"
+INTERVAL_GUIDE_SCHEMA = "autorig-browser-ltx-interval-guide-bundle.v1"
 WIDTH = 768
 HEIGHT = 448
 FRAME_COUNT = 49
@@ -34,7 +35,11 @@ AUTHORITATIVE_GUIDE_MANIFEST_ENDPOINT_PINS = frozenset(
         (
             "7484b6fe3d7e190c118b01d5baec22e4a1021647eb4145c9c74ab0daeac29451",
             "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
-        )
+        ),
+        (
+            "a09418a8725984126071614b8921eeffaee7cd9a91ca9d4c4ae34b49d1f3a6cb",
+            "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+        ),
     }
 )
 
@@ -61,6 +66,18 @@ DISTAL_PHASE_THRESHOLDS = {
     "boundary_p95_px_max": 5.0,
     "object_psnr_db_min": 30.0,
     "object_ssim_gray_min": 0.94,
+}
+V14_ENDPOINT_THRESHOLDS = {
+    **ENDPOINT_THRESHOLDS,
+    # Exact PNG guide -> H.264 round-trip golden floor for the fully animated
+    # interval sequence is 37.061 dB at frame 48. V12 retains its 38 dB gate.
+    "object_psnr_db_min": 37.0,
+}
+V14_DISTAL_PHASE_THRESHOLDS = {
+    **DISTAL_PHASE_THRESHOLDS,
+    # Full-interval GOP prediction lowers the exact-guide frame-48 swing-42
+    # ROI golden to 0.935324 SSIM. V12 retains its 0.94 gate.
+    "object_ssim_gray_min": 0.93,
 }
 SWING_THRESHOLDS = {
     "normalized_local_mae_ratio_min": 0.75,
@@ -303,23 +320,86 @@ def _load_guide_bundle(
         manifest = json.loads(manifest_bytes.decode("utf-8"))
     except Exception as exc:
         raise ContractError(f"Invalid guide manifest JSON: {exc}") from exc
-    if not isinstance(manifest, dict) or manifest.get("schema") != GUIDE_SCHEMA:
-        raise ContractError(f"guide manifest schema must be {GUIDE_SCHEMA}")
+    if not isinstance(manifest, dict):
+        raise ContractError("guide manifest must contain a JSON object")
+    manifest_schema = manifest.get("schema")
+    if manifest_schema not in {GUIDE_SCHEMA, INTERVAL_GUIDE_SCHEMA}:
+        raise ContractError(
+            f"guide manifest schema must be {GUIDE_SCHEMA} or {INTERVAL_GUIDE_SCHEMA}"
+        )
     if manifest.get("resolution") != [WIDTH, HEIGHT]:
         raise ContractError(f"guide manifest resolution must be [{WIDTH}, {HEIGHT}]")
     if manifest.get("cycle_frame_count_int") != FRAME_COUNT:
         raise ContractError(f"guide manifest cycle_frame_count_int must be {FRAME_COUNT}")
-    if manifest.get("guide_count_int") != len(KEY_FRAMES):
-        raise ContractError(f"guide manifest guide_count_int must be {len(KEY_FRAMES)}")
     if manifest.get("recovery_frame_indices_array") != list(RECOVERY_FRAMES):
         raise ContractError("guide manifest recovery frame indices are not canonical")
-    if manifest.get("recovery_guides_byte_identical_endpoint_bool") is not True:
-        raise ContractError("guide manifest must pin byte-identical recovery guides")
     if manifest.get("endpoint_guide_sha256_string") != endpoint_sha256:
         raise ContractError("guide manifest endpoint SHA-256 disagrees with endpoint guide pin")
+    if manifest_schema == GUIDE_SCHEMA:
+        expected_indices = KEY_FRAMES
+        if manifest.get("guide_count_int") != len(KEY_FRAMES):
+            raise ContractError(f"guide manifest guide_count_int must be {len(KEY_FRAMES)}")
+        if manifest.get("recovery_guides_byte_identical_endpoint_bool") is not True:
+            raise ContractError("guide manifest must pin byte-identical recovery guides")
+    else:
+        expected_indices = tuple(range(FRAME_COUNT))
+        if manifest.get("guide_count_int") != 1:
+            raise ContractError("v14 interval manifest must declare exactly one video guide")
+        if manifest.get("browser_frame_count_int") != FRAME_COUNT:
+            raise ContractError("v14 interval manifest must declare 49 browser frames")
+        if manifest.get("recovery_guides_byte_identical_endpoint_bool") is not None:
+            raise ContractError("v14 interval manifest must not claim legacy recovery guides")
+        if manifest.get("source_anchor_frame_indices_array") != list(KEY_FRAMES):
+            raise ContractError("v14 interval source-anchor indices are not canonical")
+        if manifest.get("source_anchors_byte_identical_bool") is not True:
+            raise ContractError("v14 interval source-anchor pins must be byte-identical")
+        renderer = manifest.get("renderer_object")
+        if not isinstance(renderer, dict) or (
+            renderer.get("renderer_string") != "browser_threejs"
+            or renderer.get("scene_contract_string")
+            != "v14_unified_browser_interval_guide_v1"
+            or renderer.get("all_guide_frames_browser_rendered_bool") is not True
+            or renderer.get("blender_used_bool") is not False
+            or renderer.get("shadows_enabled_bool") is not False
+            or renderer.get("deterministic_contact_cues_bool") is not True
+            or renderer.get("per_guide_contact_cue_visibility_bool") is not False
+            or renderer.get("per_frame_contact_cue_visibility_bool") is not True
+            or renderer.get("contact_cue_implementation_string")
+            != "static_rest_hoof_radial_alpha_planes"
+        ):
+            raise ContractError("v14 interval renderer contract is invalid")
+        deterministic_qa = manifest.get("deterministicRenderQa")
+        if not isinstance(deterministic_qa, dict) or (
+            deterministic_qa.get("status") != "PASS"
+            or deterministic_qa.get("frameCount") != FRAME_COUNT
+            or deterministic_qa.get("byteIdenticalFrameCount") != FRAME_COUNT
+            or deterministic_qa.get("mismatchFrameIndices") != []
+        ):
+            raise ContractError("v14 interval deterministic-render QA is not PASS")
+        lossless_qa = manifest.get("losslessVideoQa")
+        if not isinstance(lossless_qa, dict) or (
+            lossless_qa.get("status") != "PASS"
+            or lossless_qa.get("frameCount") != FRAME_COUNT
+            or lossless_qa.get("codec") != "png"
+            or lossless_qa.get("pixelFormat") != "rgb24"
+            or lossless_qa.get("decodedRgbSha256MatchesBrowserFrames") is not True
+        ):
+            raise ContractError("v14 interval lossless-video QA is not PASS")
+        cue_qa = manifest.get("contactCueQa")
+        if not isinstance(cue_qa, dict) or (
+            cue_qa.get("status") != "PASS"
+            or cue_qa.get("perFrameVisibility") is not True
+            or cue_qa.get("swingFramesHideExactlyOneCue") is not True
+            or cue_qa.get("barrierFramesShowAllFourCues") is not True
+            or not isinstance(cue_qa.get("frames"), list)
+            or len(cue_qa["frames"]) != FRAME_COUNT
+        ):
+            raise ContractError("v14 interval contact-cue QA is not PASS")
     entries = manifest.get("frames_array")
-    if not isinstance(entries, list) or len(entries) != len(KEY_FRAMES):
-        raise ContractError("guide manifest frames_array must contain exactly nine entries")
+    if not isinstance(entries, list) or len(entries) != len(expected_indices):
+        raise ContractError(
+            f"guide manifest frames_array must contain exactly {len(expected_indices)} entries"
+        )
     by_index: dict[int, dict[str, Any]] = {}
     for entry in entries:
         if not isinstance(entry, dict):
@@ -328,15 +408,27 @@ def _load_guide_bundle(
         if isinstance(index, bool) or not isinstance(index, int) or index in by_index:
             raise ContractError("guide manifest frame indices must be unique integers")
         by_index[index] = entry
-    if tuple(sorted(by_index)) != KEY_FRAMES:
-        raise ContractError(f"guide manifest frame indices must be {list(KEY_FRAMES)}")
+    if tuple(sorted(by_index)) != expected_indices:
+        raise ContractError(
+            f"guide manifest frame indices must be {list(expected_indices)}"
+        )
 
     images: dict[int, np.ndarray] = {}
     resolved_files: list[str] = []
-    for index in KEY_FRAMES:
+    decoded_pins: list[str] = []
+    for index in expected_indices:
         entry = by_index[index]
         sha = _required_sha256(entry.get("sha256_string"), f"guide frame {index} SHA-256")
         byte_count = _required_bytes(entry.get("bytes_int"), f"guide frame {index} bytes")
+        if manifest_schema == INTERVAL_GUIDE_SCHEMA:
+            if entry.get("filename_string") != f"guide_{index:03d}.png":
+                raise ContractError(f"v14 interval guide frame {index} filename is invalid")
+            decoded_pins.append(
+                _required_sha256(
+                    entry.get("decoded_rgb_sha256_string"),
+                    f"guide frame {index} decoded RGB SHA-256",
+                )
+            )
         if index in ENDPOINT_FRAMES and (sha != endpoint_sha256 or byte_count != endpoint_bytes):
             raise ContractError(
                 f"guide frame {index} must be byte-identical to the pinned endpoint guide"
@@ -351,13 +443,67 @@ def _load_guide_bundle(
             expected_bytes=byte_count,
             field=f"guide frame {index}",
         )
-        images[index] = _decode_png(payload, field=f"guide frame {index}")
+        if index in KEY_FRAMES:
+            images[index] = _decode_png(payload, field=f"guide frame {index}")
+        resolved_files.append(str(resolved))
+    if manifest_schema == INTERVAL_GUIDE_SCHEMA:
+        interval_video = manifest.get("interval_guide_video_object")
+        if not isinstance(interval_video, dict) or (
+            interval_video.get("filename") != "interval_guide.mkv"
+            or interval_video.get("container") != "matroska"
+            or interval_video.get("codec") != "png"
+            or interval_video.get("pixelFormat") != "rgb24"
+            or interval_video.get("width") != WIDTH
+            or interval_video.get("height") != HEIGHT
+            or interval_video.get("frameCount") != FRAME_COUNT
+            or interval_video.get("audioStreamCount") != 0
+            or interval_video.get("exact_browser_frame_rgb_bool") is not True
+            or interval_video.get("load_video_node_compatible_bool") is not True
+            or interval_video.get("decoded_rgb_sha256_array") != decoded_pins
+        ):
+            raise ContractError("v14 interval guide video contract is invalid")
+        video_sha = _required_sha256(
+            interval_video.get("sha256"), "v14 interval guide video SHA-256"
+        )
+        video_bytes = _required_bytes(
+            interval_video.get("bytes"), "v14 interval guide video bytes"
+        )
+        video_path = _safe_bundle_child(
+            root, interval_video.get("filename"), "v14 interval guide video filename"
+        )
+        resolved, payload = reader.read(video_path, field="v14 interval guide video")
+        _verify_pin(
+            payload,
+            expected_sha256=video_sha,
+            expected_bytes=video_bytes,
+            field="v14 interval guide video",
+        )
+        resolved_files.append(str(resolved))
+        pose_contract = manifest.get("poseContract")
+        if not isinstance(pose_contract, dict) or pose_contract.get("filename") != "pose_contract.json":
+            raise ContractError("v14 interval pose-contract record is invalid")
+        pose_sha = _required_sha256(
+            pose_contract.get("sha256"), "v14 interval pose-contract SHA-256"
+        )
+        pose_bytes = _required_bytes(
+            pose_contract.get("bytes"), "v14 interval pose-contract bytes"
+        )
+        pose_path = _safe_bundle_child(
+            root, pose_contract.get("filename"), "v14 interval pose-contract filename"
+        )
+        resolved, payload = reader.read(pose_path, field="v14 interval pose contract")
+        _verify_pin(
+            payload,
+            expected_sha256=pose_sha,
+            expected_bytes=pose_bytes,
+            field="v14 interval pose contract",
+        )
         resolved_files.append(str(resolved))
     return images, {
         "path": str(root),
         "manifest_path": str(manifest_path),
         "manifest_sha256": manifest_sha256,
-        "schema": GUIDE_SCHEMA,
+        "schema": manifest_schema,
         "files": resolved_files,
     }
 
@@ -552,18 +698,20 @@ def _roi_pair_metrics(
     }
 
 
-def _distal_phase_checks(metrics: dict[str, float]) -> dict[str, bool]:
+def _distal_phase_checks(
+    metrics: dict[str, float], thresholds: dict[str, float]
+) -> dict[str, bool]:
     return {
         "silhouette_recall": metrics["silhouette_recall"]
-        >= DISTAL_PHASE_THRESHOLDS["silhouette_recall_min"],
+        >= thresholds["silhouette_recall_min"],
         "silhouette_iou": metrics["silhouette_iou"]
-        >= DISTAL_PHASE_THRESHOLDS["silhouette_iou_min"],
+        >= thresholds["silhouette_iou_min"],
         "boundary_p95": metrics["boundary_p95_px"]
-        <= DISTAL_PHASE_THRESHOLDS["boundary_p95_px_max"],
+        <= thresholds["boundary_p95_px_max"],
         "object_psnr": metrics["object_psnr_db"]
-        >= DISTAL_PHASE_THRESHOLDS["object_psnr_db_min"],
+        >= thresholds["object_psnr_db_min"],
         "object_ssim": metrics["object_ssim_gray"]
-        >= DISTAL_PHASE_THRESHOLDS["object_ssim_gray_min"],
+        >= thresholds["object_ssim_gray_min"],
     }
 
 
@@ -599,21 +747,25 @@ def _recovery_checks(visibility: float, metrics: dict[str, float]) -> dict[str, 
     }
 
 
-def _endpoint_checks(visibility: float, metrics: dict[str, float]) -> dict[str, bool]:
+def _endpoint_checks(
+    visibility: float,
+    metrics: dict[str, float],
+    thresholds: dict[str, float],
+) -> dict[str, bool]:
     return {
-        "visibility": ENDPOINT_THRESHOLDS["normalized_visibility_ratio_min"]
+        "visibility": thresholds["normalized_visibility_ratio_min"]
         <= visibility
-        <= ENDPOINT_THRESHOLDS["normalized_visibility_ratio_max"],
+        <= thresholds["normalized_visibility_ratio_max"],
         "silhouette_iou": metrics["silhouette_iou"]
-        >= ENDPOINT_THRESHOLDS["silhouette_iou_min"],
+        >= thresholds["silhouette_iou_min"],
         "boundary_p95": metrics["boundary_p95_px"]
-        <= ENDPOINT_THRESHOLDS["boundary_p95_px_max"],
+        <= thresholds["boundary_p95_px_max"],
         "object_psnr": metrics["object_psnr_db"]
-        >= ENDPOINT_THRESHOLDS["object_psnr_db_min"],
+        >= thresholds["object_psnr_db_min"],
         "object_ssim": metrics["object_ssim_gray"]
-        >= ENDPOINT_THRESHOLDS["object_ssim_gray_min"],
+        >= thresholds["object_ssim_gray_min"],
         "centroid_shift": metrics["centroid_shift_px"]
-        <= ENDPOINT_THRESHOLDS["centroid_shift_px_max"],
+        <= thresholds["centroid_shift_px_max"],
     }
 
 
@@ -623,6 +775,8 @@ def _evaluate(
     guide_images: dict[int, np.ndarray] | None,
     *,
     codec_tolerant: bool,
+    endpoint_thresholds: dict[str, float],
+    distal_phase_thresholds: dict[str, float],
 ) -> tuple[dict[str, Any], bytes]:
     endpoint_mask = _endpoint_object_mask(endpoint)
     support = cv2.dilate(
@@ -691,7 +845,7 @@ def _evaluate(
         global_checks = (
             _recovery_checks(visibility, endpoint_metrics)
             if index in RECOVERY_FRAMES
-            else _endpoint_checks(visibility, endpoint_metrics)
+            else _endpoint_checks(visibility, endpoint_metrics, endpoint_thresholds)
         )
         distal_results: dict[str, Any] = {}
         if guide_images is not None:
@@ -703,7 +857,9 @@ def _evaluate(
                     masks[index],
                     phase_roi,
                 )
-                distal_checks = _distal_phase_checks(distal_metrics)
+                distal_checks = _distal_phase_checks(
+                    distal_metrics, distal_phase_thresholds
+                )
                 distal_results[str(phase)] = {
                     "metrics": distal_metrics,
                     "checks": distal_checks,
@@ -978,11 +1134,36 @@ def run_object_region_video_gate(
             endpoint_bytes=endpoint_size,
             reader=reader,
         )
+    is_v14_interval = (
+        guide_provenance is not None
+        and guide_provenance.get("schema") == INTERVAL_GUIDE_SCHEMA
+    )
+    is_h264_candidate = candidate_provenance["kind"] == "mp4"
+    is_v14_h264 = is_v14_interval and is_h264_candidate
+    threshold_profile = (
+        "v14_interval_h264_golden_v1"
+        if is_v14_h264
+        else (
+            "lossless_frame_directory_v1"
+            if not is_h264_candidate
+            else "v12_recovery_h264_golden_v1"
+        )
+    )
+    endpoint_thresholds = (
+        V14_ENDPOINT_THRESHOLDS if is_v14_h264 else ENDPOINT_THRESHOLDS
+    )
+    distal_phase_thresholds = (
+        V14_DISTAL_PHASE_THRESHOLDS
+        if is_v14_h264
+        else DISTAL_PHASE_THRESHOLDS
+    )
     evaluation, evidence = _evaluate(
         frames,
         endpoint,
         guide_images,
-        codec_tolerant=candidate_provenance["kind"] == "mp4",
+        codec_tolerant=is_h264_candidate,
+        endpoint_thresholds=endpoint_thresholds,
+        distal_phase_thresholds=distal_phase_thresholds,
     )
     report = {
         "schema": SCHEMA,
@@ -1008,9 +1189,10 @@ def run_object_region_video_gate(
             "mp4_codec_reference_background_margin_rgb_l2": 0.5,
             "mp4_codec_boundary_snap_radius_px": 2,
             "endpoint_support_dilation_radius_px": 45,
+            "threshold_profile": threshold_profile,
             "recovery_thresholds": RECOVERY_THRESHOLDS,
-            "loop_endpoint_thresholds": ENDPOINT_THRESHOLDS,
-            "distal_phase_thresholds": DISTAL_PHASE_THRESHOLDS,
+            "loop_endpoint_thresholds": endpoint_thresholds,
+            "distal_phase_thresholds": distal_phase_thresholds,
             "swing_thresholds": SWING_THRESHOLDS,
         },
         **evaluation,
