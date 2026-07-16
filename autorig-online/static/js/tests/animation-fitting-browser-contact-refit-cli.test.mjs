@@ -11,6 +11,11 @@ import {
     runCli,
     validateContactRefitInputs,
 } from '../../../tools/animation_fitting/browser_contact_refit.mjs';
+import {
+    authorContactRefitInputManifest,
+    parseAuthorContactRefitArgs,
+    runAuthorContactRefitCli,
+} from '../../../tools/animation_fitting/author_browser_contact_refit_manifest.mjs';
 
 const FOOT_ORDER = ['hind_left', 'fore_left', 'hind_right', 'fore_right'];
 const sha = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -271,7 +276,14 @@ function fixture() {
     const manifest = writeJson(manifestPath, manifestValue);
     return {
         root, manifestPath, manifest, manifestValue, raw, bridgeValue, fitSummaryValue,
-        diagnosticValue, paths: { diagnostic: diagnostic.path, initialFit: initialFit.path },
+        diagnosticValue,
+        paths: {
+            bundleDirectory,
+            observations: observations.path,
+            bridge: bridge.path,
+            diagnostic: diagnostic.path,
+            initialFit: initialFit.path,
+        },
     };
 }
 
@@ -474,6 +486,92 @@ test('contact-refit CLI parser requires an externally pinned immutable manifest'
     assert.throws(() => parseContactRefitArgs([
         '--input-manifest', 'x', '--input-manifest-sha256', 'bad', '--three-module', 't', '--output-dir', 'o',
     ]), /lowercase SHA-256/);
+});
+
+test('contact-refit manifest author parser requires the complete immutable browser chain', () => {
+    assert.deepEqual(parseAuthorContactRefitArgs(['--help']), { help: true });
+    assert.throws(() => parseAuthorContactRefitArgs([]), /missing required option bundleDirectory/);
+    assert.throws(() => parseAuthorContactRefitArgs(['--bundle-dir']), /requires a value/);
+    assert.throws(() => parseAuthorContactRefitArgs(['--unknown', 'value']), /unknown option/);
+});
+
+test('contact-refit manifest author validates and publishes a deterministic browser-only manifest', (t) => {
+    const value = fixture();
+    t.after(() => fs.rmSync(value.root, { recursive: true, force: true }));
+    const config = {
+        bundleDirectory: value.paths.bundleDirectory,
+        observationsPath: value.paths.observations,
+        bridgeReportPath: value.paths.bridge,
+        initialFitSummaryPath: value.paths.initialFit,
+        contactDiagnosticPath: value.paths.diagnostic,
+    };
+    const firstPath = path.join(value.root, 'authored-first.json');
+    const secondPath = path.join(value.root, 'authored-second.json');
+    const first = authorContactRefitInputManifest({ ...config, outputPath: firstPath });
+    const second = authorContactRefitInputManifest({ ...config, outputPath: secondPath });
+
+    assert.equal(first.sha256, second.sha256);
+    assert.equal(first.bytes, second.bytes);
+    assert.deepEqual(fs.readFileSync(firstPath), fs.readFileSync(secondPath));
+    assert.equal(first.manifest.browserOnly, true);
+    assert.equal(first.manifest.blenderUsed, false);
+    assert.equal(first.manifest.mixerUsed, false);
+    const validated = validateContactRefitInputs({
+        inputManifestPath: firstPath,
+        expectedManifestSha256: first.sha256,
+    });
+    assert.equal(validated.manifestIntegrity.sha256, first.sha256);
+    assert.throws(
+        () => authorContactRefitInputManifest({ ...config, outputPath: firstPath }),
+        /already exists/,
+    );
+});
+
+test('contact-refit manifest author fails closed before publish when source pins diverge', (t) => {
+    const value = fixture();
+    t.after(() => fs.rmSync(value.root, { recursive: true, force: true }));
+    value.fitSummaryValue.inputs.sourceVideoSha256 = 'f'.repeat(64);
+    writeJson(value.paths.initialFit, value.fitSummaryValue);
+    const outputPath = path.join(value.root, 'must-not-publish.json');
+    assert.throws(() => authorContactRefitInputManifest({
+        bundleDirectory: value.paths.bundleDirectory,
+        observationsPath: value.paths.observations,
+        bridgeReportPath: value.paths.bridge,
+        initialFitSummaryPath: value.paths.initialFit,
+        contactDiagnosticPath: value.paths.diagnostic,
+        outputPath,
+    }), /sourceVideoSha256/);
+    assert.equal(fs.existsSync(outputPath), false);
+    assert.deepEqual(
+        fs.readdirSync(value.root).filter((name) => name.startsWith('must-not-publish.json.staging-')),
+        [],
+    );
+});
+
+test('contact-refit manifest author CLI reports the externally pinnable manifest integrity', (t) => {
+    const value = fixture();
+    t.after(() => fs.rmSync(value.root, { recursive: true, force: true }));
+    const outputPath = path.join(value.root, 'authored-cli.json');
+    let stdout = '';
+    let stderr = '';
+    const code = runAuthorContactRefitCli([
+        '--bundle-dir', value.paths.bundleDirectory,
+        '--observations', value.paths.observations,
+        '--bridge-report', value.paths.bridge,
+        '--initial-fit-summary', value.paths.initialFit,
+        '--contact-diagnostic', value.paths.diagnostic,
+        '--output', outputPath,
+    ], {
+        stdout: { write: (text) => { stdout += text; } },
+        stderr: { write: (text) => { stderr += text; } },
+    });
+    assert.equal(code, 0, stderr);
+    const report = JSON.parse(stdout);
+    assert.equal(report.status, 'PASS_CONTACT_REFIT_INPUT_MANIFEST');
+    assert.equal(report.browserOnly, true);
+    assert.equal(report.blenderUsed, false);
+    assert.match(report.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(report.bytes, fs.statSync(outputPath).size);
 });
 
 test('immutable contact-refit chain cross-checks exact bundle, observation, bridge, initial-fit and diagnostic pins', (t) => {
