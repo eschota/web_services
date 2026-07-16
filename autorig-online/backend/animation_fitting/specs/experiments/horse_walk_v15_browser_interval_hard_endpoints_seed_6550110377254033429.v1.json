@@ -1,0 +1,140 @@
+{
+  "schema": "autorig.animation-fitting-experiment.v1",
+  "experiment_id_string": "horse_walk_v15_browser_interval_hard_endpoints_seed_6550110377254033429_v1",
+  "status_string": "prepared_for_single_controlled_generation",
+  "purpose_string": "Keep the immutable lossless browser-authored 49-frame interval guide from v14 and add the same pinned browser endpoint PNG as hard frame-0 and frame-48 guides, isolating the v14 loop-closure failure without changing the horse, camera, prompt family, seed, model or dimensions.",
+  "predecessor_experiment_object": {
+    "experiment_id_string": "horse_walk_v14_browser_interval_guide_seed_6550110377254033429_v1",
+    "result_string": "V14 rendered successfully and preserved a coherent horse plus leg motion, but the object-region gate rejected it because the interval-only graph removed the explicit endpoint guides: loop endpoint failed, recovery anchors passed 0/3 and swing anchors passed 1/4. V15 retains the interval guide and restores byte-identical hard endpoints at frames 0 and 48."
+  },
+  "base_action_id_string": "walk_forward",
+  "species_string": "horse",
+  "generation_mode_string": "loop",
+  "frame_count_int": 49,
+  "input_fps_int": 24,
+  "output_fps_int": 30,
+  "seed_int": 6550110377254033429,
+  "reference_object": {
+    "reference_contract_string": "actionless_bundle_rgb_v1",
+    "bundle_id_string": "horse-canonical-f1",
+    "immutable_manifest_filename_string": "immutable_manifest.json",
+    "immutable_manifest_sha256_string": "f5e55c5073d09bc01dac90f4b7244f995fd42b0bdd37e09258cd4178e5573873",
+    "bundle_manifest_filename_string": "fitting_bundle.json",
+    "bundle_manifest_sha256_string": "e328fae0fd850a38249fb8b40c2e2766e8d90ab1ce4c1f241e926e9230d23744",
+    "reference_png_filename_string": "reference_rgb.png",
+    "reference_png_sha256_string": "94bf47cc137c0aaee975b2a75b7cd2b28f75215e282cdb6865bdd4095630a0b1",
+    "conditioning_variant_string": "canonical_actionless_provenance_plus_v15_browser_interval_and_hard_endpoints",
+    "source_model_sha256_string": "fa75772d83c2613ddd6df6f7a305a407e12abf4a75c9083bb53df4d2619f50a1",
+    "actionless_required_bool": true,
+    "geometry_uv_normals_mutated_bool": false
+  },
+  "interval_guide_contract_object": {
+    "guide_contract_string": "browser_rendered_lossless_interval_video_v1",
+    "bundle_id_string": "horse-walk-v14-browser-interval-guide-f1",
+    "immutable_manifest_filename_string": "immutable_manifest.json",
+    "immutable_manifest_sha256_string": "a09418a8725984126071614b8921eeffaee7cd9a91ca9d4c4ae34b49d1f3a6cb",
+    "video_filename_string": "interval_guide.mkv",
+    "video_sha256_string": "0a6f08834dd562e1200dd211842604d97fc487243a04ae3ad7838f0f948c7c05",
+    "video_bytes_int": 650377,
+    "frame_count_int": 49,
+    "fps_int": 30,
+    "resolution_array": [768, 448],
+    "container_string": "matroska",
+    "codec_string": "png",
+    "pixel_format_string": "rgb24",
+    "load_video_node_class_string": "LoadVideo",
+    "get_video_components_node_class_string": "GetVideoComponents",
+    "ltxv_add_guide_count_int": 1,
+    "ltxv_add_guide_strength_float": 1.0,
+    "ltxv_add_guide_frame_index_int": 0,
+    "base_video_latent_slices_int": 7,
+    "guide_temporal_latent_slices_int": 7,
+    "final_temporal_latent_slices_int": 14,
+    "post_sampling_guide_crop_required_bool": true
+  },
+  "hard_endpoint_contract_object": {
+    "guide_contract_string": "browser_rendered_identical_hard_loop_endpoints_v1",
+    "source_bundle_id_string": "horse-walk-v14-browser-interval-guide-f1",
+    "image_filename_string": "guide_000.png",
+    "image_sha256_string": "d0714166ac91d38a6cfe0f0d2ee18bc18f221fc2ca6782d99a8a0cbb215576b3",
+    "image_bytes_int": 27257,
+    "frame_indices_array": [0, 48],
+    "strengths_array": [1.0, 1.0],
+    "byte_identical_endpoints_bool": true,
+    "interval_ltxv_add_guide_count_int": 1,
+    "endpoint_ltxv_add_guide_count_int": 2,
+    "total_ltxv_add_guide_count_int": 3,
+    "base_video_latent_slices_int": 7,
+    "guide_temporal_latent_slices_int": 7,
+    "endpoint_temporal_latent_slices_int": 2,
+    "final_temporal_latent_slices_int": 16,
+    "chain_order_array": ["interval_video", "hard_start_0", "hard_end_48"],
+    "post_sampling_guide_crop_required_bool": true
+  },
+  "workflow_object": {
+    "workflow_name_string": "autorig_ltx2_animal_loop_v1_api.json",
+    "workflow_fingerprint_sha256_string": "e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56",
+    "conditioning_implementation_string": "official_interval_video_then_byte_identical_hard_start_and_end_LTXVAddGuide_chain",
+    "conditioned_frames_array": [
+      {
+        "role_string": "full_browser_authored_49_frame_cycle",
+        "frame_index_int": 0,
+        "strength_float": 1.0
+      },
+      {
+        "role_string": "hard_byte_identical_start_endpoint",
+        "frame_index_int": 0,
+        "strength_float": 1.0
+      },
+      {
+        "role_string": "hard_byte_identical_end_endpoint",
+        "frame_index_int": 48,
+        "strength_float": 1.0
+      }
+    ],
+    "post_sampling_guide_crop_required_bool": true
+  },
+  "resolution_override_object": {
+    "source_reference_width_int": 768,
+    "source_reference_height_int": 448,
+    "latent_width_int": 768,
+    "latent_height_int": 448,
+    "resize_longer_int": 768
+  },
+  "positive_prompt_string": "Locked-camera inverse skeletal fitting reference of the exact canonical actionless horse and camera. Treat the supplied browser Three.js interval video as one mandatory exact 49-frame temporal guide and treat the supplied identical frame-0 and frame-48 endpoint image as two mandatory hard loop boundaries, never as loose style examples or optional references. Preserve the interval guide's exact temporal order: hind-left only during frames 1-11 with apex frame 6; all four hooves planted at recovery frame 12; fore-left only during frames 13-23 with apex frame 18; all four hooves planted at recovery frame 24; hind-right only during frames 25-35 with apex frame 30; all four hooves planted at recovery frame 36; fore-right only during frames 37-47 with apex frame 42. Frame 0 and frame 48 must reproduce the exact same supplied planted horse silhouette, object position and camera-space dimensions. At most one hoof is in swing at any frame and at least three hooves remain planted, with no flight or suspension frame. Every leg, including each fetlock-pastern-hoof distal chain, remains one opaque connected fixed-length anatomical chain in every frame. Preserve one identical horse, geometry, proportions, materials, four persistent legs, background, exposure and fixed camera, with no seam pause or net translation.",
+  "negative_prompt_string": "ignored video guide, ignored endpoint guide, optional endpoint guide, different first and last frame, endpoint silhouette drift, endpoint scale drift, endpoint translation, sparse guide interpretation, guide frame reordering, repeated prior swing at recovery, shifted guide timing, suppressed swing apex, missing swing apex, recovery anchor drift, early next swing, late previous touchdown, camera movement, crop, zoom, scene cut, background change, background fade, ground disappearance, exposure drift, lighting flicker, duplicate horse, identity change, extra limb, missing limb, ghost limb, ghost hoof, ghost distal segment, faded limb, disappearing limb, detached limb, detached hoof, detached distal segment, wavy limb, transparent limb, translucent limb, broken silhouette, length snap, segment-length snap, stretched distal chain, compressed distal chain, paired hoof swing, overlapping hoof swing, crossing recovery barrier, foot sliding, hoof skating, diagonal pair, lateral pair, trot, pace, hop, bound, gallop, flight phase, suspension phase, fewer than three planted hooves, ground penetration, broken joint, rubber limb, curled distal limb, hoof morphing, material change, endpoint freeze, seam pause, text, watermark",
+  "variants_array": [
+    {
+      "variant_id_string": "browser_interval_hard_endpoints_seed_a",
+      "start_guide_strength_float": 1.0,
+      "end_guide_strength_float": 1.0
+    }
+  ],
+  "controlled_variable_string": "Against v14, add only two byte-identical strength-1.0 endpoint image guides at frames 0 and 48 after the unchanged full-cycle interval video guide.",
+  "fixed_factors_array": [
+    "same immutable actionless Horse model and camera provenance",
+    "same native 768x448 dimensions and 49-frame loop",
+    "same deterministic seed 6550110377254033429",
+    "same pinned LTX 19B FP8 checkpoint and static-camera LoRA",
+    "same lossless browser-authored 49-frame interval video",
+    "same browser-rendered endpoint PNG reused byte-identically at frames 0 and 48",
+    "official LTXVAddGuide chain with post-sampling LTXVCropGuides",
+    "no Blender and no unavailable control model",
+    "virtual memory allowed and no free-memory preflight gate"
+  ],
+  "manual_acceptance_gates_array": [
+    "the raw experiment JSON SHA-256 equals its code-owned v15 pin before reference or guide bundle access",
+    "the immutable interval manifest, MKV and hard endpoint PNG match their code-owned SHA-256 and byte-size pins",
+    "the patched graph contains one LoadImage, one LoadVideo, one GetVideoComponents, two ResizeImageMaskNode, two LTXVPreprocess, three LTXVAddGuide and one LTXVCropGuides",
+    "the graph applies interval video first, hard frame 0 second and the byte-identical hard frame 48 last",
+    "the graph retains seven base plus seven interval-guide plus two endpoint temporal latent slices for a total of sixteen",
+    "manual visual review and the hardened object-region video gate pass before browser fitting",
+    "TAPNext gait QA orderAccepted and overlapAccepted are both true with no flight frame",
+    "candidate remains generated_not_approved until browser fitting hoof-contact, target-deformation and fixed-camera visual QA pass"
+  ],
+  "generation_authorization_object": {
+    "authorized_bool": false,
+    "required_next_action_string": "Runtime authorization must exactly match this immutable v15 experiment id and raw spec SHA-256. Physical free-memory checks are not authorization gates; actual render OOM is the only memory failure evidence."
+  },
+  "approved_bool": false
+}

@@ -79,6 +79,13 @@ V14_EXPERIMENT_ID = (
 V14_EXPERIMENT_SPEC_SHA256 = (
     "0f172076147e94099ea7c0cf3c323a46f698ea48e55b7bce9acec789e0e77c66"
 )
+V15_EXPERIMENT_ID = (
+    "horse_walk_v15_browser_interval_hard_endpoints_"
+    "seed_6550110377254033429_v1"
+)
+V15_EXPERIMENT_SPEC_SHA256 = (
+    "d6c6e5ffe6b233c5360643f05ba0e6ab7d736c1dfef466c0b3660564e2f63a51"
+)
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPECTED_EXPERIMENT_ID,
     "horse_walk_prompt_v3_semantic_staggered_beats_guide_065_v1",
@@ -92,6 +99,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     V12_EXPERIMENT_ID,
     V13_EXPERIMENT_ID,
     V14_EXPERIMENT_ID,
+    V15_EXPERIMENT_ID,
 }) | V9_EXPERIMENT_IDS
 RESULT_SCHEMA = "autorig.animation-fitting-controlled-result.v1"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -109,6 +117,12 @@ V14_INTERVAL_GUIDE_CONTRACT = "browser_rendered_lossless_interval_video_v1"
 V14_BASE_VIDEO_LATENT_SLICES = 7
 V14_GUIDE_TEMPORAL_LATENT_SLICES = 7
 V14_FINAL_TEMPORAL_LATENT_SLICES = 14
+V15_ENDPOINT_GUIDE_CONTRACT = "browser_rendered_identical_hard_loop_endpoints_v1"
+V15_ENDPOINT_GUIDE_FILENAME = "guide_000.png"
+V15_ENDPOINT_GUIDE_SIZE_BYTES = 27257
+V15_ENDPOINT_FRAME_INDICES = (0, 48)
+V15_ENDPOINT_GUIDE_STRENGTHS = (1.0, 1.0)
+V15_FINAL_TEMPORAL_LATENT_SLICES = 16
 V12_GUIDE_CONTRACT = "browser_rendered_recovery_static_scene_rgb_keyframes_v1"
 V12_SCENE_CONTRACT = "v12_unified_browser_recovery_guides_v1"
 V10_GUIDE_RESOLUTION = (768, 448)
@@ -1912,6 +1926,94 @@ def _load_browser_interval_guide(
     )
 
 
+def _load_browser_interval_guide_with_hard_endpoints(
+    experiment: Mapping[str, Any],
+    *,
+    guide_bundle: Optional[Path],
+    reference_sha256: str,
+    frame_count: int,
+    start_strength: float,
+    end_strength: float,
+) -> tuple[
+    Path,
+    str,
+    tuple[ControlledGuideFrame, ...],
+    ControlledGuideVideo,
+]:
+    """Load the v14 interval guide plus byte-identical hard loop endpoints."""
+
+    bundle, manifest_sha256, guide_video = _load_browser_interval_guide(
+        experiment,
+        guide_bundle=guide_bundle,
+        reference_sha256=reference_sha256,
+        frame_count=frame_count,
+        start_strength=start_strength,
+        end_strength=end_strength,
+    )
+    contract = experiment.get("hard_endpoint_contract_object")
+    if not isinstance(contract, dict) or (
+        contract.get("guide_contract_string") != V15_ENDPOINT_GUIDE_CONTRACT
+        or contract.get("source_bundle_id_string") != V14_GUIDE_BUNDLE_ID
+        or contract.get("image_filename_string") != V15_ENDPOINT_GUIDE_FILENAME
+        or contract.get("image_sha256_string") != V12_ENDPOINT_GUIDE_SHA256
+        or contract.get("image_bytes_int") != V15_ENDPOINT_GUIDE_SIZE_BYTES
+        or contract.get("frame_indices_array") != list(V15_ENDPOINT_FRAME_INDICES)
+        or contract.get("strengths_array") != list(V15_ENDPOINT_GUIDE_STRENGTHS)
+        or contract.get("byte_identical_endpoints_bool") is not True
+        or contract.get("interval_ltxv_add_guide_count_int") != 1
+        or contract.get("endpoint_ltxv_add_guide_count_int") != 2
+        or contract.get("total_ltxv_add_guide_count_int") != 3
+        or contract.get("base_video_latent_slices_int")
+        != V14_BASE_VIDEO_LATENT_SLICES
+        or contract.get("guide_temporal_latent_slices_int")
+        != V14_GUIDE_TEMPORAL_LATENT_SLICES
+        or contract.get("endpoint_temporal_latent_slices_int") != 2
+        or contract.get("final_temporal_latent_slices_int")
+        != V15_FINAL_TEMPORAL_LATENT_SLICES
+        or contract.get("chain_order_array")
+        != ["interval_video", "hard_start_0", "hard_end_48"]
+        or contract.get("post_sampling_guide_crop_required_bool") is not True
+    ):
+        raise ControlledExperimentError(
+            "v15 immutable interval-plus-hard-endpoints contract is invalid"
+        )
+    if frame_count != 49 or start_strength != 1.0 or end_strength != 1.0:
+        raise ControlledExperimentError(
+            "v15 hard endpoints require exactly 49 frames at strength 1.0"
+        )
+    endpoint_path = bundle / V15_ENDPOINT_GUIDE_FILENAME
+    try:
+        endpoint_bytes = endpoint_path.read_bytes()
+    except OSError as exc:
+        raise ControlledExperimentError(
+            f"cannot read v15 hard endpoint guide {endpoint_path}: {exc}"
+        ) from exc
+    endpoint_sha256 = hashlib.sha256(endpoint_bytes).hexdigest()
+    if (
+        endpoint_sha256 != V12_ENDPOINT_GUIDE_SHA256
+        or len(endpoint_bytes) != V15_ENDPOINT_GUIDE_SIZE_BYTES
+    ):
+        raise ControlledExperimentError(
+            "v15 hard endpoint image does not match its code-owned SHA-256/size pin"
+        )
+    endpoint_frames = tuple(
+        ControlledGuideFrame(
+            frame_index=frame_index,
+            image=endpoint_path,
+            sha256=endpoint_sha256,
+            size_bytes=len(endpoint_bytes),
+            strength=strength,
+        )
+        for frame_index, strength in zip(
+            V15_ENDPOINT_FRAME_INDICES,
+            V15_ENDPOINT_GUIDE_STRENGTHS,
+        )
+    )
+    for frame in endpoint_frames:
+        _verify_v12_planned_guide_frame(frame, decode_png=True)
+    return bundle, manifest_sha256, endpoint_frames, guide_video
+
+
 def load_controlled_plan(
     *,
     experiment_path: Path,
@@ -1953,6 +2055,14 @@ def load_controlled_plan(
         raise ControlledExperimentError(
             "v14 experiment spec SHA-256 is not the exact code-owned checked-in pin: "
             f"expected {V14_EXPERIMENT_SPEC_SHA256}, got {experiment_sha256}"
+        )
+    if (
+        experiment_id == V15_EXPERIMENT_ID
+        and experiment_sha256 != V15_EXPERIMENT_SPEC_SHA256
+    ):
+        raise ControlledExperimentError(
+            "v15 experiment spec SHA-256 is not the exact code-owned checked-in pin: "
+            f"expected {V15_EXPERIMENT_SPEC_SHA256}, got {experiment_sha256}"
         )
     if authorization != experiment_id:
         raise ControlledExperimentError(
@@ -2108,6 +2218,20 @@ def load_controlled_plan(
                 start_strength=start_strength,
                 end_strength=end_strength,
             )
+        )
+    elif experiment_id == V15_EXPERIMENT_ID:
+        (
+            browser_guide_bundle,
+            guide_manifest_sha256,
+            guide_frames,
+            guide_video,
+        ) = _load_browser_interval_guide_with_hard_endpoints(
+            experiment,
+            guide_bundle=guide_bundle,
+            reference_sha256=reference_sha,
+            frame_count=frame_count,
+            start_strength=start_strength,
+            end_strength=end_strength,
         )
 
     latent_width: Optional[int] = None
@@ -2650,6 +2774,192 @@ def patch_browser_interval_video_guide(
     return result
 
 
+def patch_browser_interval_video_with_hard_endpoints(
+    prompt: Mapping[str, Any], *, uploaded_video: str
+) -> dict[str, Any]:
+    """Prepend the full-cycle interval guide while retaining hard frame 0/-1 guides."""
+
+    video_name = str(uploaded_video or "").strip()
+    if not re.fullmatch(
+        r"autorig_animation_fitting/autorig_[a-f0-9]{32}\.mkv", video_name
+    ):
+        raise ControlledExperimentError(
+            "v15 uploaded interval guide must be the exact digest-named MKV input"
+        )
+    result = copy.deepcopy(dict(prompt))
+    titled: dict[str, tuple[str, dict[str, Any]]] = {}
+    for node_id, node in result.items():
+        if not isinstance(node, dict):
+            raise ControlledExperimentError("v15 workflow nodes must be objects")
+        meta = node.get("_meta")
+        title = str(meta.get("title") or "") if isinstance(meta, dict) else ""
+        if title:
+            if title in titled:
+                raise ControlledExperimentError(
+                    f"v15 workflow title is duplicated: {title}"
+                )
+            titled[title] = (str(node_id), node)
+    required = (
+        "AUTORIG_START_FRAME",
+        "AUTORIG_START_GUIDE",
+        "AUTORIG_END_GUIDE_N_MINUS_1",
+        "AUTORIG_CROP_GUIDE_LATENTS",
+    )
+    if any(title not in titled for title in required):
+        raise ControlledExperimentError("v15 pinned workflow guide nodes are missing")
+    load_id, load = titled["AUTORIG_START_FRAME"]
+    start_id, start = titled["AUTORIG_START_GUIDE"]
+    end_id, end = titled["AUTORIG_END_GUIDE_N_MINUS_1"]
+    _, crop = titled["AUTORIG_CROP_GUIDE_LATENTS"]
+
+    by_class: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for node_id, node in result.items():
+        by_class.setdefault(str(node.get("class_type") or ""), []).append(
+            (str(node_id), node)
+        )
+    if (
+        load.get("class_type") != "LoadImage"
+        or len(by_class.get("LoadImage", [])) != 1
+        or by_class.get("LoadVideo")
+        or by_class.get("GetVideoComponents")
+        or len(by_class.get("ResizeImageMaskNode", [])) != 1
+        or len(by_class.get("LTXVPreprocess", [])) != 1
+        or len(by_class.get("LTXVAddGuide", [])) != 2
+        or len(by_class.get("LTXVCropGuides", [])) != 1
+    ):
+        raise ControlledExperimentError(
+            "v15 pinned workflow is not the exact two-endpoint image-guide base"
+        )
+    resize_id, resize = by_class["ResizeImageMaskNode"][0]
+    preprocess_id, preprocess = by_class["LTXVPreprocess"][0]
+    start_inputs = start.get("inputs")
+    end_inputs = end.get("inputs")
+    resize_inputs = resize.get("inputs")
+    preprocess_inputs = preprocess.get("inputs")
+    crop_inputs = crop.get("inputs")
+    if not all(
+        isinstance(value, dict)
+        for value in (
+            start_inputs,
+            end_inputs,
+            resize_inputs,
+            preprocess_inputs,
+            crop_inputs,
+        )
+    ):
+        raise ControlledExperimentError("v15 pinned guide inputs are invalid")
+    assert isinstance(start_inputs, dict)
+    assert isinstance(end_inputs, dict)
+    assert isinstance(resize_inputs, dict)
+    assert isinstance(preprocess_inputs, dict)
+    assert isinstance(crop_inputs, dict)
+    if (
+        resize_inputs.get("input") != [load_id, 0]
+        or resize_inputs.get("resize_type") != "scale longer dimension"
+        or resize_inputs.get("resize_type.longer_size") != 768
+        or preprocess_inputs.get("image") != [resize_id, 0]
+        or preprocess_inputs.get("img_compression") != 18
+        or start.get("class_type") != "LTXVAddGuide"
+        or start_inputs.get("frame_idx") != 0
+        or start_inputs.get("strength") != 1.0
+        or start_inputs.get("image") != [preprocess_id, 0]
+        or end.get("class_type") != "LTXVAddGuide"
+        or end_inputs.get("frame_idx") != -1
+        or end_inputs.get("strength") != 1.0
+        or end_inputs.get("image") != [preprocess_id, 0]
+        or end_inputs.get("positive") != [start_id, 0]
+        or end_inputs.get("negative") != [start_id, 1]
+        or end_inputs.get("latent") != [start_id, 2]
+        or crop_inputs.get("positive") != [end_id, 0]
+        or crop_inputs.get("negative") != [end_id, 1]
+    ):
+        raise ControlledExperimentError("v15 pinned hard endpoint chain is not exact")
+
+    concat_rows = by_class.get("LTXVConcatAVLatent", [])
+    cfg_rows = by_class.get("CFGGuider", [])
+    latent_rows = by_class.get("EmptyLTXVLatentVideo", [])
+    if len(concat_rows) != 1 or len(cfg_rows) != 1 or len(latent_rows) != 1:
+        raise ControlledExperimentError("v15 pinned sampler chain is not unique")
+    concat_inputs = concat_rows[0][1].get("inputs")
+    cfg_inputs = cfg_rows[0][1].get("inputs")
+    latent_inputs = latent_rows[0][1].get("inputs")
+    if not all(isinstance(value, dict) for value in (concat_inputs, cfg_inputs, latent_inputs)):
+        raise ControlledExperimentError("v15 pinned sampler inputs are invalid")
+    assert isinstance(concat_inputs, dict)
+    assert isinstance(cfg_inputs, dict)
+    assert isinstance(latent_inputs, dict)
+    if (
+        concat_inputs.get("video_latent") != [end_id, 2]
+        or cfg_inputs.get("positive") != [end_id, 0]
+        or cfg_inputs.get("negative") != [end_id, 1]
+        or latent_inputs.get("length") != 49
+    ):
+        raise ControlledExperimentError("v15 pinned endpoint sampler wiring is not exact")
+
+    generated_ids = ("915000", "915001", "915002", "915003", "915004")
+    if any(node_id in result for node_id in generated_ids):
+        raise ControlledExperimentError("v15 deterministic interval node id collides")
+    interval_load_id, components_id, interval_resize_id, interval_preprocess_id, interval_id = (
+        generated_ids
+    )
+    result[interval_load_id] = {
+        "class_type": "LoadVideo",
+        "_meta": {"title": "AUTORIG_INTERVAL_GUIDE_VIDEO"},
+        "inputs": {"file": video_name},
+    }
+    result[components_id] = {
+        "class_type": "GetVideoComponents",
+        "_meta": {"title": "AUTORIG_INTERVAL_GUIDE_COMPONENTS"},
+        "inputs": {"video": [interval_load_id, 0]},
+    }
+    interval_resize = copy.deepcopy(resize)
+    interval_resize["_meta"] = {"title": "AUTORIG_INTERVAL_GUIDE_RESIZE"}
+    interval_resize["inputs"]["input"] = [components_id, 0]
+    result[interval_resize_id] = interval_resize
+    interval_preprocess = copy.deepcopy(preprocess)
+    interval_preprocess["_meta"] = {"title": "AUTORIG_INTERVAL_GUIDE_PREPROCESS"}
+    interval_preprocess["inputs"]["image"] = [interval_resize_id, 0]
+    result[interval_preprocess_id] = interval_preprocess
+    interval_guide = copy.deepcopy(start)
+    interval_guide["_meta"] = {"title": "AUTORIG_INTERVAL_GUIDE_ADD"}
+    interval_guide["inputs"]["image"] = [interval_preprocess_id, 0]
+    interval_guide["inputs"]["frame_idx"] = 0
+    interval_guide["inputs"]["strength"] = 1.0
+    result[interval_id] = interval_guide
+    start_inputs["positive"] = [interval_id, 0]
+    start_inputs["negative"] = [interval_id, 1]
+    start_inputs["latent"] = [interval_id, 2]
+
+    final_counts: dict[str, int] = {}
+    for node in result.values():
+        class_type = str(node.get("class_type") or "")
+        final_counts[class_type] = final_counts.get(class_type, 0) + 1
+    expected_counts = {
+        "LoadImage": 1,
+        "LoadVideo": 1,
+        "GetVideoComponents": 1,
+        "ResizeImageMaskNode": 2,
+        "LTXVPreprocess": 2,
+        "LTXVAddGuide": 3,
+        "LTXVCropGuides": 1,
+    }
+    if any(final_counts.get(name, 0) != count for name, count in expected_counts.items()):
+        raise ControlledExperimentError("v15 final graph node inventory is invalid")
+    base_slices = ((int(latent_inputs["length"]) - 1) // 8) + 1
+    guide_slices = ((49 - 1) // 8) + 1
+    endpoint_slices = 2
+    if (
+        base_slices != V14_BASE_VIDEO_LATENT_SLICES
+        or guide_slices != V14_GUIDE_TEMPORAL_LATENT_SLICES
+        or base_slices + guide_slices + endpoint_slices
+        != V15_FINAL_TEMPORAL_LATENT_SLICES
+    ):
+        raise ControlledExperimentError(
+            "v15 graph violates the pinned 7+7+2=16 temporal latent budget"
+        )
+    return result
+
+
 def _job_identity(plan: ControlledExperimentPlan, worker: ComfyWorker) -> tuple[dict[str, Any], str, str]:
     identity = {
         "schema": "autorig.animation-fitting-controlled-job-identity.v1",
@@ -2793,12 +3103,14 @@ async def run_controlled_experiment(
                 )
             else:
                 uploaded_guides: dict[int, str] = {}
+                uploaded_video: Optional[str] = None
                 if plan.guide_frames:
                     uploads_by_sha256: dict[str, str] = {}
                     for frame in plan.guide_frames:
                         if plan.experiment_id in (
                             V12_EXPERIMENT_ID,
                             V13_EXPERIMENT_ID,
+                            V15_EXPERIMENT_ID,
                         ):
                             _verify_v12_planned_guide_frame(frame, decode_png=False)
                         elif plan.experiment_id == V11_EXPERIMENT_ID:
@@ -2815,13 +3127,15 @@ async def run_controlled_experiment(
                             uploads_by_sha256[frame.sha256] = uploaded
                         uploaded_guides[frame.frame_index] = uploaded
                     uploaded_start = uploaded_guides[0]
-                elif plan.guide_video is not None:
-                    uploaded_start = await client.upload_reference_video(
+                if plan.guide_video is not None:
+                    uploaded_video = await client.upload_reference_video(
                         plan.guide_video.video,
                         expected_sha256=plan.guide_video.sha256,
                         expected_size_bytes=plan.guide_video.size_bytes,
                     )
-                else:
+                    if not plan.guide_frames:
+                        uploaded_start = uploaded_video
+                if not plan.guide_frames and plan.guide_video is None:
                     uploaded_start = await client.upload_reference_image(plan.reference_image)
                 profile: WorkflowProfile = load_animation_fitting_specs().workflows["loop"]
                 prompt = apply_workflow_bindings(
@@ -2848,7 +3162,17 @@ async def run_controlled_experiment(
                     start_strength=plan.start_guide_strength,
                     end_strength=plan.end_guide_strength,
                 )
-                if plan.guide_frames:
+                if (
+                    plan.experiment_id == V15_EXPERIMENT_ID
+                    and plan.guide_frames
+                    and plan.guide_video is not None
+                    and uploaded_video is not None
+                ):
+                    prompt = patch_browser_interval_video_with_hard_endpoints(
+                        prompt,
+                        uploaded_video=uploaded_video,
+                    )
+                elif plan.guide_frames:
                     prompt = patch_browser_keyframe_guides(
                         prompt,
                         uploaded_images=uploaded_guides,
@@ -2856,10 +3180,10 @@ async def run_controlled_experiment(
                             frame.frame_index: frame.strength for frame in plan.guide_frames
                         },
                     )
-                elif plan.guide_video is not None:
+                elif plan.guide_video is not None and uploaded_video is not None:
                     prompt = patch_browser_interval_video_guide(
                         prompt,
-                        uploaded_video=uploaded_start,
+                        uploaded_video=uploaded_video,
                     )
                 store.append_job_state(job_id, {
                     **identity,
