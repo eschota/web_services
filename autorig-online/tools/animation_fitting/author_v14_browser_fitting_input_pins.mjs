@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Author the two immutable local-input pin manifests consumed by the V14
+ * Author the two immutable local-input pin manifests consumed by the V14/V15
  * browser fitting spec author.  This program only snapshots local files and
  * atomically publishes JSON; it never executes subprocesses or stages.
  */
@@ -118,7 +118,7 @@ export function buildV14InputPinPayloads(configValue, dependencies = {}) {
     const config = configValue && typeof configValue === 'object' && !Array.isArray(configValue)
         ? configValue : (() => { throw new Error('config must be an object'); })();
     const toolNames = Object.keys(V14_PIPELINE_TOOL_SOURCE_PATHS).sort();
-    if (toolNames.length !== 28) throw new Error('runner must export the exact 28-file V14 tool-source closure');
+    if (toolNames.length !== 28) throw new Error('runner must export the exact 28-file V14/V15 tool-source closure');
     const executableRows = EXECUTABLE_NAMES.map((name) => ({
         field: `runtime executable ${name}`,
         path: path.resolve(nonEmptyString(config[name], name)),
@@ -280,7 +280,7 @@ function helpText() {
 
 Creates exactly runtime-pins.json (${V14_RUNTIME_PINS_SCHEMA}) and
 tool-source-pins.json (${V14_TOOL_SOURCE_PINS_SCHEMA}) for the exact 28-file
-closure exported by the V14 runner. Every input file is read exactly once.
+closure exported by the V14/V15 runner. Every input file is read exactly once.
 No subprocess, GPU stage, Blender, database, or network operation is used.`;
 }
 

@@ -202,10 +202,11 @@ test('both external barriers produce immutable deterministic revisions and prove
     const runtimePins = writeJson(path.join(root, 'runtime-pins.json'), { pins: true });
     const toolPins = writeJson(path.join(root, 'tool-pins.json'), { pins: true });
     const externalPins = { contactRefitInputManifestSha256: null, threeClipSha256: null };
+    const experimentId = 'horse_walk_v15_browser_interval_hard_endpoints_seed_6550110377254033429_v1';
     const baseSpec = {
         outputRoot,
         clipName: 'Horse_Walk_Test',
-        controlledGeneration: { state: controlledJob },
+        controlledGeneration: { state: controlledJob, experimentId },
         guide: { bundleDirectory: path.join(root, 'guide'), immutableManifestSha256: '1'.repeat(64) },
         canonicalBundle: {
             directory: path.join(root, 'canonical'), immutableManifestSha256: '2'.repeat(64),
@@ -228,8 +229,12 @@ test('both external barriers produce immutable deterministic revisions and prove
             threeClipSha256: config.threeClipSha256,
         },
     });
-    const buildPipelineSpec = (config) => ({ spec: specFromConfig(config), snapshots: [] });
+    const buildPipelineSpec = (config) => {
+        assert.equal(config.experimentId, experimentId);
+        return { spec: specFromConfig(config), snapshots: [] };
+    };
     const authorPipelineSpec = (config) => {
+        assert.equal(config.experimentId, experimentId);
         const pin = writeJson(config.output, specFromConfig(config));
         return { spec: pin, initialPipelineStatus: 'TEST' };
     };

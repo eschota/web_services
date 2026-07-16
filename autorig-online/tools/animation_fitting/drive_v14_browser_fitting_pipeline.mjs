@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Fail-closed unattended stage driver for the immutable Horse_2 V14 browser
+ * Fail-closed unattended stage driver for the immutable Horse_2 V14/V15 browser
  * fitting pipeline.
  *
  * The runner remains the sole command author.  This driver only consumes the
@@ -359,6 +359,9 @@ export function deriveV14RevisionConfig(specValue, pinField, observedSha256, out
     const toolPins = descriptorFromSpec(provenance.toolSourcePinManifest, 'pipeline spec.authoringProvenance.toolSourcePinManifest');
     if (Object.keys(toolSources).length !== 28) throw new Error('pipeline spec tool-source closure drift');
     return {
+        ...(controlled.experimentId == null ? {} : {
+            experimentId: string(controlled.experimentId, 'pipeline spec.controlledGeneration.experimentId'),
+        }),
         controlledJob: job.path,
         controlledJobSha256: job.sha256,
         canonicalBundle: path.resolve(string(canonical.directory, 'pipeline spec.canonicalBundle.directory')),

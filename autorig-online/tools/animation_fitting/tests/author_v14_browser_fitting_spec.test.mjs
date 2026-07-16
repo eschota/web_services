@@ -10,6 +10,7 @@ import {
     V14_PIPELINE_SPEC_SCHEMA_V2,
     V14_RUNTIME_PINS_SCHEMA,
     V14_TOOL_SOURCE_PINS_SCHEMA,
+    REAL_V15_CONTRACT,
     authorV14PipelineSpec,
     buildV14PipelineSpec,
     parseAuthorArgs,
@@ -46,7 +47,7 @@ function promptId(jobId) {
     return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-4${raw.slice(13, 16)}-8${raw.slice(17, 20)}-${raw.slice(20)}`;
 }
 
-function fixture() {
+function fixture({ hardEndpointGuides = false } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v14-spec-author-'));
     const canonicalRoot = path.join(root, 'horse-canonical-test');
     const reference = write(path.join(canonicalRoot, 'reference_rgb.png'), 'canonical-rgb');
@@ -124,7 +125,7 @@ function fixture() {
     };
     let toolManifest = writeJson(path.join(root, 'tool-pins.json'), toolManifestValue);
 
-    const candidatePayload = Buffer.from('real-v14-candidate');
+    const candidatePayload = Buffer.from(hardEndpointGuides ? 'real-v15-candidate' : 'real-v14-candidate');
     const candidateDigest = digest(candidatePayload);
     const candidate = write(path.join(root, 'raw', candidateDigest.slice(0, 2), `${candidateDigest}.mp4`), candidatePayload);
     const frames = Array.from({ length: 49 }, (_, index) => (
@@ -133,9 +134,11 @@ function fixture() {
     const seedString = '6550110377254033429';
     const identity = {
         schema: 'autorig.animation-fitting-controlled-job-identity.v1',
-        experiment_id_string: 'horse_walk_v14_test_v1',
+        experiment_id_string: hardEndpointGuides ? 'horse_walk_v15_test_v1' : 'horse_walk_v14_test_v1',
         experiment_sha256_string: 'b'.repeat(64),
-        runtime_authorization_string: 'explicit_cli:horse_walk_v14_test_v1',
+        runtime_authorization_string: hardEndpointGuides
+            ? 'explicit_cli:horse_walk_v15_test_v1'
+            : 'explicit_cli:horse_walk_v14_test_v1',
         reference_sha256_string: reference.sha256,
         positive_prompt_sha256_string: 'c'.repeat(64),
         negative_prompt_sha256_string: 'd'.repeat(64),
@@ -153,12 +156,23 @@ function fixture() {
             frame_count_int: 49, width_int: 768, height_int: 448, fps_int: 30,
             strength_float: '__INTERVAL_STRENGTH__', ltxv_add_guide_count_int: 1,
         },
+        ...(hardEndpointGuides ? {
+            browser_guide_sequence_object: {
+                guide_manifest_sha256_string: guideManifest.sha256,
+                frames_array: [0, 48].map((frameIndex) => ({
+                    frame_index_int: frameIndex,
+                    sha256_string: guideFrames[0].sha256_string,
+                    strength_float: '__ENDPOINT_STRENGTH__',
+                })),
+            },
+        } : {}),
     };
     const replaceExactNumbers = (payload) => payload
         .replace('"__EXACT_SEED__"', seedString)
         .replace('"__START_STRENGTH__"', '1.0')
         .replace('"__END_STRENGTH__"', '1.0')
-        .replace('"__INTERVAL_STRENGTH__"', '1.0');
+        .replace('"__INTERVAL_STRENGTH__"', '1.0')
+        .replaceAll('"__ENDPOINT_STRENGTH__"', '1.0');
     const identityCanonical = replaceExactNumbers(JSON.stringify(stableValue(identity)));
     const jobId = digest(Buffer.from(identityCanonical));
     const controlledPromptId = promptId(jobId);
@@ -195,11 +209,13 @@ function fixture() {
         guideVideoSha256: guideVideo.sha256,
         guideVideoBytes: guideVideo.bytes,
         endpointGuideSha256: guideFrames[0].sha256_string,
+        hardEndpointGuides,
         threeModuleSha256: three.sha256,
         frameCount: 49, inputFps: 24, outputFps: 30, width: 768, height: 448,
     };
     const outputRoot = path.join(root, 'pipeline-output');
     const config = {
+        experimentId: identity.experiment_id_string,
         controlledJob: job.path, controlledJobSha256: job.sha256,
         canonicalBundle: canonicalRoot, canonicalImmutableSha256: immutable.sha256,
         fittingBundleSha256: fitting.sha256, sourceModelSha256,
@@ -249,6 +265,26 @@ test('CLI requires a completed controlled job and rejects the old direct-MP4 esc
     assert.throws(() => parseAuthorArgs([]), /--controlled-job is required/);
 });
 
+test('CLI accepts only the exact code-owned V14 or V15 experiment ids', () => {
+    const required = [
+        '--controlled-job', 'job.json', '--controlled-job-sha256', '1'.repeat(64),
+        '--canonical-bundle', 'canonical', '--canonical-immutable-sha256', '2'.repeat(64),
+        '--fitting-bundle-sha256', '3'.repeat(64), '--source-model-sha256', '4'.repeat(64),
+        '--guide-bundle', 'guide', '--guide-manifest-sha256', '5'.repeat(64),
+        '--guide-video', 'guide.mkv', '--guide-video-sha256', '6'.repeat(64), '--guide-video-bytes', '1',
+        '--runtime-pins', 'runtime.json', '--runtime-pins-sha256', '7'.repeat(64),
+        '--tool-source-pins', 'tools.json', '--tool-source-pins-sha256', '8'.repeat(64),
+        '--output-root', 'out', '--output', 'spec.json',
+    ];
+    assert.equal(parseAuthorArgs([
+        '--experiment-id', REAL_V15_CONTRACT.experimentId, ...required,
+    ]).experimentId, REAL_V15_CONTRACT.experimentId);
+    assert.throws(
+        () => parseAuthorArgs(['--experiment-id', 'horse_walk_v16_untrusted', ...required]),
+        /not an authorized V14\/V15 controlled experiment/,
+    );
+});
+
 test('authors deterministic V14 v2 controlled-generation specs atomically without stage execution', (context) => {
     const f = fixture();
     context.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
@@ -270,6 +306,22 @@ test('authors deterministic V14 v2 controlled-generation specs atomically withou
     assert.throws(
         () => authorV14PipelineSpec(f.config, { expectedContract: f.expected, inspectPipeline: strictV2Inspector }),
         /output already exists/,
+    );
+});
+
+test('authors a V15 hard-endpoint controlled binding and rejects endpoint sequence drift', (context) => {
+    const f = fixture({ hardEndpointGuides: true });
+    context.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+    const built = buildV14PipelineSpec(f.config, { expectedContract: f.expected });
+    assert.equal(built.spec.controlledGeneration.experimentId, f.expected.experimentId);
+    assert.equal(built.spec.controlledGeneration.jobId, f.expected.jobId);
+    assert.equal(built.spec.clipName, 'Horse_Walk_LTX_V15_Browser_Contact_Refit');
+    const changed = structuredClone(f.jobValue);
+    changed.browser_guide_sequence_object.frames_array[1].sha256_string = 'f'.repeat(64);
+    f.rewriteJob(changed);
+    assert.throws(
+        () => buildV14PipelineSpec(f.config, { expectedContract: f.expected }),
+        /hard endpoint guide sequence drift/,
     );
 });
 

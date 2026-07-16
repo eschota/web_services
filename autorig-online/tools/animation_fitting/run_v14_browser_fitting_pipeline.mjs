@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Fail-closed, resumable command author for the Horse_2 V14 browser-fitting run.
+ * Fail-closed, resumable command author for the Horse_2 V14/V15 browser-fitting run.
  *
  * This program deliberately does not execute subprocesses.  It validates the
  * immutable input pins and every already-published stage, then writes a new
@@ -32,7 +32,24 @@ const V14_CONTROLLED_JOB = Object.freeze({
     positivePromptSha256: '91719b6d9196c70f86f7fa264393f5e373112014b415e51a0266c2383720ff3e',
     negativePromptSha256: '0b83e99c26922bc3170cfa5ff3b4a7f2caae40aabf3fdaa2de292354344483fb',
     seed: '6550110377254033429',
+    hardEndpointGuides: false,
 });
+const V15_CONTROLLED_JOB = Object.freeze({
+    jobId: 'c38c7df668895eea9f418a81b62ea7a16c49d4d05871f051534175e1df5900b2',
+    promptId: '29e3e70a-4ce1-45c6-8c2f-082dc2ffa0e5',
+    experimentId: 'horse_walk_v15_browser_interval_hard_endpoints_seed_6550110377254033429_v1',
+    experimentSha256: 'd6c6e5ffe6b233c5360643f05ba0e6ab7d736c1dfef466c0b3660564e2f63a51',
+    workflowName: 'autorig_ltx2_animal_loop_v1_api.json',
+    workflowFingerprint: 'e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56',
+    positivePromptSha256: '6a49d06824e6b18b14baecd31272ef06791b4ffc6eb72fcfe9426549b1fad71a',
+    negativePromptSha256: '9b11fe50580e36b65f3d121e4480d3ff1d980e82e956758525f9882224f81993',
+    seed: '6550110377254033429',
+    hardEndpointGuides: true,
+});
+const CONTROLLED_JOBS_BY_EXPERIMENT = new Map([
+    [V14_CONTROLLED_JOB.experimentId, V14_CONTROLLED_JOB],
+    [V15_CONTROLLED_JOB.experimentId, V15_CONTROLLED_JOB],
+]);
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const TOOLS_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
@@ -234,11 +251,11 @@ function validateControlledGeneration(specBase, controlledValue, topLevelCandida
     const workflowFingerprint = sha256(
         controlled.workflowFingerprint, 'spec.controlledGeneration.workflowFingerprint',
     );
-    if (jobId !== V14_CONTROLLED_JOB.jobId || promptId !== V14_CONTROLLED_JOB.promptId
-        || experimentId !== V14_CONTROLLED_JOB.experimentId
-        || experimentSha256 !== V14_CONTROLLED_JOB.experimentSha256
-        || workflowFingerprint !== V14_CONTROLLED_JOB.workflowFingerprint) {
-        throw new Error('spec.controlledGeneration is not the exact authorized V14 controlled job');
+    const controlledJob = CONTROLLED_JOBS_BY_EXPERIMENT.get(experimentId);
+    if (!controlledJob || jobId !== controlledJob.jobId || promptId !== controlledJob.promptId
+        || experimentSha256 !== controlledJob.experimentSha256
+        || workflowFingerprint !== controlledJob.workflowFingerprint) {
+        throw new Error('spec.controlledGeneration is not an exact authorized V14/V15 controlled job');
     }
 
     requireExactKeys(controlled.state, ['path', 'bytes', 'sha256'], 'spec.controlledGeneration.state');
@@ -277,22 +294,22 @@ function validateControlledGeneration(specBase, controlledValue, topLevelCandida
     if (state.experiment_id_string !== experimentId
         || state.experiment_sha256_string !== experimentSha256
         || state.prompt_id_string !== promptId
-        || state.workflow_name_string !== V14_CONTROLLED_JOB.workflowName
+        || state.workflow_name_string !== controlledJob.workflowName
         || state.workflow_fingerprint_string !== workflowFingerprint
         || state.runtime_authorization_string !== `explicit_cli:${experimentId}`
         || state.worker_id_string !== 'local-4090'
         || state.worker_base_url_string !== 'http://127.0.0.1:8188') {
-        throw new Error('controlled generation job state identity does not match the authorized V14 job');
+        throw new Error('controlled generation job state identity does not match the authorized V14 job or authorized V15 job');
     }
     const seedToken = rawJsonNumber(stateSnapshot, 'seed_int', 'controlled generation seed');
-    if (state.positive_prompt_sha256_string !== V14_CONTROLLED_JOB.positivePromptSha256
-        || state.negative_prompt_sha256_string !== V14_CONTROLLED_JOB.negativePromptSha256
-        || seedToken !== V14_CONTROLLED_JOB.seed
+    if (state.positive_prompt_sha256_string !== controlledJob.positivePromptSha256
+        || state.negative_prompt_sha256_string !== controlledJob.negativePromptSha256
+        || seedToken !== controlledJob.seed
         || state.frame_count_int !== 49 || state.input_fps_int !== 24 || state.output_fps_int !== 30
         || state.start_guide_strength_float !== 1 || state.end_guide_strength_float !== 1
         || state.approval_state_string !== 'generated_not_approved'
         || state.send_to_skeletal_fitting_bool !== false) {
-        throw new Error('controlled generation completed state lost its exact V14 generation contract');
+        throw new Error('controlled generation completed state lost its exact V14 generation contract or exact V15 generation contract');
     }
     const resolution = object(state.resolution_override_object, 'controlled generation resolution override');
     if (resolution.latent_width_int !== 768 || resolution.latent_height_int !== 448
@@ -316,6 +333,25 @@ function validateControlledGeneration(specBase, controlledValue, topLevelCandida
         || interval.fps_int !== 30 || interval.strength_float !== 1
         || interval.ltxv_add_guide_count_int !== 1) {
         throw new Error('controlled generation interval guide provenance changed');
+    }
+    let generationEndpointGuideSha256 = null;
+    if (controlledJob.hardEndpointGuides === true) {
+        const sequence = object(
+            state.browser_guide_sequence_object,
+            'controlled generation hard endpoint guide sequence',
+        );
+        const rows = Array.isArray(sequence.frames_array) ? sequence.frames_array : [];
+        if (sequence.guide_manifest_sha256_string !== generationGuideManifestSha256
+            || rows.length !== 2
+            || rows[0]?.frame_index_int !== 0 || rows[1]?.frame_index_int !== 48
+            || !SHA256_RE.test(String(rows[0]?.sha256_string || ''))
+            || rows[1]?.sha256_string !== rows[0]?.sha256_string
+            || rows[0]?.strength_float !== 1 || rows[1]?.strength_float !== 1) {
+            throw new Error('controlled V15 generation hard endpoint guide provenance changed');
+        }
+        generationEndpointGuideSha256 = rows[0].sha256_string;
+    } else if (state.browser_guide_sequence_object != null) {
+        throw new Error('controlled V14 generation unexpectedly contains hard endpoint guides');
     }
 
     const candidate = pinnedSnapshot({
@@ -387,7 +423,7 @@ function validateControlledGeneration(specBase, controlledValue, topLevelCandida
         schema: V14_CONTROLLED_GENERATION_BINDING_SCHEMA,
         jobId, promptId, experimentId, experimentSha256, workflowFingerprint,
         generationGuideManifestSha256, generationGuideVideoSha256,
-        generationGuideVideoBytes, generationReferenceSha256,
+        generationGuideVideoBytes, generationReferenceSha256, generationEndpointGuideSha256,
         stateSnapshot, candidate, frames,
         preconditions: [stateSnapshot, candidate, ...frames.map((row) => row.snapshot)],
     };
@@ -1251,8 +1287,10 @@ function validateSpecSnapshot(specPathValue, expectedSpecSha256) {
     if (controlledGeneration.generationGuideManifestSha256 !== guide.manifestSnapshot.sha256
         || controlledGeneration.generationGuideVideoSha256 !== guide.interval.sha256
         || controlledGeneration.generationGuideVideoBytes !== guide.interval.bytes
-        || controlledGeneration.generationReferenceSha256 !== canonicalRgb.sha256) {
-        throw new Error('controlled generation state does not bind the exact V14 guide/canonical reference inputs');
+        || controlledGeneration.generationReferenceSha256 !== canonicalRgb.sha256
+        || (controlledGeneration.generationEndpointGuideSha256 != null
+            && controlledGeneration.generationEndpointGuideSha256 !== guide.endpoint.sha256)) {
+        throw new Error('controlled generation state does not bind the exact V14/V15 guide/canonical reference inputs');
     }
     const runtime = validateRuntime(path.dirname(specPath), spec.runtime);
     const toolSources = validateToolSources(path.dirname(specPath), spec.toolSources);

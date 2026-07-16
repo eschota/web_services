@@ -26,6 +26,19 @@ const CONTROLLED_JOB = Object.freeze({
     experimentId: 'horse_walk_v14_browser_interval_guide_seed_6550110377254033429_v1',
     experimentSha256: '0f172076147e94099ea7c0cf3c323a46f698ea48e55b7bce9acec789e0e77c66',
     workflowFingerprint: 'e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56',
+    positivePromptSha256: '91719b6d9196c70f86f7fa264393f5e373112014b415e51a0266c2383720ff3e',
+    negativePromptSha256: '0b83e99c26922bc3170cfa5ff3b4a7f2caae40aabf3fdaa2de292354344483fb',
+    hardEndpointGuides: false,
+});
+const V15_CONTROLLED_JOB = Object.freeze({
+    jobId: 'c38c7df668895eea9f418a81b62ea7a16c49d4d05871f051534175e1df5900b2',
+    promptId: '29e3e70a-4ce1-45c6-8c2f-082dc2ffa0e5',
+    experimentId: 'horse_walk_v15_browser_interval_hard_endpoints_seed_6550110377254033429_v1',
+    experimentSha256: 'd6c6e5ffe6b233c5360643f05ba0e6ab7d736c1dfef466c0b3660564e2f63a51',
+    workflowFingerprint: 'e0f549b58d3933027a4f4d3fde69d6e3dfb6d360f0200e8f00a9d2bff278bc56',
+    positivePromptSha256: '6a49d06824e6b18b14baecd31272ef06791b4ffc6eb72fcfe9426549b1fad71a',
+    negativePromptSha256: '9b11fe50580e36b65f3d121e4480d3ff1d980e82e956758525f9882224f81993',
+    hardEndpointGuides: true,
 });
 
 function write(filename, bufferValue) {
@@ -39,7 +52,7 @@ function writeJson(filename, value) {
     return write(filename, jsonBuffer(value));
 }
 
-function fixture() {
+function fixture(controlledJob = CONTROLLED_JOB) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v14-pipeline-'));
     const artifactRoot = path.join(root, 'controlled-artifacts');
     const candidateBuffer = Buffer.from('49-frame-ltx-v14-candidate');
@@ -127,18 +140,18 @@ function fixture() {
         schema: 'autorig.animation-fitting-controlled-job-identity.v1', sequence_int: 3,
         recorded_at_unix_float: 1784130000.25,
         status_string: 'completed',
-        experiment_id_string: CONTROLLED_JOB.experimentId,
-        experiment_sha256_string: CONTROLLED_JOB.experimentSha256,
-        runtime_authorization_string: `explicit_cli:${CONTROLLED_JOB.experimentId}`,
+        experiment_id_string: controlledJob.experimentId,
+        experiment_sha256_string: controlledJob.experimentSha256,
+        runtime_authorization_string: `explicit_cli:${controlledJob.experimentId}`,
         reference_sha256_string: referenceRgb.sha256,
-        positive_prompt_sha256_string: '91719b6d9196c70f86f7fa264393f5e373112014b415e51a0266c2383720ff3e',
-        negative_prompt_sha256_string: '0b83e99c26922bc3170cfa5ff3b4a7f2caae40aabf3fdaa2de292354344483fb',
+        positive_prompt_sha256_string: controlledJob.positivePromptSha256,
+        negative_prompt_sha256_string: controlledJob.negativePromptSha256,
         seed_int: '__EXACT_V14_SEED__',
         frame_count_int: 49, input_fps_int: 24, output_fps_int: 30,
         start_guide_strength_float: 1, end_guide_strength_float: 1,
         worker_id_string: 'local-4090', worker_base_url_string: 'http://127.0.0.1:8188',
         workflow_name_string: 'autorig_ltx2_animal_loop_v1_api.json',
-        workflow_fingerprint_string: CONTROLLED_JOB.workflowFingerprint,
+        workflow_fingerprint_string: controlledJob.workflowFingerprint,
         approval_state_string: 'generated_not_approved', send_to_skeletal_fitting_bool: false,
         resolution_override_object: {
             latent_width_int: 768, latent_height_int: 448, resize_longer_int: 768,
@@ -149,15 +162,25 @@ function fixture() {
             frame_count_int: 49, width_int: 768, height_int: 448, fps_int: 30,
             strength_float: 1, ltxv_add_guide_count_int: 1,
         },
-        prompt_id_string: CONTROLLED_JOB.promptId,
+        ...(controlledJob.hardEndpointGuides ? {
+            browser_guide_sequence_object: {
+                guide_manifest_sha256_string: guideManifest.sha256,
+                frames_array: [0, 48].map((frameIndex) => ({
+                    frame_index_int: frameIndex,
+                    sha256_string: guideFrames[0].sha256_string,
+                    strength_float: 1,
+                })),
+            },
+        } : {}),
+        prompt_id_string: controlledJob.promptId,
         raw_video_path_string: candidate.path,
         raw_video_sha256_string: candidate.sha256,
         raw_video_bytes_int: candidate.bytes,
         frame_paths_array: generationFrames.map((pin) => pin.path),
         frame_sha256_array: generationFrames.map((pin) => pin.sha256),
         backend_output_object: {
-            filename_string: `${CONTROLLED_JOB.jobId.slice(0, 16)}_00001.mp4`,
-            subfolder_string: `animation_fitting/controlled/${CONTROLLED_JOB.experimentId}`,
+            filename_string: `${controlledJob.jobId.slice(0, 16)}_00001.mp4`,
+            subfolder_string: `animation_fitting/controlled/${controlledJob.experimentId}`,
             type_string: 'output',
         },
     };
@@ -165,7 +188,7 @@ function fixture() {
         .replace('"__EXACT_V14_SEED__"', '6550110377254033429');
     const generationStateBuffer = Buffer.from(`${generationStateJson}\n`, 'utf8');
     const generationState = write(path.join(
-        artifactRoot, 'jobs', CONTROLLED_JOB.jobId, '000003.json',
+        artifactRoot, 'jobs', controlledJob.jobId, '000003.json',
     ), generationStateBuffer);
     const spec = {
         schema: V14_PIPELINE_SPEC_SCHEMA,
@@ -178,11 +201,11 @@ function fixture() {
         candidate: descriptor(candidate),
         controlledGeneration: {
             schema: 'autorig.v14-controlled-generation-binding.v1',
-            jobId: CONTROLLED_JOB.jobId,
-            promptId: CONTROLLED_JOB.promptId,
-            experimentId: CONTROLLED_JOB.experimentId,
-            experimentSha256: CONTROLLED_JOB.experimentSha256,
-            workflowFingerprint: CONTROLLED_JOB.workflowFingerprint,
+            jobId: controlledJob.jobId,
+            promptId: controlledJob.promptId,
+            experimentId: controlledJob.experimentId,
+            experimentSha256: controlledJob.experimentSha256,
+            workflowFingerprint: controlledJob.workflowFingerprint,
             state: descriptor(generationState),
             candidate: descriptor(candidate),
             frames: generationFrames.map((pin, frameIndex) => ({ frameIndex, ...descriptor(pin) })),
@@ -217,7 +240,7 @@ function fixture() {
     return {
         root, candidate, generationState, generationFrames, guideManifest, fitting, immutable,
         skeleton, skinWeights, topology, sourceModelSha256,
-        outputRoot, specPath, specSha256: specPin.sha256, spec,
+        outputRoot, specPath, specSha256: specPin.sha256, spec, controlledJob,
     };
 }
 
@@ -280,6 +303,40 @@ test('fresh pinned V14 run authors one exact object-gate command without executi
     assert.match(state.next.command.powershell, /animation_fitting\.object_region_video_gate/);
     const source = fs.readFileSync(new URL('../run_v14_browser_fitting_pipeline.mjs', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /node:child_process|\bspawnSync\b|\bexecFile\b/);
+});
+
+test('fresh pinned V15 hard-endpoint run exposes only the object gate before browser fitting', (context) => {
+    const f = fixture(V15_CONTROLLED_JOB);
+    context.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+    let state = inspectV14Pipeline({ specPath: f.specPath, expectedSpecSha256: f.specSha256 });
+    assert.equal(state.status, 'READY_OBJECT_REGION_GATE');
+    assert.equal(state.next.stage, 'object_region_gate');
+    assert.equal(state.controlledGeneration.jobId, V15_CONTROLLED_JOB.jobId);
+    assert.equal(state.controlledGeneration.experimentId, V15_CONTROLLED_JOB.experimentId);
+    publishGate(f, false);
+    state = inspectV14Pipeline({ specPath: f.specPath, expectedSpecSha256: f.specSha256 });
+    assert.equal(state.status, 'FAILED_OBJECT_REGION_GATE');
+    assert.equal(state.next, null);
+    assert.deepEqual(state.completedStages, ['object_region_gate']);
+});
+
+test('V15 hard endpoint state must bind the same pinned guide frame at 0 and 48', (context) => {
+    const f = fixture(V15_CONTROLLED_JOB);
+    context.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+    const original = fs.readFileSync(f.generationState.path, 'utf8');
+    const endpointSha = f.spec.guide.endpointGuide.sha256;
+    const secondOffset = original.lastIndexOf(endpointSha);
+    assert.ok(secondOffset > original.indexOf(endpointSha));
+    const changedPayload = `${original.slice(0, secondOffset)}${'f'.repeat(64)}${original.slice(secondOffset + 64)}`;
+    const changed = write(f.generationState.path, changedPayload);
+    f.spec.controlledGeneration.state = {
+        path: changed.path, bytes: changed.bytes, sha256: changed.sha256,
+    };
+    const specPin = writeJson(f.specPath, f.spec);
+    assert.throws(
+        () => inspectV14Pipeline({ specPath: f.specPath, expectedSpecSha256: specPin.sha256 }),
+        /hard endpoint guide provenance changed/,
+    );
 });
 
 test('PASS object gate advances only to the exact pinned TAPNext++/SAM2 command', (context) => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Immutable, fail-closed spec author for the real Horse_2 V14 browser fitting
+ * Immutable, fail-closed spec author for the real Horse_2 V14/V15 browser fitting
  * pipeline.  It only snapshots and validates local files, authors JSON, and
  * asks the existing runner to inspect that JSON.  It never starts a job,
  * subprocess, GPU stage, Blender, database, or network operation.
@@ -55,6 +55,29 @@ export const REAL_V14_CONTRACT = Object.freeze({
     width: 768,
     height: 448,
 });
+
+export const REAL_V15_CONTRACT = Object.freeze({
+    ...REAL_V14_CONTRACT,
+    experimentId: 'horse_walk_v15_browser_interval_hard_endpoints_seed_6550110377254033429_v1',
+    experimentSha256: 'd6c6e5ffe6b233c5360643f05ba0e6ab7d736c1dfef466c0b3660564e2f63a51',
+    jobId: 'c38c7df668895eea9f418a81b62ea7a16c49d4d05871f051534175e1df5900b2',
+    promptId: '29e3e70a-4ce1-45c6-8c2f-082dc2ffa0e5',
+    hardEndpointGuides: true,
+});
+
+const REAL_CONTROLLED_CONTRACTS = new Map([
+    [REAL_V14_CONTRACT.experimentId, REAL_V14_CONTRACT],
+    [REAL_V15_CONTRACT.experimentId, REAL_V15_CONTRACT],
+]);
+
+function controlledContract(experimentIdValue) {
+    const experimentId = experimentIdValue == null
+        ? REAL_V14_CONTRACT.experimentId
+        : nonEmptyString(experimentIdValue, 'experimentId');
+    const expected = REAL_CONTROLLED_CONTRACTS.get(experimentId);
+    if (!expected) throw new Error(`experimentId is not an authorized V14/V15 controlled experiment: ${experimentId}`);
+    return expected;
+}
 
 function object(value, field) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} must be an object`);
@@ -184,6 +207,15 @@ function rawJsonNumber(snapshot, key, field) {
     if (matches.length !== 1) throw new Error(`${field} must occur exactly once as a JSON number`);
     if (!Number.isFinite(Number(matches[0][1]))) throw new Error(`${field} must be finite`);
     return matches[0][1];
+}
+
+function rawJsonNumbers(snapshot, key, field) {
+    const escaped = key.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = [...snapshot.buffer.toString('utf8').matchAll(new RegExp(`"${escaped}"\\s*:\\s*(-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)`, 'g'))];
+    if (!matches.length || matches.some((match) => !Number.isFinite(Number(match[1])))) {
+        throw new Error(`${field} must occur as finite JSON numbers`);
+    }
+    return matches.map((match) => match[1]);
 }
 
 function validateCanonicalBundle(config, expected, snapshots) {
@@ -397,7 +429,13 @@ function validateControlledJob(config, expected, canonical, guide, outputRoot, s
     const exactSeed = BigInt(seedToken);
     const startStrengthToken = rawJsonNumber(loaded.snapshot, 'start_guide_strength_float', 'controlled job start guide strength');
     const endStrengthToken = rawJsonNumber(loaded.snapshot, 'end_guide_strength_float', 'controlled job end guide strength');
-    const intervalStrengthToken = rawJsonNumber(loaded.snapshot, 'strength_float', 'controlled job interval guide strength');
+    const guideStrengthTokens = rawJsonNumbers(loaded.snapshot, 'strength_float', 'controlled job guide strengths');
+    const expectedGuideStrengthCount = expected.hardEndpointGuides === true ? 3 : 1;
+    if (guideStrengthTokens.length !== expectedGuideStrengthCount
+        || guideStrengthTokens.some((token) => Number(token) !== 1)) {
+        throw new Error(`controlled job must preserve exactly ${expectedGuideStrengthCount} strength-1.0 guide values`);
+    }
+    const intervalStrengthToken = guideStrengthTokens.at(-1);
     if (job.experiment_id_string !== expected.experimentId || job.experiment_sha256_string !== expected.experimentSha256
         || job.runtime_authorization_string !== `explicit_cli:${expected.experimentId}`
         || exactSeed !== expected.seed || job.frame_count_int !== expected.frameCount
@@ -421,6 +459,21 @@ function validateControlledJob(config, expected, canonical, guide, outputRoot, s
         || interval.strength_float !== 1 || interval.ltxv_add_guide_count_int !== 1) {
         throw new Error('controlled job guide cross-pins drift');
     }
+    const endpointSequence = job.browser_guide_sequence_object;
+    if (expected.hardEndpointGuides === true) {
+        const sequence = object(endpointSequence, 'controlled job hard endpoint sequence');
+        const endpointRows = Array.isArray(sequence.frames_array) ? sequence.frames_array : [];
+        if (sequence.guide_manifest_sha256_string !== guide.manifest.sha256
+            || endpointRows.length !== 2
+            || endpointRows[0]?.frame_index_int !== 0 || endpointRows[1]?.frame_index_int !== 48
+            || endpointRows[0]?.sha256_string !== guide.endpoint.sha256
+            || endpointRows[1]?.sha256_string !== guide.endpoint.sha256
+            || endpointRows[0]?.strength_float !== 1 || endpointRows[1]?.strength_float !== 1) {
+            throw new Error('controlled V15 job hard endpoint guide sequence drift');
+        }
+    } else if (endpointSequence != null) {
+        throw new Error('controlled V14 job unexpectedly contains hard endpoint guides');
+    }
     const identityKeys = [
         'schema', 'experiment_id_string', 'experiment_sha256_string', 'runtime_authorization_string',
         'reference_sha256_string', 'positive_prompt_sha256_string', 'negative_prompt_sha256_string',
@@ -429,6 +482,7 @@ function validateControlledJob(config, expected, canonical, guide, outputRoot, s
         'workflow_fingerprint_string', 'approval_state_string', 'send_to_skeletal_fitting_bool',
         'resolution_override_object', 'browser_interval_guide_object',
     ];
+    if (expected.hardEndpointGuides === true) identityKeys.push('browser_guide_sequence_object');
     const identity = Object.fromEntries(identityKeys.map((key) => {
         if (!(key in job)) throw new Error(`controlled job identity is missing ${key}`);
         return [key, job[key]];
@@ -440,16 +494,22 @@ function validateControlledJob(config, expected, canonical, guide, outputRoot, s
     canonicalIdentity.start_guide_strength_float = '__START_STRENGTH_NUMBER__';
     canonicalIdentity.end_guide_strength_float = '__END_STRENGTH_NUMBER__';
     canonicalIdentity.browser_interval_guide_object.strength_float = '__INTERVAL_STRENGTH_NUMBER__';
+    if (expected.hardEndpointGuides === true) {
+        canonicalIdentity.browser_guide_sequence_object.frames_array[0].strength_float = '__ENDPOINT_0_STRENGTH_NUMBER__';
+        canonicalIdentity.browser_guide_sequence_object.frames_array[1].strength_float = '__ENDPOINT_48_STRENGTH_NUMBER__';
+    }
     const identityJson = canonicalJson(canonicalIdentity)
         .replace('"__SEED_NUMBER__"', seedToken)
         .replace('"__START_STRENGTH_NUMBER__"', startStrengthToken)
         .replace('"__END_STRENGTH_NUMBER__"', endStrengthToken)
-        .replace('"__INTERVAL_STRENGTH_NUMBER__"', intervalStrengthToken);
+        .replace('"__INTERVAL_STRENGTH_NUMBER__"', intervalStrengthToken)
+        .replace('"__ENDPOINT_0_STRENGTH_NUMBER__"', guideStrengthTokens[0])
+        .replace('"__ENDPOINT_48_STRENGTH_NUMBER__"', guideStrengthTokens[1]);
     const jobId = hash(Buffer.from(identityJson, 'utf8'));
     if (path.basename(jobDirectory) !== jobId) {
         throw new Error('controlled job path is not bound to its deterministic job identity');
     }
-    if (jobId !== expected.jobId) throw new Error('controlled job deterministic identity is not the authorized V14 job');
+    if (jobId !== expected.jobId) throw new Error('controlled job deterministic identity is not the authorized V14/V15 job');
     const promptId = nonEmptyString(job.prompt_id_string, 'controlled job prompt id');
     if (!UUID_RE.test(promptId) || promptId !== expectedPromptId(jobId) || promptId !== expected.promptId) {
         throw new Error('controlled job prompt id drift');
@@ -511,7 +571,7 @@ function optionalSha(value, field) {
 
 export function buildV14PipelineSpec(configValue, dependencies = {}) {
     const config = object(configValue, 'config');
-    const expected = dependencies.expectedContract || REAL_V14_CONTRACT;
+    const expected = dependencies.expectedContract || controlledContract(config.experimentId);
     if (RUNNER_V14_PIPELINE_SPEC_SCHEMA !== V14_PIPELINE_SPEC_SCHEMA_V2) {
         throw new Error(`runner schema drift: expected ${V14_PIPELINE_SPEC_SCHEMA_V2}`);
     }
@@ -535,7 +595,9 @@ export function buildV14PipelineSpec(configValue, dependencies = {}) {
         orchestratorExecutesSubprocesses: false,
         semanticId: 'walk_forward',
         clipName: config.clipName == null
-            ? 'Horse_Walk_LTX_V14_Browser_Contact_Refit'
+            ? (expected.hardEndpointGuides === true
+                ? 'Horse_Walk_LTX_V15_Browser_Contact_Refit'
+                : 'Horse_Walk_LTX_V14_Browser_Contact_Refit')
             : nonEmptyString(config.clipName, 'clipName'),
         outputRoot,
         candidate: descriptor(candidateSource.candidate),
@@ -628,6 +690,7 @@ export function parseAuthorArgs(argv) {
     const values = {};
     let help = false;
     const flags = new Set([
+        '--experiment-id',
         '--controlled-job', '--controlled-job-sha256',
         '--canonical-bundle', '--canonical-immutable-sha256', '--fitting-bundle-sha256', '--source-model-sha256',
         '--guide-bundle', '--guide-manifest-sha256', '--guide-video', '--guide-video-sha256', '--guide-video-bytes',
@@ -651,12 +714,16 @@ export function parseAuthorArgs(argv) {
     ];
     required.forEach((flag) => { if (values[flag] == null) throw new Error(`${flag} is required`); });
     const key = (flag) => flag.slice(2).replaceAll(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    return Object.fromEntries(Object.entries(values).map(([flag, value]) => [key(flag), value]));
+    const config = Object.fromEntries(Object.entries(values).map(([flag, value]) => [key(flag), value]));
+    config.experimentId ??= REAL_V14_CONTRACT.experimentId;
+    controlledContract(config.experimentId);
+    return config;
 }
 
 function helpText() {
     return `Usage:
   node author_v14_browser_fitting_spec.mjs \\
+    [--experiment-id V14_OR_V15_EXPERIMENT_ID] \\
     --controlled-job FILE --controlled-job-sha256 SHA256 \\
     --canonical-bundle DIR --canonical-immutable-sha256 SHA256 \\
     --fitting-bundle-sha256 SHA256 --source-model-sha256 SHA256 \\
@@ -670,7 +737,7 @@ The runtime manifest (${V14_RUNTIME_PINS_SCHEMA}) pins executables python/node/
 chrome/ffmpeg/ffprobe, threeModule revision 160, trackingRuntimeRoot, and
 trackingRuntimeLock.  The tool manifest (${V14_TOOL_SOURCE_PINS_SCHEMA}) pins
 the exact 28 names exported by run_v14_browser_fitting_pipeline.mjs.
-V14 v2 deliberately rejects a bare MP4: the completed controlled-generation
+V14/V15 v2 deliberately rejects a bare MP4: the completed controlled-generation
 state and its 49 ordered frame pins are mandatory.  This author performs local
 immutable validation only and never executes a job,
 pipeline stage, subprocess, GPU operation, Blender, database, or network call.`;
