@@ -13,6 +13,7 @@ import {
     measureHorseOneShotFinalPose,
     parseHorseVisualPhaseQaArgs,
     renderHorse2QaFramesInBrowser,
+    resolveHorseVisualQaActionContract,
     runHorseVisualPhaseQa,
     validateHorse2QaInputs,
 } from '../browser_horse_visual_phase_qa.mjs';
@@ -202,6 +203,47 @@ test('immutable Horse_2 and fitted Three clip validation pins every byte', (cont
     }), /model provenance/);
     fs.appendFileSync(path.join(fixture.bundleDirectory, 'skeleton.json'), 'tamper');
     assert.throws(() => validateHorse2QaInputs(fixture), /does not match its immutable pin/);
+});
+
+test('pinned action contract enforces semantic frame count, fps and temporal mode', (context) => {
+    const idleContract = resolveHorseVisualQaActionContract('idle_fidget');
+    assert.equal(idleContract.frameCount, 97);
+    assert.equal(idleContract.outputFps, 30);
+    assert.equal(idleContract.generationMode, 'loop');
+    assert.match(idleContract.pin.sha256, /^[0-9a-f]{64}$/);
+
+    const fixture = writeBundleFixture();
+    context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+    const clip = JSON.parse(fs.readFileSync(fixture.threeClipPath, 'utf8'));
+    const times = Array.from(new Float32Array(Array.from({ length: 97 }, (_, index) => index / 30)));
+    clip.duration = 96 / 30;
+    clip.tracks[0].times = times;
+    clip.tracks[0].values = times.flatMap(() => [0, 0, 0, 1]);
+    clip.tracks[1].times = times;
+    clip.tracks[1].values = times.flatMap((_, index) => [
+        0.01 * Math.sin(Math.PI * index / 96) ** 2,
+        0,
+        0,
+    ]);
+    fs.writeFileSync(fixture.threeClipPath, jsonBuffer(clip));
+
+    const validated = validateHorse2QaInputs({ ...fixture, semanticId: 'idle_fidget' });
+    assert.equal(validated.clipContract.frameCount, 97);
+    assert.equal(validated.clipContract.fps, 30);
+    assert.equal(validated.actionContract.semanticId, 'idle_fidget');
+    assert.equal(validated.actionContract.pin.sha256, idleContract.pin.sha256);
+    assert.throws(
+        () => validateHorse2QaInputs({ ...fixture, semanticId: 'walk_forward' }),
+        /exact 49-frame Horse_2 fitting interval/,
+    );
+    assert.throws(
+        () => validateHorse2QaInputs({ ...fixture, semanticId: 'death' }),
+        /requires one_shot temporal mode/,
+    );
+    assert.throws(
+        () => resolveHorseVisualQaActionContract('not_a_catalog_action'),
+        /is not unique in the action prompts contract/,
+    );
 });
 
 test('one-shot validation preserves chronology without requiring loop endpoint closure', (context) => {

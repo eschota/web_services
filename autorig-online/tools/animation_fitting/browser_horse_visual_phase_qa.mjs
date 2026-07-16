@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import zlib from 'node:zlib';
 
 export const HORSE_VISUAL_PHASE_QA_SCHEMA = 'autorig.animation-visual-phase-qa.v1';
@@ -39,6 +39,11 @@ const BUNDLE_SCHEMA = 'autorig-actionless-fitting-bundle.v1';
 const WIDTH = 768;
 const HEIGHT = 448;
 const SHA256_RE = /^[0-9a-f]{64}$/;
+const ACTION_PROMPTS_SCHEMA = 'autorig.animation-fitting-prompts.v1';
+const ACTION_PROMPTS_PATH = fileURLToPath(new URL(
+    '../../backend/animation_fitting/specs/action_prompts.v1.json',
+    import.meta.url,
+));
 
 function fail(message) {
     throw new Error(message);
@@ -140,7 +145,43 @@ function vector3(value, field) {
     return value.map((entry, index) => finite(entry, `${field}[${index}]`));
 }
 
-function validateThreeClip(clip, clipPin, boneNames, { loop = true } = {}) {
+export function resolveHorseVisualQaActionContract(semanticId) {
+    const semantic = string(semanticId, 'semanticId').trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9_]{0,63}$/.test(semantic)) fail('semanticId is invalid');
+    const snapshot = readSnapshot(ACTION_PROMPTS_PATH, 'action prompts contract');
+    const contract = parseJson(snapshot, 'action prompts contract');
+    if (contract.schema !== ACTION_PROMPTS_SCHEMA) {
+        fail(`action prompts contract schema must be ${ACTION_PROMPTS_SCHEMA}`);
+    }
+    if (contract.frame_rule_string !== '8n+1' || !Array.isArray(contract.actions_array)) {
+        fail('action prompts contract frame rule or action inventory is invalid');
+    }
+    const rows = contract.actions_array.filter((row) => row?.action_id_string === semantic);
+    if (rows.length !== 1) fail(`semanticId ${semantic} is not unique in the action prompts contract`);
+    const row = object(rows[0], `action prompts ${semantic}`);
+    const frameCount = integer(row.frame_count_int, `${semantic}.frame_count_int`, 2);
+    if ((frameCount - 1) % 8 !== 0) fail(`${semantic}.frame_count_int violates the 8n+1 rule`);
+    const generationMode = string(row.generation_mode_string, `${semantic}.generation_mode_string`);
+    if (!['loop', 'one_shot'].includes(generationMode)) {
+        fail(`${semantic}.generation_mode_string must be loop or one_shot`);
+    }
+    const outputFps = integer(contract.output_fps_int, 'action prompts output_fps_int', 1);
+    return {
+        schema: 'autorig.browser-horse-visual-qa-action-contract.v1',
+        semanticId: semantic,
+        generationMode,
+        frameCount,
+        outputFps,
+        pin: { path: snapshot.path, bytes: snapshot.bytes, sha256: snapshot.sha256 },
+    };
+}
+
+function validateThreeClip(
+    clip,
+    clipPin,
+    boneNames,
+    { loop = true, expectedFrameCount = 49, expectedFps = 30 } = {},
+) {
     const name = string(clip.name, 'threeClip.name');
     const duration = finite(clip.duration, 'threeClip.duration');
     if (duration <= 0) fail('threeClip.duration must be positive');
@@ -156,8 +197,8 @@ function validateThreeClip(clip, clipPin, boneNames, { loop = true } = {}) {
         names.add(trackName);
         const match = trackName.match(/^(.*)\.(quaternion|position)$/);
         if (!match || !boneNames.has(match[1])) fail(`threeClip track ${trackName} is not bound to the immutable skeleton`);
-        if (!Array.isArray(track.times) || track.times.length !== 49) {
-            fail(`${trackName}.times must contain the exact 49-frame Horse_2 fitting interval`);
+        if (!Array.isArray(track.times) || track.times.length !== expectedFrameCount) {
+            fail(`${trackName}.times must contain the exact ${expectedFrameCount}-frame ${expectedFrameCount === 49 ? 'Horse_2 fitting' : 'semantic action'} interval`);
         }
         const times = track.times.map((entry, timeIndex) => finite(entry, `${trackName}.times[${timeIndex}]`));
         if (times[0] !== 0 || Math.abs(times.at(-1) - duration) > durationTimelineTolerance
@@ -186,12 +227,20 @@ function validateThreeClip(clip, clipPin, boneNames, { loop = true } = {}) {
     if (loop && maximumLoopEndpointError > 1e-5) {
         fail(`Three clip loop endpoint error ${maximumLoopEndpointError} exceeds 1e-5`);
     }
+    const fps = (timeline.length - 1) / duration;
+    const fpsTolerance = Math.max(Number.EPSILON, Math.abs(expectedFps) * (2 ** -23));
+    if (Math.abs(fps - expectedFps) > fpsTolerance) {
+        fail(`Three clip fps ${fps} does not match semantic action fps ${expectedFps}`);
+    }
     return {
         name,
         duration,
         timeline,
         frameCount: timeline.length,
-        fps: (timeline.length - 1) / duration,
+        fps,
+        expectedFrameCount,
+        expectedFps,
+        fpsTolerance,
         trackCount: clip.tracks.length,
         loop,
         temporalMode: loop ? 'loop' : 'one_shot',
@@ -209,6 +258,7 @@ export function validateHorse2QaInputs({
     expectedFittingBundleSha256,
     expectedSourceModelSha256,
     expectedLoop = true,
+    semanticId = null,
 }) {
     for (const [value, field] of [
         [expectedImmutableManifestSha256, 'expectedImmutableManifestSha256'],
@@ -324,13 +374,21 @@ export function validateHorse2QaInputs({
         if (!Array.isArray(face.vertex_ids) || face.vertex_ids.length < 3) fail(`face ${index} must contain >=3 vertices`);
         face.vertex_ids.forEach((vertexId) => integer(vertexId, `face ${index} vertex`, 0) >= 344 && fail(`face ${index} vertex is out of range`));
     });
+    const actionContract = semanticId == null ? null : resolveHorseVisualQaActionContract(semanticId);
+    if (actionContract && (actionContract.generationMode === 'loop') !== (expectedLoop === true)) {
+        fail(`semanticId ${actionContract.semanticId} requires ${actionContract.generationMode} temporal mode`);
+    }
     const clipSnapshot = readSnapshot(clipValue, 'threeClipPath');
     const threeClip = parseJson(clipSnapshot, 'Three clip');
     const clipContract = validateThreeClip(threeClip, {
         path: clipSnapshot.path,
         bytes: clipSnapshot.bytes,
         sha256: clipSnapshot.sha256,
-    }, boneNames, { loop: expectedLoop === true });
+    }, boneNames, {
+        loop: expectedLoop === true,
+        expectedFrameCount: actionContract?.frameCount ?? 49,
+        expectedFps: actionContract?.outputFps ?? 30,
+    });
     const camera = object(fittingBundle.camera, 'fittingBundle.camera');
     if (JSON.stringify(camera.resolution) !== JSON.stringify([WIDTH, HEIGHT])) fail(`Horse_2 camera resolution must be ${WIDTH}x${HEIGHT}`);
     matrixValues(camera.camera_to_world, 'camera.camera_to_world');
@@ -349,6 +407,7 @@ export function validateHorse2QaInputs({
         topologyPin: { path: topologySnapshot.path, bytes: topologySnapshot.bytes, sha256: topologySnapshot.sha256 },
         threeClip,
         clipContract,
+        actionContract,
         zeroWeightVertices,
     };
 }
@@ -615,6 +674,9 @@ export function buildHorseVisualPhaseEvidence({
 }) {
     const semantic = string(semanticId, 'semanticId').trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9_]{0,63}$/.test(semantic)) fail('semanticId is invalid');
+    if (validated.actionContract && validated.actionContract.semanticId !== semantic) {
+        fail('semanticId does not match the validated action contract');
+    }
     if (!cameraSettingsPin || !SHA256_RE.test(cameraSettingsPin.sha256) || cameraSettingsPin.bytes <= 0) {
         fail('cameraSettingsPin must pin the immutable fixed-camera settings');
     }
@@ -697,6 +759,7 @@ export function buildHorseVisualPhaseEvidence({
                 skin_weights: validated.skinWeightsPin,
                 surface_topology: validated.topologyPin,
                 three_clip: validated.clipContract.pin,
+                action_prompts_contract: validated.actionContract?.pin ?? null,
             },
             camera_settings: cameraSettingsPin,
             browser_reconstruction_qa: {
@@ -1100,6 +1163,7 @@ export async function runHorseVisualPhaseQa(configuration, dependencies = {}) {
         expectedFittingBundleSha256: config.expectedFittingBundleSha256,
         expectedSourceModelSha256: config.expectedSourceModelSha256,
         expectedLoop: config.loop !== false,
+        semanticId: config.semanticId,
     });
     if (!SHA256_RE.test(config.expectedThreeClipSha256)
         || validated.clipContract.pin.sha256 !== config.expectedThreeClipSha256) {
