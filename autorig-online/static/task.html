@@ -10860,6 +10860,10 @@
                 };
             };
 
+            function resolvePinnedFittedTrackTargetName(trackName) {
+                return String(trackName || '').replace(/\.(?:quaternion|position)$/, '');
+            }
+
             async function startPinnedRgbBrowserAnimationFitting(opts = {}) {
                 const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
                 onProgress(0, tFitting('idle_ltx_fit_loading_video', 'Loading pinned RGB observations...'));
@@ -10960,7 +10964,7 @@
                         });
                         const missingTrackTargets = [...new Set(
                             (clip.tracks || [])
-                                .map((track) => String(track?.name || '').split('.')[0])
+                                .map((track) => resolvePinnedFittedTrackTargetName(track?.name))
                                 .filter((name) => name && !viewerNodeNames.has(name)),
                         )];
                         if (missingTrackTargets.length) {

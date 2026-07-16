@@ -83,6 +83,10 @@ const pinnedRgbFittingBody = extractFunctionBody(
     taskHtml,
     'async function startPinnedRgbBrowserAnimationFitting',
 );
+const fittedTrackTargetResolverBody = extractFunctionBody(
+    taskHtml,
+    'function resolvePinnedFittedTrackTargetName',
+);
 
 test('task viewer imports the complete browser-first fitting pipeline from real modules', () => {
     assert.match(
@@ -142,6 +146,22 @@ test('pinned RGB entrypoint enforces canonical full-body browser fitting on the 
     );
     assert.doesNotMatch(pinnedRgbFittingBody, /new\s+(?:THREE\.)?AnimationMixer\s*\(/);
     assert.doesNotMatch(pinnedRgbFittingBody, /\bfetch\s*\(/);
+});
+
+test('pinned RGB track validation preserves dots inside real Horse_2 bone names', () => {
+    const resolveTrackTarget = new Function('trackName', fittedTrackTargetResolverBody);
+    assert.equal(
+        resolveTrackTarget('thigh_stretch_dupli_001.l.quaternion'),
+        'thigh_stretch_dupli_001.l',
+    );
+    assert.equal(
+        resolveTrackTarget('Horse_2.spine.003.position'),
+        'Horse_2.spine.003',
+    );
+    assert.equal(resolveTrackTarget('plain_bone.quaternion'), 'plain_bone');
+    assert.equal(resolveTrackTarget('bone.with.dots'), 'bone.with.dots');
+    assert.match(pinnedRgbFittingBody, /resolvePinnedFittedTrackTargetName\(track\?\.name\)/);
+    assert.doesNotMatch(pinnedRgbFittingBody, /track\?\.name[^\n]*split\(['"]\.['"]\)/);
 });
 
 test('semantic entrypoint executes decode, tracking, constrained fitting, and shared-model apply in order', () => {
