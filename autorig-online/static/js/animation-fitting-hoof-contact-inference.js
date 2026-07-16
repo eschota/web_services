@@ -1,8 +1,10 @@
 import { fitBrowserAnimation } from './animation-fitting-browser-core.js';
+import { assessHorseWalkGait } from './animation-fitting-semantic-tracker.js';
 
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const GROUND_EVIDENCE_SCHEMA = 'autorig-browser-sam2-ground-evidence.v1';
 const CONTACT_SCHEDULE_SCHEMA = 'autorig-browser-hoof-contact-schedule.v1';
+const CONTACT_REFIT_PROVENANCE_SCHEMA = 'autorig-browser-contact-refit-provenance.v1';
 const TRACKER_BACKEND = 'google-deepmind-tapnextpp-online';
 const SEGMENTER_BACKEND = 'facebookresearch-sam2.1-video';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -49,9 +51,27 @@ const DEFAULTS = Object.freeze({
     maximumFittedContactSlideRatio: 0.002,
 });
 
+const CONTACT_REFIT_THRESHOLDS = Object.freeze({
+    contactWeight: 1,
+    minimumDutyFactor: DEFAULTS.minimumDutyFactor,
+    maximumDutyFactor: DEFAULTS.maximumDutyFactor,
+    minimumTouchdownGapPhase: DEFAULTS.minimumTouchdownGapPhase,
+    maximumTouchdownGapPhase: DEFAULTS.maximumTouchdownGapPhase,
+    minimumSupportFeet: 3,
+    maximumFourSupportFrames: DEFAULTS.maximumFourSupportFrames,
+    maximumFittedContactSlideRatio: DEFAULTS.maximumFittedContactSlideRatio,
+});
+
 function object(value, field) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error(`${field} must be an object`);
+    }
+    return value;
+}
+
+function sha256(value, field) {
+    if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
+        throw new Error(`${field} must be a lowercase SHA-256`);
     }
     return value;
 }
@@ -764,6 +784,285 @@ export function inferHoofContacts(args = {}) {
     return diagnostic;
 }
 
+function exactIntegerFrames(value, field, frameCount, { ascending = true } = {}) {
+    if (!Array.isArray(value) || !value.length) throw new Error(`${field} must not be empty`);
+    const frames = value.map((frame, index) => {
+        const result = integer(frame, `${field}[${index}]`);
+        if (result >= frameCount) throw new Error(`${field}[${index}] is outside the schedule`);
+        return result;
+    });
+    if (new Set(frames).size !== frames.length) throw new Error(`${field} repeats a frame`);
+    const ordered = [...frames].sort((first, second) => first - second);
+    if (ascending && !frames.every((frame, index) => frame === ordered[index])) {
+        throw new Error(`${field} must be strictly ascending`);
+    }
+    return frames;
+}
+
+function exactShaPins(value, observations) {
+    const pins = object(value, 'pins');
+    const required = [
+        'inputManifestSha256',
+        'diagnosticSha256',
+        'bridgeReportSha256',
+        'initialFitSummarySha256',
+        'observationsSha256',
+        'fittingBundleSha256',
+        'immutableManifestSha256',
+        'sourceVideoSha256',
+        'sourceModelSha256',
+        'sourceSkeletonSha256',
+    ];
+    const normalized = Object.fromEntries(required.map((name) => [name, sha256(pins[name], `pins.${name}`)]));
+    const provenance = object(observations.provenance, 'observations.provenance');
+    if (normalized.sourceVideoSha256 !== provenance.source_video_sha256) {
+        throw new Error('contact-refit source-video SHA-256 does not match observations provenance');
+    }
+    if (normalized.fittingBundleSha256 !== provenance.bundle_sha256) {
+        throw new Error('contact-refit bundle SHA-256 does not match observations provenance');
+    }
+    if (normalized.immutableManifestSha256 !== provenance.immutable_manifest_sha256) {
+        throw new Error('contact-refit immutable-manifest SHA-256 does not match observations provenance');
+    }
+    return normalized;
+}
+
+/**
+ * Validate an immutable PASS schedule before it is allowed to become solver
+ * input.  The status string is not trusted: the four semantic contacts,
+ * cyclic order and support envelope are reconstructed from the schedule.
+ */
+export function validatePinnedHoofContactSchedule({ observations: observationValue, schedule: scheduleValue } = {}) {
+    const normalizedObservations = normalizeObservations(observationValue);
+    const schedule = object(scheduleValue, 'schedule');
+    if (schedule.schema !== CONTACT_SCHEDULE_SCHEMA || schedule.status !== 'PASS') {
+        throw new Error('pinned hoof-contact schedule must be a PASS schedule');
+    }
+    if (integer(schedule.frameCount, 'schedule.frameCount', 2) !== normalizedObservations.frameCount) {
+        throw new Error('pinned hoof-contact schedule frameCount does not match observations');
+    }
+    const uniqueFrameCount = integer(schedule.uniqueFrameCount, 'schedule.uniqueFrameCount', 1);
+    if (uniqueFrameCount !== normalizedObservations.frameCount - 1) {
+        throw new Error('pinned hoof-contact schedule must preserve one duplicated loop endpoint');
+    }
+    if (Math.abs(finite(schedule.fps, 'schedule.fps') - normalizedObservations.fps) > 1e-9) {
+        throw new Error('pinned hoof-contact schedule fps does not match observations');
+    }
+    if (schedule.loop !== true) throw new Error('pinned hoof-contact schedule must be loop=true');
+    if (!Array.isArray(schedule.footOrderContract)
+        || schedule.footOrderContract.length !== WALK_FOOT_ORDER.length
+        || schedule.footOrderContract.some((foot, index) => foot !== WALK_FOOT_ORDER[index])) {
+        throw new Error('pinned hoof-contact schedule foot-order contract is invalid');
+    }
+    if (!Array.isArray(schedule.inferredTouchdownOrder)
+        || !cyclicOrderMatches(schedule.inferredTouchdownOrder, WALK_FOOT_ORDER)) {
+        throw new Error('pinned hoof-contact schedule gait order is invalid');
+    }
+    if (!Array.isArray(schedule.contacts) || schedule.contacts.length !== WALK_FOOT_ORDER.length) {
+        throw new Error('pinned hoof-contact schedule must contain exactly four limb contacts');
+    }
+    const contacts = new Map();
+    schedule.contacts.forEach((contactValue, index) => {
+        const contact = object(contactValue, `schedule.contacts[${index}]`);
+        const anchorId = contact.anchor_id;
+        const foot = typeof anchorId === 'string' && anchorId.endsWith('.hoof')
+            ? anchorId.slice(0, -'.hoof'.length)
+            : null;
+        if (!WALK_FOOT_ORDER.includes(foot) || anchorId !== `${foot}.hoof`) {
+            throw new Error(`schedule.contacts[${index}] is not an exact Horse hoof contact`);
+        }
+        if (contacts.has(foot)) throw new Error(`pinned hoof-contact schedule repeats ${foot}`);
+        const frames = exactIntegerFrames(contact.frames, `schedule.contacts[${index}].frames`, normalizedObservations.frameCount);
+        const weight = finite(contact.weight, `schedule.contacts[${index}].weight`);
+        if (weight !== CONTACT_REFIT_THRESHOLDS.contactWeight) {
+            throw new Error(`schedule.contacts[${index}].weight must equal the code-owned contact weight`);
+        }
+        contacts.set(foot, { anchor_id: anchorId, frames, weight });
+    });
+    WALK_FOOT_ORDER.forEach((foot) => {
+        if (!contacts.has(foot)) throw new Error(`pinned hoof-contact schedule is missing ${foot}`);
+    });
+
+    const feet = object(schedule.feet, 'schedule.feet');
+    const touchdownByFoot = new Map();
+    WALK_FOOT_ORDER.forEach((foot) => {
+        const detail = object(feet[foot], `schedule.feet.${foot}`);
+        if (!Array.isArray(detail.failures) || detail.failures.length) {
+            throw new Error(`pinned hoof-contact schedule has rejected ${foot} evidence`);
+        }
+        const contactFrames = exactIntegerFrames(
+            detail.contactFrames,
+            `schedule.feet.${foot}.contactFrames`,
+            uniqueFrameCount,
+            { ascending: false },
+        );
+        const declaredUnique = contacts.get(foot).frames
+            .filter((frame) => frame < uniqueFrameCount);
+        const canonicalContactFrames = [...contactFrames].sort((first, second) => first - second);
+        if (JSON.stringify(canonicalContactFrames) !== JSON.stringify(declaredUnique)) {
+            throw new Error(`pinned hoof-contact frames disagree for ${foot}`);
+        }
+        const endpointPresent = contacts.get(foot).frames.includes(uniqueFrameCount);
+        if (endpointPresent !== contactFrames.includes(0)) {
+            throw new Error(`pinned hoof-contact loop endpoint disagrees for ${foot}`);
+        }
+        const touchdown = integer(detail.touchdownFrame, `schedule.feet.${foot}.touchdownFrame`);
+        const liftoff = integer(detail.liftoffFrame, `schedule.feet.${foot}.liftoffFrame`);
+        if (touchdown >= uniqueFrameCount || liftoff >= uniqueFrameCount) {
+            throw new Error(`pinned hoof-contact phase is outside the loop for ${foot}`);
+        }
+        if (contactFrames[0] !== touchdown
+            || contactFrames.some((frame, index) => index > 0
+                && frame !== circularIndex(contactFrames[index - 1] + 1, uniqueFrameCount))
+            || liftoff !== circularIndex(contactFrames.at(-1) + 1, uniqueFrameCount)) {
+            throw new Error(`pinned hoof-contact interval is not one chronological cyclic run for ${foot}`);
+        }
+        touchdownByFoot.set(foot, touchdown);
+        const dutyFactor = ratio(detail.dutyFactor, `schedule.feet.${foot}.dutyFactor`, { positive: true });
+        if (Math.abs(dutyFactor - contactFrames.length / uniqueFrameCount) > 1e-9) {
+            throw new Error(`pinned hoof-contact duty factor disagrees for ${foot}`);
+        }
+        if (dutyFactor < CONTACT_REFIT_THRESHOLDS.minimumDutyFactor
+            || dutyFactor > CONTACT_REFIT_THRESHOLDS.maximumDutyFactor) {
+            throw new Error(`pinned hoof-contact duty factor fails code-owned bounds for ${foot}`);
+        }
+        if (finite(detail.characteristicHeightPx, `schedule.feet.${foot}.characteristicHeightPx`) <= 0) {
+            throw new Error(`schedule.feet.${foot}.characteristicHeightPx must be positive`);
+        }
+    });
+    const touchdownOrder = [...WALK_FOOT_ORDER]
+        .sort((first, second) => touchdownByFoot.get(first) - touchdownByFoot.get(second));
+    if (JSON.stringify(touchdownOrder) !== JSON.stringify(schedule.inferredTouchdownOrder)) {
+        throw new Error('pinned hoof-contact touchdown order does not match per-foot phases');
+    }
+
+    const qa = object(schedule.qa, 'schedule.qa');
+    if (!Array.isArray(qa.failures) || qa.failures.length) {
+        throw new Error('pinned hoof-contact schedule QA contains failures');
+    }
+    if (sha256(qa.sourceVideoSha256, 'schedule.qa.sourceVideoSha256')
+        !== normalizedObservations.sourceVideoSha256) {
+        throw new Error('pinned hoof-contact source-video SHA-256 does not match observations');
+    }
+    if (qa.segmenterBackend !== SEGMENTER_BACKEND) {
+        throw new Error(`pinned hoof-contact segmenter backend must be ${SEGMENTER_BACKEND}`);
+    }
+    const thresholds = object(qa.thresholds, 'schedule.qa.thresholds');
+    const minimumSupportFeet = integer(thresholds.minimumSupportFeet, 'schedule.qa.thresholds.minimumSupportFeet', 2);
+    const maximumFourSupportFrames = integer(
+        thresholds.maximumFourSupportFrames,
+        'schedule.qa.thresholds.maximumFourSupportFrames',
+    );
+    const maximumFittedContactSlideRatio = ratio(
+        thresholds.maximumFittedContactSlideRatio,
+        'schedule.qa.thresholds.maximumFittedContactSlideRatio',
+        { positive: true },
+    );
+    const minimumTouchdownGapPhase = ratio(
+        thresholds.minimumTouchdownGapPhase,
+        'schedule.qa.thresholds.minimumTouchdownGapPhase',
+        { positive: true },
+    );
+    const maximumTouchdownGapPhase = ratio(
+        thresholds.maximumTouchdownGapPhase,
+        'schedule.qa.thresholds.maximumTouchdownGapPhase',
+        { positive: true },
+    );
+    const minimumDutyFactor = ratio(
+        thresholds.minimumDutyFactor,
+        'schedule.qa.thresholds.minimumDutyFactor',
+        { positive: true },
+    );
+    const maximumDutyFactor = ratio(
+        thresholds.maximumDutyFactor,
+        'schedule.qa.thresholds.maximumDutyFactor',
+        { positive: true },
+    );
+    const exactThresholds = {
+        minimumSupportFeet,
+        maximumFourSupportFrames,
+        maximumFittedContactSlideRatio,
+        minimumTouchdownGapPhase,
+        maximumTouchdownGapPhase,
+        minimumDutyFactor,
+        maximumDutyFactor,
+    };
+    if (Object.entries(exactThresholds).some(([name, value]) => value !== CONTACT_REFIT_THRESHOLDS[name])) {
+        throw new Error('pinned hoof-contact schedule thresholds must equal the code-owned Horse contact-refit contract');
+    }
+    if (!Array.isArray(schedule.touchdownGaps) || schedule.touchdownGaps.length !== WALK_FOOT_ORDER.length) {
+        throw new Error('pinned hoof-contact schedule must contain four touchdown gaps');
+    }
+    schedule.inferredTouchdownOrder.forEach((foot, index) => {
+        const next = schedule.inferredTouchdownOrder[(index + 1) % WALK_FOOT_ORDER.length];
+        const frames = circularIndex(touchdownByFoot.get(next) - touchdownByFoot.get(foot), uniqueFrameCount);
+        const phase = frames / uniqueFrameCount;
+        const declared = object(schedule.touchdownGaps[index], `schedule.touchdownGaps[${index}]`);
+        if (declared.from !== foot || declared.to !== next || declared.frames !== frames
+            || Math.abs(finite(declared.phase, `schedule.touchdownGaps[${index}].phase`) - phase) > 1e-12) {
+            throw new Error('pinned hoof-contact touchdown-gap provenance is inconsistent');
+        }
+        if (phase < minimumTouchdownGapPhase || phase > maximumTouchdownGapPhase) {
+            throw new Error('pinned hoof-contact schedule fails touchdown-spacing gates');
+        }
+    });
+    const supportByFrame = Array.from({ length: uniqueFrameCount }, (_, frame) => (
+        WALK_FOOT_ORDER.filter((foot) => contacts.get(foot).frames.includes(frame)).length
+    ));
+    const support = object(qa.support, 'schedule.qa.support');
+    if (!Array.isArray(support.byFrame)
+        || support.byFrame.length !== supportByFrame.length
+        || support.byFrame.some((count, frame) => count !== supportByFrame[frame])) {
+        throw new Error('pinned hoof-contact support timeline is inconsistent');
+    }
+    const minimumSupport = Math.min(...supportByFrame);
+    const maximumSupport = Math.max(...supportByFrame);
+    const fourSupportFrames = supportByFrame.filter((count) => count === 4).length;
+    if (support.minimum !== minimumSupport || support.maximum !== maximumSupport
+        || support.fourSupportFrames !== fourSupportFrames) {
+        throw new Error('pinned hoof-contact support summary is inconsistent');
+    }
+    if (minimumSupport < minimumSupportFeet || fourSupportFrames > maximumFourSupportFrames) {
+        throw new Error('pinned hoof-contact schedule fails walk support gates');
+    }
+    return {
+        schedule,
+        contacts: WALK_FOOT_ORDER.map((foot) => ({
+            ...contacts.get(foot),
+            frames: [...contacts.get(foot).frames],
+        })),
+        sourceVideoSha256: normalizedObservations.sourceVideoSha256,
+        support: { minimum: minimumSupport, maximum: maximumSupport, fourSupportFrames },
+    };
+}
+
+/** Apply an externally pinned PASS schedule without mutating diagnostic input. */
+export function applyPinnedHoofContactSchedule({ observations, schedule, pins } = {}) {
+    const validated = validatePinnedHoofContactSchedule({ observations, schedule });
+    const normalizedPins = exactShaPins(pins, observations);
+    const hoofIds = new Set(WALK_FOOT_ORDER.map((foot) => `${foot}.hoof`));
+    const result = structuredClone(observations);
+    result.contacts = [
+        ...(Array.isArray(result.contacts) ? result.contacts : [])
+            .filter((contact) => !hoofIds.has(contact?.anchor_id)),
+        ...validated.contacts.map((contact) => ({ ...contact, frames: [...contact.frames] })),
+    ];
+    result.provenance = {
+        ...(result.provenance || {}),
+        browser_hoof_contacts: {
+            schema: CONTACT_REFIT_PROVENANCE_SCHEMA,
+            source: 'immutable_pass_diagnostic',
+            browserOnly: true,
+            blenderUsed: false,
+            mixerUsed: false,
+            footOrder: [...WALK_FOOT_ORDER],
+            support: { ...validated.support },
+            ...normalizedPins,
+        },
+    };
+    return { observations: result, schedule: structuredClone(schedule), pins: normalizedPins };
+}
+
 export function applyInferredHoofContacts({ observations, groundEvidence, options = {} } = {}) {
     const schedule = inferHoofContacts({ observations, groundEvidence, options });
     const hoofIds = new Set(WALK_FOOT_ORDER.map((foot) => `${foot}.hoof`));
@@ -843,10 +1142,63 @@ export function fitBrowserAnimationWithHoofContacts({
     return { fitted, schedule: applied.schedule, gaitQa, observations: applied.observations };
 }
 
+/**
+ * Final browser-only refit stage.  Unlike inference, this consumes only the
+ * immutable PASS diagnostic schedule supplied by the controlled CLI.
+ */
+export function fitBrowserAnimationWithPinnedHoofContacts({
+    skeleton,
+    observations,
+    schedule,
+    pins,
+    fitOptions = {},
+    gaitQaOptions = {},
+} = {}) {
+    if ((fitOptions.loop ?? true) !== true) {
+        throw new Error('pinned Horse contact refit requires fitOptions.loop=true');
+    }
+    const applied = applyPinnedHoofContactSchedule({ observations, schedule, pins });
+    const gaitQa = assessHorseWalkGait(applied.observations, {
+        ...gaitQaOptions,
+        expectedOrder: [...WALK_FOOT_ORDER],
+        maximumSimultaneousSwingFrames: 0,
+    });
+    if (gaitQa.accepted !== true) {
+        const error = new Error('pinned Horse contact refit rejected by semantic gait QA');
+        error.schedule = applied.schedule;
+        error.gaitQa = gaitQa;
+        throw error;
+    }
+    const fitted = fitBrowserAnimation({
+        skeleton,
+        observations: applied.observations,
+        options: { ...fitOptions, loop: true },
+    });
+    const fittedWalkQa = gateFittedWalk({ fitted, schedule: applied.schedule });
+    if (fittedWalkQa.status !== 'PASS') {
+        const error = new Error(`pinned Horse contact refit rejected: ${fittedWalkQa.failures.join(', ')}`);
+        error.schedule = applied.schedule;
+        error.fitted = fitted;
+        error.fittedWalkQa = fittedWalkQa;
+        throw error;
+    }
+    return {
+        fitted,
+        schedule: applied.schedule,
+        fittedWalkQa,
+        gaitQa,
+        observations: applied.observations,
+        pins: applied.pins,
+        runtime: { browserOnly: true, blenderUsed: false, mixerUsed: false },
+    };
+}
+
 export const HOOF_CONTACT_INFERENCE_CONTRACT = Object.freeze({
     observations: OBSERVATION_SCHEMA,
     groundEvidence: GROUND_EVIDENCE_SCHEMA,
     schedule: CONTACT_SCHEDULE_SCHEMA,
+    contactRefitProvenance: CONTACT_REFIT_PROVENANCE_SCHEMA,
+    contactRefitThresholds: CONTACT_REFIT_THRESHOLDS,
     trackerBackend: TRACKER_BACKEND,
     segmenterBackend: SEGMENTER_BACKEND,
     footOrder: WALK_FOOT_ORDER,

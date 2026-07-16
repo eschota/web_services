@@ -37,10 +37,6 @@ function parseArguments(argv) {
     return result;
 }
 
-function readJson(filename) {
-    return JSON.parse(fs.readFileSync(filename, 'utf8'));
-}
-
 function requireObject(value, field) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error(`${field} must be an object`);
@@ -63,18 +59,51 @@ function sha256Buffer(value) {
     return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function fileIntegrity(filename, field) {
-    let stat;
+function fileSnapshot(filename, field) {
+    let before;
+    let after;
+    let buffer;
     try {
-        stat = fs.statSync(filename);
+        before = fs.statSync(filename);
+        buffer = fs.readFileSync(filename);
+        after = fs.statSync(filename);
     } catch (error) {
         throw new Error(`${field} is unavailable at ${filename}: ${error.message}`);
     }
-    if (!stat.isFile() || stat.size <= 0) throw new Error(`${field} must be a non-empty file`);
+    if (!before.isFile() || !after.isFile() || buffer.length <= 0) {
+        throw new Error(`${field} must be a non-empty file`);
+    }
+    if (before.size !== buffer.length || after.size !== buffer.length
+        || before.dev !== after.dev || before.ino !== after.ino
+        || before.mtimeMs !== after.mtimeMs) {
+        throw new Error(`${field} changed while its immutable bytes were read`);
+    }
     return {
         path: path.resolve(filename),
-        bytes: stat.size,
-        sha256: sha256Buffer(fs.readFileSync(filename)),
+        bytes: buffer.length,
+        sha256: sha256Buffer(buffer),
+        buffer,
+    };
+}
+
+function fileIntegrity(filename, field) {
+    const snapshot = fileSnapshot(filename, field);
+    return { path: snapshot.path, bytes: snapshot.bytes, sha256: snapshot.sha256 };
+}
+
+function jsonFileSnapshot(filename, field) {
+    const snapshot = fileSnapshot(filename, field);
+    let json;
+    try {
+        json = JSON.parse(snapshot.buffer.toString('utf8'));
+    } catch (error) {
+        throw new Error(`${field} is not valid JSON: ${error.message}`);
+    }
+    return {
+        path: snapshot.path,
+        bytes: snapshot.bytes,
+        sha256: snapshot.sha256,
+        json,
     };
 }
 
@@ -168,8 +197,8 @@ export function validateBridgeAndRawPins({ raw, report, observationPath, bridgeR
     }
     const bundleManifestPath = path.join(bundleDirectory, 'fitting_bundle.json');
     const immutableManifestPath = path.join(bundleDirectory, 'immutable_manifest.json');
-    const bundleManifestIntegrity = fileIntegrity(bundleManifestPath, 'immutable fitting-bundle manifest');
-    const immutableManifestIntegrity = fileIntegrity(immutableManifestPath, 'immutable-copy manifest');
+    const bundleManifestIntegrity = jsonFileSnapshot(bundleManifestPath, 'immutable fitting-bundle manifest');
+    const immutableManifestIntegrity = jsonFileSnapshot(immutableManifestPath, 'immutable-copy manifest');
     if (bundleManifestIntegrity.sha256 !== reportBundleSha256) {
         throw new Error('fitting_bundle.json SHA-256 does not match bridge/raw pins');
     }
@@ -177,8 +206,8 @@ export function validateBridgeAndRawPins({ raw, report, observationPath, bridgeR
         throw new Error('immutable_manifest.json SHA-256 does not match bridge/raw pins');
     }
 
-    const bundleManifest = readJson(bundleManifestPath);
-    const immutableManifest = readJson(immutableManifestPath);
+    const bundleManifest = bundleManifestIntegrity.json;
+    const immutableManifest = immutableManifestIntegrity.json;
     if (bundleManifest.schema !== BUNDLE_SCHEMA) {
         throw new Error(`fitting_bundle.json schema must be ${BUNDLE_SCHEMA}`);
     }
@@ -269,8 +298,16 @@ export function validateBridgeAndRawPins({ raw, report, observationPath, bridgeR
         observations: observationsIntegrity,
         bridgeReport: bridgeReportIntegrity,
         sourceVideo: sourceVideoIntegrity,
-        bundleManifest: bundleManifestIntegrity,
-        immutableManifest: immutableManifestIntegrity,
+        bundleManifest: {
+            path: bundleManifestIntegrity.path,
+            bytes: bundleManifestIntegrity.bytes,
+            sha256: bundleManifestIntegrity.sha256,
+        },
+        immutableManifest: {
+            path: immutableManifestIntegrity.path,
+            bytes: immutableManifestIntegrity.bytes,
+            sha256: immutableManifestIntegrity.sha256,
+        },
         immutableFiles,
     };
 }
@@ -285,8 +322,7 @@ function paeth(left, above, upperLeft) {
     return upperLeft;
 }
 
-function decodeGrayscalePng(filename, frame) {
-    const input = fs.readFileSync(filename);
+function decodeGrayscalePng(input, filename, frame) {
     const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
     if (input.length < signature.length || !input.subarray(0, 8).equals(signature)) {
         throw new Error(`${filename} is not a PNG`);
@@ -433,22 +469,22 @@ export function loadMaskFrames({ raw, observationPath, masksDirectory = null }) 
             throw new Error(`silhouette ${frame} is not chronological`);
         }
         const filename = resolveMaskPath(observationPath, masksDirectory, silhouette);
-        const integrity = fileIntegrity(filename, `SAM2 mask frame ${frame}`);
+        const snapshot = fileSnapshot(filename, `SAM2 mask frame ${frame}`);
         if (silhouette.sha256 != null
-            && integrity.sha256 !== requireSha256(silhouette.sha256, `silhouette ${frame}.sha256`)) {
+            && snapshot.sha256 !== requireSha256(silhouette.sha256, `silhouette ${frame}.sha256`)) {
             throw new Error(`SAM2 mask frame ${frame} does not match its declared SHA-256`);
         }
-        if (silhouette.bytes != null && integrity.bytes !== silhouette.bytes) {
+        if (silhouette.bytes != null && snapshot.bytes !== silhouette.bytes) {
             throw new Error(`SAM2 mask frame ${frame} does not match its declared byte count`);
         }
         files.push({
             frame,
             declaredPath: silhouette.path,
-            path: integrity.path,
-            bytes: integrity.bytes,
-            sha256: integrity.sha256,
+            path: snapshot.path,
+            bytes: snapshot.bytes,
+            sha256: snapshot.sha256,
         });
-        return decodeGrayscalePng(filename, frame);
+        return decodeGrayscalePng(snapshot.buffer, snapshot.path, frame);
     });
     const hashPayload = {
         schema: MASK_MANIFEST_SCHEMA,
@@ -481,14 +517,20 @@ export function main(argv = process.argv.slice(2)) {
     const bridgeReportPath = path.resolve(args['bridge-report']);
     const outputPath = path.resolve(args.output);
     const groundOutputPath = args['ground-output'] ? path.resolve(args['ground-output']) : null;
-    const raw = readJson(observationPath);
-    const bridgeReport = readJson(bridgeReportPath);
+    const rawSnapshot = jsonFileSnapshot(observationPath, 'observations JSON');
+    const bridgeSnapshot = jsonFileSnapshot(bridgeReportPath, 'bridge report JSON');
+    const raw = rawSnapshot.json;
+    const bridgeReport = bridgeSnapshot.json;
     const integrity = validateBridgeAndRawPins({
         raw,
         report: bridgeReport,
         observationPath,
         bridgeReportPath,
     });
+    if (integrity.observations.sha256 !== rawSnapshot.sha256
+        || integrity.bridgeReport.sha256 !== bridgeSnapshot.sha256) {
+        throw new Error('diagnostic JSON input changed after its immutable snapshot was parsed');
+    }
     const observations = prepareBridgeObservations(raw, bridgeReport);
     const loadedMasks = loadMaskFrames({
         raw,

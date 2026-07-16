@@ -192,4 +192,25 @@ test('SAM2 mask manifest binds chronological declared paths, bytes and hashes', 
         () => loadMaskFrames({ raw: tamperedPin, observationPath: path.join(root, 'observations.json') }),
         /does not match its declared SHA-256/,
     );
+
+    const firstPath = path.join(maskDirectory, 'frame-0.png');
+    const originalReadFileSync = fs.readFileSync;
+    let mutated = false;
+    fs.readFileSync = function patchedReadFileSync(filename, ...args) {
+        const bytes = originalReadFileSync.call(fs, filename, ...args);
+        if (!mutated && typeof filename === 'string' && path.resolve(filename) === path.resolve(firstPath)) {
+            mutated = true;
+            fs.appendFileSync(firstPath, Buffer.from([0]));
+        }
+        return bytes;
+    };
+    try {
+        assert.throws(
+            () => loadMaskFrames({ raw, observationPath: path.join(root, 'observations.json') }),
+            /changed while its immutable bytes were read/,
+        );
+        assert.equal(mutated, true);
+    } finally {
+        fs.readFileSync = originalReadFileSync;
+    }
 });

@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 
 import { fitBrowserAnimation } from '../../static/js/animation-fitting-browser-core.js';
 import { prepareRgbObservationsForBrowser } from '../../static/js/animation-fitting-rgb-observation-bridge.js';
+import { fitBrowserAnimationWithPinnedHoofContacts } from '../../static/js/animation-fitting-hoof-contact-inference.js';
 import {
     bakeFittedAnimationToThreeHierarchyClip,
     buildHorse2BrowserFittingSkeleton,
@@ -519,6 +520,28 @@ function writeJsonAtomic(filename, value) {
     fs.renameSync(temporary, filename);
 }
 
+function writeJsonSetFromStaging(entries) {
+    const staged = entries.map(({ filename, value }) => ({
+        filename,
+        temporary: `${filename}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`,
+        contents: `${JSON.stringify(value, null, 2)}\n`,
+    }));
+    const published = [];
+    try {
+        staged.forEach((item) => fs.writeFileSync(item.temporary, item.contents, { encoding: 'utf8', flag: 'wx' }));
+        staged.forEach((item) => {
+            fs.renameSync(item.temporary, item.filename);
+            published.push(item.filename);
+        });
+    } catch (error) {
+        staged.forEach((item) => {
+            if (fs.existsSync(item.temporary)) fs.rmSync(item.temporary, { force: true });
+        });
+        published.forEach((filename) => fs.rmSync(filename, { force: true }));
+        throw error;
+    }
+}
+
 function serializeThreeClip(THREE, clip) {
     if (typeof THREE.AnimationClip?.toJSON !== 'function') {
         throw new Error('THREE.AnimationClip.toJSON() is required to emit a hierarchy clip');
@@ -587,7 +610,24 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         ...BROWSER_FIT_CANARY_DEFAULTS.fit,
         ...(config.fit || {}),
     };
-    const fitted = fitBrowserAnimation({ skeleton, observations: prepared, options: fitOptions });
+    let preparedForFit = prepared;
+    let contactRefit = null;
+    let fitted;
+    if (dependencies.contactRefit != null) {
+        const contract = object(dependencies.contactRefit, 'dependencies.contactRefit');
+        contactRefit = fitBrowserAnimationWithPinnedHoofContacts({
+            skeleton,
+            observations: prepared,
+            schedule: object(contract.schedule, 'dependencies.contactRefit.schedule'),
+            pins: object(contract.pins, 'dependencies.contactRefit.pins'),
+            fitOptions,
+            gaitQaOptions: contract.gaitQaOptions || {},
+        });
+        preparedForFit = contactRefit.observations;
+        fitted = contactRefit.fitted;
+    } else {
+        fitted = fitBrowserAnimation({ skeleton, observations: prepared, options: fitOptions });
+    }
     const clipName = nonEmptyString(config.clipName || 'Horse_LTX_Browser_Fit_Canary', 'clipName');
     const hierarchy = bakeFittedAnimationToThreeHierarchyClip({
         THREE,
@@ -624,20 +664,49 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
     const gateEvaluation = evaluateBrowserFitGates({
         maximumHeadReconstructionErrorWorld: modelState.maximumHeadReconstructionErrorWorld,
         restSeedAlignment,
-        prepared,
+        prepared: preparedForFit,
         fitted,
         hierarchyQa: hierarchy.qa,
         hierarchyRayCount,
         clipValid,
         allTracksBound,
         minimumTargetSamples,
-        gates: config.gates,
+        gates: contactRefit
+            ? { ...(config.gates || {}), requireFourLimbContacts: true }
+            : config.gates,
     });
+    if (contactRefit) {
+        gateEvaluation.results.push({
+            name: 'pinned_contact_schedule',
+            passed: contactRefit.schedule.status === 'PASS',
+            actual: contactRefit.schedule.status,
+            comparator: '===',
+            threshold: 'PASS',
+        });
+        gateEvaluation.results.push({
+            name: 'semantic_walk_gait',
+            passed: contactRefit.gaitQa.accepted === true,
+            actual: contactRefit.gaitQa.accepted,
+            comparator: '===',
+            threshold: true,
+        });
+        gateEvaluation.results.push({
+            name: 'fitted_walk_contact_slide',
+            passed: contactRefit.fittedWalkQa.status === 'PASS',
+            actual: contactRefit.fittedWalkQa.maximumContactSlideRatio,
+            comparator: '<=',
+            threshold: contactRefit.fittedWalkQa.thresholdRatio,
+        });
+        gateEvaluation.passed = gateEvaluation.results.every((result) => result.passed);
+    }
+    const fittingMode = contactRefit ? 'contact_constrained_refit' : 'unconstrained_diagnostic';
     const bridgeReport = {
         schema: 'autorig-browser-fit-canary-bridge-report.v1',
         status: 'VALIDATED',
         browserOnly: true,
         blenderUsed: false,
+        mixerUsed: false,
+        fittingMode,
         inputs: {
             bundleDirectory: validated.bundleDirectory,
             observationsPath: validated.observationsPath,
@@ -651,20 +720,30 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         selectedTrackCount: prepared.tracks.length,
         mappings: prepared.provenance.browser_rgb_bridge.mappings,
         sourceContacts: Array.isArray(observations.contacts) ? observations.contacts.length : 0,
-        preparedContacts: prepared.contacts.length,
+        preparedContacts: preparedForFit.contacts.length,
         restSeedAlignment,
     };
     const fitSummary = {
         schema: 'autorig-browser-fit-canary-summary.v1',
-        status: gateEvaluation.passed ? 'PASS_BROWSER_FIT_GATES' : 'FAIL_BROWSER_FIT_GATES',
+        status: gateEvaluation.passed
+            ? (contactRefit ? 'PASS_BROWSER_CONTACT_REFIT_GATES' : 'PASS_BROWSER_FIT_GATES')
+            : (contactRefit ? 'FAIL_BROWSER_CONTACT_REFIT_GATES' : 'FAIL_BROWSER_FIT_GATES'),
         browserOnly: true,
         blenderUsed: false,
+        mixerUsed: false,
+        fittingMode,
+        approvedForBrowserContactFit: Boolean(contactRefit && gateEvaluation.passed),
         approvedForAnimationLibrary: false,
-        approvalExclusions: [
-            'gait_semantics_and_phase_order',
-            'fixed_camera_visual_phase_qa',
-            'target_mesh_deformation_qa',
-        ],
+        approvalExclusions: contactRefit
+            ? [
+                'fixed_camera_visual_phase_qa',
+                'target_mesh_deformation_qa',
+            ]
+            : [
+                'gait_semantics_and_phase_order',
+                'fixed_camera_visual_phase_qa',
+                'target_mesh_deformation_qa',
+            ],
         runtime: {
             node: process.version,
             threeRevision: String(THREE.REVISION || 'unknown'),
@@ -681,8 +760,8 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
             frameCount,
             fps: observations.fps,
             mappingMode: bridgeReport.mappingMode,
-            selectedTrackCount: prepared.tracks.length,
-            contactCount: prepared.contacts.length,
+            selectedTrackCount: preparedForFit.tracks.length,
+            contactCount: preparedForFit.contacts.length,
             restSeedAlignment,
         },
         fit: {
@@ -703,6 +782,16 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
             segmentRayCount: hierarchyRayCount,
         },
         gates: gateEvaluation,
+        ...(contactRefit ? {
+            contactRefit: {
+                provenance: contactRefit.observations.provenance.browser_hoof_contacts,
+                scheduleStatus: contactRefit.schedule.status,
+                scheduleSupport: contactRefit.schedule.qa.support,
+                inferredTouchdownOrder: contactRefit.schedule.inferredTouchdownOrder,
+                semanticGaitQa: contactRefit.gaitQa,
+                fittedWalkQa: contactRefit.fittedWalkQa,
+            },
+        } : {}),
     };
 
     fs.mkdirSync(outputDirectory, { recursive: true });
@@ -711,11 +800,17 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
     writeJsonAtomic(bridgeReportPath, bridgeReport);
     writeJsonAtomic(fitSummaryPath, fitSummary);
     const outputs = { bridgeReportPath, fitSummaryPath };
-    if (gateEvaluation.passed && config.emitFittedAnimation === true) {
+    if (gateEvaluation.passed && config.emitFittedAnimation === true && config.emitThreeClip === true) {
+        outputs.fittedAnimationPath = path.join(outputDirectory, 'fitted-animation.json');
+        outputs.threeClipPath = path.join(outputDirectory, 'three-clip.json');
+        writeJsonSetFromStaging([
+            { filename: outputs.fittedAnimationPath, value: fitted },
+            { filename: outputs.threeClipPath, value: serializeThreeClip(THREE, hierarchy.clip) },
+        ]);
+    } else if (gateEvaluation.passed && config.emitFittedAnimation === true) {
         outputs.fittedAnimationPath = path.join(outputDirectory, 'fitted-animation.json');
         writeJsonAtomic(outputs.fittedAnimationPath, fitted);
-    }
-    if (gateEvaluation.passed && config.emitThreeClip === true) {
+    } else if (gateEvaluation.passed && config.emitThreeClip === true) {
         outputs.threeClipPath = path.join(outputDirectory, 'three-clip.json');
         writeJsonAtomic(outputs.threeClipPath, serializeThreeClip(THREE, hierarchy.clip));
     }

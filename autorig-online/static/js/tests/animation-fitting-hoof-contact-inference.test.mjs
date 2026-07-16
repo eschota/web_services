@@ -3,12 +3,15 @@ import test from 'node:test';
 
 import {
     applyInferredHoofContacts,
+    applyPinnedHoofContactSchedule,
     deriveSam2GroundEvidence,
     diagnoseHoofContacts,
     fitBrowserAnimationWithHoofContacts,
+    fitBrowserAnimationWithPinnedHoofContacts,
     gateFittedWalk,
     HOOF_CONTACT_INFERENCE_CONTRACT,
     inferHoofContacts,
+    validatePinnedHoofContactSchedule,
 } from '../animation-fitting-hoof-contact-inference.js';
 
 const FRAME_COUNT = 49;
@@ -94,6 +97,29 @@ function observations({ wrongOrder = false } = {}) {
     };
 }
 
+function strictWalkObservations() {
+    const source = observations();
+    HOOF_CONTACT_INFERENCE_CONTRACT.footOrder.forEach((foot) => {
+        const hoof = source.tracks.find((track) => track.anchor_id === `${foot}.hoof`);
+        const joint = source.tracks.find((track) => track.anchor_id === `${foot}.joint`);
+        hoof.points.forEach((point, frame) => {
+            const uniqueFrame = frame === UNIQUE_FRAMES ? 0 : frame;
+            const phase = circularIndex(uniqueFrame - TOUCHDOWNS[foot]);
+            const value = phase < 36
+                ? [X_BY_FOOT[foot], GROUND_Y]
+                : [
+                    X_BY_FOOT[foot] + Math.sin(((phase - 36) / 12) * Math.PI * 2) * 9,
+                    GROUND_Y - Math.sin(((phase - 36) / 12) * Math.PI) * 36,
+                ];
+            point.x = value[0];
+            point.y = value[1];
+            joint.points[frame].x = (X_BY_FOOT[foot] + value[0]) / 2;
+            joint.points[frame].y = 240;
+        });
+    });
+    return source;
+}
+
 function fillRect(data, left, top, right, bottom, value = 255) {
     for (let y = Math.max(0, top); y <= Math.min(HEIGHT - 1, bottom); y += 1) {
         for (let x = Math.max(0, left); x <= Math.min(WIDTH - 1, right); x += 1) {
@@ -151,6 +177,23 @@ function skeleton() {
         };
     });
     return { schema: 'autorig-browser-fitting-skeleton.v1', rigType: 'HORSE_2', limbs };
+}
+
+function refitPins(source) {
+    source.provenance.bundle_sha256 = '1'.repeat(64);
+    source.provenance.immutable_manifest_sha256 = '2'.repeat(64);
+    return {
+        inputManifestSha256: '3'.repeat(64),
+        diagnosticSha256: '4'.repeat(64),
+        bridgeReportSha256: '5'.repeat(64),
+        initialFitSummarySha256: '6'.repeat(64),
+        observationsSha256: '7'.repeat(64),
+        fittingBundleSha256: source.provenance.bundle_sha256,
+        immutableManifestSha256: source.provenance.immutable_manifest_sha256,
+        sourceVideoSha256: source.provenance.source_video_sha256,
+        sourceModelSha256: 'a'.repeat(64),
+        sourceSkeletonSha256: 'b'.repeat(64),
+    };
 }
 
 test('SAM2 masks bind chronological ground evidence to exact left/right hoof tracks', () => {
@@ -358,4 +401,159 @@ test('contact application preserves unrelated observation contacts', () => {
     const applied = applyInferredHoofContacts({ observations: source, groundEvidence: evidence(source) });
     assert.equal(applied.observations.contacts.length, 5);
     assert.deepEqual(applied.observations.contacts[0], source.contacts[0]);
+});
+
+test('pinned PASS schedule maps exactly four limbs with immutable browser-only provenance', () => {
+    const source = strictWalkObservations();
+    const schedule = inferHoofContacts({
+        observations: source,
+        groundEvidence: evidence(source),
+        options: { minimumSupportFeet: 3 },
+    });
+    const pins = refitPins(source);
+    const validated = validatePinnedHoofContactSchedule({ observations: source, schedule });
+    assert.equal(validated.contacts.length, 4);
+    assert.ok(validated.support.minimum >= 3);
+    const applied = applyPinnedHoofContactSchedule({ observations: source, schedule, pins });
+    assert.equal(source.contacts.length, 0, 'pinned schedule application is immutable');
+    assert.equal(applied.observations.contacts.length, 4);
+    assert.deepEqual(
+        applied.observations.contacts.map((contact) => contact.anchor_id).sort(),
+        HOOF_CONTACT_INFERENCE_CONTRACT.footOrder.map((foot) => `${foot}.hoof`).sort(),
+    );
+    assert.deepEqual(applied.observations.provenance.browser_hoof_contacts, {
+        schema: HOOF_CONTACT_INFERENCE_CONTRACT.contactRefitProvenance,
+        source: 'immutable_pass_diagnostic',
+        browserOnly: true,
+        blenderUsed: false,
+        mixerUsed: false,
+        footOrder: [...HOOF_CONTACT_INFERENCE_CONTRACT.footOrder],
+        support: validated.support,
+        ...pins,
+    });
+});
+
+test('pinned schedule rejects missing limbs, forged support and provenance/hash mismatch', () => {
+    const source = strictWalkObservations();
+    const schedule = inferHoofContacts({
+        observations: source,
+        groundEvidence: evidence(source),
+        options: { minimumSupportFeet: 3 },
+    });
+    const pins = refitPins(source);
+
+    const missing = structuredClone(schedule);
+    missing.contacts.pop();
+    assert.throws(
+        () => validatePinnedHoofContactSchedule({ observations: source, schedule: missing }),
+        /exactly four limb contacts/,
+    );
+
+    const forgedSupport = structuredClone(schedule);
+    forgedSupport.qa.support.byFrame[0] = forgedSupport.qa.support.byFrame[0] === 0 ? 4 : 0;
+    assert.throws(
+        () => validatePinnedHoofContactSchedule({ observations: source, schedule: forgedSupport }),
+        /support timeline is inconsistent/,
+    );
+
+    const weakContact = structuredClone(schedule);
+    weakContact.contacts[0].weight = 0.000001;
+    assert.throws(
+        () => validatePinnedHoofContactSchedule({ observations: source, schedule: weakContact }),
+        /code-owned contact weight/,
+    );
+
+    const relaxedThresholds = structuredClone(schedule);
+    relaxedThresholds.qa.thresholds.maximumFittedContactSlideRatio = 1;
+    assert.throws(
+        () => validatePinnedHoofContactSchedule({ observations: source, schedule: relaxedThresholds }),
+        /code-owned Horse contact-refit contract/,
+    );
+
+    const relaxedDuty = structuredClone(schedule);
+    relaxedDuty.qa.thresholds.minimumDutyFactor = 0.01;
+    assert.throws(
+        () => validatePinnedHoofContactSchedule({ observations: source, schedule: relaxedDuty }),
+        /code-owned Horse contact-refit contract/,
+    );
+
+    assert.throws(
+        () => applyPinnedHoofContactSchedule({
+            observations: source,
+            schedule,
+            pins: { ...pins, diagnosticSha256: 'not-a-hash' },
+        }),
+        /pins\.diagnosticSha256 must be a lowercase SHA-256/,
+    );
+    assert.throws(
+        () => applyPinnedHoofContactSchedule({
+            observations: source,
+            schedule,
+            pins: { ...pins, sourceVideoSha256: 'f'.repeat(64) },
+        }),
+        /source-video SHA-256 does not match observations provenance/,
+    );
+});
+
+test('pinned refit rejects a self-consistently repinned two-foot support gait before solver invocation', () => {
+    const source = observations();
+    const schedule = inferHoofContacts({ observations: source, groundEvidence: evidence(source) });
+    const pins = refitPins(source);
+    assert.throws(
+        () => fitBrowserAnimationWithPinnedHoofContacts({
+            skeleton: skeleton(),
+            observations: source,
+            schedule,
+            pins,
+            fitOptions: { loop: true, smoothingRadius: 0, iterations: 80, tolerance: 1e-7 },
+        }),
+        /code-owned Horse contact-refit contract/,
+    );
+});
+
+test('pinned strict walk reruns the pure browser solver and passes fitted contact-slide QA', () => {
+    const source = strictWalkObservations();
+    const schedule = inferHoofContacts({
+        observations: source,
+        groundEvidence: evidence(source),
+        options: { minimumSupportFeet: 3 },
+    });
+    const pins = refitPins(source);
+    const result = fitBrowserAnimationWithPinnedHoofContacts({
+        skeleton: skeleton(),
+        observations: source,
+        schedule,
+        pins,
+        fitOptions: { loop: true, smoothingRadius: 0, jointAttraction: 0, iterations: 80, tolerance: 1e-7 },
+    });
+    assert.equal(result.gaitQa.accepted, true);
+    assert.equal(result.gaitQa.simultaneousSwingFrameCount, 0);
+    assert.equal(result.fittedWalkQa.status, 'PASS');
+    assert.equal(result.observations.contacts.length, 4);
+    assert.deepEqual(result.runtime, { browserOnly: true, blenderUsed: false, mixerUsed: false });
+});
+
+test('pinned refit rejects solver-produced contact slide even when schedule and semantic gait PASS', () => {
+    const source = strictWalkObservations();
+    const schedule = inferHoofContacts({
+        observations: source,
+        groundEvidence: evidence(source),
+        options: { minimumSupportFeet: 3 },
+    });
+    const pins = refitPins(source);
+    const proximal = source.tracks.find((track) => track.anchor_id === 'fore_left.proximal');
+    const stance = new Set(schedule.contacts.find((contact) => contact.anchor_id === 'fore_left.hoof').frames);
+    proximal.points.forEach((point, frame) => {
+        if (stance.has(frame)) point.x += 180 + (frame === UNIQUE_FRAMES ? 0 : frame * 3);
+    });
+    assert.throws(
+        () => fitBrowserAnimationWithPinnedHoofContacts({
+            skeleton: skeleton(),
+            observations: source,
+            schedule,
+            pins,
+            fitOptions: { loop: true, smoothingRadius: 0, jointAttraction: 0, iterations: 80, tolerance: 1e-7 },
+        }),
+        /fitted_contact_slide/,
+    );
 });
