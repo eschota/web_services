@@ -148,6 +148,63 @@ export function computeLongDimensionScaleAndPad(referenceValue, outputValue) {
     return { reference, output, scale, scaled, pad };
 }
 
+function referenceGeometryTransform(value, referenceResolution, outputResolution) {
+    if (value == null) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('geometryTransform must be an object');
+    }
+    if (value.mode !== 'center_crop_cover') {
+        throw new Error('geometryTransform.mode must be center_crop_cover');
+    }
+    if (value.coordinate_transform !== 'half_pixel_centers') {
+        throw new Error('geometryTransform.coordinate_transform must be half_pixel_centers');
+    }
+    const source = resolution(value.source_resolution, 'geometryTransform.source_resolution');
+    const target = resolution(value.target_resolution, 'geometryTransform.target_resolution');
+    if (source.some((item, index) => Math.abs(item - referenceResolution[index]) > 1e-7)) {
+        throw new Error('geometryTransform.source_resolution does not match referenceResolution');
+    }
+    if (target.some((item, index) => Math.abs(item - outputResolution[index]) > 1e-7)) {
+        throw new Error('geometryTransform.target_resolution does not match outputResolution');
+    }
+    const cropValue = value.crop_pixels;
+    if (!cropValue || typeof cropValue !== 'object' || Array.isArray(cropValue)) {
+        throw new Error('geometryTransform.crop_pixels must be an object');
+    }
+    const crop = {
+        x: finite(cropValue.x, 'geometryTransform.crop_pixels.x'),
+        y: finite(cropValue.y, 'geometryTransform.crop_pixels.y'),
+        width: finite(cropValue.width, 'geometryTransform.crop_pixels.width'),
+        height: finite(cropValue.height, 'geometryTransform.crop_pixels.height'),
+    };
+    if (crop.x < 0 || crop.y < 0 || crop.width <= 0 || crop.height <= 0
+        || crop.x + crop.width > source[0] + 1e-7
+        || crop.y + crop.height > source[1] + 1e-7) {
+        throw new Error('geometryTransform.crop_pixels is outside source_resolution');
+    }
+    const scale = resolution(value.scale_xy, 'geometryTransform.scale_xy');
+    const expectedScale = [target[0] / crop.width, target[1] / crop.height];
+    if (scale.some((item, index) => Math.abs(item - expectedScale[index]) > 1e-6)) {
+        throw new Error('geometryTransform.scale_xy does not match crop and target resolutions');
+    }
+    if (value.rgb_interpolation !== 'opencv_bilinear') {
+        throw new Error('geometryTransform.rgb_interpolation must be opencv_bilinear');
+    }
+    if (value.mask_interpolation !== 'opencv_nearest') {
+        throw new Error('geometryTransform.mask_interpolation must be opencv_nearest');
+    }
+    return {
+        mode: value.mode,
+        coordinate_transform: value.coordinate_transform,
+        source_resolution: [...source],
+        target_resolution: [...target],
+        crop_pixels: crop,
+        scale_xy: [...scale],
+        rgb_interpolation: value.rgb_interpolation,
+        mask_interpolation: value.mask_interpolation,
+    };
+}
+
 /** Compose task.html viewer contain-capture with Comfy long-dimension scaling. */
 export function createViewerToLtxProjection(options = {}) {
     const sourceViewport = resolution(options.sourceViewport || options.referenceResolution || [768, 448], 'sourceViewport');
@@ -155,14 +212,48 @@ export function createViewerToLtxProjection(options = {}) {
     const outputResolution = resolution(options.outputResolution || [512, 320], 'outputResolution');
     const capture = computeContainScaleAndPad(sourceViewport, referenceResolution);
     const ltx = computeLongDimensionScaleAndPad(referenceResolution, outputResolution);
-    const sourceToOutputScale = capture.scale * ltx.scale;
+    const geometryTransform = referenceGeometryTransform(
+        options.geometryTransform || options.referenceGeometryTransform || null,
+        referenceResolution,
+        outputResolution,
+    );
+    const referenceToOutputScale = geometryTransform
+        ? [...geometryTransform.scale_xy]
+        : [ltx.scale, ltx.scale];
+    const referenceToOutputOffset = geometryTransform
+        ? [
+            (0.5 - geometryTransform.crop_pixels.x) * referenceToOutputScale[0] - 0.5,
+            (0.5 - geometryTransform.crop_pixels.y) * referenceToOutputScale[1] - 0.5,
+        ]
+        : [...ltx.pad];
+    const sourceToOutputScaleXY = referenceToOutputScale.map((scale) => capture.scale * scale);
+    const sourceToOutputScale = sourceToOutputScaleXY[0];
+    const referencePixelToOutput = (referencePixel) => [
+        referencePixel[0] * referenceToOutputScale[0] + referenceToOutputOffset[0],
+        referencePixel[1] * referenceToOutputScale[1] + referenceToOutputOffset[1],
+    ];
+    const outputPixelToSource = (outputPixel) => {
+        const referencePixel = [
+            (outputPixel[0] - referenceToOutputOffset[0]) / referenceToOutputScale[0],
+            (outputPixel[1] - referenceToOutputOffset[1]) / referenceToOutputScale[1],
+        ];
+        return [
+            (referencePixel[0] - capture.pad[0]) / capture.scale,
+            (referencePixel[1] - capture.pad[1]) / capture.scale,
+        ];
+    };
     return {
         sourceViewport,
         referenceResolution,
         outputResolution,
         capture,
         ltx,
+        geometryTransform,
+        projectionMode: geometryTransform ? 'pinned_reference_geometry_transform' : 'legacy_ltx_long_dimension_pad',
+        referenceToOutputScale,
+        referenceToOutputOffset,
         sourceToOutputScale,
+        sourceToOutputScaleXY,
         ndcToOutput(ndcValue) {
             const ndc = array3(ndcValue, 'ndc');
             const sourcePixel = [
@@ -173,15 +264,24 @@ export function createViewerToLtxProjection(options = {}) {
                 sourcePixel[0] * capture.scale + capture.pad[0],
                 sourcePixel[1] * capture.scale + capture.pad[1],
             ];
+            return referencePixelToOutput(referencePixel);
+        },
+        outputPixelToNdc(pixelValue, z = 0) {
+            if (!Array.isArray(pixelValue) || pixelValue.length !== 2) {
+                throw new Error('output pixel must be [x, y]');
+            }
+            const pixel = pixelValue.map((item, index) => finite(item, `output pixel[${index}]`));
+            const sourcePixel = outputPixelToSource(pixel);
             return [
-                referencePixel[0] * ltx.scale + ltx.pad[0],
-                referencePixel[1] * ltx.scale + ltx.pad[1],
+                2 * sourcePixel[0] / sourceViewport[0] - 1,
+                1 - 2 * sourcePixel[1] / sourceViewport[1],
+                finite(z, 'output pixel ndc z'),
             ];
         },
         outputPixelToNdcDelta() {
             return [
-                2 / (sourceViewport[0] * sourceToOutputScale),
-                -2 / (sourceViewport[1] * sourceToOutputScale),
+                2 / (sourceViewport[0] * sourceToOutputScaleXY[0]),
+                -2 / (sourceViewport[1] * sourceToOutputScaleXY[1]),
             ];
         },
     };
@@ -425,6 +525,7 @@ function projectionOptions(options, profile) {
             || profile.output_resolution
             || profile.outputResolution
             || [512, 320],
+        geometryTransform: options.geometryTransform || options.referenceGeometryTransform || null,
     });
 }
 
@@ -554,11 +655,22 @@ export function buildHorse2BrowserFittingSkeleton(options = {}) {
             sourceViewport: [...projection.sourceViewport],
             referenceResolution: [...projection.referenceResolution],
             outputResolution: [...projection.outputResolution],
+            projectionMode: projection.projectionMode,
             viewerContainScale: projection.capture.scale,
             viewerContainPad: [...projection.capture.pad],
             ltxLongDimensionScale: projection.ltx.scale,
             ltxCenterPad: [...projection.ltx.pad],
             sourceToOutputScale: projection.sourceToOutputScale,
+            sourceToOutputScaleXY: [...projection.sourceToOutputScaleXY],
+            ...(projection.geometryTransform ? {
+                geometryTransform: {
+                    ...projection.geometryTransform,
+                    source_resolution: [...projection.geometryTransform.source_resolution],
+                    target_resolution: [...projection.geometryTransform.target_resolution],
+                    crop_pixels: { ...projection.geometryTransform.crop_pixels },
+                    scale_xy: [...projection.geometryTransform.scale_xy],
+                },
+            } : {}),
         },
         provenance: {
             source: 'three_actionless_rest_pose',
@@ -603,17 +715,10 @@ function objectDepth(object) {
 }
 
 function outputPixelToNdc(pixel, projection, z = 0) {
-    const outputX = finite(pixel[0], 'fitted pixel x');
-    const outputY = finite(pixel[1], 'fitted pixel y');
-    const referenceX = (outputX - projection.ltx.pad[0]) / projection.ltx.scale;
-    const referenceY = (outputY - projection.ltx.pad[1]) / projection.ltx.scale;
-    const sourceX = (referenceX - projection.capture.pad[0]) / projection.capture.scale;
-    const sourceY = (referenceY - projection.capture.pad[1]) / projection.capture.scale;
-    return [
-        2 * sourceX / projection.sourceViewport[0] - 1,
-        1 - 2 * sourceY / projection.sourceViewport[1],
-        z,
-    ];
+    return projection.outputPixelToNdc([
+        finite(pixel[0], 'fitted pixel x'),
+        finite(pixel[1], 'fitted pixel y'),
+    ], z);
 }
 
 function unprojectPixel(THREE, camera, pixel, projection, z) {
@@ -719,6 +824,7 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
         sourceViewport: skeleton.projection?.sourceViewport,
         referenceResolution: skeleton.projection?.referenceResolution,
         outputResolution,
+        geometryTransform: skeleton.projection?.geometryTransform || null,
     });
     model.updateWorldMatrix?.(true, true);
     camera.updateProjectionMatrix?.();

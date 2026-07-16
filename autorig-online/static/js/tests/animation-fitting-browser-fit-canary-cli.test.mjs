@@ -98,6 +98,7 @@ test('canary CLI parser requires immutable inputs and preserves explicit browser
         '--no-loop',
         '--require-four-limb-contacts',
         '--emit-three-clip',
+        '--emit-rejected-diagnostic',
     ]);
     assert.equal(parsed.bundleDirectory, 'bundle');
     assert.equal(parsed.positionMappings, false);
@@ -111,6 +112,7 @@ test('canary CLI parser requires immutable inputs and preserves explicit browser
     assert.equal(parsed.fit.loop, false);
     assert.equal(parsed.gates.requireFourLimbContacts, true);
     assert.equal(parsed.emitThreeClip, true);
+    assert.equal(parsed.emitRejectedDiagnostic, true);
     assert.throws(() => parseCanaryArgs(['--bundle-dir', 'bundle']), /missing required option observationsPath/);
     assert.throws(() => parseCanaryArgs([
         '--bundle-dir', 'bundle', '--observations', 'o', '--three-module', 't', '--output-dir', 'x', '--guess', 'yes',

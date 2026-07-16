@@ -1827,6 +1827,7 @@ def run_observation_pipeline(
     segmenter: MaskBackend,
     depth_backend: DepthBackend | None = None,
     contact_profile: str | Path | None = None,
+    priority_anchor_ids: tuple[str, ...] = (),
     browser_endpoint_guide_bundle: str | Path | None = None,
     browser_endpoint_guide_manifest_sha256: str | None = None,
     config: ObservationRuntimeConfig | None = None,
@@ -1867,6 +1868,14 @@ def run_observation_pipeline(
     profile = (
         load_contact_profile(contact_profile) if contact_profile is not None else None
     )
+    if (
+        not isinstance(priority_anchor_ids, tuple)
+        or any(not isinstance(value, str) or not value for value in priority_anchor_ids)
+        or len(set(priority_anchor_ids)) != len(priority_anchor_ids)
+    ):
+        raise ContractError(
+            "Priority anchor IDs must be a unique tuple of non-empty strings"
+        )
     if profile is not None:
         if not cfg.loop:
             raise ContractError(
@@ -1881,16 +1890,33 @@ def run_observation_pipeline(
             rig_metadata=rig.metadata,
             anchors=rig.anchors,
         )
+    profile_priority_ids = () if profile is None else profile.priority_anchor_ids
+    combined_priority_ids = tuple(
+        dict.fromkeys((*profile_priority_ids, *priority_anchor_ids))
+    )
     seeds = select_anchor_seeds(
         bundle,
         max_tracks=cfg.max_track_count,
-        priority_anchor_ids=() if profile is None else profile.priority_anchor_ids,
+        priority_anchor_ids=combined_priority_ids,
         browser_endpoint_guide_bundle=browser_endpoint_guide_bundle,
         browser_endpoint_guide_manifest_sha256=(
             browser_endpoint_guide_manifest_sha256
         ),
         loop=cfg.loop,
     )
+    if combined_priority_ids:
+        seeds = replace(
+            seeds,
+            reference_provenance={
+                **seeds.reference_provenance,
+                "seed_selection": {
+                    "mode": "explicit_pinned_surface_anchor_priority",
+                    "priority_anchor_ids": list(combined_priority_ids),
+                    "contact_profile_anchor_count": len(profile_priority_ids),
+                    "caller_anchor_count": len(priority_anchor_ids),
+                },
+            },
+        )
     if browser_reference is not None:
         expected_frames = seeds.reference_provenance["selected"]["manifest"][
             "cycle_frame_count"

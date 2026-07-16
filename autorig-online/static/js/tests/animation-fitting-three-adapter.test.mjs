@@ -241,6 +241,36 @@ test('viewer capture contain and LTX long-dimension transforms compose exactly',
     close(pixelDelta[1], -1 / 144);
 });
 
+test('pinned center-crop geometry uses OpenCV half-pixel centers in both directions', () => {
+    const geometryTransform = {
+        mode: 'center_crop_cover',
+        coordinate_transform: 'half_pixel_centers',
+        source_resolution: [768, 448],
+        target_resolution: [384, 256],
+        crop_pixels: { x: 48, y: 0, width: 672, height: 448 },
+        scale_xy: [384 / 672, 256 / 448],
+        rgb_interpolation: 'opencv_bilinear',
+        mask_interpolation: 'opencv_nearest',
+    };
+    const projection = createViewerToLtxProjection({
+        sourceViewport: [768, 448],
+        referenceResolution: [768, 448],
+        outputResolution: [384, 256],
+        geometryTransform,
+    });
+    assert.equal(projection.projectionMode, 'pinned_reference_geometry_transform');
+    assert.deepEqual(projection.geometryTransform, geometryTransform);
+    const cropTopLeftNdc = [2 * 48 / 768 - 1, 1, 0.25];
+    const cropTopLeftOutput = projection.ndcToOutput(cropTopLeftNdc);
+    close(cropTopLeftOutput[0], -3 / 14);
+    close(cropTopLeftOutput[1], -3 / 14);
+    const roundTrip = projection.outputPixelToNdc(cropTopLeftOutput, 0.25);
+    roundTrip.forEach((value, index) => close(value, cropTopLeftNdc[index]));
+    const pixelDelta = projection.outputPixelToNdcDelta();
+    close(pixelDelta[0], 7 / 1536);
+    close(pixelDelta[1], -1 / 128);
+});
+
 test('Horse profile skips clavicles and exposes the exact seven ordered deform heads', () => {
     const fore = horseDeformChainNames(HORSE_2_SEMANTIC_PROFILE, 'fore_left');
     assert.equal(fore.length, 7);

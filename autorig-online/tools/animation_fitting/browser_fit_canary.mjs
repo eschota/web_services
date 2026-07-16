@@ -625,6 +625,7 @@ function selectedRestSeedAlignment({ THREE, camera, skeleton, surfaceAnchors, ob
         sourceViewport: skeleton.projection.sourceViewport,
         referenceResolution: skeleton.projection.referenceResolution,
         outputResolution: skeleton.projection.outputResolution,
+        geometryTransform: skeleton.projection.geometryTransform || null,
     });
     const errors = prepared.provenance.browser_rgb_bridge.mappings.map((mapping) => {
         const world = anchorWorldById.get(mapping.sourceAnchorId);
@@ -810,6 +811,7 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
     const modelState = buildBundleModel(THREE, validated.skeleton);
     const camera = buildBundleCamera(THREE, validated.fittingBundle);
     const observations = validated.observations;
+    const geometryTransform = observations.provenance?.first_frame_reference?.geometry_transform || null;
     const frameCount = integer(observations.frame_count, 'observations.frame_count', 2);
     const width = integer(observations.width, 'observations.width', 1);
     const height = integer(observations.height, 'observations.height', 1);
@@ -836,6 +838,7 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
         sourceViewport: validated.fittingBundle.camera.resolution,
         referenceResolution: validated.fittingBundle.camera.resolution,
         outputResolution: [width, height],
+        geometryTransform,
         includePositionMappings: positionMappings,
     });
     const cameraContract = {
@@ -1134,6 +1137,12 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
             } : null,
         },
         gates: gateEvaluation,
+        rejectedDiagnosticEmission: config.emitRejectedDiagnostic === true ? {
+            requested: true,
+            emittedOnlyWhenGatesFail: true,
+            approvedForAnimationLibrary: false,
+            humanReviewCannotOverrideMachineGateFailure: true,
+        } : null,
         ...(contactRefit ? {
             contactRefit: {
                 provenance: contactRefit.observations.provenance.browser_hoof_contacts,
@@ -1165,6 +1174,32 @@ export async function runBrowserFitCanary(configuration, dependencies = {}) {
     } else if (gateEvaluation.passed && config.emitThreeClip === true) {
         outputs.threeClipPath = path.join(outputDirectory, 'three-clip.json');
         writeJsonAtomic(outputs.threeClipPath, serializeThreeClip(THREE, hierarchy.clip));
+    } else if (!gateEvaluation.passed && config.emitRejectedDiagnostic === true) {
+        const failedGates = gateEvaluation.results
+            .filter((result) => !result.passed)
+            .map((result) => result.name);
+        hierarchy.clip.userData = {
+            ...(hierarchy.clip.userData || {}),
+            autorigRejectedDiagnostic: {
+                schema: 'autorig-browser-rejected-fit-diagnostic.v1',
+                status: 'REJECTED_MACHINE_GATES',
+                failedGates,
+                approvedForAnimationLibrary: false,
+                humanReviewCannotOverrideMachineGateFailure: true,
+            },
+        };
+        outputs.rejectedFittedAnimationPath = path.join(
+            outputDirectory,
+            'rejected-diagnostic-fitted-animation.json',
+        );
+        outputs.rejectedThreeClipPath = path.join(
+            outputDirectory,
+            'rejected-diagnostic-three-clip.json',
+        );
+        writeJsonSetFromStaging([
+            { filename: outputs.rejectedFittedAnimationPath, value: fitted },
+            { filename: outputs.rejectedThreeClipPath, value: serializeThreeClip(THREE, hierarchy.clip) },
+        ]);
     }
     return { passed: gateEvaluation.passed, bridgeReport, fitSummary, outputs };
 }
@@ -1205,6 +1240,8 @@ Options:
                                 Optional pair; velocity gates disabled by default
   --emit-fitted-animation        Written only when all browser-fit gates PASS
   --emit-three-clip              Written only when all browser-fit gates PASS
+  --emit-rejected-diagnostic     On gate FAIL, emit explicitly rejected fitted/Three JSON
+                                for visual diagnosis only; never grants approval
   --help
 
 Exit codes: 0 browser-fit gates PASS, 2 invalid input/runtime, 3 QA gates FAIL.
@@ -1262,6 +1299,7 @@ export function parseCanaryArgs(argv) {
         }
         else if (flag === '--emit-fitted-animation') config.emitFittedAnimation = true;
         else if (flag === '--emit-three-clip') config.emitThreeClip = true;
+        else if (flag === '--emit-rejected-diagnostic') config.emitRejectedDiagnostic = true;
         else throw new Error(`unknown option ${flag}`);
     }
     if (help) return { help: true };

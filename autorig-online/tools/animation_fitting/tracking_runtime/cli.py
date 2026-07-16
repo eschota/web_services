@@ -21,7 +21,9 @@ from .core import (
     run_observation_pipeline,
     select_anchor_seeds,
 )
+from .independent_foreground_gate import run_independent_foreground_gate
 from .official_backends import (
+    Sam2ImageForegroundBackend,
     Sam2VideoMaskBackend,
     TapNextPPBackend,
     VideoDepthAnythingSmallBackend,
@@ -69,6 +71,16 @@ def _parser() -> argparse.ArgumentParser:
     observe.add_argument("--allow-cpu", action="store_true")
     observe.add_argument("--with-depth", action="store_true")
     observe.add_argument("--contact-profile")
+    observe.add_argument(
+        "--priority-anchor-id",
+        action="append",
+        default=[],
+        help=(
+            "Exact immutable surface anchor ID to prioritize; repeatable. "
+            "Use only when independent foreground evidence identifies a safer "
+            "same-bone visible surface point."
+        ),
+    )
     observe.add_argument("--loop", action="store_true")
     observe.add_argument(
         "--browser-endpoint-guide-bundle",
@@ -98,6 +110,22 @@ def _parser() -> argparse.ArgumentParser:
     observe.add_argument("--min-visible-confidence", type=float, default=0.05)
     observe.add_argument("--min-median-visible-confidence", type=float, default=0.50)
     observe.add_argument("--min-track-mask-ratio", type=float, default=0.55)
+
+    foreground = commands.add_parser(
+        "admit-foreground",
+        help="Run an independent video-pixel/SAM2 first-frame alignment gate",
+    )
+    foreground.add_argument("--video", required=True)
+    foreground.add_argument("--bundle", required=True)
+    foreground.add_argument("--output-dir", required=True)
+    foreground.add_argument("--device", default="cuda")
+    foreground.add_argument("--allow-cpu", action="store_true")
+    foreground.add_argument("--ffprobe")
+    foreground.add_argument(
+        "--reference-geometry-mode",
+        choices=sorted(REFERENCE_GEOMETRY_MODES),
+        default=REFERENCE_GEOMETRY_ASPECT_STRICT,
+    )
     return parser
 
 
@@ -336,12 +364,38 @@ def main(argv: list[str] | None = None) -> int:
                 segmenter=segmenter,
                 depth_backend=depth,
                 contact_profile=args.contact_profile,
+                priority_anchor_ids=tuple(args.priority_anchor_id),
                 config=config,
                 ffprobe=args.ffprobe,
                 **browser_reference_kwargs,
             )
             print(json.dumps({"observations": str(output)}, indent=2))
             return 0
+        if args.command == "admit-foreground":
+            lock = load_runtime_lock(args.runtime_lock)
+            paths = _paths(runtime_root)
+            backend = Sam2ImageForegroundBackend(
+                paths["sam2"],
+                paths["sam2_hiera_tiny"],
+                lock,
+                device=args.device,
+                require_cuda=not bool(args.allow_cpu),
+            )
+            result = run_independent_foreground_gate(
+                video=args.video,
+                bundle=args.bundle,
+                output_dir=args.output_dir,
+                backend=backend,
+                reference_geometry_mode=args.reference_geometry_mode,
+                ffprobe=args.ffprobe,
+            )
+            print(
+                json.dumps(
+                    {"gate": str(result.gate_json), "decision": result.decision},
+                    indent=2,
+                )
+            )
+            return 0 if result.decision == "PASS" else 2
     except FittingError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

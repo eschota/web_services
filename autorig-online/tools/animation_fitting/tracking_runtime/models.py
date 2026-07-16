@@ -56,6 +56,15 @@ class MaskResult:
 
 
 @dataclass(frozen=True)
+class IndependentForegroundResult:
+    """A first-frame mask inferred without canonical geometry or semantic seeds."""
+
+    mask: np.ndarray
+    score: float
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class DepthResult:
     relative_depth: np.ndarray
     provenance: dict[str, Any] = field(default_factory=dict)
@@ -67,6 +76,12 @@ class TrackerBackend(Protocol):
 
 class MaskBackend(Protocol):
     def segment(self, video: VideoFrames, initial_mask: np.ndarray) -> MaskResult: ...
+
+
+class IndependentForegroundBackend(Protocol):
+    def segment(
+        self, image_rgb: np.ndarray, prompt_box_xyxy: np.ndarray
+    ) -> IndependentForegroundResult: ...
 
 
 class DepthBackend(Protocol):

@@ -11,7 +11,14 @@ from typing import Any
 import numpy as np
 
 from ..errors import ContractError, DependencyUnavailableError
-from .models import DepthResult, MaskResult, SeedSet, TrackResult, VideoFrames
+from .models import (
+    DepthResult,
+    IndependentForegroundResult,
+    MaskResult,
+    SeedSet,
+    TrackResult,
+    VideoFrames,
+)
 from .runtime_lock import RuntimeLock
 
 
@@ -254,6 +261,129 @@ class Sam2VideoMaskBackend:
                 "postprocessing": False,
             },
         )
+
+
+@dataclass
+class Sam2ImageForegroundBackend:
+    """SAM 2.1 first-frame segmentation driven only by an image-derived box.
+
+    The caller is responsible for deriving ``prompt_box_xyxy`` without using a
+    canonical mask, rig seeds, or a tracker prompt.  Candidate selection is
+    deliberately limited to SAM's own predicted-IoU score, so downstream
+    canonical comparison cannot influence which mask is returned.
+    """
+
+    repo: Path
+    checkpoint: Path
+    lock: RuntimeLock
+    device: str = "cuda"
+    require_cuda: bool = True
+
+    def __post_init__(self) -> None:
+        self.repo = Path(self.repo).resolve()
+        self.checkpoint = Path(self.checkpoint).resolve()
+        self.repo_provenance = self.lock.verify_repo("sam2", self.repo)
+        self.checkpoint_provenance = self.lock.verify_checkpoint(
+            "sam2_hiera_tiny", self.checkpoint, license_repo=self.repo
+        )
+
+    def segment(
+        self, image_rgb: np.ndarray, prompt_box_xyxy: np.ndarray
+    ) -> IndependentForegroundResult:
+        torch = _torch(self.device, require_cuda=self.require_cuda)
+        _prepend_import_root(self.repo)
+        try:
+            from sam2.build_sam import build_sam2
+            from sam2.sam2_image_predictor import SAM2ImagePredictor
+        except Exception as exc:
+            raise DependencyUnavailableError(f"Pinned SAM 2 image import failed: {exc}") from exc
+        image = np.asarray(image_rgb)
+        if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
+            raise ContractError("SAM 2 image input must be HxWx3 uint8 RGB")
+        box = np.asarray(prompt_box_xyxy, dtype=np.float32)
+        if box.shape != (4,) or not np.all(np.isfinite(box)):
+            raise ContractError("SAM 2 image prompt box must be four finite XYXY values")
+        height, width = image.shape[:2]
+        if not (
+            0.0 <= box[0] < box[2] < width
+            and 0.0 <= box[1] < box[3] < height
+        ):
+            raise ContractError("SAM 2 image prompt box must stay inside the image")
+        device = torch.device(self.device)
+        model = None
+        predictor = None
+        try:
+            model = build_sam2(
+                "configs/sam2.1/sam2.1_hiera_t.yaml",
+                str(self.checkpoint),
+                device=device,
+                apply_postprocessing=False,
+            )
+            predictor = SAM2ImagePredictor(model)
+            with torch.inference_mode():
+                predictor.set_image(image)
+                masks, scores, _ = predictor.predict(
+                    box=box,
+                    multimask_output=True,
+                )
+            masks_array = np.asarray(masks, dtype=bool)
+            scores_array = np.asarray(scores, dtype=np.float64)
+            if (
+                masks_array.ndim != 3
+                or masks_array.shape[1:] != (height, width)
+                or scores_array.shape != (masks_array.shape[0],)
+                or not np.all(np.isfinite(scores_array))
+                or masks_array.shape[0] < 1
+            ):
+                raise ContractError("SAM 2 image predictor returned an invalid mask set")
+            selected_index = int(np.argmax(scores_array))
+            selected = masks_array[selected_index]
+            if not np.any(selected):
+                raise ContractError("SAM 2 selected an empty independent foreground mask")
+            candidate_records = [
+                {
+                    "index": index,
+                    "predicted_iou": float(scores_array[index]),
+                    "area_pixels": int(np.sum(masks_array[index])),
+                }
+                for index in range(masks_array.shape[0])
+            ]
+            return IndependentForegroundResult(
+                mask=np.ascontiguousarray(selected),
+                score=float(scores_array[selected_index]),
+                provenance={
+                    "backend": "facebookresearch-sam2.1-image",
+                    "model": "sam2.1_hiera_tiny",
+                    "repo": self.repo_provenance,
+                    "checkpoint": self.checkpoint_provenance,
+                    "device": str(device),
+                    "torch": torch.__version__,
+                    "prompt": {
+                        "kind": "video_pixel_motion_box_xyxy",
+                        "box": [float(value) for value in box],
+                        "canonical_geometry_used": False,
+                        "semantic_seeds_used": False,
+                    },
+                    "selection": {
+                        "contract": "maximum_sam_predicted_iou_only",
+                        "selected_index": selected_index,
+                        "candidates": candidate_records,
+                        "canonical_comparison_used": False,
+                    },
+                    "postprocessing": False,
+                },
+            )
+        finally:
+            if predictor is not None:
+                try:
+                    predictor.reset_predictor()
+                except Exception:
+                    pass
+            del predictor
+            del model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
 
 @dataclass

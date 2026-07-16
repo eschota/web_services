@@ -94,6 +94,30 @@ compressed arrays, one mask per frame, a contact sheet, ffprobe evidence,
 diagnostics, and a SHA-256 manifest. Use a fresh output directory for every
 candidate; there is deliberately no overwrite switch.
 
+When an upstream center crop makes the full-scene scalar correlation ambiguous,
+run the independent foreground gate before fitting. Its prompt box is derived
+only from optical flow over decoded video pixels. Pinned SAM 2.1 selects a mask
+only by its own predicted-IoU score; canonical geometry and semantic anchors are
+introduced only after that mask has been frozen. The gate compares against the
+high-confidence (`uint8 >= 128`) canonical silhouette and publishes immutable
+mask, saliency, overlay, metrics, and hash evidence:
+
+```powershell
+& $python -m animation_fitting.tracking_runtime admit-foreground `
+  --video 'R:\ComfyUI-data\autorig-fitting\candidates\horse_trot.mp4' `
+  --bundle 'R:\ComfyUI-data\autorig-fitting\horse-canonical-f1' `
+  --output-dir 'R:\ComfyUI-data\autorig-fitting\admission\horse_trot_001' `
+  --reference-geometry-mode center_crop_cover
+```
+
+A PASS permits fitting but never approves animation quality: fixed-camera visual
+review and deformation/contact QA remain mandatory.
+
+If that independent mask proves that a default surface seed lies outside the
+observed subject, `observe` may repeat `--priority-anchor-id BONE:VERTEX` to use
+a pinned same-bone surface anchor. The exact IDs are recorded in first-frame
+provenance; tracking thresholds remain unchanged.
+
 ## Current exact boundary
 
 - The current external eight-frame horse clip is a static runtime smoke fixture. It proves deterministic TAPNext++ -> SAM 2.1 -> VDA execution, not acceptable walk motion or fitting quality.

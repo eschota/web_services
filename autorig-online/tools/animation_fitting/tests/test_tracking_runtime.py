@@ -906,6 +906,17 @@ def test_priority_seed_selection_never_exceeds_max_tracks(tmp_path: Path) -> Non
     assert len(seeds.track_ids) == len(priority)
 
 
+def test_priority_seed_selection_places_requested_anchor_first(tmp_path: Path) -> None:
+    bundle, _ = _bundle(tmp_path)
+    baseline = select_anchor_seeds(bundle)
+    requested = baseline.anchor_ids[-1]
+
+    seeds = select_anchor_seeds(bundle, priority_anchor_ids=(requested,))
+
+    assert seeds.anchor_ids[0] == requested
+    assert len(seeds.anchor_ids) == len(baseline.anchor_ids)
+
+
 def test_browser_endpoint_manifest_must_be_authoritatively_allowlisted(
     tmp_path: Path,
 ) -> None:
