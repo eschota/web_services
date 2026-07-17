@@ -343,7 +343,7 @@ export class TaskAnimationFittingPanel {
         this.tracker = options.tracker || null;
         this.solver = options.solver || null;
         this.trackerLoader = options.trackerLoader || (() => import('./animation-fitting-semantic-tracker.js?v=2'));
-        this.solverLoader = options.solverLoader || (() => import('./animation-fitting-browser-core.js'));
+        this.solverLoader = options.solverLoader || (() => import('./animation-fitting-browser-core.js?v=3'));
         this.frameCount = positiveInteger(options.frameCount ?? DEFAULT_FRAME_COUNT, 'frameCount');
         this.fps = finiteNumber(options.fps ?? DEFAULT_FPS, 'fps');
         if (this.fps <= 0) throw new Error('fps must be positive');

@@ -1,4 +1,4 @@
-import { fitBrowserAnimation } from './animation-fitting-browser-core.js?v=2';
+import { fitBrowserAnimation } from './animation-fitting-browser-core.js?v=3';
 import { assessHorseWalkGait } from './animation-fitting-semantic-tracker.js?v=1';
 
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';

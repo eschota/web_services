@@ -1,11 +1,11 @@
-import { fitBrowserAnimation } from './animation-fitting-browser-core.js?v=2';
+import { fitBrowserAnimation } from './animation-fitting-browser-core.js?v=3';
 import {
     HORSE_2_SEMANTIC_PROFILE,
     bakeFittedAnimationToThreeHierarchyClip,
     buildHorse2BrowserFittingSkeleton,
-} from './animation-fitting-three-adapter.js?v=2';
-import { prepareRgbObservationsForBrowser } from './animation-fitting-rgb-observation-bridge.js?v=1';
-import { fitBrowserAnimationWithPinnedHoofContacts } from './animation-fitting-hoof-contact-inference.js?v=1';
+} from './animation-fitting-three-adapter.js?v=3';
+import { prepareRgbObservationsForBrowser } from './animation-fitting-rgb-observation-bridge.js?v=2';
+import { fitBrowserAnimationWithPinnedHoofContacts } from './animation-fitting-hoof-contact-inference.js?v=2';
 
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const EVIDENCE_SCHEMA = 'autorig-browser-animation-fitting-controller-evidence.v1';

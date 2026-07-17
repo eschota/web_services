@@ -423,6 +423,6 @@ test('QA metrics flatten deterministically and panel owns no mixer or render loo
     const source = await readFile(new URL('../task-animation-fitting-panel.js', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /new\s+(?:THREE\.)?AnimationMixer/);
     assert.doesNotMatch(source, /requestAnimationFrame|setInterval\s*\(/);
-    assert.match(source, /import\('\.\/animation-fitting-browser-core\.js'\)/);
+    assert.match(source, /import\('\.\/animation-fitting-browser-core\.js\?v=3'\)/);
     assert.match(source, /buildSemanticObservations/);
 });

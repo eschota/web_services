@@ -1,4 +1,4 @@
-import { fitBrowserAnimation } from './animation-fitting-browser-core.js';
+import { fitBrowserAnimation } from './animation-fitting-browser-core.js?v=3';
 
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const SKELETON_SCHEMA = 'autorig-browser-fitting-skeleton.v1';
