@@ -25,8 +25,8 @@ if __package__:
         _validate_descriptor,
     )
 else:  # pragma: no cover - direct script boundary
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from animation_fitting.package_browser_animation_glb import (
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from package_browser_animation_glb import (
         ApprovedClipInput, BIN_CHUNK, GLB_MAGIC, JSON_CHUNK, PackageError,
         Snapshot, _build_output, _exact_keys, _joint_nodes, _object,
         _parse_json, _publish_exclusive, _snapshot, _string, _validate_clip,

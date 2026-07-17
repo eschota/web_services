@@ -10,12 +10,12 @@ import tempfile
 import unittest
 
 
-TOOLS_ROOT = Path(__file__).resolve().parents[2]
-if str(TOOLS_ROOT) not in sys.path:
-    sys.path.insert(0, str(TOOLS_ROOT))
+MODULE_ROOT = Path(__file__).resolve().parents[1]
+if str(MODULE_ROOT) not in sys.path:
+    sys.path.insert(0, str(MODULE_ROOT))
 
-from animation_fitting.package_browser_animation_glb import PackageError  # noqa: E402
-from animation_fitting.package_browser_animation_preview_glb import (  # noqa: E402
+from package_browser_animation_glb import PackageError  # noqa: E402
+from package_browser_animation_preview_glb import (  # noqa: E402
     INPUT_SCHEMA,
     package_browser_animation_preview_glb,
 )
