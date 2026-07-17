@@ -1,0 +1,44 @@
+[Unit]
+Description=AutoRig Animation Fitting Telegram Review Bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/autorig-online/backend
+ExecStart=/root/autorig-online/venv/bin/python -m animation_fitting_telegram_bot poll
+Restart=always
+RestartSec=5
+
+# Dedicated @codexai_bot credentials; never point this at the main AutoRig bot env.
+EnvironmentFile=/etc/autorig-animation-fitting-telegram.env
+Environment="PYTHONPATH=/root/autorig-online/backend"
+Environment="HOME=/root"
+Environment="PATH=/root/autorig-online/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+StateDirectory=autorig-animation-fitting
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/autorig-animation-fitting
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=autorig-animation-fitting-telegram
+
+[Install]
+WantedBy=multi-user.target
