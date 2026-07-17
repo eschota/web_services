@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { fitBrowserAnimation } from '../animation-fitting-browser-core.js';
+import {
+    BROWSER_FITTING_SCHEMAS,
+    fitBrowserAnimation,
+} from '../animation-fitting-browser-core.js';
 import {
     HORSE_2_SEMANTIC_PROFILE,
     HORSE_2_FULL_BODY_CHAINS,
     HORSE_2_FULL_BODY_JOINT_LIMITS,
     HORSE_2_FULL_BODY_SOURCE_ANCHORS,
+    alignHoofSoleNormalToGround,
+    bakeFittedAnimationToThreeHierarchyClip,
     buildHorse2BrowserFittingSkeleton,
     computeContainScaleAndPad,
     computeLongDimensionScaleAndPad,
@@ -30,12 +35,53 @@ class Vector3 {
         return new Vector3(this.x, this.y, this.z);
     }
 
+    copy(value) {
+        return this.set(value.x, value.y, value.z);
+    }
+
+    add(value) {
+        this.x += value.x;
+        this.y += value.y;
+        this.z += value.z;
+        return this;
+    }
+
+    sub(value) {
+        this.x -= value.x;
+        this.y -= value.y;
+        this.z -= value.z;
+        return this;
+    }
+
+    multiplyScalar(value) {
+        this.x *= value;
+        this.y *= value;
+        this.z *= value;
+        return this;
+    }
+
+    lengthSq() {
+        return this.dot(this);
+    }
+
+    length() {
+        return Math.sqrt(this.lengthSq());
+    }
+
+    distanceTo(value) {
+        return this.clone().sub(value).length();
+    }
+
     normalize() {
         const length = Math.hypot(this.x, this.y, this.z) || 1;
         this.x /= length;
         this.y /= length;
         this.z /= length;
         return this;
+    }
+
+    dot(value) {
+        return this.x * value.x + this.y * value.y + this.z * value.z;
     }
 
     applyQuaternion(quaternion) {
@@ -70,6 +116,52 @@ class Quaternion {
 
     clone() {
         return new Quaternion(this.x, this.y, this.z, this.w);
+    }
+
+    copy(value) {
+        Object.assign(this, { x: value.x, y: value.y, z: value.z, w: value.w });
+        return this;
+    }
+
+    normalize() {
+        const length = Math.hypot(this.x, this.y, this.z, this.w) || 1;
+        this.x /= length;
+        this.y /= length;
+        this.z /= length;
+        this.w /= length;
+        return this;
+    }
+
+    multiply(value) {
+        const ax = this.x; const ay = this.y; const az = this.z; const aw = this.w;
+        const bx = value.x; const by = value.y; const bz = value.z; const bw = value.w;
+        this.x = ax * bw + aw * bx + ay * bz - az * by;
+        this.y = ay * bw + aw * by + az * bx - ax * bz;
+        this.z = az * bw + aw * bz + ax * by - ay * bx;
+        this.w = aw * bw - ax * bx - ay * by - az * bz;
+        return this;
+    }
+
+    setFromUnitVectors(fromValue, toValue) {
+        const from = fromValue.clone().normalize();
+        const to = toValue.clone().normalize();
+        let scalar = from.dot(to) + 1;
+        if (scalar < 1e-8) {
+            scalar = 0;
+            if (Math.abs(from.x) > Math.abs(from.z)) {
+                Object.assign(this, { x: -from.y, y: from.x, z: 0, w: scalar });
+            } else {
+                Object.assign(this, { x: 0, y: -from.z, z: from.y, w: scalar });
+            }
+        } else {
+            Object.assign(this, {
+                x: from.y * to.z - from.z * to.y,
+                y: from.z * to.x - from.x * to.z,
+                z: from.x * to.y - from.y * to.x,
+                w: scalar,
+            });
+        }
+        return this.normalize();
     }
 
     invert() {
@@ -157,14 +249,14 @@ class Camera extends Object3D {
     projectVector(vector) {
         vector.x /= 10;
         vector.y /= 10;
-        vector.z = 0;
+        vector.z /= 10;
         return vector;
     }
 
     unprojectVector(vector) {
         vector.x *= 10;
         vector.y *= 10;
-        vector.z = 0;
+        vector.z *= 10;
         return vector;
     }
 
@@ -175,7 +267,26 @@ class Camera extends Object3D {
     updateProjectionMatrix() {}
 }
 
-const THREE = { Vector3, Quaternion };
+class QuaternionKeyframeTrack {
+    constructor(name, times, values) { Object.assign(this, { name, times, values }); }
+}
+
+class VectorKeyframeTrack {
+    constructor(name, times, values) { Object.assign(this, { name, times, values }); }
+}
+
+class AnimationClip {
+    constructor(name, duration, tracks) { Object.assign(this, { name, duration, tracks }); }
+    validate() { return this.tracks.every((track) => track.values.every(Number.isFinite)); }
+}
+
+const THREE = {
+    Vector3,
+    Quaternion,
+    QuaternionKeyframeTrack,
+    VectorKeyframeTrack,
+    AnimationClip,
+};
 
 function horseFixture({ fullBody = false } = {}) {
     const model = new Object3D('Model');
@@ -339,6 +450,8 @@ test('Three adapter auto-maps only chain roots in directly connected chains', ()
         'fore_left', 'fore_right', 'hind_left', 'hind_right',
     ]);
     Object.values(skeleton.limbs).forEach((limb) => {
+        assert.deepEqual(limb.contactOrientation.groundNormalWorld, [0, 1, 0]);
+        assert.equal(limb.contactOrientation.source, 'three_world_y_up_actionless_planted_pose');
         assert.equal(limb.joints.length, 6);
         assert.equal(limb.sourceBoneChain.length, 7);
         assert.equal(limb.trackedJointIndex, 3);
@@ -363,11 +476,62 @@ test('Three adapter auto-maps only chain roots in directly connected chains', ()
     assert.equal(skeleton.provenance.sharedBoneRoot, 'c_pos');
     assert.equal(skeleton.provenance.terminalPolicy, 'seven_bone_heads_six_segments_to_toes_head');
     assert.equal(skeleton.provenance.positionMappings, 'auto_chain_roots_and_parent_breaks');
+    assert.deepEqual(skeleton.provenance.groundPlaneNormalWorld, [0, 1, 0]);
+    assert.equal(skeleton.provenance.groundPlaneNormalSource, 'three_world_y_up_default');
     close(skeleton.projection.sourceToOutputScale, 0.5);
     close(skeleton.projection.ltxCenterPad[1], 5);
     assert.equal('auxiliaryChains' in skeleton, false);
     assert.equal(skeleton.provenance.fullBody.enabled, false);
     assert.equal(skeleton.provenance.fullBody.selectedChainCount, 4);
+});
+
+test('Horse adapter derives per-hoof sole normals from the planted rest pose and canonical ground normal', () => {
+    const { model, camera } = horseFixture();
+    const result = buildHorse2BrowserFittingSkeleton({
+        THREE,
+        model,
+        camera,
+        groundPlaneNormalWorld: [0, 0, 1],
+        sourceViewport: [100, 80],
+        referenceResolution: [100, 80],
+        outputResolution: [50, 50],
+    });
+    for (const label of ['fore_left', 'fore_right', 'hind_left', 'hind_right']) {
+        const orientation = result.limbs[label].contactOrientation;
+        assert.equal(orientation.schema, BROWSER_FITTING_SCHEMAS.hoofGroundOrientation);
+        assert.equal(orientation.terminalBone, result.limbs[label].sourceBoneChain.at(-1));
+        assert.deepEqual(orientation.soleNormalLocal, [0, 0, 1]);
+        assert.deepEqual(orientation.groundNormalWorld, [0, 0, 1]);
+        assert.equal(orientation.source, 'declared_ground_plane_actionless_planted_pose');
+    }
+    assert.deepEqual(result.provenance.groundPlaneNormalWorld, [0, 0, 1]);
+    assert.equal(result.provenance.groundPlaneNormalSource, 'explicit_caller_contract');
+});
+
+test('hoof sole normal correction aligns a tilted hoof to ground with shortest world-space arc', () => {
+    const THREE = { Vector3, Quaternion };
+    const angle = Math.PI / 3;
+    const tilted = new Quaternion(Math.sin(angle / 2), 0, 0, Math.cos(angle / 2));
+    const result = alignHoofSoleNormalToGround({
+        THREE,
+        worldQuaternion: tilted,
+        soleNormalLocal: [0, 0, 1],
+        groundNormalWorld: [0, 0, 1],
+    });
+    const aligned = new Vector3(0, 0, 1).applyQuaternion(result.quaternion).normalize();
+    assert.ok(aligned.dot(new Vector3(0, 0, 1)) >= 1 - 1e-12);
+    assert.ok(Math.abs(result.qa.beforeErrorRad - angle) <= 1e-12);
+    assert.ok(result.qa.afterErrorRad <= 1e-7);
+    assert.ok(Math.abs(result.qa.correctionAngleRad - angle) <= 1e-7);
+});
+
+test('hoof sole normal correction rejects a zero ground normal', () => {
+    assert.throws(() => alignHoofSoleNormalToGround({
+        THREE: { Vector3, Quaternion },
+        worldQuaternion: new Quaternion(),
+        soleNormalLocal: [0, 0, 1],
+        groundNormalWorld: [0, 0, 0],
+    }), /groundNormalWorld has zero length/);
 });
 
 test('opt-in Horse_2 full-body adapter keeps four locomotion limbs and exposes exact auxiliary chains', () => {
@@ -472,6 +636,35 @@ test('adapter output is accepted by browser core without child position double t
     assert.equal(fitted.positionTracks.length, 4);
     assert.equal(fitted.qa.maximumBoneLengthErrorPx < 1e-9, true);
     assert.equal(fitted.qa.loopEndpointError, 0);
+});
+
+test('hierarchy hoof-orientation QA fails closed when the fitted clip has zero contact frames', () => {
+    const { model, camera } = horseFixture();
+    const skeleton = buildHorse2BrowserFittingSkeleton({
+        THREE,
+        model,
+        camera,
+        sourceViewport: [100, 80],
+        referenceResolution: [100, 80],
+        outputResolution: [50, 50],
+    });
+    const fitted = fitBrowserAnimation({
+        skeleton,
+        observations: constantObservations(skeleton),
+        options: { loop: true, smoothingRadius: 0 },
+    });
+    assert.equal(fitted.qa.hoofGroundOrientationContactFrameCount, 0);
+    const { qa } = bakeFittedAnimationToThreeHierarchyClip({
+        THREE,
+        model,
+        camera,
+        skeleton,
+        fitted,
+    });
+    assert.equal(qa.hoofGroundOrientation.contactFrameCount, 0);
+    assert.equal(qa.hoofGroundOrientation.expectedContactFrameCount, 0);
+    assert.equal(qa.hoofGroundOrientation.maximumNormalErrorAfterRad, 0);
+    assert.equal(qa.hoofGroundOrientation.passed, false);
 });
 
 test('auto position mappings include mixed-parent chain breaks but exclude connected children', () => {

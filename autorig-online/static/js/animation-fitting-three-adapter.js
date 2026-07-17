@@ -1,5 +1,7 @@
 const SKELETON_SCHEMA = 'autorig-browser-fitting-skeleton.v1';
 const FITTED_SCHEMA = 'autorig-browser-fitted-animation.v1';
+const HOOF_GROUND_ORIENTATION_SCHEMA = 'autorig-browser-hoof-ground-orientation.v1';
+const THREE_WORLD_UP = Object.freeze([0, 1, 0]);
 const REQUIRED_LIMB_LABELS = Object.freeze([
     'fore_left',
     'fore_right',
@@ -215,8 +217,61 @@ function array4(value, field) {
     return normalized.map((item) => item / length);
 }
 
+function normalizedVector3(THREE, value, field) {
+    if (typeof THREE?.Vector3 !== 'function') throw new Error('THREE.Vector3 is required');
+    const components = array3(value, field);
+    const length = Math.hypot(...components);
+    if (length <= 1e-12) throw new Error(`${field} has zero length`);
+    return new THREE.Vector3(...components).normalize();
+}
+
+function hoofGroundOrientationContract(THREE, terminalBone, groundNormalValue) {
+    if (!terminalBone || typeof terminalBone.getWorldQuaternion !== 'function') {
+        throw new Error('terminal hoof bone getWorldQuaternion() is required');
+    }
+    if (typeof THREE?.Quaternion !== 'function') throw new Error('THREE.Quaternion is required');
+    const groundNormalWorld = normalizedVector3(
+        THREE,
+        groundNormalValue ?? THREE_WORLD_UP,
+        'groundPlaneNormalWorld',
+    );
+    const restWorldQuaternion = terminalBone.getWorldQuaternion(new THREE.Quaternion());
+    if (typeof restWorldQuaternion?.clone !== 'function'
+        || typeof restWorldQuaternion.clone().invert !== 'function') {
+        throw new Error('terminal hoof world quaternion clone().invert() is required');
+    }
+    // Define the sole normal in terminal-bone local space from the canonical
+    // actionless planted pose.  This preserves each hoof's authored roll/yaw,
+    // while giving contact IK one exact normal that must map back to the
+    // canonical ground-plane normal.
+    const soleNormalLocal = groundNormalWorld.clone()
+        .applyQuaternion(restWorldQuaternion.clone().invert())
+        .normalize();
+    return {
+        schema: HOOF_GROUND_ORIENTATION_SCHEMA,
+        terminalBone: terminalBone.name,
+        soleNormalLocal: array3(soleNormalLocal, `${terminalBone.name}.soleNormalLocal`),
+        groundNormalWorld: array3(groundNormalWorld, 'groundNormalWorld'),
+        source: groundNormalValue == null
+            ? 'three_world_y_up_actionless_planted_pose'
+            : 'declared_ground_plane_actionless_planted_pose',
+    };
+}
+
 function distance3(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function sameDirection3(leftValue, rightValue, leftField, rightField) {
+    const left = array3(leftValue, leftField);
+    const right = array3(rightValue, rightField);
+    const leftLength = Math.hypot(...left);
+    const rightLength = Math.hypot(...right);
+    if (leftLength <= 1e-12 || rightLength <= 1e-12) return false;
+    const dot = left.reduce((sum, value, index) => (
+        sum + (value / leftLength) * (right[index] / rightLength)
+    ), 0);
+    return dot >= 1 - 1e-12;
 }
 
 function distance2(a, b) {
@@ -709,6 +764,13 @@ function semanticChainContract({ THREE, options, profile, label, names, bones, w
     }
     const oneJoint = joints.length === 1;
     const terminalRole = REQUIRED_LIMB_LABELS.includes(label) ? 'hoof' : 'terminal';
+    const contactOrientation = REQUIRED_LIMB_LABELS.includes(label)
+        ? hoofGroundOrientationContract(
+            THREE,
+            bones.get(names.at(-1)),
+            options.groundPlaneNormalWorld,
+        )
+        : null;
     return {
         joints,
         proximalTrack: `${label}.proximal`,
@@ -717,6 +779,7 @@ function semanticChainContract({ THREE, options, profile, label, names, bones, w
         trackedJointIndex: oneJoint ? null : Math.max(1, Math.floor(joints.length / 2)),
         sourceBoneChain: [...names],
         terminalBone: names.at(-1),
+        ...(contactOrientation ? { contactOrientation } : {}),
     };
 }
 
@@ -857,6 +920,10 @@ export function buildHorse2BrowserFittingSkeleton(options = {}) {
         },
         provenance: {
             source: 'three_actionless_rest_pose',
+            groundPlaneNormalWorld: [...limbs.fore_left.contactOrientation.groundNormalWorld],
+            groundPlaneNormalSource: options.groundPlaneNormalWorld == null
+                ? 'three_world_y_up_default'
+                : 'explicit_caller_contract',
             semanticProfileId: String(profile.profile_id || profile.profileId || 'horse_2.semantic_limbs.v1'),
             terminalPolicy: 'seven_bone_heads_six_segments_to_toes_head',
             sharedBoneRoot: String(boneRoot.name || ''),
@@ -889,6 +956,47 @@ function setQuaternionFromUnitVectors(quaternion, from, to) {
         throw new Error('THREE.Quaternion.setFromUnitVectors() is required');
     }
     return quaternion.setFromUnitVectors(from, to);
+}
+
+/**
+ * Rotate one fitted hoof terminal orientation so its declared sole normal is
+ * parallel to the ground-plane normal.  The correction is applied in world
+ * space and pre-multiplied onto the fitted world quaternion; contact position
+ * and the already solved chain heads therefore stay unchanged.
+ */
+export function alignHoofSoleNormalToGround({
+    THREE,
+    worldQuaternion,
+    soleNormalLocal,
+    groundNormalWorld,
+} = {}) {
+    if (typeof THREE?.Quaternion !== 'function' || typeof THREE?.Vector3 !== 'function') {
+        throw new Error('THREE Quaternion and Vector3 are required');
+    }
+    if (!worldQuaternion || typeof worldQuaternion.clone !== 'function') {
+        throw new Error('worldQuaternion.clone() is required');
+    }
+    const sole = normalizedVector3(THREE, soleNormalLocal, 'soleNormalLocal');
+    const ground = normalizedVector3(THREE, groundNormalWorld, 'groundNormalWorld');
+    const before = sole.clone().applyQuaternion(worldQuaternion).normalize();
+    const beforeDot = Math.min(1, Math.max(-1, before.dot(ground)));
+    const correction = setQuaternionFromUnitVectors(new THREE.Quaternion(), before, ground);
+    const correctionW = Math.min(1, Math.max(-1, Math.abs(finite(correction.w, 'correction.w'))));
+    const corrected = multiplyQuaternion(correction.clone(), worldQuaternion.clone()).normalize();
+    const after = sole.clone().applyQuaternion(corrected).normalize();
+    const afterDot = Math.min(1, Math.max(-1, after.dot(ground)));
+    return {
+        quaternion: corrected,
+        qa: {
+            schema: HOOF_GROUND_ORIENTATION_SCHEMA,
+            beforeErrorRad: Math.acos(beforeDot),
+            afterErrorRad: Math.acos(afterDot),
+            correctionAngleRad: 2 * Math.acos(correctionW),
+            soleNormalWorldBefore: array3(before, 'soleNormalWorldBefore'),
+            soleNormalWorldAfter: array3(after, 'soleNormalWorldAfter'),
+            groundNormalWorld: array3(ground, 'groundNormalWorld'),
+        },
+    };
 }
 
 function assignVector(target, source, field) {
@@ -983,7 +1091,8 @@ function normalizedFittedFrames(fitted, skeleton) {
     if (!Object.keys(skeleton?.limbs || {}).length) throw new Error('skeleton.limbs must not be empty');
     fitted.frames.forEach((frame, frameIndex) => chains.forEach(({ collection, label, contract }) => {
         const expected = contract.sourceBoneChain?.length;
-        const points = frame?.[collection]?.[label]?.points;
+        const fittedChain = frame?.[collection]?.[label];
+        const points = fittedChain?.points;
         if (!Number.isInteger(expected) || expected < 2) {
             throw new Error(`skeleton chain ${label} is missing sourceBoneChain`);
         }
@@ -995,6 +1104,28 @@ function normalizedFittedFrames(fitted, skeleton) {
                 throw new Error(`fitted frame ${frameIndex} chain ${label} point ${pointIndex} is invalid`);
             }
         });
+        const contactOrientation = fittedChain?.contactOrientation;
+        if (contactOrientation != null) {
+            const declared = contract.contactOrientation;
+            if (!declared || collection !== 'limbs'
+                || contactOrientation.schema !== HOOF_GROUND_ORIENTATION_SCHEMA
+                || contactOrientation.apply !== true
+                || contactOrientation.terminalBone !== declared.terminalBone
+                || !sameDirection3(
+                    contactOrientation.soleNormalLocal,
+                    declared.soleNormalLocal,
+                    `fitted frame ${frameIndex} ${label} soleNormalLocal`,
+                    `skeleton ${label} soleNormalLocal`,
+                )
+                || !sameDirection3(
+                    contactOrientation.groundNormalWorld,
+                    declared.groundNormalWorld,
+                    `fitted frame ${frameIndex} ${label} groundNormalWorld`,
+                    `skeleton ${label} groundNormalWorld`,
+                )) {
+                throw new Error(`fitted frame ${frameIndex} chain ${label} has invalid hoof ground orientation`);
+            }
+        }
     }));
     return chains;
 }
@@ -1063,6 +1194,15 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
     let maximumHierarchyBakeReprojectionErrorPx = 0;
     let maximumRequestedFittedPointErrorPx = 0;
     let unreachablePixelRays = 0;
+    let hoofGroundOrientationContactFrameCount = 0;
+    let maximumHoofNormalErrorBeforeRad = 0;
+    let maximumHoofNormalErrorAfterRad = 0;
+    let maximumHoofOrientationCorrectionRad = 0;
+    const expectedHoofGroundOrientationContactFrameCount = Number.isInteger(
+        fitted.qa?.hoofGroundOrientationContactFrameCount,
+    ) && fitted.qa.hoofGroundOrientationContactFrameCount >= 0
+        ? fitted.qa.hoofGroundOrientationContactFrameCount
+        : null;
 
     const restore = () => {
         snapshots.forEach((snapshot, bone) => {
@@ -1079,7 +1219,8 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
             const desired = new Map();
             chains.forEach(({ key, collection, label, contract }) => {
                 const { names, segments } = perChain.get(key);
-                const pixels = frame[collection][label].points;
+                const fittedChain = frame[collection][label];
+                const pixels = fittedChain.points;
                 const restRoot = rest.get(names[0]).head;
                 const rootNdcZ = restRoot.clone().project(camera).z;
                 let rootPoint = unprojectPixel(THREE, camera, pixels[0], projection, rootNdcZ);
@@ -1123,6 +1264,33 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
                         quaternion: multiplyQuaternion(delta, restQuaternion.clone()).normalize(),
                     });
                 });
+                if (fittedChain.contactOrientation?.apply === true) {
+                    const orientation = fittedChain.contactOrientation;
+                    const terminal = desired.get(orientation.terminalBone);
+                    if (!terminal) {
+                        throw new Error(`missing hoof orientation terminal ${orientation.terminalBone}`);
+                    }
+                    const aligned = alignHoofSoleNormalToGround({
+                        THREE,
+                        worldQuaternion: terminal.quaternion,
+                        soleNormalLocal: orientation.soleNormalLocal,
+                        groundNormalWorld: orientation.groundNormalWorld,
+                    });
+                    terminal.quaternion = aligned.quaternion;
+                    hoofGroundOrientationContactFrameCount += 1;
+                    maximumHoofNormalErrorBeforeRad = Math.max(
+                        maximumHoofNormalErrorBeforeRad,
+                        aligned.qa.beforeErrorRad,
+                    );
+                    maximumHoofNormalErrorAfterRad = Math.max(
+                        maximumHoofNormalErrorAfterRad,
+                        aligned.qa.afterErrorRad,
+                    );
+                    maximumHoofOrientationCorrectionRad = Math.max(
+                        maximumHoofOrientationCorrectionRad,
+                        aligned.qa.correctionAngleRad,
+                    );
+                }
             });
 
             uniqueBones.sort((left, right) => objectDepth(left) - objectDepth(right)).forEach((bone) => {
@@ -1209,6 +1377,20 @@ export function bakeFittedAnimationToThreeHierarchyClip(options = {}) {
             maximumHierarchyBakeReprojectionErrorPx,
             maximumRequestedFittedPointErrorPx,
             unreachablePixelRays,
+            hoofGroundOrientation: {
+                schema: HOOF_GROUND_ORIENTATION_SCHEMA,
+                method: 'world_space_shortest_arc_sole_normal_to_ground_normal',
+                positionPreserved: true,
+                contactFrameCount: hoofGroundOrientationContactFrameCount,
+                expectedContactFrameCount: expectedHoofGroundOrientationContactFrameCount,
+                maximumNormalErrorBeforeRad: maximumHoofNormalErrorBeforeRad,
+                maximumNormalErrorAfterRad: maximumHoofNormalErrorAfterRad,
+                maximumCorrectionRad: maximumHoofOrientationCorrectionRad,
+                passed: expectedHoofGroundOrientationContactFrameCount > 0
+                    && hoofGroundOrientationContactFrameCount
+                        === expectedHoofGroundOrientationContactFrameCount
+                    && maximumHoofNormalErrorAfterRad <= 1e-6,
+            },
         },
     };
 }

@@ -2,6 +2,7 @@ const SKELETON_SCHEMA = 'autorig-browser-fitting-skeleton.v1';
 const OBSERVATION_SCHEMA = 'autorig-fitting-observations.v1';
 const FITTED_SCHEMA = 'autorig-browser-fitted-animation.v1';
 const C1_PERIODIC_CLOSURE_SCHEMA = 'autorig-browser-c1-periodic-closure.v1';
+const HOOF_GROUND_ORIENTATION_SCHEMA = 'autorig-browser-hoof-ground-orientation.v1';
 
 const EPSILON = 1e-9;
 
@@ -33,6 +34,13 @@ function vec3(value, field) {
         throw new Error(`${field} must be a three-component array`);
     }
     return value.map((item, index) => finite(item, `${field}[${index}]`));
+}
+
+function normalized3(value, field) {
+    const vector = vec3(value, field);
+    const length = Math.hypot(...vector);
+    if (length <= EPSILON) throw new Error(`${field} must not be zero`);
+    return vector.map((item) => item / length);
 }
 
 function add2(a, b) {
@@ -342,6 +350,36 @@ function normalizeSkeleton(value) {
                 return bone;
             });
         }
+        let contactOrientation = null;
+        if (limbValue.contactOrientation != null) {
+            const value = limbValue.contactOrientation;
+            if (!value || typeof value !== 'object' || Array.isArray(value)
+                || value.schema !== HOOF_GROUND_ORIENTATION_SCHEMA) {
+                throw new Error(`limb ${label}.contactOrientation must use ${HOOF_GROUND_ORIENTATION_SCHEMA}`);
+            }
+            if (collection !== 'limbs') {
+                throw new Error(`auxiliary chain ${label} cannot declare hoof ground orientation`);
+            }
+            if (typeof value.terminalBone !== 'string' || !value.terminalBone) {
+                throw new Error(`limb ${label}.contactOrientation.terminalBone is required`);
+            }
+            if (sourceBoneChain && value.terminalBone !== sourceBoneChain.at(-1)) {
+                throw new Error(`limb ${label}.contactOrientation.terminalBone must be its terminal source bone`);
+            }
+            contactOrientation = {
+                schema: HOOF_GROUND_ORIENTATION_SCHEMA,
+                terminalBone: value.terminalBone,
+                soleNormalLocal: normalized3(
+                    value.soleNormalLocal,
+                    `limb ${label}.contactOrientation.soleNormalLocal`,
+                ),
+                groundNormalWorld: normalized3(
+                    value.groundNormalWorld,
+                    `limb ${label}.contactOrientation.groundNormalWorld`,
+                ),
+                source: String(value.source || 'declared'),
+            };
+        }
         result[label] = {
             label,
             collection,
@@ -352,6 +390,7 @@ function normalizeSkeleton(value) {
             trackedJointIndex,
             orderedHeadTracks,
             sourceBoneChain,
+            contactOrientation,
             branchConnector: limbValue.branchConnector == null
                 ? null
                 : { ...limbValue.branchConnector },
@@ -969,6 +1008,14 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
             });
             debugFrames[frame][chain.collection][label] = {
                 points: framePoints.map((point) => [...point]),
+                ...(chain.collection === 'limbs' && pins.has(frame) && limb.contactOrientation ? {
+                    contactOrientation: {
+                        ...limb.contactOrientation,
+                        soleNormalLocal: [...limb.contactOrientation.soleNormalLocal],
+                        groundNormalWorld: [...limb.contactOrientation.groundNormalWorld],
+                        apply: true,
+                    },
+                } : {}),
             };
         });
         maximumSlide = Math.max(maximumSlide, maximumContactSlide(points, pins));
@@ -1015,6 +1062,11 @@ export function fitBrowserAnimation({ skeleton: skeletonValue, observations: obs
             maximumBoneLengthErrorPx: maximumLengthError,
             maximumJointLimitViolationRad: maximumJointLimitViolation,
             maximumContactSlidePx: maximumSlide,
+            hoofGroundOrientationContactFrameCount: debugFrames.reduce(
+                (sum, frame) => sum + Object.values(frame.limbs)
+                    .filter((limb) => limb.contactOrientation?.apply === true).length,
+                0,
+            ),
             loopEndpointError: loopEndpointError,
         },
         frames: debugFrames,
@@ -1294,5 +1346,6 @@ export const BROWSER_FITTING_SCHEMAS = Object.freeze({
     skeleton: SKELETON_SCHEMA,
     observations: OBSERVATION_SCHEMA,
     fitted: FITTED_SCHEMA,
+    hoofGroundOrientation: HOOF_GROUND_ORIENTATION_SCHEMA,
     c1PeriodicClosure: C1_PERIODIC_CLOSURE_SCHEMA,
 });

@@ -10,7 +10,12 @@ import {
 
 const LABELS = ['fore_left', 'fore_right', 'hind_left', 'hind_right'];
 
-function skeleton({ tightLimits = false, rootMotion = false, positionMappings = false } = {}) {
+function skeleton({
+    tightLimits = false,
+    rootMotion = false,
+    positionMappings = false,
+    hoofGroundOrientation = false,
+} = {}) {
     const limbs = {};
     LABELS.forEach((label, index) => {
         const x = index * 2;
@@ -48,6 +53,15 @@ function skeleton({ tightLimits = false, rootMotion = false, positionMappings = 
                 },
             ],
             trackedJointIndex: 1,
+            ...(hoofGroundOrientation ? {
+                contactOrientation: {
+                    schema: BROWSER_FITTING_SCHEMAS.hoofGroundOrientation,
+                    terminalBone: `${label}_hoof_terminal`,
+                    soleNormalLocal: [0, 0, 1],
+                    groundNormalWorld: [0, 0, 1],
+                    source: 'synthetic_planted_rest_pose',
+                },
+            } : {}),
         };
     });
     return {
@@ -479,6 +493,39 @@ test('contact intervals pin the hoof and bound slide', () => {
         options: { loop: false, smoothingRadius: 0, jointAttraction: 0, iterations: 80, tolerance: 1e-7 },
     });
     assert.ok(fitted.qa.maximumContactSlidePx < 1e-5);
+});
+
+test('contact frames carry exact hoof-sole normal alignment requests without altering swing frames', () => {
+    const fitted = fitBrowserAnimation({
+        skeleton: skeleton({ hoofGroundOrientation: true }),
+        observations: observations({ contact: true }),
+        options: { loop: false, smoothingRadius: 0 },
+    });
+    assert.equal(fitted.qa.hoofGroundOrientationContactFrameCount, 3);
+    fitted.frames.forEach((frame, frameIndex) => {
+        const orientation = frame.limbs.hind_right.contactOrientation;
+        if ([2, 3, 4].includes(frameIndex)) {
+            assert.equal(orientation.schema, BROWSER_FITTING_SCHEMAS.hoofGroundOrientation);
+            assert.equal(orientation.apply, true);
+            assert.equal(orientation.terminalBone, 'hind_right_hoof_terminal');
+            assert.deepEqual(orientation.soleNormalLocal, [0, 0, 1]);
+            assert.deepEqual(orientation.groundNormalWorld, [0, 0, 1]);
+        } else {
+            assert.equal(orientation, undefined);
+        }
+        for (const label of LABELS.filter((label) => label !== 'hind_right')) {
+            assert.equal(frame.limbs[label].contactOrientation, undefined);
+        }
+    });
+});
+
+test('hoof-ground orientation rejects a zero sole normal before solving', () => {
+    const value = skeleton({ hoofGroundOrientation: true });
+    value.limbs.fore_left.contactOrientation.soleNormalLocal = [0, 0, 0];
+    assert.throws(
+        () => fitBrowserAnimation({ skeleton: value, observations: observations() }),
+        /soleNormalLocal must not be zero/,
+    );
 });
 
 test('loop closure makes quaternion and root endpoints identical', () => {
