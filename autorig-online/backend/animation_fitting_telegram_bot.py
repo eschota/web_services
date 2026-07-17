@@ -22,7 +22,6 @@ from animation_fitting_telegram_approval import (
     UnauthorizedReviewer,
     callback_data,
     configured_owner,
-    decision_caption,
     default_ledger_path,
     make_candidate_binding,
     record_candidate_markup_failure,
@@ -30,6 +29,9 @@ from animation_fitting_telegram_approval import (
     register_sent_candidate,
     sha256_file,
 )
+
+
+DELETE_RETRY_DELAYS_SECONDS = (0.0, 0.25, 1.0)
 
 
 def _get_token() -> str:
@@ -235,19 +237,36 @@ async def handle_review_callback(update, context) -> None:
         answer = "Референс утверждён" if approved else "Референс отклонён"
     if result.duplicate:
         answer += " (уже сохранено)"
-    await query.answer(answer)
-    caption = decision_caption(getattr(message, "caption", None), result.record)
     try:
-        await query.edit_message_caption(
-            caption=caption,
-            reply_markup=getattr(message, "reply_markup", None),
-        )
+        await query.answer(answer)
     except Exception as exc:
-        print(f"[AnimationFittingTelegram] Caption edit failed: {type(exc).__name__}")
+        # Callback acknowledgement is only transient UI.  A Telegram/network
+        # failure here must not leave an already-decided queue item visible.
+        print(f"[AnimationFittingTelegram] Callback answer failed: {type(exc).__name__}")
+
+    # The private chat is a validation queue, not an archive.  The append-only
+    # ledger is authoritative once record_decision() succeeds, so both approve
+    # and reject remove the reviewed message instead of adding status text.
+    last_error = None
+    for delay in DELETE_RETRY_DELAYS_SECONDS:
+        if delay:
+            await asyncio.sleep(delay)
         try:
-            await message.reply_text(f"{answer}. Решение записано в журнал.")
-        except Exception:
-            pass
+            delete = getattr(message, "delete", None)
+            if callable(delete):
+                await delete()
+            else:
+                bot = getattr(context, "bot", None)
+                if bot is None or not callable(getattr(bot, "delete_message", None)):
+                    raise RuntimeError("Telegram message delete API is unavailable")
+                await bot.delete_message(chat_id=int(chat.id), message_id=int(message.message_id))
+            return
+        except Exception as exc:
+            last_error = exc
+    print(
+        "[AnimationFittingTelegram] Reviewed message delete failed: "
+        f"{type(last_error).__name__ if last_error is not None else 'UnknownError'}"
+    )
 
 
 async def _start_command(update, context) -> None:

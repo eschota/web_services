@@ -286,9 +286,17 @@ class _FakeMessage:
         self.chat = SimpleNamespace(id=chat_id, type="private")
         self.reply_markup = None
         self.replies = []
+        self.delete_calls = 0
+        self.fail_delete = False
 
     async def reply_text(self, text):
         self.replies.append(text)
+
+    async def delete(self):
+        self.delete_calls += 1
+        if self.fail_delete:
+            raise RuntimeError("simulated Telegram delete failure")
+        return True
 
 
 class _FakeBot:
@@ -323,16 +331,27 @@ class _FakeBot:
 
 
 class _FakeQuery:
-    def __init__(self, *, data, message, user_id=OWNER, query_id="callback-1"):
+    def __init__(
+        self,
+        *,
+        data,
+        message,
+        user_id=OWNER,
+        query_id="callback-1",
+        fail_answer=False,
+    ):
         self.data = data
         self.message = message
         self.from_user = SimpleNamespace(id=user_id)
         self.id = query_id
         self.answers = []
         self.caption_edits = []
+        self.fail_answer = fail_answer
 
     async def answer(self, text, show_alert=False):
         self.answers.append((text, show_alert))
+        if self.fail_answer:
+            raise RuntimeError("simulated Telegram callback answer failure")
 
     async def edit_message_caption(self, **kwargs):
         self.caption_edits.append(kwargs)
@@ -418,7 +437,7 @@ class AnimationFittingTelegramBotAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]["errorType"], "RuntimeError")
         self.assertNotIn("secret-looking", json.dumps(events))
 
-    async def test_callback_handler_records_decision_answers_and_edits_caption(self):
+    async def test_callback_handler_records_decision_answers_and_deletes_queue_message(self):
         binding = review.make_candidate_binding("horse/death-d02", review.sha256_file(self.video))
         review.register_sent_candidate(self.ledger, binding, chat_id=OWNER, message_id=45)
         message = _FakeMessage(message_id=45, caption="Horse Death D02")
@@ -426,9 +445,98 @@ class AnimationFittingTelegramBotAsyncTests(unittest.IsolatedAsyncioTestCase):
         query = _FakeQuery(data=review.callback_data(binding, review.APPROVE), message=message)
         await review_bot.handle_review_callback(SimpleNamespace(callback_query=query), None)
         self.assertEqual(query.answers, [("Референс утверждён", False)])
-        self.assertIn("✅ Утверждено как референс для фиттинга", query.caption_edits[0]["caption"])
+        self.assertEqual(message.delete_calls, 1)
+        self.assertEqual(query.caption_edits, [])
+        self.assertEqual(message.replies, [])
         events = [json.loads(line) for line in self.ledger.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(events[-1]["decisionMeaning"], "approved_as_fitting_reference")
+
+    async def test_callback_reject_also_deletes_queue_message(self):
+        binding = review.make_candidate_binding(
+            "horse/fitted/walk-01",
+            review.sha256_file(self.video),
+            media_kind="fitted_preview",
+            machine_qa_sha256=MACHINE_QA_SHA,
+        )
+        review.register_sent_candidate(self.ledger, binding, chat_id=OWNER, message_id=46)
+        message = _FakeMessage(message_id=46, caption="Horse Walk fitted")
+        query = _FakeQuery(
+            data=review.callback_data(binding, review.REJECT),
+            message=message,
+            query_id="callback-reject",
+        )
+        await review_bot.handle_review_callback(SimpleNamespace(callback_query=query), None)
+        self.assertEqual(query.answers, [("Visual QA: FAIL", False)])
+        self.assertEqual(message.delete_calls, 1)
+        self.assertEqual(query.caption_edits, [])
+        self.assertEqual(message.replies, [])
+        events = [json.loads(line) for line in self.ledger.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(events[-1]["decisionMeaning"], "human_visual_fail")
+
+    async def test_callback_answer_failure_still_deletes_after_persisting_decision(self):
+        binding = review.make_candidate_binding("horse/idle-01", review.sha256_file(self.video))
+        review.register_sent_candidate(self.ledger, binding, chat_id=OWNER, message_id=47)
+        message = _FakeMessage(message_id=47)
+        query = _FakeQuery(
+            data=review.callback_data(binding, review.APPROVE),
+            message=message,
+            query_id="callback-answer-fails",
+            fail_answer=True,
+        )
+        await review_bot.handle_review_callback(SimpleNamespace(callback_query=query), None)
+        self.assertEqual(message.delete_calls, 1)
+        self.assertEqual(message.replies, [])
+        events = [json.loads(line) for line in self.ledger.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(events[-1]["event"], "decision")
+        self.assertEqual(events[-1]["decisionMeaning"], "approved_as_fitting_reference")
+
+    async def test_permanent_delete_failure_retries_three_times_without_losing_decision_or_spam(self):
+        binding = review.make_candidate_binding("horse/trot-01", review.sha256_file(self.video))
+        review.register_sent_candidate(self.ledger, binding, chat_id=OWNER, message_id=48)
+        message = _FakeMessage(message_id=48)
+        message.fail_delete = True
+        query = _FakeQuery(
+            data=review.callback_data(binding, review.REJECT),
+            message=message,
+            query_id="callback-delete-fails",
+        )
+        with patch.object(review_bot, "DELETE_RETRY_DELAYS_SECONDS", (0.0, 0.0, 0.0)):
+            await review_bot.handle_review_callback(SimpleNamespace(callback_query=query), None)
+        self.assertEqual(message.delete_calls, 3)
+        self.assertEqual(message.replies, [])
+        self.assertEqual(query.caption_edits, [])
+        events = [json.loads(line) for line in self.ledger.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(events[-1]["event"], "decision")
+        self.assertEqual(events[-1]["decisionMeaning"], "rejected_as_fitting_reference")
+
+    async def test_unauthorized_and_unknown_callbacks_never_delete_message(self):
+        binding = review.make_candidate_binding("horse/jump-01", review.sha256_file(self.video))
+        review.register_sent_candidate(self.ledger, binding, chat_id=OWNER, message_id=49)
+
+        unauthorized_message = _FakeMessage(message_id=49)
+        unauthorized = _FakeQuery(
+            data=review.callback_data(binding, review.APPROVE),
+            message=unauthorized_message,
+            user_id=OWNER + 1,
+            query_id="callback-unauthorized",
+        )
+        await review_bot.handle_review_callback(SimpleNamespace(callback_query=unauthorized), None)
+        self.assertEqual(unauthorized_message.delete_calls, 0)
+
+        unknown_binding = review.make_candidate_binding(
+            "horse/not-registered", review.sha256_file(self.video)
+        )
+        unknown_message = _FakeMessage(message_id=50)
+        unknown = _FakeQuery(
+            data=review.callback_data(unknown_binding, review.REJECT),
+            message=unknown_message,
+            query_id="callback-unknown",
+        )
+        await review_bot.handle_review_callback(SimpleNamespace(callback_query=unknown), None)
+        self.assertEqual(unknown_message.delete_calls, 0)
+
+        events = [json.loads(line) for line in self.ledger.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([event["event"] for event in events], ["candidate_sent"])
 
     async def test_discover_owner_requires_exactly_one_private_identity(self):
         _FakeBot.updates = [SimpleNamespace(
