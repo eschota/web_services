@@ -911,7 +911,7 @@ def _safe_worker_float(value: Any, default: float = 900.0) -> float:
 async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) -> WorkerQueueStatus:
     """Get detailed queue status from a single worker"""
     try:
-        response = await client.get(worker_url, timeout=5.0)
+        response = await client.get(worker_url, timeout=10.0)
         if response.status_code == 200:
             data = response.json()
             if not isinstance(data, dict):
