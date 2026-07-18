@@ -49,11 +49,11 @@ class SpyServer:
 
     def __init__(self):
         self.converter_servers = {
-            'F1': 'http://5.129.157.224:5132/api-converter-glb',
-            'F2': 'http://5.129.157.224:5279/api-converter-glb',
-            'F7': 'http://5.129.157.224:5131/api-converter-glb',
-            'F11': 'http://5.129.157.224:5533/api-converter-glb',
-            'F13': 'http://5.129.157.224:5267/api-converter-glb'
+            'F1': 'https://converter-f1.freestock.online/api-converter-glb',
+            'F2': 'https://converter-f2.freestock.online/api-converter-glb',
+            'F7': 'https://converter-f7.freestock.online/api-converter-glb',
+            'F11': 'https://converter-f11.freestock.online/api-converter-glb',
+            'F13': 'https://converter-f13.freestock.online/api-converter-glb'
         }
 
         # CPU monitoring - store measurements for 10 minutes (60 measurements at 10-sec intervals)
@@ -662,20 +662,20 @@ class RenderFarmerBot:
             ],
             # Server management buttons (first row)
             [
-                InlineKeyboardButton("⚙️ F1", url="http://5.129.157.224:5132/api-converter-glb-ui"),
-                InlineKeyboardButton("⚙️ F2", url="http://5.129.157.224:5279/api-converter-glb-ui"),
-                InlineKeyboardButton("⚙️ F7", url="http://5.129.157.224:5131/api-converter-glb-ui")
+                InlineKeyboardButton("⚙️ F1", url="https://converter-f1.freestock.online/api-converter-glb-ui"),
+                InlineKeyboardButton("⚙️ F2", url="https://converter-f2.freestock.online/api-converter-glb-ui"),
+                InlineKeyboardButton("⚙️ F7", url="https://converter-f7.freestock.online/api-converter-glb-ui")
             ],
             # Server management buttons (second row)
             [
-                InlineKeyboardButton("⚙️ F11", url="http://5.129.157.224:5533/api-converter-glb-ui"),
-                InlineKeyboardButton("⚙️ F13", url="http://5.129.157.224:5267/api-converter-glb-ui"),
+                InlineKeyboardButton("⚙️ F11", url="https://converter-f11.freestock.online/api-converter-glb-ui"),
+                InlineKeyboardButton("⚙️ F13", url="https://converter-f13.freestock.online/api-converter-glb-ui"),
                 InlineKeyboardButton("📊 Tasks", callback_data="show_tasks")
             ],
             # Test links section
             [
-                InlineKeyboardButton("🔄 Перезапуск F1", url="http://5.129.157.224:5132/api-converter-glb-restart-server"),
-                InlineKeyboardButton("⚙️ Управление F2", url="http://5.129.157.224:5279/api-converter-glb-ui")
+                InlineKeyboardButton("🔄 Перезапуск F1", url="https://converter-f1.freestock.online/api-converter-glb-restart-server"),
+                InlineKeyboardButton("⚙️ Управление F2", url="https://converter-f2.freestock.online/api-converter-glb-ui")
             ]
         ]
 
@@ -683,13 +683,13 @@ class RenderFarmerBot:
         if online_count < 5:
             keyboard.extend([
                 [
-                    InlineKeyboardButton("🔄 F1", url="http://5.129.157.224:5132/api-converter-glb-restart-server"),
-                    InlineKeyboardButton("🔄 F2", url="http://5.129.157.224:5279/api-converter-glb-restart-server"),
-                    InlineKeyboardButton("🔄 F7", url="http://5.129.157.224:5131/api-converter-glb-restart-server")
+                    InlineKeyboardButton("🔄 F1", url="https://converter-f1.freestock.online/api-converter-glb-restart-server"),
+                    InlineKeyboardButton("🔄 F2", url="https://converter-f2.freestock.online/api-converter-glb-restart-server"),
+                    InlineKeyboardButton("🔄 F7", url="https://converter-f7.freestock.online/api-converter-glb-restart-server")
                 ],
                 [
-                    InlineKeyboardButton("🔄 F11", url="http://5.129.157.224:5533/api-converter-glb-restart-server"),
-                    InlineKeyboardButton("🔄 F13", url="http://5.129.157.224:5267/api-converter-glb-restart-server")
+                    InlineKeyboardButton("🔄 F11", url="https://converter-f11.freestock.online/api-converter-glb-restart-server"),
+                    InlineKeyboardButton("🔄 F13", url="https://converter-f13.freestock.online/api-converter-glb-restart-server")
                 ]
             ])
 
@@ -1029,8 +1029,8 @@ class RenderFarmerBot:
 📊 Система готова к мониторингу
 
 🔗 <b>Тестовые ссылки:</b>
-🔄 Перезапуск F1 (<a href="http://5.129.157.224:5132/api-converter-glb-restart-server">ссылка</a>)
-⚙️ Управление F2 (<a href="http://5.129.157.224:5279/api-converter-glb-ui">ссылка</a>)
+🔄 Перезапуск F1 (<a href="https://converter-f1.freestock.online/api-converter-glb-restart-server">ссылка</a>)
+⚙️ Управление F2 (<a href="https://converter-f2.freestock.online/api-converter-glb-ui">ссылка</a>)
 
 {timestamp}"""
 

@@ -98,11 +98,11 @@ def is_admin_email(email: Optional[str]) -> bool:
 # Workers (Converters)
 # =============================================================================
 WORKERS = [
-    "http://5.129.157.224:5132/api-converter-glb",
-    "http://5.129.157.224:5279/api-converter-glb",
-    "http://5.129.157.224:5131/api-converter-glb",
-    "http://5.129.157.224:5533/api-converter-glb",
-    "http://5.129.157.224:5267/api-converter-glb",
+    "https://converter-f1.freestock.online/api-converter-glb",
+    "https://converter-f2.freestock.online/api-converter-glb",
+    "https://converter-f7.freestock.online/api-converter-glb",
+    "https://converter-f11.freestock.online/api-converter-glb",
+    "https://converter-f13.freestock.online/api-converter-glb",
 ]
 
 # =============================================================================

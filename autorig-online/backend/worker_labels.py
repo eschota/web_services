@@ -18,6 +18,25 @@ CONVERTER_BY_PORT: dict[int, dict[str, str]] = {
     5267: {"short": "F13", "hint": "конвертер F13, порт 5267"},
 }
 
+CONVERTER_BY_HOSTNAME: dict[str, dict[str, str]] = {
+    f"converter-f{number}.freestock.online": {
+        "short": f"F{number}",
+        "hint": f"converter F{number}, FreeStock HTTPS gateway",
+    }
+    for number in (1, 2, 7, 11, 13)
+}
+
+
+def extract_hostname_from_worker_url(raw: Optional[str]) -> Optional[str]:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        parsed = urlparse(s if "://" in s else "https://" + s)
+    except Exception:
+        return None
+    return str(parsed.hostname or "").strip().lower() or None
+
 
 def extract_port_from_worker_url(raw: Optional[str]) -> Optional[int]:
     """Match admin-overlay extractPortFromWorkerApi logic."""
@@ -40,6 +59,11 @@ def worker_label_from_url(worker_url: Optional[str]) -> Optional[tuple[str, str]
     """
     Returns (short, hint) e.g. ('F2', 'конвертер F2, порт 5279') or None if unknown port.
     """
+    hostname = extract_hostname_from_worker_url(worker_url)
+    hostname_row = CONVERTER_BY_HOSTNAME.get(hostname or "")
+    if hostname_row:
+        return (hostname_row["short"], hostname_row["hint"])
+
     port = extract_port_from_worker_url(worker_url)
     if port is None:
         return None
