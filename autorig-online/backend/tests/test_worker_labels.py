@@ -1,6 +1,6 @@
 import unittest
 
-from worker_labels import worker_label_from_url
+from worker_labels import format_task_worker_telegram_html, worker_label_from_url
 
 
 class WorkerLabelsTests(unittest.TestCase):
@@ -18,6 +18,14 @@ class WorkerLabelsTests(unittest.TestCase):
         )
         self.assertIsNotNone(label)
         self.assertEqual("F1", label[0])
+
+    def test_hostname_task_label_does_not_require_port(self):
+        self.assertEqual(
+            "Node: <b>F7</b> <code>f7-pc</code>",
+            format_task_worker_telegram_html(
+                "https://converter-f7.freestock.online/api-converter-glb"
+            ),
+        )
 
 
 if __name__ == "__main__":

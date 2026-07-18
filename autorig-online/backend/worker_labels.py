@@ -84,3 +84,24 @@ def format_worker_stalled_telegram_html(worker_url: Optional[str]) -> str:
             f"<code>{html.escape(u)}</code>"
         )
     return f"🔧 <code>{html.escape(u)}</code>"
+
+
+WORKER_HOST_BY_SHORT: dict[str, str] = {
+    "F1": "f1-pc",
+    "F2": "f2-pc",
+    "F7": "f7-pc",
+    "F11": "f11-pc",
+    "F13": "f13-pc",
+}
+
+
+def format_task_worker_telegram_html(worker_url: Optional[str]) -> Optional[str]:
+    """Compact HTML fragment for task completion messages."""
+    label = worker_label_from_url(worker_url)
+    if not label:
+        return None
+    short, _hint = label
+    host = WORKER_HOST_BY_SHORT.get(short, short.lower())
+    port = extract_port_from_worker_url(worker_url)
+    endpoint = f"{host}:{port}" if port is not None else host
+    return f"Node: <b>{html.escape(short)}</b> <code>{html.escape(endpoint)}</code>"
