@@ -11097,6 +11097,7 @@
                 ignoreUntil: performance.now() + 2000,
             });
             let splitViewportRenderFrame = 0;
+            let mainViewerLastDebugPublishAt = 0;
             const MAIN_VIEWER_QUALITY_PROFILES = {
                 high: {
                     badge: 'HQ',
@@ -14956,7 +14957,10 @@
                         if (transformManager) transformManager.update();
                         if (playModeController?.active) playModeController.update(dt);
                         if (!splitViewportController) updateSunShadowFocus(false);
-                        publishMainViewerDebugState();
+                        if (time - mainViewerLastDebugPublishAt >= 1000) {
+                            publishMainViewerDebugState();
+                            mainViewerLastDebugPublishAt = time;
+                        }
                         if (window.updateZoomInertia && splitViewportActiveInteractionView === 'perspective') window.updateZoomInertia();
                         Object.values(splitViewportControls).forEach((orbit) => orbit?.update?.());
                         
