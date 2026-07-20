@@ -12054,8 +12054,17 @@
                         renderer.setScissorTest(true);
                         splitViewportRenderFrame += 1;
                         const stride = Math.max(1, Number(getMainViewerQualityProfile().secondaryViewportStride || 1));
-                        splitViewportController.getRects().forEach((rect) => {
-                            if (rect.role === 'main' || splitViewportRenderFrame % stride === 0) {
+                        const rects = splitViewportController.getRects();
+                        const secondaryRects = rects.filter((rect) => rect.role !== 'main');
+                        const secondaryIndex = secondaryRects.length
+                            ? Math.floor(splitViewportRenderFrame / stride) % secondaryRects.length
+                            : -1;
+                        rects.forEach((rect) => {
+                            const renderSecondary = stride === 1 || (
+                                splitViewportRenderFrame % stride === 0
+                                && rect === secondaryRects[secondaryIndex]
+                            );
+                            if (rect.role === 'main' || renderSecondary) {
                                 renderSplitViewportRect(rect, refreshShadows);
                             }
                         });
