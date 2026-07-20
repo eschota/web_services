@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoRig.online Blender Plugin | AI Auto Rigging Add-on</title>
+    <meta name="description" content="Native Blender add-on for AutoRig.online: automatic character, animal and non-humanoid rigging with presets, animation workflow and Gumroad purchase.">
+    <meta name="keywords" content="Blender auto rig plugin, Blender auto rigging add-on, AI rigging Blender, AutoRig.online Blender plugin, animal rigging Blender, non-humanoid rigging Blender, Blender rig presets">
+    <link rel="canonical" href="https://autorig.online/blender-plugin">
+    <meta property="og:title" content="AutoRig.online Blender Plugin">
+    <meta property="og:description" content="Native Blender add-on for AutoRig.online automatic rigging, presets, animation workflow, animal and non-humanoid models.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://autorig.online/blender-plugin">
+    <meta property="og:image" content="https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AutoRig.online Blender Plugin">
+    <meta name="twitter:description" content="Automatic rigging inside Blender with AutoRig.online presets and V2 rigging workflow.">
+    <meta name="twitter:image" content="https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp">
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="preload" as="image" href="/static/images/plugin/blender-plugin-screenshot-20260516.webp">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <style>
+        .plugin-page {
+            background:
+                radial-gradient(circle at 14% 10%, rgba(255, 122, 24, 0.18), transparent 30%),
+                radial-gradient(circle at 82% 8%, rgba(56, 189, 248, 0.14), transparent 34%),
+                linear-gradient(180deg, #10111d 0%, #151629 48%, #0f101c 100%);
+            color: var(--text-primary);
+        }
+        .plugin-hero {
+            position: relative;
+            min-height: clamp(560px, 76vh, 820px);
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+            background:
+                linear-gradient(90deg, rgba(11, 12, 22, 0.98) 0%, rgba(11, 12, 22, 0.9) 38%, rgba(11, 12, 22, 0.34) 72%, rgba(11, 12, 22, 0.2) 100%),
+                url("/static/images/plugin/blender-plugin-screenshot-20260516.webp") center right / cover no-repeat;
+        }
+        .plugin-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto 0 0;
+            height: 120px;
+            background: linear-gradient(180deg, rgba(16, 17, 29, 0), #151629);
+            pointer-events: none;
+        }
+        .plugin-hero-inner {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            padding: clamp(3rem, 6vw, 5.5rem) 1.5rem;
+        }
+        .plugin-hero-copy {
+            max-width: 700px;
+        }
+        .plugin-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #ffb45c;
+            font-size: 0.9rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+        .plugin-kicker img {
+            width: 28px;
+            height: 28px;
+        }
+        .plugin-hero h1 {
+            margin: 0;
+            max-width: 680px;
+            font-size: clamp(2.4rem, 5.6vw, 5.1rem);
+            line-height: 1;
+            letter-spacing: 0;
+        }
+        .plugin-gradient-text {
+            color: #ffffff;
+            background: linear-gradient(90deg, #ffffff 0%, #ffb45c 45%, #38bdf8 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .plugin-lead {
+            max-width: 660px;
+            margin: 1.25rem 0 0;
+            color: rgba(238, 238, 255, 0.78);
+            font-size: clamp(1rem, 2vw, 1.24rem);
+            line-height: 1.65;
+        }
+        .plugin-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1.75rem;
+        }
+        .plugin-offer-note {
+            width: 100%;
+            color: rgba(238, 238, 255, 0.78);
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+        .plugin-proof-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin-top: 1.5rem;
+        }
+        .plugin-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 32px;
+            padding: 0.45rem 0.65rem;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(238, 238, 255, 0.82);
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+        .plugin-main {
+            padding: clamp(2.5rem, 5vw, 4.5rem) 1.5rem 4.5rem;
+        }
+        .plugin-section {
+            margin-top: clamp(2rem, 4vw, 3.25rem);
+        }
+        .plugin-section:first-child {
+            margin-top: 0;
+        }
+        .plugin-section-header {
+            max-width: 820px;
+            margin-bottom: 1.25rem;
+        }
+        .plugin-section-header h2 {
+            margin: 0;
+            font-size: clamp(1.7rem, 3.8vw, 3rem);
+            line-height: 1.06;
+            letter-spacing: 0;
+        }
+        .plugin-section-header p {
+            margin: 0.75rem 0 0;
+            color: var(--text-secondary);
+            font-size: 1rem;
+            line-height: 1.65;
+        }
+        .plugin-screenshot-panel {
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.13);
+            border-radius: 8px;
+            background: #0d0e1a;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+        }
+        .plugin-screenshot-panel img {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        .plugin-screenshot-caption {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem 1rem;
+            justify-content: space-between;
+            padding: 0.9rem 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+        }
+        .plugin-screenshot-caption strong {
+            color: var(--text-primary);
+        }
+        .plugin-feature-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .plugin-feature,
+        .plugin-step,
+        .plugin-frame-card,
+        .plugin-link-card {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.045);
+        }
+        .plugin-feature,
+        .plugin-step,
+        .plugin-link-card {
+            padding: 1rem;
+        }
+        .plugin-feature h3,
+        .plugin-step h3 {
+            margin: 0;
+            font-size: 1rem;
+            line-height: 1.25;
+        }
+        .plugin-feature p,
+        .plugin-step p,
+        .plugin-frame-card p {
+            margin: 0.55rem 0 0;
+            color: var(--text-secondary);
+            font-size: 0.94rem;
+            line-height: 1.55;
+        }
+        .plugin-frame-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.8rem;
+        }
+        .plugin-frame-card {
+            overflow: hidden;
+        }
+        .plugin-frame-card img {
+            display: block;
+            width: 100%;
+            aspect-ratio: 9 / 16;
+            object-fit: cover;
+            background: #0f101c;
+        }
+        .plugin-frame-card p {
+            min-height: 3.2rem;
+            padding: 0.7rem;
+            margin: 0;
+            font-weight: 700;
+        }
+        .plugin-step-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .plugin-step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            margin-bottom: 0.75rem;
+            border-radius: 8px;
+            background: rgba(255, 180, 92, 0.16);
+            color: #ffb45c;
+            font-weight: 900;
+        }
+        .plugin-cta-band {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 180, 92, 0.42);
+            border-radius: 8px;
+            background: linear-gradient(135deg, rgba(255, 180, 92, 0.16), rgba(56, 189, 248, 0.1));
+        }
+        .plugin-cta-band h2 {
+            margin: 0 0 0.35rem;
+            font-size: clamp(1.45rem, 3vw, 2.25rem);
+            letter-spacing: 0;
+        }
+        .plugin-cta-band p {
+            margin: 0;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .plugin-link-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .plugin-link-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+        .plugin-link-card span {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        @media (max-width: 1100px) {
+            .plugin-feature-grid,
+            .plugin-step-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .plugin-frame-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+        @media (max-width: 760px) {
+            .plugin-hero {
+                min-height: auto;
+                background:
+                    linear-gradient(180deg, rgba(11, 12, 22, 0.92), rgba(11, 12, 22, 0.98)),
+                    url("/static/images/plugin/blender-plugin-screenshot-20260516.webp") center / cover no-repeat;
+            }
+            .plugin-hero-inner {
+                padding: 2rem 0.875rem 2.25rem;
+            }
+            .plugin-hero-copy {
+                max-width: 100%;
+                min-width: 0;
+            }
+            .plugin-kicker {
+                flex-wrap: wrap;
+            }
+            .plugin-hero h1 {
+                max-width: 100%;
+                font-size: clamp(1.95rem, 9.5vw, 2.45rem);
+                line-height: 1.06;
+                overflow-wrap: anywhere;
+            }
+            .plugin-main {
+                padding: 2.25rem 0.875rem 3rem;
+            }
+            .plugin-lead {
+                font-size: 1rem;
+                line-height: 1.55;
+            }
+            .plugin-actions {
+                flex-direction: column;
+            }
+            .plugin-actions .btn,
+            .plugin-cta-band .btn {
+                width: 100%;
+            }
+            .plugin-proof-row {
+                align-items: stretch;
+            }
+            .plugin-pill {
+                max-width: 100%;
+                justify-content: center;
+                text-align: center;
+            }
+            .plugin-frame-grid,
+            .plugin-feature-grid,
+            .plugin-step-grid,
+            .plugin-link-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "AutoRig.online Blender Plugin",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Blender",
+        "url": "https://autorig.online/blender-plugin",
+        "downloadUrl": "https://autorig.online/blender-plugin/checkout",
+        "image": "https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp",
+        "screenshot": "https://autorig.online/static/images/plugin/blender-plugin-screenshot-20260516.webp",
+        "description": "Native Blender plugin for AutoRig.online automatic 3D character, animal and non-humanoid rigging.",
+        "offers": {
+            "@type": "Offer",
+            "url": "https://autorig.online/blender-plugin/checkout",
+            "priceCurrency": "USD",
+            "availability": "https://schema.org/InStock"
+        },
+        "author": {
+            "@type": "Organization",
+            "name": "AutoRig.online"
+        }
+    }
+    </script>
+</head>
+<body class="plugin-page" data-layout-free3d-init="none" data-layout-active-path="/blender-plugin">
+    <div id="site-header"></div>
+
+    <main>
+        <section class="plugin-hero" aria-labelledby="plugin-title">
+            <div class="container plugin-hero-inner">
+                <div class="plugin-hero-copy">
+                    <div class="plugin-kicker">
+                        <img src="/static/images/icons/blender_logo.png" alt="" width="28" height="28">
+                        Native Blender Add-on
+                    </div>
+                    <h1 id="plugin-title"><span class="plugin-gradient-text">Auto rig directly in Blender</span> with AutoRig.online.</h1>
+                    <p class="plugin-lead">
+                        The AutoRig.online Blender plugin brings the V2 rigging workflow into your Blender scene:
+                        generate rigs, use presets, work with humanoid and non-humanoid models, and prepare animation-ready characters without switching tools.
+                    </p>
+                    <div class="plugin-actions">
+                        <a href="/blender-plugin/checkout?source=blender_plugin_page" class="btn btn-primary plugin-buy-link">Buy Blender Plugin</a>
+                        <a href="https://www.youtube.com/shorts/vEn7laZijOI" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">Watch presentation</a>
+                        <span class="plugin-offer-note" id="plugin-offer-price">Assigned test price loads at checkout.</span>
+                    </div>
+                    <div class="plugin-proof-row" aria-label="Plugin highlights">
+                        <span class="plugin-pill">Blender-native panel</span>
+                        <span class="plugin-pill">13 unique presets</span>
+                        <span class="plugin-pill">Humanoid and non-humanoid</span>
+                        <span class="plugin-pill">Animation workflow</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="container plugin-main">
+            <section class="plugin-section" aria-labelledby="plugin-ui-title">
+                <div class="plugin-section-header">
+                    <h2 id="plugin-ui-title">A real Blender plugin UI, not just a web checkout.</h2>
+                    <p>The Gumroad screenshot is cached locally on AutoRig.online and shows the add-on inside Blender with animal models, generated control shapes, preset options and rig parameters.</p>
+                </div>
+                <figure class="plugin-screenshot-panel">
+                    <img src="/static/images/plugin/blender-plugin-screenshot-20260516.webp" alt="AutoRig.online Blender plugin panel with animal rigs and rigging settings inside Blender" width="1280" height="684" loading="eager">
+                    <figcaption class="plugin-screenshot-caption">
+                        <strong>AutoRig.online add-on inside Blender</strong>
+                        <span>Rig controls, presets, animal models and Blender scene workflow in one screen.</span>
+                    </figcaption>
+                </figure>
+            </section>
+
+            <section class="plugin-section" aria-labelledby="plugin-features-title">
+                <div class="plugin-section-header">
+                    <h2 id="plugin-features-title">What the plugin workflow is built around</h2>
+                    <p>The presentation emphasizes automatic rigging, broad model support, hard-surface cases, Blender/Unity/Unreal use, and presets for both humanoid and non-humanoid characters.</p>
+                </div>
+                <div class="plugin-feature-grid">
+                    <article class="plugin-feature">
+                        <h3>Full auto rig and animation</h3>
+                        <p>Generate a rigging result and move directly into animation preview and export decisions.</p>
+                    </article>
+                    <article class="plugin-feature">
+                        <h3>Any 3D model direction</h3>
+                        <p>Use the same AutoRig direction for animals, stylized creatures, humanoids and non-humanoid shapes.</p>
+                    </article>
+                    <article class="plugin-feature">
+                        <h3>Hard-surface support</h3>
+                        <p>The V2 presentation includes mechanical and hard-surface models, not only organic characters.</p>
+                    </article>
+                    <article class="plugin-feature">
+                        <h3>Blender / Unity / Unreal</h3>
+                        <p>Prepare rigs in Blender and use the result in common game and animation pipelines.</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="plugin-section" aria-labelledby="plugin-presentation-title">
+                <div class="plugin-section-header">
+                    <h2 id="plugin-presentation-title">Presentation frames from the V2 rigging demo</h2>
+                    <p>Ten cached frames from the one-minute Shorts presentation, with the on-video labels transcribed into captions for scanning and SEO.</p>
+                </div>
+                <div class="plugin-frame-grid">
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-01.webp" alt="Erosion volumetric bone detector frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>Erosion volumetric bone detector</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-02.webp" alt="Full auto rig and animation frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>Full auto rig and animation</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-03.webp" alt="Works on any 3D model type frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>Works on any 3D model type</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-04.webp" alt="Hard surface frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>Hard surface</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-05.webp" alt="Blender Unity Unreal frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>Blender / Unity / Unreal</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-06.webp" alt="Available online frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>Available online</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-07.webp" alt="13 unique presets frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>13 unique presets</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-08.webp" alt="Humanoid characters frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>Humanoid characters</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-09.webp" alt="And not humanoid frame from AutoRig presentation" width="405" height="720" loading="lazy">
+                        <p>And not humanoid</p>
+                    </article>
+                    <article class="plugin-frame-card">
+                        <img src="/static/images/plugin/plugin-short-frames-20260516/frame-10.webp" alt="AutoRig.online presentation frame with horse model" width="405" height="720" loading="lazy">
+                        <p>AutoRig.online workflow</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="plugin-section" aria-labelledby="plugin-steps-title">
+                <div class="plugin-section-header">
+                    <h2 id="plugin-steps-title">Blender-first rigging flow</h2>
+                    <p>The plugin is for artists who want the AutoRig workflow inside Blender while keeping the online service available for browser uploads.</p>
+                </div>
+                <div class="plugin-step-grid">
+                    <article class="plugin-step">
+                        <span class="plugin-step-number">1</span>
+                        <h3>Open the add-on panel</h3>
+                        <p>Work from Blender with the AutoRig panel visible next to your model and scene.</p>
+                    </article>
+                    <article class="plugin-step">
+                        <span class="plugin-step-number">2</span>
+                        <h3>Select a preset</h3>
+                        <p>Use the V2 preset direction for humanoids, animals, creatures or other model types.</p>
+                    </article>
+                    <article class="plugin-step">
+                        <span class="plugin-step-number">3</span>
+                        <h3>Generate the rig</h3>
+                        <p>Run automatic rig generation and keep the result in your Blender project context.</p>
+                    </article>
+                    <article class="plugin-step">
+                        <span class="plugin-step-number">4</span>
+                        <h3>Tune rig settings</h3>
+                        <p>Adjust branch, smoothing and rig parameters instead of accepting a black-box result.</p>
+                    </article>
+                    <article class="plugin-step">
+                        <span class="plugin-step-number">5</span>
+                        <h3>Animate and export</h3>
+                        <p>Move into animation preview, Blender cleanup, Unity, Unreal or your own production pipeline.</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="plugin-section plugin-cta-band" aria-label="Buy Blender plugin">
+                <div>
+                    <h2>Buy the native Blender plugin</h2>
+                    <p>Use AutoRig.online in the browser, or buy the Blender add-on when you want the rigging workflow inside Blender.</p>
+                </div>
+                <a href="/blender-plugin/checkout?source=blender_plugin_page_cta" class="btn btn-primary plugin-buy-link">Buy on Gumroad</a>
+            </section>
+
+            <section class="plugin-section plugin-link-grid" aria-label="External links">
+                <a class="plugin-link-card" href="https://www.youtube.com/shorts/vEn7laZijOI" target="_blank" rel="noopener noreferrer">
+                    <strong>Watch the Shorts presentation</strong>
+                    <span>1-minute V2 demo</span>
+                </a>
+                <a class="plugin-link-card" href="https://www.producthunt.com/products/autorig-online?launch=autorig-online" target="_blank" rel="noopener noreferrer">
+                    <strong>AutoRig.online on Product Hunt</strong>
+                    <span>Launch page</span>
+                </a>
+            </section>
+        </div>
+    </main>
+
+    <div id="site-footer"></div>
+
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const updateLinks = (offer) => {
+                const displayPrice = offer && offer.display_price;
+                const priceEl = document.getElementById('plugin-offer-price');
+                document.querySelectorAll('.plugin-buy-link').forEach((link) => {
+                    const base = link.getAttribute('href') || '/blender-plugin/checkout';
+                    const separator = base.includes('?') ? '&' : '?';
+                    link.href = `${base}${separator}page_url=${encodeURIComponent(window.location.href)}`;
+                    if (displayPrice && link.textContent.includes('Blender Plugin')) {
+                        link.textContent = `Buy Blender Plugin ${displayPrice}`;
+                    }
+                });
+                if (priceEl && displayPrice) {
+                    priceEl.textContent = `Your assigned test price: ${displayPrice}`;
+                }
+            };
+            fetch('/api/blender-plugin/offer')
+                .then((resp) => resp.ok ? resp.json() : null)
+                .then(updateLinks)
+                .catch(() => updateLinks(null));
+        });
+    </script>
+</body>
+</html>

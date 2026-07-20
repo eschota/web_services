@@ -1,20 +1,26 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 499.9487381159941,
+      "y": 194.52992227960715,
+      "z": 294.58758665991036
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": -25.405345410482635,
+      "y": 73.92303886688971,
+      "z": -7.873076709854209
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "mediterranean_courtyard.jpg",
-  "plane_color": "#b9a37d",
+  "plane_color": "#282a2f",
   "schema_version": 1,
   "semantic_tags": [
     "courtyard",
@@ -23,16 +29,25 @@
     "garden",
     "human",
     "statue",
-    "animal"
+    "animal",
+    "humanoid",
+    "character"
   ],
   "shadow_settings": {
-    "opacity": 0.5,
-    "shadow_y_offset": 0.005,
-    "softness": 5.0,
-    "sun_multiplier": 2.3
+    "opacity": 0.34,
+    "shadow_y_offset": 0.01,
+    "softness": 5,
+    "sun_multiplier": 3.5
+  },
+  "src": "/static/env/backdrops/mediterranean_courtyard.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/mediterranean_courtyard.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/mediterranean_courtyard.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/mediterranean_courtyard.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/mediterranean_courtyard.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
-    "inclination": 52,
+    "inclination": 55,
     "intensity": 2.45,
     "rotation": -65
   },

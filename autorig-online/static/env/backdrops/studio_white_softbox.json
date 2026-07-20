@@ -1,17 +1,23 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 342.1803803098335,
+      "y": 111.40052846333896,
+      "z": 47.06511828475506
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": -9.888070582271535,
+      "y": 69.43640178591562,
+      "z": -51.16656576179446
     }
+  },
+  "environment_settings": {
+    "intensity": 0.55,
+    "mode": "image",
+    "reflection_intensity": 2.76,
+    "source": "backdrop"
   },
   "image_filename": "studio_white_softbox.jpg",
   "plane_color": "#e9e9e9",
@@ -23,17 +29,26 @@
     "clean",
     "neutral",
     "toy",
-    "character"
+    "character",
+    "humanoid",
+    "human"
   ],
   "shadow_settings": {
-    "opacity": 0.42,
-    "shadow_y_offset": 0.005,
-    "softness": 5.0,
-    "sun_multiplier": 1.5
+    "opacity": 0.69,
+    "shadow_y_offset": 0.01,
+    "softness": 47.7,
+    "sun_multiplier": 0.5
+  },
+  "src": "/static/env/backdrops/studio_white_softbox.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/studio_white_softbox.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/studio_white_softbox.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/studio_white_softbox.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/studio_white_softbox.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
     "inclination": 55,
-    "intensity": 2.0,
+    "intensity": 2,
     "rotation": -35
   },
   "theme_id": "studio_white_softbox",

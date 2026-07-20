@@ -1,5 +1,7 @@
 /**
- * Site-wide layout bootstrap: inject #site-header and #site-footer from header.js / footer.js.
+ * Site-wide layout bootstrap.
+ * Production pages receive SEO-critical header/footer markup from backend partials.
+ * This script enhances that markup and only uses JS rendering as a legacy fallback.
  * Configure via <body data-layout-free3d-ribbon="1" data-layout-free3d-init="none|task" data-layout-active-path="...">
  * - data-layout-free3d-ribbon: include Free3D ribbon HTML (same as SiteHeader.showSearch)
  * - data-layout-free3d-init: "task" runs SiteHeader.initSearch (task page); "none" leaves ribbon to app.js on home
@@ -42,6 +44,27 @@
         });
     }
 
+
+    function isServerRendered(el) {
+        return !!(el && el.getAttribute('data-server-rendered') === '1');
+    }
+
+    function normalizePath(p) {
+        if (p == null || p === '') return '/';
+        return String(p).replace(/\/$/, '') || '/';
+    }
+
+    function applyActiveNav(headerEl, activePath) {
+        if (!headerEl || activePath === 'none') return;
+        const current = normalizePath(activePath || (typeof location !== 'undefined' ? location.pathname : ''));
+        headerEl.querySelectorAll('.nav-link[href]').forEach((link) => {
+            const href = link.getAttribute('href');
+            if (!href || href === '#') return;
+            const linkPath = normalizePath(href);
+            link.classList.toggle('active', linkPath === current);
+        });
+    }
+
     function bootstrap(extra) {
         const merged = { ...readOptions(), ...(extra || {}) };
         const showSearch = merged.showSearch;
@@ -55,12 +78,20 @@
         const footerEl = document.getElementById('site-footer');
         const webapp = isWebAppMode();
 
-        if (footerEl && window.SiteFooter && typeof SiteFooter.render === 'function') {
+        if (footerEl && !isServerRendered(footerEl) && window.SiteFooter && typeof SiteFooter.render === 'function') {
             footerEl.innerHTML = SiteFooter.render();
         }
 
         if (webapp && headerEl) {
             headerEl.innerHTML = '';
+        } else if (headerEl && isServerRendered(headerEl)) {
+            applyActiveNav(headerEl, activePath);
+            if (typeof SiteHeader !== 'undefined' && SiteHeader && typeof SiteHeader.init === 'function') {
+                SiteHeader.init();
+            }
+            if (initMode === 'task') {
+                bootstrapTaskSearch();
+            }
         } else if (headerEl && window.SiteHeader && typeof SiteHeader.render === 'function') {
             headerEl.innerHTML = SiteHeader.render({
                 showSearch: !!showSearch,
@@ -90,7 +121,7 @@
             if (document.querySelector('script[data-support-chat-js="1"]')) return;
 
             const s = document.createElement('script');
-            s.src = '/static/js/support-chat.js?v=20260430-sup5';
+            s.src = '/static/js/support-chat.js?v=20260509-pollbackoff1';
             s.async = true;
             s.setAttribute('data-support-chat-js', '1');
             s.onload = function () {

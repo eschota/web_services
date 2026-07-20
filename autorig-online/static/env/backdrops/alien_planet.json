@@ -1,20 +1,26 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": -79.3176195026892,
+      "y": 20.318310870538795,
+      "z": 201.11461151756748
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 29.164314995661215,
+      "y": 31.178679900641562,
+      "z": -1.9152128555350785
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "alien_planet.jpg",
-  "plane_color": "#8b6d82",
+  "plane_color": "#5e4d6f",
   "schema_version": 1,
   "semantic_tags": [
     "space",
@@ -27,15 +33,22 @@
     "robot"
   ],
   "shadow_settings": {
-    "opacity": 0.55,
+    "opacity": 0.71,
     "shadow_y_offset": 0.005,
-    "softness": 7.0,
-    "sun_multiplier": 1.9
+    "softness": 0.2,
+    "sun_multiplier": 3.5
+  },
+  "src": "/static/env/backdrops/alien_planet.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/alien_planet.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/alien_planet.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/alien_planet.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/alien_planet.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
-    "inclination": 28,
-    "intensity": 2.0,
-    "rotation": -135
+    "inclination": 19,
+    "intensity": 2,
+    "rotation": -93
   },
   "theme_id": "alien_planet",
   "theme_name": "Alien Planet",

@@ -97,9 +97,27 @@
         5267: { short: 'F13', hint: 'конвертер F13, порт 5267' },
     };
 
+    var CONVERTER_BY_HOSTNAME = {
+        'converter-f1.freestock.online': { short: 'F1', hint: 'converter F1, FreeStock HTTPS gateway' },
+        'converter-f2.freestock.online': { short: 'F2', hint: 'converter F2, FreeStock HTTPS gateway' },
+        'converter-f7.freestock.online': { short: 'F7', hint: 'converter F7, FreeStock HTTPS gateway' },
+        'converter-f11.freestock.online': { short: 'F11', hint: 'converter F11, FreeStock HTTPS gateway' },
+        'converter-f13.freestock.online': { short: 'F13', hint: 'converter F13, FreeStock HTTPS gateway' },
+    };
+
     /** @returns {{ short: string, title: string } | null} */
     function converterBadgeFromWorkerApi(workerApi) {
         if (!workerApi || typeof workerApi !== 'string') return null;
+        try {
+            var parsed = new URL(workerApi.indexOf('://') === -1 ? 'https://' + workerApi : workerApi);
+            var hostnameRow = CONVERTER_BY_HOSTNAME[parsed.hostname.toLowerCase()];
+            if (hostnameRow) {
+                return {
+                    short: hostnameRow.short,
+                    title: hostnameRow.hint + ' - ' + workerApi.trim(),
+                };
+            }
+        } catch (e) {}
         var port = extractPortFromWorkerApi(workerApi);
         if (port == null) return null;
         var row = CONVERTER_BY_PORT[port];

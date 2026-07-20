@@ -8,6 +8,7 @@ import uuid
 import shutil
 import asyncio
 import time
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any, Tuple, Set
 import hashlib
@@ -73,6 +74,7 @@ from config import (
     RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
 )
+from viewer_environment import build_viewer_environment_from_settings
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
@@ -81,6 +83,13 @@ from database import (
     CryptoPaymentReport, EmailCampaignClick, EmailCampaignSend, EmailDeliveryEvent,
     SupportChatSession,
     SupportChatMessage,
+    AnimalAnimationApprovedClip,
+    AnimalAnimationCandidate,
+    AnimalAnimationFittingJob,
+    AnimalAnimationLibraryActivation,
+    AnimalAnimationLibraryArtifact,
+    AnimalAnimationLibraryVersion,
+    TaskAnimationCorrection,
     reset_admin_overlay_counters,
     get_or_create_admin_overlay_counters,
     get_public_gallery_stats,
@@ -133,10 +142,6 @@ from workers import (
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from viewer_theme_vision import analyze_backdrop_theme_with_openai
-from viewer_environment_contract import (
-    ensure_viewer_environment_in_settings,
-    get_viewer_environment_from_settings,
-)
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
     create_session, get_user_by_session, delete_session,
@@ -157,12 +162,58 @@ from tasks import (
     admin_requeue_task_to_created,
 )
 
+from animation_corrections import (
+    MAX_PAYLOAD_BYTES as ANIMATION_CORRECTION_MAX_PAYLOAD_BYTES,
+    AnimationCorrectionValidationError,
+    canonical_json as canonical_animation_correction_json,
+    load_json_object as load_animation_correction_json,
+    payload_sha256 as animation_correction_sha256,
+    validate_animation_corrections,
+)
+from animation_correction_exports import (
+    EXPORT_TOKEN as ANIMATION_CORRECTION_EXPORT_TOKEN,
+    apply_export_result as apply_animation_correction_export_result,
+    dispatch_animation_correction_export,
+    normalize_source_sha256 as normalize_animation_correction_source_sha256,
+)
+
 
 import re
 import httpx
 
 from namecheap_remote_api import router as namecheap_remote_router
 from idle_ltx_routes import register_idle_ltx_routes
+from animal_animation_library import (
+    ANIMAL_CLIP_IDS,
+    ANIMAL_RIG_TYPES,
+    AnimationCandidateCreateRequest,
+    AnimationCandidateDecisionRequest,
+    AnimationFittingJobCreateRequest,
+    AnimationLibraryArtifactPutRequest,
+    AnimationLibraryCreateRequest,
+    AnimationLibraryError,
+    AnimationLibraryRollbackRequest,
+    activate_library_version,
+    activation_for_task,
+    activations_for_task,
+    add_fitting_candidate,
+    canonical_animation_id,
+    create_fitting_job,
+    create_library_version,
+    current_activation as current_animation_library_activation,
+    decide_fitting_candidate,
+    find_library_version,
+    get_fitting_job_payload,
+    manifest_sha256 as calculate_animation_manifest_sha256,
+    parse_matrix_animation_artifact,
+    put_library_artifact,
+    rollback_library_version,
+    serialize_candidate,
+    serialize_fitting_job,
+    serialize_library_version,
+    validate_animation_manifest,
+    validate_glb_animation_contract,
+)
 
 # Throttle poster-classification recovery triggers from GET /api/task (per task_id).
 _poster_recovery_throttle: Dict[str, float] = {}
@@ -171,31 +222,7 @@ PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 PREFLIGHT_RENDER_MAX_BYTES = 6 * 1024 * 1024
 
 
-def _worker_has_threejs_publish(worker: Any) -> bool:
-    flags = getattr(worker, "feature_flags", None)
-    return isinstance(flags, dict) and bool(flags.get("threejs_preview_publish_enabled"))
-
-
-def _task_requires_threejs_publish(task: Task) -> bool:
-    if (getattr(task, "pipeline_kind", None) or "rig") != "rig":
-        return False
-    try:
-        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
-        if not isinstance(settings, dict):
-            settings = {}
-    except Exception:
-        settings = {}
-    ensure_viewer_environment_in_settings(settings)
-    return bool(get_viewer_environment_from_settings(settings))
-
-
-async def get_dispatchable_workers(
-    db: AsyncSession,
-    queue_status,
-    *,
-    allow_quarantined: bool = False,
-    require_threejs_publish: bool = False,
-) -> List[Any]:
+async def get_dispatchable_workers(db: AsyncSession, queue_status, *, allow_quarantined: bool = False) -> List[Any]:
     """
     Return workers that are free according to both worker API and backend DB.
     The DB overlay avoids burst dispatch races where several tasks pick the same
@@ -211,7 +238,6 @@ async def get_dispatchable_workers(
             and ((w.total_pending or 0) <= 0)
             and (w.queue_size <= 0)
             and (allow_quarantined or not is_worker_quarantined(w.url))
-            and (not require_threejs_publish or _worker_has_threejs_publish(w))
         )
     ]
 
@@ -602,6 +628,37 @@ async def background_task_updater():
     background_worker_cycle_count = 0
     
     print("[Background Worker] Started task updater")
+
+    async def _sync_processing_tasks(db):
+        # Keep backend task rows aligned with terminal worker state before stall checks
+        # and before dispatch can hand the same worker another queued task.
+        result = await db.execute(
+            select(Task).where(Task.status == "processing")
+        )
+        processing_tasks = result.scalars().all()
+
+        if not processing_tasks:
+            return
+
+        print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
+
+        # Update tasks concurrently (bounded) so the loop doesn't take minutes when many tasks are processing.
+        # IMPORTANT: Each task gets its own DB session to avoid SQLAlchemy transaction conflicts.
+        semaphore = asyncio.Semaphore(8)
+
+        async def _update_one(task_id: str):
+            async with semaphore:
+                try:
+                    async with AsyncSessionLocal() as task_db:
+                        task = await get_task_by_id(task_db, task_id)
+                        if task and task.status == "processing":
+                            await update_task_progress(task_db, task)
+                except Exception as e:
+                    print(f"[Background Worker] Error updating task {task_id}: {e}")
+
+        # Pass task IDs, not task objects (to get fresh data in each session).
+        task_ids = [t.id for t in processing_tasks]
+        await asyncio.gather(*[_update_one(tid) for tid in task_ids])
     
     while background_task_running:
         try:
@@ -611,10 +668,12 @@ async def background_task_updater():
                 queue_status = None
                 force_stale_reset = False
                 # =============================================================
-                # 1. Queue snapshot + stall monitor, then stale reset, then dispatch
+                # 1. Worker state sync, queue snapshot + stall monitor, then stale reset, then dispatch
                 #    (reset must run before dispatch so tasks moved to "created" post in the same tick)
                 # =============================================================
                 try:
+                    await _sync_processing_tasks(db)
+
                     queue_status = await get_global_queue_status(db=db)
                     try:
                         stalled_detected = await _monitor_stalled_workers(db, queue_status=queue_status)
@@ -647,8 +706,7 @@ async def background_task_updater():
                             print("[Background Worker] All free workers are quarantined, using degraded dispatch fallback")
 
                     if free_workers:
-                        # Pull up to N queued tasks. Assign per task so viewer-environment jobs only
-                        # land on workers that publish the Three.js renderer output.
+                        # Pull up to N queued tasks
                         queued_result = await db.execute(
                             select(Task)
                             .where(Task.status == "created")
@@ -656,26 +714,8 @@ async def background_task_updater():
                             .limit(len(free_workers))
                         )
                         queued_tasks = queued_result.scalars().all()
-                        remaining_workers = list(free_workers)
 
-                        for task in queued_tasks:
-                            require_threejs = _task_requires_threejs_publish(task)
-                            worker_index = next(
-                                (
-                                    i
-                                    for i, candidate in enumerate(remaining_workers)
-                                    if (not require_threejs or _worker_has_threejs_publish(candidate))
-                                ),
-                                None,
-                            )
-                            if worker_index is None:
-                                if require_threejs:
-                                    print(
-                                        f"[Background Worker] Task {task.id} waits for a "
-                                        "threejs_preview_publish_enabled worker"
-                                    )
-                                continue
-                            worker = remaining_workers.pop(worker_index)
+                        for task, worker in zip(queued_tasks, free_workers):
                             try:
                                 await start_task_on_worker(db, task, worker.url)
                             except Exception as e:
@@ -767,35 +807,6 @@ async def background_task_updater():
                             _release_gallery_purge_lock(lock_f)
 
                 # =============================================================
-                # 3. Update progress for all processing tasks
-                # =============================================================
-                result = await db.execute(
-                    select(Task).where(Task.status == "processing")
-                )
-                processing_tasks = result.scalars().all()
-                
-                if processing_tasks:
-                    print(f"[Background Worker] Updating {len(processing_tasks)} processing tasks")
-
-                    # Update tasks concurrently (bounded) so the loop doesn't take minutes when many tasks are processing
-                    # IMPORTANT: Each task gets its own DB session to avoid SQLAlchemy transaction conflicts
-                    semaphore = asyncio.Semaphore(8)
-
-                    async def _update_one(task_id: str):
-                        async with semaphore:
-                            try:
-                                async with AsyncSessionLocal() as task_db:
-                                    task = await get_task_by_id(task_db, task_id)
-                                    if task and task.status == "processing":
-                                        await update_task_progress(task_db, task)
-                            except Exception as e:
-                                print(f"[Background Worker] Error updating task {task_id}: {e}")
-
-                    # Pass task IDs, not task objects (to get fresh data in each session)
-                    task_ids = [t.id for t in processing_tasks]
-                    await asyncio.gather(*[_update_one(tid) for tid in task_ids])
-
-                # =============================================================
                 # 4. Poster classification recovery (pending or transient poster fetch errors)
                 # =============================================================
                 try:
@@ -878,6 +889,8 @@ async def lifespan(app: FastAPI):
     
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
+    from youtube_upload import youtube_retry_worker
+    app.state.youtube_retry_worker = asyncio.create_task(youtube_retry_worker())
     
     # Send Telegram startup notification (fire-and-forget)
     try:
@@ -904,11 +917,19 @@ async def lifespan(app: FastAPI):
     # Shutdown
     background_task_running = False
     background_worker = getattr(app.state, "background_worker", None)
+    youtube_worker = getattr(app.state, "youtube_retry_worker", None)
     if background_worker:
         background_worker.cancel()
+    if youtube_worker:
+        youtube_worker.cancel()
     try:
         if background_worker:
             await background_worker
+    except asyncio.CancelledError:
+        pass
+    try:
+        if youtube_worker:
+            await youtube_worker
     except asyncio.CancelledError:
         pass
 
@@ -1114,6 +1135,59 @@ def _validate_viewer_settings_payload(body_bytes: bytes) -> dict:
     return data
 
 
+def _validate_viewer_camera_vector(value: Any, field_name: str) -> Dict[str, float]:
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail=f"camera.{field_name} must be an object")
+    out: Dict[str, float] = {}
+    for axis in ("x", "y", "z"):
+        try:
+            n = float(value[axis])
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"camera.{field_name}.{axis} must be a number")
+        if not math.isfinite(n) or abs(n) > 1_000_000:
+            raise HTTPException(status_code=400, detail=f"camera.{field_name}.{axis} is out of range")
+        out[axis] = n
+    return out
+
+
+def _validate_viewer_default_camera_payload(body_bytes: bytes, *, saved_by: str) -> Dict[str, Any]:
+    data = _validate_viewer_settings_payload(body_bytes)
+    source = data.get("camera") if isinstance(data.get("camera"), dict) else data
+    if not isinstance(source, dict):
+        raise HTTPException(status_code=400, detail="camera payload must be an object")
+
+    try:
+        fov = float(source["fov"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="camera.fov must be a number")
+    if not math.isfinite(fov) or fov < 1 or fov > 120:
+        raise HTTPException(status_code=400, detail="camera.fov is out of range")
+
+    camera_settings: Dict[str, Any] = {
+        "position": _validate_viewer_camera_vector(source.get("position"), "position"),
+        "target": _validate_viewer_camera_vector(source.get("target"), "target"),
+        "fov": fov,
+        "global_camera_preset": True,
+        "bounds_policy": "ignore",
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_by": saved_by,
+    }
+    if isinstance(source.get("up"), dict):
+        camera_settings["up"] = _validate_viewer_camera_vector(source.get("up"), "up")
+    return camera_settings
+
+
+def _read_global_viewer_camera_preset() -> Optional[Dict[str, Any]]:
+    data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
+    camera_settings = data.get("camera") if isinstance(data, dict) else None
+    if not isinstance(camera_settings, dict):
+        return None
+    bounds_policy = str(camera_settings.get("bounds_policy") or "").strip().lower()
+    if camera_settings.get("global_camera_preset") is True or bounds_policy == "ignore":
+        return camera_settings
+    return None
+
+
 def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optional[AnonSession]) -> bool:
     if user and is_admin_email(user.email):
         return True
@@ -1150,20 +1224,7 @@ ANIMAL_ANIMATION_PACK_CREDITS = TASK_UNLOCK_CREDITS
 DOWNLOAD_ALL_FILES_CREDITS = TASK_UNLOCK_CREDITS
 ANIMAL_RIG_DOWNLOAD_CREDITS = TASK_UNLOCK_CREDITS
 PURCHASE_CHECKOUT_INTENT_MAX_AGE = timedelta(hours=72)
-ANIMAL_VARIANT_TYPES = [
-    "dog",
-    "bear",
-    "cat",
-    "cow",
-    "deer",
-    "elephant",
-    "giraffe",
-    "horse",
-    "mouse",
-    "pig",
-    "rabbit",
-    "turtle",
-]
+ANIMAL_VARIANT_TYPES = list(ANIMAL_RIG_TYPES)
 ANIMAL_VARIANT_ORIENTATIONS = ("front", "back")
 
 
@@ -1443,12 +1504,93 @@ async def _worker_file_available(url: str) -> bool:
             resp = await client.head(url, timeout=15.0)
             if resp.status_code == 200:
                 return True
-            if resp.status_code not in (405, 403):
+            if resp.status_code in (404, 410):
                 return False
             resp = await client.get(url, headers={"Range": "bytes=0-0"}, timeout=20.0)
             return resp.status_code in (200, 206)
     except Exception:
         return False
+
+
+_RANGED_FILE_CACHE_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+async def _cache_worker_file_by_ranges(
+    url: str,
+    cache_path: Path,
+    *,
+    chunk_size: int = 4 * 1024 * 1024,
+    max_bytes: int = 512 * 1024 * 1024,
+) -> Path:
+    """Cache a worker file whose gateway only supports bounded Range requests."""
+    lock = _RANGED_FILE_CACHE_LOCKS.setdefault(str(cache_path), asyncio.Lock())
+    async with lock:
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            return cache_path
+
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            timeout = httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
+            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+                probe = None
+                for attempt in range(4):
+                    probe = await client.get(url, headers={"Range": "bytes=0-0"})
+                    if probe.status_code in (200, 206):
+                        break
+                    if attempt < 3:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                assert probe is not None
+                if probe.status_code == 200:
+                    if not probe.content or len(probe.content) > max_bytes:
+                        raise HTTPException(status_code=502, detail="Animation source returned an invalid file size")
+                    temp_path.write_bytes(probe.content)
+                elif probe.status_code == 206:
+                    match = re.fullmatch(
+                        r"bytes\s+0-0/(\d+)",
+                        str(probe.headers.get("content-range") or ""),
+                        re.IGNORECASE,
+                    )
+                    if not match or len(probe.content) != 1:
+                        raise HTTPException(status_code=502, detail="Animation source returned an invalid range probe")
+                    total_size = int(match.group(1))
+                    if total_size <= 0 or total_size > max_bytes:
+                        raise HTTPException(status_code=502, detail="Animation source returned an invalid file size")
+
+                    with temp_path.open("wb") as output:
+                        output.write(probe.content)
+                        start = 1
+                        while start < total_size:
+                            end = min(total_size - 1, start + chunk_size - 1)
+                            expected_range = f"bytes {start}-{end}/{total_size}"
+                            response = None
+                            for attempt in range(4):
+                                candidate = await client.get(url, headers={"Range": f"bytes={start}-{end}"})
+                                actual_range = str(candidate.headers.get("content-range") or "").lower()
+                                if (
+                                    candidate.status_code == 206
+                                    and actual_range == expected_range
+                                    and len(candidate.content) == end - start + 1
+                                ):
+                                    response = candidate
+                                    break
+                                if attempt < 3:
+                                    await asyncio.sleep(0.5 * (attempt + 1))
+                            if response is None:
+                                raise HTTPException(status_code=502, detail="Animation source returned an incomplete range")
+                            output.write(response.content)
+                            start = end + 1
+                else:
+                    raise HTTPException(status_code=502, detail=f"Animation source returned HTTP {probe.status_code}")
+
+            temp_path.replace(cache_path)
+            return cache_path
+        except HTTPException:
+            temp_path.unlink(missing_ok=True)
+            raise
+        except Exception as exc:
+            temp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=502, detail=f"Animation source unavailable: {exc}") from exc
 
 
 async def _download_worker_file_bytes(url: str, label: str, *, max_bytes: int = 80 * 1024 * 1024) -> bytes:
@@ -3596,8 +3738,6 @@ async def api_create_task(
     rig_v2_detection_meta: Optional[Dict[str, Any]] = None
     rig_v2_manual_selection = False
     local_rotation: Optional[List[float]] = None
-    local_rotation_authoritative: Optional[bool] = None
-    rig_orientation: Optional[Dict[str, Any]] = None
     animal_semantic_markers: Optional[Dict[str, List[float]]] = None
     preflight_render_image_data_url: Optional[str] = None
     source_preview_url: Optional[str] = None
@@ -3632,19 +3772,6 @@ async def api_create_task(
         if raw_mode is not None and str(raw_mode).strip():
             rig_mode = str(raw_mode).strip()
         local_rotation = _coerce_float_vec3(data.get("local_rotation"), "local_rotation")
-        local_rotation_authoritative = _coerce_optional_bool(
-            data.get("local_rotation_authoritative"),
-            "local_rotation_authoritative",
-        )
-        rig_orientation = _coerce_rig_orientation(
-            data.get("rig_orientation") or data.get("rig_orientation_json"),
-            local_rotation=local_rotation,
-            local_rotation_authoritative=local_rotation_authoritative,
-            default_source="site_auto",
-        )
-        if rig_orientation:
-            local_rotation = rig_orientation["local_rotation"]
-            local_rotation_authoritative = bool(rig_orientation.get("local_rotation_authoritative"))
         animal_semantic_markers = _coerce_animal_semantic_markers(data.get("animal_semantic_markers"))
         rig_v2_manual_selection = bool(data.get("rig_v2_manual_selection"))
         raw_detection = data.get("rig_v2_animal_detection")
@@ -3691,19 +3818,6 @@ async def api_create_task(
             form.get("local_rotation_json") or form.get("local_rotation"),
             "local_rotation",
         )
-        local_rotation_authoritative = _coerce_optional_bool(
-            form.get("local_rotation_authoritative"),
-            "local_rotation_authoritative",
-        )
-        rig_orientation = _coerce_rig_orientation(
-            form.get("rig_orientation_json") or form.get("rig_orientation"),
-            local_rotation=local_rotation,
-            local_rotation_authoritative=local_rotation_authoritative,
-            default_source="site_auto",
-        )
-        if rig_orientation:
-            local_rotation = rig_orientation["local_rotation"]
-            local_rotation_authoritative = bool(rig_orientation.get("local_rotation_authoritative"))
         animal_semantic_markers = _coerce_animal_semantic_markers(
             form.get("animal_semantic_markers_json") or form.get("animal_semantic_markers")
         )
@@ -3730,16 +3844,6 @@ async def api_create_task(
     if pipeline not in ("rig", "convert"):
         pipeline = "rig"
     input_type = normalize_task_type(input_type)
-    if pipeline == "rig" and not via_api:
-        rig_orientation = _ensure_site_authoritative_rig_orientation(
-            rig_orientation,
-            local_rotation=local_rotation,
-            local_rotation_authoritative=local_rotation_authoritative,
-            default_source="site_auto",
-        )
-        if rig_orientation:
-            local_rotation = rig_orientation["local_rotation"]
-            local_rotation_authoritative = bool(rig_orientation.get("local_rotation_authoritative"))
     disk_headroom_checked = False
 
     # Handle file upload
@@ -3828,10 +3932,6 @@ async def api_create_task(
         }
         if local_rotation is not None:
             rig_v2_detection_meta["local_rotation"] = local_rotation
-        if local_rotation_authoritative is not None:
-            rig_v2_detection_meta["local_rotation_authoritative"] = bool(local_rotation_authoritative)
-        if rig_orientation:
-            rig_v2_detection_meta["rig_orientation"] = rig_orientation
         if animal_semantic_markers:
             rig_v2_detection_meta["animal_semantic_markers"] = animal_semantic_markers
             rig_v2_detection_meta["source"] = "blueprint_retarget"
@@ -3871,21 +3971,12 @@ async def api_create_task(
     if rig_v2_detection_meta:
         settings["rig_v2_animal_detection"] = rig_v2_detection_meta
 
-    if rig_orientation:
-        settings["rig_orientation"] = rig_orientation
-
     if source_preview_url:
         parsed_source_preview = urlparse(source_preview_url)
         if parsed_source_preview.scheme in ("http", "https") and parsed_source_preview.netloc:
             settings["source_preview_url"] = source_preview_url
 
-    existing_theme_selection = settings.get("viewer_theme_selection")
-    existing_theme_id = ""
-    if isinstance(existing_theme_selection, dict):
-        existing_theme_id = str(
-            existing_theme_selection.get("theme_id") or existing_theme_selection.get("id") or ""
-        ).strip()
-    if not existing_theme_id:
+    if "viewer_theme_selection" not in settings:
         selected_theme = _select_viewer_theme_from_metadata(
             input_url=final_url,
             input_type=input_type,
@@ -3893,7 +3984,6 @@ async def api_create_task(
         )
         if selected_theme:
             settings["viewer_theme_selection"] = selected_theme
-    ensure_viewer_environment_in_settings(settings)
 
     if settings:
         task.viewer_settings = json.dumps(settings, ensure_ascii=False)
@@ -3914,14 +4004,7 @@ async def api_create_task(
     # Try to dispatch immediately to a free worker (don't wait for background cycle)
     try:
         queue_status = await get_global_queue_status(db=db)
-        viewer_environment_for_dispatch = (
-            get_viewer_environment_from_settings(settings) if pipeline == "rig" else None
-        )
-        free_workers = await get_dispatchable_workers(
-            db,
-            queue_status,
-            require_threejs_publish=bool(viewer_environment_for_dispatch),
-        )
+        free_workers = await get_dispatchable_workers(db, queue_status)
         free_worker = free_workers[0] if free_workers else None
         if free_worker:
             # Refresh task from DB and dispatch
@@ -3984,170 +4067,6 @@ def _coerce_float_vec3(value: Any, field_name: str) -> Optional[List[float]]:
             raise HTTPException(status_code=400, detail=f"{field_name} contains an invalid number")
         out.append(number)
     return out
-
-
-def _coerce_optional_bool(value: Any, field_name: str) -> Optional[bool]:
-    if value in (None, ""):
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in ("1", "true", "yes", "on"):
-            return True
-        if lowered in ("0", "false", "no", "off"):
-            return False
-    raise HTTPException(status_code=400, detail=f"{field_name} must be a boolean")
-
-
-def _quarter_turns_from_rotation(local_rotation: List[float]) -> Dict[str, int]:
-    out: Dict[str, int] = {}
-    for axis, value in zip(("x", "y", "z"), local_rotation):
-        try:
-            out[axis] = int(round(float(value) / 90.0))
-        except Exception:
-            out[axis] = 0
-    return out
-
-
-def _coerce_rig_orientation(
-    value: Any,
-    *,
-    local_rotation: Optional[List[float]] = None,
-    local_rotation_authoritative: Optional[bool] = None,
-    default_source: str = "site_auto",
-) -> Optional[Dict[str, Any]]:
-    if isinstance(value, str) and value.strip():
-        try:
-            value = json.loads(value)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail="rig_orientation must be a JSON object") from exc
-    if value in (None, ""):
-        if local_rotation is None or local_rotation_authoritative is not True:
-            return None
-        value = {}
-    if not isinstance(value, dict):
-        raise HTTPException(status_code=400, detail="rig_orientation must be an object")
-
-    orientation = json.loads(json.dumps(value, ensure_ascii=False))
-    rotation = _coerce_float_vec3(
-        orientation.get("local_rotation", local_rotation),
-        "rig_orientation.local_rotation",
-    )
-    if rotation is None:
-        return None
-
-    authoritative = local_rotation_authoritative
-    if authoritative is None:
-        authoritative = _coerce_optional_bool(
-            orientation.get("local_rotation_authoritative", True),
-            "rig_orientation.local_rotation_authoritative",
-        )
-    if authoritative is None:
-        authoritative = True
-
-    quarter_turns = orientation.get("quarter_turns")
-    if not isinstance(quarter_turns, dict):
-        quarter_turns = _quarter_turns_from_rotation(rotation)
-
-    orientation["schema_version"] = int(orientation.get("schema_version") or 1)
-    orientation["source"] = str(orientation.get("source") or default_source)
-    orientation["local_rotation"] = rotation
-    orientation["local_rotation_authoritative"] = bool(authoritative)
-    orientation["quarter_turns"] = {
-        axis: int(quarter_turns.get(axis, 0) or 0)
-        for axis in ("x", "y", "z")
-    }
-    orientation["user_interacted_bool"] = bool(orientation.get("user_interacted_bool", False))
-    return orientation
-
-
-def _is_nonzero_rotation(local_rotation: Optional[List[float]]) -> bool:
-    if local_rotation is None:
-        return False
-    return any(abs(float(value or 0.0)) > 0.0001 for value in local_rotation)
-
-
-def _ensure_site_authoritative_rig_orientation(
-    rig_orientation: Optional[Dict[str, Any]],
-    *,
-    local_rotation: Optional[List[float]],
-    local_rotation_authoritative: Optional[bool],
-    default_source: str,
-) -> Optional[Dict[str, Any]]:
-    if rig_orientation is not None:
-        return rig_orientation
-    if local_rotation_authoritative is False:
-        return None
-
-    rotation = local_rotation if local_rotation is not None else [0.0, 0.0, 0.0]
-    user_interacted = _is_nonzero_rotation(rotation)
-    source = "site_manual" if user_interacted and default_source == "site_auto" else default_source
-    return _coerce_rig_orientation(
-        {
-            "source": source,
-            "user_interacted_bool": user_interacted,
-        },
-        local_rotation=rotation,
-        local_rotation_authoritative=True,
-        default_source=source,
-    )
-
-
-def _transform_params_from_rig_orientation(
-    rig_orientation: Optional[Dict[str, Any]],
-    *,
-    default_source: str,
-) -> Optional[Dict[str, Any]]:
-    if not isinstance(rig_orientation, dict):
-        return None
-    try:
-        orientation = _coerce_rig_orientation(
-            rig_orientation,
-            default_source=default_source,
-        )
-    except HTTPException:
-        return None
-    if not orientation:
-        return None
-    return {
-        "local_rotation": orientation["local_rotation"],
-        "local_rotation_authoritative": bool(orientation.get("local_rotation_authoritative", True)),
-        "rig_orientation": orientation,
-    }
-
-
-def _ensure_site_transform_params_from_settings(
-    settings: Dict[str, Any],
-    *,
-    default_source: str,
-) -> Optional[Dict[str, Any]]:
-    if not isinstance(settings, dict):
-        return None
-    transform_params = _transform_params_from_rig_orientation(
-        settings.get("rig_orientation"),
-        default_source=default_source,
-    )
-    if transform_params:
-        settings["rig_orientation"] = transform_params["rig_orientation"]
-        return transform_params
-
-    orientation = _ensure_site_authoritative_rig_orientation(
-        None,
-        local_rotation=None,
-        local_rotation_authoritative=None,
-        default_source=default_source,
-    )
-    if not orientation:
-        return None
-    settings["rig_orientation"] = orientation
-    return {
-        "local_rotation": orientation["local_rotation"],
-        "local_rotation_authoritative": True,
-        "rig_orientation": orientation,
-    }
 
 
 def _coerce_animal_semantic_markers(value: Any) -> Optional[Dict[str, List[float]]]:
@@ -5144,7 +5063,6 @@ async def api_get_task(
 
     rig_v2_animal_detection = None
     viewer_theme_selection = None
-    viewer_environment = None
     try:
         settings = json.loads(task.viewer_settings or "{}")
         if isinstance(settings, dict):
@@ -5154,11 +5072,9 @@ async def api_get_task(
             theme = settings.get("viewer_theme_selection")
             if isinstance(theme, dict):
                 viewer_theme_selection = theme
-            viewer_environment = get_viewer_environment_from_settings(settings)
     except Exception:
         rig_v2_animal_detection = None
         viewer_theme_selection = None
-        viewer_environment = None
 
     def _task_response_animal_type(detection: Optional[dict]) -> Optional[str]:
         if not isinstance(detection, dict):
@@ -5209,7 +5125,6 @@ async def api_get_task(
         rig_type=response_animal_type,
         rig_v2_animal_detection=rig_v2_animal_detection,
         viewer_theme_selection=viewer_theme_selection,
-        viewer_environment=viewer_environment,
         fbx_glb_output_url=task.fbx_glb_output_url,
         fbx_glb_model_name=task.fbx_glb_model_name,
         fbx_glb_ready=task.fbx_glb_ready,
@@ -5443,6 +5358,21 @@ def _clean_animal_action_name(value: Any) -> Optional[str]:
 
 
 def _extract_animal_variant_actions(row: Dict[str, Any], animal_type: str) -> List[str]:
+    # Versioned library rows use canonical semantic IDs.  Do not fuzzy-match
+    # worker action basenames: only exact IDs or aliases declared in taxonomy.
+    if isinstance(row, dict) and row.get("animation_library_revision"):
+        raw_ids = row.get("animation_clip_ids")
+        if isinstance(raw_ids, list):
+            canonical_ids = [canonical_animation_id(value, animal_type) for value in raw_ids]
+            if canonical_ids == list(ANIMAL_CLIP_IDS):
+                return list(ANIMAL_CLIP_IDS)
+        try:
+            declared_count = int(row.get("animation_clip_count"))
+        except (TypeError, ValueError):
+            declared_count = 0
+        if declared_count == len(ANIMAL_CLIP_IDS):
+            return list(ANIMAL_CLIP_IDS)
+
     candidates: List[Any] = []
     if isinstance(row, dict):
         stage4 = row.get("stage4_finalize")
@@ -5478,6 +5408,211 @@ def _extract_animal_variant_actions(row: Dict[str, Any], animal_type: str) -> Li
         label = animal_type.capitalize()
         actions.append(f"{label}_default")
     return actions
+
+
+_PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES = 256 * 1024
+_PRIMARY_ANIMAL_ANIMATION_CLIP_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_. -]{0,127}$")
+_EXACT_GUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _animal_animation_artifact_stem(
+    guid: str,
+    animal_type: str,
+    orientation: str,
+    *,
+    is_primary: bool,
+) -> str:
+    if is_primary:
+        return guid
+    return f"{guid}_{animal_type}_{orientation}"
+
+
+def _select_exact_animal_animation_manifest(
+    task: Task,
+    files: List[Dict[str, Any]],
+    animal_type: str,
+    orientation: str,
+) -> Optional[Tuple[str, str]]:
+    """Select one root manifest with the exact GUID/variant filename.
+
+    The worker file inventory is authoritative here.  Do not probe guessed URLs
+    or accept nested/similarly named files: either one canonical root artifact
+    is present or the catalog falls back to its legacy default action.
+    """
+    worker_root, inferred_guid = _infer_worker_root_and_guid(task)
+    task_guid = str(task.guid or "").strip()
+    selected_animal = _task_animal_type_from_settings(task)
+    if (
+        not worker_root
+        or not inferred_guid
+        or not task_guid
+        or inferred_guid != task_guid
+        or not _EXACT_GUID_RE.fullmatch(task_guid)
+        or animal_type not in ANIMAL_VARIANT_TYPES
+        or orientation not in ANIMAL_VARIANT_ORIENTATIONS
+    ):
+        return None
+
+    is_primary = animal_type == selected_animal and orientation == "front"
+    artifact_stem = _animal_animation_artifact_stem(
+        task_guid,
+        animal_type,
+        orientation,
+        is_primary=is_primary,
+    )
+    manifest_name = f"{artifact_stem}_all_animations.manifest.json"
+    artifact_name = f"{artifact_stem}_all_animations.glb"
+    expected_manifest_url = f"{worker_root.rstrip('/')}/{task_guid}/{manifest_name}"
+    expected_artifact_url = f"{worker_root.rstrip('/')}/{task_guid}/{artifact_name}"
+
+    exact_manifest_matches: List[Dict[str, Any]] = []
+    exact_artifact_matches: List[Dict[str, Any]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("folder") or "") != "root":
+            continue
+        size = item.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            continue
+        item_name = str(item.get("name") or "")
+        item_rel_path = str(item.get("rel_path") or "")
+        item_url = str(item.get("url") or "")
+        if (
+            item_name == manifest_name
+            and item_rel_path == manifest_name
+            and item_url == expected_manifest_url
+            and size <= _PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES
+        ):
+            exact_manifest_matches.append(item)
+        elif (
+            item_name == artifact_name
+            and item_rel_path == artifact_name
+            and item_url == expected_artifact_url
+        ):
+            exact_artifact_matches.append(item)
+
+    if len(exact_manifest_matches) != 1 or len(exact_artifact_matches) != 1:
+        return None
+    return expected_manifest_url, artifact_name
+
+
+def _parse_exact_animal_animation_manifest(
+    payload: Any,
+    *,
+    expected_artifact_name: str,
+) -> List[str]:
+    """Validate the worker's compact all-animations manifest fail closed."""
+    if not isinstance(payload, dict):
+        return []
+    schema_version = payload.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != 1
+        or payload.get("artifact_type") != "animal_all_animations_glb"
+    ):
+        return []
+    if payload.get("artifact_file") != expected_artifact_name:
+        return []
+
+    exported = payload.get("exported_clip_names")
+    clips = payload.get("clips")
+    clip_count = payload.get("clip_count")
+    if (
+        not isinstance(exported, list)
+        or not exported
+        or len(exported) > 128
+        or isinstance(clip_count, bool)
+        or not isinstance(clip_count, int)
+        or clip_count != len(exported)
+        or not isinstance(clips, list)
+        or len(clips) != len(exported)
+    ):
+        return []
+
+    actions: List[str] = []
+    normalized_names: Set[str] = set()
+    for index, raw_name in enumerate(exported):
+        if not isinstance(raw_name, str) or raw_name != raw_name.strip():
+            return []
+        if not _PRIMARY_ANIMAL_ANIMATION_CLIP_NAME_RE.fullmatch(raw_name):
+            return []
+        if raw_name.endswith("__LD_STAGE4_TUNED"):
+            return []
+        normalized = _normalize_animation_key(raw_name)
+        if not normalized or normalized in normalized_names:
+            return []
+        clip = clips[index]
+        if not isinstance(clip, dict) or clip.get("name") != raw_name:
+            return []
+        normalized_names.add(normalized)
+        actions.append(raw_name)
+    return actions
+
+
+async def _fetch_exact_animal_animation_manifest_actions(
+    task: Task,
+    files: List[Dict[str, Any]],
+    animal_type: str,
+    orientation: str,
+    *,
+    client: Optional[httpx.AsyncClient] = None,
+) -> List[str]:
+    selected = _select_exact_animal_animation_manifest(task, files, animal_type, orientation)
+    if not selected:
+        return []
+    manifest_url, expected_artifact_name = selected
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=5.0, follow_redirects=False)
+    response = None
+    try:
+        request = client.build_request("GET", manifest_url)
+        response = await client.send(request, stream=True, follow_redirects=False)
+        if response.status_code != 200:
+            return []
+        raw_content_length = str(response.headers.get("content-length") or "").strip()
+        if raw_content_length and (
+            not raw_content_length.isdigit()
+            or int(raw_content_length) <= 0
+            or int(raw_content_length) > _PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES
+        ):
+            return []
+
+        body = bytearray()
+        async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            remaining = (_PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES + 1) - len(body)
+            if remaining <= 0:
+                return []
+            body.extend(chunk[:remaining])
+            if len(body) > _PRIMARY_ANIMAL_ANIMATION_MANIFEST_MAX_BYTES:
+                return []
+        if not body:
+            return []
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return []
+    finally:
+        if response is not None:
+            try:
+                await response.aclose()
+            except Exception:
+                pass
+        if owns_client:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+    return _parse_exact_animal_animation_manifest(
+        payload,
+        expected_artifact_name=expected_artifact_name,
+    )
 
 
 async def _has_animal_animation_pack_purchase(
@@ -5540,7 +5675,45 @@ async def _build_animal_animation_catalog_response(
                 file_map[name.lower()] = item
     matrix = await _fetch_animal_variant_matrix(task, file_map)
     row = matrix.get(f"{normalized_animal}:{normalized_orientation}") or {}
-    actions = _extract_animal_variant_actions(row, normalized_animal)
+    action_row = row
+    if isinstance(row, dict) and row.get("animation_library_revision"):
+        assignment = await activation_for_task(
+            db,
+            rig_type=normalized_animal,
+            task_created_at=task.created_at,
+        )
+        try:
+            if not assignment:
+                raise AnimationLibraryError("No task library assignment", status_code=404)
+            parse_matrix_animation_artifact(
+                row,
+                rig_type=normalized_animal,
+                orientation=normalized_orientation,
+                expected_revision=assignment[1].revision,
+            )
+        except AnimationLibraryError:
+            # Do not backfill old tasks or advertise clips from a mismatched
+            # matrix revision.  Preserve only the worker's legacy action list.
+            action_row = dict(row)
+            for key in (
+                "animation_library_revision",
+                "animation_clip_count",
+                "animation_clip_ids",
+            ):
+                action_row.pop(key, None)
+    if action_row:
+        # A concrete matrix row remains authoritative, including its legacy
+        # default behavior when the row does not declare action names.
+        actions = _extract_animal_variant_actions(action_row, normalized_animal)
+    else:
+        actions = await _fetch_exact_animal_animation_manifest_actions(
+            task,
+            files if available else [],
+            normalized_animal,
+            normalized_orientation,
+        )
+        if not actions:
+            actions = _extract_animal_variant_actions({}, normalized_animal)
     pack_purchased = await _has_animal_animation_pack_purchase(
         db,
         user,
@@ -5711,9 +5884,10 @@ async def _build_animal_variants_response(
             if name:
                 file_map[name.lower()] = item
 
-    matrix = await _fetch_animal_variant_matrix(task, file_map) if file_map else {}
+    matrix = await _fetch_animal_variant_matrix(task, file_map)
     progress_text = await _fetch_animal_variant_progress_line(task)
     purchased_all = await _has_full_task_download_purchase(db, user, task.id) if user else False
+    task_library_assignments = await activations_for_task(db, task_created_at=task.created_at)
 
     variants: List[AnimalRigVariantItem] = []
     for animal_type in ANIMAL_VARIANT_TYPES:
@@ -5738,6 +5912,18 @@ async def _build_animal_variants_response(
             row = matrix.get(f"{animal_type}:{orientation}") or {}
             matrix_status = str(row.get("status") or row.get("state") or "").strip().lower()
             error = str(row.get("error") or row.get("message") or "").strip() or None
+            animation_meta = None
+            assignment = task_library_assignments.get(animal_type)
+            if assignment:
+                try:
+                    animation_meta = parse_matrix_animation_artifact(
+                        row,
+                        rig_type=animal_type,
+                        orientation=orientation,
+                        expected_revision=assignment[1].revision,
+                    )
+                except AnimationLibraryError:
+                    animation_meta = None
 
             if blend_item and fbx_item:
                 status = "ready"
@@ -5756,6 +5942,18 @@ async def _build_animal_variants_response(
                 status=status,
                 error=error,
                 preview_url=_animal_variant_public_url(task.id, animal_type, orientation, "fbx", preview=True) if fbx_item else None,
+                animation_manifest_url=(
+                    f"/api/task/{task.id}/animation-manifest?rig_type={quote(animal_type)}&orientation={quote(orientation)}"
+                    if animation_meta else None
+                ),
+                animation_glb_url=(
+                    f"/api/task/{task.id}/animations.glb?rig_type={quote(animal_type)}&orientation={quote(orientation)}"
+                    if animation_meta else None
+                ),
+                animation_library_revision=animation_meta.library_revision if animation_meta else None,
+                animation_clip_count=animation_meta.animation_clip_count if animation_meta else None,
+                animation_manifest_sha256=animation_meta.animation_manifest_sha256 if animation_meta else None,
+                animation_glb_sha256=animation_meta.animation_glb_sha256 if animation_meta else None,
                 blend=_animal_variant_file_state(blend_item, task.id, animal_type, orientation, "blend"),
                 fbx=_animal_variant_file_state(fbx_item, task.id, animal_type, orientation, "fbx"),
                 skeleton=_animal_variant_file_state(skeleton_item, task.id, animal_type, orientation, "skeleton"),
@@ -5785,6 +5983,301 @@ async def api_task_animal_variants(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return await _build_animal_variants_response(task, db, user)
+
+
+def _raise_animation_library_http_error(exc: AnimationLibraryError):
+    raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/animation-libraries/taxonomy")
+async def api_admin_animation_taxonomy(
+    admin: User = Depends(require_admin),
+):
+    from animal_animation_library import TAXONOMY
+
+    return TAXONOMY
+
+
+@app.post("/api/admin/animation-libraries")
+async def api_admin_create_animation_library(
+    body: AnimationLibraryCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        version = await create_library_version(db, body, admin_email=admin.email)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_library_version(version)
+
+
+@app.get("/api/admin/animation-libraries")
+async def api_admin_list_animation_libraries(
+    rig_type: Optional[str] = None,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(AnimalAnimationLibraryVersion).order_by(
+        AnimalAnimationLibraryVersion.rig_type.asc(),
+        AnimalAnimationLibraryVersion.created_at.desc(),
+    )
+    if rig_type:
+        normalized = str(rig_type).strip().lower()
+        if normalized not in ANIMAL_VARIANT_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid animal rig type")
+        query = query.where(AnimalAnimationLibraryVersion.rig_type == normalized)
+    versions = list((await db.execute(query)).scalars().all())
+    active_ids: Set[int] = set()
+    active_result = await db.execute(
+        select(AnimalAnimationLibraryActivation.library_version_id).where(
+            AnimalAnimationLibraryActivation.deactivated_at.is_(None)
+        )
+    )
+    active_ids = {int(row[0]) for row in active_result.all()}
+    payload = []
+    for version in versions:
+        artifacts = list((await db.execute(
+            select(AnimalAnimationLibraryArtifact).where(
+                AnimalAnimationLibraryArtifact.library_version_id == version.id
+            )
+        )).scalars().all())
+        approved_count = int((await db.execute(
+            select(func.count(AnimalAnimationApprovedClip.id)).where(
+                AnimalAnimationApprovedClip.library_version_id == version.id
+            )
+        )).scalar() or 0)
+        payload.append(serialize_library_version(
+            version,
+            artifacts=artifacts,
+            approved_clip_count=approved_count,
+            active=version.id in active_ids,
+        ))
+    return {"libraries": payload, "total": len(payload)}
+
+
+@app.get("/api/admin/animation-libraries/{rig_type}/{revision}")
+async def api_admin_get_animation_library(
+    rig_type: str,
+    revision: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        version = await find_library_version(db, rig_type, revision)
+        active = await current_animation_library_activation(db, version.rig_type)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    artifacts = list((await db.execute(
+        select(AnimalAnimationLibraryArtifact).where(
+            AnimalAnimationLibraryArtifact.library_version_id == version.id
+        )
+    )).scalars().all())
+    clips = list((await db.execute(
+        select(AnimalAnimationApprovedClip)
+        .where(AnimalAnimationApprovedClip.library_version_id == version.id)
+        .order_by(AnimalAnimationApprovedClip.clip_order.asc())
+    )).scalars().all())
+    payload = serialize_library_version(
+        version,
+        artifacts=artifacts,
+        approved_clip_count=len(clips),
+        active=bool(active and active[1].id == version.id),
+    )
+    payload["approved_clips"] = [
+        {
+            "semantic_id": clip.semantic_id,
+            "category": clip.category,
+            "order": clip.clip_order,
+            "loop": clip.loop,
+            "duration": clip.duration,
+            "fps": clip.fps,
+            "start_pose_id": clip.start_pose_id,
+            "end_pose_id": clip.end_pose_id,
+            "root_motion_available": clip.root_motion_available,
+            "qa_profile_revision": clip.qa_profile_revision,
+            "candidate_id": clip.candidate_id,
+            "fbx_url": clip.fbx_url,
+            "fbx_sha256": clip.fbx_sha256,
+            "metrics": json.loads(clip.metrics_json or "{}"),
+            "provenance": json.loads(clip.provenance_json or "{}"),
+            "approved_by": clip.approved_by,
+            "approved_at": clip.approved_at,
+        }
+        for clip in clips
+    ]
+    return payload
+
+
+@app.put("/api/admin/animation-libraries/{rig_type}/{revision}/artifacts/{orientation}")
+async def api_admin_put_animation_library_artifact(
+    rig_type: str,
+    revision: str,
+    orientation: str,
+    body: AnimationLibraryArtifactPutRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        artifact = await put_library_artifact(
+            db,
+            rig_type=rig_type,
+            revision=revision,
+            orientation=orientation,
+            request=body,
+        )
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return {
+        "orientation": artifact.orientation,
+        "manifest_sha256": artifact.manifest_sha256,
+        "artifact_sha256": artifact.artifact_sha256,
+        "animation_clip_count": artifact.animation_clip_count,
+        "animation_glb_url": artifact.animation_glb_url,
+        "package_zip_url": artifact.package_zip_url,
+    }
+
+
+@app.post("/api/admin/animation-libraries/{rig_type}/{revision}/activate")
+async def api_admin_activate_animation_library(
+    rig_type: str,
+    revision: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        activation = await activate_library_version(
+            db,
+            rig_type=rig_type,
+            revision=revision,
+            admin_email=admin.email,
+        )
+        version = await find_library_version(db, rig_type, revision)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return {
+        "rig_type": version.rig_type,
+        "revision": version.revision,
+        "activation_id": activation.id,
+        "activated_at": activation.activated_at,
+        "reason": activation.reason,
+    }
+
+
+@app.post("/api/admin/animation-libraries/{rig_type}/rollback")
+async def api_admin_rollback_animation_library(
+    rig_type: str,
+    body: AnimationLibraryRollbackRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        activation = await rollback_library_version(
+            db,
+            rig_type=rig_type,
+            target_revision=body.target_revision,
+            admin_email=admin.email,
+        )
+        version_result = await db.execute(
+            select(AnimalAnimationLibraryVersion).where(
+                AnimalAnimationLibraryVersion.id == activation.library_version_id
+            )
+        )
+        version = version_result.scalar_one()
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return {
+        "rig_type": version.rig_type,
+        "revision": version.revision,
+        "activation_id": activation.id,
+        "activated_at": activation.activated_at,
+        "reason": activation.reason,
+    }
+
+
+@app.post("/api/admin/animation-fitting/jobs")
+async def api_admin_create_animation_fitting_job(
+    body: AnimationFittingJobCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job = await create_fitting_job(db, body, admin_email=admin.email)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_fitting_job(job)
+
+
+@app.get("/api/admin/animation-fitting/jobs")
+async def api_admin_list_animation_fitting_jobs(
+    rig_type: Optional[str] = None,
+    semantic_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(AnimalAnimationFittingJob)
+    if rig_type:
+        normalized_rig = str(rig_type).strip().lower()
+        if normalized_rig not in ANIMAL_VARIANT_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid animal rig type")
+        query = query.where(AnimalAnimationFittingJob.rig_type == normalized_rig)
+    if semantic_id:
+        canonical = canonical_animation_id(semantic_id)
+        if not canonical:
+            raise HTTPException(status_code=400, detail="Invalid semantic animation ID")
+        query = query.where(AnimalAnimationFittingJob.semantic_id == canonical)
+    if status:
+        query = query.where(AnimalAnimationFittingJob.status == str(status).strip().lower())
+    jobs = list((await db.execute(
+        query.order_by(AnimalAnimationFittingJob.created_at.desc()).limit(limit)
+    )).scalars().all())
+    return {"jobs": [serialize_fitting_job(job) for job in jobs], "total": len(jobs)}
+
+
+@app.get("/api/admin/animation-fitting/jobs/{job_id}")
+async def api_admin_get_animation_fitting_job(
+    job_id: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await get_fitting_job_payload(db, job_id)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+
+
+@app.post("/api/admin/animation-fitting/jobs/{job_id}/candidates")
+async def api_admin_add_animation_fitting_candidate(
+    job_id: str,
+    body: AnimationCandidateCreateRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        candidate = await add_fitting_candidate(db, job_id=job_id, request=body)
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_candidate(candidate)
+
+
+@app.post("/api/admin/animation-fitting/candidates/{candidate_id}/decision")
+async def api_admin_decide_animation_fitting_candidate(
+    candidate_id: str,
+    body: AnimationCandidateDecisionRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        candidate = await decide_fitting_candidate(
+            db,
+            candidate_id=candidate_id,
+            request=body,
+            admin_email=admin.email,
+        )
+    except AnimationLibraryError as exc:
+        _raise_animation_library_http_error(exc)
+    return serialize_candidate(candidate)
 
 
 async def _resolve_animal_variant_source(
@@ -5823,6 +6316,93 @@ async def _resolve_animal_variant_source(
                 return url, filename
 
     raise HTTPException(status_code=404, detail="Variant file not available yet")
+
+
+def _retryable_animal_variant_not_ready(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=detail,
+        headers={"Retry-After": "3", "Cache-Control": "no-store"},
+    )
+
+
+def _remote_file_snapshot_from_headers(
+    status_code: int,
+    headers: Any,
+) -> Optional[Dict[str, Any]]:
+    content_length: Optional[int] = None
+    if status_code == 206:
+        content_range = str(headers.get("content-range") or "")
+        match = re.fullmatch(r"bytes\s+\d+-\d+/(\d+)", content_range, re.IGNORECASE)
+        if match:
+            content_length = int(match.group(1))
+    elif status_code == 200:
+        raw_length = str(headers.get("content-length") or "").strip()
+        if raw_length.isdigit():
+            content_length = int(raw_length)
+
+    etag = str(headers.get("etag") or "").strip()
+    last_modified = str(headers.get("last-modified") or "").strip()
+    if not content_length or content_length <= 0 or not (etag or last_modified):
+        return None
+    return {
+        "content_length": content_length,
+        "etag": etag,
+        "last_modified": last_modified,
+    }
+
+
+async def _read_remote_file_snapshot(client: httpx.AsyncClient, url: str) -> Optional[Dict[str, Any]]:
+    response = await client.head(url)
+    if response.status_code == 200:
+        return _remote_file_snapshot_from_headers(response.status_code, response.headers)
+    if response.status_code not in (405, 501):
+        return None
+
+    request = client.build_request("GET", url, headers={"Range": "bytes=0-0"})
+    ranged = await client.send(request, stream=True)
+    try:
+        snapshot = _remote_file_snapshot_from_headers(ranged.status_code, ranged.headers)
+        if not snapshot:
+            return None
+        first_byte = b""
+        async for chunk in ranged.aiter_bytes(chunk_size=1):
+            if chunk:
+                first_byte = chunk
+                break
+        return snapshot if first_byte else None
+    finally:
+        await ranged.aclose()
+
+
+async def _probe_stable_remote_file(
+    url: str,
+    *,
+    client: Optional[httpx.AsyncClient] = None,
+    stability_delay_seconds: float = 1.0,
+) -> Optional[Dict[str, Any]]:
+    """Reject an obvious write race; two samples do not prove publication completeness."""
+    owns_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
+            follow_redirects=False,
+        )
+    try:
+        first = await _read_remote_file_snapshot(client, url)
+        if not first:
+            return None
+        if stability_delay_seconds > 0:
+            await asyncio.sleep(min(stability_delay_seconds, 1.0))
+        second = await _read_remote_file_snapshot(client, url)
+        if not second or second != first:
+            return None
+        return first
+    except Exception:
+        return None
+    finally:
+        if owns_client:
+            await client.aclose()
 
 
 @app.get("/api/task/{task_id}/animal-variants/{animal_type}/{orientation}/preview.fbx")
@@ -5873,6 +6453,19 @@ async def api_animal_variant_download(
     if not await _has_full_task_download_purchase(db, user, task_id):
         raise HTTPException(status_code=402, detail="Full download purchase required")
     source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, kind)
+    stable_snapshot: Optional[Dict[str, Any]] = None
+    if kind == "blend":
+        stable_snapshot = await _probe_stable_remote_file(source_url)
+        if not stable_snapshot:
+            raise _retryable_animal_variant_not_ready(
+                "Variant Blend is still being written; retry the same download shortly"
+            )
+        return await _proxy_model_file(
+            source_url,
+            filename,
+            as_attachment=True,
+            required_snapshot=stable_snapshot,
+        )
     return await _proxy_model_file(source_url, filename, as_attachment=True)
 
 
@@ -6034,7 +6627,6 @@ async def api_restart_task(
     """Restart task with the same task_id (available after 1 minute)"""
     from datetime import timedelta
     from workers import select_best_worker, send_task_to_worker
-    via_api = bool(getattr(request.state, "auth_via_api_key", False))
 
     task = await get_task_by_id(db, task_id)
     if not task:
@@ -6074,40 +6666,6 @@ async def api_restart_task(
                 restart_body_data = parsed_body
     except Exception as e:
         print(f"[Restart] Could not parse body: {e}")
-
-    restart_local_rotation = None
-    restart_local_rotation_authoritative = None
-    restart_rig_orientation = None
-    if "local_rotation" in restart_body_data:
-        restart_local_rotation = _coerce_float_vec3(restart_body_data.get("local_rotation"), "local_rotation")
-    if "local_rotation_authoritative" in restart_body_data:
-        restart_local_rotation_authoritative = _coerce_optional_bool(
-            restart_body_data.get("local_rotation_authoritative"),
-            "local_rotation_authoritative",
-        )
-    restart_rig_orientation = _coerce_rig_orientation(
-        restart_body_data.get("rig_orientation") or restart_body_data.get("rig_orientation_json"),
-        local_rotation=restart_local_rotation,
-        local_rotation_authoritative=restart_local_rotation_authoritative,
-        default_source="task_restart",
-    )
-    if restart_rig_orientation:
-        restart_local_rotation = restart_rig_orientation["local_rotation"]
-        restart_local_rotation_authoritative = bool(restart_rig_orientation.get("local_rotation_authoritative"))
-
-    restart_pipeline_kind_for_orientation = getattr(task, "pipeline_kind", None) or "rig"
-    if restart_pipeline_kind_for_orientation not in ("rig", "convert"):
-        restart_pipeline_kind_for_orientation = "rig"
-    if restart_pipeline_kind_for_orientation == "rig" and not via_api:
-        restart_rig_orientation = _ensure_site_authoritative_rig_orientation(
-            restart_rig_orientation,
-            local_rotation=restart_local_rotation,
-            local_rotation_authoritative=restart_local_rotation_authoritative,
-            default_source="task_restart",
-        )
-        if restart_rig_orientation:
-            restart_local_rotation = restart_rig_orientation["local_rotation"]
-            restart_local_rotation_authoritative = bool(restart_rig_orientation.get("local_rotation_authoritative"))
 
     animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
     requested_rig_key = str(
@@ -6176,12 +6734,6 @@ async def api_restart_task(
                 "user_selected_bool": True,
                 "animal_decision_accepted_bool": True,
             }
-            if restart_local_rotation is not None:
-                settings["rig_v2_animal_detection"]["local_rotation"] = restart_local_rotation
-            if restart_local_rotation_authoritative is not None:
-                settings["rig_v2_animal_detection"]["local_rotation_authoritative"] = bool(restart_local_rotation_authoritative)
-            if restart_rig_orientation:
-                settings["rig_v2_animal_detection"]["rig_orientation"] = restart_rig_orientation
         else:
             existing_detection = settings.get("rig_v2_animal_detection")
             if isinstance(existing_detection, dict):
@@ -6196,8 +6748,6 @@ async def api_restart_task(
                     "manual_selection": True,
                     "user_selected_bool": True,
                 }
-        if restart_rig_orientation:
-            settings["rig_orientation"] = restart_rig_orientation
         task.viewer_settings = json.dumps(settings, ensure_ascii=False)
 
     # Increment version (restart_count)
@@ -6231,7 +6781,7 @@ async def api_restart_task(
         
         # 1. Clear GLB cache (prepared.glb, animations.glb)
         glb_cache = static_dir / "glb_cache"
-        for cache_file in glb_cache.glob(f"{task_id}_*.glb"):
+        for cache_file in glb_cache.glob(f"{task_id}_*"):
             cache_file.unlink()
             print(f"[Restart] Deleted cached GLB: {cache_file.name}")
         
@@ -6259,45 +6809,16 @@ async def api_restart_task(
     if pk_restart not in ("rig", "convert"):
         pk_restart = "rig"
 
-    viewer_environment_restart = None
-    if pk_restart == "rig":
-        try:
-            restart_settings = json.loads(task.viewer_settings or "{}")
-            if not isinstance(restart_settings, dict):
-                restart_settings = {}
-        except Exception:
-            restart_settings = {}
-        if ensure_viewer_environment_in_settings(restart_settings):
-            task.viewer_settings = json.dumps(restart_settings, ensure_ascii=False)
-        viewer_environment_restart = get_viewer_environment_from_settings(restart_settings)
-        if restart_rig_orientation:
-            restart_settings["rig_orientation"] = restart_rig_orientation
-            task.viewer_settings = json.dumps(restart_settings, ensure_ascii=False)
-
     # Parse transform params from request body (rig pipeline only)
     transform_params = None
     if pk_restart == "rig":
         if any(k in restart_body_data for k in ("local_position", "local_rotation", "local_scale")):
             transform_params = {
                 "local_position": restart_body_data.get("local_position"),
-                "local_rotation": restart_local_rotation if restart_local_rotation is not None else restart_body_data.get("local_rotation"),
+                "local_rotation": restart_body_data.get("local_rotation"),
                 "local_scale": restart_body_data.get("local_scale")
             }
-            if restart_local_rotation_authoritative is not None:
-                transform_params["local_rotation_authoritative"] = bool(restart_local_rotation_authoritative)
-            if restart_rig_orientation:
-                transform_params["rig_orientation"] = restart_rig_orientation
             print(f"[Restart] Transform params from request: {transform_params}")
-
-        if not transform_params and restart_rig_orientation:
-            transform_params = {
-                "local_rotation": restart_rig_orientation["local_rotation"],
-                "local_rotation_authoritative": bool(
-                    restart_rig_orientation.get("local_rotation_authoritative", True)
-                ),
-                "rig_orientation": restart_rig_orientation,
-            }
-            print(f"[Restart] Transform params from rig_orientation: {transform_params}")
 
         # Fallback: read from saved viewer_settings if no transforms in request
         if not transform_params and task.viewer_settings:
@@ -6325,12 +6846,6 @@ async def api_restart_task(
                             ],
                             "local_scale": [scale.get("x", 1), scale.get("y", 1), scale.get("z", 1)]
                         }
-                        orientation = settings.get("rig_orientation") if isinstance(settings, dict) else None
-                        if isinstance(orientation, dict):
-                            transform_params["rig_orientation"] = orientation
-                            transform_params["local_rotation_authoritative"] = bool(
-                                orientation.get("local_rotation_authoritative", True)
-                            )
                         print(f"[Restart] Transform params from viewer_settings: {transform_params}")
             except Exception as e:
                 print(f"[Restart] Could not read viewer_settings: {e}")
@@ -6344,7 +6859,11 @@ async def api_restart_task(
         pipeline_kind=pk_restart,
         animal_type=restart_animal_type,
         mode=restart_worker_mode,
-        viewer_environment=viewer_environment_restart,
+        viewer_environment=(
+            build_viewer_environment_from_settings(task.viewer_settings, app_url=APP_URL)
+            if pk_restart == "rig"
+            else None
+        ),
     )
     if not result.success:
         task.status = "error"
@@ -8326,31 +8845,16 @@ async def api_admin_restart_incomplete_tasks(
                     pk_ad = getattr(task, "pipeline_kind", None) or "rig"
                     if pk_ad not in ("rig", "convert"):
                         pk_ad = "rig"
-                    viewer_environment_ad = None
-                    transform_params_ad = None
-                    if pk_ad == "rig":
-                        try:
-                            ad_settings = json.loads(task.viewer_settings or "{}")
-                            if not isinstance(ad_settings, dict):
-                                ad_settings = {}
-                        except Exception:
-                            ad_settings = {}
-                        if ensure_viewer_environment_in_settings(ad_settings):
-                            task.viewer_settings = json.dumps(ad_settings, ensure_ascii=False)
-                        viewer_environment_ad = get_viewer_environment_from_settings(ad_settings)
-                        transform_params_ad = _ensure_site_transform_params_from_settings(
-                            ad_settings,
-                            default_source="task_restart",
-                        )
-                        if transform_params_ad:
-                            task.viewer_settings = json.dumps(ad_settings, ensure_ascii=False)
                     send_result = await send_task_to_worker(
                         worker_url,
                         task.input_url,
                         task.input_type or "t_pose",
-                        transform_params=transform_params_ad,
                         pipeline_kind=pk_ad,
-                        viewer_environment=viewer_environment_ad,
+                        viewer_environment=(
+                            build_viewer_environment_from_settings(task.viewer_settings, app_url=APP_URL)
+                            if pk_ad == "rig"
+                            else None
+                        ),
                     )
                     if not send_result.success:
                         task.status = "error"
@@ -8425,6 +8929,54 @@ async def proxy_video(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    local_video_path = Path("/var/autorig/videos") / f"{task_id}.mp4"
+    if local_video_path.exists() and local_video_path.stat().st_size > 0:
+        file_size = local_video_path.stat().st_size
+        start, end = 0, file_size - 1
+        status_code = 200
+        range_header = request.headers.get("range")
+        if range_header:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip(), re.IGNORECASE)
+            if not match or (not match.group(1) and not match.group(2)):
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            if match.group(1):
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else file_size - 1
+            else:
+                suffix_length = int(match.group(2))
+                start = max(0, file_size - suffix_length)
+            end = min(end, file_size - 1)
+            if start < 0 or start >= file_size or end < start:
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            status_code = 206
+
+        async def stream_local_video():
+            remaining = end - start + 1
+            with local_video_path.open("rb") as source:
+                source.seek(start)
+                while remaining > 0:
+                    chunk = source.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        local_headers = {
+            "Content-Disposition": f'inline; filename="{task_id}_video.mp4"',
+            "Cache-Control": "public, max-age=0, must-revalidate",
+            "Content-Encoding": "identity",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end - start + 1),
+        }
+        if status_code == 206:
+            local_headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        return StreamingResponse(
+            stream_local_video(),
+            status_code=status_code,
+            media_type="video/mp4",
+            headers=local_headers,
+        )
     
     source_video_url = await _resolve_task_video_source_url(task)
     if not source_video_url:
@@ -8471,7 +9023,7 @@ async def proxy_video(
         _vname = f"{task_id}_video.mp4"
     response_headers: Dict[str, str] = {
         "Content-Disposition": f'inline; filename="{_vname}"',
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=0, must-revalidate",
         # Prevent GZip middleware from wrapping video stream and breaking ranges.
         "Content-Encoding": "identity",
         "Accept-Ranges": "bytes",
@@ -8728,6 +9280,145 @@ async def proxy_file_by_name(
     )
 
 
+def _task_bundle_meta_cache_path(task_id: str) -> Path:
+    return TASK_CACHE_DIR / task_id / ".meta" / "bundle.json"
+
+
+def _bundle_meta_response(
+    *,
+    ready: bool,
+    source: str,
+    file_count: Optional[int] = None,
+    total_size: Optional[int] = None,
+    generated_at: Optional[str] = None,
+    converter_version: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "bundle_file_count": file_count if ready else None,
+        "bundle_file_count_ready": bool(ready),
+        "bundle_file_count_source": source,
+        "bundle_total_size": total_size,
+        "bundle_meta_generated_at": generated_at,
+        "bundle_converter_version": converter_version,
+    }
+
+
+def _normalize_bundle_meta(raw: Any, *, source: str, worker_zip_url: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        file_count = int(raw.get("bundle_file_count", raw.get("file_count", 0)) or 0)
+    except Exception:
+        file_count = 0
+    if file_count <= 0:
+        return None
+
+    total_size_raw = raw.get("bundle_total_size", raw.get("zip_size"))
+    try:
+        total_size = int(total_size_raw) if total_size_raw is not None else None
+    except Exception:
+        total_size = None
+
+    meta_source = str(raw.get("bundle_file_count_source") or raw.get("source") or source or "unknown")
+    return _bundle_meta_response(
+        ready=True,
+        source=meta_source,
+        file_count=file_count,
+        total_size=total_size,
+        generated_at=raw.get("bundle_meta_generated_at") or raw.get("generated_at"),
+        converter_version=raw.get("bundle_converter_version") or raw.get("converter_version"),
+    )
+
+
+def _read_cached_task_bundle_meta(task_id: str, worker_zip_url: Optional[str]) -> Optional[Dict[str, Any]]:
+    path = _task_bundle_meta_cache_path(task_id)
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    cached_zip_url = raw.get("bundle_worker_zip_url") or raw.get("worker_zip_url")
+    if cached_zip_url and worker_zip_url and cached_zip_url != worker_zip_url:
+        return None
+    return _normalize_bundle_meta(raw, source="metadata_cache", worker_zip_url=worker_zip_url)
+
+
+def _write_cached_task_bundle_meta(task_id: str, meta: Dict[str, Any]) -> None:
+    try:
+        path = _task_bundle_meta_cache_path(task_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"[BundleMeta] Failed to write metadata cache for task {task_id}: {e}")
+
+
+async def _worker_bundle_zip_available(zip_url: str) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            async with client.stream("GET", zip_url, headers={"Range": "bytes=0-0"}) as response:
+                return response.status_code in (200, 206)
+    except Exception:
+        return False
+
+
+async def _load_task_bundle_meta(
+    task: Task,
+    *,
+    fallback_file_count: int = 0,
+    fallback_total_size: int = 0,
+) -> Dict[str, Any]:
+    zip_url = resolve_worker_full_bundle_zip_url(task)
+    cached_meta = _read_cached_task_bundle_meta(task.id, zip_url)
+    if cached_meta and cached_meta.get("bundle_file_count_source") != "fallback_cache":
+        return cached_meta
+
+    if zip_url:
+        meta_url = f"{zip_url}.meta.json"
+        try:
+            async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+                response = await client.get(meta_url, headers={"Accept": "application/json"})
+            if response.status_code == 200:
+                worker_meta = _normalize_bundle_meta(
+                    response.json(),
+                    source="worker_meta",
+                    worker_zip_url=zip_url,
+                )
+                if worker_meta:
+                    worker_meta["bundle_file_count_source"] = "worker_meta"
+                    worker_meta_cache = dict(worker_meta)
+                    worker_meta_cache["worker_zip_url"] = zip_url
+                    _write_cached_task_bundle_meta(task.id, worker_meta_cache)
+                    return worker_meta
+        except Exception as e:
+            print(f"[BundleMeta] Worker metadata unavailable for task {task.id}: {e}")
+
+        if await _worker_bundle_zip_available(zip_url):
+            return _bundle_meta_response(
+                ready=False,
+                source="worker_meta_missing",
+            )
+
+    if cached_meta and cached_meta.get("bundle_file_count_source") == "fallback_cache":
+        return cached_meta
+
+    if fallback_file_count > 0:
+        return _bundle_meta_response(
+            ready=True,
+            source="fallback_cache",
+            file_count=int(fallback_file_count),
+            total_size=int(fallback_total_size or 0),
+        )
+
+    return _bundle_meta_response(
+        ready=False,
+        source="unknown" if task.status == "done" else "task_not_done",
+    )
+
+
 @app.get("/api/task/{task_id}/cached-files")
 async def api_task_cached_files(
     task_id: str,
@@ -8760,12 +9451,18 @@ async def api_task_cached_files(
                 })
         
         if files:
+            bundle_meta = await _load_task_bundle_meta(
+                task,
+                fallback_file_count=len(files),
+                fallback_total_size=total_size,
+            )
             return {
                 "cached": True,
                 "task_id": task_id,
                 "files": files,
                 "total_size": total_size,
-                "file_count": len(files)
+                "file_count": len(files),
+                **bundle_meta,
             }
     
     # If task is done but not cached yet, trigger caching
@@ -8779,23 +9476,36 @@ async def api_task_cached_files(
         urls_to_cache = list(dict.fromkeys(urls_to_cache))
         # Start caching in background
         result = await cache_task_files(task_id, urls_to_cache, task.guid)
+        total_size = sum(f["size"] for f in result["files"])
+        bundle_meta = await _load_task_bundle_meta(
+            task,
+            fallback_file_count=len(result["files"]),
+            fallback_total_size=total_size,
+        )
         return {
             "cached": result["cached"],
             "task_id": task_id,
             "files": result["files"],
-            "total_size": sum(f["size"] for f in result["files"]),
+            "total_size": total_size,
             "file_count": len(result["files"]),
-            "errors": result.get("errors", [])
+            "errors": result.get("errors", []),
+            **bundle_meta,
         }
     
     # Task not ready yet
+    bundle_meta = (
+        await _load_task_bundle_meta(task)
+        if task.status == "done"
+        else _bundle_meta_response(ready=False, source="task_not_done")
+    )
     return {
         "cached": False,
         "task_id": task_id,
         "files": [],
         "total_size": 0,
         "file_count": 0,
-        "message": "Task not completed yet" if task.status != "done" else "No files to cache"
+        "message": "Task not completed yet" if task.status != "done" else "No files to cache",
+        **bundle_meta,
     }
 
 
@@ -8860,6 +9570,17 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for file_path in files:
             zf.write(file_path, arcname=file_path.name)
+
+    fallback_meta = _bundle_meta_response(
+        ready=True,
+        source="fallback_cache",
+        file_count=len(files),
+        total_size=zip_path.stat().st_size if zip_path.exists() else None,
+        generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    )
+    fallback_meta_cache = dict(fallback_meta)
+    fallback_meta_cache["worker_zip_url"] = resolve_worker_full_bundle_zip_url(task)
+    _write_cached_task_bundle_meta(task.id, fallback_meta_cache)
 
     return FileResponse(
         zip_path,
@@ -9151,6 +9872,21 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
     return None
 
 
+def _find_exact_file_in_ready_urls(ready_urls: list, filename: str) -> Optional[str]:
+    """Find a URL whose decoded path basename exactly matches ``filename``."""
+    filename_lower = str(filename or "").strip().lower()
+    if not filename_lower:
+        return None
+    for url in ready_urls:
+        url_clean = str(url or "").strip()
+        if not url_clean:
+            continue
+        basename = Path(unquote(urlparse(url_clean).path)).name.lower()
+        if basename == filename_lower:
+            return url_clean
+    return None
+
+
 BLUEPRINT_SKELETON_SUFFIX = "_skeleton.json"
 BLUEPRINT_RIG_PREVIEW_SUFFIX = "_rig_preview.mp4"
 
@@ -9175,6 +9911,10 @@ def _find_cached_blueprint_file(task_id: str, guid: Optional[str], suffix: str) 
         path = cache_dir / name
         if path.exists() and path.is_file() and path.stat().st_size > 0:
             return path
+    # Skeleton variants such as ``dog_front_skeleton.json`` are diagnostic
+    # outputs and must never replace the task's canonical skeleton.
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        return None
     matches = sorted(cache_dir.glob(f"*{suffix}"))
     for path in matches:
         if path.is_file() and path.stat().st_size > 0:
@@ -9198,7 +9938,14 @@ async def _remote_file_exists(url: str) -> bool:
 
 async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str]:
     urls = list(task.ready_urls or []) + list(task.output_urls or [])
-    existing = _find_file_in_ready_urls(urls, suffix)
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        if not task.guid:
+            return None
+        canonical_filename = f"{task.guid}{suffix}"
+        existing = _find_exact_file_in_ready_urls(urls, canonical_filename)
+    else:
+        canonical_filename = ""
+        existing = _find_file_in_ready_urls(urls, suffix)
     if existing:
         return existing
     if not task.guid or not task.worker_api:
@@ -9234,8 +9981,15 @@ async def _resolve_task_worker_file_url(task: Task, suffix: str) -> Optional[str
                 continue
             name = str(item.get("name") or "")
             rel_path = str(item.get("rel_path") or "")
-            if rel_path and name.lower().endswith(suffix):
-                return f"{worker_root}/{task.guid}/{rel_path}"
+            if not rel_path:
+                continue
+            if suffix == BLUEPRINT_SKELETON_SUFFIX:
+                item_basename = Path(unquote(urlparse(rel_path).path)).name
+                if item_basename.lower() != canonical_filename.lower():
+                    continue
+            elif not name.lower().endswith(suffix):
+                continue
+            return f"{worker_root}/{task.guid}/{rel_path}"
     return None
 
 
@@ -10010,6 +10764,7 @@ _GLB_FILE_HTTP_HEADERS: Dict[str, str] = {
     "Access-Control-Allow-Origin": "*",
     "Content-Encoding": "identity",
 }
+_ANIMAL_VARIANT_FIRST_BYTE_TIMEOUT_SECONDS = 5.0
 
 
 async def _proxy_model_file(
@@ -10017,6 +10772,7 @@ async def _proxy_model_file(
     filename: str,
     *,
     as_attachment: bool = False,
+    required_snapshot: Optional[Dict[str, Any]] = None,
 ) -> StreamingResponse:
     """Proxy a model file from worker with streaming.
 
@@ -10036,23 +10792,37 @@ async def _proxy_model_file(
     content_type = content_types.get(ext, "application/octet-stream")
     
     # Large ZIP bundles: allow long reads from worker (nginx should use long proxy_read_timeout too).
-    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0), follow_redirects=True)
+    allow_redirects = required_snapshot is None
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=60.0, read=600.0, write=60.0, pool=60.0),
+        follow_redirects=allow_redirects,
+    )
     try:
         req = client.build_request("GET", url)
-        upstream = await client.send(req, stream=True)
+        upstream = await client.send(req, stream=True, follow_redirects=allow_redirects)
     except Exception as e:
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"Model source unavailable: {e}")
 
     if upstream.status_code != 200:
-        status = 404 if upstream.status_code == 404 else 502
+        status = 503 if required_snapshot is not None else (404 if upstream.status_code == 404 else 502)
         try:
             await upstream.aclose()
         finally:
             await client.aclose()
+        if required_snapshot is not None:
+            raise _retryable_animal_variant_not_ready(
+                f"Variant artifact changed before download (HTTP {upstream.status_code}); retry shortly"
+            )
         raise HTTPException(status_code=status, detail=f"Model source returned HTTP {upstream.status_code}")
 
+    resources_closed = False
+
     async def _close_stream_resources():
+        nonlocal resources_closed
+        if resources_closed:
+            return
+        resources_closed = True
         try:
             await upstream.aclose()
         finally:
@@ -10069,6 +10839,66 @@ async def _proxy_model_file(
     content_length = upstream.headers.get("content-length")
     last_modified = upstream.headers.get("last-modified")
     etag = upstream.headers.get("etag")
+    body_iterator = upstream.aiter_bytes(chunk_size=131072)
+    if required_snapshot is not None:
+        expected_length = required_snapshot.get("content_length")
+        expected_etag = str(required_snapshot.get("etag") or "")
+        expected_last_modified = str(required_snapshot.get("last_modified") or "")
+        actual_length: Optional[int] = None
+        if content_length and str(content_length).isdigit():
+            actual_length = int(str(content_length))
+        metadata_matches = (
+            isinstance(expected_length, int)
+            and expected_length > 0
+            and actual_length == expected_length
+            and (not expected_etag or str(etag or "") == expected_etag)
+            and (not expected_last_modified or str(last_modified or "") == expected_last_modified)
+        )
+        if not metadata_matches:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact metadata is empty or changed; retry the same download shortly"
+            )
+
+        async def _read_first_nonempty_chunk() -> bytes:
+            async for chunk in body_iterator:
+                if chunk:
+                    return chunk
+            return b""
+
+        try:
+            first_chunk = await asyncio.wait_for(
+                _read_first_nonempty_chunk(),
+                timeout=_ANIMAL_VARIANT_FIRST_BYTE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact did not produce a first byte in time; retry shortly"
+            )
+        except Exception:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact stream failed before the first byte; retry shortly"
+            )
+        if not first_chunk:
+            await _close_stream_resources()
+            raise _retryable_animal_variant_not_ready(
+                "Variant artifact returned an empty body; retry the same download shortly"
+            )
+
+        async def _verified_body_iterator():
+            try:
+                yield first_chunk
+                async for chunk in body_iterator:
+                    if chunk:
+                        yield chunk
+            finally:
+                await _close_stream_resources()
+
+        response_body = _verified_body_iterator()
+    else:
+        response_body = body_iterator
     if content_length:
         headers["Content-Length"] = content_length
     if last_modified:
@@ -10078,7 +10908,7 @@ async def _proxy_model_file(
 
     media_type = upstream.headers.get("content-type") or content_type
     return StreamingResponse(
-        upstream.aiter_bytes(chunk_size=131072),  # 128KB chunks
+        response_body,  # 128KB chunks; guarded downloads prefetch one non-empty chunk.
         media_type=media_type,
         headers=headers,
         background=BackgroundTask(_close_stream_resources),
@@ -10110,46 +10940,8 @@ def _validate_glb(data: bytes) -> bool:
     return True
 
 
-def _glb_json_payload(path: Path) -> Optional[dict]:
-    """Read the JSON chunk from a GLB without touching binary buffers."""
-    try:
-        with path.open("rb") as f:
-            if f.read(4) != b"glTF":
-                return None
-            f.read(8)
-            while True:
-                header = f.read(8)
-                if len(header) < 8:
-                    return None
-                chunk_len = int.from_bytes(header[:4], "little")
-                chunk_type = header[4:8]
-                data = f.read(chunk_len)
-                if len(data) < chunk_len:
-                    return None
-                if chunk_type == b"JSON":
-                    return json.loads(data.decode("utf-8").rstrip("\x00 \t\r\n"))
-    except Exception as e:
-        print(f"[GLB Validate] Failed to parse JSON chunk for {path.name}: {e}")
-    return None
-
-
-def _glb_counts(path: Path) -> tuple[int, int]:
-    payload = _glb_json_payload(path)
-    if not isinstance(payload, dict):
-        return 0, 0
-    meshes = payload.get("meshes") or []
-    animations = payload.get("animations") or []
-    mesh_count = len(meshes) if isinstance(meshes, list) else 0
-    animation_count = len(animations) if isinstance(animations, list) else 0
-    return mesh_count, animation_count
-
-
-def _glb_mesh_count(path: Path) -> int:
-    return _glb_counts(path)[0]
-
-
-def _validate_glb_file(path: Path, *, require_mesh: bool = False, require_animation: bool = False) -> bool:
-    """Validate GLB header/length and optionally require renderable animated mesh data."""
+def _validate_glb_file(path: Path) -> bool:
+    """Validate GLB header and declared length without loading the whole file into RAM."""
     try:
         actual_size = path.stat().st_size
         if actual_size < 12:
@@ -10169,18 +10961,15 @@ def _validate_glb_file(path: Path, *, require_mesh: bool = False, require_animat
     if actual_size != expected_length:
         print(f"[GLB Validate] Length mismatch for {path.name}: header says {expected_length}, actual {actual_size}")
         return False
-    if require_mesh or require_animation:
-        mesh_count, animation_count = _glb_counts(path)
-        if require_mesh and mesh_count <= 0:
-            print(f"[GLB Validate] Meshless GLB rejected for preview: {path.name}")
-            return False
-        if require_animation and animation_count <= 0:
-            print(f"[GLB Validate] Animationless GLB rejected for preview: {path.name}")
-            return False
     return True
 
 
-async def _stream_httpx_response_to_file(response: httpx.Response, destination: Path) -> int:
+async def _stream_httpx_response_to_file(
+    response: httpx.Response,
+    destination: Path,
+    *,
+    max_bytes: Optional[int] = None,
+) -> int:
     """Stream an upstream response to disk to avoid buffering large files in memory."""
     bytes_written = 0
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -10191,6 +10980,8 @@ async def _stream_httpx_response_to_file(response: httpx.Response, destination: 
                     continue
                 f.write(chunk)
                 bytes_written += len(chunk)
+                if max_bytes is not None and bytes_written > max_bytes:
+                    raise ValueError(f"Download exceeds {max_bytes} bytes")
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -10252,7 +11043,7 @@ def _iter_task_artifact_paths(task: Task) -> List[Path]:
         TASK_CACHE_DIR / task.id,
         Path("/var/autorig/videos") / f"{task.id}.mp4",
     ]
-    paths.extend(GLB_CACHE_DIR.glob(f"{task.id}_*.glb"))
+    paths.extend(GLB_CACHE_DIR.glob(f"{task.id}_*"))
     upload_token = _extract_upload_token_from_input_url(getattr(task, "input_url", None))
     upload_path = _upload_path_for_token(upload_token)
     if upload_path:
@@ -10954,14 +11745,7 @@ async def purge_gallery_upstream_dead_tasks(
     }
 
 
-async def _get_cached_glb(
-    task_id: str,
-    url: str,
-    cache_name: str,
-    *,
-    require_mesh: bool = False,
-    require_animation: bool = False,
-) -> Optional[FileResponse]:
+async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:
     """
     Get GLB file from local cache, or download and cache it.
     Returns FileResponse for cached file, or None if download failed.
@@ -10973,11 +11757,7 @@ async def _get_cached_glb(
     if cache_path.exists():
         # Validate cached file is not corrupted
         try:
-            if not _validate_glb_file(
-                cache_path,
-                require_mesh=require_mesh,
-                require_animation=require_animation,
-            ):
+            if not _validate_glb_file(cache_path):
                 print(f"[GLB Cache] Cached file corrupted, deleting: {cache_path.name}")
                 cache_path.unlink()
             else:
@@ -11003,11 +11783,7 @@ async def _get_cached_glb(
                     return None
                 size_bytes = await _stream_httpx_response_to_file(response, temp_path)
 
-            if not _validate_glb_file(
-                temp_path,
-                require_mesh=require_mesh,
-                require_animation=require_animation,
-            ):
+            if not _validate_glb_file(temp_path):
                 print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
                 try:
                     temp_path.unlink()
@@ -11049,68 +11825,276 @@ async def api_proxy_model_glb(
     return await _proxy_model_file(model_url, f"{task_id}_model.glb")
 
 
+async def _resolve_task_matrix_animation_artifact(
+    task: Task,
+    db: AsyncSession,
+    *,
+    rig_type: Optional[str],
+    orientation: str,
+):
+    if not _is_animal_task(task):
+        raise HTTPException(status_code=404, detail="Animal animation manifest is available for animal tasks only")
+    selected_rig = str(rig_type or _task_animal_type_from_settings(task) or "").strip().lower()
+    selected_orientation = str(orientation or "front").strip().lower()
+    try:
+        assignment = await activation_for_task(
+            db,
+            rig_type=selected_rig,
+            task_created_at=task.created_at,
+        )
+    except AnimationLibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No animation library was assigned when this task was created")
+
+    matrix = await _fetch_animal_variant_matrix(task, {})
+    row = matrix.get(f"{selected_rig}:{selected_orientation}")
+    try:
+        artifact = parse_matrix_animation_artifact(
+            row,
+            rig_type=selected_rig,
+            orientation=selected_orientation,
+            expected_revision=assignment[1].revision,
+        )
+    except AnimationLibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return artifact, assignment[1]
+
+
+def _animation_artifact_etag(sha256_hex: str) -> str:
+    return f'"sha256:{sha256_hex}"'
+
+
+def _request_etag_matches(request: Request, etag: str) -> bool:
+    values = [value.strip() for value in str(request.headers.get("if-none-match") or "").split(",")]
+    return "*" in values or etag in values
+
+
+def _file_sha256_hex(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _strict_animation_headers(artifact) -> Dict[str, str]:
+    return {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Access-Control-Allow-Origin": "*",
+        "Content-Encoding": "identity",
+        "ETag": _animation_artifact_etag(artifact.animation_glb_sha256),
+        "X-Animation-Library-Revision": artifact.library_revision,
+        "X-Animation-Artifact-SHA256": artifact.animation_glb_sha256,
+        "X-Animation-Clip-Count": str(artifact.animation_clip_count),
+    }
+
+
+MAX_STRICT_ANIMATION_GLB_BYTES = 512 * 1024 * 1024
+
+
+async def _fetch_strict_animation_manifest(artifact, version) -> Tuple[dict, str]:
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            upstream = await client.get(artifact.animation_manifest_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Animation manifest source unavailable: {exc}") from exc
+    if upstream.status_code == 404:
+        raise HTTPException(status_code=404, detail="Animation manifest is absent from the selected variant")
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Animation manifest source returned HTTP {upstream.status_code}")
+    if len(upstream.content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=502, detail="Animation manifest is too large")
+    try:
+        payload = upstream.json()
+        payload = validate_animation_manifest(
+            payload,
+            expected_revision=artifact.library_revision,
+            expected_rig_type=artifact.rig_type,
+            expected_orientation=artifact.orientation,
+            expected_artifact_sha256=artifact.animation_glb_sha256,
+            expected_template_skeleton_sha256=version.template_skeleton_sha256,
+        )
+    except AnimationLibraryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Animation manifest is not valid JSON") from exc
+    digest = calculate_animation_manifest_sha256(payload)
+    if artifact.animation_manifest_sha256 and digest != artifact.animation_manifest_sha256:
+        raise HTTPException(status_code=502, detail="Animation manifest SHA-256 does not match variant matrix")
+    return payload, digest
+
+
+async def _strict_animation_glb_response(task_id: str, artifact, manifest: dict, request: Request):
+    revision_key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", artifact.library_revision).strip("_")
+    cache_path = GLB_CACHE_DIR / (
+        f"{task_id}_animations_{artifact.rig_type}_{artifact.orientation}_"
+        f"{revision_key}_{artifact.animation_glb_sha256[:16]}.glb"
+    )
+    headers = _strict_animation_headers(artifact)
+    etag = headers["ETag"]
+
+    if cache_path.exists():
+        valid = False
+        try:
+            valid = _validate_glb_file(cache_path) and _file_sha256_hex(cache_path) == artifact.animation_glb_sha256
+            if valid:
+                validate_glb_animation_contract(cache_path, manifest)
+        except (OSError, AnimationLibraryError):
+            valid = False
+        if valid:
+            if _request_etag_matches(request, etag):
+                return Response(status_code=304, headers=headers)
+            return FileResponse(
+                path=str(cache_path),
+                media_type="model/gltf-binary",
+                filename=f"{task_id}_{artifact.rig_type}_{artifact.orientation}_animations.glb",
+                headers=headers,
+            )
+        try:
+            cache_path.unlink()
+        except OSError:
+            pass
+
+    temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            async with client.stream(
+                "GET",
+                artifact.animation_glb_url,
+                timeout=30.0,
+                headers={"Accept-Encoding": "identity"},
+            ) as upstream:
+                if upstream.status_code == 404:
+                    raise HTTPException(status_code=404, detail="Animations GLB is absent from the selected manifest")
+                if upstream.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"Animation source returned HTTP {upstream.status_code}")
+                content_length = upstream.headers.get("content-length")
+                if content_length:
+                    try:
+                        if int(content_length) > MAX_STRICT_ANIMATION_GLB_BYTES:
+                            raise HTTPException(status_code=502, detail="Animation source GLB is too large")
+                    except ValueError:
+                        pass
+                downloaded_bytes = await _stream_httpx_response_to_file(
+                    upstream,
+                    temp_path,
+                    max_bytes=MAX_STRICT_ANIMATION_GLB_BYTES,
+                )
+                if downloaded_bytes > MAX_STRICT_ANIMATION_GLB_BYTES:
+                    raise HTTPException(status_code=502, detail="Animation source GLB is too large")
+        if not _validate_glb_file(temp_path):
+            raise HTTPException(status_code=502, detail="Animation source returned an invalid GLB")
+        if _file_sha256_hex(temp_path) != artifact.animation_glb_sha256:
+            raise HTTPException(status_code=502, detail="Animation source SHA-256 does not match variant matrix")
+        try:
+            validate_glb_animation_contract(temp_path, manifest)
+        except AnimationLibraryError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        temp_path.replace(cache_path)
+    except HTTPException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=f"Animation source unavailable: {exc}") from exc
+
+    if _request_etag_matches(request, etag):
+        return Response(status_code=304, headers=headers)
+    return FileResponse(
+        path=str(cache_path),
+        media_type="model/gltf-binary",
+        filename=f"{task_id}_{artifact.rig_type}_{artifact.orientation}_animations.glb",
+        headers=headers,
+    )
+
+
+@app.get("/api/task/{task_id}/animation-manifest")
+async def api_task_animation_manifest(
+    task_id: str,
+    request: Request,
+    rig_type: Optional[str] = None,
+    orientation: str = "front",
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    artifact, version = await _resolve_task_matrix_animation_artifact(
+        task,
+        db,
+        rig_type=rig_type,
+        orientation=orientation,
+    )
+    payload, digest = await _fetch_strict_animation_manifest(artifact, version)
+    etag = _animation_artifact_etag(digest)
+    headers = {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Access-Control-Allow-Origin": "*",
+        "ETag": etag,
+        "X-Animation-Library-Revision": artifact.library_revision,
+        "X-Animation-Manifest-SHA256": digest,
+        "X-Animation-Clip-Count": str(artifact.animation_clip_count),
+    }
+    if _request_etag_matches(request, etag):
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(content=payload, headers=headers)
+
+
 @app.get("/api/task/{task_id}/animations.glb")
 async def api_proxy_animations_glb(
     task_id: str,
+    request: Request,
+    rig_type: Optional[str] = None,
+    orientation: str = "front",
     db: AsyncSession = Depends(get_db)
 ):
-    """Get a renderable animated GLB for the task viewer.
-
-    The legacy canonical *_all_animations.glb can be a skeleton-only animation
-    carrier for older tasks. Prefer the Three.js preview GLB when present, and
-    only serve GLBs that contain both mesh and animation data so the viewer can
-    safely fall back to the package FBX instead of showing an invisible/static
-    asset.
-    """
+    """Get a revisioned manifest artifact, with an exact legacy fallback."""
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     if not task.guid:
         raise HTTPException(status_code=404, detail="Model not available yet")
+    
+    if _is_animal_task(task):
+        selected_rig = str(rig_type or _task_animal_type_from_settings(task) or "").strip().lower()
+        try:
+            assignment = await activation_for_task(db, rig_type=selected_rig, task_created_at=task.created_at)
+        except AnimationLibraryError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        if assignment:
+            artifact, version = await _resolve_task_matrix_animation_artifact(
+                task,
+                db,
+                rig_type=selected_rig,
+                orientation=orientation,
+            )
+            manifest, _manifest_digest = await _fetch_strict_animation_manifest(artifact, version)
+            return await _strict_animation_glb_response(task.id, artifact, manifest, request)
+        # Pre-library animal tasks remain readable, but only through their
+        # exact ready URL; they are never silently assigned a later revision.
+        if rig_type is not None or str(orientation or "front").lower() != "front":
+            raise HTTPException(status_code=404, detail="Legacy task has no revisioned animation variant")
 
-    candidates: list[tuple[str, str]] = []
-    ready_urls = task.ready_urls or []
-    preview_url = _find_file_in_ready_urls(ready_urls, "_all_animations_threejs_preview.glb")
-    if preview_url:
-        candidates.append(("animations_preview", preview_url))
-
-    animations_url = _find_file_in_ready_urls(ready_urls, "_all_animations.glb")
+    # Legacy cache for pre-library animal tasks and humanoid/T-pose tasks.
+    cache_path = GLB_CACHE_DIR / f"{task_id}_animations.glb"
+    if cache_path.exists() and _validate_glb_file(cache_path):
+        return FileResponse(
+            path=str(cache_path),
+            media_type="model/gltf-binary",
+            filename=f"{task_id}_animations.glb",
+            headers=dict(_GLB_FILE_HTTP_HEADERS),
+        )
+    
+    # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
+    animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
     if animations_url:
-        candidates.append(("animations_all", animations_url))
-
-    worker_base = _resolve_worker_base_from_task(task)
-    if worker_base:
-        candidates.extend(
-            [
-                (
-                    "animations_preview",
-                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations_threejs_preview.glb",
-                ),
-                (
-                    "animations_all",
-                    f"{worker_base}/converter/glb/{task.guid}/{task.guid}_all_animations.glb",
-                ),
-            ]
-        )
-
-    seen: set[str] = set()
-    for cache_name, candidate_url in candidates:
-        normalized_url = candidate_url.strip()
-        if not normalized_url or normalized_url in seen:
-            continue
-        seen.add(normalized_url)
-        result = await _get_cached_glb(
-            task_id,
-            normalized_url,
-            cache_name,
-            require_mesh=True,
-            require_animation=True,
-        )
+        result = await _get_cached_glb(task_id, animations_url, "animations")
         if result:
             return result
 
-    raise HTTPException(status_code=404, detail="Animations GLB not available yet")
+    raise HTTPException(status_code=404, detail="Animations GLB is not declared by the task")
 
 
 @app.head("/api/task/{task_id}/animations.fbx")
@@ -11153,7 +12137,19 @@ async def api_proxy_animations_fbx(
     animations_url, filename = _resolve_all_animations_fbx_url(task)
     if not animations_url or not filename:
         raise HTTPException(status_code=404, detail="Animations FBX not available yet")
-    return await _proxy_model_file(animations_url, filename, as_attachment=True)
+    cache_path = GLB_CACHE_DIR / f"{task_id}_{Path(filename).name}"
+    cached_path = await _cache_worker_file_by_ranges(animations_url, cache_path)
+    return FileResponse(
+        path=str(cached_path),
+        media_type="application/octet-stream",
+        filename=Path(filename).name,
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Encoding": "identity",
+        },
+    )
 
 
 @app.get("/api/task/{task_id}/prepared.glb")
@@ -11220,12 +12216,13 @@ async def _blueprint_file_response(
 
     cached = _find_cached_blueprint_file(task_id, task.guid, suffix)
     if cached:
+        cache_control = "no-store" if suffix == BLUEPRINT_SKELETON_SUFFIX else "public, max-age=86400"
         return FileResponse(
             path=str(cached),
             media_type=media_type,
             filename=public_filename,
             headers={
-                "Cache-Control": "public, max-age=86400",
+                "Cache-Control": cache_control,
                 "Access-Control-Allow-Origin": "*",
                 "Content-Encoding": "identity",
             },
@@ -11234,7 +12231,10 @@ async def _blueprint_file_response(
     source_url = await _resolve_task_worker_file_url(task, suffix)
     if not source_url:
         raise HTTPException(status_code=404, detail="Blueprint file not available yet")
-    return await _proxy_model_file(source_url, public_filename, as_attachment=False)
+    response = await _proxy_model_file(source_url, public_filename, as_attachment=False)
+    if suffix == BLUEPRINT_SKELETON_SUFFIX:
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.head("/api/task/{task_id}/blueprint/skeleton.json")
@@ -11325,7 +12325,7 @@ async def api_proxy_thumb(
                 content=response.content,
                 media_type="image/jpeg",
                 headers={
-                    "Cache-Control": "public, max-age=86400",
+                    "Cache-Control": "public, max-age=0, must-revalidate",
                     "Access-Control-Allow-Origin": "*"
                 }
             )
@@ -12407,7 +13407,6 @@ async def api_task_viewer_theme_auto_select(
             existing = {}
 
         existing["viewer_theme_selection"] = selected
-        ensure_viewer_environment_in_settings(existing)
 
         task.viewer_settings = json.dumps(existing, ensure_ascii=False)
 
@@ -12444,6 +13443,274 @@ async def api_set_viewer_default_settings(
     return {"ok": True}
 
 
+@app.post("/api/admin/viewer-default-camera")
+async def api_set_viewer_default_camera(
+    request: Request,
+    admin: User = Depends(require_admin),
+):
+    """Admin-only: merge the live 3D viewer camera into global default settings."""
+    body = await request.body()
+    camera_settings = _validate_viewer_default_camera_payload(
+        body,
+        saved_by=str(getattr(admin, "email", "") or ""),
+    )
+    try:
+        existing = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
+        if not existing:
+            existing = json.loads(json.dumps(DEFAULT_VIEWER_SETTINGS))
+        existing["camera"] = camera_settings
+        _atomic_write_json_file(VIEWER_DEFAULT_SETTINGS_PATH, existing)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save default camera: {e}")
+    return {"ok": True, "camera": camera_settings}
+
+
+def _task_animation_correction_payload(
+    state: Optional[TaskAnimationCorrection],
+    *,
+    can_edit: bool,
+) -> Dict[str, Any]:
+    published = load_animation_correction_json(getattr(state, "published_json", None))
+    draft = load_animation_correction_json(getattr(state, "draft_json", None)) if can_edit else None
+    active = draft if can_edit and draft is not None else published
+    revision = int(getattr(state, "published_revision", 0) or 0)
+    published_at = getattr(state, "published_at", None)
+    return {
+        "schemaVersion": 1,
+        "canEdit": bool(can_edit),
+        "draft": draft,
+        "published": published,
+        "active": active,
+        "publishedRevision": revision,
+        "publishedAt": published_at.isoformat() if published_at else None,
+        "publishedSha256": animation_correction_sha256(published) if published else None,
+        "export": {
+            "status": str(getattr(state, "export_status", None) or "idle"),
+            "error": getattr(state, "export_error", None),
+            "sourceSha256": load_animation_correction_json(
+                getattr(state, "source_sha256_json", None)
+            ),
+            "correctedGlbUrl": getattr(state, "corrected_glb_url", None),
+            "correctedFbxZipUrl": getattr(state, "corrected_fbx_zip_url", None),
+        },
+    }
+
+
+async def _read_animation_correction_request(request: Request) -> Dict[str, Any]:
+    body = await request.body()
+    if len(body) > ANIMATION_CORRECTION_MAX_PAYLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Animation corrections payload too large")
+    try:
+        raw = json.loads(body.decode("utf-8"))
+        return validate_animation_corrections(raw)
+    except AnimationCorrectionValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid animation corrections JSON") from exc
+
+
+async def _task_animation_correction_state(
+    db: AsyncSession,
+    task_id: str,
+) -> Optional[TaskAnimationCorrection]:
+    return (
+        await db.execute(
+            select(TaskAnimationCorrection).where(TaskAnimationCorrection.task_id == task_id)
+        )
+    ).scalar_one_or_none()
+
+
+@app.get("/api/task/{task_id}/animation-corrections")
+async def api_get_task_animation_corrections(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Public published corrections; owner/admin additionally receives its draft."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    can_edit = _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session)
+    state = await _task_animation_correction_state(db, task_id)
+    response.headers["Cache-Control"] = "no-store"
+    return _task_animation_correction_payload(state, can_edit=can_edit)
+
+
+@app.put("/api/task/{task_id}/animation-corrections")
+async def api_put_task_animation_corrections(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner/admin: replace the private draft without changing public preview."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to edit animation corrections")
+
+    corrections = await _read_animation_correction_request(request)
+    state = await _task_animation_correction_state(db, task_id)
+    if state is None:
+        state = TaskAnimationCorrection(task_id=task_id)
+        db.add(state)
+    state.draft_json = canonical_animation_correction_json(corrections)
+    await db.commit()
+    await db.refresh(state)
+    response.headers["Cache-Control"] = "no-store"
+    return _task_animation_correction_payload(state, can_edit=True)
+
+
+@app.post("/api/task/{task_id}/animation-corrections/publish")
+async def api_publish_task_animation_corrections(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner/admin: atomically publish the draft and enqueue revisioned exports."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to publish animation corrections")
+
+    state = await _task_animation_correction_state(db, task_id)
+    draft = load_animation_correction_json(getattr(state, "draft_json", None))
+    if state is None or draft is None:
+        raise HTTPException(status_code=409, detail="Save an animation correction draft before publishing")
+    try:
+        published = validate_animation_corrections(draft)
+    except AnimationCorrectionValidationError as exc:
+        raise HTTPException(status_code=409, detail=f"Saved draft is invalid: {exc}") from exc
+
+    state.published_json = canonical_animation_correction_json(published)
+    state.published_revision = int(state.published_revision or 0) + 1
+    state.published_at = datetime.utcnow()
+    state.export_status = "queued"
+    state.export_error = None
+    state.source_sha256_json = None
+    state.corrected_glb_url = None
+    state.corrected_fbx_zip_url = None
+    revision = int(state.published_revision)
+    await db.commit()
+    await db.refresh(state)
+    payload = _task_animation_correction_payload(state, can_edit=True)
+    return JSONResponse(
+        payload,
+        headers={"Cache-Control": "no-store"},
+        background=BackgroundTask(dispatch_animation_correction_export, task_id, revision),
+    )
+
+
+@app.post("/api/task/{task_id}/animation-corrections/export/retry")
+async def api_retry_task_animation_correction_export(
+    task_id: str,
+    request: Request,
+    response: Response,
+    user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    anon_session = None
+    try:
+        anon_session = await get_anon_session(request, response, db)
+    except Exception:
+        anon_session = None
+    if not _is_task_owner_or_admin(task=task, user=user, anon_session=anon_session):
+        raise HTTPException(status_code=403, detail="Not authorized to retry correction export")
+    state = await _task_animation_correction_state(db, task_id)
+    if not state or not state.published_json or int(state.published_revision or 0) <= 0:
+        raise HTTPException(status_code=409, detail="No published correction revision")
+    state.export_status = "queued"
+    state.export_error = None
+    revision = int(state.published_revision)
+    await db.commit()
+    payload = _task_animation_correction_payload(state, can_edit=True)
+    return JSONResponse(
+        payload,
+        headers={"Cache-Control": "no-store"},
+        background=BackgroundTask(dispatch_animation_correction_export, task_id, revision),
+    )
+
+
+@app.post("/api/internal/task/{task_id}/animation-corrections/export/{revision}")
+async def api_apply_task_animation_correction_export_result(
+    task_id: str,
+    revision: int,
+    request: Request,
+):
+    expected = ANIMATION_CORRECTION_EXPORT_TOKEN
+    provided = request.headers.get("authorization", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Animation correction export callback is not configured")
+    if not provided.startswith("Bearer ") or not hmac.compare_digest(provided[7:], expected):
+        raise HTTPException(status_code=401, detail="Invalid export callback token")
+    body = await request.body()
+    if len(body) > 64 * 1024:
+        raise HTTPException(status_code=413, detail="Export result payload too large")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid export result JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Export result must be an object")
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in {"queued", "processing", "ready", "failed"}:
+        raise HTTPException(status_code=400, detail="Invalid export status")
+
+    def _optional_http_url(value: Any, field: str) -> Optional[str]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        parsed = urlparse(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=400, detail=f"{field} must be an absolute HTTP URL")
+        return raw
+
+    try:
+        source_sha256 = normalize_animation_correction_source_sha256(
+            payload.get("sourceSha256"),
+            required=status == "ready",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    applied = await apply_animation_correction_export_result(
+        task_id=task_id,
+        revision=revision,
+        status=status,
+        corrected_glb_url=_optional_http_url(payload.get("correctedGlbUrl"), "correctedGlbUrl"),
+        corrected_fbx_zip_url=_optional_http_url(payload.get("correctedFbxZipUrl"), "correctedFbxZipUrl"),
+        source_sha256=source_sha256,
+        error=str(payload.get("error") or "").strip() or None,
+    )
+    if not applied:
+        raise HTTPException(status_code=409, detail="Correction revision is no longer current")
+    return {"ok": True, "taskId": task_id, "revision": revision, "status": status}
+
+
 @app.get("/api/task/{task_id}/viewer-settings")
 async def api_get_task_viewer_settings(
     task_id: str,
@@ -12473,6 +13740,9 @@ async def api_get_task_viewer_settings(
         try:
             data = json.loads(task.viewer_settings)
             if isinstance(data, dict):
+                global_camera = _read_global_viewer_camera_preset()
+                if global_camera:
+                    data = {**data, "camera": global_camera}
                 return data
         except Exception:
             # Corrupt JSON in DB: ignore and fallback to defaults.
@@ -12481,22 +13751,6 @@ async def api_get_task_viewer_settings(
     data = _read_json_file(VIEWER_DEFAULT_SETTINGS_PATH)
     if not data:
         data = DEFAULT_VIEWER_SETTINGS
-    if not isinstance(data, dict):
-        data = {}
-    else:
-        data = dict(data)
-
-    # Public viewers still need the task-specific immutable environment so the
-    # task page matches worker-rendered previews without exposing editable state.
-    try:
-        public_task_settings = json.loads(task.viewer_settings or "{}")
-        if isinstance(public_task_settings, dict):
-            for key in ("viewer_theme_selection", "viewer_environment"):
-                value = public_task_settings.get(key)
-                if isinstance(value, dict):
-                    data[key] = value
-    except Exception:
-        pass
     return data
 
 
@@ -12530,10 +13784,9 @@ async def api_set_task_viewer_settings(
             existing = {}
     except Exception:
         existing = {}
-    for key in ("rig_v2_animal_detection", "viewer_theme_selection", "viewer_environment", "rig_orientation"):
+    for key in ("rig_v2_animal_detection", "viewer_theme_selection"):
         if isinstance(existing.get(key), dict) and key not in settings:
             settings[key] = existing[key]
-    ensure_viewer_environment_in_settings(settings)
     task.viewer_settings = json.dumps(settings, ensure_ascii=False)
     await db.commit()
     return {"ok": True}
@@ -13281,6 +14534,18 @@ async def serve_llm_txt():
     raise HTTPException(status_code=404, detail="llm.txt not found")
 
 
+@app.get("/llms.txt")
+async def serve_llms_txt():
+    """De-facto LLM discovery file; keep /llm.txt as backward-compatible alias."""
+    path = STATIC_DIR / "llms.txt"
+    if path.is_file():
+        return FileResponse(str(path), media_type="text/plain; charset=utf-8")
+    fallback = STATIC_DIR / "llm.txt"
+    if fallback.is_file():
+        return FileResponse(str(fallback), media_type="text/plain; charset=utf-8")
+    raise HTTPException(status_code=404, detail="llms.txt not found")
+
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -13366,9 +14631,11 @@ async def task_page(
                 task_title = "❌ Rigging Failed"
                 task_description = "There was an error processing this model."
             
-            # Check if video exists
+            # Check if video exists. Prefer DB truth; filesystem check is a legacy fallback.
             video_path = f"/var/autorig/videos/{task_id}.mp4"
-            has_video = os.path.exists(video_path) and os.path.getsize(video_path) > 0
+            has_video = bool(getattr(task, "video_ready", False)) or (
+                os.path.exists(video_path) and os.path.getsize(video_path) > 0
+            )
             
             # Assume thumb exists if task has ready_urls
             has_thumb = bool(task.ready_urls)
@@ -13407,10 +14674,26 @@ async def task_page(
             "description": task_description[:2000],
             "url": task_url,
             "image": f"{base_url}/api/thumb/{task_id}",
+            "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
             "mainEntityOfPage": task_url,
+            "creator": {"@type": "Organization", "name": "AutoRig.online"},
+            "isFamilyFriendly": True,
         }
+        if task.created_at:
+            creative_work["dateCreated"] = task.created_at.isoformat()
+        if task.updated_at:
+            creative_work["dateModified"] = task.updated_at.isoformat()
         if task_keywords:
             creative_work["keywords"] = ", ".join(task_keywords[:24])
+        if has_video:
+            creative_work["associatedMedia"] = {
+                "@type": "VideoObject",
+                "name": task_page_title[:200],
+                "description": task_description[:2000],
+                "thumbnailUrl": f"{base_url}/api/thumb/{task_id}",
+                "contentUrl": f"{base_url}/api/video/{task_id}",
+                "uploadDate": (task.updated_at or task.created_at or datetime.utcnow()).isoformat(),
+            }
         json_ld = f'\n    <script type="application/ld+json">{json.dumps(creative_work, ensure_ascii=False)}</script>'
     standard_seo_tags = f'<meta name="description" content="{safe_task_meta_description}">{keywords_meta}{json_ld}'
 
@@ -13461,7 +14744,7 @@ async def task_page(
     # Mark as indexable, inject canonical and OG/Twitter tags for valid tasks
     html_content = html_content.replace(
         '<meta name="robots" content="noindex, nofollow">',
-        '<meta name="robots" content="index, follow">',
+        '<meta name="robots" content="index, follow, max-image-preview:large, max-video-preview:-1">',
     )
     html_content = html_content.replace(
         "<!-- TASK_SEO_PLACEHOLDER -->",
@@ -13876,17 +15159,17 @@ for _rig_key in GALLERY_RIG_TYPES:
 @app.get("/sitemap.xml")
 async def sitemap_index(db: AsyncSession = Depends(get_db)):
     """
-    Sitemap index: static marketing pages + public task urlsets by part.
+    Sitemap index: static marketing pages + SEO-gated public task urlsets by part.
     """
     from seo_gallery import (
         build_sitemap_index_xml,
-        gallery_sitemap_all_index_part_count,
+        gallery_sitemap_index_part_count,
         video_sitemap_entry_count,
     )
 
     base = (APP_URL or "https://autorig.online").rstrip("/")
     child_locs: List[Tuple[str, Optional[datetime]]] = [(f"{base}/sitemap/pages.xml", None)]
-    n_parts = await gallery_sitemap_all_index_part_count(db)
+    n_parts = await gallery_sitemap_index_part_count(db)
     for p in range(n_parts):
         child_locs.append((f"{base}/sitemap/gallery/part/{p}.xml", None))
     n_video_entries = await video_sitemap_entry_count(db)
@@ -13925,7 +15208,23 @@ async def sitemap_mirror(db: AsyncSession = Depends(get_db)):
 @app.head("/sitemap/gallery/part/{part}.xml")
 @app.get("/sitemap/gallery/part/{part}.xml")
 async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(get_db)):
-    """Chunk (max 50) of public /task?id={task_id} URLs (no SEO gate)."""
+    """Chunk (max 50) of SEO-gated public /task?id={task_id} URLs."""
+    from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_indexing_part
+
+    if part < 0:
+        raise HTTPException(status_code=404, detail="Invalid sitemap chunk")
+    base = (APP_URL or "https://autorig.online").rstrip("/")
+    urls = await gallery_sitemap_urls_for_indexing_part(db, part)
+    if not urls:
+        raise HTTPException(status_code=404, detail="Empty sitemap chunk")
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
+
+
+@app.head("/sitemap/gallery/all/part/{part}.xml")
+@app.get("/sitemap/gallery/all/part/{part}.xml")
+async def sitemap_gallery_public_part(part: int, db: AsyncSession = Depends(get_db)):
+    """Diagnostic full public chunk (max 50) of /task?id={task_id} URLs, without SEO gate."""
     from seo_gallery import build_urlset_xml, gallery_sitemap_urls_for_all_part
 
     if part < 0:
@@ -13934,7 +15233,7 @@ async def sitemap_gallery_indexing_part(part: int, db: AsyncSession = Depends(ge
     urls = await gallery_sitemap_urls_for_all_part(db, part)
     if not urls:
         raise HTTPException(status_code=404, detail="Empty sitemap chunk")
-    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.75")
+    xml = build_urlset_xml(base, urls, changefreq="daily", priority="0.45")
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 

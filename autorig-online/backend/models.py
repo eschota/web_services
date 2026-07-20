@@ -125,6 +125,12 @@ class AnimalRigVariantItem(BaseModel):
     status: str = "pending"
     error: Optional[str] = None
     preview_url: Optional[str] = None
+    animation_manifest_url: Optional[str] = None
+    animation_glb_url: Optional[str] = None
+    animation_library_revision: Optional[str] = None
+    animation_clip_count: Optional[int] = None
+    animation_manifest_sha256: Optional[str] = None
+    animation_glb_sha256: Optional[str] = None
     blend: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
     fbx: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)
     skeleton: AnimalVariantFileState = Field(default_factory=AnimalVariantFileState)

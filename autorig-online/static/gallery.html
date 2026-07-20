@@ -4,17 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Auto Rig Gallery — Real Results</title>
-    <meta name="description" content="Browse real rigging results from AutoRig.Online. Sort by likes or newest, and explore the full gallery with pagination.">
+    <meta name="description" content="Browse real rigging results from AutoRig.Online. Explore newest gallery files by rig type with pagination.">
 
     <!-- Open Graph -->
     <meta property="og:title" content="AutoRig Gallery - Real Results">
-    <meta property="og:description" content="Browse real auto-rigged tasks. Sort by likes or newest, paginate through all results.">
+    <meta property="og:description" content="Browse real auto-rigged tasks by rig type and paginate through the newest results.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://autorig.online/gallery">
     <meta property="og:image" content="https://autorig.online/static/images/og-image.png">
 
     <!-- Styles -->
-    <link rel="stylesheet" href="/static/css/styles.css?v=gallery-dyn-1">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
 
     <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
@@ -32,7 +32,7 @@
         <section class="hero">
         <div class="container">
                 <h1 class="text-gradient" data-i18n="gallery_page_title">Gallery</h1>
-                <p class="hero-subtitle" data-i18n="gallery_page_subtitle">Real completed tasks. Sort by likes or newest.</p>
+                <p class="hero-subtitle" data-i18n="gallery_page_subtitle">Real completed tasks. Browse newest results by rig type.</p>
             </div>
         </section>
 
@@ -44,10 +44,22 @@
                         <div id="gallery-total" style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem;">—</div>
                     </div>
                     <div style="display:flex; gap: 0.75rem; align-items:center; flex-wrap: wrap; justify-content:flex-end;">
-                        <label style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="gallery_sort_label">Sort:</label>
-                        <select id="gallery-sort" class="form-select" style="width: 220px;">
-                            <option value="likes" data-i18n="gallery_sort_likes">Top liked</option>
-                            <option value="date" data-i18n="gallery_sort_date">Newest</option>
+                        <label style="color: var(--text-secondary); font-size: 0.9rem;" data-i18n="gallery_rig_type_label">Rig type:</label>
+                        <select id="gallery-rig-type" class="form-select" style="width: 220px;">
+                            <option value="all" data-i18n="gallery_rig_type_all">All rig types</option>
+                            <option value="humanoid" data-i18n="gallery_rig_type_humanoid">Humanoid</option>
+                            <option value="dog" data-i18n="gallery_rig_type_dog">Dog</option>
+                            <option value="bear" data-i18n="gallery_rig_type_bear">Bear</option>
+                            <option value="cat" data-i18n="gallery_rig_type_cat">Cat</option>
+                            <option value="cow" data-i18n="gallery_rig_type_cow">Cow</option>
+                            <option value="deer" data-i18n="gallery_rig_type_deer">Deer</option>
+                            <option value="elephant" data-i18n="gallery_rig_type_elephant">Elephant</option>
+                            <option value="giraffe" data-i18n="gallery_rig_type_giraffe">Giraffe</option>
+                            <option value="horse" data-i18n="gallery_rig_type_horse">Horse</option>
+                            <option value="mouse" data-i18n="gallery_rig_type_mouse">Mouse</option>
+                            <option value="pig" data-i18n="gallery_rig_type_pig">Pig</option>
+                            <option value="rabbit" data-i18n="gallery_rig_type_rabbit">Rabbit</option>
+                            <option value="turtle" data-i18n="gallery_rig_type_turtle">Turtle</option>
                         </select>
                     </div>
                 </div>
@@ -67,18 +79,23 @@
     <div id="site-footer"></div>
 
     <!-- Scripts -->
-        <script src="/static/js/header.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/site-layout.js?v=20260509-supportpoll1"></script>
+        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
 <script src="/static/js/i18n.js"></script>
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
-    <script src="/static/js/task-card.js"></script>
-    <script src="/static/js/app.js?v=gallery-dyn-1"></script>
+    <script src="/static/js/task-card.js?v=gallery-stats-rigtypes-1"></script>
+    <script src="/static/js/app.js?v=gallery-rigtype-filter-1"></script>
     <script>
         const GalleryPage = {
             page: 1,
             perPage: 24,
-            sort: 'likes',
+            sort: 'date',
+            rigType: (() => {
+                const value = new URLSearchParams(window.location.search).get('rig_type') || 'all';
+                const allowed = ['all', 'humanoid', 'dog', 'bear', 'cat', 'cow', 'deer', 'elephant', 'giraffe', 'horse', 'mouse', 'pig', 'rabbit', 'turtle'];
+                return allowed.includes(value) ? value : 'all';
+            })(),
             loading: false,
 
             async load() {
@@ -97,7 +114,8 @@
                     const params = new URLSearchParams({
                         page: String(this.page),
                         per_page: String(this.perPage),
-                        sort: this.sort
+                        sort: this.sort,
+                        rig_type: this.rigType
                     });
                     const resp = await fetch(`/api/gallery?${params.toString()}`);
                     const data = await resp.json();
@@ -125,8 +143,6 @@
                         const thumbUrl = it.thumbnail_url || `/thumb/${it.task_id}`;
                         const videoUrl = it.video_url || `/api/video/${it.task_id}`;
                         const timeAgo = it.time_ago || '';
-                        const likeCount = (typeof it.like_count === 'number') ? it.like_count : 0;
-                        const liked = !!it.liked_by_me;
                         const openLabel = (typeof window.t === 'function') ? t('gallery_open') : 'Open';
                         const rigKey = (typeof it.rig_icon_key === 'string' && it.rig_icon_key) ? it.rig_icon_key : 'humanoid';
                         const rigSrc = (typeof resolveRigIconUrl === 'function')
@@ -138,10 +154,6 @@
                                 <div class="gallery-card-media">
                                     <img src="${thumbUrl}" loading="lazy" alt="">
                                     ${rigBadge}
-                                    <button class="like-btn ${liked ? 'liked' : ''}" type="button" data-like-task="${it.task_id}">
-                                        <span class="like-heart">♥</span>
-                                        <span class="like-count">${likeCount}</span>
-                                    </button>
                                 </div>
                                 <div class="gallery-card-meta">
                                     <span class="gallery-time">${timeAgo}</span>
@@ -157,34 +169,6 @@
                         img.addEventListener('load', markLoaded, { once: true });
                         img.addEventListener('error', markLoaded, { once: true });
                         if (img.complete) markLoaded();
-                    });
-
-                    // Like buttons (auth-only)
-                    grid.querySelectorAll('[data-like-task]').forEach(btn => {
-                        btn.addEventListener('click', async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-
-                            // If not logged in: redirect to login
-                            const userInfo = document.getElementById('user-info');
-                            const isAuthed = userInfo && !userInfo.classList.contains('hidden');
-                            if (!isAuthed) {
-                                window.location.href = '/auth/login';
-                                return;
-                            }
-
-                            const taskId = btn.getAttribute('data-like-task');
-                            try {
-                                const r = await fetch(`/api/gallery/${taskId}/like`, { method: 'POST' });
-                                if (r.status === 401) { window.location.href = '/auth/login'; return; }
-                                const d = await r.json();
-                                btn.classList.toggle('liked', !!d.liked_by_me);
-                                const cnt = btn.querySelector('.like-count');
-                                if (cnt) cnt.textContent = String(d.like_count ?? 0);
-                            } catch (err) {
-                                console.error('Like failed:', err);
-                            }
-                        });
                     });
 
                     // Video playback on hover/visibility
@@ -227,15 +211,22 @@
             },
 
             init() {
-                const sortEl = document.getElementById('gallery-sort');
+                const rigTypeEl = document.getElementById('gallery-rig-type');
                 const prevBtn = document.getElementById('gallery-prev');
                 const nextBtn = document.getElementById('gallery-next');
 
-                if (sortEl) {
-                    sortEl.value = this.sort;
-                    sortEl.addEventListener('change', () => {
-                        this.sort = sortEl.value || 'likes';
+                if (rigTypeEl) {
+                    rigTypeEl.value = this.rigType;
+                    rigTypeEl.addEventListener('change', () => {
+                        this.rigType = rigTypeEl.value || 'all';
                         this.page = 1;
+                        const url = new URL(window.location.href);
+                        if (this.rigType === 'all') {
+                            url.searchParams.delete('rig_type');
+                        } else {
+                            url.searchParams.set('rig_type', this.rigType);
+                        }
+                        window.history.replaceState({}, '', url);
                         this.load();
                     });
                 }
@@ -252,7 +243,7 @@
                     this.load();
                 });
 
-                // Re-render text on language change (and refresh liked_by_me)
+                // Re-render text on language change.
                 window.addEventListener('languageChanged', () => {
                     this.load();
                 });

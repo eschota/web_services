@@ -1,17 +1,23 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 163.68868835353248,
+      "y": 51.32385571592659,
+      "z": 156.19319054828304
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": -0.03870804573830001,
+      "y": 28.55192333199849,
+      "z": -4.375069318867766
     }
+  },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
   },
   "image_filename": "sci_fi_hangar.jpg",
   "plane_color": "#55606a",
@@ -27,15 +33,22 @@
     "metal"
   ],
   "shadow_settings": {
-    "opacity": 0.48,
+    "opacity": 0.83,
     "shadow_y_offset": 0.005,
-    "softness": 5.5,
-    "sun_multiplier": 1.7
+    "softness": 33.2,
+    "sun_multiplier": 2.55
+  },
+  "src": "/static/env/backdrops/sci_fi_hangar.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/sci_fi_hangar.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/sci_fi_hangar.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/sci_fi_hangar.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/sci_fi_hangar.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
-    "inclination": 62,
+    "inclination": 28,
     "intensity": 1.9,
-    "rotation": -10
+    "rotation": 25
   },
   "theme_id": "sci_fi_hangar",
   "theme_name": "Sci-Fi Hangar",

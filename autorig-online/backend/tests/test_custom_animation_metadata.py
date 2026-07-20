@@ -24,7 +24,7 @@ class CustomAnimationMetadataTests(unittest.TestCase):
 
     def test_manifest_pricing_rules(self):
         pricing = self.manifest.get("pricing", {})
-        self.assertEqual(pricing.get("single_animation_credits"), 1)
+        self.assertEqual(pricing.get("single_animation_credits"), 10)
         self.assertEqual(pricing.get("all_animations_credits"), 10)
         self.assertEqual(str(pricing.get("download_format", "")).lower(), "fbx")
 
@@ -33,11 +33,11 @@ class CustomAnimationMetadataTests(unittest.TestCase):
         ids = [item.get("id") for item in items]
         self.assertEqual(len(ids), len(set(ids)), "Animation IDs must be unique")
 
-    def test_manifest_entries_are_fbx_single_credit(self):
+    def test_manifest_entries_are_fbx_task_unlock_price(self):
         items = self.manifest.get("animations", [])
         bad = []
         for item in items:
-            if item.get("credits") != 1 or str(item.get("format", "")).lower() != "fbx":
+            if item.get("credits") != 10 or str(item.get("format", "")).lower() != "fbx":
                 bad.append(item.get("id"))
         self.assertEqual(bad, [], f"Invalid pricing/format in: {bad}")
 

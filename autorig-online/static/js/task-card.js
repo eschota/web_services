@@ -18,14 +18,28 @@ const TaskCard = {
      * Render a task card HTML
      */
     render(item, options = {}) {
-        const currentSort = options.currentSort || 'likes';
+        const currentSort = options.currentSort || 'date';
         
         const taskUrl = `/task?id=${item.task_id}`;
-        const thumbUrl = item.thumbnail_url || `/api/thumb/${item.task_id}`;
-        const videoUrl = item.video_url || `/api/video/${item.task_id}`;
-        const likeCount = (typeof item.like_count === 'number') ? item.like_count : 0;
+        const mediaVersion = encodeURIComponent(
+            String(item.guid || item.updated_at || item.video_url || item.version || 'ready')
+        );
+        const versionTaskMediaUrl = (url) => {
+            const raw = String(url || '');
+            if (!mediaVersion) return raw;
+            const isTaskMedia = (
+                raw.startsWith('/api/video/')
+                || raw.startsWith('/api/thumb/')
+                || raw.startsWith('/thumb/')
+                || raw.includes('/api/video/')
+                || raw.includes('/api/thumb/')
+            );
+            if (!isTaskMedia) return raw;
+            return `${raw}${raw.includes('?') ? '&' : '?'}v=${mediaVersion}`;
+        };
+        const thumbUrl = versionTaskMediaUrl(item.thumbnail_url || `/api/thumb/${item.task_id}`);
+        const videoUrl = versionTaskMediaUrl(item.video_url || `/api/video/${item.task_id}`);
         const salesCount = (typeof item.sales_count === 'number') ? item.sales_count : 0;
-        const liked = !!item.liked_by_me;
         
         const authorDisplay = this.formatAuthorName(item.author_nickname, item.author_email);
         const authorEmail = item.author_email || null;
@@ -53,35 +67,9 @@ const TaskCard = {
             ? resolveRigIconUrl(rigKey)
             : `/static/Icons_png/${rigKey === 'humanoid' ? 'Human' : (rigKey.charAt(0).toUpperCase() + rigKey.slice(1))}.png?v=rigicons1`;
         const rigIconHtml = `<span class="tc-rig-icon" title="Rig type"><img src="${rigIconSrc}" alt="" width="64" height="64" loading="lazy" decoding="async" aria-hidden="true"></span>`;
+        const badgesHtml = salesHtml ? `<div class="tc-badges">${salesHtml}</div>` : '';
         
-        return `<a href="${taskUrl}" class="tc-card" data-task-id="${item.task_id}"><div class="tc-media"><img class="tc-thumb" src="${thumbUrl}" alt="" onload="this.classList.add('loaded')"><video class="tc-video" src="${videoUrl}" muted loop playsinline preload="none"></video>${authorHtml}${versionHtml}${rigIconHtml}<div class="tc-badges"><button class="tc-like ${liked ? 'liked' : ''}" data-like-task="${item.task_id}" onclick="event.preventDefault();event.stopPropagation();TaskCard.toggleLike(this,'${item.task_id}')"><span>♥</span><span class="tc-like-count">${likeCount}</span></button>${salesHtml}</div></div></a>`;
-    },
-    
-    /**
-     * Toggle like on a task
-     */
-    async toggleLike(btn, taskId) {
-        // Check auth
-        const userInfo = document.getElementById('user-info');
-        const isAuthed = userInfo && !userInfo.classList.contains('hidden');
-        if (!isAuthed) {
-            window.location.href = '/auth/login';
-            return;
-        }
-        
-        try {
-            const r = await fetch(`/api/gallery/${taskId}/like`, { method: 'POST' });
-            if (r.status === 401) {
-                window.location.href = '/auth/login';
-                return;
-            }
-            const d = await r.json();
-            btn.classList.toggle('liked', !!d.liked_by_me);
-            const cnt = btn.querySelector('.tc-like-count');
-            if (cnt) cnt.textContent = String(d.like_count ?? 0);
-        } catch (err) {
-            console.error('Like failed:', err);
-        }
+        return `<a href="${taskUrl}" class="tc-card" data-task-id="${item.task_id}"><div class="tc-media"><img class="tc-thumb" src="${thumbUrl}" alt="" onload="this.classList.add('loaded')"><video class="tc-video" src="${videoUrl}" muted loop playsinline preload="none"></video>${authorHtml}${versionHtml}${rigIconHtml}${badgesHtml}</div></a>`;
     },
     
     /**
@@ -110,7 +98,7 @@ const TaskCard = {
                 e.preventDefault();
                 e.stopPropagation();
                 const author = el.getAttribute('data-author');
-                const sort = el.getAttribute('data-sort') || 'likes';
+                const sort = el.getAttribute('data-sort') || 'date';
                 if (author) TaskCard.navigateToAuthor(author, sort);
             });
         });

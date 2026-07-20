@@ -20,64 +20,58 @@
 
   <url>
     <loc>https://autorig.online/animal-rig</loc>
-    <lastmod>2026-05-07</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.95</priority>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.88</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/animal-rig"/>
     <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/before.png</video:thumbnail_loc>
-      <video:title>Beaver before AutoRig V2 animal rigging</video:title>
-      <video:description>Before example: beaver model before AutoRig V2 animal rigging and animation.</video:description>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/before-poster-20260516.png</video:thumbnail_loc>
+      <video:title>Before V2 animal rig</video:title>
+      <video:description>Original beaver model before AutoRig V2 animal rigging.</video:description>
       <video:content_loc>https://autorig.online/static/videos/animal-rig/before.mp4</video:content_loc>
-      <video:publication_date>2026-05-07T00:00:00+00:00</video:publication_date>
-      <video:family_friendly>yes</video:family_friendly>
+      <video:publication_date>2026-05-16</video:publication_date>
     </video:video>
     <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/after.png</video:thumbnail_loc>
-      <video:title>Beaver after AutoRig V2 animal rigging and animation</video:title>
-      <video:description>After example: beaver model with AutoRig V2 SUPER AI RIG and animal animation.</video:description>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/after-poster-20260516.png</video:thumbnail_loc>
+      <video:title>AutoRig V2 Animal RIG presentation</video:title>
+      <video:description>AI animal rigging and animation preview for a beaver model after V2 rigging.</video:description>
       <video:content_loc>https://autorig.online/static/videos/animal-rig/after.mp4</video:content_loc>
-      <video:publication_date>2026-05-07T00:00:00+00:00</video:publication_date>
-      <video:family_friendly>yes</video:family_friendly>
+      <video:publication_date>2026-05-16</video:publication_date>
     </video:video>
     <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.png</video:thumbnail_loc>
-      <video:title>Spider robot AutoRig V2 animal animation example</video:title>
-      <video:description>Spider robot test model animated with AutoRig V2 creature rigging.</video:description>
-      <video:content_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-07T00:00:00+00:00</video:publication_date>
-      <video:family_friendly>yes</video:family_friendly>
-    </video:video>
-    <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig.png</video:thumbnail_loc>
-      <video:title>Cat AutoRig V2 animal animation example</video:title>
-      <video:description>Cat model rigged and animated with AutoRig V2 animal rigging.</video:description>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig-poster-20260516.png</video:thumbnail_loc>
+      <video:title>Cat V2 animal rig animation example</video:title>
+      <video:description>Cat animation generated with AutoRig V2 animal rigging.</video:description>
       <video:content_loc>https://autorig.online/static/videos/animal-rig/cat-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-07T00:00:00+00:00</video:publication_date>
-      <video:family_friendly>yes</video:family_friendly>
+      <video:publication_date>2026-05-16</video:publication_date>
     </video:video>
     <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.png</video:thumbnail_loc>
-      <video:title>Alpaca AutoRig V2 animal animation example</video:title>
-      <video:description>Alpaca model rigged and animated with AutoRig V2 animal rigging.</video:description>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/alpaca-v2-rig-poster-20260516.png</video:thumbnail_loc>
+      <video:title>Alpaca V2 animal rig animation example</video:title>
+      <video:description>Alpaca animation generated with AutoRig V2 animal rigging.</video:description>
       <video:content_loc>https://autorig.online/static/videos/animal-rig/alpaca-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-07T00:00:00+00:00</video:publication_date>
-      <video:family_friendly>yes</video:family_friendly>
+      <video:publication_date>2026-05-16</video:publication_date>
     </video:video>
     <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.png</video:thumbnail_loc>
-      <video:title>Rabbit AutoRig V2 animal animation example</video:title>
-      <video:description>Rabbit model rigged and animated with AutoRig V2 animal rigging.</video:description>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/rabbit-v2-rig-poster-20260516.png</video:thumbnail_loc>
+      <video:title>Rabbit V2 animal rig animation example</video:title>
+      <video:description>Rabbit animation generated with AutoRig V2 animal rigging.</video:description>
       <video:content_loc>https://autorig.online/static/videos/animal-rig/rabbit-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-07T00:00:00+00:00</video:publication_date>
-      <video:family_friendly>yes</video:family_friendly>
+      <video:publication_date>2026-05-16</video:publication_date>
     </video:video>
     <video:video>
-      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/turtle-v2-rig.png</video:thumbnail_loc>
-      <video:title>Turtle AutoRig V2 animal animation example</video:title>
-      <video:description>Turtle model rigged and animated with AutoRig V2 animal rigging.</video:description>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/turtle-v2-rig-poster-20260516.png</video:thumbnail_loc>
+      <video:title>Turtle V2 animal rig animation example</video:title>
+      <video:description>Turtle animation generated with AutoRig V2 animal rigging.</video:description>
       <video:content_loc>https://autorig.online/static/videos/animal-rig/turtle-v2-rig.mp4</video:content_loc>
-      <video:publication_date>2026-05-07T00:00:00+00:00</video:publication_date>
-      <video:family_friendly>yes</video:family_friendly>
+      <video:publication_date>2026-05-16</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig-poster-20260516.png</video:thumbnail_loc>
+      <video:title>Spider robot non-humanoid V2 rig animation example</video:title>
+      <video:description>Spider robot animation generated with AutoRig V2 non-humanoid rigging.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/animal-rig/spider-robot-v2-rig.mp4</video:content_loc>
+      <video:publication_date>2026-05-16</video:publication_date>
     </video:video>
   </url>
 
@@ -93,6 +87,14 @@
     <lastmod>2026-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/blender-plugin</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/blender-plugin"/>
   </url>
 
   <url>
@@ -117,52 +119,12 @@
     <priority>0.55</priority>
   </url>
 
-  <!-- How It Works (4 languages) -->
+  <!-- How It Works -->
   <url>
     <loc>https://autorig.online/how-it-works</loc>
     <lastmod>2026-01-03</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/how-it-works-ru</loc>
-    <lastmod>2026-01-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/how-it-works-zh</loc>
-    <lastmod>2026-01-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
-  </url>
-
-  <url>
-    <loc>https://autorig.online/how-it-works-hi</loc>
-    <lastmod>2026-01-03</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/how-it-works"/>
-    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/how-it-works-ru"/>
-    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/how-it-works-zh"/>
-    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/how-it-works-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/how-it-works"/>
   </url>
 
@@ -171,6 +133,20 @@
     <lastmod>2026-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/terms</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/user-agreement</loc>
+    <lastmod>2026-05-18</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
   </url>
 
   <!-- Format-specific landing pages -->
@@ -597,6 +573,124 @@
     <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/auto-rig-obj-zh"/>
     <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/auto-rig-obj-hi"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/auto-rig-obj"/>
+  </url>
+
+  <!-- Rig type SEO landing pages -->
+  <url>
+    <loc>https://autorig.online/humanoid-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/humanoid-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/humanoid-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/dog-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/dog-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/dog-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/bear-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/bear-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/bear-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cat-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cat-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cat-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/cow-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/cow-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/cow-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/deer-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/deer-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/deer-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/elephant-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/elephant-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/elephant-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/giraffe-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/giraffe-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/giraffe-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/horse-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/horse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/horse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/mouse-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/mouse-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/mouse-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/pig-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/pig-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/pig-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/rabbit-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/rabbit-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/rabbit-auto-rig"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/turtle-auto-rig</loc>
+    <lastmod>2026-05-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.82</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/turtle-auto-rig"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/turtle-auto-rig"/>
   </url>
 
 </urlset>

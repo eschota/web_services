@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Payment Success | AutoRig.online</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
 </head>
 <body data-layout-free3d-init="none">
     <div id="site-header"></div>
@@ -13,21 +13,28 @@
         <div class="container" style="max-width: 820px;">
             <div class="card" style="padding: 2rem;">
                 <h1 style="margin-top: 0;" data-i18n="payment_success_title">Payment successful</h1>
-                <p style="color: var(--text-secondary);" data-i18n="payment_success_desc">
+                <p id="payment-success-desc" style="color: var(--text-secondary);" data-i18n="payment_success_desc">
                     Payment successful. Credits will appear shortly (usually within 1–2 minutes).
                 </p>
-                <div style="display:flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                <div id="payment-unlock-recovery" class="hidden" style="margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(var(--accent-rgb), 0.08);">
+                    <h2 style="font-size: 1.25rem; margin: 0 0 0.5rem;">Finish unlocking your task</h2>
+                    <p id="payment-unlock-status" style="color: var(--text-secondary); margin: 0 0 1rem;">
+                        Checking your credit balance...
+                    </p>
+                    <a id="payment-unlock-task-link" class="btn btn-primary hidden" href="#">Return to unlock this task</a>
+                </div>
+                <div id="payment-success-actions" style="display:flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap;">
                     <a class="btn btn-primary" href="/" data-i18n="payment_success_back">Back to Home</a>
-                    <a class="btn btn-secondary" href="/buy" data-i18n="payment_success_buy">Buy more credits</a>
+                    <a class="btn btn-secondary" href="/buy-credits" data-i18n="payment_success_buy">Buy more credits</a>
                 </div>
             </div>
         </div>
     </main>
     <div id="site-footer"></div>
 
-        <script src="/static/js/header.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/site-layout.js?v=20260430-supportfix"></script>
+        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
 <script src="/static/js/i18n.js"></script>
     <script>
         function setTheme(theme) {
@@ -57,10 +64,114 @@
                 });
             });
         }
+        const PENDING_DOWNLOAD_UNLOCK_KEY = 'autorigPendingDownloadUnlock';
+        const PENDING_DOWNLOAD_UNLOCK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+        const AUTH_POLL_MAX_MS = 120000;
+        const AUTH_POLL_INTERVAL_MS = 2500;
+
+        function readPendingDownloadUnlock() {
+            try {
+                const raw = localStorage.getItem(PENDING_DOWNLOAD_UNLOCK_KEY);
+                if (!raw) {
+                    const params = new URLSearchParams(window.location.search);
+                    if (params.get('autorig_unlock_dry_run') === '1' && params.get('task_id')) {
+                        return {
+                            taskId: params.get('task_id'),
+                            requiredCredits: Number(params.get('required_credits') || 10),
+                            balanceBefore: 0,
+                            source: 'download_all',
+                            createdAt: Date.now()
+                        };
+                    }
+                    return null;
+                }
+                const intent = JSON.parse(raw);
+                if (!intent || typeof intent !== 'object') return null;
+                const createdAt = Number(intent.createdAt || 0);
+                if (!createdAt || Date.now() - createdAt > PENDING_DOWNLOAD_UNLOCK_MAX_AGE_MS) {
+                    localStorage.removeItem(PENDING_DOWNLOAD_UNLOCK_KEY);
+                    return null;
+                }
+                if (!intent.taskId) return null;
+                return intent;
+            } catch (e) {
+                localStorage.removeItem(PENDING_DOWNLOAD_UNLOCK_KEY);
+                return null;
+            }
+        }
+
+        async function fetchAuthStatus() {
+            const resp = await fetch('/auth/me', { credentials: 'same-origin', cache: 'no-store' });
+            if (!resp.ok) throw new Error('auth');
+            return await resp.json();
+        }
+
+        function showUnlockReturn(intent, balance) {
+            const required = Number(intent.requiredCredits || 10);
+            const status = document.getElementById('payment-unlock-status');
+            const link = document.getElementById('payment-unlock-task-link');
+            const params = new URLSearchParams();
+            params.set('id', String(intent.taskId));
+            params.set('resume_download_unlock', '1');
+            if (new URLSearchParams(window.location.search).get('autorig_unlock_dry_run') === '1') {
+                params.set('autorig_unlock_dry_run', '1');
+            }
+            if (status) {
+                status.textContent = `Your credits are available. Return to confirm the ${required}-credit task unlock. Current balance: ${balance} credits.`;
+            }
+            if (link) {
+                link.href = `/task?${params.toString()}`;
+                link.classList.remove('hidden');
+            }
+        }
+
+        async function setupPendingUnlockRecovery() {
+            const intent = readPendingDownloadUnlock();
+            if (!intent) return;
+
+            const recovery = document.getElementById('payment-unlock-recovery');
+            const status = document.getElementById('payment-unlock-status');
+            const actions = document.getElementById('payment-success-actions');
+            const desc = document.getElementById('payment-success-desc');
+            if (recovery) recovery.classList.remove('hidden');
+            if (actions) actions.classList.add('hidden');
+            if (desc) {
+                desc.textContent = 'Payment successful. We are checking your credit balance so you can return and confirm your task unlock.';
+            }
+
+            const required = Number(intent.requiredCredits || 10);
+            const startedAt = Date.now();
+            while (Date.now() - startedAt < AUTH_POLL_MAX_MS) {
+                try {
+                    const auth = await fetchAuthStatus();
+                    if (!auth.authenticated) {
+                        if (status) status.textContent = 'Sign in to the same account used for checkout, then return to this page.';
+                        return;
+                    }
+                    const balance = Number(auth.credits_remaining || auth.user?.balance_credits || 0);
+                    if (balance >= required) {
+                        showUnlockReturn(intent, balance);
+                        return;
+                    }
+                    if (status) {
+                        status.textContent = `Credits are still processing. Current balance: ${balance} credits; this unlock needs ${required} credits.`;
+                    }
+                } catch (e) {
+                    if (status) status.textContent = 'Still checking your credits...';
+                }
+                await new Promise((resolve) => setTimeout(resolve, AUTH_POLL_INTERVAL_MS));
+            }
+
+            if (status) {
+                status.textContent = 'Credits are still processing. Refresh this page in a minute, or open your task after the balance updates.';
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', async () => {
             await I18n.init();
             setupThemeToggle();
             setupLangSelector();
+            setupPendingUnlockRecovery().catch((e) => console.warn('Pending unlock recovery failed:', e));
         });
     </script>
 </body>

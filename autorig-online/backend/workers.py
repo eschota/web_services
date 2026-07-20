@@ -101,7 +101,7 @@ async def _recover_worker_task_after_post_timeout(
     of incorrectly marking the task as Worker timeout.
     """
     try:
-        resp = await client.get(worker_url, timeout=5.0)
+        resp = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -182,7 +182,9 @@ async def _recover_worker_task_after_post_timeout(
 async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) -> List[Tuple[str, int]]:
     """
     Return enabled worker URLs ordered by weight desc (priority), id asc.
-    Fallback to config.WORKERS (weight=0) when DB has no rows or db is not provided.
+    Fallback to config.WORKERS (weight=0) only when the DB has no configured
+    worker rows or no DB session was provided. An existing table with every
+    worker disabled is an intentional maintenance drain and must stay empty.
     """
     if not db:
         return [(u, 0) for u in WORKERS]
@@ -195,10 +197,16 @@ async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) 
         )
         rows = res.all()
         workers = [(url, int(weight or 0)) for (url, weight) in rows if url]
-    except Exception:
-        workers = []
+        if workers:
+            return workers
 
-    return workers or [(u, 0) for u in WORKERS]
+        configured_count_res = await db.execute(select(func.count(WorkerEndpoint.id)))
+        if int(configured_count_res.scalar() or 0) > 0:
+            return []
+    except Exception:
+        pass
+
+    return [(u, 0) for u in WORKERS]
 
 
 async def get_configured_workers(db: Optional[AsyncSession] = None) -> List[str]:
@@ -242,6 +250,7 @@ def get_worker_effective_active(worker: Any, backend_counts: Optional[Dict[str, 
 
 
 WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
+WORKER_HEALTH_TIMEOUT_SECONDS = float(os.getenv("WORKER_HEALTH_TIMEOUT_SECONDS", "10"))
 _worker_quarantine_until: Dict[str, datetime] = {}
 _worker_quarantine_reason: Dict[str, str] = {}
 
@@ -304,7 +313,7 @@ def get_quarantined_workers() -> Dict[str, dict]:
 async def get_worker_load(worker_url: str, client: httpx.AsyncClient) -> WorkerInfo:
     """Get load/status from a single worker"""
     try:
-        response = await client.get(worker_url, timeout=5.0)
+        response = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             # Worker may return load info in different formats
@@ -922,7 +931,7 @@ def _safe_worker_float(value: Any, default: float = 900.0) -> float:
 async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) -> WorkerQueueStatus:
     """Get detailed queue status from a single worker"""
     try:
-        response = await client.get(worker_url, timeout=5.0)
+        response = await client.get(worker_url, timeout=WORKER_HEALTH_TIMEOUT_SECONDS)
         if response.status_code == 200:
             data = response.json()
             if not isinstance(data, dict):

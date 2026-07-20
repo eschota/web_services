@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Daily JSON snapshot of tasks eligible for /sitemap/gallery and /m/{id} (same SQL filters).
+Daily JSON snapshot of tasks eligible for /sitemap/gallery and /task?id={id} (same SQL filters).
 
 Run via cron, e.g. 0 3 * * * /root/autorig-online/venv/bin/python /root/autorig-online/backend/scripts/dump_sitemap_tasks.py
 

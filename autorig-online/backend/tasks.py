@@ -15,6 +15,10 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession, AsyncSessionLocal
+from config import APP_URL
+from viewer_environment import build_viewer_environment_from_settings
+from worker_progress_contract import latest_terminal_failure_reason
+from task_timeout_contract import task_hard_timeout_reference
 from workers import (
     select_best_worker,
     send_task_to_worker,
@@ -30,10 +34,6 @@ from workers import (
     task_visible_on_worker_refs,
     find_worker_queue_status_for_task,
     quarantine_worker,
-)
-from viewer_environment_contract import (
-    ensure_viewer_environment_in_settings,
-    get_viewer_environment_from_settings,
 )
 
 
@@ -55,87 +55,6 @@ RIG_V2_WORKER_ANIMAL_TYPES = {
     "rabbit",
     "turtle",
 }
-
-
-def _load_task_viewer_settings(task: Task) -> Dict[str, Any]:
-    try:
-        settings = json.loads(task.viewer_settings or "{}")
-        return settings if isinstance(settings, dict) else {}
-    except Exception:
-        return {}
-
-
-def _coerce_rotation_list(value: Any) -> Optional[List[float]]:
-    if not isinstance(value, (list, tuple)) or len(value) != 3:
-        return None
-    out: List[float] = []
-    for item in value:
-        try:
-            number = float(item)
-        except Exception:
-            return None
-        if number != number or abs(number) > 1_000_000:
-            return None
-        out.append(number)
-    return out
-
-
-def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on")
-    return False
-
-
-def _site_authoritative_identity_orientation(source: str) -> Dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "source": source,
-        "local_rotation": [0.0, 0.0, 0.0],
-        "local_rotation_authoritative": True,
-        "quarter_turns": {"x": 0, "y": 0, "z": 0},
-        "user_interacted_bool": False,
-    }
-
-
-def _transform_params_from_viewer_settings(settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if not isinstance(settings, dict):
-        return None
-    orientation = settings.get("rig_orientation")
-    if not isinstance(orientation, dict):
-        return None
-    local_rotation = _coerce_rotation_list(orientation.get("local_rotation"))
-    if local_rotation is None:
-        return None
-    return {
-        "local_rotation": local_rotation,
-        "local_rotation_authoritative": _as_bool(orientation.get("local_rotation_authoritative", True)),
-        "rig_orientation": orientation,
-    }
-
-
-def _ensure_site_transform_params_from_viewer_settings(
-    settings: Dict[str, Any],
-    *,
-    created_via_api: bool,
-    source: str = "site_auto",
-) -> Optional[Dict[str, Any]]:
-    transform_params = _transform_params_from_viewer_settings(settings)
-    if transform_params or created_via_api:
-        return transform_params
-
-    orientation = _site_authoritative_identity_orientation(source)
-    settings["rig_orientation"] = orientation
-    return {
-        "local_rotation": orientation["local_rotation"],
-        "local_rotation_authoritative": True,
-        "rig_orientation": orientation,
-    }
-
-
 RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
 
 
@@ -184,6 +103,13 @@ def _animal_detection_confident_enough(detection: Any) -> bool:
     except Exception:
         threshold = RIG_V2_ANIMAL_DECISION_THRESHOLD
     return weight >= threshold
+
+
+def _viewer_environment_for_task(task: Task) -> Optional[Dict[str, Any]]:
+    return build_viewer_environment_from_settings(
+        getattr(task, "viewer_settings", None),
+        app_url=APP_URL,
+    )
 
 
 def _animal_type_from_detection_meta(detection: Any) -> Optional[str]:
@@ -430,30 +356,19 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
 
                 # Start main pipeline immediately (do not wait for next poll).
                 if not task.worker_task_id and task.fbx_glb_output_url:
-                    viewer_settings = _load_task_viewer_settings(task)
-                    if ensure_viewer_environment_in_settings(viewer_settings):
-                        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
-                    viewer_environment = get_viewer_environment_from_settings(viewer_settings)
-                    transform_params = _ensure_site_transform_params_from_viewer_settings(
-                        viewer_settings,
-                        created_via_api=bool(getattr(task, "created_via_api", False)),
-                        source="site_auto",
-                    )
-                    if transform_params:
-                        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
                     result = await send_task_to_worker(
                         task.worker_api,
                         task.fbx_glb_output_url,
                         task.input_type or "t_pose",
-                        transform_params=transform_params,
                         pipeline_kind="rig",
-                        viewer_environment=viewer_environment,
+                        viewer_environment=_viewer_environment_for_task(task),
                     )
                     if not result.success:
                         task.status = "error"
                         task.error_message = result.error
                         task.updated_at = datetime.utcnow()
                         await db.commit()
+                        _schedule_task_error_notification(task.id)
                         return
 
                     task.worker_task_id = result.task_id
@@ -482,6 +397,7 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
         task.error_message = task.fbx_glb_error
         task.updated_at = datetime.utcnow()
         await db.commit()
+        _schedule_task_error_notification(task.id)
 
 
 # =============================================================================
@@ -541,12 +457,6 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     Workers accept GLB, FBX, OBJ directly via input_url.
     Returns: (task, error_message)
     """
-    task.worker_api = worker_url
-    task.status = "processing"
-    task.updated_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(task)
-
     pk = getattr(task, "pipeline_kind", None) or "rig"
     if pk not in ("rig", "convert"):
         pk = "rig"
@@ -555,35 +465,17 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     mode = None
     transform_params = None
     animal_semantic_markers = None
-    viewer_settings = _load_task_viewer_settings(task)
-    viewer_environment = None
-    if pk == "rig":
-        if ensure_viewer_environment_in_settings(viewer_settings):
-            task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
-            await db.commit()
-            await db.refresh(task)
-        viewer_environment = get_viewer_environment_from_settings(viewer_settings)
-        transform_params = _ensure_site_transform_params_from_viewer_settings(
-            viewer_settings,
-            created_via_api=bool(getattr(task, "created_via_api", False)),
-            source="site_auto",
-        )
     if str(task_type_for_worker).strip().lower() == "animal":
         try:
-            detection = viewer_settings.get("rig_v2_animal_detection") if isinstance(viewer_settings, dict) else None
+            settings = json.loads(task.viewer_settings or "{}")
+            detection = settings.get("rig_v2_animal_detection") if isinstance(settings, dict) else None
             if isinstance(detection, dict):
                 if _animal_detection_confident_enough(detection):
                     animal_type = _animal_type_from_detection_meta(detection)
                     mode = str(detection.get("mode") or "").strip() or None
                     local_rotation = detection.get("local_rotation")
-                    if not transform_params and isinstance(local_rotation, list) and len(local_rotation) == 3:
+                    if isinstance(local_rotation, list) and len(local_rotation) == 3:
                         transform_params = {"local_rotation": local_rotation}
-                        if "local_rotation_authoritative" in detection:
-                            transform_params["local_rotation_authoritative"] = _as_bool(
-                                detection.get("local_rotation_authoritative")
-                            )
-                        if isinstance(detection.get("rig_orientation"), dict):
-                            transform_params["rig_orientation"] = detection["rig_orientation"]
                     markers = detection.get("animal_semantic_markers")
                     if isinstance(markers, dict):
                         animal_semantic_markers = markers
@@ -595,6 +487,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             mode = None
         if not animal_type:
             task.status = "error"
+            task.worker_api = None
             task.error_message = (
                 "Animal rig task is missing animal_type metadata. "
                 "Please retry the upload so AI animal detection can finish."
@@ -602,11 +495,17 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             task.updated_at = datetime.utcnow()
             await db.commit()
             await db.refresh(task)
+            _schedule_task_error_notification(task.id)
             return task, task.error_message
-    if pk == "rig" and transform_params:
-        task.viewer_settings = json.dumps(viewer_settings, ensure_ascii=False)
-        await db.commit()
-        await db.refresh(task)
+
+    # Reserve the worker only after all deterministic task metadata is valid.
+    # Otherwise malformed legacy animal tasks look like worker-side failures.
+    task.worker_api = worker_url
+    task.status = "processing"
+    task.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(task)
+
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,
@@ -617,7 +516,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         animal_type=animal_type,
         mode=mode,
         animal_semantic_markers=animal_semantic_markers,
-        viewer_environment=viewer_environment,
+        viewer_environment=_viewer_environment_for_task(task) if pk == "rig" else None,
     )
     if not result.success:
         error = result.error or "Worker dispatch failed"
@@ -646,6 +545,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         task.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(task)
+        _schedule_task_error_notification(task.id)
         return task, error
 
     task.worker_task_id = result.task_id
@@ -735,6 +635,33 @@ def _is_animal_task(task: Task) -> bool:
     return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
 
 
+def _restore_worker_api_from_progress_page(task: Task) -> bool:
+    """
+    Recover worker_api for already-dispatched tasks when the DB row kept only
+    progress_page. This lets existing progress/failure sync code use the worker.
+    """
+    if (getattr(task, "worker_api", None) or "").strip():
+        return False
+    progress_page = (getattr(task, "progress_page", None) or "").strip()
+    if not progress_page:
+        return False
+    try:
+        parsed = urlparse(progress_page)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    if "/converter/glb/" not in parsed.path:
+        return False
+
+    task.worker_api = f"{parsed.scheme}://{parsed.netloc}/api-converter-glb"
+    if not (getattr(task, "guid", None) or "").strip():
+        match = re.search(r"/converter/glb/([0-9a-fA-F-]{36})(?:/|$)", parsed.path)
+        if match:
+            task.guid = match.group(1)
+    return True
+
+
 def _worker_outputs_look_complete(urls: List[str]) -> bool:
     names = [urlparse(u).path.rsplit("/", 1)[-1].lower() for u in urls or []]
     has_video = any(
@@ -804,18 +731,10 @@ async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
             resp = await client.get(log_url)
         if resp.status_code != 200:
             return None
-        text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+        text = resp.text
     except Exception:
         return None
-
-    failure_re = re.compile(r"\b(FAILURE|FATAL|ERROR)\s*:\s*(.+)", re.IGNORECASE)
-    for line in reversed([ln.strip() for ln in text.splitlines() if ln.strip()]):
-        match = failure_re.search(line)
-        if not match:
-            continue
-        message = match.group(2).strip() or line
-        return message[:500]
-    return None
+    return latest_terminal_failure_reason(text)
 
 
 async def _worker_conversion_completed(task: Task) -> bool:
@@ -834,7 +753,25 @@ async def _worker_conversion_completed(task: Task) -> bool:
         text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
     except Exception:
         return False
-    return "Conversion completed" in text
+    # Animal-only-rig workers continue scheduling optional cross-species
+    # variants after the requested rig, skeleton, and preview have been
+    # exported.  Their primary completion marker is therefore distinct from
+    # the legacy generic converter marker.
+    return (
+        "Conversion completed" in text
+        or "Animal primary rigging completed" in text
+    )
+
+
+def _schedule_task_error_notification(task_id: str) -> None:
+    """Fire-and-forget operator alert when a task reaches terminal error."""
+    try:
+        from telegram_bot import reserve_and_broadcast_task_error
+
+        print(f"[Tasks] Scheduling Telegram error notification for task {task_id}")
+        asyncio.create_task(reserve_and_broadcast_task_error(task_id))
+    except Exception as e:
+        print(f"[Telegram] Failed to schedule error notification for task {task_id}: {e}")
 
 
 async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> bool:
@@ -846,6 +783,7 @@ async def _mark_task_worker_failed_if_reported(db: AsyncSession, task: Task) -> 
     task.updated_at = datetime.utcnow()
     await db.commit()
     print(f"[Tasks] Worker reported terminal failure for {task.id}: {failure}")
+    _schedule_task_error_notification(task.id)
     return True
 
 
@@ -872,6 +810,10 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     Check and update task progress.
     Checks a batch of URLs and updates ready count.
     """
+    if _restore_worker_api_from_progress_page(task):
+        task.updated_at = datetime.utcnow()
+        print(f"[Tasks] Restored worker_api from progress_page for task {task.id}: {task.worker_api}")
+
     # Track if task just completed
     was_processing = task.status == "processing"
     previous_ready_count = task.ready_count
@@ -905,7 +847,6 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         if task.total_count > 0 and task.ready_count >= task.total_count:
             if _is_animal_task(task) and not await _worker_conversion_completed(task):
                 task.status = "processing"
-                task.progress = min(int(task.progress or 0), 99)
             else:
                 task.status = "done"
 
@@ -922,8 +863,6 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             task.ready_count = len(concrete_urls)
             conversion_completed = (not _is_animal_task(task)) or await _worker_conversion_completed(task)
             task.status = "done" if conversion_completed else "processing"
-            if not conversion_completed:
-                task.progress = min(int(task.progress or 0), 99)
             task.last_progress_at = datetime.utcnow()
             preferred_video_url = _preferred_video_url_from_outputs(
                 concrete_urls,
@@ -1083,6 +1022,8 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
     task.fbx_glb_model_name = None
     task.fbx_glb_ready = False
     task.fbx_glb_error = None
+    task.telegram_new_notified_at = None
+    task.telegram_done_notified_at = None
 
 
 async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
@@ -1097,10 +1038,11 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     if current_restarts >= MAX_TASK_RESTARTS:
         # Mark as error - too many restarts
         task.status = "error"
-        task.error_message = f"Task failed after {current_restarts} automatic restart attempts. Worker may be unavailable."
+        task.error_message = f"Task made no progress after {current_restarts} automatic restart attempts."
         task.updated_at = datetime.utcnow()
         await db.commit()
         print(f"[Stale Task] Task {task.id} marked as error after {current_restarts} restarts")
+        _schedule_task_error_notification(task.id)
         return False
     
     # Reset task for re-processing
@@ -1164,14 +1106,27 @@ async def find_and_reset_stale_tasks(
     active_tasks = result.scalars().all()
 
     action_count = 0
+    terminal_error_task_ids: list[str] = []
     for task in active_tasks:
-        # 1. Global hard timeout (default aligned with ~2h worker job cap via env)
-        if task.created_at and task.created_at < global_cutoff:
+        # 1. Hard timeout from the current dispatch/progress epoch. Using the
+        # original creation time here made every redispatch of an old task
+        # immediately stale again, producing misleading multi-worker failures.
+        hard_timeout_reference = task_hard_timeout_reference(
+            status=task.status,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            last_progress_at=task.last_progress_at,
+        )
+        if hard_timeout_reference and hard_timeout_reference < global_cutoff:
             task.status = "error"
-            task.error_message = f"Task timed out after {GLOBAL_TASK_TIMEOUT_MINUTES} minutes."
+            task.error_message = (
+                f"Task had no dispatch/progress activity for "
+                f"{GLOBAL_TASK_TIMEOUT_MINUTES} minutes."
+            )
             task.updated_at = now
             print(f"[Timeout] Task {task.id} marked as error (global timeout)")
             action_count += 1
+            terminal_error_task_ids.append(task.id)
             continue
 
         if task.status != "processing":
@@ -1237,6 +1192,8 @@ async def find_and_reset_stale_tasks(
 
     if action_count > 0:
         await db.commit()
+        for task_id in terminal_error_task_ids:
+            _schedule_task_error_notification(task_id)
 
     return action_count
 

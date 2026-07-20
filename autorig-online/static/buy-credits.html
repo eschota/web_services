@@ -3,8 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Buy Credits | AutoRig.online</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
+    <title>Buy AutoRig Credits and Blender Plugin | AutoRig.online</title>
+    <meta name="description" content="Buy AutoRig.online credits for web-based AI rigging, downloads and animation exports, or buy the native Blender plugin for automatic rigging directly inside Blender.">
+    <link rel="canonical" href="https://autorig.online/buy-credits">
+    <link rel="stylesheet" href="/static/css/styles.css?v=20260516-home-demo-mobile">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "AutoRig.online products",
+        "url": "https://autorig.online/buy-credits",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "item": {
+                    "@type": "Product",
+                    "name": "AutoRig Credits",
+                    "description": "Credit packs for AutoRig.online web-based AI rigging, downloads, animation exports and production workflows.",
+                    "brand": {
+                        "@type": "Brand",
+                        "name": "AutoRig.online"
+                    },
+                    "offers": {
+                        "@type": "AggregateOffer",
+                        "url": "https://autorig.online/buy-credits",
+                        "priceCurrency": "USD",
+                        "lowPrice": "3",
+                        "highPrice": "100",
+                        "offerCount": "4",
+                        "availability": "https://schema.org/InStock"
+                    }
+                }
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "item": {
+                    "@type": "SoftwareApplication",
+                    "name": "AutoRig.online Blender Plugin",
+                    "description": "Native Blender add-on for AutoRig.online automatic character, animal and non-humanoid rigging workflows.",
+                    "applicationCategory": "MultimediaApplication",
+                    "operatingSystem": "Blender",
+                    "url": "https://autorig.online/blender-plugin",
+                    "offers": {
+                        "@type": "Offer",
+                        "url": "https://autorig.online/blender-plugin/checkout",
+                        "availability": "https://schema.org/InStock"
+                    }
+                }
+            }
+        ]
+    }
+    </script>
     <style>
         #roadmap-cards {
             display: grid;
@@ -124,6 +175,141 @@
             font-size: 1.2rem;
             font-weight: 700;
         }
+        .buy-hero {
+            padding: clamp(2rem, 5vw, 3rem);
+            margin-bottom: 1rem;
+            border: 1px solid rgba(var(--accent-rgb), 0.42);
+            background:
+                radial-gradient(circle at 12% 10%, rgba(var(--accent-rgb), 0.2), transparent 30%),
+                rgba(255, 255, 255, 0.045);
+        }
+        .buy-hero-kicker {
+            margin: 0 0 0.65rem;
+            color: var(--accent);
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .buy-hero h1 {
+            max-width: 760px;
+            margin: 0;
+            font-size: clamp(2rem, 5vw, 3.7rem);
+            line-height: 1.05;
+            letter-spacing: 0;
+        }
+        .buy-hero p {
+            max-width: 760px;
+            margin: 1rem 0 0;
+            color: var(--text-secondary);
+            font-size: clamp(1rem, 2vw, 1.18rem);
+            line-height: 1.65;
+        }
+        .buy-product-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .buy-product-card {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.045);
+        }
+        .buy-product-card-featured {
+            border-color: rgba(var(--accent-rgb), 0.48);
+            background: rgba(var(--accent-rgb), 0.08);
+        }
+        .buy-product-card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.9rem;
+            min-width: 0;
+            margin-bottom: 0.85rem;
+        }
+        .buy-product-card-header img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+        .buy-product-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            flex-shrink: 0;
+            border-radius: 8px;
+            background: rgba(var(--accent-rgb), 0.16);
+            color: var(--accent);
+            font-size: 1.35rem;
+            font-weight: 900;
+        }
+        .buy-product-eyebrow {
+            display: block;
+            margin-bottom: 0.2rem;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .buy-product-title {
+            margin: 0;
+            font-size: clamp(1.25rem, 3vw, 1.65rem);
+            font-weight: 800;
+            line-height: 1.15;
+        }
+        .buy-product-copy {
+            margin: 0;
+            color: var(--text-secondary);
+            line-height: 1.55;
+        }
+        .buy-product-list {
+            display: grid;
+            gap: 0.45rem;
+            margin: 1rem 0 0;
+            padding: 0;
+            list-style: none;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            line-height: 1.45;
+        }
+        .buy-product-list li {
+            display: flex;
+            gap: 0.5rem;
+            min-width: 0;
+        }
+        .buy-product-list li::before {
+            content: "";
+            width: 0.48rem;
+            height: 0.48rem;
+            margin-top: 0.45rem;
+            flex: 0 0 auto;
+            border-radius: 999px;
+            background: var(--accent);
+        }
+        .buy-product-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            margin-top: auto;
+            padding-top: 1.25rem;
+        }
+        .buy-product-actions .btn {
+            min-width: 150px;
+        }
+        .buy-section-intro {
+            margin: 0 0 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.55;
+            max-width: 48rem;
+        }
         .sr-only {
             position: absolute;
             width: 1px;
@@ -139,12 +325,22 @@
             .pricing-grid-billing {
                 grid-template-columns: 1fr !important;
             }
-            .paywall-feature-grid {
-                grid-template-columns: 1fr !important;
+            .buy-product-grid {
+                grid-template-columns: 1fr;
+            }
+            .buy-hero {
+                padding: 1.5rem;
+            }
+            .buy-hero h1 {
+                font-size: clamp(2rem, 9vw, 2.6rem);
             }
             .buy-credits-header {
                 flex-direction: column;
                 align-items: flex-start !important;
+            }
+            .buy-product-actions,
+            .buy-product-actions .btn {
+                width: 100%;
             }
         }
     </style>
@@ -154,30 +350,56 @@
 
     <main style="padding: 3rem 0;">
         <div class="container" style="max-width: 980px;">
-            <div class="card" style="padding: 2rem; border: 1px solid var(--border); background: rgba(var(--accent-rgb), 0.05);">
-                <h1 style="margin: 0 0 0.75rem; font-size: 2rem;" data-i18n="paywall_title">AutoRig Credits</h1>
-                <p style="color: var(--text-secondary); margin: 0 0 1rem; line-height: 1.55;" data-i18n="paywall_intro">
-                    Credits unlock rigged model downloads, custom animations, and full ZIP bundles.
-                </p>
-                <div class="paywall-feature-grid" style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin: 1rem 0;">
-                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
-                        <div style="font-weight:700;" data-i18n="paywall_item_zip">Full ZIP bundle</div>
-                        <div style="color:var(--text-muted); font-size:0.9rem; margin-top:0.3rem;" data-i18n="paywall_item_zip_desc">10 credits per task</div>
-                    </div>
-                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
-                        <div style="font-weight:700;" data-i18n="paywall_item_anim">All custom animations</div>
-                        <div style="color:var(--text-muted); font-size:0.9rem; margin-top:0.3rem;" data-i18n="paywall_item_anim_desc">10 credits per task</div>
-                    </div>
-                    <div class="card" style="padding: 1rem; background: rgba(255,255,255,0.03);">
-                        <div style="font-weight:700;" data-i18n="paywall_item_single">Single custom animation</div>
-                        <div style="color:var(--text-muted); font-size:0.9rem; margin-top:0.3rem;" data-i18n="paywall_item_single_desc">1 credit each</div>
-                    </div>
-                </div>
-            </div>
+            <section class="card buy-hero" aria-labelledby="buy-page-title">
+                <p class="buy-hero-kicker" data-i18n="buy_page_kicker">AutoRig Store</p>
+                <h1 id="buy-page-title" data-i18n="buy_page_title">Buy AutoRig credits and the Blender plugin</h1>
+                <p data-i18n="buy_page_intro">Use credits for task unlocks in the browser workflow. One task unlock costs 10 credits and includes the ZIP, protected files, animal variants, and custom animation downloads.</p>
+            </section>
 
-            <div class="card" style="padding: 1.25rem 1.5rem; margin-top: 1rem;">
+            <section class="buy-product-grid" aria-label="AutoRig products">
+                <article class="buy-product-card buy-product-card-featured">
+                    <div class="buy-product-card-header">
+                        <span class="buy-product-icon" aria-hidden="true">C</span>
+                        <div>
+                            <span class="buy-product-eyebrow" data-i18n="buy_product_credits_label">Web workflow</span>
+                            <h2 class="buy-product-title" data-i18n="buy_product_credits_title">AutoRig Credits</h2>
+                        </div>
+                    </div>
+                    <p class="buy-product-copy" data-i18n="buy_product_credits_desc">Credits unlock complete AutoRig task downloads. Each task unlock costs 10 credits.</p>
+                    <ul class="buy-product-list">
+                        <li data-i18n="buy_product_credits_point_1">Use with GLB, FBX, and OBJ uploads.</li>
+                        <li data-i18n="buy_product_credits_point_2">One unlock includes the ZIP, protected files, animal variants, and custom animation downloads.</li>
+                        <li data-i18n="buy_product_credits_point_3">Pay by card or crypto using the packs below.</li>
+                    </ul>
+                    <div class="buy-product-actions">
+                        <a href="#credits-packs" class="btn btn-primary" data-i18n="buy_product_credits_cta">Choose credits</a>
+                    </div>
+                </article>
+
+                <article class="buy-product-card">
+                    <div class="buy-product-card-header">
+                        <img src="/static/images/icons/blender_logo.png" alt="" width="48" height="48" loading="eager">
+                        <div>
+                            <span class="buy-product-eyebrow" data-i18n="buy_product_plugin_label">Native add-on</span>
+                            <h2 class="buy-product-title" data-i18n="buy_product_plugin_title">Native Blender Plugin</h2>
+                        </div>
+                    </div>
+                    <p class="buy-product-copy" data-i18n="buy_product_plugin_desc">Run the AutoRig.online workflow from Blender, use presets, and prepare humanoid, animal, and non-humanoid models without switching tools.</p>
+                    <ul class="buy-product-list">
+                        <li data-i18n="buy_product_plugin_point_1">Rig and adjust models directly in Blender.</li>
+                        <li data-i18n="buy_product_plugin_point_2">Use V2 animal and non-humanoid workflows.</li>
+                        <li data-i18n="buy_product_plugin_point_3">Buy once through Gumroad.</li>
+                    </ul>
+                    <div class="buy-product-actions">
+                        <a href="/blender-plugin" class="btn btn-ghost" data-i18n="buy_product_plugin_learn">Learn more</a>
+                        <a href="/blender-plugin/checkout?source=buy_credits_page" class="btn btn-secondary" id="buy-plugin-main" data-i18n="buy_product_plugin_cta">Buy Blender Plugin</a>
+                    </div>
+                    <p class="buy-product-copy" id="buy-plugin-price" style="margin-top: 0.75rem;">Assigned test price loads at checkout.</p>
+                </article>
+            </section>
+            <div class="card" id="credits-packs" style="padding: 1.25rem 1.5rem; margin-top: 1rem;">
                 <div class="buy-credits-header" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.65rem 1rem; margin-bottom: 0.5rem;">
-                    <h2 style="margin: 0;" data-i18n="buy_title">Buy Credits</h2>
+                    <h2 style="margin: 0;" data-i18n="buy_title">Buy AutoRig Credits</h2>
                     <div id="billing-tabs" class="billing-method-row" role="tablist" aria-label="Payment method">
                         <button type="button" class="billing-method-btn billing-tab-active" id="billing-tab-card" data-billing="card" role="tab" aria-selected="true" data-i18n-title="buy_pay_methods_a11y" title="Pay with Visa, Mastercard, or PayPal (Gumroad)">
                             <span class="pay-icons" aria-hidden="true">
@@ -219,42 +441,63 @@
                 <p id="buy-notice-crypto" class="buy-credits-hint hidden" data-i18n="buy_crypto_notice">
                     Pay with crypto on this page. After you send funds, submit your transaction ID. Credits are added manually after we verify the payment (usually within a day).
                 </p>
+                <p class="buy-section-intro" data-i18n="buy_credits_section_intro">Choose a credit pack for the web app. Credits are attached to your signed-in AutoRig.online account; 10 credits unlock one task.</p>
 
-            <div id="panel-billing-card" class="billing-panel pricing-grid-billing" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 0;">
+            <div id="panel-billing-card" class="billing-panel pricing-grid-billing" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-top: 0;">
                 <div class="card" style="padding: 1.5rem; text-align: center;">
-                    <h3 style="margin-top: 0;">100 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$10</div>
+                    <h3 style="margin-top: 0;">30 credits</h3>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$3</div>
                     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
-                    <button type="button" class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin: -0.35rem 0 1rem;">3 task unlocks</div>
+                    <a href="/buy-credits/checkout/oneclick-30-credits?source=buy_credits_page" class="btn btn-primary" id="buy-30" style="width: 100%;" data-i18n="buy_btn">Buy</a>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center; border: 2px solid var(--accent); position: relative;">
                     <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;" data-i18n="buy_popular">POPULAR</span>
+                    <h3 style="margin-top: 0;">100 credits</h3>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$10</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin: -0.35rem 0 1rem;">10 task unlocks</div>
+                    <a href="/buy-credits/checkout/autorig-100?source=buy_credits_page" class="btn btn-primary" id="buy-100" style="width: 100%;" data-i18n="buy_btn">Buy</a>
+                </div>
+                <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">500 credits</h3>
-                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$30</div>
-                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.06 per credit</div>
-                    <button type="button" class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                    <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$50</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin: -0.35rem 0 1rem;">50 task unlocks</div>
+                    <a href="/buy-credits/checkout/autorig-500?source=buy_credits_page" class="btn btn-primary" id="buy-500" style="width: 100%;" data-i18n="buy_btn">Buy</a>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">1000 credits</h3>
                     <div style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">$100</div>
                     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">$0.10 per credit</div>
-                    <button type="button" class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</button>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin: -0.35rem 0 1rem;">100 task unlocks</div>
+                    <a href="/buy-credits/checkout/autorig-1000?source=buy_credits_page" class="btn btn-primary" id="buy-1000" style="width: 100%;" data-i18n="buy_btn">Buy</a>
                 </div>
             </div>
 
-            <div id="panel-billing-crypto" class="billing-panel pricing-grid-billing hidden" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 0;">
+            <div id="panel-billing-crypto" class="billing-panel pricing-grid-billing hidden" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-top: 0;">
                 <div class="card" style="padding: 1.5rem; text-align: center;">
-                    <h3 style="margin-top: 0;">100 <span data-i18n="buy_credits_word">credits</span></h3>
+                    <h3 style="margin-top: 0;">30 <span data-i18n="buy_credits_word">credits</span></h3>
                     <div class="crypto-price-main" style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">—</div>
                     <div class="crypto-price-per" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem;">—</div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.35rem;">3 task unlocks</div>
                     <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;" data-i18n="buy_crypto_discount_label">20% off card price</div>
-                    <button type="button" class="btn btn-primary crypto-open-modal" data-tier="autorig-100" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
+                    <button type="button" class="btn btn-primary crypto-open-modal" data-tier="oneclick-30-credits" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
                 </div>
                 <div class="card" style="padding: 1.5rem; text-align: center; border: 2px solid var(--accent); position: relative;">
                     <span style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 0.75rem; font-weight: 600; padding: 2px 12px; border-radius: 12px;" data-i18n="buy_popular">POPULAR</span>
+                    <h3 style="margin-top: 0;">100 <span data-i18n="buy_credits_word">credits</span></h3>
+                    <div class="crypto-price-main" style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">—</div>
+                    <div class="crypto-price-per" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem;">—</div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.35rem;">10 task unlocks</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;" data-i18n="buy_crypto_discount_label">20% off card price</div>
+                    <button type="button" class="btn btn-primary crypto-open-modal" data-tier="autorig-100" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
+                </div>
+                <div class="card" style="padding: 1.5rem; text-align: center;">
                     <h3 style="margin-top: 0;">500 <span data-i18n="buy_credits_word">credits</span></h3>
                     <div class="crypto-price-main" style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">—</div>
                     <div class="crypto-price-per" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem;">—</div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.35rem;">50 task unlocks</div>
                     <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;" data-i18n="buy_crypto_discount_label">20% off card price</div>
                     <button type="button" class="btn btn-primary crypto-open-modal" data-tier="autorig-500" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
                 </div>
@@ -262,10 +505,12 @@
                     <h3 style="margin-top: 0;">1000 <span data-i18n="buy_credits_word">credits</span></h3>
                     <div class="crypto-price-main" style="font-size: 2rem; font-weight: 700; color: var(--accent); margin: 1rem 0;">—</div>
                     <div class="crypto-price-per" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem;">—</div>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.35rem;">100 task unlocks</div>
                     <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;" data-i18n="buy_crypto_discount_label">20% off card price</div>
                     <button type="button" class="btn btn-primary crypto-open-modal" data-tier="autorig-1000" style="width: 100%;" data-i18n="buy_crypto_pay_btn">Pay with crypto</button>
                 </div>
             </div>
+
             </div>
 
             <div id="crypto-modal-overlay" class="hidden" role="dialog" aria-modal="true">
@@ -304,7 +549,7 @@
                     <button type="button" class="btn btn-ghost" id="feedback-reply-cancel" style="padding: 0.25rem 0.5rem; flex-shrink: 0;" data-i18n="feedback_reply_cancel">Cancel</button>
                 </div>
                 <div style="margin-top: 1rem;">
-                    <textarea id="feedback-text" style="width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="What should we improve?"></textarea>
+                    <textarea id="feedback-text" style="width: 100%; min-height: 120px; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-family: inherit; resize: vertical;" placeholder="What do you think about the RIG? What should we improve?"></textarea>
                     <button class="btn btn-primary" id="btn-submit-feedback" style="margin-top: 1rem;" data-i18n="feedback_submit">Submit Feedback</button>
                 </div>
             </div>
@@ -317,13 +562,18 @@
                 </div>
             </div>
 
+            <div class="card" style="padding: 2rem; margin-top: 1rem;">
+                <h2 style="margin-top: 0;" data-i18n="roadmap_title">Roadmap — your vote</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;" data-i18n="roadmap_intro">Pick what we should prioritize next. You can change your vote anytime.</p>
+                <div id="roadmap-cards"></div>
+            </div>
         </div>
     </main>
     <div id="site-footer"></div>
 
-        <script src="/static/js/header.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/footer.js?v=20260324-sitelayout"></script>
-    <script src="/static/js/site-layout.js?v=20260430-supportfix"></script>
+        <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
 <script src="/static/js/i18n.js"></script>
     <script>
@@ -392,25 +642,6 @@
 
         function roadmapTitleKey(k) {
             return ({ face_rig_animation: 'roadmap_face_rig_title', animals_rig_animation: 'roadmap_animals_title', avatar_speech_lipsync: 'roadmap_avatar_title' })[k] || k;
-        }
-
-        async function loadDonationStats() {
-            const line = document.getElementById('donation-stats-line');
-            const fill = document.getElementById('donation-bar-fill');
-            if (!line || !fill) return;
-            try {
-                const resp = await fetch('/api/buy-credits/donation-stats');
-                if (!resp.ok) throw new Error('bad status');
-                const d = await resp.json();
-                const raised = Number(d.raised_usd) || 0;
-                const goal = Number(d.goal_usd) || 1000;
-                const pct = Math.min(100, goal > 0 ? (raised / goal) * 100 : 0);
-                line.textContent = t('donation_progress_line', { raised: raised.toFixed(2), goal: String(goal) });
-                fill.style.width = pct.toFixed(2) + '%';
-            } catch (e) {
-                console.error('Donation stats failed:', e);
-                line.textContent = '—';
-            }
         }
 
         async function loadRoadmap() {
@@ -875,35 +1106,21 @@
         }
 
         function setupBuyButtons() {
-            const getUserid = () => (window.__authedUser && window.__authedUser.email) ? window.__authedUser.email : '';
-            
-            const packageInfo = {
-                'autorig-100': { credits: '100', price: '$10' },
-                'autorig-500': { credits: '500', price: '$30' },
-                'autorig-1000': { credits: '1000', price: '$100' }
-            };
-            
-            const go = (p) => {
-                const uid = getUserid();
-                if (!uid) {
-                    alert(t('buy_login_required'));
-                    window.location.href = '/auth/login';
-                    return;
-                }
-                
-                // Send Telegram notification (fire-and-forget)
-                const info = packageInfo[p] || { credits: p, price: 'unknown' };
-                fetch('/api/notify/credits-click', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ package: `${info.credits} credits`, price: info.price })
-                }).catch(() => {}); // ignore errors
-                
-                window.location.href = gumroadUrl(p, uid);
-            };
-            document.getElementById('buy-100')?.addEventListener('click', () => go('autorig-100'));
-            document.getElementById('buy-500')?.addEventListener('click', () => go('autorig-500'));
-            document.getElementById('buy-1000')?.addEventListener('click', () => go('autorig-1000'));
+            const link = document.getElementById('buy-plugin-main');
+            const priceEl = document.getElementById('buy-plugin-price');
+            if (!link) return;
+            const checkoutUrl = `/blender-plugin/checkout?source=buy_credits_page&page_url=${encodeURIComponent(window.location.href)}`;
+            link.href = checkoutUrl;
+            fetch('/api/blender-plugin/offer')
+                .then((resp) => resp.ok ? resp.json() : null)
+                .then((offer) => {
+                    if (!offer || !offer.display_price) return;
+                    link.textContent = `Buy Blender Plugin ${offer.display_price}`;
+                    if (priceEl) {
+                        priceEl.textContent = `Your assigned test price: ${offer.display_price}`;
+                    }
+                })
+                .catch(() => {});
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -911,14 +1128,15 @@
             setupThemeToggle();
             setupLangSelector();
             await updateCreditsUI();
+            await loadRoadmap();
             setupBuyButtons();
             setupBillingTabs();
             setupCryptoModal();
             setupFeedbackForm();
             await loadFeedback();
             window.addEventListener('languageChanged', () => {
+                loadRoadmap();
                 if (window.__cryptoConfig) applyCryptoPricesToCards();
-                loadFeedback();
             });
         });
     </script>

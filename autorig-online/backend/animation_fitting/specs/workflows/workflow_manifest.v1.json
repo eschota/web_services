@@ -1,0 +1,52 @@
+{
+  "active_graph_rule_string": "reachable mode-0 nodes from the sole active output; mode-4 branches are omitted",
+  "base_checkpoint_string": "ltx-2-19b-distilled-fp8.safetensors",
+  "ignored_ui_widget_remainders_object": {
+    "2004": [
+      "image"
+    ],
+    "4832": [
+      "fixed"
+    ]
+  },
+  "omitted_ui_node_ids_array": [
+    "4802",
+    "4808",
+    "4814",
+    "4818",
+    "4819",
+    "4823",
+    "4824",
+    "4923",
+    "4961",
+    "4963",
+    "4964",
+    "4966",
+    "4967",
+    "4968",
+    "4973",
+    "4977",
+    "4978",
+    "4979",
+    "4983"
+  ],
+  "schema": "autorig.animation-fitting-built-workflows.v1",
+  "source_workflow_sha256_string": "74be9fe34ec98ab85177ee4183bf504575f91427f13b73fb70c1e8acfea900f6",
+  "static_camera_lora_string": "ltx-2-19b-lora-camera-control-static.safetensors",
+  "workflows_array": [
+    {
+      "canonical_size_bytes_int": 4737,
+      "generation_mode_string": "loop",
+      "node_count_int": 26,
+      "workflow_fingerprint_sha256_string": "6c81e125c466ce0e4a3951ee30b125babc70650f3efbbf05f8ad3ae900cac0f9",
+      "workflow_name_string": "autorig_animal_loop_ltx2_19b_v1_api.json"
+    },
+    {
+      "canonical_size_bytes_int": 4500,
+      "generation_mode_string": "one_shot",
+      "node_count_int": 25,
+      "workflow_fingerprint_sha256_string": "b8f53e0dcd456fcfbe86a23113089d8954793308133e6353094e33b4e01d7bae",
+      "workflow_name_string": "autorig_animal_oneshot_ltx2_19b_v1_api.json"
+    }
+  ]
+}

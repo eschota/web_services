@@ -1,20 +1,26 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 572.1059600793601,
+      "y": 204.54661640864956,
+      "z": 270.86287690196764
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 47.47596833563652,
+      "y": 99.9722037105473,
+      "z": -59.038961557478274
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "savanna_acacia_plain.jpg",
-  "plane_color": "#b58548",
+  "plane_color": "#6a4b39",
   "schema_version": 1,
   "semantic_tags": [
     "savanna",
@@ -29,8 +35,15 @@
   "shadow_settings": {
     "opacity": 0.55,
     "shadow_y_offset": 0.005,
-    "softness": 6.0,
+    "softness": 15,
     "sun_multiplier": 2.8
+  },
+  "src": "/static/env/backdrops/savanna_acacia_plain.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/savanna_acacia_plain.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/savanna_acacia_plain.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/savanna_acacia_plain.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/savanna_acacia_plain.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
     "inclination": 56,

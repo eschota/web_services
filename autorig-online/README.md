@@ -250,14 +250,13 @@ sudo systemctl reload nginx
 # Редактирование crontab
 sudo crontab -e
 
-# Добавление задачи очистки файлов старше 24 часов
-0 */6 * * * find /var/autorig/uploads -type f -mmin +1440 -delete
-0 */6 * * * find /var/autorig/uploads -type d -empty -delete
+# Pressure-only cleanup: script exits without deleting while free space is healthy.
+0 */6 * * * bash /root/autorig-online/deploy/cleanup_uploads.sh >> /var/log/autorig-upload-cleanup.log 2>&1
 ```
 
 ### 📇 Ежедневный дамп задач для SEO (JSON snapshot)
 
-Скрипт [`backend/scripts/dump_sitemap_tasks.py`](backend/scripts/dump_sitemap_tasks.py) выгружает в JSON все задачи с условиями публичной галереи (как у страниц `/m/{id}`): поля `poster_llm_*`, даты, `pipeline_kind`. Не подменяет живую генерацию sitemap по HTTP.
+Скрипт [`backend/scripts/dump_sitemap_tasks.py`](backend/scripts/dump_sitemap_tasks.py) выгружает в JSON все задачи с условиями публичной галереи (как у публичных страниц `/task?id={id}`): поля `poster_llm_*`, даты, `pipeline_kind`. Не подменяет живую генерацию sitemap по HTTP.
 
 ```bash
 0 3 * * * cd /root/autorig-online/backend && /root/autorig-online/venv/bin/python scripts/dump_sitemap_tasks.py --output /root/autorig-online/backend/data/sitemap_tasks_snapshot.json
@@ -267,9 +266,9 @@ sudo crontab -e
 
 ### 🗺️ Ежедневное обновление sitemap (зеркало + отчёт SEO)
 
-Индекс [`/sitemap.xml`](https://autorig.online/sitemap.xml) собирается **на каждый запрос** из БД: статические страницы + чанки `/sitemap/gallery/part/{n}.xml` для полного публичного набора страниц задач (`status=done`, `video_ready`, poster-условия, `content_rating != adult`, см. `gallery_seo_task_conditions` в [`seo_gallery.py`](backend/seo_gallery.py)). Для совместимости сохранён legacy-гейт: `/sitemap/gallery/indexing/part/{n}.xml` (фильтр `gallery_seo_indexing_sql_conditions` + `seo_passes_indexing_gate`).
+Индекс [`/sitemap.xml`](https://autorig.online/sitemap.xml) собирается **на каждый запрос** из БД: статические страницы + SEO-gated чанки `/sitemap/gallery/part/{n}.xml` для публичных страниц задач `/task?id={id}`. В root sitemap попадают только completed/non-adult задачи с poster/video и LLM metadata (`gallery_seo_indexing_sql_conditions` + `seo_passes_indexing_gate` в [`seo_gallery.py`](backend/seo_gallery.py)). Полный публичный набор без SEO-гейта оставлен только для диагностики: `/sitemap/gallery/all/part/{n}.xml`.
 
-Скрипт [`backend/scripts/daily_sitemap_refresh.py`](backend/scripts/daily_sitemap_refresh.py) раз в сутки записывает копию `sitemap.xml`, `gallery-part-*.xml` (полный пул), `gallery-indexing-part-*.xml` (SEO-гейт) и `seo_indexing_report.json` в `backend/data/sitemap_generated/` (аудит, бэкап XML, сравнение полного и SEO-гейт пулинга). HTTP по-прежнему отдаёт актуальные XML из БД.
+Скрипт [`backend/scripts/daily_sitemap_refresh.py`](backend/scripts/daily_sitemap_refresh.py) раз в сутки записывает копию `sitemap.xml`, `gallery-part-*.xml` (SEO-гейт, тот же контракт что live root sitemap), `gallery-all-part-*.xml` (полный диагностический пул), `gallery-indexing-part-*.xml` (совместимый SEO-гейт alias) и `seo_indexing_report.json` в `backend/data/sitemap_generated/` (аудит, бэкап XML, сравнение полного и SEO-гейт пулинга). HTTP по-прежнему отдаёт актуальные XML из БД.
 
 ```bash
 15 3 * * * cd /root/autorig-online/backend && /root/autorig-online/venv/bin/python scripts/daily_sitemap_refresh.py
@@ -299,9 +298,6 @@ sudo crontab -e
 | `UPLOAD_DIR` | Директория для загрузок | `/var/autorig/uploads` |
 | `UPLOAD_TTL_HOURS` | Время жизни загрузок (часы) | `24` |
 | `MAX_UPLOAD_SIZE_MB` | Максимальный размер файла (MB) | `100` |
-| `FREESTOCK_GUMROAD_PROXY_TARGET` | URL приёма Gumroad webhook для продуктов `freestock-*` | `https://freestock.online/gumroad/ping` |
-
-Подробнее: шлюз `POST /api-gumroad` пересылает тело без изменений либо на Free3D, либо на Freestock в зависимости от permalink; см. [`SERVICE_CONCEPT.md`](SERVICE_CONCEPT.md).
 
 ## 🔌 API Endpoints
 
@@ -310,13 +306,13 @@ sudo crontab -e
 | Метод | Эндпоинт | Описание |
 |-------|----------|----------|
 | `GET` | `/` | 🏠 Главная страница |
-| `GET` | `/rig-v2.html` | 🧪 Prototype: upload FBX/GLB, local preview, 512px render, animal-type vision |
-| `GET` | `/m/{task_id}` | 🧩 Публичная SEO-страница задачи (без viewer, с canonical на задачу) |
+| `GET` | `/task?id={task_id}` | 🧩 Публичная страница задачи и viewer; completed/public задачи получают динамические SEO/OG/JSON-LD meta |
 | `GET` | `/sitemap.xml` | 🗺 Индекс sitemap |
 | `GET` | `/sitemap-mirror.xml` | 🗺 Зеркальный индекс sitemap (из `backend/data/sitemap_generated/sitemap.xml`) |
 | `GET` | `/sitemap/pages.xml` | 🗺 Статические страницы сайта для sitemap |
-| `GET` | `/sitemap/gallery/part/{n}.xml` | 🗺 Публичные URL задач (`/m/{id}`), полный список |
-| `GET` | `/sitemap/gallery/indexing/part/{n}.xml` | 🗺 Только SEO-гейт список URL задач (`/m/{id}`) |
+| `GET` | `/sitemap/gallery/part/{n}.xml` | 🗺 SEO-gated URL задач (`/task?id={id}`), основной список для root sitemap |
+| `GET` | `/sitemap/gallery/indexing/part/{n}.xml` | 🗺 SEO-gated URL задач (`/task?id={id}`), совместимый alias |
+| `GET` | `/sitemap/gallery/all/part/{n}.xml` | 🗺 Полный публичный диагностический список URL задач без SEO-гейта |
 | `GET` | `/task?id=X` | 📊 Страница прогресса задачи (индексируется как самостоятельная, если задача существует; `/task` без `id` и несуществующие `task` остаются `noindex`) |
 | `GET` | `/auth/login` | 🔐 Вход через Google OAuth |
 | `GET` | `/auth/callback` | 🔄 Обратный вызов OAuth |
@@ -324,8 +320,6 @@ sudo crontab -e
 | `GET` | `/auth/me` | 👤 Информация о текущем пользователе |
 | `POST` | `/api/task/create` | ➕ Создание задачи конвертации |
 | `GET` | `/api/task/{id}` | 📋 Получение статуса задачи |
-| `POST` | `/api/rig-v2/task/create` | 🧪 Prototype upload: создаёт `rig_v2_preview` задачу без отправки на воркеры |
-| `GET/POST` | `/api/rig-v2/vision/animal-type` | 🧪 Prototype OpenRouter vision proxy; API key только на backend |
 | `GET` | `/api/history` | 📚 История задач пользователя |
 
 ### 👑 Админ эндпоинты *(требуется `eschota@gmail.com`)*

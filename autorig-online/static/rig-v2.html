@@ -380,63 +380,41 @@
       });
     }
 
-    const RIG_V2_BACKDROP_FALLBACK = '/static/env/viewer-meadow-bg.png';
-
     async function loadRigV2BackdropManifest() {
-      try {
-        const r = await fetch('/api/viewer-backdrops', { cache: 'no-store' });
-        if (r.ok) {
-          const data = await r.json();
-          if (Array.isArray(data)) return data;
-          console.warn('[RigV2] API body is not an array');
-          return [];
-        }
-        console.warn('[RigV2] /api/viewer-backdrops HTTP', r.status);
-      } catch (err) {
-        console.warn('[RigV2] backdrop API', err);
-      }
-      try {
-        const r = await fetch('/static/env/viewer_backdrops.json', { cache: 'no-store' });
-        if (r.ok) {
-          const data = await r.json();
-          if (Array.isArray(data) && data.length) {
-            console.warn('[RigV2] using static viewer_backdrops.json — prefer /api/viewer-backdrops on server');
-            return data;
-          }
-        }
-      } catch (err) {
-        console.warn('[RigV2] backdrop JSON fallback', err);
-      }
-      return null;
+      const r = await fetch('/api/viewer-backdrops', { cache: 'no-store' });
+      if (!r.ok) throw new Error(`/api/viewer-backdrops HTTP ${r.status}`);
+      const data = await r.json();
+      if (!Array.isArray(data)) throw new Error('/api/viewer-backdrops did not return an array');
+      return data;
     }
 
     async function initRigV2BackdropStrip() {
       if (!backdropStrip || !backdropStripWrap || backdropStrip.dataset.wired === '1') return;
-      let manifest = await loadRigV2BackdropManifest();
-      if (manifest === null) {
-        applyRigV2BackdropUrl(RIG_V2_BACKDROP_FALLBACK, 'manifest-null-fallback');
-        backdropStrip.replaceChildren();
-        backdropStrip.dataset.wired = '1';
-        return;
+      let manifest = [];
+      try {
+        manifest = await loadRigV2BackdropManifest();
+      } catch (err) {
+        console.error('[RigV2] backdrop manifest failed', err);
       }
+      manifest = manifest.filter((m) => m && m.id != null && m.src && m.thumb_src);
       if (!manifest.length) {
-        applyRigV2BackdropUrl(RIG_V2_BACKDROP_FALLBACK, 'empty-backdrops');
         backdropStrip.replaceChildren();
         backdropStrip.dataset.wired = '1';
+        console.error('[RigV2] no complete viewer backdrop themes');
         return;
       }
-      const first = manifest.find((m) => m && m.id != null && m.src) || manifest[0];
-      applyRigV2BackdropUrl(first.src, 'default-first');
+      const first = manifest[0];
+      applyRigV2BackdropUrl(first.src, 'initial-theme');
 
       let current = first;
       backdropStrip.replaceChildren();
       for (const item of manifest) {
-        if (item.id == null || !item.src) continue;
+        if (item.id == null || !item.src || !item.thumb_src) continue;
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'rig-v2-backdrop-thumb';
         btn.dataset.backdropId = String(item.id);
-        btn.style.backgroundImage = `url(${JSON.stringify(item.src)})`;
+        btn.style.backgroundImage = `url(${JSON.stringify(item.thumb_src)})`;
         btn.title = String(item.id);
         btn.setAttribute('aria-label', String(item.id));
         btn.setAttribute('aria-pressed', String(item.id) === String(current.id) ? 'true' : 'false');

@@ -16,8 +16,6 @@ const App = {
         taskSubmitChainLock: false,
         rigV2VisionDeps: null,
         rigDetectModalResizeObs: null,
-        rigDetectLocalRotation: [0, 0, 0],
-        rigDetectOrientationUserInteracted: false,
     },
 
     scheduleNonCriticalWork(callback, timeout = 1200) {
@@ -449,46 +447,9 @@ const App = {
         return (h % 1000) / 1000;
     },
 
-    normalizeRigDetectRotation(rotation) {
-        const raw = Array.isArray(rotation) ? rotation : [0, 0, 0];
-        return [0, 1, 2].map((idx) => {
-            const n = Number(raw[idx] ?? 0);
-            if (!Number.isFinite(n)) return 0;
-            return ((Math.round(n / 90) * 90) % 360 + 360) % 360;
-        });
-    },
-
-    rigDetectQuarterTurns(rotation) {
-        const r = this.normalizeRigDetectRotation(rotation);
-        return {
-            x: Math.round(r[0] / 90) % 4,
-            y: Math.round(r[1] / 90) % 4,
-            z: Math.round(r[2] / 90) % 4,
-        };
-    },
-
-    buildRigOrientationPayload(localRotation, userInteracted, source = null) {
-        const rotation = this.normalizeRigDetectRotation(localRotation);
-        const interacted = !!userInteracted;
-        return {
-            schema_version: 1,
-            source: source || (interacted ? 'site_manual' : 'site_auto'),
-            local_rotation: rotation,
-            local_rotation_authoritative: true,
-            quarter_turns: this.rigDetectQuarterTurns(rotation),
-            user_interacted_bool: interacted,
-        };
-    },
-
-    renderRigDetectOrientationState(target, localRotation) {
-        if (!target) return;
-        const r = this.normalizeRigDetectRotation(localRotation);
-        target.textContent = `X ${r[0]} / Y ${r[1]} / Z ${r[2]}`;
-    },
-
     /**
      * Client-side detection + optional live viewer in viewerHost.
-     * @returns {{ detection: object|null, dispose: () => void, setLocalRotation: (rotation: number[]) => void }}
+     * @returns {{ detection: object|null, dispose: () => void }}
      */
     async runHiddenAnimalDetection(source, options = {}) {
         const viewerHost = options.viewerHost || null;
@@ -507,8 +468,6 @@ const App = {
         let pmremGenerator = null;
         let offHost = null;
         let resizeObserver = null;
-        let previewObject = null;
-        let setLocalRotation = () => {};
 
         const dispose = () => {
             if (disposed) return;
@@ -649,7 +608,7 @@ const App = {
                 object = await loadWithLoader(new OBJLoader(), url);
             } else {
                 dispose();
-                return { detection: null, dispose: () => {}, setLocalRotation: () => {} };
+                return { detection: null, dispose: () => {} };
             }
             const detectorFallbackMaterial = new THREE.MeshStandardMaterial({
                 name: 'vision_detector_neutral_gray',
@@ -703,22 +662,8 @@ const App = {
                 }
             });
             scene.add(object);
-            previewObject = object;
             const box = new THREE.Box3().setFromObject(object);
             object.position.sub(box.getCenter(new THREE.Vector3()));
-            setLocalRotation = (rotation) => {
-                if (!previewObject || !renderer || !camera) return;
-                const r = this.normalizeRigDetectRotation(rotation);
-                previewObject.rotation.set(
-                    THREE.MathUtils.degToRad(r[0]),
-                    THREE.MathUtils.degToRad(r[1]),
-                    THREE.MathUtils.degToRad(r[2])
-                );
-                previewObject.updateMatrixWorld(true);
-                controls?.update();
-                renderer.render(scene, camera);
-            };
-            setLocalRotation(options.localRotation || [0, 0, 0]);
             const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
             const bounds = new THREE.Box3().setFromObject(object);
             const maxDim = Math.max(size.x, size.y, size.z, 1);
@@ -795,7 +740,9 @@ const App = {
             };
             const preflightRender = capture(views[0]);
             const first = await analyze(views[0], preflightRender);
-            const rest = await Promise.all(views.slice(1).map(analyze));
+            // Array.map passes (value, index, array). Keep the index from being
+            // mistaken for analyze()'s optional capturedImage argument.
+            const rest = await Promise.all(views.slice(1).map((view) => analyze(view)));
             const results = [first].concat(rest);
             const scores = {};
             const votes = {};
@@ -864,24 +811,21 @@ const App = {
 
             if (!deferDisposal) {
                 dispose();
-                return { detection, dispose: () => {}, setLocalRotation: () => {} };
+                return { detection, dispose: () => {} };
             }
-            return { detection, dispose, setLocalRotation };
+            return { detection, dispose };
         } catch (err) {
             console.warn('[RigV2Preflight] animal detection skipped:', err);
             dispose();
-            return { detection: null, dispose: () => {}, setLocalRotation: () => {} };
+            return { detection: null, dispose: () => {} };
         }
     },
 
-    buildRigDetectionSubmitPayload(detection, selectedRigKey, orientationState = null) {
+    buildRigDetectionSubmitPayload(detection, selectedRigKey) {
         const d = JSON.parse(JSON.stringify(detection));
         delete d.preflight_render_jpg_base64_string;
         const autoKey = this.rigDetectAutoKey(detection);
         const sel = String(selectedRigKey || 'humanoid').toLowerCase();
-        const localRotation = this.normalizeRigDetectRotation(orientationState?.localRotation || this.state.rigDetectLocalRotation);
-        const userInteracted = !!orientationState?.userInteracted;
-        const rigOrientation = this.buildRigOrientationPayload(localRotation, userInteracted);
         if (sel === 'humanoid') {
             d.type = 'humanoid';
             d.animal_type = '';
@@ -892,21 +836,15 @@ const App = {
             d.mode = 'only_rig';
             d.user_selected_bool = sel !== autoKey;
         }
-        d.local_rotation = localRotation;
-        d.local_rotation_authoritative = true;
-        d.rig_orientation = rigOrientation;
         return d;
     },
 
-    applyRigSelectionToFormData(formData, detection, selectedRigKey, orientationState = null) {
+    applyRigSelectionToFormData(formData, detection, selectedRigKey) {
         formData.set('type', 't_pose');
         formData.delete('animal_type');
         formData.delete('mode');
-        const payload = this.buildRigDetectionSubmitPayload(detection, selectedRigKey, orientationState);
+        const payload = this.buildRigDetectionSubmitPayload(detection, selectedRigKey);
         formData.set('rig_v2_animal_detection_json', JSON.stringify(payload));
-        formData.set('local_rotation_json', JSON.stringify(payload.local_rotation));
-        formData.set('local_rotation_authoritative', 'true');
-        formData.set('rig_orientation_json', JSON.stringify(payload.rig_orientation));
         const preflight = detection.preflight_render_jpg_base64_string;
         if (preflight) {
             formData.set('preflight_render_jpg_base64_string', preflight);
@@ -1020,9 +958,9 @@ const App = {
     },
 
     /**
-     * @returns {Promise<{selectedRigKey: string, localRotation: number[], userInteracted: boolean}>}
+     * @returns {Promise<string>} selected rig key (humanoid | animal)
      */
-    waitRigDetectReview(detection, initialSelected, options = {}) {
+    waitRigDetectReview(detection, initialSelected) {
         return new Promise((resolve) => {
             const overlay = document.getElementById('convert-form-busy');
             const review = document.getElementById('rig-detect-review');
@@ -1030,24 +968,19 @@ const App = {
             const hint = document.getElementById('rig-detect-hint');
             const startBtn = document.getElementById('rig-detect-start-now');
             const footer = document.getElementById('rig-detect-footer');
-            const orientationPanel = document.getElementById('rig-detect-orientation');
-            const orientationState = document.getElementById('rig-detect-orientation-state');
-            const orientationButtons = Array.from(document.querySelectorAll('[data-rig-rotate-axis]'));
 
             const initialReviewSelection = initialSelected;
 
             let viewerTitlePhase = 'review';
             const refreshViewerTitle = () => this.refreshRigDetectViewerTitle(viewerTitlePhase);
             let selected = initialSelected;
-            let localRotation = this.normalizeRigDetectRotation(options.localRotation || this.state.rigDetectLocalRotation);
-            let userInteracted = !!this.state.rigDetectOrientationUserInteracted;
             let secondsLeft = this.RIG_DETECT_REVIEW_SECONDS;
             let interval = 0;
             let settled = false;
 
             const renderReviewCopy = () => {
                 if (typeof t !== 'function') return;
-                const manual = userInteracted || selected !== initialReviewSelection;
+                const manual = selected !== initialReviewSelection;
                 const leadKey = manual ? 'upload_rig_review_lead_manual' : 'upload_rig_review_lead_auto';
                 if (lead) {
                     lead.textContent = t(leadKey, { animation_type: this.rigDetectTypeLabel(selected) });
@@ -1066,31 +999,14 @@ const App = {
                     startBtn.textContent = t('upload_rig_start_now_with_timer', { timer: String(secondsLeft) });
                 }
             };
-            const renderOrientationState = () => {
-                this.renderRigDetectOrientationState(orientationState, localRotation);
-            };
-            const resetCountdown = () => {
-                secondsLeft = this.RIG_DETECT_REVIEW_SECONDS;
-                renderReviewCopy();
-                refreshStartBtn();
-            };
-            const markManualInteraction = () => {
-                userInteracted = true;
-                this.state.rigDetectOrientationUserInteracted = true;
-                resetCountdown();
-            };
 
             overlay?.classList.add('rig-detect--review-phase');
             review?.classList.remove('hidden');
-            orientationPanel?.classList.remove('hidden');
             refreshViewerTitle();
-            renderOrientationState();
-            options.setLocalRotation?.(localRotation);
 
             this.renderRigDetectCloud(detection, selected, (rig) => {
                 selected = rig;
                 this.updateRigDetectSelection(selected);
-                markManualInteraction();
                 renderReviewCopy();
             });
 
@@ -1104,23 +1020,8 @@ const App = {
                 refreshStartBtn();
                 refreshViewerTitle();
                 this.refreshRigDetectCloudLabels();
-                renderOrientationState();
             };
             window.addEventListener('languageChanged', onLang);
-
-            const onRotate = (event) => {
-                const axis = String(event.currentTarget?.dataset?.rigRotateAxis || '').toLowerCase();
-                const idx = { x: 0, y: 1, z: 2 }[axis];
-                if (idx === undefined) return;
-                const next = this.normalizeRigDetectRotation(localRotation);
-                next[idx] = (next[idx] + 90) % 360;
-                localRotation = next;
-                this.state.rigDetectLocalRotation = [...localRotation];
-                options.setLocalRotation?.(localRotation);
-                renderOrientationState();
-                markManualInteraction();
-            };
-            orientationButtons.forEach((btn) => btn.addEventListener('click', onRotate));
 
             const finish = (value) => {
                 if (settled) return;
@@ -1128,15 +1029,9 @@ const App = {
                 if (interval) clearInterval(interval);
                 interval = 0;
                 window.removeEventListener('languageChanged', onLang);
-                orientationButtons.forEach((btn) => btn.removeEventListener('click', onRotate));
                 if (startBtn) startBtn.onclick = null;
-                orientationPanel?.classList.add('hidden');
                 overlay?.classList.remove('rig-detect--review-phase');
-                resolve({
-                    selectedRigKey: value,
-                    localRotation: this.normalizeRigDetectRotation(localRotation),
-                    userInteracted,
-                });
+                resolve(value);
             };
 
             interval = window.setInterval(() => {
@@ -1463,26 +1358,12 @@ const App = {
                     url: linkVal,
                     ext: '.' + String(linkVal || '').split('?')[0].split('#')[0].split('.').pop().toLowerCase()
                 };
-            this.state.rigDetectLocalRotation = [0, 0, 0];
-            this.state.rigDetectOrientationUserInteracted = false;
-            const { detection, dispose: dDispose, setLocalRotation } = await this.runHiddenAnimalDetection(sourceInfo, {
-                viewerHost: viewerHost || null,
-                localRotation: this.state.rigDetectLocalRotation,
-            });
+            const { detection, dispose: dDispose } = await this.runHiddenAnimalDetection(sourceInfo, { viewerHost: viewerHost || null });
             detectionDispose = dDispose;
 
             let selectedRigKey = this.rigDetectReviewInitialKey(detection);
-            let reviewResult = {
-                selectedRigKey,
-                localRotation: this.state.rigDetectLocalRotation,
-                userInteracted: false,
-            };
             if (detection) {
-                reviewResult = await this.waitRigDetectReview(detection, selectedRigKey, {
-                    localRotation: this.state.rigDetectLocalRotation,
-                    setLocalRotation,
-                });
-                selectedRigKey = reviewResult.selectedRigKey;
+                selectedRigKey = await this.waitRigDetectReview(detection, selectedRigKey);
             }
             detectionDispose();
             detectionDispose = () => {};
@@ -1497,13 +1378,12 @@ const App = {
             rigCloud?.classList.add('hidden');
 
             if (detection) {
-                this.applyRigSelectionToFormData(formData, detection, selectedRigKey, reviewResult);
+                this.applyRigSelectionToFormData(formData, detection, selectedRigKey);
             }
 
             const rigProfileKey = this.getTaskCreateRigProfileKey(selectedRigKey);
             const inputFp = this.getTaskCreateInputFingerprint(isUpload, this.state.selectedFile, linkVal);
-            const rotationKey = this.normalizeRigDetectRotation(reviewResult.localRotation).join(',');
-            const dedupeKey = `${busyMode}|${inputFp}|${rigProfileKey}|rot:${rotationKey}`;
+            const dedupeKey = `${busyMode}|${inputFp}|${rigProfileKey}`;
             if (this.isTaskCreateDeduped(dedupeKey)) {
                 alert(typeof t === 'function' ? t('error_task_create_duplicate_recent') : 'Please wait before creating the same task again.');
                 return;
@@ -1544,7 +1424,7 @@ const App = {
                     alert(t('error_login_required'));
                     window.location.href = '/auth/login';
                 } else if (status === 402) {
-                    window.location.href = '/buy';
+                    window.location.href = '/buy-credits';
                 } else {
                     alert(this.taskCreateErrorMessage(status, data, responseText));
                 }
@@ -2124,7 +2004,7 @@ const App = {
                     window.location.href = '/auth/login';
                 } else if (response.status === 402) {
                     navigatingAway = true;
-                    window.location.href = '/buy';
+                    window.location.href = '/buy-credits';
                 } else {
                     alert(data.detail || t('error_generic'));
                 }

@@ -1,17 +1,23 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 292.99766663981114,
+      "y": 130.98606944349785,
+      "z": 265.65265515541495
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 61.44433846122882,
+      "y": 32.65320470941178,
+      "z": -81.99306544345548
     }
+  },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
   },
   "image_filename": "tiny_forest_floor.jpg",
   "plane_color": "#6e593d",
@@ -28,9 +34,16 @@
   ],
   "shadow_settings": {
     "opacity": 0.5,
-    "shadow_y_offset": 0.005,
+    "shadow_y_offset": 0.01,
     "softness": 7.5,
     "sun_multiplier": 1.7
+  },
+  "src": "/static/env/backdrops/tiny_forest_floor.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/tiny_forest_floor.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/tiny_forest_floor.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/tiny_forest_floor.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/tiny_forest_floor.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
     "inclination": 38,

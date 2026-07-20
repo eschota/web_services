@@ -1,41 +1,62 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 343.28082117890983,
+      "y": 86.16020433031223,
+      "z": 222.32465523488762
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 61.599274794859994,
+      "y": 50.86019268816238,
+      "z": -53.921817464632646
     }
   },
+  "environment_settings": {
+    "intensity": 1.1,
+    "mode": "image",
+    "reflection_intensity": 1.78,
+    "source": "backdrop"
+  },
   "image_filename": "ranch_farmyard.jpg",
-  "plane_color": "#a88455",
+  "plane_color": "#40301c",
   "schema_version": 1,
   "semantic_tags": [
     "farm",
     "ranch",
     "horse",
     "cow",
+    "pig",
+    "piglet",
+    "hog",
+    "boar",
+    "swine",
     "deer",
+    "goat",
+    "sheep",
+    "livestock",
     "animal",
     "western",
     "stable"
   ],
   "shadow_settings": {
-    "opacity": 0.55,
-    "shadow_y_offset": 0.005,
-    "softness": 6.5,
-    "sun_multiplier": 2.5
+    "opacity": 0.39,
+    "shadow_y_offset": -2,
+    "softness": 0,
+    "sun_multiplier": 2.2
+  },
+  "src": "/static/env/backdrops/ranch_farmyard.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/ranch_farmyard.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/ranch_farmyard.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/ranch_farmyard.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/ranch_farmyard.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
-    "inclination": 45,
+    "inclination": 51,
     "intensity": 2.55,
-    "rotation": -65
+    "rotation": -97
   },
   "theme_id": "ranch_farmyard",
   "theme_name": "Ranch Farmyard",

@@ -3,6 +3,8 @@
  * Modal dialog for changing rig type and restarting tasks
  */
 
+import { isSecsVertexPbrMaterial } from './vertex-pbr-material.js?v=2';
+
 // Rig types enum
 export const RigType = {
     CHAR: 'char',
@@ -633,6 +635,12 @@ export class ViewerControls {
         this.groundPlane = options.groundPlane; // Ground plane mesh
         this.model = options.model;
         this.t = options.t || ((key) => key);
+        this.pointerEventFilter = typeof options.pointerEventFilter === 'function'
+            ? options.pointerEventFilter
+            : null;
+        this.pointerNdcResolver = typeof options.pointerNdcResolver === 'function'
+            ? options.pointerNdcResolver
+            : null;
         
         this.bloomPass = options.bloomPass || null;
         
@@ -764,8 +772,8 @@ export class ViewerControls {
             this.groundPlane.material.color.set(params.color);
         }
         if (params.size !== undefined) {
-            const base = (this.groundPlane.userData && this.groundPlane.userData.shadowPlaneBaseSize) || 200;
-            const s = Math.max(0.01, parseFloat(params.size)) / base;
+            // Plane is 2x2 by default (1m radius). Scale it.
+            const s = params.size;
             this.groundPlane.scale.set(s, s, 1);
         }
     }
@@ -1263,6 +1271,9 @@ export class ViewerControls {
             console.log('[ViewerControls] Material already has post-processing injected, skipping:', material.name || material.type);
             return;
         }
+
+        const isVertexPbr = isSecsVertexPbrMaterial(material);
+        const previousOnBeforeCompile = material.onBeforeCompile;
         
         console.log('[ViewerControls] Injecting post-processing into material:', {
             type: material.type,
@@ -1277,8 +1288,14 @@ export class ViewerControls {
             }
         });
 
-        material.onBeforeCompile = (shader) => {
+        material.onBeforeCompile = (shader, renderer) => {
             console.log('[ViewerControls] onBeforeCompile called for material:', material.name || material.type);
+
+            // Vertex PBR owns the base material decode. Run it first, then layer
+            // the viewer's channel adjustments/debug UI over the resulting shader.
+            if (typeof previousOnBeforeCompile === 'function') {
+                previousOnBeforeCompile.call(material, shader, renderer);
+            }
             
             // Add all channel uniforms to the shader
             const channels = ['albedo', 'ao', 'normal', 'roughness', 'metalness', 'emissive'];
@@ -1457,23 +1474,29 @@ export class ViewerControls {
 
             // 9. Output Debug Overrides
             const originalShader = shader.fragmentShader;
-            const hasOutputFragment = originalShader.includes('#include <output_fragment>');
+            const outputAnchor = originalShader.includes('#include <opaque_fragment>')
+                ? '#include <opaque_fragment>'
+                : (originalShader.includes('#include <output_fragment>') ? '#include <output_fragment>' : null);
 
-            if (hasOutputFragment) {
+            if (outputAnchor) {
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    '#include <output_fragment>',
+                    outputAnchor,
                     `
                     if (u_debug_mode > 0.5) {
                     vec3 debugCol = vec3(1.0, 0.0, 1.0); // Magenta fallback
                     
                     if (u_debug_mode < 1.5) {
-                        // AO - read directly from aoMap
-                        #ifdef USE_AOMAP
-                            vec4 aoTexel = texture2D(aoMap, vAoMapUv);
-                            debugCol = vec3(aoTexel.r);
-                        #else
-                            debugCol = vec3(1.0); // No AO = white
-                        #endif
+                        // AO - Vertex PBR stores AO in COLOR_0.a.
+                        ${isVertexPbr ? `
+                            debugCol = vec3(clamp(vColor.a, 0.0, 1.0));
+                        ` : `
+                            #ifdef USE_AOMAP
+                                vec4 aoTexel = texture2D(aoMap, vAoMapUv);
+                                debugCol = vec3(aoTexel.r);
+                            #else
+                                debugCol = vec3(1.0); // No AO = white
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 2.5) {
                         // Normal - read directly from normalMap
@@ -1485,31 +1508,43 @@ export class ViewerControls {
                         #endif
                     }
                     else if (u_debug_mode < 3.5) {
-                        // Albedo - read directly from map (base color)
-                        #ifdef USE_MAP
-                            vec4 albedoTexel = texture2D(map, vMapUv);
-                            debugCol = albedoTexel.rgb;
-                        #else
-                            debugCol = diffuseColor.rgb; // Use material color
-                        #endif
+                        // Albedo - Vertex PBR stores linear base color in COLOR_0.rgb.
+                        ${isVertexPbr ? `
+                            debugCol = clamp(vColor.rgb, 0.0, 1.0);
+                        ` : `
+                            #ifdef USE_MAP
+                                vec4 albedoTexel = texture2D(map, vMapUv);
+                                debugCol = albedoTexel.rgb;
+                            #else
+                                debugCol = diffuseColor.rgb; // Use material color
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 4.5) {
-                        // Metalness - read from metalnessMap (blue channel for GLB)
-                        #ifdef USE_METALNESSMAP
-                            vec4 metalnessTexel = texture2D(metalnessMap, vMetalnessMapUv);
-                            debugCol = vec3(metalnessTexel.b); // Blue channel = metalness
-                        #else
-                            debugCol = vec3(metalness); // Use material value
-                        #endif
+                        // Metalness - Vertex PBR stores it in TEXCOORD_1.x.
+                        ${isVertexPbr ? `
+                            debugCol = vec3(clamp(vSecsMetalRough.x, 0.0, 1.0));
+                        ` : `
+                            #ifdef USE_METALNESSMAP
+                                vec4 metalnessTexel = texture2D(metalnessMap, vMetalnessMapUv);
+                                debugCol = vec3(metalnessTexel.b); // Blue channel = metalness
+                            #else
+                                debugCol = vec3(metalness); // Use material value
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 5.5) {
-                        // Roughness - read from roughnessMap (green channel for GLB)
-                        #ifdef USE_ROUGHNESSMAP
-                            vec4 roughnessTexel = texture2D(roughnessMap, vRoughnessMapUv);
-                            debugCol = vec3(roughnessTexel.g); // Green channel = roughness
-                        #else
-                            debugCol = vec3(roughness); // Use material value
-                        #endif
+                        // Roughness - Vertex PBR stores perceptual roughness in TEXCOORD_1.y.
+                        ${isVertexPbr ? `
+                            debugCol = vec3(clamp(vSecsMetalRough.y, 0.0, 1.0));
+                        ` : `
+                            #ifdef USE_ROUGHNESSMAP
+                                vec4 roughnessTexel = texture2D(roughnessMap, vRoughnessMapUv);
+                                debugCol = vec3(roughnessTexel.g); // Green channel = roughness
+                            #else
+                                debugCol = vec3(roughness); // Use material value
+                            #endif
+                        `}
                     }
                     else if (u_debug_mode < 6.5) {
                         // Emissive - read directly from emissiveMap
@@ -1523,12 +1558,12 @@ export class ViewerControls {
                     
                     gl_FragColor = vec4(debugCol, 1.0);
                 } else {
-                    #include <output_fragment>
+                    ${outputAnchor}
                 }
                 `
                 );
             } else {
-                console.warn('[ViewerControls] #include <output_fragment> not found, adding debug block at end of shader');
+                console.warn('[ViewerControls] Standard output shader chunk not found, adding debug block at end of shader');
                 const lastBrace = shader.fragmentShader.lastIndexOf('}');
                 if (lastBrace > 0) {
                     const beforeLastBrace = shader.fragmentShader.substring(0, lastBrace);
@@ -1635,6 +1670,17 @@ export class ViewerControls {
                 }
 
                 const original = this.originalMaterials.get(matKey);
+
+                if (isSecsVertexPbrMaterial(original)) {
+                    // Vertex PBR channel views are implemented by the composed
+                    // standard-material shader so skinning and PBR stay active.
+                    if (Array.isArray(child.material)) {
+                        child.material[index] = original;
+                    } else {
+                        child.material = original;
+                    }
+                    return;
+                }
 
                 if (channel === MaterialChannel.PBR) {
                     // Restore original PBR material (already has injected adjustments)
@@ -2042,12 +2088,19 @@ export class ViewerControls {
         const domElement = this.renderer.domElement;
 
         const getMousePos = (e) => {
+            const resolved = this.pointerNdcResolver?.(e);
+            if (resolved && Number.isFinite(resolved.x) && Number.isFinite(resolved.y)) {
+                mouse.x = resolved.x;
+                mouse.y = resolved.y;
+                return;
+            }
             const rect = domElement.getBoundingClientRect();
             mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         };
 
         const onPointerDown = (e) => {
+            if (this.pointerEventFilter && !this.pointerEventFilter(e)) return;
             if (this.rigType !== RigType.CHAR && this.rigType !== RigType.ANIMATIONS) return;
             if (this.cameraMode === CameraMode.FLY) return;
 
@@ -2079,6 +2132,7 @@ export class ViewerControls {
 
         const onPointerMove = (e) => {
             if (!dragging) return;
+            if (this.pointerEventFilter && !this.pointerEventFilter(e)) return;
 
             getMousePos(e);
             raycaster.setFromCamera(mouse, this.camera);
@@ -2188,7 +2242,7 @@ export class ViewerControls {
                         this.injectPostProcessing(mat);
                         
                         // Apply baked AO if material doesn't have its own aoMap
-                        if (!mat.aoMap && this.bakedAOTexture) {
+                        if (!isSecsVertexPbrMaterial(mat) && !mat.aoMap && this.bakedAOTexture) {
                             mat.aoMap = this.bakedAOTexture;
                             mat.aoMapIntensity = 1.0;
                             mat.needsUpdate = true;
@@ -2296,6 +2350,8 @@ export class ViewerControls {
                     // Get original material to check if it had aoMap
                     const originalKey = `${child.uuid}_${idx}`;
                     const originalMat = this.originalMaterials.get(originalKey);
+
+                    if (isSecsVertexPbrMaterial(originalMat || mat)) return;
                     
                     // If original didn't have aoMap, update with new baked one
                     if (!originalMat?.aoMap && mat.aoMap !== this.bakedAOTexture) {
@@ -3058,6 +3114,12 @@ export class TransformManager {
         this.renderer = options.renderer;
         this.controls = options.controls;      // OrbitControls
         this.model = options.model;
+        this.pointerEventFilter = typeof options.pointerEventFilter === 'function'
+            ? options.pointerEventFilter
+            : null;
+        this.pointerNdcResolver = typeof options.pointerNdcResolver === 'function'
+            ? options.pointerNdcResolver
+            : null;
         
         this.mode = TransformMode.SELECT;
         this.snapEnabled = true;
@@ -3125,6 +3187,10 @@ export class TransformManager {
      * Get normalized mouse coordinates
      */
     _getMouse(event) {
+        const resolved = this.pointerNdcResolver?.(event);
+        if (resolved && Number.isFinite(resolved.x) && Number.isFinite(resolved.y)) {
+            return resolved;
+        }
         const rect = this.renderer.domElement.getBoundingClientRect();
         return {
             x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -3137,6 +3203,7 @@ export class TransformManager {
      */
     _onPointerDown(event) {
         if (event.button !== 0) return; // Left click only
+        if (this.pointerEventFilter && !this.pointerEventFilter(event)) return;
 
         const mouse = this._getMouse(event);
 
@@ -3179,6 +3246,7 @@ export class TransformManager {
      * Pointer move handler
      */
     _onPointerMove(event) {
+        if (this.pointerEventFilter && !this.pointerEventFilter(event)) return;
         const mouse = this._getMouse(event);
         
         if (this.isDragging && this.dragAxis) {

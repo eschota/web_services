@@ -35,6 +35,16 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production-very-secret-key-12
 # =============================================================================
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./db/autorig.db")
 
+# Canonical animal animation artifacts are runtime data and must stay outside Git.
+ANIMATION_LIBRARY_ROOT = os.getenv(
+    "ANIMATION_LIBRARY_ROOT",
+    "/var/autorig/animation-library",
+).strip()
+ANIMATION_FITTING_JOBS_ROOT = os.getenv(
+    "ANIMATION_FITTING_JOBS_ROOT",
+    "/var/autorig/animation-fitting/jobs",
+).strip()
+
 # =============================================================================
 # Google OAuth2
 # =============================================================================
@@ -88,11 +98,11 @@ def is_admin_email(email: Optional[str]) -> bool:
 # Workers (Converters)
 # =============================================================================
 WORKERS = [
-    "http://5.129.157.224:5132/api-converter-glb",
-    "http://5.129.157.224:5279/api-converter-glb",
-    "http://5.129.157.224:5131/api-converter-glb",
-    "http://5.129.157.224:5533/api-converter-glb",
-    "http://5.129.157.224:5267/api-converter-glb",
+    "https://converter-f1.freestock.online/api-converter-glb",
+    "https://converter-f2.freestock.online/api-converter-glb",
+    "https://converter-f7.freestock.online/api-converter-glb",
+    "https://converter-f11.freestock.online/api-converter-glb",
+    "https://converter-f13.freestock.online/api-converter-glb",
 ]
 
 # =============================================================================
@@ -101,6 +111,13 @@ WORKERS = [
 ANON_FREE_LIMIT = 0  # Free conversions for anonymous users
 USER_FREE_LIMIT = 0  # Total free credits after login (0 credits for all registered users)
 USER_BONUS_AFTER_LOGIN = 27  # Additional credits after login (30 - max anon used)
+
+# =============================================================================
+# Public Gallery Stats
+# =============================================================================
+# Marketing-facing completed rig counter. This is intentionally independent from
+# the current tasks table because old task rows/cache may be purged for disk space.
+PUBLIC_COMPLETED_RIG_BASELINE = int(os.getenv("PUBLIC_COMPLETED_RIG_BASELINE", "7124"))
 
 # =============================================================================
 # Upload Settings
@@ -154,6 +171,8 @@ RATE_LIMIT_AGENT_REGISTER = os.getenv("RATE_LIMIT_AGENT_REGISTER", "15/hour")
 # =============================================================================
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@autorig.online")
+MARKETING_POSTAL_ADDRESS = os.getenv("MARKETING_POSTAL_ADDRESS", "").strip()
+RESEND_WEBHOOK_SECRET = os.getenv("RESEND_WEBHOOK_SECRET", "").strip()
 
 # =============================================================================
 # Gumroad
@@ -165,47 +184,28 @@ GUMROAD_PRODUCT_CREDITS = {
     "free3d-unlimitedsubscription": 999999,
     "free3d-unlimited": 999999,
     # Legacy AutoRig products (kept for backward compatibility)
+    "oneclick-30-credits": 30,
     "autorig-100": 100,
     "autorig-500": 500,
     "autorig-1000": 1000,
 }
 
+# Gumroad product_permalink -> USD minimum price for the Blender plugin ABCD test.
+BLENDER_PLUGIN_AB_VARIANTS = {
+    "blender-plugin-10": 10,
+    "blender-plugin-30": 30,
+    "blender-plugin-50": 50,
+    # Keep the original public Gumroad URL as the $100 variant.
+    "blender-plugin": 100,
+}
+
 # Gumroad product_permalinks (lowercase) that count toward /buy-credits donation progress
 AUTORIG_DONATION_PRODUCT_KEYS = frozenset(
-    k.strip().lower() for k in GUMROAD_PRODUCT_CREDITS if str(k).strip().lower().startswith("autorig-")
+    k.strip().lower()
+    for k in GUMROAD_PRODUCT_CREDITS
+    if str(k).strip().lower().startswith("autorig-")
+    or str(k).strip().lower() == "oneclick-30-credits"
 )
-
-# Second-site Gumroad webhook consumer (Freestock). Same ping contract as free3d.online/gumroad/ping.
-_FREESTOCK_GUMROAD_PROXY_RAW = (
-    os.getenv(
-        "FREESTOCK_GUMROAD_PROXY_TARGET",
-        "https://freestock.online/gumroad/ping",
-    )
-    .strip()
-    .rstrip("/")
-)
-FREESTOCK_GUMROAD_PROXY_TARGET = (
-    _FREESTOCK_GUMROAD_PROXY_RAW or "https://freestock.online/gumroad/ping"
-)
-FREESTOCK_GUMROAD_PRODUCT_KEYS = frozenset(
-    {
-        "freestock-starter",
-        "freestock-creator",
-        "freestock-pro",
-        "freestock-studio",
-    }
-)
-
-
-def is_freestock_gumroad_product(product_key: str) -> bool:
-    """Freestock store slugs — prefix match catches future Gumroad tiers on same subdomain."""
-    k = (product_key or "").strip().lower()
-    if not k:
-        return False
-    if k in FREESTOCK_GUMROAD_PRODUCT_KEYS:
-        return True
-    return k.startswith("freestock-")
-
 
 # Public donation thermometer on buy-credits (USD)
 DONATION_GOAL_USD = int(os.getenv("DONATION_GOAL_USD", "1000"))
@@ -218,8 +218,9 @@ CRYPTO_DISCOUNT_FRACTION = float(os.getenv("CRYPTO_DISCOUNT_FRACTION", "0.2"))
 CRYPTO_BTC_USD_RATE = float(os.getenv("CRYPTO_BTC_USD_RATE", "95000"))
 # (gumroad_permalink_key, credits, list_price_usd)
 AUTORIG_CRYPTO_TIERS: list[tuple[str, int, float]] = [
+    ("oneclick-30-credits", 30, 3.0),
     ("autorig-100", 100, 10.0),
-    ("autorig-500", 500, 30.0),
+    ("autorig-500", 500, 50.0),
     ("autorig-1000", 1000, 100.0),
 ]
 CRYPTO_ALLOWED_TIER_KEYS = frozenset(t[0] for t in AUTORIG_CRYPTO_TIERS)
@@ -292,9 +293,36 @@ SUPPORT_CHAT_MESSAGE_MAX_CHARS = int(os.getenv("SUPPORT_CHAT_MESSAGE_MAX_CHARS",
 # Set AUTOMATIC_TASK_DB_DELETION=1 to restore legacy automatic DB row deletion.
 AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
 
-MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "10"))  # Minimum free space to maintain (background cleanup)
+MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "2.5"))  # Critical free-space floor for background cleanup
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
+UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS = float(
+    os.getenv("UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS", "1")
+)  # Under disk pressure, terminal-task upload originals older than this may be removed
+DISK_ALERT_USED_PERCENT = float(
+    os.getenv("DISK_ALERT_USED_PERCENT", "90")
+)  # Send Telegram alerts while / stays at or above this used-percent threshold
+DISK_CLEANUP_USED_PERCENT = float(
+    os.getenv("DISK_CLEANUP_USED_PERCENT", "90")
+)  # Start periodic pressure cleanup before free space reaches the hard outage floor
+DISK_CLEANUP_TARGET_BUFFER_GB = float(
+    os.getenv("DISK_CLEANUP_TARGET_BUFFER_GB", "0.75")
+)  # Extra free-space margin above the used-percent threshold after cleanup
+GLB_CACHE_MAX_GB = float(
+    os.getenv("GLB_CACHE_MAX_GB", "6.0")
+)  # Hard cap for regenerable static/glb_cache during periodic cleanup
+PERIODIC_TASK_CACHE_MAX_GB = float(
+    os.getenv("PERIODIC_TASK_CACHE_MAX_GB", "14.0")
+)  # Periodic hard ceiling for static/tasks even if the admin UI cap is higher
+PERIODIC_TASK_CACHE_MIN_AGE_HOURS = float(
+    os.getenv("PERIODIC_TASK_CACHE_MIN_AGE_HOURS", "24")
+)  # Under pressure, evict static/tasks only for terminal tasks older than this
+GLB_CACHE_MIN_AGE_HOURS = float(
+    os.getenv("GLB_CACHE_MIN_AGE_HOURS", "24")
+)  # Under pressure, evict glb_cache only for files older than this
+VIDEO_CACHE_MIN_AGE_HOURS = float(
+    os.getenv("VIDEO_CACHE_MIN_AGE_HOURS", "24")
+)  # Last-resort pressure cleanup: only videos already uploaded to YouTube
 
 # Before each new task: try to reach at least this much free space on /
 NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
@@ -303,7 +331,7 @@ NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
 NEW_TASK_PURGE_TASKS_MAX_FREED_GB = float(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "8"))
 
 # Max total size of static/tasks (task file cache); enforced before new task; admin can override in DB
-TASK_CACHE_MAX_GB = float(os.getenv("TASK_CACHE_MAX_GB", "10.0"))
+TASK_CACHE_MAX_GB = float(os.getenv("TASK_CACHE_MAX_GB", "22.0"))
 
 # Purge DB rows for terminal tasks that have neither video nor any thumbnail URL in ready/output lists
 # (Used only as legacy env name; gallery purges are gated by GALLERY_DB_PURGE_INTERVAL_CYCLES below.)

@@ -1,39 +1,56 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 517.9975992130725,
+      "y": 267.4854793918445,
+      "z": 241.8173070236562
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 45.77260233370811,
+      "y": 54.23910974240153,
+      "z": -95.16180871524402
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "jungle_temple_ruins.jpg",
-  "plane_color": "#777469",
+  "plane_color": "#434e51",
   "schema_version": 1,
   "semantic_tags": [
     "jungle",
     "temple",
     "ruins",
     "turtle",
+    "dinosaur",
+    "dino",
+    "reptile",
+    "prehistoric",
     "monkey",
     "lizard",
     "adventure",
     "fantasy"
   ],
   "shadow_settings": {
-    "opacity": 0.52,
-    "shadow_y_offset": 0.005,
+    "opacity": 0.55,
+    "shadow_y_offset": 0.01,
     "softness": 8.5,
-    "sun_multiplier": 1.6
+    "sun_multiplier": 2.95
+  },
+  "src": "/static/env/backdrops/jungle_temple_ruins.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/jungle_temple_ruins.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/jungle_temple_ruins.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/jungle_temple_ruins.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/jungle_temple_ruins.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
-    "inclination": 35,
+    "inclination": 25,
     "intensity": 1.85,
     "rotation": -105
   },

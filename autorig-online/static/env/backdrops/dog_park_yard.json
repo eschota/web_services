@@ -1,20 +1,26 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 425.07163725053675,
+      "y": 238.53843236083517,
+      "z": 228.66647445420284
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 20.197730551090487,
+      "y": 55.706326182645,
+      "z": -60.25099490243753
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "dog_park_yard.jpg",
-  "plane_color": "#9a7b4f",
+  "plane_color": "#332f28",
   "schema_version": 1,
   "semantic_tags": [
     "dog",
@@ -29,15 +35,22 @@
     "domestic"
   ],
   "shadow_settings": {
-    "opacity": 0.55,
-    "shadow_y_offset": 0.005,
-    "softness": 6.0,
-    "sun_multiplier": 2.4
+    "opacity": 0.67,
+    "shadow_y_offset": 0.01,
+    "softness": 0,
+    "sun_multiplier": 1.75
+  },
+  "src": "/static/env/backdrops/dog_park_yard.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/dog_park_yard.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/dog_park_yard.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/dog_park_yard.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/dog_park_yard.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
-    "inclination": 48,
+    "inclination": 25,
     "intensity": 2.5,
-    "rotation": -55
+    "rotation": 63
   },
   "theme_id": "dog_park_yard",
   "theme_name": "Pet Park Yard",

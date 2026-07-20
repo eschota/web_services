@@ -1,0 +1,13 @@
+[Unit]
+Description=AutoRig pressure-only disk cleanup
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/autorig-online/backend
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/autorig-online/environment
+EnvironmentFile=-/etc/autorig-telegram.env
+ExecStart=/root/autorig-online/venv/bin/python3 /root/autorig-online/backend/scripts/run_disk_pressure_cleanup.py

@@ -1,18 +1,48 @@
 # AutoRig Online robots.txt
+#
+# AI/search crawlers are allowed to discover public pages and media previews,
+# while API internals, auth, admin and raw user-upload storage remain blocked.
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: YouBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: Applebot
+User-agent: CCBot
+User-agent: Bravebot
+Allow: /
+Allow: /api/thumb/
+Allow: /api/video/
+Allow: /skill.md
+Allow: /llm.txt
+Allow: /llms.txt
+Disallow: /m$
+Disallow: /m/
+Disallow: /m?
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /auth/
+Disallow: /u/
+
 User-agent: *
 Allow: /
 
 # Main pages
 Allow: /gallery
-Allow: /m/
 Allow: /guides
 Allow: /buy-credits
+Allow: /blender-plugin
+Allow: /animal-rig
 Allow: /how-it-works
 Allow: /faq
 
 # Agents / LLM discovery
 Allow: /skill.md
 Allow: /llm.txt
+Allow: /llms.txt
 
 # Format-specific landing pages
 Allow: /glb-auto-rig
@@ -61,9 +91,66 @@ Allow: /auto-rig-obj-ru
 Allow: /auto-rig-obj-zh
 Allow: /auto-rig-obj-hi
 
+# Rig type SEO landing pages
+Allow: /humanoid-auto-rig
+Allow: /humanoid-auto-rig-ru
+Allow: /humanoid-auto-rig-zh
+Allow: /humanoid-auto-rig-hi
+Allow: /dog-auto-rig
+Allow: /dog-auto-rig-ru
+Allow: /dog-auto-rig-zh
+Allow: /dog-auto-rig-hi
+Allow: /bear-auto-rig
+Allow: /bear-auto-rig-ru
+Allow: /bear-auto-rig-zh
+Allow: /bear-auto-rig-hi
+Allow: /cat-auto-rig
+Allow: /cat-auto-rig-ru
+Allow: /cat-auto-rig-zh
+Allow: /cat-auto-rig-hi
+Allow: /cow-auto-rig
+Allow: /cow-auto-rig-ru
+Allow: /cow-auto-rig-zh
+Allow: /cow-auto-rig-hi
+Allow: /deer-auto-rig
+Allow: /deer-auto-rig-ru
+Allow: /deer-auto-rig-zh
+Allow: /deer-auto-rig-hi
+Allow: /elephant-auto-rig
+Allow: /elephant-auto-rig-ru
+Allow: /elephant-auto-rig-zh
+Allow: /elephant-auto-rig-hi
+Allow: /giraffe-auto-rig
+Allow: /giraffe-auto-rig-ru
+Allow: /giraffe-auto-rig-zh
+Allow: /giraffe-auto-rig-hi
+Allow: /horse-auto-rig
+Allow: /horse-auto-rig-ru
+Allow: /horse-auto-rig-zh
+Allow: /horse-auto-rig-hi
+Allow: /mouse-auto-rig
+Allow: /mouse-auto-rig-ru
+Allow: /mouse-auto-rig-zh
+Allow: /mouse-auto-rig-hi
+Allow: /pig-auto-rig
+Allow: /pig-auto-rig-ru
+Allow: /pig-auto-rig-zh
+Allow: /pig-auto-rig-hi
+Allow: /rabbit-auto-rig
+Allow: /rabbit-auto-rig-ru
+Allow: /rabbit-auto-rig-zh
+Allow: /rabbit-auto-rig-hi
+Allow: /turtle-auto-rig
+Allow: /turtle-auto-rig-ru
+Allow: /turtle-auto-rig-zh
+Allow: /turtle-auto-rig-hi
+
 # Disallow API and admin
 Allow: /api/thumb/
 Allow: /api/video/
+Disallow: /m$
+Disallow: /m/
+Disallow: /m?
 Disallow: /api/
 Disallow: /admin
 Disallow: /admin/

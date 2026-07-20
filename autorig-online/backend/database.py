@@ -1,13 +1,13 @@
 """
 Database models and setup for AutoRig Online
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import json
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
-    UniqueConstraint, ForeignKey, create_engine, event, Index,
+    UniqueConstraint, ForeignKey, create_engine, event, Index, text,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -58,6 +58,14 @@ class User(Base):
     total_tasks = Column(Integer, default=0)
     youtube_bonus_received = Column(Boolean, default=False)
     email_task_completed = Column(Boolean, default=True, nullable=False)  # task-ready emails; False = unsubscribed
+    email_marketing_unsubscribed_at = Column(DateTime, nullable=True)
+    # Global suppression: hard bounces/complaints must not receive marketing or transactional email.
+    email_invalid_at = Column(DateTime, nullable=True)
+    email_invalid_reason = Column(Text, nullable=True)
+    email_invalid_source = Column(String(64), nullable=True)
+    email_last_bounce_at = Column(DateTime, nullable=True)
+    email_last_bounce_type = Column(String(32), nullable=True)
+    email_transient_bounce_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login_at = Column(DateTime, default=datetime.utcnow)
     
@@ -66,6 +74,67 @@ class User(Base):
         from config import is_admin_email
         return is_admin_email(self.email)
 
+
+class EmailCampaignSend(Base):
+    """Per-recipient campaign send log for resumable marketing email sends."""
+    __tablename__ = "email_campaign_sends"
+    __table_args__ = (
+        UniqueConstraint("campaign_key", "email_hash", name="uq_email_campaign_key_hash"),
+        Index("ix_email_campaign_sends_campaign_status", "campaign_key", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_key = Column(String(128), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    email_hash = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+    provider_message_id = Column(String(128), nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime, nullable=True)
+
+
+class EmailCampaignClick(Base):
+    """Click events for tracked marketing campaign links."""
+    __tablename__ = "email_campaign_clicks"
+    __table_args__ = (
+        Index("ix_email_campaign_clicks_campaign_link", "campaign_key", "link_key"),
+        Index("ix_email_campaign_clicks_email_hash", "email_hash"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_key = Column(String(128), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    email_hash = Column(String(64), nullable=False)
+    link_key = Column(String(64), nullable=False, index=True)
+    destination_url = Column(String(1024), nullable=False)
+    ip_hash = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    clicked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EmailDeliveryEvent(Base):
+    """Resend delivery/bounce/complaint webhook event log."""
+    __tablename__ = "email_delivery_events"
+    __table_args__ = (
+        Index("ix_email_delivery_events_message", "provider_message_id"),
+        Index("ix_email_delivery_events_email_hash", "email_hash"),
+        Index("ix_email_delivery_events_event_type", "event_type"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    svix_id = Column(String(128), unique=True, nullable=True)
+    provider_message_id = Column(String(128), nullable=True)
+    campaign_key = Column(String(128), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    email_hash = Column(String(64), nullable=True)
+    event_type = Column(String(64), nullable=False)
+    bounce_type = Column(String(32), nullable=True)
+    bounce_subtype = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    raw_event_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class AnonSession(Base):
     """Anonymous user session (tracked by cookie)"""
@@ -127,6 +196,28 @@ class TaskAnimationBundlePurchase(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_id = Column(String(36), nullable=False, index=True)
     user_email = Column(String(255), nullable=False, index=True)
+    credits_spent = Column(Integer, nullable=False, default=10)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TaskAnimalAnimationPackPurchase(Base):
+    """Purchase of one animal variant animation pack for a task."""
+    __tablename__ = "task_animal_animation_pack_purchases"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id",
+            "user_email",
+            "animal_type",
+            "orientation",
+            name="uq_task_animal_animation_pack_purchase",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    animal_type = Column(String(32), nullable=False, index=True)
+    orientation = Column(String(16), nullable=False, index=True)
     credits_spent = Column(Integer, nullable=False, default=10)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -232,12 +323,227 @@ class Task(Base):
     @ready_urls.setter
     def ready_urls(self, value: list):
         self._ready_urls = json.dumps(value)
-    
+
     @property
     def progress(self) -> int:
         if self.total_count == 0:
             return 0
-        return int((self.ready_count / self.total_count) * 100)
+        value = int((self.ready_count / self.total_count) * 100)
+        if self.status == "processing":
+            return min(value, 99)
+        return value
+
+
+class TaskAnimationCorrection(Base):
+    """Draft/published realtime bone corrections for one task viewer."""
+
+    __tablename__ = "task_animation_corrections"
+
+    task_id = Column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    draft_json = Column(Text, nullable=True)
+    published_json = Column(Text, nullable=True)
+    published_revision = Column(Integer, nullable=False, default=0)
+    export_status = Column(String(32), nullable=False, default="idle")
+    export_error = Column(Text, nullable=True)
+    source_sha256_json = Column(Text, nullable=True)
+    corrected_glb_url = Column(String(1024), nullable=True)
+    corrected_fbx_zip_url = Column(String(1024), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    published_at = Column(DateTime, nullable=True)
+
+
+class AnimalAnimationLibraryVersion(Base):
+    """One immutable draft/published revision of a canonical species library."""
+
+    __tablename__ = "animal_animation_library_versions"
+    __table_args__ = (
+        UniqueConstraint("rig_type", "revision", name="uq_animal_animation_library_rig_revision"),
+        Index("ix_animal_animation_library_rig_status", "rig_type", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rig_type = Column(String(32), nullable=False, index=True)
+    revision = Column(String(128), nullable=False, index=True)
+    status = Column(String(24), nullable=False, default="draft", index=True)  # draft | published | retired
+    template_skeleton_sha256 = Column(String(64), nullable=False)
+    qa_profile_revision = Column(String(128), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    published_at = Column(DateTime, nullable=True)
+
+
+class AnimalAnimationLibraryArtifact(Base):
+    """Orientation-specific canonical manifest and multi-clip GLB for a revision."""
+
+    __tablename__ = "animal_animation_library_artifacts"
+    __table_args__ = (
+        UniqueConstraint("library_version_id", "orientation", name="uq_animal_animation_artifact_orientation"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    orientation = Column(String(16), nullable=False)
+    manifest_json = Column(Text, nullable=False)
+    manifest_sha256 = Column(String(64), nullable=False)
+    animation_glb_url = Column(String(2048), nullable=True)
+    animation_glb_path = Column(String(2048), nullable=True)
+    artifact_sha256 = Column(String(64), nullable=False)
+    animation_clip_count = Column(Integer, nullable=False)
+    package_zip_url = Column(String(2048), nullable=True)
+    package_zip_path = Column(String(2048), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AnimalAnimationLibraryActivation(Base):
+    """History interval used to bind a task to the revision active when it was created."""
+
+    __tablename__ = "animal_animation_library_activations"
+    __table_args__ = (
+        Index("ix_animal_animation_activation_lookup", "rig_type", "activated_at", "deactivated_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rig_type = Column(String(32), nullable=False, index=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id"),
+        nullable=False,
+        index=True,
+    )
+    activated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    deactivated_at = Column(DateTime, nullable=True, index=True)
+    activated_by = Column(String(255), nullable=False)
+    reason = Column(String(32), nullable=False, default="activate")  # activate | rollback
+
+
+class AnimalAnimationFittingJob(Base):
+    """Durable orchestration state for one species/semantic action fitting run."""
+
+    __tablename__ = "animal_animation_fitting_jobs"
+    __table_args__ = (
+        Index("ix_animal_fitting_job_library_action", "library_version_id", "semantic_id"),
+        Index("ix_animal_fitting_job_status_created", "status", "created_at"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    rig_type = Column(String(32), nullable=False, index=True)
+    semantic_id = Column(String(128), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="queued", index=True)
+    workflow_name = Column(String(128), nullable=False)
+    workflow_fingerprint = Column(String(128), nullable=False)
+    worker_url = Column(String(2048), nullable=False)
+    prompt_id = Column(String(128), nullable=False, unique=True, index=True)
+    prompt = Column(Text, nullable=False)
+    candidate_target = Column(Integer, nullable=False, default=8)
+    candidate_limit = Column(Integer, nullable=False, default=16)
+    candidates_attempted = Column(Integer, nullable=False, default=0)
+    config_json = Column(Text, nullable=False, default="{}")
+    error = Column(Text, nullable=True)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+
+
+class AnimalAnimationCandidate(Base):
+    """Generated LTX video plus fitted clip and machine QA for a fitting job."""
+
+    __tablename__ = "animal_animation_candidates"
+    __table_args__ = (
+        UniqueConstraint("job_id", "seed", name="uq_animal_animation_candidate_job_seed"),
+        UniqueConstraint("job_id", "rank", name="uq_animal_animation_candidate_job_rank"),
+        Index("ix_animal_animation_candidate_job_rank", "job_id", "rank"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    job_id = Column(
+        String(36),
+        ForeignKey("animal_animation_fitting_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    seed = Column(BigInteger, nullable=False)
+    status = Column(String(32), nullable=False, default="generated", index=True)
+    raw_video_url = Column(String(2048), nullable=True)
+    raw_video_path = Column(String(2048), nullable=True)
+    decoded_frames_path = Column(String(2048), nullable=True)
+    fitted_clip_url = Column(String(2048), nullable=True)
+    fitted_clip_path = Column(String(2048), nullable=True)
+    fitted_clip_sha256 = Column(String(64), nullable=True)
+    duration = Column(Float, nullable=True)
+    fps = Column(Float, nullable=True)
+    root_motion_available = Column(Boolean, nullable=False, default=False)
+    metrics_json = Column(Text, nullable=False, default="{}")
+    provenance_json = Column(Text, nullable=False, default="{}")
+    rank_score = Column(Float, nullable=True)
+    rank = Column(Integer, nullable=True)
+    qa_passed = Column(Boolean, nullable=False, default=False)
+    decision = Column(String(16), nullable=True)  # approved | rejected
+    decision_reason = Column(Text, nullable=True)
+    reviewed_by = Column(String(255), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AnimalAnimationApprovedClip(Base):
+    """The one admin-approved candidate for a semantic ID in a library revision."""
+
+    __tablename__ = "animal_animation_approved_clips"
+    __table_args__ = (
+        UniqueConstraint("library_version_id", "semantic_id", name="uq_animal_approved_clip_semantic"),
+        UniqueConstraint("candidate_id", name="uq_animal_approved_clip_candidate"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    library_version_id = Column(
+        Integer,
+        ForeignKey("animal_animation_library_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    candidate_id = Column(
+        String(36),
+        ForeignKey("animal_animation_candidates.id"),
+        nullable=False,
+        index=True,
+    )
+    semantic_id = Column(String(128), nullable=False, index=True)
+    category = Column(String(32), nullable=False)
+    clip_order = Column(Integer, nullable=False)
+    loop = Column(Boolean, nullable=False)
+    duration = Column(Float, nullable=False)
+    fps = Column(Float, nullable=False)
+    start_pose_id = Column(String(128), nullable=False)
+    end_pose_id = Column(String(128), nullable=False)
+    root_motion_available = Column(Boolean, nullable=False, default=False)
+    qa_profile_revision = Column(String(128), nullable=False)
+    fbx_url = Column(String(2048), nullable=True)
+    fbx_path = Column(String(2048), nullable=True)
+    fbx_sha256 = Column(String(64), nullable=False)
+    metrics_json = Column(Text, nullable=False, default="{}")
+    provenance_json = Column(Text, nullable=False, default="{}")
+    approved_by = Column(String(255), nullable=False)
+    approved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class AdminOverlayCounters(Base):
@@ -248,9 +554,20 @@ class AdminOverlayCounters(Base):
     id = Column(Integer, primary_key=True, default=1)
     completed_count = Column(Integer, nullable=False, default=0)
     total_duration_seconds = Column(Float, nullable=False, default=0.0)
+    # Public all-time completed rig count; not reset by admin overlay metrics.
+    public_completed_total = Column(Integer, nullable=False, default=7124)
     # Upper bound for total size of static/tasks (GB); evict oldest cache dirs when exceeded
-    task_cache_max_gb = Column(Float, nullable=False, default=10.0)
+    task_cache_max_gb = Column(Float, nullable=False, default=22.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RigCompletionEvent(Base):
+    """Durable public completion event, independent from purged task rows/cache."""
+    __tablename__ = "rig_completion_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(36), nullable=False, unique=True, index=True)
+    completed_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 class YoutubeCredentials(Base):
@@ -332,6 +649,29 @@ class GumroadPurchase(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     credited = Column(Boolean, default=False)
     credits_added = Column(Integer, default=0)
+
+
+class PurchaseCheckoutIntent(Base):
+    """Server-side checkout click/pending task-unlock intent."""
+    __tablename__ = "purchase_checkout_intents"
+    __table_args__ = (
+        Index("ix_purchase_checkout_intents_user_created", "user_email", "created_at"),
+        Index("ix_purchase_checkout_intents_task", "task_id"),
+        Index("ix_purchase_checkout_intents_sale", "gumroad_sale_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    product_permalink = Column(String(255), nullable=False, index=True)
+    product_kind = Column(String(40), nullable=False, default="credits")
+    source = Column(String(80), nullable=True)
+    task_id = Column(String(36), nullable=True, index=True)
+    required_credits = Column(Integer, nullable=True)
+    page_url = Column(String(1024), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    gumroad_sale_id = Column(String(255), nullable=True)
+    auto_unlock_status = Column(String(64), nullable=True)
 
 
 class ApiKey(Base):
@@ -569,7 +909,7 @@ _ADMIN_OVERLAY_ROW_ID = 1
 
 async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlayCounters:
     from sqlalchemy import select
-    from config import TASK_CACHE_MAX_GB
+    from config import PUBLIC_COMPLETED_RIG_BASELINE, TASK_CACHE_MAX_GB
 
     result = await db.execute(
         select(AdminOverlayCounters).where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
@@ -580,9 +920,14 @@ async def get_or_create_admin_overlay_counters(db: AsyncSession) -> AdminOverlay
             id=_ADMIN_OVERLAY_ROW_ID,
             completed_count=0,
             total_duration_seconds=0.0,
+            public_completed_total=int(PUBLIC_COMPLETED_RIG_BASELINE),
             task_cache_max_gb=float(TASK_CACHE_MAX_GB),
         )
         db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    elif int(row.public_completed_total or 0) < int(PUBLIC_COMPLETED_RIG_BASELINE):
+        row.public_completed_total = int(PUBLIC_COMPLETED_RIG_BASELINE)
         await db.commit()
         await db.refresh(row)
     return row
@@ -593,19 +938,91 @@ async def bump_admin_overlay_task_completed(db: AsyncSession, task: Task) -> Non
     from sqlalchemy import update
 
     await get_or_create_admin_overlay_counters(db)
+    completed_at = datetime.utcnow()
+    if "sqlite" in DATABASE_URL:
+        insert_result = await db.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO rig_completion_events (task_id, completed_at)
+                VALUES (:task_id, :completed_at)
+                """
+            ),
+            {"task_id": task.id, "completed_at": completed_at},
+        )
+    else:
+        insert_result = await db.execute(
+            text(
+                """
+                INSERT INTO rig_completion_events (task_id, completed_at)
+                VALUES (:task_id, :completed_at)
+                ON CONFLICT (task_id) DO NOTHING
+                """
+            ),
+            {"task_id": task.id, "completed_at": completed_at},
+        )
+    if insert_result.rowcount == 0:
+        return
+
     dur = 0.0
     if task.created_at and task.updated_at:
         dur = max(0.0, (task.updated_at - task.created_at).total_seconds())
+    values = {
+        "completed_count": AdminOverlayCounters.completed_count + 1,
+        "total_duration_seconds": AdminOverlayCounters.total_duration_seconds + dur,
+        "updated_at": datetime.utcnow(),
+        "public_completed_total": AdminOverlayCounters.public_completed_total + 1,
+    }
     await db.execute(
         update(AdminOverlayCounters)
         .where(AdminOverlayCounters.id == _ADMIN_OVERLAY_ROW_ID)
-        .values(
-            completed_count=AdminOverlayCounters.completed_count + 1,
-            total_duration_seconds=AdminOverlayCounters.total_duration_seconds + dur,
-            updated_at=datetime.utcnow(),
-        )
+        .values(**values)
     )
     await db.commit()
+
+
+async def get_public_gallery_stats(db: AsyncSession) -> dict:
+    """Public counters for the homepage/gallery, independent from visible gallery rows."""
+    from sqlalchemy import distinct, func, select
+    from config import PUBLIC_COMPLETED_RIG_BASELINE
+
+    row = await get_or_create_admin_overlay_counters(db)
+    completed_total = max(
+        int(PUBLIC_COMPLETED_RIG_BASELINE),
+        int(getattr(row, "public_completed_total", 0) or 0),
+    )
+    since = datetime.utcnow() - timedelta(hours=24)
+
+    event_result = await db.execute(
+        select(func.count(distinct(RigCompletionEvent.task_id))).where(
+            RigCompletionEvent.completed_at >= since
+        )
+    )
+    event_last_24h = int(event_result.scalar() or 0)
+
+    task_result = await db.execute(
+        select(func.count(Task.id)).where(
+            Task.status == "done",
+            Task.updated_at >= since,
+        )
+    )
+    task_last_24h = int(task_result.scalar() or 0)
+
+    telegram_last_24h = 0
+    try:
+        telegram_result = await db.execute(
+            select(func.count(distinct(TelegramNotification.event_key))).where(
+                TelegramNotification.event_type == "task_done",
+                TelegramNotification.created_at >= since,
+            )
+        )
+        telegram_last_24h = int(telegram_result.scalar() or 0)
+    except Exception:
+        telegram_last_24h = 0
+
+    return {
+        "completed_total": completed_total,
+        "completed_last_24h": max(event_last_24h, task_last_24h, telegram_last_24h),
+    }
 
 
 async def reset_admin_overlay_counters(db: AsyncSession) -> None:
@@ -643,7 +1060,85 @@ async def init_db():
             await _try_add_column("ALTER TABLE users ADD COLUMN nickname VARCHAR(100)")
             await _try_add_column("ALTER TABLE users ADD COLUMN youtube_bonus_received BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE users ADD COLUMN email_task_completed BOOLEAN DEFAULT 1")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_marketing_unsubscribed_at DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_invalid_at DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_invalid_reason TEXT")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_invalid_source VARCHAR(64)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_last_bounce_at DATETIME")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_last_bounce_type VARCHAR(32)")
+            await _try_add_column("ALTER TABLE users ADD COLUMN email_transient_bounce_count INTEGER DEFAULT 0")
             await _try_add_column("ALTER TABLE feedback ADD COLUMN parent_id INTEGER")
+
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_sends (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                        provider_message_id VARCHAR(128),
+                        error TEXT,
+                        created_at DATETIME,
+                        updated_at DATETIME,
+                        sent_at DATETIME,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_email_campaign_key_hash
+                    ON email_campaign_sends (campaign_key, email_hash)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_campaign_status
+                    ON email_campaign_sends (campaign_key, status)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_email_hash
+                    ON email_campaign_sends (email_hash)
+                    """
+                )
+            except Exception:
+                pass
+
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_clicks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        link_key VARCHAR(64) NOT NULL,
+                        destination_url VARCHAR(1024) NOT NULL,
+                        ip_hash VARCHAR(64),
+                        user_agent VARCHAR(512),
+                        clicked_at DATETIME NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_campaign_link
+                    ON email_campaign_clicks (campaign_key, link_key)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_email_hash
+                    ON email_campaign_clicks (email_hash)
+                    """
+                )
+            except Exception:
+                pass
 
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_name VARCHAR(255)")
             await _try_add_column("ALTER TABLE anon_sessions ADD COLUMN agent_description TEXT")
@@ -677,8 +1172,26 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN stuck_hour_requeue_count INTEGER DEFAULT 0")
             await _try_add_column(
-                "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 10"
+                "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 22"
             )
+            await _try_add_column(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN public_completed_total INTEGER DEFAULT 7124"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS rig_completion_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id VARCHAR(36) NOT NULL UNIQUE,
+                        completed_at DATETIME NOT NULL
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_rig_completion_events_completed_at ON rig_completion_events (completed_at)"
+                )
+            except Exception:
+                pass
             try:
                 await conn.exec_driver_sql(
                     """
@@ -806,6 +1319,52 @@ async def init_db():
             try:
                 await conn.exec_driver_sql(
                     """
+                    CREATE TABLE IF NOT EXISTS purchase_checkout_intents (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_email VARCHAR(255) NOT NULL,
+                        product_permalink VARCHAR(255) NOT NULL,
+                        product_kind VARCHAR(40) NOT NULL DEFAULT 'credits',
+                        source VARCHAR(80),
+                        task_id VARCHAR(36),
+                        required_credits INTEGER,
+                        page_url VARCHAR(1024),
+                        created_at DATETIME NOT NULL,
+                        used_at DATETIME,
+                        gumroad_sale_id VARCHAR(255),
+                        auto_unlock_status VARCHAR(64)
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_user_created
+                    ON purchase_checkout_intents (user_email, created_at)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_product
+                    ON purchase_checkout_intents (product_permalink)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_task
+                    ON purchase_checkout_intents (task_id)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_purchase_checkout_intents_sale
+                    ON purchase_checkout_intents (gumroad_sale_id)
+                    """
+                )
+            except Exception:
+                pass
+
+            try:
+                await conn.exec_driver_sql(
+                    """
                     CREATE TABLE IF NOT EXISTS roadmap_votes (
                         user_id INTEGER NOT NULL PRIMARY KEY,
                         choice VARCHAR(64) NOT NULL,
@@ -879,6 +1438,25 @@ async def init_db():
                     ON task_animation_bundle_purchases (task_id, user_email)
                     """
                 )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS task_animal_animation_pack_purchases (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id VARCHAR(36) NOT NULL,
+                        user_email VARCHAR(255) NOT NULL,
+                        animal_type VARCHAR(32) NOT NULL,
+                        orientation VARCHAR(16) NOT NULL,
+                        credits_spent INTEGER NOT NULL DEFAULT 10,
+                        created_at DATETIME
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_task_animal_animation_pack_purchase
+                    ON task_animal_animation_pack_purchases (task_id, user_email, animal_type, orientation)
+                    """
+                )
             except Exception:
                 pass
 
@@ -893,6 +1471,83 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_task_completed BOOLEAN DEFAULT TRUE NOT NULL"
             )
+            await _try_add_column_any(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_marketing_unsubscribed_at TIMESTAMP"
+            )
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_invalid_at TIMESTAMP")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_invalid_reason TEXT")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_invalid_source VARCHAR(64)")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_last_bounce_at TIMESTAMP")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_last_bounce_type VARCHAR(32)")
+            await _try_add_column_any("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_transient_bounce_count INTEGER DEFAULT 0")
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_sends (
+                        id SERIAL PRIMARY KEY,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                        provider_message_id VARCHAR(128),
+                        error TEXT,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        sent_at TIMESTAMP
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_email_campaign_key_hash
+                    ON email_campaign_sends (campaign_key, email_hash)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_campaign_status
+                    ON email_campaign_sends (campaign_key, status)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_sends_email_hash
+                    ON email_campaign_sends (email_hash)
+                    """
+                )
+            except Exception:
+                pass
+
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_campaign_clicks (
+                        id SERIAL PRIMARY KEY,
+                        campaign_key VARCHAR(128) NOT NULL,
+                        user_id INTEGER,
+                        email_hash VARCHAR(64) NOT NULL,
+                        link_key VARCHAR(64) NOT NULL,
+                        destination_url VARCHAR(1024) NOT NULL,
+                        ip_hash VARCHAR(64),
+                        user_agent VARCHAR(512),
+                        clicked_at TIMESTAMP NOT NULL
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_campaign_link
+                    ON email_campaign_clicks (campaign_key, link_key)
+                    """
+                )
+                await conn.exec_driver_sql(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_email_campaign_clicks_email_hash
+                    ON email_campaign_clicks (email_hash)
+                    """
+                )
+            except Exception:
+                pass
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_rating VARCHAR(20) NOT NULL DEFAULT 'unknown'"
             )
@@ -942,8 +1597,26 @@ async def init_db():
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stuck_hour_requeue_count INTEGER NOT NULL DEFAULT 0"
             )
             await _try_add_column_any(
-                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 10"
+                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 22"
             )
+            await _try_add_column_any(
+                "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS public_completed_total INTEGER NOT NULL DEFAULT 7124"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS rig_completion_events (
+                        id SERIAL PRIMARY KEY,
+                        task_id VARCHAR(36) NOT NULL UNIQUE,
+                        completed_at TIMESTAMP NOT NULL
+                    )
+                    """
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_rig_completion_events_completed_at ON rig_completion_events (completed_at)"
+                )
+            except Exception:
+                pass
             await _try_add_column_any(
                 "ALTER TABLE feedback ADD COLUMN IF NOT EXISTS parent_id INTEGER"
             )
@@ -1014,4 +1687,3 @@ async def get_db():
             yield session
         finally:
             await session.close()
-

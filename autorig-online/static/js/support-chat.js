@@ -30,6 +30,8 @@
 
     var OPERATOR_GRAVATAR =
         'https://www.gravatar.com/avatar/9248a22dd0eca093b2361264d8b1b882?d=identicon&s=96';
+    var POLL_BASE_MS = 4500;
+    var POLL_MAX_MS = 60000;
 
     var PACK = {
         en: {
@@ -332,6 +334,9 @@
             sessionIdInt: getStoredSessionId(),
             visitorId: getVisitorId(),
             pollTimer: null,
+            pollActiveBool: false,
+            pollInFlightBool: false,
+            pollFailureCountInt: 0,
             openBool: false,
             afterIdInt: 0,
             renderedMessageIds: {},
@@ -580,6 +585,8 @@
 
         function pollMessages(renderBool) {
             if (!state.sessionIdInt || !state.visitorId) return Promise.resolve();
+            if (state.pollInFlightBool) return Promise.resolve();
+            state.pollInFlightBool = true;
             var sid = parseInt(state.sessionIdInt, 10) || 0;
             var after = renderBool && state.afterIdInt === 0 ? 0 : getPollCursor(sid);
             var q =
@@ -590,20 +597,40 @@
                 '&after_id_int=' +
                 encodeURIComponent(String(after));
             return apiJson('/api/support-chat/messages' + q).then(function (data) {
+                state.pollFailureCountInt = 0;
                 applyPollPayload(data, renderBool);
-            }).catch(function () {});
+            }).catch(function () {
+                state.pollFailureCountInt = Math.min(6, state.pollFailureCountInt + 1);
+            }).then(function () {
+                state.pollInFlightBool = false;
+            });
+        }
+
+        function nextPollDelayMs() {
+            if (state.pollFailureCountInt <= 0) return POLL_BASE_MS;
+            return Math.min(
+                POLL_MAX_MS,
+                POLL_BASE_MS * Math.pow(2, Math.min(4, state.pollFailureCountInt))
+            );
         }
 
         function startPoll() {
             stopPoll();
-            state.pollTimer = window.setInterval(function () {
-                pollMessages(!!state.openBool);
-            }, 4500);
+            state.pollActiveBool = true;
+            function scheduleNext() {
+                if (!state.pollActiveBool) return;
+                state.pollTimer = window.setTimeout(function () {
+                    state.pollTimer = null;
+                    pollMessages(!!state.openBool).then(scheduleNext);
+                }, nextPollDelayMs());
+            }
+            scheduleNext();
         }
 
         function stopPoll() {
+            state.pollActiveBool = false;
             if (state.pollTimer) {
-                window.clearInterval(state.pollTimer);
+                window.clearTimeout(state.pollTimer);
                 state.pollTimer = null;
             }
         }

@@ -1,0 +1,406 @@
+{
+  "1241": {
+    "_meta": {
+      "title": "AUTORIG_INPUT_CONDITIONING"
+    },
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "frame_rate": 24.0,
+      "negative": [
+        "2612",
+        0
+      ],
+      "positive": [
+        "2483",
+        0
+      ]
+    }
+  },
+  "2004": {
+    "_meta": {
+      "title": "AUTORIG_START_FRAME"
+    },
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "ltx_i2v_reference.png"
+    }
+  },
+  "2483": {
+    "_meta": {
+      "title": "AUTORIG_POSITIVE_PROMPT"
+    },
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "4960",
+        0
+      ],
+      "text": "A quiet cinematic image-to-video shot based on the reference image. The main subject makes small natural movements, fabric and fine details shift subtly, and ambient light changes gently. The camera remains completely static in place, with no pan, no tilt, no dolly, no zoom, and no scene cuts."
+    }
+  },
+  "2612": {
+    "_meta": {
+      "title": "AUTORIG_NEGATIVE_PROMPT"
+    },
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "4960",
+        0
+      ],
+      "text": "camera movement, pan, tilt, dolly, zoom, handheld shake, scene cut, cartoon, low quality, distorted details"
+    }
+  },
+  "3059": {
+    "_meta": {
+      "title": "AUTORIG_VIDEO_LATENT"
+    },
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": {
+      "batch_size": 1,
+      "height": 224,
+      "length": 97,
+      "width": 384
+    }
+  },
+  "3336": {
+    "_meta": {
+      "title": "LTXVPreprocess [3336]"
+    },
+    "class_type": "LTXVPreprocess",
+    "inputs": {
+      "image": [
+        "4981",
+        0
+      ],
+      "img_compression": 18
+    }
+  },
+  "3940": {
+    "_meta": {
+      "title": "CheckpointLoaderSimple [3940]"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+    }
+  },
+  "3980": {
+    "_meta": {
+      "title": "AUTORIG_AUDIO_LATENT"
+    },
+    "class_type": "LTXVEmptyLatentAudio",
+    "inputs": {
+      "audio_vae": [
+        "4010",
+        0
+      ],
+      "batch_size": 1,
+      "frame_rate": 24,
+      "frames_number": 97
+    }
+  },
+  "4010": {
+    "_meta": {
+      "title": "LTXVAudioVAELoader [4010]"
+    },
+    "class_type": "LTXVAudioVAELoader",
+    "inputs": {
+      "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors"
+    }
+  },
+  "4528": {
+    "_meta": {
+      "title": "LTXVConcatAVLatent [4528]"
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "inputs": {
+      "audio_latent": [
+        "3980",
+        0
+      ],
+      "video_latent": [
+        "900002",
+        2
+      ]
+    }
+  },
+  "4828": {
+    "_meta": {
+      "title": "CFGGuider [4828]"
+    },
+    "class_type": "CFGGuider",
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "4922",
+        0
+      ],
+      "negative": [
+        "900002",
+        1
+      ],
+      "positive": [
+        "900002",
+        0
+      ]
+    }
+  },
+  "4829": {
+    "_meta": {
+      "title": "SamplerCustomAdvanced [4829]"
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "guider": [
+        "4828",
+        0
+      ],
+      "latent_image": [
+        "4528",
+        0
+      ],
+      "noise": [
+        "4832",
+        0
+      ],
+      "sampler": [
+        "4831",
+        0
+      ],
+      "sigmas": [
+        "4971",
+        0
+      ]
+    }
+  },
+  "4831": {
+    "_meta": {
+      "title": "KSamplerSelect [4831]"
+    },
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler_ancestral_cfg_pp"
+    }
+  },
+  "4832": {
+    "_meta": {
+      "title": "AUTORIG_SEED"
+    },
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 43
+    }
+  },
+  "4845": {
+    "_meta": {
+      "title": "LTXVSeparateAVLatent [4845]"
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "inputs": {
+      "av_latent": [
+        "4829",
+        0
+      ]
+    }
+  },
+  "4848": {
+    "_meta": {
+      "title": "LTXVAudioVAEDecode [4848]"
+    },
+    "class_type": "LTXVAudioVAEDecode",
+    "inputs": {
+      "audio_vae": [
+        "4010",
+        0
+      ],
+      "samples": [
+        "4845",
+        1
+      ]
+    }
+  },
+  "4849": {
+    "_meta": {
+      "title": "AUTORIG_OUTPUT_VIDEO"
+    },
+    "class_type": "CreateVideo",
+    "inputs": {
+      "audio": [
+        "4848",
+        0
+      ],
+      "fps": 30.0,
+      "images": [
+        "4982",
+        0
+      ]
+    }
+  },
+  "4852": {
+    "_meta": {
+      "title": "AUTORIG_OUTPUT"
+    },
+    "class_type": "SaveVideo",
+    "inputs": {
+      "codec": "h264",
+      "filename_prefix": "animation_fitting/unbound/candidate_ltx2_19b_v1",
+      "format": "mp4",
+      "video": [
+        "4849",
+        0
+      ]
+    }
+  },
+  "4922": {
+    "_meta": {
+      "title": "LoraLoaderModelOnly [4922]"
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "ltx-2-19b-lora-camera-control-static.safetensors",
+      "model": [
+        "3940",
+        0
+      ],
+      "strength_model": 1.0
+    }
+  },
+  "4960": {
+    "_meta": {
+      "title": "LTXAVTextEncoderLoader [4960]"
+    },
+    "class_type": "LTXAVTextEncoderLoader",
+    "inputs": {
+      "ckpt_name": "ltx-2-19b-distilled-fp8.safetensors",
+      "device": "cpu",
+      "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors"
+    }
+  },
+  "4971": {
+    "_meta": {
+      "title": "ManualSigmas [4971]"
+    },
+    "class_type": "ManualSigmas",
+    "inputs": {
+      "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+    }
+  },
+  "4981": {
+    "_meta": {
+      "title": "ResizeImageMaskNode [4981]"
+    },
+    "class_type": "ResizeImageMaskNode",
+    "inputs": {
+      "input": [
+        "2004",
+        0
+      ],
+      "resize_type": "scale longer dimension",
+      "resize_type.longer_size": 512,
+      "scale_method": "lanczos"
+    }
+  },
+  "4982": {
+    "_meta": {
+      "title": "LTXVTiledVAEDecode [4982]"
+    },
+    "class_type": "LTXVTiledVAEDecode",
+    "inputs": {
+      "horizontal_tiles": 2,
+      "last_frame_fix": false,
+      "latents": [
+        "900003",
+        2
+      ],
+      "overlap": 6,
+      "vae": [
+        "3940",
+        2
+      ],
+      "vertical_tiles": 2,
+      "working_device": "auto",
+      "working_dtype": "auto"
+    }
+  },
+  "900001": {
+    "_meta": {
+      "title": "AUTORIG_START_GUIDE"
+    },
+    "class_type": "LTXVAddGuide",
+    "inputs": {
+      "frame_idx": 0,
+      "image": [
+        "3336",
+        0
+      ],
+      "latent": [
+        "3059",
+        0
+      ],
+      "negative": [
+        "1241",
+        1
+      ],
+      "positive": [
+        "1241",
+        0
+      ],
+      "strength": 0.7,
+      "vae": [
+        "3940",
+        2
+      ]
+    }
+  },
+  "900002": {
+    "_meta": {
+      "title": "AUTORIG_END_GUIDE_N_MINUS_1"
+    },
+    "class_type": "LTXVAddGuide",
+    "inputs": {
+      "frame_idx": -1,
+      "image": [
+        "3336",
+        0
+      ],
+      "latent": [
+        "900001",
+        2
+      ],
+      "negative": [
+        "900001",
+        1
+      ],
+      "positive": [
+        "900001",
+        0
+      ],
+      "strength": 0.7,
+      "vae": [
+        "3940",
+        2
+      ]
+    }
+  },
+  "900003": {
+    "_meta": {
+      "title": "AUTORIG_CROP_GUIDE_LATENTS"
+    },
+    "class_type": "LTXVCropGuides",
+    "inputs": {
+      "latent": [
+        "4845",
+        0
+      ],
+      "negative": [
+        "900002",
+        1
+      ],
+      "positive": [
+        "900002",
+        0
+      ]
+    }
+  }
+}

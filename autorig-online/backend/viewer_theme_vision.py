@@ -22,6 +22,7 @@ VIEWER_THEME_VISION_PROMPT = (
     "\"semantic_tags\":[\"tag\"],"
     "\"plane_color\":\"#rrggbb\","
     "\"shadow_settings\":{\"opacity\":0.5,\"softness\":6.0,\"sun_multiplier\":2.0,\"shadow_y_offset\":0.005},"
+    "\"environment_settings\":{\"mode\":\"image\",\"source\":\"backdrop\",\"intensity\":1.0,\"reflection_intensity\":3.0},"
     "\"sun_settings\":{\"rotation\":-75,\"inclination\":45,\"intensity\":2.2},"
     "\"camera_transform\":{\"position\":{\"x\":2.5,\"y\":1.8,\"z\":3.0},\"target\":{\"x\":0,\"y\":0.8,\"z\":0},\"fov\":45}}. "
     "Theme id must be lowercase snake_case and semantic, for example alien_planet or dog_park_yard. "
@@ -77,6 +78,7 @@ def _coerce_hex(value: Any, fallback: str) -> str:
 
 def coerce_viewer_theme_metadata(raw: Dict[str, Any], fallback_id: str) -> Dict[str, Any]:
     shadow = raw.get("shadow_settings") if isinstance(raw.get("shadow_settings"), dict) else {}
+    env = raw.get("environment_settings") if isinstance(raw.get("environment_settings"), dict) else {}
     sun = raw.get("sun_settings") if isinstance(raw.get("sun_settings"), dict) else {}
     cam = raw.get("camera_transform") if isinstance(raw.get("camera_transform"), dict) else {}
     pos = cam.get("position") if isinstance(cam.get("position"), dict) else {}
@@ -94,6 +96,12 @@ def coerce_viewer_theme_metadata(raw: Dict[str, Any], fallback_id: str) -> Dict[
             "softness": _coerce_float(shadow.get("softness"), 6.0, 0.0, 10.0),
             "sun_multiplier": _coerce_float(shadow.get("sun_multiplier"), 2.0, 0.35, 3.5),
             "shadow_y_offset": _coerce_float(shadow.get("shadow_y_offset"), 0.005, 0.0001, 0.08),
+        },
+        "environment_settings": {
+            "mode": "image",
+            "source": "backdrop",
+            "intensity": _coerce_float(env.get("intensity"), 1.0, 0.0, 10.0),
+            "reflection_intensity": _coerce_float(env.get("reflection_intensity"), 3.0, 0.0, 10.0),
         },
         "sun_settings": {
             "rotation": _coerce_float(sun.get("rotation"), -75, -180, 180),

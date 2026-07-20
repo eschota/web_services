@@ -1,13 +1,14 @@
-"""
-Public SEO surface for gallery tasks: lightweight /m/{task_id} pages and chunked sitemaps.
+﻿"""
+Public SEO surface for gallery tasks: /task?id={task_id} URLs and chunked sitemaps.
 
 Sitemap rules:
 - Root /sitemap.xml is a sitemap index.
 - Static marketing URLs live in /sitemap/pages.xml (urlset, shipped as static/sitemap-pages.xml).
-- Gallery /m/{id} URLs for **indexing** are listed at /sitemap/gallery/part/{n}.xml (50 URLs max per part),
+- Gallery /task?id={id} URLs for **indexing** are listed at /sitemap/gallery/part/{n}.xml (50 URLs max per part),
   including only tasks that pass :func:`seo_passes_indexing_gate` (LLM poster fields + enriched SEO check).
 
-Public /m/ pages still use :func:`gallery_seo_task_conditions` (broader than indexing sitemap).
+The broader public task pool still uses :func:`gallery_seo_task_conditions` and is exposed only through
+diagnostic/all-public exports, not through the root sitemap.
 
 A daily cron can mirror the same XML to disk; see scripts/daily_sitemap_refresh.py.
 """
@@ -18,7 +19,7 @@ import json
 import math
 import time
 from datetime import datetime, timezone
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Sequence, Tuple
 from urllib.parse import quote
 
 from sqlalchemy import func, or_, select
@@ -28,7 +29,7 @@ from database import Task
 
 GALLERY_SEO_URLS_PER_SITEMAP = 50
 
-# Server-side SEO theme terms merged with poster_llm_keywords on /m/{id} pages.
+# Server-side SEO theme terms merged with poster_llm_keywords on task pages.
 SEO_LEXICON: Tuple[str, ...] = (
     "face rig",
     "animation",
@@ -48,7 +49,7 @@ _DEFAULT_PUBLIC_DESC = (
 
 def enrich_seo_metadata(task: Task) -> Tuple[str, str, List[str], str]:
     """
-    Merge poster_llm_* with SEO_LEXICON for /m pages.
+    Merge poster_llm_* with SEO_LEXICON for task pages.
     Returns: title, description, keywords (deduped, capped), visible semantic paragraph (plain text).
     """
     raw_title = (getattr(task, "poster_llm_title", None) or "").strip()
@@ -122,7 +123,7 @@ def gallery_seo_indexing_sql_conditions() -> List:
 
 def seo_passes_indexing_gate(task: Task) -> Tuple[bool, List[str]]:
     """
-    Full SEO check before a /m/{id} URL is listed in the indexing sitemap.
+    Full SEO check before a task URL is listed in the indexing sitemap.
     Uses enrich_seo_metadata output plus poster_llm_* presence.
     """
     title, desc, kws, _sem = enrich_seo_metadata(task)
@@ -158,7 +159,7 @@ def invalidate_sitemap_public_cache() -> None:
 
 
 async def get_sitemap_public_entries(db: AsyncSession) -> List[Tuple[str, datetime | None]]:
-    """All /m/{id} URLs allowed in public sitemap (gallery conditions only, no SEO gate)."""
+    """All task URLs allowed in public sitemap (gallery conditions only, no SEO gate)."""
     global _SITEMAP_PUBLIC_CACHE
     now = time.monotonic()
     ts, cached = _SITEMAP_PUBLIC_CACHE
@@ -181,7 +182,7 @@ async def get_sitemap_public_entries(db: AsyncSession) -> List[Tuple[str, dateti
 
 
 async def gallery_sitemap_all_index_part_count(db: AsyncSession) -> int:
-    """Number of sitemap parts for public /m/{id} task URLs without SEO gate."""
+    """Number of sitemap parts for public task URLs without SEO gate."""
     entries = await get_sitemap_public_entries(db)
     n = len(entries)
     if n == 0:
@@ -192,17 +193,17 @@ async def gallery_sitemap_all_index_part_count(db: AsyncSession) -> int:
 async def gallery_sitemap_urls_for_all_part(
     db: AsyncSession, part: int
 ) -> List[Tuple[str, datetime | None]]:
-    """Public sitemap chunk for /m/{id} task URLs (no SEO gate)."""
+    """Public sitemap chunk for /task?id={id} URLs (no SEO gate)."""
     if part < 0:
         return []
     entries = await get_sitemap_public_entries(db)
     offset = part * GALLERY_SEO_URLS_PER_SITEMAP
     slice_ = entries[offset : offset + GALLERY_SEO_URLS_PER_SITEMAP]
-    return [(f"/m/{tid}", lm) for tid, lm in slice_]
+    return [(f"/task?id={quote(tid, safe='')}", lm) for tid, lm in slice_]
 
 
 async def get_sitemap_indexable_entries(db: AsyncSession) -> List[Tuple[str, datetime | None]]:
-    """All /m/{id} URLs allowed in indexing sitemap, newest first (cached ~5 min per process)."""
+    """All task URLs allowed in indexing sitemap, newest first (cached ~5 min per process)."""
     global _SITEMAP_INDEXABLE_CACHE
     now = time.monotonic()
     ts, cached = _SITEMAP_INDEXABLE_CACHE
@@ -243,7 +244,7 @@ async def gallery_sitemap_urls_for_indexing_part(
     entries = await get_sitemap_indexable_entries(db)
     offset = part * GALLERY_SEO_URLS_PER_SITEMAP
     slice_ = entries[offset : offset + GALLERY_SEO_URLS_PER_SITEMAP]
-    return [(f"/m/{tid}", lm) for tid, lm in slice_]
+    return [(f"/task?id={quote(tid, safe='')}", lm) for tid, lm in slice_]
 
 
 async def video_sitemap_entries(db: AsyncSession) -> List[dict]:
@@ -332,8 +333,6 @@ def build_sitemap_index_xml(base_url: str, child_locs: Sequence[Tuple[str, datet
         lines.append("  </sitemap>")
     lines.append("</sitemapindex>")
     return "\n".join(lines) + "\n"
-
-
 def build_urlset_xml(
     base_url: str,
     urls: Sequence[Tuple[str, datetime | None]],
@@ -341,7 +340,7 @@ def build_urlset_xml(
     changefreq: str = "weekly",
     priority: str = "0.65",
 ) -> str:
-    """urls: (path or full URL of public page, lastmod). Gallery /m URLs use daily + higher priority."""
+    """urls: (path or full URL of public page, lastmod). Gallery task URLs use daily + higher priority."""
     base = base_url.rstrip("/")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -360,10 +359,8 @@ def build_urlset_xml(
         lines.append("  </url>")
     lines.append("</urlset>")
     return "\n".join(lines) + "\n"
-
-
 def build_video_sitemap_xml(base_url: str, entries: Sequence[dict]) -> str:
-    """Build Google video sitemap for /m/{id} landing pages with YouTube player URLs."""
+    """Build Google video sitemap for /task?id={id} pages with YouTube player URLs."""
     base = base_url.rstrip("/")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -375,7 +372,7 @@ def build_video_sitemap_xml(base_url: str, entries: Sequence[dict]) -> str:
         if not task_id or not yt_id:
             continue
         safe_yt_id = quote(yt_id, safe="")
-        loc = f"{base}/m/{task_id}"
+        loc = f"{base}/task?id={quote(task_id, safe='')}"
         thumb_url = f"{base}/thumb/{task_id}"
         player_url = f"https://www.youtube.com/embed/{safe_yt_id}"
         title = xml_escape_text(str(item.get("title") or _DEFAULT_PUBLIC_TITLE).strip())[:100]
@@ -401,145 +398,3 @@ def build_video_sitemap_xml(base_url: str, entries: Sequence[dict]) -> str:
         lines.append("  </url>")
     lines.append("</urlset>")
     return "\n".join(lines) + "\n"
-
-
-def build_public_model_page_html(
-    base_url: str,
-    task_id: str,
-    title: str,
-    description: str,
-    keywords: List[str],
-    *,
-    semantic_section: str = "",
-    youtube_video_id: Optional[str] = None,
-    youtube_video_uploaded: bool = False,
-    last_modified: Optional[datetime] = None,
-) -> str:
-    """Minimal indexable HTML: meta + OG + JSON-LD; full viewer stays on /task."""
-    base = base_url.rstrip("/")
-    canonical = f"{base}/m/{task_id}"
-    viewer_url = f"{base}/task?id={task_id}"
-    thumb_url = f"{base}/thumb/{task_id}"
-    safe_title = xml_escape_text(title)[:200]
-    safe_desc = xml_escape_text(description)[:500]
-    kw_csv = ", ".join(
-        html.escape(str(k).strip()[:80], quote=True) for k in keywords[:24] if str(k).strip()
-    )
-
-    json_ld: dict = {
-        "@context": "https://schema.org",
-        "@type": "CreativeWork",
-        "name": title[:200],
-        "description": description[:2000],
-        "url": canonical,
-        "image": thumb_url,
-        "mainEntityOfPage": canonical,
-    }
-    if keywords:
-        json_ld["keywords"] = ", ".join(keywords[:24])
-    json_ld_str = json.dumps(json_ld, ensure_ascii=False)
-    keywords_meta = f'  <meta name="keywords" content="{kw_csv}">\n' if kw_csv else ""
-
-    about_block = ""
-    if semantic_section.strip():
-        st = xml_escape_text(semantic_section.strip())[:1200]
-        about_block = (
-            f'  <section class="seo-about" aria-labelledby="about-heading">\n'
-            f'    <h2 id="about-heading">About this rig</h2>\n'
-            f"    <p>{st}</p>\n"
-            f"  </section>\n"
-        )
-
-    youtube_meta = ""
-    youtube_json_ld = ""
-    youtube_block = ""
-    yt_id = (youtube_video_id or "").strip()
-    if youtube_video_uploaded and yt_id:
-        safe_yt_id = quote(yt_id, safe="")
-        yt_watch_url = f"https://www.youtube.com/watch?v={safe_yt_id}"
-        yt_embed_url = f"https://www.youtube.com/embed/{safe_yt_id}"
-        youtube_meta = f"""  <meta property="og:video" content="{xml_escape_loc(yt_watch_url)}">
-  <meta property="og:video:secure_url" content="{xml_escape_loc(yt_watch_url)}">
-  <meta property="og:video:type" content="text/html">
-  <meta property="og:video:width" content="1280">
-  <meta property="og:video:height" content="720">
-  <meta name="twitter:player" content="{xml_escape_loc(yt_embed_url)}">
-  <meta name="twitter:player:width" content="1280">
-  <meta name="twitter:player:height" content="720">
-"""
-        video_json_ld: dict = {
-            "@context": "https://schema.org",
-            "@type": "VideoObject",
-            "name": title[:200],
-            "description": description[:500],
-            "thumbnailUrl": thumb_url,
-            "url": yt_watch_url,
-            "embedUrl": yt_embed_url,
-            "uploadDate": _w3c_datetime(last_modified or datetime.utcnow().replace(tzinfo=timezone.utc)),
-            "mainEntityOfPage": canonical,
-        }
-        if keywords:
-            video_json_ld["keywords"] = ", ".join(keywords[:24])
-        youtube_json_ld = f'\n  <script type="application/ld+json">{json.dumps(video_json_ld, ensure_ascii=False)}</script>'
-        youtube_block = f"""  <section class="video-preview" aria-labelledby="video-heading">
-    <h2 id="video-heading">Video preview</h2>
-    <iframe src="{xml_escape_loc(yt_embed_url)}" title="{safe_title} video preview" loading="lazy"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-      allowfullscreen></iframe>
-    <p><a href="{xml_escape_loc(yt_watch_url)}" rel="noopener noreferrer">Watch on YouTube</a></p>
-  </section>
-"""
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="robots" content="index,follow">
-  <link rel="canonical" href="{xml_escape_loc(canonical)}">
-  <title>{safe_title} | AutoRig.online</title>
-  <meta name="description" content="{safe_desc}">
-{keywords_meta}
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="{xml_escape_loc(canonical)}">
-  <meta property="og:title" content="{safe_title} | AutoRig.online">
-  <meta property="og:description" content="{safe_desc}">
-  <meta property="og:image" content="{xml_escape_loc(thumb_url)}">
-  <meta property="og:site_name" content="AutoRig.online">
-  <meta name="twitter:card" content="{'player' if (youtube_video_uploaded and yt_id) else 'summary_large_image'}">
-{youtube_meta}  <meta name="twitter:title" content="{safe_title} | AutoRig.online">
-  <meta name="twitter:description" content="{safe_desc}">
-  <meta name="twitter:image" content="{xml_escape_loc(thumb_url)}">
-  <script type="application/ld+json">{json_ld_str}</script>{youtube_json_ld}
-  <style>
-    body {{ font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem;
-      background: #0f111a; color: #e8e8ef; line-height: 1.5; }}
-    img {{ max-width: 100%; border-radius: 12px; display: block; }}
-    a.btn {{ display: inline-block; margin-top: 1rem; padding: 0.55rem 1.1rem; border-radius: 999px;
-      background: #6366f1; color: #fff; text-decoration: none; font-weight: 600; }}
-    a.btn:hover {{ filter: brightness(1.08); }}
-    .muted {{ color: #9ca3af; font-size: 0.9rem; margin-top: 1.5rem; }}
-    .seo-about {{ margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.1); }}
-    .seo-about h2 {{ font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem; color: #c4c9d8; }}
-    .seo-about p {{ margin: 0; color: #b8c0d0; font-size: 0.95rem; }}
-    .video-preview {{ margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.1); }}
-    .video-preview h2 {{ font-size: 1rem; font-weight: 600; margin: 0 0 0.75rem; color: #c4c9d8; }}
-    .video-preview iframe {{ display: block; width: 100%; aspect-ratio: 16 / 9; height: auto; border: 0; border-radius: 12px; background: #050711; }}
-    .video-preview p {{ margin: 0.65rem 0 0; font-size: 0.9rem; }}
-  </style>
-</head>
-<body>
-  <h1>{safe_title}</h1>
-  <p>{safe_desc}</p>
-  <p><img src="{xml_escape_loc(thumb_url)}" width="640" height="360" alt="{safe_title}" loading="lazy"></p>
-{youtube_block}{about_block}  <p><a class="btn" href="{xml_escape_loc(viewer_url)}">Open 3D viewer &amp; downloads</a></p>
-  <p class="muted">AutoRig Online — automatic character rigging (GLB, FBX, Unity, Unreal).</p>
-</body>
-</html>
-"""
-
-
-async def load_task_for_public_model_page(db: AsyncSession, task_id: str) -> Task | None:
-    conds = gallery_seo_task_conditions() + [Task.id == task_id]
-    result = await db.execute(select(Task).where(*conds).limit(1))
-    return result.scalar_one_or_none()

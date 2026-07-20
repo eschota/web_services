@@ -1,20 +1,26 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 363.626463641795,
+      "y": 133.01217969840954,
+      "z": 497.36853801950707
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 72.09023529880051,
+      "y": 74.9902545397754,
+      "z": -9.008786602808819
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "pine_forest_trail.jpg",
-  "plane_color": "#6d573c",
+  "plane_color": "#38332e",
   "schema_version": 1,
   "semantic_tags": [
     "forest",
@@ -27,15 +33,22 @@
     "nature"
   ],
   "shadow_settings": {
-    "opacity": 0.58,
-    "shadow_y_offset": 0.005,
-    "softness": 7.0,
+    "opacity": 0.62,
+    "shadow_y_offset": 0.01,
+    "softness": 7,
     "sun_multiplier": 1.8
   },
+  "src": "/static/env/backdrops/pine_forest_trail.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/pine_forest_trail.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/pine_forest_trail.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/pine_forest_trail.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/pine_forest_trail.jpg?v=20260713-split-v1"
+  },
   "sun_settings": {
-    "inclination": 40,
+    "inclination": 28,
     "intensity": 2.1,
-    "rotation": -120
+    "rotation": -91
   },
   "theme_id": "pine_forest_trail",
   "theme_name": "Pine Forest Trail",

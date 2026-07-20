@@ -149,6 +149,14 @@ CGTrader_SUBMIT_SERVER/db/*.db
 
 autorig-online/mcp/.venv/
 
+# AutoRig production-only state and emergency backups
+autorig-online/.codex_backups/
+autorig-online/_codex_backups/
+autorig-online/backups/
+autorig-online/autorig.db
+autorig-online/**/*.bak*
+autorig-online/**/*.orig
+
 # Snap Chromium user profile under $HOME (revisioned paths change often)
 snap/
 

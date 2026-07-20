@@ -1,0 +1,63 @@
+{
+  "schema": "animal-animation-taxonomy.v1",
+  "revision": "animal-base-30-v1",
+  "source_fps": 24,
+  "output_fps": 30,
+  "rig_types": [
+    "dog",
+    "bear",
+    "cat",
+    "cow",
+    "deer",
+    "elephant",
+    "giraffe",
+    "horse",
+    "mouse",
+    "pig",
+    "rabbit",
+    "turtle"
+  ],
+  "orientations": ["front", "back"],
+  "poses": [
+    {"id": "default_pose", "description": "Actionless default rig pose"},
+    {"id": "locomotion_contact", "description": "Stable grounded gait contact pose"},
+    {"id": "airborne", "description": "Airborne transition pose"},
+    {"id": "death_end", "description": "Terminal death pose"}
+  ],
+  "clips": [
+    {"id": "idle_neutral", "category": "idle", "order": 1, "loop": true, "frame_profile": 97, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["default", "idle"]},
+    {"id": "idle_alert", "category": "idle", "order": 2, "loop": true, "frame_profile": 97, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["alert_idle"]},
+    {"id": "idle_relaxed", "category": "idle", "order": 3, "loop": true, "frame_profile": 97, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["relaxed_idle"]},
+    {"id": "idle_look_around", "category": "idle", "order": 4, "loop": true, "frame_profile": 97, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["look_around"]},
+    {"id": "idle_fidget", "category": "idle", "order": 5, "loop": true, "frame_profile": 97, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["fidget"]},
+
+    {"id": "walk_forward", "category": "locomotion", "order": 6, "loop": true, "frame_profile": 49, "start_pose_id": "locomotion_contact", "end_pose_id": "locomotion_contact", "legacy_aliases": ["walk", "walking"]},
+    {"id": "walk_backward", "category": "locomotion", "order": 7, "loop": true, "frame_profile": 49, "start_pose_id": "locomotion_contact", "end_pose_id": "locomotion_contact", "legacy_aliases": ["backward_walk", "walk_back"]},
+    {"id": "trot_jog", "category": "locomotion", "order": 8, "loop": true, "frame_profile": 49, "start_pose_id": "locomotion_contact", "end_pose_id": "locomotion_contact", "legacy_aliases": ["trot", "jog"]},
+    {"id": "run", "category": "locomotion", "order": 9, "loop": true, "frame_profile": 49, "start_pose_id": "locomotion_contact", "end_pose_id": "locomotion_contact", "legacy_aliases": ["running", "gallop"]},
+    {"id": "sprint", "category": "locomotion", "order": 10, "loop": true, "frame_profile": 49, "start_pose_id": "locomotion_contact", "end_pose_id": "locomotion_contact", "legacy_aliases": ["fast_run"]},
+    {"id": "turn_left_90", "category": "locomotion", "order": 11, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["turn_left"]},
+    {"id": "turn_right_90", "category": "locomotion", "order": 12, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["turn_right"]},
+    {"id": "turn_around_180", "category": "locomotion", "order": 13, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["turn_around"]},
+    {"id": "stop_brake", "category": "locomotion", "order": 14, "loop": false, "frame_profile": 33, "start_pose_id": "locomotion_contact", "end_pose_id": "default_pose", "legacy_aliases": ["stop", "brake"]},
+
+    {"id": "jump_air", "category": "air", "order": 15, "loop": true, "frame_profile": 49, "start_pose_id": "airborne", "end_pose_id": "airborne", "legacy_aliases": ["air_loop"]},
+    {"id": "fall", "category": "air", "order": 16, "loop": false, "frame_profile": 49, "start_pose_id": "airborne", "end_pose_id": "death_end", "legacy_aliases": ["falling", "air_fall"]},
+    {"id": "jump_start", "category": "air", "order": 17, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "airborne", "legacy_aliases": ["jump_takeoff"]},
+    {"id": "jump_land", "category": "air", "order": 18, "loop": false, "frame_profile": 33, "start_pose_id": "airborne", "end_pose_id": "default_pose", "legacy_aliases": ["land", "landing"]},
+    {"id": "jump_full", "category": "air", "order": 19, "loop": false, "frame_profile": 49, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["jump"]},
+
+    {"id": "attack_primary", "category": "combat", "order": 20, "loop": false, "frame_profile": 49, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["attack"]},
+    {"id": "attack_secondary", "category": "combat", "order": 21, "loop": false, "frame_profile": 49, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["attack_2", "secondary_attack"]},
+    {"id": "attack_heavy", "category": "combat", "order": 22, "loop": false, "frame_profile": 49, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["heavy_attack"]},
+    {"id": "hit_front", "category": "combat", "order": 23, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["hit", "damage"]},
+    {"id": "hit_left", "category": "combat", "order": 24, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["damage_left"]},
+    {"id": "hit_right", "category": "combat", "order": 25, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["damage_right"]},
+    {"id": "death", "category": "combat", "order": 26, "loop": false, "frame_profile": 65, "start_pose_id": "default_pose", "end_pose_id": "death_end", "legacy_aliases": ["die", "dying"]},
+    {"id": "get_up", "category": "combat", "order": 27, "loop": false, "frame_profile": 65, "start_pose_id": "death_end", "end_pose_id": "default_pose", "legacy_aliases": ["getup", "stand_up"]},
+
+    {"id": "eat_interact", "category": "behavior", "order": 28, "loop": true, "frame_profile": 97, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["eat", "feeding"]},
+    {"id": "sleep_rest", "category": "behavior", "order": 29, "loop": true, "frame_profile": 97, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["sleep", "rest"]},
+    {"id": "vocalize_emote", "category": "behavior", "order": 30, "loop": false, "frame_profile": 33, "start_pose_id": "default_pose", "end_pose_id": "default_pose", "legacy_aliases": ["vocalize", "emote", "roar", "bark", "meow"]}
+  ]
+}

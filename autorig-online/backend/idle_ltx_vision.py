@@ -1,5 +1,5 @@
 """
-Vision → structured LTX prompts for Idle LTX (species-agnostic rigged 3D creature preview).
+Vision → structured LTX prompts for motion-reference videos used by animation fitting.
 """
 from __future__ import annotations
 
@@ -12,21 +12,58 @@ import httpx
 
 IDLE_LTX_VISION_PROMPT_JSON = Path(__file__).resolve().parent / "idle_ltx_vision_prompt.json"
 
-IDLE_LTX_FRAME_COUNT_DEFAULT = 129
+IDLE_LTX_FRAME_COUNT_DEFAULT = 41
 IDLE_LTX_VARIANT_COUNT = 4
 
 IDLE_LTX_DEFAULT_NEGATIVE_PROMPT = (
     "camera movement, moving camera, orbit camera, rotating camera, camera pan, camera tilt, "
     "camera zoom, dolly shot, tracking shot, handheld camera, camera shake, viewpoint change, "
-    "reframing, subject rotation, body turning, walking, stepping, running, jumping, scene change, "
+    "reframing, dynamic camera, cinematic camera move, crane shot, jib shot, push in, pull out, "
+    "push-in, pull-back, dolly in, dolly out, moving closer, moving away, camera forward movement, "
+    "camera backward movement, changing camera distance, parallax shift, background drift, lens zoom, "
+    "rack focus, subject rotation, body turning, scene change, "
     "background movement, morphing, melting, extra legs, extra head, distorted anatomy, broken face, "
-    "text, watermark, logo"
+    "random letters, alphabet wall, unreadable text, fake signage, posters, text, watermark, logo"
 )
 
 IDLE_LTX_USER_PROMPT_DEFAULT = (
-    "Create locked-camera idle loop prompts for skeletal animation fitting. "
-    "Minimal in-place motion only; feet planted; no locomotion."
+    "Create four locked-camera LTX motion-reference prompts for idle, walk, run, and die variants. "
+    "These videos will be targets for inverse skeletal animation fitting, so motion must be clean, centered, and bone-fit friendly. "
+    "Every prompt must start with a single locked-off tripod shot, static frame, fixed viewpoint. "
+    "The camera is bolted down and never moves, the camera-subject distance never changes, and the background stays pixel-locked."
 )
+
+IDLE_LTX_STATIC_CAMERA_SENTENCE = (
+    "Single locked-off tripod shot. Static frame. Fixed viewpoint. The camera is bolted down and never moves. "
+    "No push-in, no pull-back, no dolly in, no dolly out, no zoom, no pan, no tilt, no orbit, no tracking, "
+    "no handheld shake, no reframing. The distance between camera and subject never changes. "
+    "The entire frame, including the selected theme backdrop, stays pixel-locked with zero parallax."
+)
+IDLE_LTX_FIRST_FRAME_SENTENCE = (
+    "Use the provided first frame as the visual source and preserve its subject, environment, props, lighting, "
+    "materials, body pose, silhouette, framing, and background layout."
+)
+IDLE_LTX_NO_TEXT_SENTENCE = (
+    "Do not add random letters, alphabet walls, unreadable text, fake signage, posters, watermarks, logos, "
+    "or any typography that is not already visible in the provided first frame."
+)
+
+
+def _with_hard_camera_lock(prompt: str) -> str:
+    body = _as_str(prompt)
+    if not body:
+        return f"{IDLE_LTX_FIRST_FRAME_SENTENCE} {IDLE_LTX_NO_TEXT_SENTENCE} {IDLE_LTX_STATIC_CAMERA_SENTENCE}"
+    lock = IDLE_LTX_STATIC_CAMERA_SENTENCE
+    first = IDLE_LTX_FIRST_FRAME_SENTENCE
+    pieces: List[str] = []
+    if first.lower() not in body.lower():
+        pieces.append(first)
+    if IDLE_LTX_NO_TEXT_SENTENCE.lower() not in body.lower():
+        pieces.append(IDLE_LTX_NO_TEXT_SENTENCE)
+    if lock.lower() not in body.lower():
+        pieces.append(lock)
+    pieces.append(body)
+    return " ".join(pieces)
 
 
 def load_vision_json_task() -> str:
@@ -175,27 +212,25 @@ def coerce_vision_result(raw: Dict[str, Any]) -> Dict[str, Any]:
         forb = ["walking", "stepping", "camera movement"]
 
     neg = _as_str(raw.get("ltx_negative_prompt_string")) or IDLE_LTX_DEFAULT_NEGATIVE_PROMPT
+    if "camera movement" not in neg.lower() or "camera zoom" not in neg.lower():
+        neg = f"{neg}, {IDLE_LTX_DEFAULT_NEGATIVE_PROMPT}"
+    neg = neg[:2000]
     base = _as_str(raw.get("ltx_base_prompt_string"))
     motions_joined = ", ".join(safe[:8])
     if not base:
         base = (
-            f"A full-body {species} 3D character exactly matching the provided reference image: {model_desc}. "
-            f"Locked-off tripod camera. The camera is completely static for the entire video. Fixed viewpoint. "
-            f"Fixed background. No camera movement of any kind. The {species} performs a very subtle idle loop in place: "
-            f"{motions_joined}. The feet, hooves, paws, or body contact points stay planted. "
-            "The body remains centered in the same screen position. "
-            "The silhouette, proportions, colors, materials, and 3D model shape remain consistent with the input image. "
-            "No walking. No stepping. No body turn. No camera orbit. No pan. No tilt. No zoom. No dolly. No tracking shot. "
-            "No viewpoint change. No scene change. No morphing. No extra limbs. No text. No watermark."
+            f"Use the provided first frame as the visual source. A full-body {species} 3D character is visible: {model_desc}. "
+            f"Preserve the same environment, props, lighting, shadows, materials, framing, and background layout from the first frame. "
+            f"Single locked-off tripod shot. Static frame. Fixed viewpoint. The camera is bolted down and never moves. "
+            f"The {species} performs a very subtle idle loop in place: {motions_joined}. "
+            "The feet, hooves, paws, or body contact points stay planted and the root stays anchored. "
+            "No camera movement, no subject travel, no scene change, no invented text, and no new background objects."
         )
+    base = _with_hard_camera_lock(base)
+    base = base[:2400]
 
     variants_in = raw.get("ltx_variants_array")
-    default_names = [
-        "breathing_only",
-        "head_and_ears_or_head_only",
-        "tiny_weight_shift_no_steps",
-        "secondary_motion_if_visible",
-    ]
+    default_names = ["idle", "walk", "run", "die"]
     variants: List[Dict[str, str]] = []
     if isinstance(variants_in, list):
         for i in range(IDLE_LTX_VARIANT_COUNT):
@@ -208,14 +243,16 @@ def coerce_vision_result(raw: Dict[str, Any]) -> Dict[str, Any]:
         variants.append({"variant_name_string": default_names[len(variants)], "prompt_string": ""})
 
     suffixes = [
-        "Emphasize only barely visible chest breathing and still pose; no head turn; lowest motion.",
-        "Add only minimal head, neck, or ear micro-motion if those parts are visible; no torso rotation.",
-        "Allow a tiny in-place weight shift; all contact points stay planted; zero steps.",
-        "Allow only species-appropriate secondary motion (tail, ears, wings, mane, shell, fur) if visible; keep body anchored.",
+        "Idle variant: subtle breathing and small natural motion in place; no locomotion.",
+        "Walk variant: walking-in-place motion while the character stays centered in the frame.",
+        "Run variant: running-in-place motion with more energy while the character stays centered.",
+        "Die variant: fall or collapse in place into a defeated pose; no scene change.",
     ]
     for i, sf in enumerate(suffixes):
         if not _as_str(variants[i]["prompt_string"]):
             variants[i]["prompt_string"] = f"{base} {sf}"
+        variants[i]["variant_name_string"] = default_names[i]
+        variants[i]["prompt_string"] = _with_hard_camera_lock(variants[i]["prompt_string"])[:2400]
 
     return {
         "detected_species_string": species,

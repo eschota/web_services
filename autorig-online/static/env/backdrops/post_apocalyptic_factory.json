@@ -1,17 +1,23 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 379.434421036991,
+      "y": 81.13993194069769,
+      "z": 304.3643767574581
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 19.73630794200862,
+      "y": 82.4355433684938,
+      "z": -43.658771074505225
     }
+  },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
   },
   "image_filename": "post_apocalyptic_factory.jpg",
   "plane_color": "#5f5a50",
@@ -27,10 +33,17 @@
     "ruins"
   ],
   "shadow_settings": {
-    "opacity": 0.62,
-    "shadow_y_offset": 0.005,
-    "softness": 8.0,
+    "opacity": 0.4,
+    "shadow_y_offset": 0.01,
+    "softness": 60,
     "sun_multiplier": 1.4
+  },
+  "src": "/static/env/backdrops/post_apocalyptic_factory.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/post_apocalyptic_factory.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/post_apocalyptic_factory.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/post_apocalyptic_factory.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/post_apocalyptic_factory.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
     "inclination": 32,

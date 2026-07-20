@@ -1,20 +1,26 @@
 {
-  "admin_edited_bool": false,
+  "admin_edited_bool": true,
   "camera_transform": {
     "fov": 45,
     "position": {
-      "x": 2.5,
-      "y": 1.8,
-      "z": 3.0
+      "x": 572.1059600793601,
+      "y": 204.54661640864956,
+      "z": 270.86287690196764
     },
     "target": {
-      "x": 0.0,
-      "y": 0.8,
-      "z": 0.0
+      "x": 47.47596833563652,
+      "y": 99.9722037105473,
+      "z": -59.038961557478274
     }
   },
+  "environment_settings": {
+    "intensity": 1,
+    "mode": "image",
+    "reflection_intensity": 3,
+    "source": "backdrop"
+  },
   "image_filename": "ancient_ruins.jpg",
-  "plane_color": "#b2ab9b",
+  "plane_color": "#41403e",
   "schema_version": 1,
   "semantic_tags": [
     "ruins",
@@ -24,18 +30,28 @@
     "warrior",
     "greek",
     "roman",
-    "fantasy"
+    "fantasy",
+    "humanoid",
+    "human",
+    "character"
   ],
   "shadow_settings": {
-    "opacity": 0.45,
+    "opacity": 0.41,
     "shadow_y_offset": 0.005,
-    "softness": 5.5,
-    "sun_multiplier": 2.4
+    "softness": 8.5,
+    "sun_multiplier": 3.5
+  },
+  "src": "/static/env/backdrops/ancient_ruins.jpg",
+  "viewport_srcs": {
+    "perspective": "/static/env/backdrops/viewer/ancient_ruins.jpg?v=20260713-split-v1",
+    "top": "/static/env/backdrops/viewer/top/ancient_ruins.jpg?v=20260713-split-v1",
+    "front": "/static/env/backdrops/viewer/front/ancient_ruins.jpg?v=20260713-split-v1",
+    "left": "/static/env/backdrops/viewer/left/ancient_ruins.jpg?v=20260713-split-v1"
   },
   "sun_settings": {
-    "inclination": 52,
+    "inclination": 35,
     "intensity": 2.45,
-    "rotation": -60
+    "rotation": -101
   },
   "theme_id": "ancient_ruins",
   "theme_name": "Ancient Marble Ruins",

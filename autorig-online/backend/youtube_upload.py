@@ -11,7 +11,8 @@ import hashlib
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlencode
 
@@ -22,7 +23,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,8 +37,14 @@ from config import (
     YOUTUBE_UPLOAD_PRIVACY,
 )
 from database import AsyncSessionLocal, Task, YoutubeCredentials, YoutubeUploadedHash
+from workers import get_worker_base_url
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_VIDEO_CACHE_DIR = Path(os.getenv("YOUTUBE_VIDEO_CACHE_DIR", "/var/autorig/videos"))
+YOUTUBE_TASK_CACHE_DIR = Path(__file__).resolve().parent.parent / "static" / "tasks"
+YOUTUBE_UPLOAD_LIMIT_RETRY_SECONDS = int(os.getenv("YOUTUBE_UPLOAD_LIMIT_RETRY_SECONDS", "3600"))
+YOUTUBE_VIDEO_SOURCE_RETRY_SECONDS = int(os.getenv("YOUTUBE_VIDEO_SOURCE_RETRY_SECONDS", "600"))
+YOUTUBE_RETRY_POLL_SECONDS = int(os.getenv("YOUTUBE_RETRY_POLL_SECONDS", "300"))
 
 # Fallback title used only when task-level model metadata is unavailable.
 YOUTUBE_VIDEO_TITLE = "autorig character"
@@ -53,9 +60,64 @@ def youtube_source_video_url(site_video_url: str) -> str:
     return u
 
 
+def _is_animal_task(task: Task) -> bool:
+    return str(getattr(task, "input_type", "") or "").strip().lower() == "animal"
+
+
+def _task_youtube_video_candidates(task: Task) -> List[str]:
+    """Preferred upload sources. Animal tasks use rig preview before generic videos."""
+    urls: List[str] = []
+
+    def add(url: Optional[str]) -> None:
+        u = (url or "").strip()
+        if u and u not in urls:
+            urls.append(u)
+
+    source_urls = list(getattr(task, "ready_urls", None) or []) + list(getattr(task, "output_urls", None) or [])
+    if _is_animal_task(task):
+        for url in source_urls:
+            if str(url or "").lower().endswith("_rig_preview.mp4"):
+                add(str(url))
+        if task.guid and task.worker_api:
+            worker_base = get_worker_base_url(task.worker_api)
+            if worker_base:
+                add(f"{worker_base.rstrip('/')}/converter/glb/{task.guid}/{task.guid}_rig_preview.mp4")
+
+    site_video_url = (task.video_url or "").strip()
+    if site_video_url:
+        add(youtube_source_video_url(site_video_url))
+        add(site_video_url)
+
+    for url in source_urls:
+        low = str(url or "").lower()
+        if low.endswith("_video.mp4") or low.endswith("_video_small.mp4"):
+            add(youtube_source_video_url(str(url)))
+
+    return urls
+
+
+def _task_youtube_local_video_candidates(task: Task) -> List[Path]:
+    """Completed task videos cached on the backend, preferred over ephemeral worker URLs."""
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if not task_id:
+        return []
+
+    names = (
+        ("rig_preview.mp4", "video.mp4", "video_small.mp4")
+        if _is_animal_task(task)
+        else ("video.mp4", "video_small.mp4", "rig_preview.mp4")
+    )
+    paths = [YOUTUBE_VIDEO_CACHE_DIR / f"{task_id}.mp4"]
+    paths.extend(YOUTUBE_TASK_CACHE_DIR / task_id / name for name in names)
+    return [path for path in paths if path.is_file() and path.stat().st_size > 0]
+
+
 # Serialize uploads per SHA-256 so two tasks with identical bytes cannot double-upload.
 _hash_lock_registry_lock = asyncio.Lock()
 _sha256_upload_locks: dict[str, asyncio.Lock] = {}
+# Serialize channel uploads so the first uploadLimitExceeded response establishes
+# a shared cooldown before other completed tasks call YouTube concurrently.
+_youtube_upload_slot_lock = asyncio.Lock()
 
 
 async def _lock_for_sha256(sha256_hex: str) -> asyncio.Lock:
@@ -131,7 +193,6 @@ def _build_youtube_description(
     YouTube max description length 5000.
     """
     base = APP_URL.rstrip("/")
-    public_model_link = f"{base}/m/{task_id}"
     task_link = f"{base}/task?id={task_id}"
     clean_title = _compact_text(model_title)
     clean_description = (model_description or "").strip()
@@ -148,8 +209,7 @@ def _build_youtube_description(
         "AutoRig Online creates AI-assisted character rigs, animation previews, and engine-ready exports for GLB, FBX, OBJ, Unity, and Unreal Engine workflows.",
         "",
         f"Website: {base}",
-        f"Model page: {public_model_link}",
-        f"3D viewer & downloads: {task_link}",
+        f"Task page, 3D viewer & downloads: {task_link}",
     ])
     if clean_keywords:
         parts.extend(["", "Keywords: " + ", ".join(clean_keywords[:16])])
@@ -242,6 +302,26 @@ def _youtube_error_needs_new_oauth(exc: BaseException) -> bool:
     if "token has been expired" in s or "token has been revoked" in s:
         return True
     return False
+
+
+def _youtube_error_is_upload_limit(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "uploadlimitexceeded" in text or "exceeded the number of videos" in text
+
+
+async def _youtube_upload_limit_cooldown_active() -> bool:
+    cutoff = datetime.utcnow() - timedelta(seconds=max(60, YOUTUBE_UPLOAD_LIMIT_RETRY_SECONDS))
+    async with AsyncSessionLocal() as db:
+        latest = await db.scalar(
+            select(Task.updated_at)
+            .where(
+                Task.youtube_upload_status == "deferred",
+                Task.youtube_upload_error == "upload_limit_exceeded",
+            )
+            .order_by(Task.updated_at.desc())
+            .limit(1)
+        )
+    return bool(latest and latest > cutoff)
 
 
 async def _telegram_youtube_token_notice(detail: str) -> None:
@@ -357,6 +437,8 @@ def _upload_video_file_blocking(
 
 async def run_youtube_upload_for_task(task_id: str) -> None:
     video_url: Optional[str] = None
+    video_candidates: List[str] = []
+    local_video_candidates: List[Path] = []
     tid: Optional[str] = None
     refresh_token: Optional[str] = None
     upload_title: str = YOUTUBE_VIDEO_TITLE
@@ -389,7 +471,9 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
                 await db.commit()
             return
 
-        if not task.video_ready or not task.video_url:
+        video_candidates = _task_youtube_video_candidates(task)
+        local_video_candidates = _task_youtube_local_video_candidates(task)
+        if not local_video_candidates and not video_candidates and (not task.video_ready or not task.video_url):
             return
 
         if OPENAI_API_KEY:
@@ -421,23 +505,48 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             print(f"[YouTube] No channel credentials (DB or YOUTUBE_REFRESH_TOKEN); skip task {task_id}")
             return
 
-        site_video_url = task.video_url.strip()
-        if not site_video_url:
+        if not video_candidates:
             return
 
         tid = task.id
 
+    if await _youtube_upload_limit_cooldown_active():
+        await _mark_deferred(task_id, "upload_limit_cooldown")
+        return
+
     title = upload_title
     desc = upload_desc if upload_desc else _build_youtube_description(tid)
-
-    video_url = youtube_source_video_url(site_video_url)
 
     tmp_path: Optional[str] = None
     try:
         async with httpx.AsyncClient(timeout=600.0, follow_redirects=True) as client:
-            resp = await client.get(video_url)
-            resp.raise_for_status()
-            data = resp.content
+            last_error: Optional[BaseException] = None
+            data: Optional[bytes] = None
+            for candidate_path in local_video_candidates:
+                try:
+                    data = await asyncio.to_thread(candidate_path.read_bytes)
+                    video_url = str(candidate_path)
+                    print(f"[YouTube] Using cached video for task {task_id}: {candidate_path}")
+                    break
+                except Exception as e:
+                    last_error = e
+                    print(f"[YouTube] Cached video failed for task {task_id}: {candidate_path} ({e})")
+            for candidate_url in video_candidates:
+                if data is not None:
+                    break
+                video_url = candidate_url
+                try:
+                    resp = await client.get(candidate_url)
+                    resp.raise_for_status()
+                    data = resp.content
+                    break
+                except Exception as e:
+                    last_error = e
+                    print(f"[YouTube] Video source failed for task {task_id}: {candidate_url} ({e})")
+            if data is None:
+                if last_error:
+                    raise last_error
+                raise RuntimeError("No YouTube video source candidates")
 
         sha256_hex = hashlib.sha256(data).hexdigest()
         lock = await _lock_for_sha256(sha256_hex)
@@ -474,14 +583,18 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
                 f.write(data)
 
             try:
-                video_id = await asyncio.to_thread(
-                    _upload_video_file_blocking,
-                    file_path=tmp_path,
-                    title=title,
-                    description=desc,
-                    refresh_token=refresh_token,
-                    tags=upload_tags if upload_tags else None,
-                )
+                async with _youtube_upload_slot_lock:
+                    if await _youtube_upload_limit_cooldown_active():
+                        await _mark_deferred(task_id, "upload_limit_cooldown")
+                        return
+                    video_id = await asyncio.to_thread(
+                        _upload_video_file_blocking,
+                        file_path=tmp_path,
+                        title=title,
+                        description=desc,
+                        refresh_token=refresh_token,
+                        tags=upload_tags if upload_tags else None,
+                    )
             except RefreshError as e:
                 print(f"[YouTube] OAuth refresh failed task {task_id}: {e}")
                 await _telegram_youtube_token_notice(str(e))
@@ -490,6 +603,9 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             except HttpError as e:
                 err = str(e)[:2000]
                 print(f"[YouTube] Upload HttpError task {task_id}: {err}")
+                if _youtube_error_is_upload_limit(e):
+                    await _mark_deferred(task_id, "upload_limit_exceeded")
+                    return
                 if _youtube_error_needs_new_oauth(e):
                     await _telegram_youtube_token_notice(err)
                 await _mark_failed(task_id, err)
@@ -552,6 +668,9 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
     except HttpError as e:
         err = str(e)[:2000]
         print(f"[YouTube] Upload HttpError task {task_id}: {err}")
+        if _youtube_error_is_upload_limit(e):
+            await _mark_deferred(task_id, "upload_limit_exceeded")
+            return
         if _youtube_error_needs_new_oauth(e):
             await _telegram_youtube_token_notice(err)
         await _mark_failed(task_id, err)
@@ -559,7 +678,10 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         print(f"[YouTube] Upload failed task {task_id}: {e}")
         if _youtube_error_needs_new_oauth(e):
             await _telegram_youtube_token_notice(str(e))
-        await _mark_failed(task_id, str(e)[:2000])
+        if "404 Not Found" in str(e):
+            await _mark_deferred(task_id, "video_source_pending")
+        else:
+            await _mark_failed(task_id, str(e)[:2000])
     finally:
         if tmp_path and os.path.isfile(tmp_path):
             try:
@@ -577,6 +699,57 @@ async def _mark_failed(task_id: str, message: str) -> None:
         task.youtube_upload_error = message
         task.updated_at = datetime.utcnow()
         await db.commit()
+
+
+async def _mark_deferred(task_id: str, reason: str) -> None:
+    async with AsyncSessionLocal() as db:
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task or task.youtube_video_id:
+            return
+        task.youtube_upload_status = "deferred"
+        task.youtube_upload_error = reason
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+
+
+async def youtube_retry_worker() -> None:
+    """Retry one recent deferred upload at a time without blocking task processing."""
+    print("[YouTube Retry] Started")
+    try:
+        await asyncio.sleep(30)
+        while True:
+            try:
+                if not await _youtube_upload_limit_cooldown_active():
+                    now = datetime.utcnow()
+                    source_cutoff = now - timedelta(seconds=max(60, YOUTUBE_VIDEO_SOURCE_RETRY_SECONDS))
+                    async with AsyncSessionLocal() as db:
+                        task_id = await db.scalar(
+                            select(Task.id)
+                            .where(
+                                Task.status == "done",
+                                Task.youtube_video_id.is_(None),
+                                Task.youtube_upload_status == "deferred",
+                                Task.content_rating.in_(("safe", "suggestive")),
+                                Task.content_classified_at.isnot(None),
+                                or_(
+                                    Task.youtube_upload_error != "video_source_pending",
+                                    Task.updated_at <= source_cutoff,
+                                ),
+                            )
+                            .order_by(Task.created_at.desc())
+                            .limit(1)
+                        )
+                    if task_id:
+                        print(f"[YouTube Retry] Retrying task {task_id}")
+                        await run_youtube_upload_for_task(task_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"[YouTube Retry] Cycle failed: {e}")
+            await asyncio.sleep(max(30, YOUTUBE_RETRY_POLL_SECONDS))
+    except asyncio.CancelledError:
+        print("[YouTube Retry] Stopped")
+        raise
 
 
 def schedule_youtube_upload_if_eligible(task_id: str) -> None:

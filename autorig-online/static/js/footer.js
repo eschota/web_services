@@ -31,6 +31,7 @@ function renderSiteFooter() {
                         <li><a href="/glb-auto-rig" data-i18n="footer_glb_rig">GLB Auto Rigging</a></li>
                         <li><a href="/fbx-auto-rig" data-i18n="footer_fbx_rig">FBX Auto Rigging</a></li>
                         <li><a href="/obj-auto-rig" data-i18n="footer_obj_rig">OBJ Auto Rigging</a></li>
+                        <li><a href="/blender-plugin" data-i18n="footer_blender_plugin">Blender Plugin</a></li>
                         <li><a href="/gallery" data-i18n="nav_gallery">Gallery</a></li>
                     </ul>
                 </div>
@@ -72,7 +73,14 @@ function renderSiteFooter() {
                         <a href="/user-agreement" data-i18n="footer_user_agreement">User Agreement</a>
                     </nav>
                 </div>
-                <div class="footer-social">
+                <div class="footer-social" style="flex-wrap:wrap; justify-content:center;">
+                    <a href="https://www.producthunt.com/products/autorig-online?embed=true&amp;utm_source=embed&amp;utm_medium=post_embed" target="_blank" rel="noopener noreferrer" title="AutoRig.online on Product Hunt" style="display:flex; align-items:center; gap:0.65rem; padding:0.45rem 0.7rem; background:#fff; color:#1a1a1a; border:1px solid rgba(255,255,255,0.2); border-radius:8px; text-decoration:none; box-shadow:0 8px 24px rgba(0,0,0,0.22);">
+                        <img alt="AutoRig.online" src="https://ph-files.imgix.net/8a6be386-0972-4915-8161-07aa93ad6d03.png?auto=format&amp;fit=crop&amp;w=80&amp;h=80" width="32" height="32" loading="lazy" style="width:32px; height:32px; border-radius:6px; object-fit:cover; flex-shrink:0;">
+                        <span style="display:flex; flex-direction:column; gap:0.05rem; line-height:1.15;">
+                            <span style="font-size:0.78rem; font-weight:700; color:#1a1a1a;">AutoRig.online on Product Hunt</span>
+                            <span style="font-size:0.72rem; font-weight:600; color:#ff6154;">Check it out &rarr;</span>
+                        </span>
+                    </a>
                     <a href="https://t.me/autorigonline" target="_blank" rel="noopener noreferrer" class="footer-social-link" title="Telegram">
                         ${TELEGRAM_ICON_SVG}
                         <span>Telegram</span>
