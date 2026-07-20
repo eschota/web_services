@@ -3255,6 +3255,35 @@
         .animation-rail-icon:hover:not(:disabled) { border-color: #60a5fa; background: rgba(96,165,250,0.18); }
         .animation-rail-icon:disabled { opacity: 0.42; cursor: not-allowed; }
         .animation-rail-icon img { filter: brightness(10); }
+        .animation-rail-download-button {
+            flex-basis: 34px;
+            width: 34px;
+            height: 34px;
+            border-color: rgba(125, 211, 252, 0.3);
+            background: linear-gradient(180deg, rgba(96, 165, 250, 0.16), rgba(99, 102, 241, 0.1));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 10px rgba(0,0,0,0.18);
+            transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+        }
+        .animation-rail-download-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            border-color: #7dd3fc;
+            background: linear-gradient(180deg, rgba(96, 165, 250, 0.28), rgba(99, 102, 241, 0.17));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 5px 14px rgba(37,99,235,0.25);
+        }
+        .animation-rail-download-button:active:not(:disabled) { transform: translateY(0); }
+        .animation-rail-download-button:focus-visible {
+            outline: 2px solid #fbbf24;
+            outline-offset: 2px;
+        }
+        .animation-rail-icon img.animation-rail-download-icon {
+            width: 22px;
+            height: 22px;
+            filter: none;
+            transition: transform 140ms ease;
+        }
+        .animation-rail-download-button:hover:not(:disabled) .animation-rail-download-icon {
+            transform: translateY(1px);
+        }
         .animation-rail-stats,
         .animation-rail-selection {
             color: rgba(255,255,255,0.68);
@@ -3981,15 +4010,15 @@
                                 <div class="animation-rail-footer">
                                     <div id="custom-anim-selected-label" class="animation-rail-selection">Select an animation</div>
                                     <div class="animation-rail-downloads">
-                                        <button id="custom-anim-download-btn" class="animation-rail-icon" type="button" disabled title="Download animation with base rig" aria-label="Download animation with base rig">
-                                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16">
+                                        <button id="custom-anim-download-btn" class="animation-rail-icon animation-rail-download-button" type="button" disabled title="Download animation with base rig" aria-label="Download animation with base rig">
+                                            <img class="animation-rail-download-icon" src="/static/images/icons/animation-rig-download.svg" alt="">
                                             <span class="custom-anim-download-btn-text visually-hidden">Download animation with base rig</span>
                                         </button>
-                                        <button id="custom-anim-download-only-btn" class="animation-rail-icon" type="button" disabled title="Download animation only" aria-label="Download animation only">
-                                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16">
+                                        <button id="custom-anim-download-only-btn" class="animation-rail-icon animation-rail-download-button" type="button" disabled title="Download animation only" aria-label="Download animation only">
+                                            <img class="animation-rail-download-icon" src="/static/images/icons/animation-clip-download.svg" alt="">
                                         </button>
-                                        <button id="custom-anim-download-pack-btn" class="animation-rail-icon hidden" type="button" disabled title="Download animation pack" aria-label="Download animation pack">
-                                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16">
+                                        <button id="custom-anim-download-pack-btn" class="animation-rail-icon animation-rail-download-button hidden" type="button" disabled title="Download animation pack" aria-label="Download animation pack">
+                                            <img class="animation-rail-download-icon" src="/static/images/icons/animation-pack-download.svg" alt="">
                                             <span class="custom-anim-download-pack-btn-text visually-hidden">Download all animations</span>
                                         </button>
                                     </div>
@@ -8275,7 +8304,7 @@
                 const actionText = this.tSafe('custom_anim_download_selected_action', 'Download Selected Animation');
                 let btnTextEl = downloadBtn.querySelector('.custom-anim-download-btn-text');
                 if (!btnTextEl) {
-                    downloadBtn.innerHTML = '<img src="/static/images/icons/download.svg" alt="" width="16" height="16" style="filter: brightness(10);"><span class="custom-anim-download-btn-text"></span>';
+                    downloadBtn.innerHTML = '<img class="animation-rail-download-icon" src="/static/images/icons/animation-rig-download.svg" alt=""><span class="custom-anim-download-btn-text visually-hidden"></span>';
                     btnTextEl = downloadBtn.querySelector('.custom-anim-download-btn-text');
                 }
                 if (btnTextEl) {

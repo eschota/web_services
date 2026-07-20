@@ -27,6 +27,9 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertLess(rail_index, fps_index)
         self.assertLess(fps_index, next_legacy_control_index)
         self.assertIn('id="custom-anim-download-only-btn"', self.html[rail_index:fps_index])
+        self.assertIn('/static/images/icons/animation-rig-download.svg', self.html[rail_index:fps_index])
+        self.assertIn('/static/images/icons/animation-clip-download.svg', self.html[rail_index:fps_index])
+        self.assertIn('/static/images/icons/animation-pack-download.svg', self.html[rail_index:fps_index])
 
     def test_split_viewer_has_only_three_views(self):
         self.assertIn("['perspective', 'top', 'front']", self.split_source)
