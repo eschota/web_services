@@ -14632,6 +14632,7 @@
                 // Wheel handler - accumulate velocity
                 renderer.domElement.addEventListener('wheel', (e) => {
                     if (splitViewportController && !splitViewportController.isEventInView(e, 'perspective')) return;
+                    splitViewportController?.setInteractionView('perspective');
                     e.preventDefault();
                     // Normalize wheel delta across browsers
                     const delta = e.deltaY > 0 ? 1 : -1;
@@ -15067,7 +15068,7 @@
                             publishMainViewerDebugState();
                             mainViewerLastDebugPublishAt = time;
                         }
-                        if (window.updateZoomInertia && splitViewportActiveInteractionView === 'perspective') window.updateZoomInertia();
+                        if (window.updateZoomInertia) window.updateZoomInertia();
                         Object.values(splitViewportControls).forEach((orbit) => orbit?.update?.());
                         
                         if (!isDefaultComparisonOn && cameraInitialized && camera && controls) {

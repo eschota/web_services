@@ -36,6 +36,11 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertIn("preserveDrawingBuffer: true", self.html)
         self.assertIn("secondaryViewportStride: 4", self.html)
 
+    def test_perspective_zoom_is_not_blocked_by_stale_interaction_state(self):
+        self.assertIn("splitViewportController?.setInteractionView('perspective');", self.html)
+        self.assertIn("if (window.updateZoomInertia) window.updateZoomInertia();", self.html)
+        self.assertNotIn("window.updateZoomInertia && splitViewportActiveInteractionView === 'perspective'", self.html)
+
     def test_manual_rig_buttons_have_no_text_label_nodes(self):
         self.assertNotIn("const label = document.createElement('span');\n                        label.textContent = formatManualRigLabel(key);", self.html)
         self.assertIn("btn.setAttribute('aria-label', formatManualRigLabel(key));", self.html)
