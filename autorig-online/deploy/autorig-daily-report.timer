@@ -1,0 +1,11 @@
+[Unit]
+Description=Send AutoRig daily email report at 10:00 Novosibirsk time
+
+[Timer]
+OnCalendar=*-*-* 10:00:00 Asia/Novosibirsk
+Persistent=true
+AccuracySec=1min
+Unit=autorig-daily-report.service
+
+[Install]
+WantedBy=timers.target
