@@ -54,6 +54,11 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertIn('if (!this.animationCatalogLoaded)', method)
         self.assertIn('void this.loadAnimationCatalog().catch((error) => {', method)
 
+    def test_animal_animation_selection_loads_variant_fbx(self):
+        self.assertIn('shouldLoadAnimalVariantPreview', self.html)
+        self.assertIn('window.TaskVariantPreviewBridge', self.html)
+        self.assertIn("currentModelType !== 'variant'", self.html)
+
     def test_split_viewer_has_only_three_views(self):
         self.assertIn("['perspective', 'top', 'front']", self.split_source)
         self.assertNotIn("'left'", self.split_source)

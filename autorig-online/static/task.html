@@ -8296,10 +8296,36 @@
                 }
                 if (token !== this.animationApplyToken) return;
 
+                const isAnimalTask = this.isAnimalAnimationCatalog();
+                const shouldLoadAnimalVariant = previewPolicy?.shouldLoadAnimalVariantPreview?.({
+                    automatic,
+                    embeddedMatched,
+                    isAnimalTask,
+                    previewUrl: selected.preview_url,
+                }) ?? Boolean(selected.preview_url && !automatic && !embeddedMatched && isAnimalTask);
+                const variantBridge = window.TaskVariantPreviewBridge;
+                if (shouldLoadAnimalVariant && typeof variantBridge?.loadFbx === 'function') {
+                    try {
+                        const loaded = await variantBridge.loadFbx(
+                            selected.preview_url,
+                            `${this.getLocalizedAnimationName(selected)} Animal Animation FBX`
+                        );
+                        if (token !== this.animationApplyToken) return;
+                        if (loaded) {
+                            for (const candidate of candidates) {
+                                if (await bridge.playByName(candidate)) return;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Animal FBX preview playback failed:', e);
+                    }
+                }
+                if (token !== this.animationApplyToken) return;
+
                 const policyInput = {
                     automatic,
                     embeddedMatched,
-                    isAnimalTask: this.isAnimalAnimationCatalog(),
+                    isAnimalTask,
                     previewUrl: selected.preview_url,
                 };
                 const useExternalFbx = previewPolicy?.shouldLoadExternalFbxPreview?.(policyInput)
@@ -10267,7 +10293,9 @@
             window.CustomAnimationViewerBridge = {
                 async playByName(name) {
                     try {
-                        if (typeof setActiveMode === 'function' && currentModelType !== 'animations') {
+                        if (typeof setActiveMode === 'function'
+                            && currentModelType !== 'animations'
+                            && currentModelType !== 'variant') {
                             await setActiveMode('animation');
                         }
                     } catch (_) {

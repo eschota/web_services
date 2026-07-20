@@ -43,3 +43,17 @@ export function shouldLoadExternalFbxPreview({
         && !isAnimalTask
     );
 }
+
+export function shouldLoadAnimalVariantPreview({
+    automatic = false,
+    embeddedMatched = false,
+    isAnimalTask = false,
+    previewUrl = '',
+} = {}) {
+    return Boolean(
+        String(previewUrl || '').trim()
+        && !automatic
+        && !embeddedMatched
+        && isAnimalTask
+    );
+}
