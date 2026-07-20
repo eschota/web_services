@@ -102,9 +102,10 @@ class TaskStatusResponse(BaseModel):
     pipeline: str = Field(default="rig", description="``rig`` or ``convert``")
     # YouTube auto-upload (public video id when upload succeeded)
     youtube_video_id: Optional[str] = None
-    youtube_upload_status: Optional[str] = None  # uploaded | skipped | failed | deferred
+    youtube_upload_status: Optional[str] = None  # uploaded | skipped | failed
     rig_v2_animal_detection: Optional[dict] = None
     viewer_theme_selection: Optional[dict] = None
+    viewer_environment: Optional[dict] = None
 
 
 class AnimalVariantFileState(BaseModel):

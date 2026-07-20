@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import (
@@ -16,9 +16,10 @@ from config import (
     GOOGLE_REDIRECT_URI,
     SECRET_KEY,
     ANON_FREE_LIMIT,
-    USER_FREE_LIMIT
+    USER_FREE_LIMIT,
+    GUMROAD_PRODUCT_CREDITS,
 )
-from database import User, AnonSession, Session
+from database import User, AnonSession, Session, GumroadPurchase
 
 
 # =============================================================================
@@ -148,6 +149,38 @@ async def delete_session(db: AsyncSession, token: str):
 # =============================================================================
 # User Management
 # =============================================================================
+async def apply_pending_gumroad_credits(db: AsyncSession, user: User) -> int:
+    """
+    Backfill Gumroad purchases that arrived before the buyer created/logged into
+    their AutoRig account. Webhooks are stored by email even when no User exists.
+    """
+    email = (user.email or "").strip().lower()
+    if not email:
+        return 0
+    result = await db.execute(
+        select(GumroadPurchase).where(
+            func.lower(GumroadPurchase.email) == email,
+            GumroadPurchase.credited.is_(False),
+            GumroadPurchase.refunded.is_(False),
+        )
+    )
+    purchases = list(result.scalars().all())
+    total = 0
+    for purchase in purchases:
+        product_key = str(purchase.product_permalink or "").strip().lower()
+        credits = int(GUMROAD_PRODUCT_CREDITS.get(product_key, 0) or 0)
+        if credits <= 0:
+            continue
+        total += credits
+        purchase.credited = True
+        purchase.credits_added = credits
+    if total > 0:
+        user.balance_credits = max(0, int(user.balance_credits or 0) + total)
+        user.gumroad_email = user.gumroad_email or user.email
+        print(f"[Auth] Applied pending Gumroad credits: user={user.email} credits={total}")
+    return total
+
+
 async def get_or_create_user(
     db: AsyncSession, 
     email: str, 
@@ -168,6 +201,7 @@ async def get_or_create_user(
             user.name = name
         if picture:
             user.picture = picture
+        await apply_pending_gumroad_credits(db, user)
         await db.commit()
         return user
     
@@ -183,6 +217,9 @@ async def get_or_create_user(
         balance_credits=initial_balance
     )
     db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    await apply_pending_gumroad_credits(db, user)
     await db.commit()
     await db.refresh(user)
     

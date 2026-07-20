@@ -1504,12 +1504,93 @@ async def _worker_file_available(url: str) -> bool:
             resp = await client.head(url, timeout=15.0)
             if resp.status_code == 200:
                 return True
-            if resp.status_code not in (405, 403):
+            if resp.status_code in (404, 410):
                 return False
             resp = await client.get(url, headers={"Range": "bytes=0-0"}, timeout=20.0)
             return resp.status_code in (200, 206)
     except Exception:
         return False
+
+
+_RANGED_FILE_CACHE_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+async def _cache_worker_file_by_ranges(
+    url: str,
+    cache_path: Path,
+    *,
+    chunk_size: int = 4 * 1024 * 1024,
+    max_bytes: int = 512 * 1024 * 1024,
+) -> Path:
+    """Cache a worker file whose gateway only supports bounded Range requests."""
+    lock = _RANGED_FILE_CACHE_LOCKS.setdefault(str(cache_path), asyncio.Lock())
+    async with lock:
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            return cache_path
+
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            timeout = httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0)
+            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+                probe = None
+                for attempt in range(4):
+                    probe = await client.get(url, headers={"Range": "bytes=0-0"})
+                    if probe.status_code in (200, 206):
+                        break
+                    if attempt < 3:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                assert probe is not None
+                if probe.status_code == 200:
+                    if not probe.content or len(probe.content) > max_bytes:
+                        raise HTTPException(status_code=502, detail="Animation source returned an invalid file size")
+                    temp_path.write_bytes(probe.content)
+                elif probe.status_code == 206:
+                    match = re.fullmatch(
+                        r"bytes\s+0-0/(\d+)",
+                        str(probe.headers.get("content-range") or ""),
+                        re.IGNORECASE,
+                    )
+                    if not match or len(probe.content) != 1:
+                        raise HTTPException(status_code=502, detail="Animation source returned an invalid range probe")
+                    total_size = int(match.group(1))
+                    if total_size <= 0 or total_size > max_bytes:
+                        raise HTTPException(status_code=502, detail="Animation source returned an invalid file size")
+
+                    with temp_path.open("wb") as output:
+                        output.write(probe.content)
+                        start = 1
+                        while start < total_size:
+                            end = min(total_size - 1, start + chunk_size - 1)
+                            expected_range = f"bytes {start}-{end}/{total_size}"
+                            response = None
+                            for attempt in range(4):
+                                candidate = await client.get(url, headers={"Range": f"bytes={start}-{end}"})
+                                actual_range = str(candidate.headers.get("content-range") or "").lower()
+                                if (
+                                    candidate.status_code == 206
+                                    and actual_range == expected_range
+                                    and len(candidate.content) == end - start + 1
+                                ):
+                                    response = candidate
+                                    break
+                                if attempt < 3:
+                                    await asyncio.sleep(0.5 * (attempt + 1))
+                            if response is None:
+                                raise HTTPException(status_code=502, detail="Animation source returned an incomplete range")
+                            output.write(response.content)
+                            start = end + 1
+                else:
+                    raise HTTPException(status_code=502, detail=f"Animation source returned HTTP {probe.status_code}")
+
+            temp_path.replace(cache_path)
+            return cache_path
+        except HTTPException:
+            temp_path.unlink(missing_ok=True)
+            raise
+        except Exception as exc:
+            temp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=502, detail=f"Animation source unavailable: {exc}") from exc
 
 
 async def _download_worker_file_bytes(url: str, label: str, *, max_bytes: int = 80 * 1024 * 1024) -> bytes:
@@ -6700,7 +6781,7 @@ async def api_restart_task(
         
         # 1. Clear GLB cache (prepared.glb, animations.glb)
         glb_cache = static_dir / "glb_cache"
-        for cache_file in glb_cache.glob(f"{task_id}_*.glb"):
+        for cache_file in glb_cache.glob(f"{task_id}_*"):
             cache_file.unlink()
             print(f"[Restart] Deleted cached GLB: {cache_file.name}")
         
@@ -8848,6 +8929,54 @@ async def proxy_video(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    local_video_path = Path("/var/autorig/videos") / f"{task_id}.mp4"
+    if local_video_path.exists() and local_video_path.stat().st_size > 0:
+        file_size = local_video_path.stat().st_size
+        start, end = 0, file_size - 1
+        status_code = 200
+        range_header = request.headers.get("range")
+        if range_header:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip(), re.IGNORECASE)
+            if not match or (not match.group(1) and not match.group(2)):
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            if match.group(1):
+                start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else file_size - 1
+            else:
+                suffix_length = int(match.group(2))
+                start = max(0, file_size - suffix_length)
+            end = min(end, file_size - 1)
+            if start < 0 or start >= file_size or end < start:
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+            status_code = 206
+
+        async def stream_local_video():
+            remaining = end - start + 1
+            with local_video_path.open("rb") as source:
+                source.seek(start)
+                while remaining > 0:
+                    chunk = source.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        local_headers = {
+            "Content-Disposition": f'inline; filename="{task_id}_video.mp4"',
+            "Cache-Control": "public, max-age=0, must-revalidate",
+            "Content-Encoding": "identity",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end - start + 1),
+        }
+        if status_code == 206:
+            local_headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        return StreamingResponse(
+            stream_local_video(),
+            status_code=status_code,
+            media_type="video/mp4",
+            headers=local_headers,
+        )
     
     source_video_url = await _resolve_task_video_source_url(task)
     if not source_video_url:
@@ -10914,7 +11043,7 @@ def _iter_task_artifact_paths(task: Task) -> List[Path]:
         TASK_CACHE_DIR / task.id,
         Path("/var/autorig/videos") / f"{task.id}.mp4",
     ]
-    paths.extend(GLB_CACHE_DIR.glob(f"{task.id}_*.glb"))
+    paths.extend(GLB_CACHE_DIR.glob(f"{task.id}_*"))
     upload_token = _extract_upload_token_from_input_url(getattr(task, "input_url", None))
     upload_path = _upload_path_for_token(upload_token)
     if upload_path:
@@ -12008,7 +12137,19 @@ async def api_proxy_animations_fbx(
     animations_url, filename = _resolve_all_animations_fbx_url(task)
     if not animations_url or not filename:
         raise HTTPException(status_code=404, detail="Animations FBX not available yet")
-    return await _proxy_model_file(animations_url, filename, as_attachment=True)
+    cache_path = GLB_CACHE_DIR / f"{task_id}_{Path(filename).name}"
+    cached_path = await _cache_worker_file_by_ranges(animations_url, cache_path)
+    return FileResponse(
+        path=str(cached_path),
+        media_type="application/octet-stream",
+        filename=Path(filename).name,
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Encoding": "identity",
+        },
+    )
 
 
 @app.get("/api/task/{task_id}/prepared.glb")

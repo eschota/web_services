@@ -57,7 +57,7 @@ function renderSiteFooter() {
                         <li><a href="/guides" data-i18n="nav_guides">All Guides</a></li>
                         <li><a href="/how-it-works" data-i18n="footer_how_it_works">How It Works</a></li>
                         <li><a href="/faq" data-i18n="footer_faq">FAQ</a></li>
-                        <li><a href="/buy-credits" data-i18n="nav_buy">Buy Credits</a></li>
+                        <li><a href="/buy" data-i18n="nav_buy">Buy Credits</a></li>
                         <li><a href="/developers" data-i18n="nav_api">API</a></li>
                     </ul>
                 </div>

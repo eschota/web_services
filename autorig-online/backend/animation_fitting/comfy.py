@@ -20,7 +20,6 @@ from .specs import WorkflowBinding, WorkflowProfile
 
 
 VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv")
-DEFAULT_RENDER_TIMEOUT_SECONDS = 7200.0
 
 
 class ComfyContractError(RuntimeError):
@@ -29,19 +28,6 @@ class ComfyContractError(RuntimeError):
 
 class ComfyTaskError(RuntimeError):
     """Raised when a submitted Comfy task fails or completes without video."""
-
-
-def _render_timeout_seconds(value: Optional[float]) -> float:
-    raw: object = value
-    if raw is None:
-        raw = os.getenv("AUTORIG_LTX_RENDER_TIMEOUT_SECONDS", str(DEFAULT_RENDER_TIMEOUT_SECONDS))
-    try:
-        timeout = float(raw)
-    except (TypeError, ValueError) as exc:
-        raise ComfyContractError("AUTORIG_LTX_RENDER_TIMEOUT_SECONDS must be numeric") from exc
-    if timeout <= 0:
-        raise ComfyContractError("AUTORIG_LTX_RENDER_TIMEOUT_SECONDS must be positive")
-    return timeout
 
 
 @dataclass(frozen=True)
@@ -200,12 +186,12 @@ class ComfyAnimationClient:
         *,
         client: Optional[httpx.AsyncClient] = None,
         request_timeout_seconds: float = 30.0,
-        render_timeout_seconds: Optional[float] = None,
+        render_timeout_seconds: float = 3600.0,
         poll_interval_seconds: float = 3.0,
     ) -> None:
         self.worker = worker
         self.request_timeout_seconds = float(request_timeout_seconds)
-        self.render_timeout_seconds = _render_timeout_seconds(render_timeout_seconds)
+        self.render_timeout_seconds = float(render_timeout_seconds)
         self.poll_interval_seconds = float(poll_interval_seconds)
         self._owns_client = client is None
         auth = None
@@ -272,37 +258,12 @@ class ComfyAnimationClient:
             "system_object": system,
         }
 
-    async def upload_reference_image(
-        self,
-        image_path: Path,
-        *,
-        expected_sha256: Optional[str] = None,
-        expected_size_bytes: Optional[int] = None,
-    ) -> str:
+    async def upload_reference_image(self, image_path: Path) -> str:
         path = Path(image_path).resolve()
         data = await asyncio.to_thread(path.read_bytes)
         if not data:
             raise ComfyContractError(f"Reference image is empty: {path}")
         digest = hashlib.sha256(data).hexdigest()
-        if expected_sha256 is not None:
-            expected_digest = str(expected_sha256).strip().lower()
-            if not re.fullmatch(r"[a-f0-9]{64}", expected_digest):
-                raise ComfyContractError("expected_sha256 must be a SHA-256 hex digest")
-            if digest != expected_digest:
-                raise ComfyContractError(
-                    f"Reference image SHA-256 mismatch for {path}: "
-                    f"expected {expected_digest}, got {digest}"
-                )
-        if expected_size_bytes is not None:
-            if isinstance(expected_size_bytes, bool) or not isinstance(
-                expected_size_bytes, int
-            ) or expected_size_bytes <= 0:
-                raise ComfyContractError("expected_size_bytes must be a positive integer")
-            if len(data) != expected_size_bytes:
-                raise ComfyContractError(
-                    f"Reference image byte size mismatch for {path}: "
-                    f"expected {expected_size_bytes}, got {len(data)}"
-                )
         suffix = path.suffix.lower() if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") else ".png"
         filename = f"autorig_{digest[:32]}{suffix}"
         content_type = mimetypes.types_map.get(suffix, "application/octet-stream")
@@ -316,128 +277,11 @@ class ComfyAnimationClient:
         parsed = response.json()
         if not isinstance(parsed, dict):
             raise ComfyContractError("Comfy upload_image returned a non-object response")
-        returned_name_value = parsed.get("name")
-        if not isinstance(returned_name_value, str):
-            raise ComfyContractError("Comfy upload_image did not return a filename")
-        returned_name = returned_name_value.strip()
+        returned_name = str(parsed.get("name") or filename).strip()
+        subfolder = str(parsed.get("subfolder") or "autorig_animation_fitting").strip().replace("\\", "/")
         if not returned_name:
             raise ComfyContractError("Comfy upload_image did not return a filename")
-        if "/" in returned_name or "\\" in returned_name:
-            raise ComfyContractError(
-                "Comfy upload_image returned a filename containing path separators"
-            )
-        if returned_name != filename:
-            raise ComfyContractError(
-                f"Comfy changed uploaded filename {filename!r} to {returned_name!r}"
-            )
-        expected_subfolder = "autorig_animation_fitting"
-        subfolder_value = parsed.get("subfolder")
-        if not isinstance(subfolder_value, str):
-            raise ComfyContractError("Comfy upload_image did not return a subfolder")
-        subfolder = subfolder_value.strip()
-        if subfolder != expected_subfolder:
-            raise ComfyContractError(
-                f"Comfy changed upload subfolder {expected_subfolder!r} to {subfolder!r}"
-            )
-        return f"{expected_subfolder}/{filename}"
-
-    async def upload_reference_video(
-        self,
-        video_path: Path,
-        *,
-        expected_sha256: str,
-        expected_size_bytes: int,
-    ) -> str:
-        """Upload one content-pinned video guide without trusting server rebinding.
-
-        Comfy's upload endpoint is shared by image and video widgets.  The
-        ``LoadVideo`` node consumes the returned input-relative name, so the
-        local bytes, extension, digest, byte count, returned filename and
-        returned subfolder all have to remain exact.
-        """
-
-        path = Path(video_path).resolve()
-        suffix = path.suffix.lower()
-        if suffix not in VIDEO_EXTENSIONS:
-            raise ComfyContractError(
-                "Reference video must use one of: " + ", ".join(VIDEO_EXTENSIONS)
-            )
-        expected_digest = str(expected_sha256).strip().lower()
-        if not re.fullmatch(r"[a-f0-9]{64}", expected_digest):
-            raise ComfyContractError("expected_sha256 must be a SHA-256 hex digest")
-        if (
-            isinstance(expected_size_bytes, bool)
-            or not isinstance(expected_size_bytes, int)
-            or expected_size_bytes <= 0
-        ):
-            raise ComfyContractError("expected_size_bytes must be a positive integer")
-
-        data = await asyncio.to_thread(path.read_bytes)
-        if not data:
-            raise ComfyContractError(f"Reference video is empty: {path}")
-        digest = hashlib.sha256(data).hexdigest()
-        if digest != expected_digest:
-            raise ComfyContractError(
-                f"Reference video SHA-256 mismatch for {path}: "
-                f"expected {expected_digest}, got {digest}"
-            )
-        if len(data) != expected_size_bytes:
-            raise ComfyContractError(
-                f"Reference video byte size mismatch for {path}: "
-                f"expected {expected_size_bytes}, got {len(data)}"
-            )
-
-        filename = f"autorig_{digest[:32]}{suffix}"
-        content_types = {
-            ".mkv": "video/x-matroska",
-            ".mp4": "video/mp4",
-            ".mov": "video/quicktime",
-            ".webm": "video/webm",
-        }
-        response = await self._client.post(
-            self._url("/upload/image"),
-            data={
-                "type": "input",
-                "subfolder": "autorig_animation_fitting",
-                "overwrite": "true",
-            },
-            files={
-                "image": (
-                    filename,
-                    data,
-                    content_types.get(suffix, "application/octet-stream"),
-                )
-            },
-            timeout=max(self.request_timeout_seconds, 120.0),
-        )
-        response.raise_for_status()
-        parsed = response.json()
-        if not isinstance(parsed, dict):
-            raise ComfyContractError("Comfy upload_video returned a non-object response")
-        returned_name_value = parsed.get("name")
-        if not isinstance(returned_name_value, str):
-            raise ComfyContractError("Comfy upload_video did not return a filename")
-        returned_name = returned_name_value.strip()
-        if not returned_name:
-            raise ComfyContractError("Comfy upload_video did not return a filename")
-        if "/" in returned_name or "\\" in returned_name:
-            raise ComfyContractError(
-                "Comfy upload_video returned a filename containing path separators"
-            )
-        if returned_name != filename:
-            raise ComfyContractError(
-                f"Comfy changed uploaded filename {filename!r} to {returned_name!r}"
-            )
-        expected_subfolder = "autorig_animation_fitting"
-        subfolder_value = parsed.get("subfolder")
-        if not isinstance(subfolder_value, str):
-            raise ComfyContractError("Comfy upload_video did not return a subfolder")
-        subfolder = subfolder_value.strip()
-        if subfolder != expected_subfolder:
-            raise ComfyContractError(
-                f"Comfy changed upload subfolder {expected_subfolder!r} to {subfolder!r}"
-            )
-        return f"{expected_subfolder}/{filename}"
+        return f"{subfolder}/{returned_name}".strip("/")
 
     async def queue_load(self) -> int:
         return _queue_load(await self._get_json("/queue"))
@@ -475,20 +319,8 @@ class ComfyAnimationClient:
     async def wait_for_output(self, prompt_id: str) -> tuple[Dict[str, Any], ComfyOutputFile]:
         deadline = time.monotonic() + self.render_timeout_seconds
         missing_polls = 0
-        last_transport_error = ""
         while time.monotonic() < deadline:
-            try:
-                history_envelope = await self._get_json(
-                    f"/history/{quote(prompt_id, safe='')}"
-                )
-            except httpx.TransportError as exc:
-                # Comfy can temporarily stop servicing HTTP while a large LTX
-                # graph saturates VRAM/GPU. The deterministic prompt remains
-                # valid, so a transient transport timeout must not turn a live
-                # render into a failed job or cause a second submission.
-                last_transport_error = f"{type(exc).__name__}: {exc}"
-                await asyncio.sleep(self.poll_interval_seconds)
-                continue
+            history_envelope = await self._get_json(f"/history/{quote(prompt_id, safe='')}")
             history = history_envelope.get(prompt_id)
             if isinstance(history, dict):
                 error = _history_error(history)
@@ -499,12 +331,7 @@ class ComfyAnimationClient:
                     return history, output
                 if _history_completed(history):
                     raise ComfyTaskError(f"Comfy task {prompt_id} completed without a video output")
-            try:
-                queue = await self._get_json("/queue")
-            except httpx.TransportError as exc:
-                last_transport_error = f"{type(exc).__name__}: {exc}"
-                await asyncio.sleep(self.poll_interval_seconds)
-                continue
+            queue = await self._get_json("/queue")
             if _queue_contains(queue, prompt_id):
                 missing_polls = 0
             else:
@@ -512,8 +339,7 @@ class ComfyAnimationClient:
                 if missing_polls >= 3:
                     raise ComfyTaskError(f"Comfy task {prompt_id} disappeared from history and queue")
             await asyncio.sleep(self.poll_interval_seconds)
-        suffix = f"; last transport error: {last_transport_error}" if last_transport_error else ""
-        raise ComfyTaskError(f"Comfy task {prompt_id} timed out{suffix}")
+        raise ComfyTaskError(f"Comfy task {prompt_id} timed out")
 
     async def download_output(self, output: ComfyOutputFile) -> bytes:
         query = urlencode(

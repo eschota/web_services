@@ -24,7 +24,6 @@ from config import (
     PROGRESS_CONCURRENCY,
     PROGRESS_CHECK_TIMEOUT
 )
-from worker_payloads import build_worker_task_payload
 
 
 def normalize_task_type(value: Optional[str]) -> str:
@@ -251,7 +250,6 @@ def get_worker_effective_active(worker: Any, backend_counts: Optional[Dict[str, 
 
 
 WORKER_QUARANTINE_SECONDS = int(os.getenv("WORKER_QUARANTINE_SECONDS", "900"))
-WORKER_DISPATCH_TIMEOUT_SECONDS = float(os.getenv("WORKER_DISPATCH_TIMEOUT_SECONDS", "120"))
 WORKER_HEALTH_TIMEOUT_SECONDS = float(os.getenv("WORKER_HEALTH_TIMEOUT_SECONDS", "10"))
 _worker_quarantine_until: Dict[str, datetime] = {}
 _worker_quarantine_reason: Dict[str, str] = {}
@@ -430,22 +428,41 @@ async def send_task_to_worker(
 
     async with httpx.AsyncClient() as client:
         try:
-            payload = build_worker_task_payload(
-                input_url,
-                task_type,
-                transform_params,
-                pipeline_kind=pk,
-                animal_type=animal_type,
-                mode=mode,
-                animal_semantic_markers=animal_semantic_markers,
-                viewer_environment=viewer_environment,
-            )
+            if pk == "convert":
+                payload = {
+                    "input_url": input_url,
+                    "type": task_type,
+                }
+            else:
+                payload = {
+                    "input_url": input_url,
+                    "type": task_type,
+                    "mode": mode or "only_rig",
+                }
+                if animal_type:
+                    payload["animal_type"] = animal_type
+                if animal_semantic_markers:
+                    payload["animal_semantic_markers"] = animal_semantic_markers
+                if isinstance(viewer_environment, dict) and viewer_environment:
+                    payload["viewer_environment"] = viewer_environment
+                if transform_params:
+                    if transform_params.get("local_position"):
+                        payload["local_position"] = transform_params["local_position"]
+                    if transform_params.get("local_rotation") is not None:
+                        payload["local_rotation"] = transform_params["local_rotation"]
+                    if "local_rotation_authoritative" in transform_params:
+                        payload["local_rotation_authoritative"] = bool(transform_params.get("local_rotation_authoritative"))
+                    rig_orientation = transform_params.get("rig_orientation")
+                    if isinstance(rig_orientation, dict) and rig_orientation:
+                        payload["rig_orientation"] = rig_orientation
+                    if transform_params.get("local_scale"):
+                        payload["local_scale"] = transform_params["local_scale"]
             
             request_started_at = time.time()
             response = await client.post(
                 worker_url,
                 json=payload,
-                timeout=WORKER_DISPATCH_TIMEOUT_SECONDS,
+                timeout=30.0
             )
             
             if response.status_code == 200:
@@ -696,6 +713,8 @@ class WorkerQueueStatus:
     max_concurrent: int = 1
     avg_task_time: float = 900.0  # Default 15 min in seconds
     error: Optional[str] = None
+    server_version: Optional[str] = None
+    feature_flags: Dict[str, Any] = field(default_factory=dict)
     # Flattened strings from worker JSON (active_tasks / similar) for matching Task.worker_task_id / guid / URLs
     active_refs: List[str] = field(default_factory=list)
     # True if JSON contained a non-null active_tasks (or alias) key — enables "lost on worker" detection
@@ -927,6 +946,8 @@ async def get_worker_queue_status(worker_url: str, client: httpx.AsyncClient) ->
                 queue_size=_safe_worker_int(data.get("queue_size"), 0),
                 max_concurrent=max_c,
                 avg_task_time=_safe_worker_float(data.get("average_time_converting_task"), 900.0),
+                server_version=str(data.get("server_version") or "") or None,
+                feature_flags=dict(data.get("feature_flags")) if isinstance(data.get("feature_flags"), dict) else {},
                 active_refs=active_refs,
                 has_active_tasks_payload=has_active_payload,
             )

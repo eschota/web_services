@@ -2248,9 +2248,8 @@
             --vp-w: 16;
             --vp-h: 9;
             position: relative;
-            width: min(100%, calc(49vh * var(--vp-w) / var(--vp-h)));
+            width: 100%;
             max-width: 100%;
-            max-height: 49vh;
             margin-inline: auto;
             border-radius: 12px;
             overflow: hidden;
@@ -5741,6 +5740,8 @@
                 video.preload = 'metadata';
                 video.loop = true;
                 video.autoplay = true;
+                video.muted = true;
+                video.defaultMuted = true;
 
                 const logVideoEvent = (eventName, extra = {}) => {
                     window.__taskPerf?.log('VideoPreview', eventName, {
@@ -5758,7 +5759,20 @@
                     logVideoEvent('paused', { reason });
                 };
 
+                const resumeVideo = (reason) => {
+                    if (document.hidden || this.videoPreviewVisible === false || !video.src) return;
+                    video.play().then(() => {
+                        logVideoEvent('autoplay resumed', { reason });
+                    }).catch((error) => {
+                        window.__taskPerf?.log('VideoPreview', 'autoplay blocked', {
+                            reason,
+                            message: error?.message || String(error)
+                        });
+                    });
+                };
+
                 this.pauseVideoPreview = pauseVideo;
+                this.playVideoPreview = resumeVideo;
 
                 ['loadedmetadata', 'canplay', 'playing', 'waiting', 'stalled', 'suspend', 'error', 'pause'].forEach((eventName) => {
                     video.addEventListener(eventName, () => {
@@ -5768,6 +5782,9 @@
                             extra.height = Number(video.videoHeight || 0);
                             extra.duration = Math.round((Number(video.duration || 0)) * 100) / 100;
                             this.syncVideoPlayerWrapAspect();
+                        }
+                        if (eventName === 'loadedmetadata' || eventName === 'canplay') {
+                            resumeVideo(eventName);
                         }
                         if (eventName === 'playing') {
                             video.dataset.wasPlaying = '1';
@@ -5782,6 +5799,8 @@
                 document.addEventListener('visibilitychange', () => {
                     if (document.hidden) {
                         pauseVideo('document-hidden');
+                    } else {
+                        resumeVideo('document-visible');
                     }
                 });
 
@@ -5794,6 +5813,8 @@
                         });
                         if (!this.videoPreviewVisible) {
                             pauseVideo('offscreen');
+                        } else {
+                            resumeVideo('onscreen');
                         }
                     }, { threshold: 0.2 });
                     this.videoPreviewObserver.observe(container);
@@ -5828,7 +5849,7 @@
                     window.__taskPageBoot?.revealElement(container, 1);
                     pending.classList.add('hidden');
                     const mediaVersion = encodeURIComponent(
-                        String(task.guid || task.updated_at || task.video_url || task.ready_count || 'ready')
+                        `${String(task.guid || task.updated_at || task.video_url || task.ready_count || 'ready')}-video-fit-v3`
                     );
                     const proxyUrl = `/api/video/${this.taskId}?v=${mediaVersion}`;
                     video.poster = `/api/thumb/${this.taskId}?v=${mediaVersion}`;
@@ -5870,12 +5891,8 @@
                         video.addEventListener('canplay', handleMetadataReady);
                         video.addEventListener('playing', handleMetadataReady);
                         window.setTimeout(() => resolveVideoPhase('Video preview queued'), 1200);
-                        if (!document.hidden) {
-                            video.play().catch((error) => {
-                                window.__taskPerf?.log('VideoPreview', 'autoplay blocked', {
-                                    message: error?.message || String(error)
-                                });
-                            });
+                        if (typeof this.playVideoPreview === 'function') {
+                            this.playVideoPreview('source-ready');
                         }
                     } else if (!document.hidden && this.videoPreviewVisible && video.paused) {
                         window.__taskPageBoot?.revealElement(container, 1);
@@ -9063,6 +9080,14 @@
         const params = new URLSearchParams(window.location.search);
         const rawTaskId = params.get('id') || '';
         const taskId = rawTaskId.split('?')[0];  // Sanitize malformed URLs
+
+        function taskAnimationAssetUrl(extension) {
+            const state = window.TaskUI?.task || {};
+            const version = encodeURIComponent(
+                `${String(state.guid || state.updated_at || state.ready_count || 'pending')}-animation-preview-v3`
+            );
+            return `/api/task/${taskId}/animations.${extension}?v=${version}`;
+        }
 
         const wrap = document.getElementById('model-viewer-wrap');
         const host = document.getElementById('model-viewer');
@@ -15704,14 +15729,14 @@
                                             { name: 'Animations GLB', status: 'pending' }
                                         ]);
                                         let ok = await loadModel(
-                                            `/api/task/${taskId}/animations.glb`,
+                                            taskAnimationAssetUrl('glb'),
                                             'Animations GLB',
                                             0,
                                             120000
                                         );
                                         if (!ok) {
                                             window.taskDbg('[Viewer] Animations GLB unavailable; trying package FBX preview...');
-                                            ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                                            ok = await loadFBX(taskAnimationAssetUrl('fbx'), 'Animations FBX');
                                         }
                                         if (ok) {
                                             currentModelType = 'animations';
@@ -15859,14 +15884,14 @@
                                     loadingManager.show('Loading Ragdoll');
                                     loadingManager.setQueue([{ name: 'Skinned Animations GLB', status: 'pending' }]);
                                     let ok = await loadModel(
-                                        `/api/task/${taskId}/animations.glb`,
+                                        taskAnimationAssetUrl('glb'),
                                         'Skinned Animations GLB',
                                         0,
                                         120000
                                     );
                                     if (!ok) {
                                         window.taskDbg('[Viewer] Ragdoll GLB unavailable; trying package FBX preview...');
-                                        ok = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Skinned Animations FBX');
+                                        ok = await loadFBX(taskAnimationAssetUrl('fbx'), 'Skinned Animations FBX');
                                     }
                                     setLoadingUIState(false);
                                     if (ok) {
@@ -17920,7 +17945,7 @@
                     
                     const gltf = await new Promise((resolve, reject) => {
                         loader.load(
-                            `/api/task/${taskId}/animations.glb`,
+                            taskAnimationAssetUrl('glb'),
                             resolve,
                             (xhr) => {
                                 if (xhr.total > 0) {
@@ -17963,7 +17988,7 @@
                     );
                     try {
                         window.taskDbg('[Viewer] Background animation fallback: trying animations.fbx');
-                        const fbxOk = await loadFBX(`/api/task/${taskId}/animations.fbx`, 'Animations FBX');
+                        const fbxOk = await loadFBX(taskAnimationAssetUrl('fbx'), 'Animations FBX');
                         if (fbxOk) {
                             currentModelType = 'animations';
                             modelCache.animations = currentModel;
@@ -19854,7 +19879,7 @@
                         }
                     }
                     if (task.status === 'done') {
-                        return `/api/task/${taskId}/animations.glb`;
+                        return taskAnimationAssetUrl('glb');
                     }
                     if (task.prepared_glb_ready) {
                         return `/api/task/${taskId}/prepared.glb`;

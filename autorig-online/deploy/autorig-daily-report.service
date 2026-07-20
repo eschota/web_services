@@ -1,0 +1,22 @@
+[Unit]
+Description=AutoRig daily email report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/autorig-online/backend
+Environment="PATH=/root/autorig-online/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONPATH=/root/autorig-online/backend"
+EnvironmentFile=-/etc/autorig-backend.env
+ExecStart=/root/autorig-online/venv/bin/python /root/autorig-online/backend/scripts/daily_email_report.py --to eschota@gmail.com
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/root/autorig-online/backend/db
+
+[Install]
+WantedBy=multi-user.target

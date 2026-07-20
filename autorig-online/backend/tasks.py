@@ -753,7 +753,14 @@ async def _worker_conversion_completed(task: Task) -> bool:
         text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
     except Exception:
         return False
-    return "Conversion completed" in text
+    # Animal-only-rig workers continue scheduling optional cross-species
+    # variants after the requested rig, skeleton, and preview have been
+    # exported.  Their primary completion marker is therefore distinct from
+    # the legacy generic converter marker.
+    return (
+        "Conversion completed" in text
+        or "Animal primary rigging completed" in text
+    )
 
 
 def _schedule_task_error_notification(task_id: str) -> None:

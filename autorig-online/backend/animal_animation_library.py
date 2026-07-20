@@ -33,21 +33,8 @@ from database import (
 
 BACKEND_DIR = Path(__file__).resolve().parent
 TAXONOMY_PATH = BACKEND_DIR / "animal_animation_taxonomy.v1.json"
-MANIFEST_V1_SCHEMA_PATH = BACKEND_DIR / "animal_animation_manifest.v1.schema.json"
-MANIFEST_V2_SCHEMA_PATH = BACKEND_DIR / "animal_animation_manifest.v2.schema.json"
-MANIFEST_V1_SCHEMA_ID = "animal-animation-manifest.v1"
-MANIFEST_V2_SCHEMA_ID = "animal-animation-manifest.v2"
-# Backward-compatible names imported by existing callers.
-MANIFEST_SCHEMA_PATH = MANIFEST_V1_SCHEMA_PATH
-MANIFEST_SCHEMA_ID = MANIFEST_V1_SCHEMA_ID
-CLIP_ARTIFACT_FORMAT_FBX = "fbx"
-CLIP_ARTIFACT_FORMAT_THREEJS_JSON = "threejs-animation-json.v1"
-SUPPORTED_CLIP_ARTIFACT_FORMATS = (
-    CLIP_ARTIFACT_FORMAT_FBX,
-    CLIP_ARTIFACT_FORMAT_THREEJS_JSON,
-)
-PACKAGE_RESULT_SCHEMA_ID = "autorig.browser-animation-glb-package-result.v1"
-PACKAGE_RESULT_MAX_BYTES = 8 * 1024 * 1024
+MANIFEST_SCHEMA_PATH = BACKEND_DIR / "animal_animation_manifest.v1.schema.json"
+MANIFEST_SCHEMA_ID = "animal-animation-manifest.v1"
 VISUAL_PHASE_QA_SCHEMA_ID = "autorig.animation-visual-phase-qa.v1"
 VISUAL_PHASE_QA_VERSION = 1
 VISUAL_PHASE_REQUIRED_PHASES = ("start", "middle", "three_quarter")
@@ -164,145 +151,6 @@ def normalize_sha256(value: Any, field_name: str = "sha256") -> str:
     if not SHA256_RE.fullmatch(digest):
         raise AnimationLibraryError(f"{field_name} must be a 64-character lowercase SHA-256")
     return digest
-
-
-def normalize_clip_artifact_format(value: Any) -> str:
-    clip_format = str(value or "").strip().lower()
-    if clip_format not in SUPPORTED_CLIP_ARTIFACT_FORMATS:
-        raise AnimationLibraryError("Unsupported fitted clip artifact format")
-    return clip_format
-
-
-def _normalize_provenance_pins(
-    candidate_bundle_sha256: Any,
-    human_review_sha256: Any,
-    *,
-    required: bool,
-) -> tuple[Optional[str], Optional[str]]:
-    bundle_value = str(candidate_bundle_sha256 or "").strip()
-    review_value = str(human_review_sha256 or "").strip()
-    if not bundle_value and not review_value and not required:
-        return None, None
-    if not bundle_value or not review_value:
-        raise AnimationLibraryError(
-            "candidate_bundle_sha256 and human_review_sha256 must be provided together"
-        )
-    return (
-        normalize_sha256(bundle_value, "candidate_bundle_sha256"),
-        normalize_sha256(review_value, "human_review_sha256"),
-    )
-
-
-@dataclass(frozen=True)
-class ClipArtifactContract:
-    format: str
-    url: Optional[str]
-    path: Optional[str]
-    sha256: str
-    candidate_bundle_sha256: Optional[str]
-    human_review_sha256: Optional[str]
-
-
-def resolve_candidate_clip_artifact(candidate: AnimalAnimationCandidate) -> ClipArtifactContract:
-    """Return the authoritative generic clip contract for a candidate row."""
-    clip_format = normalize_clip_artifact_format(
-        getattr(candidate, "fitted_clip_format", None) or CLIP_ARTIFACT_FORMAT_FBX
-    )
-    url = str(candidate.fitted_clip_url or "").strip() or None
-    path = str(candidate.fitted_clip_path or "").strip() or None
-    if not url and not path:
-        raise AnimationLibraryError("A fitted clip URL or path is required", status_code=409)
-    bundle_sha, review_sha = _normalize_provenance_pins(
-        getattr(candidate, "candidate_bundle_sha256", None),
-        getattr(candidate, "human_review_sha256", None),
-        required=clip_format != CLIP_ARTIFACT_FORMAT_FBX,
-    )
-    return ClipArtifactContract(
-        format=clip_format,
-        url=url,
-        path=path,
-        sha256=normalize_sha256(candidate.fitted_clip_sha256, "fitted_clip_sha256"),
-        candidate_bundle_sha256=bundle_sha,
-        human_review_sha256=review_sha,
-    )
-
-
-def resolve_approved_clip_artifact(approved: AnimalAnimationApprovedClip) -> ClipArtifactContract:
-    """Resolve generic fields, falling back to legacy FBX columns for old rows."""
-    clip_format = normalize_clip_artifact_format(
-        getattr(approved, "clip_artifact_format", None) or CLIP_ARTIFACT_FORMAT_FBX
-    )
-    url = (
-        str(getattr(approved, "clip_artifact_url", None) or approved.fbx_url or "").strip()
-        or None
-    )
-    path = (
-        str(getattr(approved, "clip_artifact_path", None) or approved.fbx_path or "").strip()
-        or None
-    )
-    sha_value = getattr(approved, "clip_artifact_sha256", None) or approved.fbx_sha256
-    if not url and not path:
-        raise AnimationLibraryError("Approved clip URL or path is missing", status_code=409)
-    bundle_sha, review_sha = _normalize_provenance_pins(
-        getattr(approved, "candidate_bundle_sha256", None),
-        getattr(approved, "human_review_sha256", None),
-        required=clip_format != CLIP_ARTIFACT_FORMAT_FBX,
-    )
-    return ClipArtifactContract(
-        format=clip_format,
-        url=url,
-        path=path,
-        sha256=normalize_sha256(sha_value, "clip_artifact_sha256"),
-        candidate_bundle_sha256=bundle_sha,
-        human_review_sha256=review_sha,
-    )
-
-
-def bind_approved_clip_artifact(
-    approved: AnimalAnimationApprovedClip,
-    candidate: AnimalAnimationCandidate,
-) -> ClipArtifactContract:
-    """Copy a validated candidate contract into generic and legacy columns."""
-    clip = resolve_candidate_clip_artifact(candidate)
-    approved.clip_artifact_format = clip.format
-    approved.clip_artifact_url = clip.url
-    approved.clip_artifact_path = clip.path
-    approved.clip_artifact_sha256 = clip.sha256
-    approved.candidate_bundle_sha256 = clip.candidate_bundle_sha256
-    approved.human_review_sha256 = clip.human_review_sha256
-    # Legacy columns intentionally remain mirrors until their public API is
-    # versioned away.  clip_artifact_format tells old FBX bytes from browser JSON bytes.
-    approved.fbx_url = clip.url
-    approved.fbx_path = clip.path
-    approved.fbx_sha256 = clip.sha256
-    return clip
-
-
-def canonical_approved_clip_provenance(
-    candidate: AnimalAnimationCandidate,
-    clip: Optional[ClipArtifactContract] = None,
-) -> dict:
-    """Bind browser candidate provenance to its server-owned row identity."""
-    contract = clip or resolve_candidate_clip_artifact(candidate)
-    payload = _json_value(candidate.provenance_json, None)
-    if not isinstance(payload, dict):
-        raise AnimationLibraryError("Candidate provenance must be an object", status_code=409)
-    if not contract.candidate_bundle_sha256 or not contract.human_review_sha256:
-        return payload
-    required = {
-        "candidate_id": candidate.id,
-        "candidate_bundle_sha256": contract.candidate_bundle_sha256,
-        "human_review_sha256": contract.human_review_sha256,
-    }
-    for field_name, expected_value in required.items():
-        existing_value = payload.get(field_name)
-        if existing_value is not None and existing_value != expected_value:
-            raise AnimationLibraryError(
-                f"Candidate provenance {field_name} conflicts with the stored candidate",
-                status_code=409,
-            )
-        payload[field_name] = expected_value
-    return payload
 
 
 def canonical_json_bytes(payload: Any) -> bytes:
@@ -581,33 +429,6 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_pinned_json_file(
-    path_value: str,
-    expected_sha256: str,
-    field_name: str,
-    *,
-    max_bytes: int = PACKAGE_RESULT_MAX_BYTES,
-) -> dict:
-    path = Path(path_value)
-    if not path.is_file():
-        raise AnimationLibraryError(f"{field_name} does not exist", status_code=409)
-    size = path.stat().st_size
-    if size <= 0 or size > max_bytes:
-        raise AnimationLibraryError(f"{field_name} has an invalid size", status_code=409)
-    payload_bytes = path.read_bytes()
-    if len(payload_bytes) != size:
-        raise AnimationLibraryError(f"{field_name} changed while being read", status_code=409)
-    if hashlib.sha256(payload_bytes).hexdigest() != expected_sha256:
-        raise AnimationLibraryError(f"{field_name} SHA-256 mismatch", status_code=409)
-    try:
-        payload = json.loads(payload_bytes)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AnimationLibraryError(f"{field_name} is not valid JSON", status_code=409) from exc
-    if not isinstance(payload, dict):
-        raise AnimationLibraryError(f"{field_name} must contain a JSON object", status_code=409)
-    return payload
-
-
 def _validate_glb_path(path_value: str, expected_sha256: str) -> None:
     path = Path(path_value)
     if not path.is_file():
@@ -707,7 +528,7 @@ def validate_glb_animation_contract(path_value: str | Path, manifest: dict) -> N
             )
 
 
-def _validate_animation_manifest_v1(
+def validate_animation_manifest(
     manifest: Any,
     *,
     expected_revision: Optional[str] = None,
@@ -716,7 +537,7 @@ def _validate_animation_manifest_v1(
     expected_artifact_sha256: Optional[str] = None,
     expected_template_skeleton_sha256: Optional[str] = None,
 ) -> dict:
-    """Validate the unchanged, FBX-only v1 manifest contract."""
+    """Strict semantic validation in addition to the checked-in JSON schema."""
     if not isinstance(manifest, dict):
         raise AnimationLibraryError("Animation manifest must be an object")
     payload = json.loads(json.dumps(manifest))
@@ -819,261 +640,6 @@ def _validate_animation_manifest_v1(
     return payload
 
 
-def _validate_animation_manifest_v2(
-    manifest: Any,
-    *,
-    expected_revision: Optional[str] = None,
-    expected_rig_type: Optional[str] = None,
-    expected_orientation: Optional[str] = None,
-    expected_artifact_sha256: Optional[str] = None,
-    expected_template_skeleton_sha256: Optional[str] = None,
-    expected_package_result_sha256: Optional[str] = None,
-) -> dict:
-    """Validate browser-native clip artifacts and their immutable pins."""
-    if not isinstance(manifest, dict):
-        raise AnimationLibraryError("Animation manifest must be an object")
-    payload = json.loads(json.dumps(manifest))
-    allowed_top_level = {
-        "schema",
-        "library_revision",
-        "rig_type",
-        "orientation",
-        "template_skeleton_sha256",
-        "artifact_sha256",
-        "package_result_sha256",
-        "clips",
-        "poses",
-    }
-    if set(payload) != allowed_top_level:
-        raise AnimationLibraryError("Animation manifest top-level fields do not match v2 schema")
-    if payload.get("schema") != MANIFEST_V2_SCHEMA_ID:
-        raise AnimationLibraryError("Unsupported animation manifest schema")
-    for field_name in (
-        "library_revision",
-        "rig_type",
-        "orientation",
-        "template_skeleton_sha256",
-        "artifact_sha256",
-        "package_result_sha256",
-    ):
-        if not isinstance(payload.get(field_name), str):
-            raise AnimationLibraryError(f"{field_name} must be a string")
-
-    revision = normalize_revision(payload["library_revision"])
-    rig_type = normalize_rig_type(payload["rig_type"])
-    orientation = normalize_orientation(payload["orientation"])
-    skeleton_sha = normalize_sha256(
-        payload["template_skeleton_sha256"], "template_skeleton_sha256"
-    )
-    artifact_sha = normalize_sha256(payload["artifact_sha256"], "artifact_sha256")
-    package_result_sha = normalize_sha256(
-        payload["package_result_sha256"], "package_result_sha256"
-    )
-    if expected_revision and revision != normalize_revision(expected_revision):
-        raise AnimationLibraryError(
-            "Manifest library revision does not match the selected revision",
-            status_code=409,
-        )
-    if expected_rig_type and rig_type != normalize_rig_type(expected_rig_type):
-        raise AnimationLibraryError(
-            "Manifest rig type does not match the selected variant", status_code=409
-        )
-    if expected_orientation and orientation != normalize_orientation(expected_orientation):
-        raise AnimationLibraryError(
-            "Manifest orientation does not match the selected variant", status_code=409
-        )
-    if expected_artifact_sha256 and artifact_sha != normalize_sha256(
-        expected_artifact_sha256, "artifact_sha256"
-    ):
-        raise AnimationLibraryError(
-            "Manifest artifact SHA-256 does not match matrix metadata", status_code=409
-        )
-    if expected_template_skeleton_sha256 and skeleton_sha != normalize_sha256(
-        expected_template_skeleton_sha256, "template_skeleton_sha256"
-    ):
-        raise AnimationLibraryError(
-            "Manifest template skeleton SHA-256 does not match the library",
-            status_code=409,
-        )
-    if expected_package_result_sha256 and package_result_sha != normalize_sha256(
-        expected_package_result_sha256, "package_result_sha256"
-    ):
-        raise AnimationLibraryError(
-            "Manifest package-result SHA-256 does not match artifact metadata",
-            status_code=409,
-        )
-
-    poses = payload.get("poses")
-    if not isinstance(poses, list):
-        raise AnimationLibraryError("Manifest poses must be an array")
-    if any(not isinstance(item, dict) or not isinstance(item.get("id"), str) for item in poses):
-        raise AnimationLibraryError("Every manifest pose must have a string ID")
-    pose_ids = [item["id"] for item in poses]
-    if len(pose_ids) != len(set(pose_ids)) or not set(ANIMAL_POSE_IDS).issubset(set(pose_ids)):
-        raise AnimationLibraryError("Manifest must contain unique required pose IDs")
-
-    required_clip_keys = {
-        "id",
-        "category",
-        "order",
-        "loop",
-        "duration",
-        "fps",
-        "start_pose_id",
-        "end_pose_id",
-        "root_motion_available",
-        "qa_profile_revision",
-        "provenance",
-        "clip_artifact",
-    }
-    clips = payload.get("clips")
-    if not isinstance(clips, list) or len(clips) != 30:
-        raise AnimationLibraryError("Manifest must contain exactly 30 clips")
-    if any(not isinstance(item, dict) for item in clips):
-        raise AnimationLibraryError("Every manifest clip must be an object")
-    if [item.get("id") for item in clips] != list(ANIMAL_CLIP_IDS):
-        raise AnimationLibraryError("Manifest clips must match canonical IDs and order exactly")
-    clip_hashes: set[str] = set()
-    candidate_ids: set[str] = set()
-    candidate_bundle_hashes: set[str] = set()
-    human_review_hashes: set[str] = set()
-    for item, canonical in zip(clips, ANIMAL_CLIPS):
-        if set(item) != required_clip_keys:
-            raise AnimationLibraryError(f"Clip fields do not match v2 schema for {canonical['id']}")
-        if item["category"] != canonical["category"]:
-            raise AnimationLibraryError(f"Category mismatch for {canonical['id']}")
-        if isinstance(item["order"], bool) or not isinstance(item["order"], int):
-            raise AnimationLibraryError(f"Order must be an integer for {canonical['id']}")
-        if item["order"] != int(canonical["order"]):
-            raise AnimationLibraryError(f"Order mismatch for {canonical['id']}")
-        if item["loop"] is not bool(canonical["loop"]):
-            raise AnimationLibraryError(f"Loop policy mismatch for {canonical['id']}")
-        if item["start_pose_id"] != canonical["start_pose_id"]:
-            raise AnimationLibraryError(f"Start pose mismatch for {canonical['id']}")
-        if item["end_pose_id"] != canonical["end_pose_id"]:
-            raise AnimationLibraryError(f"End pose mismatch for {canonical['id']}")
-        if (
-            isinstance(item["duration"], bool)
-            or not isinstance(item["duration"], (int, float))
-            or isinstance(item["fps"], bool)
-            or not isinstance(item["fps"], (int, float))
-        ):
-            raise AnimationLibraryError(f"Invalid duration/fps for {canonical['id']}")
-        duration = float(item["duration"])
-        fps = float(item["fps"])
-        if not math.isfinite(duration) or not math.isfinite(fps) or duration <= 0 or fps <= 0:
-            raise AnimationLibraryError(f"Duration/fps must be positive for {canonical['id']}")
-        if not isinstance(item["root_motion_available"], bool):
-            raise AnimationLibraryError(
-                f"root_motion_available must be boolean for {canonical['id']}"
-            )
-        if (
-            not isinstance(item["qa_profile_revision"], str)
-            or not item["qa_profile_revision"].strip()
-        ):
-            raise AnimationLibraryError(f"qa_profile_revision is required for {canonical['id']}")
-
-        clip_artifact = item["clip_artifact"]
-        if not isinstance(clip_artifact, dict) or set(clip_artifact) not in (
-            {"format", "sha256"},
-            {"format", "url", "sha256"},
-        ):
-            raise AnimationLibraryError(
-                f"clip_artifact fields are invalid for {canonical['id']}"
-            )
-        clip_artifact["format"] = normalize_clip_artifact_format(clip_artifact["format"])
-        if "url" in clip_artifact:
-            clip_artifact["url"] = _validate_http_url(
-                clip_artifact["url"], f"clips.{canonical['id']}.clip_artifact.url"
-            )
-        clip_artifact["sha256"] = normalize_sha256(
-            clip_artifact["sha256"], f"clips.{canonical['id']}.clip_artifact.sha256"
-        )
-        if clip_artifact["sha256"] in clip_hashes:
-            raise AnimationLibraryError("Manifest repeats a fitted clip SHA-256")
-        clip_hashes.add(clip_artifact["sha256"])
-
-        provenance = item["provenance"]
-        if not isinstance(provenance, dict):
-            raise AnimationLibraryError(f"provenance is required for {canonical['id']}")
-        for key in ("candidate_id", "candidate_bundle_sha256", "human_review_sha256"):
-            if key not in provenance:
-                raise AnimationLibraryError(
-                    f"provenance.{key} is required for {canonical['id']}"
-                )
-        candidate_id = provenance["candidate_id"]
-        try:
-            canonical_candidate_id = str(uuid.UUID(str(candidate_id)))
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise AnimationLibraryError(
-                f"provenance.candidate_id is invalid for {canonical['id']}"
-            ) from exc
-        if candidate_id != canonical_candidate_id:
-            raise AnimationLibraryError(
-                f"provenance.candidate_id must be canonical for {canonical['id']}"
-            )
-        if canonical_candidate_id in candidate_ids:
-            raise AnimationLibraryError("Manifest repeats a candidate_id")
-        candidate_ids.add(canonical_candidate_id)
-        provenance["candidate_bundle_sha256"], provenance["human_review_sha256"] = (
-            _normalize_provenance_pins(
-                provenance["candidate_bundle_sha256"],
-                provenance["human_review_sha256"],
-                required=True,
-            )
-        )
-        if provenance["candidate_bundle_sha256"] in candidate_bundle_hashes:
-            raise AnimationLibraryError("Manifest repeats a candidate bundle SHA-256")
-        if provenance["human_review_sha256"] in human_review_hashes:
-            raise AnimationLibraryError("Manifest repeats a human review SHA-256")
-        candidate_bundle_hashes.add(provenance["candidate_bundle_sha256"])
-        human_review_hashes.add(provenance["human_review_sha256"])
-
-    payload["library_revision"] = revision
-    payload["rig_type"] = rig_type
-    payload["orientation"] = orientation
-    payload["template_skeleton_sha256"] = skeleton_sha
-    payload["artifact_sha256"] = artifact_sha
-    payload["package_result_sha256"] = package_result_sha
-    return payload
-
-
-def validate_animation_manifest(
-    manifest: Any,
-    *,
-    expected_revision: Optional[str] = None,
-    expected_rig_type: Optional[str] = None,
-    expected_orientation: Optional[str] = None,
-    expected_artifact_sha256: Optional[str] = None,
-    expected_template_skeleton_sha256: Optional[str] = None,
-    expected_package_result_sha256: Optional[str] = None,
-) -> dict:
-    """Dispatch to an explicitly supported manifest schema, failing closed."""
-    if not isinstance(manifest, dict):
-        raise AnimationLibraryError("Animation manifest must be an object")
-    schema = manifest.get("schema")
-    common = {
-        "expected_revision": expected_revision,
-        "expected_rig_type": expected_rig_type,
-        "expected_orientation": expected_orientation,
-        "expected_artifact_sha256": expected_artifact_sha256,
-        "expected_template_skeleton_sha256": expected_template_skeleton_sha256,
-    }
-    if schema == MANIFEST_V1_SCHEMA_ID:
-        if expected_package_result_sha256:
-            raise AnimationLibraryError(
-                "A v1 manifest cannot bind a package-result artifact", status_code=409
-            )
-        return _validate_animation_manifest_v1(manifest, **common)
-    if schema == MANIFEST_V2_SCHEMA_ID:
-        return _validate_animation_manifest_v2(
-            manifest,
-            **common,
-            expected_package_result_sha256=expected_package_result_sha256,
-        )
-    raise AnimationLibraryError("Unsupported animation manifest schema")
-
-
 @dataclass(frozen=True)
 class MatrixAnimationArtifact:
     rig_type: str
@@ -1144,8 +710,6 @@ class AnimationLibraryArtifactPutRequest(BaseModel):
     artifact_sha256: str
     package_zip_url: Optional[str] = None
     package_zip_path: Optional[str] = None
-    package_result_path: Optional[str] = None
-    package_result_sha256: Optional[str] = None
 
 
 class AnimationFittingJobCreateRequest(BaseModel):
@@ -1171,9 +735,6 @@ class AnimationCandidateCreateRequest(BaseModel):
     fitted_clip_url: Optional[str] = None
     fitted_clip_path: Optional[str] = None
     fitted_clip_sha256: str
-    fitted_clip_format: str = CLIP_ARTIFACT_FORMAT_FBX
-    candidate_bundle_sha256: Optional[str] = None
-    human_review_sha256: Optional[str] = None
     duration: float = Field(gt=0)
     fps: float = Field(gt=0)
     root_motion_available: bool = False
@@ -1265,27 +826,6 @@ async def put_library_artifact(
         raise AnimationLibraryError("Published library revisions are immutable", status_code=409)
     orient = normalize_orientation(orientation)
     artifact_sha = normalize_sha256(request.artifact_sha256, "artifact_sha256")
-    manifest_schema = request.manifest.get("schema") if isinstance(request.manifest, dict) else None
-    package_result_path = None
-    package_result_sha = None
-    if manifest_schema == MANIFEST_V2_SCHEMA_ID:
-        if not request.package_result_path or not request.package_result_sha256:
-            raise AnimationLibraryError(
-                "A v2 artifact requires package_result_path and package_result_sha256"
-            )
-        package_result_sha = normalize_sha256(
-            request.package_result_sha256, "package_result_sha256"
-        )
-        package_result_path = _validated_runtime_path(
-            request.package_result_path, library_root, "package_result_path"
-        )
-        package_result = _read_pinned_json_file(
-            package_result_path, package_result_sha, "package_result_path"
-        )
-        if package_result.get("schema") != PACKAGE_RESULT_SCHEMA_ID:
-            raise AnimationLibraryError("Unsupported package-result schema", status_code=409)
-    elif request.package_result_path or request.package_result_sha256:
-        raise AnimationLibraryError("Only a v2 manifest may bind a package-result artifact")
     manifest = validate_animation_manifest(
         request.manifest,
         expected_revision=version.revision,
@@ -1293,7 +833,6 @@ async def put_library_artifact(
         expected_orientation=orient,
         expected_artifact_sha256=artifact_sha,
         expected_template_skeleton_sha256=version.template_skeleton_sha256,
-        expected_package_result_sha256=package_result_sha,
     )
     calculated_manifest_sha = manifest_sha256(manifest)
     if request.manifest_sha256 and normalize_sha256(request.manifest_sha256, "manifest_sha256") != calculated_manifest_sha:
@@ -1323,8 +862,6 @@ async def put_library_artifact(
     artifact.animation_clip_count = 30
     artifact.package_zip_url = zip_url
     artifact.package_zip_path = zip_path
-    artifact.package_result_path = package_result_path
-    artifact.package_result_sha256 = package_result_sha
     artifact.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(artifact)
@@ -1418,18 +955,8 @@ async def add_fitting_candidate(
     if not job:
         raise AnimationLibraryError("Fitting job not found", status_code=404)
     fitted_sha = normalize_sha256(request.fitted_clip_sha256, "fitted_clip_sha256")
-    fitted_format = normalize_clip_artifact_format(request.fitted_clip_format)
-    candidate_bundle_sha, human_review_sha = _normalize_provenance_pins(
-        request.candidate_bundle_sha256,
-        request.human_review_sha256,
-        required=fitted_format != CLIP_ARTIFACT_FORMAT_FBX,
-    )
     if not request.fitted_clip_url and not request.fitted_clip_path:
         raise AnimationLibraryError("A fitted clip URL or path is required")
-    if fitted_format == CLIP_ARTIFACT_FORMAT_THREEJS_JSON and not request.fitted_clip_path:
-        raise AnimationLibraryError(
-            "A browser clip requires a server-pinned fitted_clip_path"
-        )
     raw_video_url = _validate_http_url(request.raw_video_url, "raw_video_url") if request.raw_video_url else None
     fitted_clip_url = _validate_http_url(request.fitted_clip_url, "fitted_clip_url") if request.fitted_clip_url else None
     raw_video_path = (
@@ -1468,9 +995,6 @@ async def add_fitting_candidate(
             fitted_clip_url,
             fitted_clip_path,
             fitted_sha,
-            fitted_format,
-            candidate_bundle_sha,
-            human_review_sha,
             float(request.duration),
             float(request.fps),
             bool(request.root_motion_available),
@@ -1487,9 +1011,6 @@ async def add_fitting_candidate(
             existing.fitted_clip_url,
             existing.fitted_clip_path,
             existing.fitted_clip_sha256,
-            existing.fitted_clip_format or CLIP_ARTIFACT_FORMAT_FBX,
-            existing.candidate_bundle_sha256,
-            existing.human_review_sha256,
             float(existing.duration or 0),
             float(existing.fps or 0),
             bool(existing.root_motion_available),
@@ -1528,9 +1049,6 @@ async def add_fitting_candidate(
         fitted_clip_url=fitted_clip_url,
         fitted_clip_path=fitted_clip_path,
         fitted_clip_sha256=fitted_sha,
-        fitted_clip_format=fitted_format,
-        candidate_bundle_sha256=candidate_bundle_sha,
-        human_review_sha256=human_review_sha,
         duration=request.duration,
         fps=request.fps,
         root_motion_available=request.root_motion_available,
@@ -1602,12 +1120,11 @@ async def decide_fitting_candidate(
         raise AnimationLibraryError("Only an automatically ranked top-3 candidate can be approved", status_code=409)
     if not candidate.fitted_clip_sha256 or not candidate.duration or not candidate.fps:
         raise AnimationLibraryError("Candidate fitted clip metadata is incomplete", status_code=409)
-    candidate_clip = resolve_candidate_clip_artifact(candidate)
     validate_visual_phase_gate(
         _json_value(candidate.metrics_json, None),
         expected_rig_type=job.rig_type,
         expected_semantic_id=job.semantic_id,
-        expected_fitted_clip_sha256=candidate_clip.sha256,
+        expected_fitted_clip_sha256=candidate.fitted_clip_sha256,
     )
     clip = taxonomy_clip(job.semantic_id)
     if approved is None:
@@ -1637,15 +1154,11 @@ async def decide_fitting_candidate(
     approved.end_pose_id = clip["end_pose_id"]
     approved.root_motion_available = bool(candidate.root_motion_available)
     approved.qa_profile_revision = version.qa_profile_revision
-    bind_approved_clip_artifact(approved, candidate)
+    approved.fbx_url = candidate.fitted_clip_url
+    approved.fbx_path = candidate.fitted_clip_path
+    approved.fbx_sha256 = candidate.fitted_clip_sha256
     approved.metrics_json = candidate.metrics_json
-    if candidate_clip.candidate_bundle_sha256 and candidate_clip.human_review_sha256:
-        approved.provenance_json = _json_text(
-            canonical_approved_clip_provenance(candidate, candidate_clip)
-        )
-    else:
-        # Preserve the legacy v1 FBX behavior and bytes exactly.
-        approved.provenance_json = candidate.provenance_json
+    approved.provenance_json = candidate.provenance_json
     approved.approved_by = admin_email
     approved.approved_at = now
     candidate.decision = "approved"
@@ -1740,169 +1253,6 @@ async def current_activation(
     return (row[0], row[1]) if row else None
 
 
-def _validate_package_snapshot_descriptor(value: Any, field_name: str) -> dict:
-    descriptor = _require_exact_object_keys(
-        value, field_name, ("path", "bytes", "sha256")
-    )
-    path_value = descriptor["path"]
-    if (
-        not isinstance(path_value, str)
-        or not path_value.strip()
-        or path_value != path_value.strip()
-        or len(path_value) > 4096
-    ):
-        raise AnimationLibraryError(f"{field_name}.path is invalid", status_code=409)
-    byte_count = descriptor["bytes"]
-    if isinstance(byte_count, bool) or not isinstance(byte_count, int) or byte_count <= 0:
-        raise AnimationLibraryError(f"{field_name}.bytes is invalid", status_code=409)
-    descriptor["sha256"] = normalize_sha256(
-        descriptor["sha256"], f"{field_name}.sha256"
-    )
-    return descriptor
-
-
-def validate_package_result_contract(
-    package_result: Any,
-    *,
-    version: AnimalAnimationLibraryVersion,
-    artifact: AnimalAnimationLibraryArtifact,
-    approved: Sequence[AnimalAnimationApprovedClip],
-) -> dict:
-    """Cross-pin the browser packager completion marker to stored approvals."""
-    package_result = _require_exact_object_keys(
-        package_result,
-        "package_result",
-        (
-            "schema",
-            "library_revision",
-            "rig_type",
-            "orientation",
-            "template_skeleton_sha256",
-            "taxonomy",
-            "source",
-            "input_manifest",
-            "clips",
-            "output",
-            "source_bin_prefix_bytes",
-            "animation_count",
-        ),
-    )
-    if package_result.get("schema") != PACKAGE_RESULT_SCHEMA_ID:
-        raise AnimationLibraryError("Unsupported package-result schema", status_code=409)
-    if normalize_revision(package_result.get("library_revision")) != version.revision:
-        raise AnimationLibraryError("Package-result revision mismatch", status_code=409)
-    if normalize_rig_type(package_result.get("rig_type")) != version.rig_type:
-        raise AnimationLibraryError("Package-result rig type mismatch", status_code=409)
-    if normalize_orientation(package_result.get("orientation")) != artifact.orientation:
-        raise AnimationLibraryError("Package-result orientation mismatch", status_code=409)
-    if normalize_sha256(
-        package_result.get("template_skeleton_sha256"),
-        "package_result.template_skeleton_sha256",
-    ) != normalize_sha256(version.template_skeleton_sha256, "template_skeleton_sha256"):
-        raise AnimationLibraryError("Package-result skeleton pin mismatch", status_code=409)
-    animation_count = package_result.get("animation_count")
-    if isinstance(animation_count, bool) or animation_count != 30:
-        raise AnimationLibraryError("Package result must declare exactly 30 animations", status_code=409)
-    taxonomy = _validate_package_snapshot_descriptor(
-        package_result["taxonomy"], "package_result.taxonomy"
-    )
-    checked_taxonomy_bytes = TAXONOMY_PATH.read_bytes()
-    if taxonomy["bytes"] != len(checked_taxonomy_bytes) or taxonomy["sha256"] != hashlib.sha256(
-        checked_taxonomy_bytes
-    ).hexdigest():
-        raise AnimationLibraryError(
-            "Package-result taxonomy pin differs from the checked-in taxonomy",
-            status_code=409,
-        )
-    _validate_package_snapshot_descriptor(package_result["source"], "package_result.source")
-    _validate_package_snapshot_descriptor(
-        package_result["input_manifest"], "package_result.input_manifest"
-    )
-    output = _validate_package_snapshot_descriptor(
-        package_result["output"], "package_result.output"
-    )
-    artifact_path = Path(str(artifact.animation_glb_path or ""))
-    if not artifact_path.is_file():
-        raise AnimationLibraryError("Stored animation GLB is missing", status_code=409)
-    if output["sha256"] != normalize_sha256(artifact.artifact_sha256, "artifact_sha256"):
-        raise AnimationLibraryError("Package-result GLB pin mismatch", status_code=409)
-    if output["bytes"] != artifact_path.stat().st_size:
-        raise AnimationLibraryError("Package-result GLB byte count mismatch", status_code=409)
-    source_bin_prefix_bytes = package_result["source_bin_prefix_bytes"]
-    if (
-        isinstance(source_bin_prefix_bytes, bool)
-        or not isinstance(source_bin_prefix_bytes, int)
-        or source_bin_prefix_bytes <= 0
-        or source_bin_prefix_bytes >= output["bytes"]
-    ):
-        raise AnimationLibraryError(
-            "Package-result source_bin_prefix_bytes is invalid", status_code=409
-        )
-
-    rows = package_result.get("clips")
-    if not isinstance(rows, list) or len(rows) != 30:
-        raise AnimationLibraryError("Package result must contain exactly 30 clip pins", status_code=409)
-    if [row.get("semantic_id") if isinstance(row, dict) else None for row in rows] != list(
-        ANIMAL_CLIP_IDS
-    ):
-        raise AnimationLibraryError("Package-result clips are incomplete or unordered", status_code=409)
-    for row, approved_clip in zip(rows, approved):
-        clip = resolve_approved_clip_artifact(approved_clip)
-        row = _require_exact_object_keys(
-            row,
-            f"package_result.clips.{approved_clip.semantic_id}",
-            (
-                "semantic_id",
-                "path",
-                "bytes",
-                "sha256",
-                "duration",
-                "track_count",
-                "candidate_id",
-                "candidate_bundle_sha256",
-                "human_review_sha256",
-            ),
-        )
-        _validate_package_snapshot_descriptor(
-            {key: row[key] for key in ("path", "bytes", "sha256")},
-            f"package_result.clips.{approved_clip.semantic_id}",
-        )
-        duration = row["duration"]
-        if (
-            isinstance(duration, bool)
-            or not isinstance(duration, (int, float))
-            or not math.isfinite(float(duration))
-            or float(duration) <= 0
-            or abs(float(duration) - float(approved_clip.duration)) > 1e-6
-        ):
-            raise AnimationLibraryError(
-                f"Package-result duration differs for {approved_clip.semantic_id}",
-                status_code=409,
-            )
-        track_count = row["track_count"]
-        if isinstance(track_count, bool) or not isinstance(track_count, int) or track_count <= 0:
-            raise AnimationLibraryError(
-                f"Package-result track_count is invalid for {approved_clip.semantic_id}",
-                status_code=409,
-            )
-        expected_values = {
-            "sha256": clip.sha256,
-            "candidate_id": approved_clip.candidate_id,
-            "candidate_bundle_sha256": clip.candidate_bundle_sha256,
-            "human_review_sha256": clip.human_review_sha256,
-        }
-        for field_name, expected in expected_values.items():
-            actual = row.get(field_name)
-            if field_name.endswith("sha256"):
-                actual = normalize_sha256(actual, f"package_result.clips.{field_name}")
-            if actual != expected:
-                raise AnimationLibraryError(
-                    f"Package-result {field_name} differs for {approved_clip.semantic_id}",
-                    status_code=409,
-                )
-    return package_result
-
-
 async def _validate_activation_contents(
     db: AsyncSession,
     version: AnimalAnimationLibraryVersion,
@@ -1918,12 +1268,11 @@ async def _validate_activation_contents(
     if [row.semantic_id for row in approved] != list(ANIMAL_CLIP_IDS):
         raise AnimationLibraryError("All 30 canonical clips must be approved before activation", status_code=409)
     for approved_clip in approved:
-        approved_artifact = resolve_approved_clip_artifact(approved_clip)
         validate_visual_phase_gate(
             _json_value(approved_clip.metrics_json, None),
             expected_rig_type=version.rig_type,
             expected_semantic_id=approved_clip.semantic_id,
-            expected_fitted_clip_sha256=approved_artifact.sha256,
+            expected_fitted_clip_sha256=approved_clip.fbx_sha256,
         )
     artifact_result = await db.execute(
         select(AnimalAnimationLibraryArtifact).where(
@@ -1942,30 +1291,10 @@ async def _validate_activation_contents(
             expected_orientation=orientation,
             expected_artifact_sha256=artifact.artifact_sha256,
             expected_template_skeleton_sha256=version.template_skeleton_sha256,
-            expected_package_result_sha256=artifact.package_result_sha256,
         )
         if artifact.animation_clip_count != 30 or manifest_sha256(manifest) != artifact.manifest_sha256:
             raise AnimationLibraryError("Stored manifest metadata is inconsistent", status_code=409)
-        required_clip_format = (
-            CLIP_ARTIFACT_FORMAT_FBX
-            if manifest["schema"] == MANIFEST_V1_SCHEMA_ID
-            else CLIP_ARTIFACT_FORMAT_THREEJS_JSON
-        )
         for manifest_clip, approved_clip in zip(manifest["clips"], approved):
-            approved_artifact = resolve_approved_clip_artifact(approved_clip)
-            if approved_artifact.format != required_clip_format:
-                raise AnimationLibraryError(
-                    f"{manifest['schema']} cannot activate {approved_artifact.format} clips",
-                    status_code=409,
-                )
-            if (
-                approved_clip.qa_profile_revision != version.qa_profile_revision
-                or manifest_clip["qa_profile_revision"] != approved_clip.qa_profile_revision
-            ):
-                raise AnimationLibraryError(
-                    f"QA profile revision differs for {approved_clip.semantic_id}",
-                    status_code=409,
-                )
             if abs(float(manifest_clip["duration"]) - float(approved_clip.duration)) > 1e-6:
                 raise AnimationLibraryError(
                     f"Manifest duration differs from approved clip {approved_clip.semantic_id}",
@@ -1987,64 +1316,6 @@ async def _validate_activation_contents(
                     f"Manifest provenance differs from approved clip {approved_clip.semantic_id}",
                     status_code=409,
                 )
-            if manifest["schema"] == MANIFEST_V2_SCHEMA_ID:
-                clip_artifact = manifest_clip["clip_artifact"]
-                expected_clip_values = {
-                    "format": approved_artifact.format,
-                    "sha256": approved_artifact.sha256,
-                }
-                for field_name, expected_value in expected_clip_values.items():
-                    if clip_artifact[field_name] != expected_value:
-                        raise AnimationLibraryError(
-                            f"Manifest clip artifact differs for {approved_clip.semantic_id}",
-                            status_code=409,
-                        )
-                if "url" in clip_artifact and clip_artifact["url"] != approved_artifact.url:
-                    raise AnimationLibraryError(
-                        f"Manifest clip artifact URL differs for {approved_clip.semantic_id}",
-                        status_code=409,
-                    )
-                if (
-                    provenance.get("candidate_bundle_sha256")
-                    != approved_artifact.candidate_bundle_sha256
-                    or provenance.get("human_review_sha256")
-                    != approved_artifact.human_review_sha256
-                ):
-                    raise AnimationLibraryError(
-                        f"Manifest provenance pins differ for {approved_clip.semantic_id}",
-                        status_code=409,
-                    )
-                stored_provenance = _json_value(approved_clip.provenance_json, None)
-                if not isinstance(stored_provenance, dict) or canonical_json_bytes(
-                    provenance
-                ) != canonical_json_bytes(stored_provenance):
-                    raise AnimationLibraryError(
-                        f"Manifest full provenance differs for {approved_clip.semantic_id}",
-                        status_code=409,
-                    )
-        if manifest["schema"] == MANIFEST_V2_SCHEMA_ID:
-            if not artifact.package_result_path or not artifact.package_result_sha256:
-                raise AnimationLibraryError(
-                    "A v2 artifact is missing its package-result pin", status_code=409
-                )
-            result_path = _validated_runtime_path(
-                artifact.package_result_path, library_root, "package_result_path"
-            )
-            package_result = _read_pinned_json_file(
-                result_path,
-                normalize_sha256(artifact.package_result_sha256, "package_result_sha256"),
-                "package_result_path",
-            )
-            validate_package_result_contract(
-                package_result,
-                version=version,
-                artifact=artifact,
-                approved=approved,
-            )
-        elif artifact.package_result_path or artifact.package_result_sha256:
-            raise AnimationLibraryError(
-                "A v1 artifact cannot bind package-result metadata", status_code=409
-            )
         path = _validated_runtime_path(artifact.animation_glb_path, library_root, "animation_glb_path")
         _validate_glb_path(path, artifact.artifact_sha256)
         validate_glb_animation_contract(path, manifest)
@@ -2156,7 +1427,6 @@ def serialize_library_version(
                 "artifact_sha256": item.artifact_sha256,
                 "animation_clip_count": item.animation_clip_count,
                 "package_zip_url": item.package_zip_url,
-                "package_result_sha256": item.package_result_sha256,
             }
             for item in sorted(artifacts, key=lambda row: row.orientation)
         ],
@@ -2171,10 +1441,7 @@ def serialize_candidate(candidate: AnimalAnimationCandidate) -> dict:
         "status": candidate.status,
         "raw_video_url": candidate.raw_video_url,
         "fitted_clip_url": candidate.fitted_clip_url,
-        "fitted_clip_format": candidate.fitted_clip_format or CLIP_ARTIFACT_FORMAT_FBX,
         "fitted_clip_sha256": candidate.fitted_clip_sha256,
-        "candidate_bundle_sha256": candidate.candidate_bundle_sha256,
-        "human_review_sha256": candidate.human_review_sha256,
         "duration": candidate.duration,
         "fps": candidate.fps,
         "root_motion_available": candidate.root_motion_available,
