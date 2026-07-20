@@ -33,7 +33,7 @@ export function sampleAdaptiveQuality(state, sample = {}) {
         return { state: current, change: null };
     }
 
-    const isLow = fps < 29;
+    const isLow = fps < 29 || (Number.isFinite(p95FrameTime) && p95FrameTime > 42);
     const isSevere = fps < 20;
     const isHealthy = fps > 45 && Number.isFinite(p95FrameTime) && p95FrameTime < 28;
 

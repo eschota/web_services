@@ -27,6 +27,17 @@ test('degrades after two seconds below 20 FPS', () => {
     assert.equal(result.state.mode, 'low');
 });
 
+test('degrades after sustained p95 frame time above 42 ms', () => {
+    let state = adaptive.createAdaptiveQualityState({ mode: 'low' });
+    let result;
+    for (let second = 1; second <= 3; second += 1) {
+        result = adaptive.sampleAdaptiveQuality(state, { fps: 34, p95FrameTime: 48, now: second * 1000 });
+        state = result.state;
+    }
+    assert.equal(state.mode, 'emergency');
+    assert.equal(result.change?.to, 'emergency');
+});
+
 test('recovers one level only after twelve healthy seconds', () => {
     let state = adaptive.createAdaptiveQualityState({ mode: 'low' });
     let result;
