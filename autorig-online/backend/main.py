@@ -965,6 +965,25 @@ app.state.limiter = limiter
 app.include_router(namecheap_remote_router)
 
 
+def _disabled_viewer_feature_for_path(path: str) -> Optional[str]:
+    if not ANIMATION_FITTING_ENABLED and path.startswith("/api/admin/animation-fitting"):
+        return "Animation fitting"
+    if not BONE_CORRECTION_ENABLED and path.startswith("/api/task/") and "/animation-corrections" in path:
+        return "Bone correction"
+    return None
+
+
+@app.middleware("http")
+async def disabled_viewer_feature_guard(request: Request, call_next):
+    feature_name = _disabled_viewer_feature_for_path(request.url.path)
+    if feature_name:
+        return JSONResponse(
+            status_code=410,
+            content={"detail": f"{feature_name} is temporarily disabled"},
+        )
+    return await call_next(request)
+
+
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(

@@ -1,0 +1,58 @@
+{
+  "date": "2026-07-20",
+  "production_commit": "3b00c41df51f04139f0d374ae5d2064118d2ef1f",
+  "task_id": "32958302-e3b5-48e8-8df7-5fb30962aacf",
+  "baseline": {
+    "fps": "8-9",
+    "p95_frame_ms": "133-167",
+    "viewports": 4,
+    "bone_correction_cpu_percent": 67
+  },
+  "steady_state": [
+    {
+      "viewport": "1477x912",
+      "fps": 44,
+      "p95_frame_ms": 36,
+      "quality_profile": "emergency"
+    },
+    {
+      "viewport": "1016x912",
+      "fps": 44,
+      "p95_frame_ms": 34,
+      "quality_profile": "emergency"
+    },
+    {
+      "viewport": "390x844",
+      "fps": 39,
+      "p95_frame_ms": 38,
+      "quality_profile": "low"
+    }
+  ],
+  "viewer": {
+    "viewports": 3,
+    "canvas_css_px": "806x453",
+    "canvas_emergency_px": "523x294",
+    "dom_elements": 1094,
+    "cdp_nodes": 3883,
+    "js_heap_bytes": 71926948,
+    "model_vertices_glb": 71765,
+    "model_meshes_glb": 31,
+    "video": "H.264 540x960 30fps"
+  },
+  "cdp_cpu_profile_10_seconds": {
+    "note": "Profiler overhead temporarily produced 33 FPS and p95 44 ms; steady state returned to 41 FPS and p95 38 ms after profiling.",
+    "top_self_time_ms": [
+      {"function": "texSubImage2D", "milliseconds": 6942},
+      {"function": "(program)", "milliseconds": 625},
+      {"function": "multiplyMatrices", "milliseconds": 211},
+      {"function": "getRects", "milliseconds": 92},
+      {"function": "needsUpdate", "milliseconds": 79},
+      {"function": "WebGLRenderer.renderBufferDirect", "milliseconds": 60}
+    ]
+  },
+  "acceptance": {
+    "minimum_fps": 30,
+    "maximum_p95_frame_ms": 42,
+    "steady_state_passed": true
+  }
+}

@@ -226,7 +226,18 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("nested/Happy%20Walk.fbx", direct_urls[0])
 
     async def test_disabled_viewer_modules_return_410_before_data_access(self):
+        with patch.object(self.main, "ANIMATION_FITTING_ENABLED", False):
+            self.assertEqual(
+                self.main._disabled_viewer_feature_for_path("/api/admin/animation-fitting/jobs"),
+                "Animation fitting",
+            )
         with patch.object(self.main, "BONE_CORRECTION_ENABLED", False):
+            self.assertEqual(
+                self.main._disabled_viewer_feature_for_path(
+                    f"/api/task/{self.task_id}/animation-corrections"
+                ),
+                "Bone correction",
+            )
             with self.assertRaises(self.main.HTTPException) as bone_error:
                 await self.main.api_get_task_animation_corrections(
                     self.task_id,
