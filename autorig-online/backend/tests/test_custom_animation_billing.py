@@ -184,6 +184,54 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             await db.refresh(owner)
             self.assertEqual(owner.balance_credits, 10)
 
+    async def test_anonymous_task_owner_state_and_google_claim(self):
+        anon_task_id = "33333333-4444-5555-6666-777777777777"
+        anon_id = "anonymous-task-owner"
+        async with self.database.AsyncSessionLocal() as db:
+            task = self.database.Task(
+                id=anon_task_id,
+                owner_type="anon",
+                owner_id=anon_id,
+                created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                status="processing",
+            )
+            db.add(task)
+            await db.commit()
+
+            request = self._fake_request(
+                method="GET",
+                path=f"/api/task/{anon_task_id}/purchases",
+                headers=[(b"cookie", f"{self.main.ANON_COOKIE}={anon_id}".encode("ascii"))],
+            )
+            state = await self.main.api_get_purchase_state(
+                anon_task_id,
+                request=request,
+                response=Response(),
+                user=None,
+                db=db,
+            )
+            self.assertTrue(state.is_owner)
+            self.assertTrue(state.login_required)
+
+            claimed = await self.main._claim_anonymous_task_for_user(
+                db,
+                anon_task_id,
+                anon_id,
+                "Owner@Example.com",
+            )
+            self.assertTrue(claimed)
+            await db.refresh(task)
+            self.assertEqual(task.owner_type, "user")
+            self.assertEqual(task.owner_id, "owner@example.com")
+
+            claimed_again = await self.main._claim_anonymous_task_for_user(
+                db,
+                anon_task_id,
+                anon_id,
+                "owner@example.com",
+            )
+            self.assertFalse(claimed_again)
+
     async def test_freestock_worker_paths_survive_gateway_decode(self):
         class DummyResponse:
             status_code = 200

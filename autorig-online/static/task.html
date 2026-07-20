@@ -449,6 +449,63 @@
             color: var(--text-primary);
             border-color: var(--accent);
         }
+        .task-anon-notice-dialog {
+            position: fixed;
+            inset: 0;
+            width: min(430px, calc(100vw - 1.5rem));
+            max-width: min(430px, calc(100vw - 1.5rem));
+            height: fit-content;
+            margin: auto;
+            border: 1px solid rgba(var(--accent-rgb), 0.35);
+            border-radius: 8px;
+            padding: 0;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            box-shadow: var(--shadow-lg);
+            font-family: inherit;
+            overflow: visible;
+            z-index: 5000;
+        }
+        .task-anon-notice-dialog::backdrop {
+            background: rgba(6, 8, 18, 0.7);
+            backdrop-filter: blur(4px);
+        }
+        .task-anon-notice-dialog__inner {
+            position: relative;
+            padding: 1.4rem 1.25rem 1.2rem;
+        }
+        .task-anon-notice-dialog__close {
+            position: absolute;
+            top: 0.45rem;
+            right: 0.45rem;
+            width: 44px;
+            height: 44px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 2rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .task-anon-notice-dialog__close:hover {
+            color: var(--text-primary);
+        }
+        .task-anon-notice-dialog__copy {
+            margin: 0 2.5rem 0.7rem 0;
+            font-size: 0.95rem;
+            line-height: 1.45;
+        }
+        .task-anon-notice-dialog__copy + .task-anon-notice-dialog__copy {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+        .task-anon-notice-dialog__login {
+            width: 100%;
+            min-height: 44px;
+        }
         .task-paywall-login {
             display: flex;
             align-items: center;
@@ -5074,6 +5131,15 @@
         </div>
     </dialog>
 
+    <dialog id="task-anon-notice-dialog" class="task-anon-notice-dialog" aria-labelledby="task-anon-notice-title">
+        <div class="task-anon-notice-dialog__inner">
+            <button type="button" class="task-anon-notice-dialog__close" id="task-anon-notice-close" aria-label="Закрыть">&times;</button>
+            <p class="task-anon-notice-dialog__copy" id="task-anon-notice-title">Среднее время ожидания создания рига ~15 минут.</p>
+            <p class="task-anon-notice-dialog__copy">Авторизуйтесь через Google, чтобы получить однократное уведомление о готовности рига на вашу почту.</p>
+            <button type="button" class="btn btn-primary task-anon-notice-dialog__login" id="task-anon-notice-login">Авторизоваться через Google</button>
+        </div>
+    </dialog>
+
     <!-- Owner Tasks Modal -->
     <div id="owner-tasks-modal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 2rem;">
         <div class="card" style="min-width: 900px; max-width: 1100px; max-height: 90vh; display: flex; flex-direction: column;">
@@ -5560,6 +5626,9 @@
             videoPreviewVisible: true,
             videoPreviewBound: false,
             deferredEnhancementsScheduled: false,
+            anonymousCreatorNoticeStartedAt: Date.now(),
+            anonymousCreatorNoticeDelayMs: 5000,
+            anonymousCreatorNoticeTimer: null,
             
             async init() {
                 // Init i18n
@@ -5612,6 +5681,7 @@
                 this.setupButtons();
                 this.setupCustomAnimationPicker();
                 this.scheduleDeferredEnhancements();
+                this.scheduleAnonymousCreatorNotice();
 
                 if (!this.__languageChangeBound) {
                     this.__languageChangeBound = true;
@@ -7051,6 +7121,43 @@
 
             paywallLoginUrl() {
                 return '/auth/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+            },
+
+            scheduleAnonymousCreatorNotice() {
+                if (this.anonymousCreatorNoticeTimer) return;
+                const elapsed = Date.now() - this.anonymousCreatorNoticeStartedAt;
+                const delay = Math.max(0, this.anonymousCreatorNoticeDelayMs - elapsed);
+                this.anonymousCreatorNoticeTimer = window.setTimeout(() => {
+                    this.anonymousCreatorNoticeTimer = null;
+                    this.openAnonymousCreatorNotice();
+                }, delay);
+            },
+
+            openAnonymousCreatorNotice() {
+                const dialog = document.getElementById('task-anon-notice-dialog');
+                const isAwaitingRig = this.task && !['done', 'error'].includes(this.task.status);
+                const isAnonymousCreator = Boolean(
+                    this.purchaseState?.loaded &&
+                    this.purchaseState?.login_required &&
+                    this.purchaseState?.is_owner &&
+                    !this.authUser?.email
+                );
+                if (!dialog || dialog.dataset.shown === 'true' || !isAwaitingRig || !isAnonymousCreator) {
+                    return;
+                }
+
+                dialog.dataset.shown = 'true';
+                if (!dialog.__anonymousCreatorNoticeWired) {
+                    dialog.__anonymousCreatorNoticeWired = true;
+                    document.getElementById('task-anon-notice-close')?.addEventListener('click', () => dialog.close());
+                    document.getElementById('task-anon-notice-login')?.addEventListener('click', () => {
+                        window.location.href = this.paywallLoginUrl();
+                    });
+                    dialog.addEventListener('click', (event) => {
+                        if (event.target === dialog) dialog.close();
+                    });
+                }
+                dialog.showModal();
             },
 
             gumroadPaywallUrl(permalink) {

@@ -2204,6 +2204,32 @@ async def _try_auto_unlock_pending_checkout(
 # =============================================================================
 # Authentication Endpoints
 # =============================================================================
+async def _claim_anonymous_task_for_user(
+    db: AsyncSession,
+    task_id: Optional[str],
+    anon_id: Optional[str],
+    user_email: Optional[str],
+) -> bool:
+    """Transfer the task opened before Google OAuth to the signed-in user."""
+    task_id = str(task_id or "").strip()
+    anon_id = str(anon_id or "").strip()
+    user_email = str(user_email or "").strip().lower()
+    if not task_id or not anon_id or not user_email:
+        return False
+
+    result = await db.execute(
+        update(Task)
+        .where(
+            Task.id == task_id,
+            Task.owner_type == "anon",
+            Task.owner_id == anon_id,
+        )
+        .values(owner_type="user", owner_id=user_email)
+    )
+    await db.commit()
+    return bool(result.rowcount)
+
+
 @app.get("/auth/login")
 async def auth_login(request: Request, next: Optional[str] = None):
     """Redirect to Google OAuth"""
@@ -2261,15 +2287,15 @@ async def auth_callback(
         picture=user_info.get("picture"),
         anon_session=anon_session
     )
-    
-    # Create session
-    session_token = await create_session(db, user.id)
-    
-    # Get return URL from cookie (saved during /auth/login)
+
     next_url = request.cookies.get("auth_next", "/")
-    # Security: ensure it's a relative URL
     if not next_url.startswith("/"):
         next_url = "/"
+    next_task_id = dict(parse_qsl(urlparse(next_url).query)).get("id")
+    await _claim_anonymous_task_for_user(db, next_task_id, anon_id, user.email)
+
+    # Create session
+    session_token = await create_session(db, user.id)
     
     # Set session cookie and redirect to original page
     redirect = RedirectResponse(url=next_url, status_code=302)
@@ -6977,7 +7003,7 @@ async def api_get_purchase_state(
         return PurchaseStateResponse(
             purchased_all=False,
             purchased_files=[],
-            is_owner=False,
+            is_owner=is_owner,
             login_required=True,
             user_credits=0,
             all_files_credits=_download_all_files_cost(task),

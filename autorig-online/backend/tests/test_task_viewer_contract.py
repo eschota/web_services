@@ -39,6 +39,15 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertNotIn('id="manual-rig-restart-status"', self.html)
         self.assertNotIn("action.textContent = `Started ${selectedLabel} rig task`;", self.html)
 
+    def test_anonymous_creator_notice_contract(self):
+        self.assertIn('id="task-anon-notice-dialog"', self.html)
+        self.assertIn("Среднее время ожидания создания рига ~15 минут.", self.html)
+        self.assertIn("Авторизуйтесь через Google, чтобы получить однократное уведомление", self.html)
+        self.assertIn("anonymousCreatorNoticeDelayMs: 5000", self.html)
+        self.assertIn("this.purchaseState?.login_required", self.html)
+        self.assertIn("this.purchaseState?.is_owner", self.html)
+        self.assertIn("if (event.target === dialog) dialog.close();", self.html)
+
 
 if __name__ == "__main__":
     unittest.main()
