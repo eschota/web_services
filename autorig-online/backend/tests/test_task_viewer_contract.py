@@ -56,6 +56,7 @@ class TaskViewerContractTests(unittest.TestCase):
 
     def test_animal_animation_selection_loads_variant_fbx(self):
         self.assertIn('shouldLoadAnimalVariantPreview', self.html)
+        self.assertIn("animation-preview-policy.js?v=3", self.html)
         self.assertIn('window.TaskVariantPreviewBridge', self.html)
         self.assertIn("currentModelType !== 'variant'", self.html)
 
