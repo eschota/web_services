@@ -3267,7 +3267,12 @@
             flex-wrap: nowrap;
             gap: 0.35rem;
             overflow-x: auto;
+            overflow-y: hidden;
             min-width: 0;
+            scrollbar-width: none;
+        }
+        .manual-rig-type-grid::-webkit-scrollbar {
+            display: none;
         }
         .manual-rig-restart-actions {
             display: flex;
