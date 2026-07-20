@@ -103,6 +103,14 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(walking)
             self.assertTrue(walking.available)
             self.assertEqual(walking.credits, 10)
+            self.assertEqual(
+                walking.download_url,
+                f"/api/task/{self.task_id}/animations/download/walking",
+            )
+            self.assertEqual(
+                walking.download_with_base_url,
+                f"/api/task/{self.task_id}/animations/download-with-base/walking",
+            )
 
             # Legacy single-animation purchase creates the full task unlock: -10 credits.
             c0 = buyer.balance_credits
@@ -175,6 +183,63 @@ class CustomAnimationBillingTests(unittest.IsolatedAsyncioTestCase):
 
             await db.refresh(owner)
             self.assertEqual(owner.balance_credits, 10)
+
+    async def test_freestock_worker_paths_survive_gateway_decode(self):
+        class DummyResponse:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {
+                    "folders": {
+                        "animations": {
+                            "files": [
+                                {"rel_path": "nested/Happy Walk.fbx"},
+                                {"rel_path": "Танец.fbx"},
+                            ]
+                        }
+                    }
+                }
+
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, *args, **kwargs):
+                return DummyResponse()
+
+        with patch.object(self.main.httpx, "AsyncClient", return_value=DummyClient()):
+            urls = await self.main._fetch_worker_animation_file_urls(
+                "https://converter-f1.freestock.online/converter/glb",
+                "guid",
+            )
+            direct_urls = await self.main._fetch_worker_animation_file_urls(
+                "https://worker.example/converter/glb",
+                "guid",
+            )
+
+        self.assertIn("nested/Happy%2520Walk.fbx", urls[0])
+        self.assertIn("%25D0%25A2", urls[1])
+        self.assertIn("nested/Happy%20Walk.fbx", direct_urls[0])
+
+    async def test_disabled_viewer_modules_return_410_before_data_access(self):
+        with patch.object(self.main, "BONE_CORRECTION_ENABLED", False):
+            with self.assertRaises(self.main.HTTPException) as bone_error:
+                await self.main.api_get_task_animation_corrections(
+                    self.task_id,
+                    request=None,
+                    response=None,
+                    user=None,
+                    db=None,
+                )
+        self.assertEqual(bone_error.exception.status_code, 410)
+
+        with self.assertRaises(self.main.HTTPException) as fitting_error:
+            await self.main.api_disabled_idle_ltx(self.task_id, "status")
+        self.assertEqual(fitting_error.exception.status_code, 410)
 
     async def test_legacy_file_index_purchase_creates_task_unlock(self):
         async with self.database.AsyncSessionLocal() as db:

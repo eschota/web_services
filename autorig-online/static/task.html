@@ -3121,15 +3121,144 @@
             display: none !important;
         }
 
+        .visually-hidden {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
+        }
+
+        .animation-rail {
+            position: absolute;
+            top: 0.75rem;
+            left: 0.75rem;
+            bottom: 0.75rem;
+            z-index: 35;
+            width: min(180px, 26%);
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            padding: 0.45rem;
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 8px;
+            background: rgba(10, 14, 27, 0.84);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+            backdrop-filter: blur(10px);
+            pointer-events: auto;
+            transition: width 160ms ease, bottom 160ms ease;
+        }
+        .animation-rail.hidden { display: none; }
+        .animation-rail.is-collapsed {
+            width: 38px;
+            bottom: auto;
+        }
+        .animation-rail.is-collapsed > :not(.animation-rail-head),
+        .animation-rail.is-collapsed .animation-rail-head > :not(#animation-rail-collapse) {
+            display: none !important;
+        }
+        .animation-rail-head,
+        .animation-rail-downloads {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        .animation-rail-type {
+            min-width: 0;
+            flex: 1 1 auto;
+            height: 30px;
+            padding: 0 0.3rem;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px;
+            color: #fff;
+            background: rgba(17,24,39,0.95);
+            font-size: 0.7rem;
+        }
+        .animation-rail-icon {
+            position: relative;
+            flex: 0 0 30px;
+            width: 30px;
+            height: 30px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 1px solid rgba(255,255,255,0.16);
+            border-radius: 6px;
+            color: #fff;
+            background: rgba(255,255,255,0.08);
+            font-size: 0.72rem;
+            cursor: pointer;
+        }
+        .animation-rail-icon:hover:not(:disabled) { border-color: #60a5fa; background: rgba(96,165,250,0.18); }
+        .animation-rail-icon:disabled { opacity: 0.42; cursor: not-allowed; }
+        .animation-rail-icon img { filter: brightness(10); }
+        .animation-rail-stats,
+        .animation-rail-selection {
+            color: rgba(255,255,255,0.68);
+            font-size: 0.65rem;
+            line-height: 1.25;
+        }
+        .animation-rail-list.custom-anim-grid {
+            flex: 1 1 auto;
+            min-height: 0;
+            max-height: none;
+            overflow-y: auto;
+            gap: 0.3rem;
+            padding-right: 0.15rem;
+        }
+        .animation-rail-list .custom-anim-card {
+            min-height: 30px;
+            padding: 0.35rem 0.45rem;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.07);
+            text-align: left;
+        }
+        .animation-rail-list .custom-anim-card::before {
+            content: '\25B6';
+            margin-right: 0.38rem;
+            color: #93c5fd;
+            font-size: 0.58rem;
+        }
+        .animation-rail-list .custom-anim-name {
+            display: inline;
+            font-size: 0.68rem;
+            line-height: 1.15;
+        }
+        .animation-rail-footer {
+            display: grid;
+            gap: 0.35rem;
+            border-top: 1px solid rgba(255,255,255,0.12);
+            padding-top: 0.4rem;
+        }
+        .viewer-fps {
+            position: absolute;
+            right: 0.55rem;
+            bottom: 0.45rem;
+            z-index: 38;
+            min-width: 58px;
+            padding: 0.22rem 0.38rem;
+            border-radius: 5px;
+            background: rgba(0,0,0,0.58);
+            color: #fff;
+            font: 700 0.68rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+            text-align: center;
+            pointer-events: none;
+        }
+
         .manual-rig-restart-panel {
             margin-top: 0.75rem;
-            padding: 0.9rem;
+            padding: 0.5rem;
             border: 1px solid var(--border);
             border-radius: 12px;
             background: rgba(255,255,255,0.035);
         }
         .manual-rig-restart-head {
-            display: flex;
+            display: none;
             align-items: center;
             justify-content: space-between;
             gap: 0.75rem;
@@ -3146,18 +3275,20 @@
             color: var(--text-muted);
         }
         .manual-rig-type-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 0.5rem;
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 0.35rem;
+            overflow-x: auto;
         }
         .manual-rig-restart-actions {
             display: flex;
             justify-content: flex-end;
-            margin-top: 0.65rem;
+            margin-top: 0.4rem;
         }
         .manual-rig-create-btn {
-            min-height: 42px;
-            padding: 0.55rem 0.9rem;
+            width: 34px;
+            height: 34px;
+            padding: 0;
             border: 0;
             border-radius: 10px;
             background: linear-gradient(135deg, #6d5dfc 0%, #8b5cf6 100%);
@@ -3173,12 +3304,13 @@
             box-shadow: none;
         }
         .manual-rig-type-btn {
-            display: flex;
+            display: inline-flex;
+            flex: 0 0 54px;
+            width: 54px;
+            height: 54px;
             align-items: center;
-            gap: 0.45rem;
-            min-width: 0;
-            min-height: 52px;
-            padding: 0.28rem 0.5rem;
+            justify-content: center;
+            padding: 0;
             border: 1px solid var(--border);
             border-radius: 9px;
             background: rgba(255,255,255,0.06);
@@ -3203,16 +3335,16 @@
             transform: none;
         }
         .manual-rig-type-btn img {
-            width: 58px;
-            height: 58px;
-            margin: -7px -3px -7px -6px;
+            width: 50px;
+            height: 50px;
+            margin: 0;
             object-fit: contain;
             transform: scale(1.14);
             transform-origin: center;
             flex: 0 0 auto;
         }
         .manual-rig-type-btn span {
-            display: block;
+            display: none;
             min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -3313,7 +3445,8 @@
             }
 
             .manual-rig-type-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+                display: flex;
+                flex-wrap: nowrap;
             }
 
             .manual-rig-restart-title {
@@ -3321,15 +3454,20 @@
             }
 
             .manual-rig-type-btn {
-                min-height: 48px;
-                padding: 0.25rem 0.42rem;
-                font-size: 0.76rem;
+                flex-basis: 44px;
+                width: 44px;
+                height: 44px;
+                padding: 0;
             }
 
             .manual-rig-type-btn img {
-                width: 46px;
-                height: 46px;
-                margin: -5px -3px -5px -5px;
+                width: 42px;
+                height: 42px;
+                margin: 0;
+            }
+
+            .animation-rail {
+                width: min(170px, calc(100% - 1.5rem));
             }
 
             .face-rig-viewer-layout {
@@ -3749,13 +3887,6 @@
                     <div id="viewer-backdrop-strip-wrap" class="viewer-backdrop-strip-wrap hidden" role="toolbar" aria-label="Viewer theme backdrops">
                         <div id="viewer-backdrop-strip" class="viewer-backdrop-strip"></div>
                     </div>
-                    <div style="display:flex; gap: 0.5rem; align-items:center; flex-wrap: wrap; margin-bottom: 0.75rem;">
-                        <label style="font-size: 0.85rem; color: var(--text-muted);">Animation:</label>
-                        <select id="anim-select" class="hidden" style="padding: 0.5rem 0.75rem; border-radius: 10px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary);">
-                        </select>
-                        <button id="anim-play-btn" class="btn btn-secondary hidden" style="padding: 0.45rem 0.8rem;">Play</button>
-                        <button id="anim-pause-btn" class="btn btn-secondary hidden" style="padding: 0.45rem 0.8rem;">Pause</button>
-                </div>
                     <div id="animal-viewer-ground-row" aria-hidden="true">
                         <label for="animal-viewer-ground-color" style="font-size: 0.85rem; color: var(--text-muted);">Ground plane</label>
                         <input type="color" id="animal-viewer-ground-color" value="#6d7d8c" title="Matte shadow ground color" />
@@ -3786,7 +3917,37 @@
                         
                         <!-- Viewer Overlay UI (above canvas) -->
                         <div id="viewer-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; border-radius: 12px;">
-                            <div id="viewer-split-overlay" aria-label="Four camera viewport layout"></div>
+                            <div id="viewer-split-overlay" aria-label="Three camera viewport layout"></div>
+                            <div id="custom-animations-wrap" class="animation-rail hidden boot-deferred-section boot-reveal-surface" aria-label="Animations">
+                                <div class="animation-rail-head">
+                                    <button id="animation-rail-collapse" class="animation-rail-icon" type="button" title="Collapse animations" aria-label="Collapse animations">&#9776;</button>
+                                    <select id="custom-anim-type" class="animation-rail-type" title="Animation category" aria-label="Animation category">
+                                        <option value="walk" selected>Walk</option>
+                                    </select>
+                                    <button id="anim-play-btn" class="animation-rail-icon hidden" type="button" title="Play animation" aria-label="Play animation">&#9654;</button>
+                                    <button id="anim-pause-btn" class="animation-rail-icon hidden" type="button" title="Pause animation" aria-label="Pause animation">&#10074;&#10074;</button>
+                                </div>
+                                <select id="anim-select" class="hidden" aria-hidden="true"></select>
+                                <div id="custom-anim-stats" class="animation-rail-stats"></div>
+                                <div id="custom-anim-grid" class="custom-anim-grid animation-rail-list">
+                                    <div class="animation-rail-empty">Loading animations...</div>
+                                </div>
+                                <div class="animation-rail-footer">
+                                    <div id="custom-anim-selected-label" class="animation-rail-selection">Select an animation</div>
+                                    <div class="animation-rail-downloads">
+                                        <button id="custom-anim-download-btn" class="animation-rail-icon" type="button" disabled title="Download animation with base rig" aria-label="Download animation with base rig">
+                                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16">
+                                            <span class="custom-anim-download-btn-text visually-hidden">Download animation with base rig</span>
+                                        </button>
+                                        <button id="custom-anim-download-only-btn" class="animation-rail-icon" type="button" disabled title="Download animation only" aria-label="Download animation only">A</button>
+                                        <button id="custom-anim-download-pack-btn" class="animation-rail-icon hidden" type="button" disabled title="Download animation pack" aria-label="Download animation pack">
+                                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16">
+                                            <span class="custom-anim-download-pack-btn-text visually-hidden">Download all animations</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="viewer-fps" class="viewer-fps" aria-live="off">-- FPS</div>
                             <!-- HIDDEN: Top-left Channel Selector (kept for compatibility) -->
                             <div id="viewer-channel-wrap" style="position: absolute; top: 0.75rem; left: 0.75rem; pointer-events: auto; display: none; flex-direction: column; gap: 0.5rem;">
                                 <select id="viewer-channel-select" class="form-select" style="
@@ -4594,210 +4755,14 @@
                         </div>
                         <div id="manual-rig-type-grid" class="manual-rig-type-grid"></div>
                         <div class="manual-rig-restart-actions">
-                            <button id="manual-rig-create-btn" class="manual-rig-create-btn" type="button" disabled>Choose another rig type</button>
+                            <button id="manual-rig-create-btn" class="manual-rig-create-btn" type="button" disabled title="Create task with selected rig" aria-label="Create task with selected rig">+</button>
                         </div>
                     </div>
             </div>
             </div>
 
-            <div id="blueprint-viewer-card" class="card blueprint-viewer-card viewer-side-panel hidden is-split-viewport split-slot-inactive" aria-label="Blueprint semantic skeleton editor">
-                <div class="blueprint-viewer-stage">
-                    <div id="blueprint-viewer-canvas" class="blueprint-viewer-canvas"></div>
-                    <div id="blueprint-viewer-empty" class="blueprint-viewer-empty">Blueprint data will appear when the worker publishes skeleton.json.</div>
-                    <div class="blueprint-viewer-status" id="blueprint-viewer-status">Waiting for semantic skeleton...</div>
-                    <div class="blueprint-stage-controls" aria-label="Blueprint camera controls">
-                        <select id="blueprint-view-select" class="blueprint-view-select" aria-label="Blueprint camera view" title="Blueprint camera view" data-i18n-title="blueprint_view_select_title">
-                            <option value="right" selected data-i18n="blueprint_view_right">Right</option>
-                            <option value="front" data-i18n="blueprint_view_front">Front</option>
-                            <option value="left" data-i18n="blueprint_view_left">Left</option>
-                            <option value="back" data-i18n="blueprint_view_back">Back</option>
-                            <option value="top" data-i18n="blueprint_view_top">Top</option>
-                            <option value="bottom" data-i18n="blueprint_view_bottom">Bottom</option>
-                            <option value="perspective" data-i18n="blueprint_view_perspective">Perspective</option>
-                        </select>
-                        <button type="button" class="blueprint-icon-btn" data-blueprint-action="fit" aria-label="Fit blueprint camera" title="Fit" data-i18n-title="blueprint_fit_title">
-                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M8 3H5a2 2 0 0 0-2 2v3"></path>
-                                <path d="M16 3h3a2 2 0 0 1 2 2v3"></path>
-                                <path d="M8 21H5a2 2 0 0 1-2-2v-3"></path>
-                                <path d="M16 21h3a2 2 0 0 0 2-2v-3"></path>
-                                <path d="M9 9h6v6H9z"></path>
-                            </svg>
-                        </button>
-                        <button type="button" class="blueprint-icon-btn" data-blueprint-action="reset" aria-label="Reset blueprint camera" title="Reset camera" data-i18n-title="blueprint_reset_title">
-                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
-                                <path d="M3 3v6h6"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="blueprint-view-cube" id="blueprint-view-cube" data-active-view="right" aria-label="Blueprint view cube" title="Blueprint view cube" data-i18n-title="blueprint_cube_title">
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-top" data-blueprint-cube-view="top" aria-label="Top view" title="Top view" data-i18n-title="blueprint_cube_top_title">↑</button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-right" data-blueprint-cube-view="right" aria-label="Right view" title="Right view" data-i18n-title="blueprint_cube_right_title">→</button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-bottom" data-blueprint-cube-view="bottom" aria-label="Bottom view" title="Bottom view" data-i18n-title="blueprint_cube_bottom_title">↓</button>
-                        <button type="button" class="blueprint-cube-zone blueprint-cube-zone-left" data-blueprint-cube-view="left" aria-label="Left view" title="Left view" data-i18n-title="blueprint_cube_left_title">←</button>
-                        <button type="button" class="blueprint-cube-cycle" data-blueprint-cycle aria-label="Next blueprint camera view" title="Next blueprint camera view" data-i18n-title="blueprint_cube_next_title">
-                            <span id="blueprint-view-cube-label">Right</span>
-                        </button>
-                    </div>
-                    <div class="blueprint-stage-hud" aria-live="polite">
-                        <span class="blueprint-selected-node" id="blueprint-selected-node"></span>
-                        <span class="blueprint-viewer-coordinates" id="blueprint-coordinates"></span>
-                    </div>
-                </div>
-                <div class="blueprint-actions">
-                    <button type="button" id="blueprint-add-node-btn" class="blueprint-add-node-btn" data-i18n="blueprint_add_node_label" data-i18n-title="blueprint_add_node_tooltip">
-                        Add node
-                    </button>
-                    <button type="button" id="blueprint-reset-rig-btn" class="blueprint-rig-reset-btn" disabled data-i18n-title="blueprint_reset_rig_tooltip" aria-label="Reset rig shifts to default" title="Reset rig shifts to default">
-                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M3 7v6h6"></path>
-                            <path d="M21 17a9 9 0 0 0-15.2-6.5L3 13"></path>
-                            <path d="M9 17h6"></path>
-                            <path d="M12 14v6"></path>
-                        </svg>
-                        <span data-i18n="blueprint_reset_rig_label">Reset rig shifts to default</span>
-                    </button>
-                    <button type="button" id="blueprint-retarget-btn" class="blueprint-retarget-btn" data-i18n="blueprint_retarget_label" data-i18n-title="blueprint_retarget_tooltip">
-                        Retarget Rig Animation
-                    </button>
-                </div>
-                <div class="blueprint-legend" data-i18n="blueprint_legend">
-                    Select limb tips you want to correct.
-                </div>
             </div>
 
-            <!-- Video and animation fitting module -->
-            <div id="custom-animations-wrap" class="card hidden viewer-side-panel boot-deferred-section boot-reveal-surface">
-                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-                    <h3 class="card-title" style="margin:0; font-size:1rem;" data-i18n="animation_fitting_title">Video &amp; Animation Fitting</h3>
-                    <div style="font-size:0.72rem; color:var(--text-muted);" data-i18n="animation_fitting_price">
-                        Task unlock includes all fitted animation downloads
-                    </div>
-                </div>
-
-                <p class="animation-fitting-summary" data-i18n="animation_fitting_summary">Generate motion reference videos, then fit the current animal skeleton frame by frame to create a custom bone animation clip.</p>
-
-                <div class="animation-fitting-links" aria-label="Video and animation fitting links">
-                    <a class="animation-fitting-link" href="#idle-ltx-generator-island" data-i18n="animation_fitting_generator_link">Reference video generator</a>
-                    <a class="animation-fitting-link" href="#model-viewer-wrap" data-i18n="animation_fitting_viewer_link">3D bone preview</a>
-                </div>
-
-                <div class="custom-anim-section-label" data-i18n="animation_fitting_downloads_label">Fitted animation downloads</div>
-
-                <div style="display:flex; gap:0.45rem; align-items:center; flex-wrap:wrap;">
-                    <label for="custom-anim-type" style="font-size:0.78rem; color:var(--text-muted);" data-i18n="custom_anim_type_label">Type:</label>
-                    <select id="custom-anim-type" class="form-input" style="max-width:170px; padding:0.38rem 0.52rem; font-size:0.78rem;">
-                        <option value="walk" selected>Walk</option>
-                    </select>
-                    <div id="custom-anim-stats" style="font-size:0.72rem; color:var(--text-muted);"></div>
-                </div>
-
-                <div id="custom-anim-grid" class="custom-anim-grid">
-                    <div style="grid-column:1/-1; color:var(--text-muted);">Loading custom animations...</div>
-                </div>
-
-                <div style="display:flex; flex-direction:column; align-items:stretch; gap:0.45rem; margin-top:0.6rem;">
-                    <div id="custom-anim-selected-label" style="font-size:0.78rem; color:var(--text-muted);">
-                        Select an animation
-                    </div>
-                    <div style="display:flex; width:100%;">
-                        <button id="custom-anim-download-btn" class="btn btn-primary"
-                                style="width:100%; display:inline-flex; align-items:center; justify-content:center; gap:0.45rem; padding:0.56rem 0.8rem; font-size:0.78rem;"
-                                disabled>
-                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16" style="filter: brightness(10);">
-                            <span class="custom-anim-download-btn-text">Download Selected Animation</span>
-                        </button>
-                    </div>
-                    <div style="display:flex; width:100%;">
-                        <button id="custom-anim-download-pack-btn" class="btn btn-primary hidden"
-                                style="width:100%; display:inline-flex; align-items:center; justify-content:center; gap:0.45rem; padding:0.56rem 0.8rem; font-size:0.78rem;"
-                                disabled>
-                            <img src="/static/images/icons/download.svg" alt="" width="16" height="16" style="filter: brightness(10);">
-                            <span class="custom-anim-download-pack-btn-text">Download All Animations</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            </div>
-
-            <section id="idle-ltx-generator-island" class="card mt-3 idle-ltx-generator-card hidden boot-deferred-section boot-reveal-surface" aria-hidden="true">
-                <div class="idle-ltx-card-head">
-                    <div>
-                        <h3 class="card-title" style="margin:0;" data-i18n="idle_ltx_title">Animation reference generator</h3>
-                        <p class="idle-ltx-subtitle" style="margin:0.35rem 0 0;" data-i18n="idle_ltx_subtitle">Generate four motion reference videos for fitting real bone animation to this model.</p>
-                    </div>
-                    <div class="idle-ltx-actions">
-                        <button type="button" id="idle-ltx-reset-btn" class="btn btn-secondary hidden" data-i18n="idle_ltx_reset_button">Discard generation</button>
-                        <button type="button" id="idle-ltx-generate-btn" class="btn btn-primary" data-i18n="idle_ltx_generate_button">Generate video</button>
-                    </div>
-                </div>
-                <div id="idle-ltx-video-below-viewer-wrap" class="hidden" aria-hidden="true">
-                    <div class="idle-ltx-reference-grid">
-                        <div class="idle-ltx-reference-card">
-                            <div id="idle-ltx-v-name-0" class="idle-ltx-reference-title" data-i18n="idle_ltx_variant_idle">Idle</div>
-                            <div id="idle-ltx-v-meta-0" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-loading-0" class="idle-ltx-meta" data-i18n="idle_ltx_waiting">Waiting...</div>
-                            <div id="idle-ltx-v-status-0" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-err-0" class="idle-ltx-error hidden"></div>
-                            <div id="idle-ltx-v-shell-0" class="idle-ltx-reference-shell hidden">
-                                <video id="idle-ltx-result-video-below-0" muted playsinline loop preload="metadata"></video>
-                                <button type="button" id="idle-ltx-fit-btn-0" class="btn btn-secondary idle-ltx-fit-btn hidden" data-i18n="idle_ltx_fit_button">Start Animation Fitting</button>
-                            </div>
-                        </div>
-                        <div class="idle-ltx-reference-card">
-                            <div id="idle-ltx-v-name-1" class="idle-ltx-reference-title" data-i18n="idle_ltx_variant_walk">Walk</div>
-                            <div id="idle-ltx-v-meta-1" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-loading-1" class="idle-ltx-meta" data-i18n="idle_ltx_waiting">Waiting...</div>
-                            <div id="idle-ltx-v-status-1" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-err-1" class="idle-ltx-error hidden"></div>
-                            <div id="idle-ltx-v-shell-1" class="idle-ltx-reference-shell hidden">
-                                <video id="idle-ltx-result-video-below-1" muted playsinline loop preload="metadata"></video>
-                                <button type="button" id="idle-ltx-fit-btn-1" class="btn btn-secondary idle-ltx-fit-btn hidden" data-i18n="idle_ltx_fit_button">Start Animation Fitting</button>
-                            </div>
-                        </div>
-                        <div class="idle-ltx-reference-card">
-                            <div id="idle-ltx-v-name-2" class="idle-ltx-reference-title" data-i18n="idle_ltx_variant_run">Run</div>
-                            <div id="idle-ltx-v-meta-2" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-loading-2" class="idle-ltx-meta" data-i18n="idle_ltx_waiting">Waiting...</div>
-                            <div id="idle-ltx-v-status-2" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-err-2" class="idle-ltx-error hidden"></div>
-                            <div id="idle-ltx-v-shell-2" class="idle-ltx-reference-shell hidden">
-                                <video id="idle-ltx-result-video-below-2" muted playsinline loop preload="metadata"></video>
-                                <button type="button" id="idle-ltx-fit-btn-2" class="btn btn-secondary idle-ltx-fit-btn hidden" data-i18n="idle_ltx_fit_button">Start Animation Fitting</button>
-                            </div>
-                        </div>
-                        <div class="idle-ltx-reference-card">
-                            <div id="idle-ltx-v-name-3" class="idle-ltx-reference-title" data-i18n="idle_ltx_variant_die">Die</div>
-                            <div id="idle-ltx-v-meta-3" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-loading-3" class="idle-ltx-meta" data-i18n="idle_ltx_waiting">Waiting...</div>
-                            <div id="idle-ltx-v-status-3" class="idle-ltx-meta"></div>
-                            <div id="idle-ltx-v-err-3" class="idle-ltx-error hidden"></div>
-                            <div id="idle-ltx-v-shell-3" class="idle-ltx-reference-shell hidden">
-                                <video id="idle-ltx-result-video-below-3" muted playsinline loop preload="metadata"></video>
-                                <button type="button" id="idle-ltx-fit-btn-3" class="btn btn-secondary idle-ltx-fit-btn hidden" data-i18n="idle_ltx_fit_button">Start Animation Fitting</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div id="idle-ltx-fitting-panel" class="idle-ltx-fitting-panel hidden">
-                    <div style="display:flex; justify-content:space-between; gap:0.75rem; align-items:flex-start; flex-wrap:wrap; margin-bottom:0.6rem;">
-                        <div>
-                            <h3 style="margin:0;" data-i18n="idle_ltx_fitting_title">Animation fitting mode</h3>
-                            <p class="idle-ltx-subtitle" style="margin:0.25rem 0 0;" data-i18n="idle_ltx_fitting_description">Use the selected reference video to build and apply a browser-fitted bone animation clip on this rig.</p>
-                        </div>
-                        <button type="button" id="idle-ltx-fit-exit" class="btn btn-secondary" data-i18n="idle_ltx_fit_exit">Back</button>
-                    </div>
-                    <div id="idle-ltx-fitting-gallery" class="idle-ltx-fitting-gallery" aria-label="Generated reference videos"></div>
-                    <div class="idle-ltx-meta"><span data-i18n="idle_ltx_fit_selected">Selected reference</span>: <span id="idle-ltx-fit-selected">-</span></div>
-                    <video id="idle-ltx-fitting-video" class="idle-ltx-fitting-video" muted playsinline loop controls preload="metadata"></video>
-                    <canvas id="idle-ltx-fitting-metrics" class="idle-ltx-fitting-metrics" width="520" height="120" aria-label="Animation fitting divergence graph"></canvas>
-                    <div class="idle-ltx-progress" style="margin-top:0.65rem;"><div id="idle-ltx-fitting-progress-bar"></div></div>
-                    <div id="idle-ltx-fitting-status" class="idle-ltx-status" style="margin-top:0.5rem;"></div>
-                    <button type="button" id="idle-ltx-fit-start" class="btn btn-primary" style="margin-top:0.75rem;" data-i18n="idle_ltx_fit_start">Start Animation Fitting</button>
-                </div>
-            </section>
-            
             <div class="card mt-3 boot-deferred-section boot-reveal-surface face-rig-card-pending face-rig-ui-disabled hidden" id="face-rig-viewer-card" aria-hidden="true">
                 <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <h3 class="card-title" style="margin:0;">Face RIG Animation</h3>
@@ -6500,7 +6465,6 @@
                 const downloadUrls = (task.output_urls && task.output_urls.length > 0) ? task.output_urls : task.ready_urls;
                 this.updateFileList(downloadUrls, task, task.ready_urls || []);
                 this.updateAnimalVariantsPanel(task);
-                window.AnimalBlueprintViewer?.syncTask?.(task);
                 window.__taskPageBoot?.revealElement('downloads-card', 0);
 
                 this.renderPosterMetadataSection();
@@ -7752,7 +7716,10 @@
             setupCustomAnimationPicker() {
                 const typeSelect = document.getElementById('custom-anim-type');
                 const downloadBtn = document.getElementById('custom-anim-download-btn');
+                const downloadOnlyBtn = document.getElementById('custom-anim-download-only-btn');
                 const packBtn = document.getElementById('custom-anim-download-pack-btn');
+                const rail = document.getElementById('custom-animations-wrap');
+                const collapseBtn = document.getElementById('animation-rail-collapse');
 
                 if (typeSelect && !typeSelect.__wired) {
                     typeSelect.__wired = true;
@@ -7766,7 +7733,14 @@
                     downloadBtn.__wired = true;
                     downloadBtn.addEventListener('click', () => {
                         this.markCustomAnimationUserInteraction();
-                        this.downloadSelectedAnimationAction();
+                        this.downloadSelectedAnimationAction(true);
+                    });
+                }
+                if (downloadOnlyBtn && !downloadOnlyBtn.__wired) {
+                    downloadOnlyBtn.__wired = true;
+                    downloadOnlyBtn.addEventListener('click', () => {
+                        this.markCustomAnimationUserInteraction();
+                        this.downloadSelectedAnimationAction(false);
                     });
                 }
                 if (packBtn && !packBtn.__wired) {
@@ -7774,6 +7748,15 @@
                     packBtn.addEventListener('click', () => {
                         this.markCustomAnimationUserInteraction();
                         this.downloadAnimalAnimationPackAction();
+                    });
+                }
+                if (rail && collapseBtn && !collapseBtn.__wired) {
+                    collapseBtn.__wired = true;
+                    if (window.matchMedia('(max-width: 700px)').matches) rail.classList.add('is-collapsed');
+                    collapseBtn.addEventListener('click', () => {
+                        const collapsed = rail.classList.toggle('is-collapsed');
+                        collapseBtn.title = collapsed ? 'Open animations' : 'Collapse animations';
+                        collapseBtn.setAttribute('aria-label', collapseBtn.title);
                     });
                 }
             },
@@ -7825,19 +7808,11 @@
             ensureDesktopViewerLayout() {
                 const layout = document.getElementById('viewer-custom-layout');
                 const modelViewerWrap = document.getElementById('model-viewer-wrap');
-                const modelViewerContainer = document.getElementById('model-viewer-container');
-                const blueprintWrap = document.getElementById('blueprint-viewer-card');
                 const customWrap = document.getElementById('custom-animations-wrap');
                 if (!layout || !modelViewerWrap || !customWrap) return;
 
                 if (modelViewerWrap.parentElement !== layout) {
                     layout.insertBefore(modelViewerWrap, layout.firstChild);
-                }
-                if (blueprintWrap && modelViewerContainer && blueprintWrap.parentElement !== modelViewerContainer) {
-                    modelViewerContainer.appendChild(blueprintWrap);
-                }
-                if (customWrap.parentElement !== layout) {
-                    layout.appendChild(customWrap);
                 }
                 this.ensureTaskDesktopColumns();
             },
@@ -7980,7 +7955,7 @@
                         window.__taskPageBoot?.revealElement(wrap, 0);
                         const grid = document.getElementById('custom-anim-grid');
                         if (grid) {
-                            grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No fitted custom animation files are ready for this task yet. Generate reference videos below, then fit a ready reference to the current rig.')}</div>`;
+                            grid.innerHTML = `<div class="animation-rail-empty">No preview animations are ready for this task.</div>`;
                         }
                         this.selectedAnimationId = null;
                         this.updateCustomAnimationActions();
@@ -8048,7 +8023,7 @@
                     typeSelect.innerHTML = '';
                     stats.textContent = '';
                     this.selectedAnimationId = null;
-                    const emptyMsg = `<div style="grid-column:1/-1; color:var(--text-muted);">${this.tSafe('custom_anim_empty_ready_global', 'No fitted custom animation files are ready for this task yet. Generate reference videos below, then fit a ready reference to the current rig.')}</div>`;
+                    const emptyMsg = `<div class="animation-rail-empty">No preview animations are ready for this task.</div>`;
                     grid.innerHTML = emptyMsg;
                     this.updateCustomAnimationActions();
                     return;
@@ -8126,6 +8101,7 @@
             },
 
             async selectAnimation(animationId, options = {}) {
+                window.markMainViewerHeavyOperation?.(2000);
                 const id = this.normalizeAnimationKey(animationId);
                 if (!id || !this.animationCatalog?.animations?.some(
                     a => this.normalizeAnimationKey(a?.id) === id
@@ -8198,6 +8174,7 @@
                 const selected = this.getSelectedAnimationItem();
                 const labelEl = document.getElementById('custom-anim-selected-label');
                 const downloadBtn = document.getElementById('custom-anim-download-btn');
+                const downloadOnlyBtn = document.getElementById('custom-anim-download-only-btn');
                 const packBtn = document.getElementById('custom-anim-download-pack-btn');
                 if (!labelEl || !downloadBtn) return;
 
@@ -8223,16 +8200,19 @@
                     packBtn.disabled = !(selected && selected.available && selected.ready);
                 }
                 downloadBtn.classList.toggle('hidden', isAnimalPack);
+                downloadOnlyBtn?.classList.toggle('hidden', isAnimalPack);
 
                 if (!selected || !selected.available || !selected.ready) {
                     labelEl.textContent = this.tSafe('custom_anim_no_selection', 'Select an animation');
                     downloadBtn.disabled = true;
+                    if (downloadOnlyBtn) downloadOnlyBtn.disabled = true;
                     if (packBtn) packBtn.disabled = true;
                     return;
                 }
 
                 labelEl.textContent = this.getLocalizedAnimationName(selected);
                 downloadBtn.disabled = false;
+                if (downloadOnlyBtn) downloadOnlyBtn.disabled = false;
             },
 
             async notifyCustomAnimationIntent(source = 'custom_animation_download', animationId = null, animationName = null) {
@@ -8271,7 +8251,7 @@
                 this.triggerDownloadUrl(downloadUrl);
             },
 
-            async downloadSelectedAnimationAction() {
+            async downloadSelectedAnimationAction(withBase = true) {
                 const selected = this.getSelectedAnimationItem();
                 if (!selected || !selected.available || !selected.ready) return;
 
@@ -8291,7 +8271,7 @@
                     if (!unlocked) return;
                 }
 
-                await this.downloadSelectedAnimation(selectedId);
+                await this.downloadSelectedAnimation(selectedId, withBase);
             },
 
             async purchaseSelectedAnimation() {
@@ -8468,7 +8448,7 @@
                 return true;
             },
 
-            async downloadSelectedAnimation(animationId = null) {
+            async downloadSelectedAnimation(animationId = null, withBase = true) {
                 const targetId = this.normalizeAnimationKey(animationId || this.selectedAnimationId);
                 if (!targetId) return;
                 const selected = this.getSelectedAnimationItem();
@@ -8476,14 +8456,11 @@
                     await this.downloadAnimalAnimationPackAction();
                     return;
                 }
-                const url = `/api/task/${this.taskId}/animations/download/${encodeURIComponent(targetId)}`;
-                const baseStarted = await this.ensureCustomAnimationBaseFbxBeforeDownload();
-                if (baseStarted === null) return;
-                if (baseStarted) {
-                    this.triggerDownloadUrl(`/api/task/${this.taskId}/animations/download-with-base/${encodeURIComponent(targetId)}`);
-                } else {
-                    this.triggerDownloadUrl(url);
-                }
+                const plainUrl = selected?.download_url
+                    || `/api/task/${this.taskId}/animations/download/${encodeURIComponent(targetId)}`;
+                const withBaseUrl = selected?.download_with_base_url
+                    || `/api/task/${this.taskId}/animations/download-with-base/${encodeURIComponent(targetId)}`;
+                this.triggerDownloadUrl(withBase ? withBaseUrl : plainUrl);
             },
 
             updateFileList(urls, task, readyUrls = []) {
@@ -9002,10 +8979,6 @@
           }
         }
     </script>
-    <script>
-        window.IDLE_LTX_UI_ENABLED = true;
-    </script>
-    <script type="module" src="/static/js/animal-blueprint-viewer.js?v=24"></script>
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
@@ -9042,30 +9015,15 @@
         import { PlayModeController } from '/static/js/task-play-mode.js?v=38';
         import { TaskSplitViewportController } from '/static/js/task-split-viewer.js?v=20260713-split-v2';
         import {
+            createAdaptiveQualityState,
+            sampleAdaptiveQuality,
+            suppressAdaptiveQuality,
+        } from '/static/js/task-adaptive-quality.js?v=1';
+        import {
             AnimationPlaylistController,
             captureRootTransform,
             restoreRootTransform,
         } from '/static/js/animation-playlist-controller.js?v=1';
-        import { TaskBoneCorrectionPanel } from '/static/js/task-bone-correction-panel.js?v=2';
-        import {
-            buildThreeAnimationClip,
-            decodeVideoFramesExact,
-            mapHorseSemanticPalette,
-        } from '/static/js/task-animation-fitting-panel.js?v=3';
-        import {
-            assessHorseWalkGait,
-            buildSemanticObservations,
-        } from '/static/js/animation-fitting-semantic-tracker.js?v=2';
-        import { normalizeHorseWalkPhases } from '/static/js/animation-fitting-horse-phase-normalizer.js?v=1';
-        import { fitBrowserAnimation } from '/static/js/animation-fitting-browser-core.js?v=3';
-        import {
-            buildHorse2BrowserFittingSkeleton,
-            HORSE_2_SEMANTIC_PROFILE,
-        } from '/static/js/animation-fitting-three-adapter.js?v=3';
-        import { resolveAnimationFittingAction } from '/static/js/animation-fitting-action-contract.js?v=1';
-        import { captureHorse2SemanticReference } from '/static/js/animation-fitting-semantic-capture.js?v=1';
-        import { runTaskAnimationFittingInBrowser } from '/static/js/task-animation-fitting-browser-controller.js?v=3';
-
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
             preferredMovingClip,
@@ -9142,8 +9100,6 @@
             const animationManifestCache = new Map();
             let animationPlaylistConfigureToken = 0;
             let animationPlaylistMixer = null;
-            let boneCorrectionPanel = null;
-            let boneCorrectionConfiguredModel = null;
 
             const animationPlaylist = new AnimationPlaylistController({
                 playClip: (name, options) => play(name, options),
@@ -9157,7 +9113,6 @@
                 },
                 onClipChange: (entry, state) => {
                     if (sel && entry?.name) sel.value = entry.name;
-                    boneCorrectionPanel?.setActiveClip?.(entry);
                     window.TaskUI?.syncAnimationPlaylistClip?.(entry);
                     if (state?.mode === 'autoplay') {
                         setStatus(`Ready (${animationPlaylist.entries.length} animations) · ${state.index + 1}/${state.total}`);
@@ -9256,8 +9211,6 @@
                     animationPlaylistRootSnapshots.set(configuredModel, captureRootTransform(configuredModel));
                 }
 
-                configureBoneCorrectionForCurrentModel(configuredModel);
-
                 animationPlaylist.configure({
                     mixer: configuredMixer,
                     clips: configuredClips,
@@ -9285,6 +9238,7 @@
 
             function markAnimationPlaylistInteraction(reason) {
                 animationPlaylist.markInteraction(reason);
+                markMainViewerHeavyOperation(2000);
             }
 
             function setupAnimationPlaylistInteractionHooks() {
@@ -10326,7 +10280,6 @@
                 }
             }
 
-            window.captureAnimalLtxSemanticFrame768 = captureAnimalLtxSemanticFrame768;
 
             function getAnimalLtxThemeContext() {
                 const selection = viewerState?.viewer_theme_selection || {};
@@ -10379,7 +10332,6 @@
                 }
             }
 
-            window.initIdleLtxAnimalGenerator = () => maybeInitIdleLtxGenerator(window.TaskUI?.task || null);
 
             async function loadFittingVideo(videoUrl) {
                 const video = document.createElement('video');
@@ -11042,23 +10994,6 @@
                 };
             }
 
-            window.startAnimalAnimationFittingFromPinnedObservations = startPinnedRgbBrowserAnimationFitting;
-
-            window.startAnimalAnimationFittingFromVideo = async function startAnimalAnimationFittingFromVideo(opts = {}) {
-                const pipelineVersion = String(
-                    opts.pipeline_version_string ?? opts.pipelineVersion ?? '',
-                ).trim();
-                if (!pipelineVersion || pipelineVersion === 'legacy-rgb-renderfin-v1') {
-                    return startLegacyRgbAnimationFittingFromVideo(opts);
-                }
-                if (pipelineVersion === 'semantic-comfy-browser-v1') {
-                    return startSemanticBrowserAnimationFittingFromVideo(opts);
-                }
-                if (pipelineVersion === 'pinned-rgb-browser-v1') {
-                    return startPinnedRgbBrowserAnimationFitting(opts);
-                }
-                throw new Error(`Unsupported animation-fitting pipeline: ${pipelineVersion}`);
-            };
 
             async function loadEnvironment(scene) {
                 if (!renderer) return false;
@@ -11133,11 +11068,8 @@
             let splitViewportActiveInteractionView = 'perspective';
             const splitViewportCameras = {};
             const splitViewportControls = {};
-            const splitViewportTextures = { top: null, front: null, left: null };
+            const splitViewportTextures = { top: null, front: null };
             let splitViewportTextureLoadSerial = 0;
-            let splitViewportBlueprintMaterial = null;
-            let splitViewportBlueprintCard = null;
-            let splitViewportBlueprintSurfaceCleanup = null;
             let splitViewportShadowWarmupTarget = null;
             const splitViewportShadowLights = {};
             const splitViewportShadowCatcherStates = {};
@@ -11145,42 +11077,6 @@
             const SPLIT_VIEWPORT_SHADOW_REFRESH_MS = 100;
             let currentModel = null;
 
-            function ensureBoneCorrectionPanel() {
-                if (boneCorrectionPanel || !THREE) return boneCorrectionPanel;
-                const card = document.getElementById('blueprint-viewer-card');
-                if (!card) return null;
-                boneCorrectionPanel = new TaskBoneCorrectionPanel({
-                    THREE,
-                    taskId,
-                    card,
-                    getCamera: () => splitViewportCameras.left || null,
-                    onModeChange: () => {
-                        splitViewportShadowLastRefresh = 0;
-                        updateSplitViewportOverlay();
-                    },
-                    onInteraction: (reason) => {
-                        markAnimationPlaylistInteraction(reason || 'bone-correction');
-                        if (splitViewportControls.left) setSplitViewportInteractionView('left');
-                    },
-                    onCorrectionChange: () => {
-                        splitViewportShadowLastRefresh = 0;
-                        if (currentModel) updateShadowCatcherPlaneForModel(currentModel);
-                    },
-                });
-                window.__taskBoneCorrectionPanel = boneCorrectionPanel;
-                return boneCorrectionPanel;
-            }
-
-            function configureBoneCorrectionForCurrentModel(model = currentModel) {
-                const panel = ensureBoneCorrectionPanel();
-                if (!panel) return null;
-                const modelChanged = boneCorrectionConfiguredModel !== model;
-                boneCorrectionConfiguredModel = model || null;
-                panel.configure({ model: model || null, currentModelType });
-                if (animationPlaylist.currentEntry) panel.setActiveClip(animationPlaylist.currentEntry);
-                if (modelChanged) splitViewportShadowLastRefresh = 0;
-                return panel;
-            }
             let preparedLoaded = false;
             let finalLoaded = false;
             let mainViewerEnabled = true;
@@ -11193,9 +11089,11 @@
             let groundPlaneMesh = null;
             let mainViewerAdaptiveQualityEnabled = true;
             let mainViewerQualityMode = 'high';
-            let mainViewerQualityStableLowCount = 0;
-            let mainViewerQualityStableHighCount = 0;
-            let mainViewerQualityCooldownUntil = 0;
+            let mainViewerAdaptiveQualityState = createAdaptiveQualityState({
+                mode: 'high',
+                ignoreUntil: performance.now() + 2000,
+            });
+            let splitViewportRenderFrame = 0;
             const MAIN_VIEWER_QUALITY_PROFILES = {
                 high: {
                     badge: 'HQ',
@@ -11204,24 +11102,45 @@
                     bloom: true,
                     shadows: true,
                     shadowMapSize: 2048,
+                    secondaryViewportStride: 1,
                 },
-                medium: {
-                    badge: 'MQ',
+                balanced: {
+                    badge: 'BQ',
                     pixelRatioCap: 1.0,
                     useComposer: true,
                     bloom: false,
                     shadows: true,
                     shadowMapSize: 1024,
+                    secondaryViewportStride: 1,
                 },
                 low: {
                     badge: 'LQ',
                     pixelRatioCap: 0.8,
                     useComposer: false,
                     bloom: false,
-                    shadows: true,
+                    shadows: false,
                     shadowMapSize: 512,
+                    secondaryViewportStride: 2,
+                },
+                emergency: {
+                    badge: 'EQ',
+                    pixelRatioCap: 0.65,
+                    useComposer: false,
+                    bloom: false,
+                    shadows: false,
+                    shadowMapSize: 256,
+                    secondaryViewportStride: 4,
                 }
             };
+
+            function markMainViewerHeavyOperation(durationMs = 2000) {
+                mainViewerAdaptiveQualityState = suppressAdaptiveQuality(
+                    mainViewerAdaptiveQualityState,
+                    performance.now(),
+                    durationMs,
+                );
+            }
+            window.markMainViewerHeavyOperation = markMainViewerHeavyOperation;
 
             // Rig Editor and Viewer Controls instances
             let rigEditor = null;
@@ -11684,7 +11603,6 @@
                     perspective: ['viewer_split_perspective', 'Perspective'],
                     top: ['viewer_split_top', 'Top'],
                     front: ['viewer_split_front', 'Front'],
-                    left: ['viewer_split_blueprint_left', 'Blueprint Left'],
                 };
                 const [key, fallback] = labels[viewId] || [viewId, viewId];
                 try {
@@ -11714,47 +11632,6 @@
                     pane.appendChild(label);
                     return pane;
                 }));
-                syncBlueprintSplitViewport(rects);
-            }
-
-            function ensureBlueprintSplitViewportMounted() {
-                const modelViewerContainer = document.getElementById('model-viewer-container');
-                const card = document.getElementById('blueprint-viewer-card');
-                if (!modelViewerContainer || !card) return null;
-                if (card.parentElement !== modelViewerContainer) modelViewerContainer.appendChild(card);
-                card.classList.add('is-split-viewport');
-                splitViewportBlueprintCard = card;
-                if (splitViewportController && !splitViewportBlueprintSurfaceCleanup) {
-                    splitViewportBlueprintSurfaceCleanup = splitViewportController.registerExternalSurface(card, 'left');
-                }
-                return card;
-            }
-
-            function syncBlueprintSplitViewport(rectsOpt = null) {
-                const card = ensureBlueprintSplitViewportMounted();
-                if (!card || !splitViewportController) return;
-                const rects = rectsOpt || splitViewportController.getRects();
-                const rect = rects.find((item) => item.id === 'left') || null;
-                card.classList.toggle('split-slot-inactive', !rect);
-                if (!rect) return;
-                card.dataset.splitRole = rect.role;
-                card.style.left = `${rect.x}px`;
-                card.style.top = `${rect.y}px`;
-                card.style.width = `${rect.width}px`;
-                card.style.height = `${rect.height}px`;
-                card.style.setProperty('--blueprint-stage-height', `${rect.height}px`);
-                requestAnimationFrame(() => window.AnimalBlueprintViewer?.resize?.());
-            }
-
-            function isSemanticBlueprintSplitViewportVisible() {
-                const card = splitViewportBlueprintCard || document.getElementById('blueprint-viewer-card');
-                return Boolean(
-                    card
-                    && card.parentElement?.id === 'model-viewer-container'
-                    && !card.classList.contains('hidden')
-                    && !card.classList.contains('split-slot-inactive')
-                    && card.dataset.blueprintMode !== 'animation'
-                );
             }
 
             function setSplitViewportInteractionView(viewId) {
@@ -11787,13 +11664,9 @@
                 const cameraSpecs = {
                     top: { position: [0, 4, 0], up: [0, 0, -1] },
                     front: { position: [0, 1.5, 4], up: [0, 1, 0] },
-                    left: { position: [-4, 1.5, 0], up: [0, 1, 0] },
                 };
                 Object.entries(cameraSpecs).forEach(([viewId, spec]) => {
-                    const splitCamera = viewId === 'left'
-                        ? new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000)
-                        : new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
-                    if (viewId === 'left') splitCamera.userData.autorigOrthoHalfHeight = 1;
+                    const splitCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
                     splitCamera.position.set(...spec.position);
                     splitCamera.up.set(...spec.up);
                     splitCamera.lookAt(0, 1, 0);
@@ -11808,22 +11681,9 @@
                     orbit.target.set(0, 1, 0);
                     orbit.minDistance = 0.25;
                     orbit.maxDistance = 1000;
-                    if (viewId === 'left') {
-                        orbit.minZoom = 0.1;
-                        orbit.maxZoom = 20;
-                    }
                     orbit.enabled = false;
                     orbit.update();
                     splitViewportControls[viewId] = orbit;
-                });
-
-                splitViewportBlueprintMaterial = new THREE.MeshBasicMaterial({
-                    color: 0x67e8f9,
-                    wireframe: true,
-                    transparent: true,
-                    opacity: 0.78,
-                    depthTest: true,
-                    depthWrite: true,
                 });
 
                 splitViewportController = new TaskSplitViewportController({
@@ -11839,8 +11699,6 @@
                         window.__taskSplitViewport = { state, interactionView: splitViewportActiveInteractionView };
                     },
                 });
-                ensureBlueprintSplitViewportMounted();
-                ensureBoneCorrectionPanel();
                 setSplitViewportInteractionView('perspective');
                 updateSplitViewportOverlay();
                 syncSplitViewportBackdropTextures(activeViewerTheme, 'split runtime init');
@@ -12137,22 +11995,8 @@
                 const previousOverride = scene.overrideMaterial;
                 const previousSkyVisible = skyObject?.visible;
                 const previousGroundVisible = groundPlaneMesh?.visible;
-                const blueprintMaterialEntries = [];
                 if (skyObject) skyObject.visible = !texture;
                 if (texture) scene.background = texture;
-                if (
-                    rect.id === 'left'
-                    && splitViewportBlueprintMaterial
-                    && splitViewportBlueprintCard?.dataset.blueprintMode !== 'animation'
-                ) {
-                    currentModel?.traverse?.((child) => {
-                        if (!child?.isMesh || !child.material) return;
-                        blueprintMaterialEntries.push({ child, material: child.material });
-                        child.material = Array.isArray(child.material)
-                            ? child.material.map(() => splitViewportBlueprintMaterial)
-                            : splitViewportBlueprintMaterial;
-                    });
-                }
                 try {
                     if (refreshShadows) renderSplitViewportShadowMap(viewCamera, rect.id, shadowLight);
                     else applySplitViewportShadowCatcherState(rect.id);
@@ -12162,7 +12006,6 @@
                     renderer.clear(true, true, true);
                     renderer.render(scene, viewCamera);
                 } finally {
-                    blueprintMaterialEntries.forEach(({ child, material }) => { child.material = material; });
                     scene.background = previousBackground;
                     scene.overrideMaterial = previousOverride;
                     if (skyObject && previousSkyVisible !== undefined) skyObject.visible = previousSkyVisible;
@@ -12205,7 +12048,13 @@
                     renderer.shadowMap.needsUpdate = false;
                     try {
                         renderer.setScissorTest(true);
-                        splitViewportController.getRects().forEach((rect) => renderSplitViewportRect(rect, refreshShadows));
+                        splitViewportRenderFrame += 1;
+                        const stride = Math.max(1, Number(getMainViewerQualityProfile().secondaryViewportStride || 1));
+                        splitViewportController.getRects().forEach((rect) => {
+                            if (rect.role === 'main' || splitViewportRenderFrame % stride === 0) {
+                                renderSplitViewportRect(rect, refreshShadows);
+                            }
+                        });
                     } finally {
                         applySplitViewportShadowCatcherState('perspective');
                         restorePrimaryViewerShadowLight();
@@ -14176,6 +14025,7 @@
                 if (!MAIN_VIEWER_QUALITY_PROFILES[mode]) return;
                 const previousMode = mainViewerQualityMode;
                 mainViewerQualityMode = mode;
+                mainViewerAdaptiveQualityState = { ...mainViewerAdaptiveQualityState, mode };
                 perfLogger.mainViewerQuality = mode;
                 if (!renderer) return;
 
@@ -14200,45 +14050,19 @@
                 }
             }
 
-            function maybeAdaptMainViewerQuality(fps) {
-                if (!mainViewerAdaptiveQualityEnabled || !mainViewerEnabled || loadingManager?.isVisible) return;
-
-                const now = performance.now();
-                if (now < mainViewerQualityCooldownUntil) return;
-
-                if (fps < 24) {
-                    mainViewerQualityStableLowCount += 1;
-                    mainViewerQualityStableHighCount = 0;
-                } else if (fps > 52) {
-                    mainViewerQualityStableHighCount += 1;
-                    mainViewerQualityStableLowCount = 0;
-                } else {
-                    mainViewerQualityStableLowCount = 0;
-                    mainViewerQualityStableHighCount = 0;
-                }
-
-                if (mainViewerQualityStableLowCount >= 3) {
-                    if (mainViewerQualityMode === 'high') {
-                        applyMainViewerQuality('medium', `fps-drop-${fps}`);
-                    } else if (mainViewerQualityMode === 'medium') {
-                        applyMainViewerQuality('low', `fps-drop-${fps}`);
-                    }
-                    mainViewerQualityStableLowCount = 0;
-                    mainViewerQualityStableHighCount = 0;
-                    mainViewerQualityCooldownUntil = now + 6000;
-                    return;
-                }
-
-                if (mainViewerQualityStableHighCount >= 8) {
-                    if (mainViewerQualityMode === 'low') {
-                        applyMainViewerQuality('medium', `fps-recover-${fps}`);
-                    } else if (mainViewerQualityMode === 'medium') {
-                        applyMainViewerQuality('high', `fps-recover-${fps}`);
-                    }
-                    mainViewerQualityStableLowCount = 0;
-                    mainViewerQualityStableHighCount = 0;
-                    mainViewerQualityCooldownUntil = now + 10000;
-                }
+            function maybeAdaptMainViewerQuality(fps, p95FrameTime = Infinity) {
+                const result = sampleAdaptiveQuality(mainViewerAdaptiveQualityState, {
+                    fps,
+                    p95FrameTime,
+                    now: performance.now(),
+                    seconds: 1,
+                    active: mainViewerAdaptiveQualityEnabled
+                        && mainViewerEnabled
+                        && !loadingManager?.isVisible
+                        && !document.hidden,
+                });
+                mainViewerAdaptiveQualityState = result.state;
+                if (result.change) applyMainViewerQuality(result.change.to, result.change.reason);
             }
 
             function updateFullscreenButton() {
@@ -15055,6 +14879,8 @@
 
                 let frameCount = 0;
                 let lastTime = performance.now();
+                let lastFrameTimestamp = lastTime;
+                let frameTimeSamples = [];
                 const fpsLabel = document.getElementById('viewer-fps');
 
                 stopMainViewerLoop = function stopMainViewerLoop() {
@@ -15083,36 +14909,46 @@
                         // FPS calculation
                         frameCount++;
                         const time = performance.now();
+                        const frameTime = Math.max(0, time - lastFrameTimestamp);
+                        lastFrameTimestamp = time;
+                        if (frameTime < 1000) {
+                            frameTimeSamples.push(frameTime);
+                            if (frameTimeSamples.length > 240) frameTimeSamples.shift();
+                        }
                         if (time >= lastTime + 1000) {
                             mainViewerCurrentFps = frameCount;
                             perfLogger.mainViewerFps = frameCount;
-                            maybeAdaptMainViewerQuality(frameCount);
+                            const sortedFrameTimes = [...frameTimeSamples].sort((a, b) => a - b);
+                            const p95Index = Math.max(0, Math.ceil(sortedFrameTimes.length * 0.95) - 1);
+                            const p95FrameTime = sortedFrameTimes[p95Index] || Infinity;
+                            perfLogger.mainViewerP95FrameTime = Number.isFinite(p95FrameTime)
+                                ? Math.round(p95FrameTime * 10) / 10
+                                : null;
+                            maybeAdaptMainViewerQuality(frameCount, p95FrameTime);
                             const qualityBadge = getMainViewerQualityProfile().badge;
                             if (fpsLabel) {
-                                fpsLabel.textContent = `${frameCount} FPS · ${qualityBadge}`;
+                                fpsLabel.textContent = `${frameCount} FPS`;
+                                fpsLabel.title = `${mainViewerQualityMode} quality · p95 ${Math.round(p95FrameTime)} ms`;
+                                fpsLabel.dataset.quality = qualityBadge;
                                 if (frameCount >= 55) fpsLabel.style.color = '#4ade80';
                                 else if (frameCount >= 30) fpsLabel.style.color = '#facc15';
                                 else fpsLabel.style.color = '#f87171';
                             }
                             frameCount = 0;
                             lastTime = time;
+                            frameTimeSamples = [];
                         }
 
                         const dt = Math.min(clock.getDelta(), 1 / 20);
                         if (!mainViewerEnabled || document.hidden) {
                             return;
                         }
-                        const correctionRuntimeEnabled = currentModelType === 'animations' && !playModeController?.active;
-                        boneCorrectionPanel?.setRuntimeEnabled?.(correctionRuntimeEnabled);
-                        boneCorrectionPanel?.beforeMixerUpdate?.();
                         if (mixer) {
                             mixer.update(dt);
                             if (currentModelType !== 'animations') {
                                 snapCurrentModelToGround({ force: false });
                             }
                         }
-                        const correctionPoseChanged = boneCorrectionPanel?.afterMixerUpdate?.() === true;
-                        if (correctionPoseChanged) currentModel?.updateMatrixWorld?.(true);
                         if (viewerControls && splitViewportActiveInteractionView === 'perspective') viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
                         if (playModeController?.active) playModeController.update(dt);
@@ -15120,7 +14956,6 @@
                         publishMainViewerDebugState();
                         if (window.updateZoomInertia && splitViewportActiveInteractionView === 'perspective') window.updateZoomInertia();
                         Object.values(splitViewportControls).forEach((orbit) => orbit?.update?.());
-                        boneCorrectionPanel?.updateOverlay?.();
                         
                         if (!isDefaultComparisonOn && cameraInitialized && camera && controls) {
                             viewerState.camera.position.x = camera.position.x;
@@ -15603,7 +15438,6 @@
                         if (nextMode === 'animation') {
                             restoreAnimationPreviewClipsAfterPlay();
                         }
-                        configureBoneCorrectionForCurrentModel();
                     };
 
                     const showRagdollHelpOnce = () => {
@@ -16073,15 +15907,18 @@
                         }
                         if (restartBusy) {
                             status.textContent = `Creating ${selectedLabel} rig task...`;
-                            action.textContent = `Creating ${selectedLabel} rig task...`;
+                            action.title = `Creating ${selectedLabel} rig task...`;
+                            action.setAttribute('aria-label', action.title);
                             action.disabled = true;
                         } else if (hasChange) {
                             status.textContent = `Selected: ${selectedLabel} · current: ${currentLabel}`;
-                            action.textContent = `Create new ${selectedLabel} rig task`;
+                            action.title = `Create new ${selectedLabel} rig task`;
+                            action.setAttribute('aria-label', action.title);
                             action.disabled = false;
                         } else {
                             status.textContent = `Current: ${currentLabel}`;
-                            action.textContent = 'Choose another rig type';
+                            action.title = 'Choose another rig type';
+                            action.setAttribute('aria-label', action.title);
                             action.disabled = true;
                         }
                     }
@@ -16094,6 +15931,7 @@
                         btn.className = 'manual-rig-type-btn';
                         btn.dataset.rigKey = key;
                         btn.setAttribute('aria-pressed', key === selectedKey ? 'true' : 'false');
+                        btn.setAttribute('aria-label', formatManualRigLabel(key));
                         btn.title = key === activeKey
                             ? `Current rig type: ${formatManualRigLabel(key)}`
                             : `Create a new task as ${formatManualRigLabel(key)}`;
@@ -16103,9 +15941,7 @@
                         icon.loading = 'lazy';
                         icon.src = (window.resolveRigIconUrl ? window.resolveRigIconUrl(key) : `/static/Icons_png/${key === 'humanoid' ? 'Human' : formatManualRigLabel(key)}.png`);
 
-                        const label = document.createElement('span');
-                        label.textContent = formatManualRigLabel(key);
-                        btn.append(icon, label);
+                        btn.append(icon);
 
                         btn.addEventListener('click', async () => {
                             if (restartBusy) return;
@@ -17428,6 +17264,7 @@
             }
 
             async function loadModel(glbUrl, label = 'GLB', retryCount = 0, timeoutMs = LOAD_MODEL_DEFAULT_TIMEOUT_MS) {
+                markMainViewerHeavyOperation(2000);
                 if (!sceneInited) await initScene();
                 const isAnimationPreview = isAnimationModelSource(label, glbUrl);
 
@@ -17661,6 +17498,7 @@
 
             // Load FBX model with animations
             async function loadFBX(fbxUrl, label = 'FBX', retryCount = 0) {
+                markMainViewerHeavyOperation(2000);
                 if (!sceneInited) await initScene();
                 const isAnimationPreview = isAnimationModelSource(label, fbxUrl);
 
@@ -17868,7 +17706,6 @@
                     const ok = await loadFBX(url, label);
                     if (ok) {
                         currentModelType = 'variant';
-                        configureBoneCorrectionForCurrentModel();
                         finalLoaded = true;
                     }
                     return ok;
@@ -20329,7 +20166,6 @@
                         if (ok) {
                             if (rigEditor && t) rigEditor.setTaskStatus(t.status);
                             window.taskDbg('[Viewer] Final animation preview loaded directly; skipping prepared preview.');
-                            void maybeInitIdleLtxGenerator(t);
                             return;
                         }
                         animationsBackgroundFinished = true;
@@ -20392,7 +20228,6 @@
                             window.taskDbg('[Viewer] Auto-switching to animation mode (ready)');
                             setActiveMode('animation');
                         }
-                        void maybeInitIdleLtxGenerator(t);
                     }
 
                     // Update RigEditor status
@@ -20494,53 +20329,6 @@
             });
         }
     </script>
-
-    <div id="idle-ltx-modal" class="idle-ltx-modal hidden" aria-hidden="true" data-idle-ltx-close="1">
-        <div class="idle-ltx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="idle-ltx-modal-title" tabindex="-1">
-            <button type="button" id="idle-ltx-modal-close" class="idle-ltx-modal-close" aria-label="Close">x</button>
-            <div class="idle-ltx-modal-main">
-                <h2 id="idle-ltx-modal-title" style="margin:0 2.5rem 0.35rem 0;" data-i18n="idle_ltx_modal_title">Generate fitting references</h2>
-                <p class="idle-ltx-subtitle" style="margin:0 0 1rem;" data-i18n="idle_ltx_modal_description">We capture the rigged model in base pose, analyze one frame, build four full scene prompts from editable motion intents, then generate reference videos for the animation fitting pipeline. The videos are intermediate targets; the goal is a real bone animation clip.</p>
-                <div id="idle-ltx-vision-fatal-alert" class="alert alert-error hidden" style="white-space:pre-wrap; margin-bottom:0.85rem;"></div>
-                <div class="idle-ltx-modal-layout">
-                    <div>
-                        <div class="idle-ltx-snapshot-frame">
-                            <div id="idle-ltx-preview-placeholder" class="idle-ltx-subtitle" data-i18n="idle_ltx_preview_placeholder">The start frame preview will appear before generation.</div>
-                            <img id="idle-ltx-snapshot-img" class="hidden" alt="">
-                        </div>
-                        <div id="idle-ltx-generate-preview" class="hidden" style="margin-top:0.75rem;">
-                            <div class="idle-ltx-meta"><span data-i18n="idle_ltx_detected_model">Detected model</span>: <span id="idle-ltx-species-display">-</span></div>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="idle-ltx-prompt-grid">
-                            <div class="idle-ltx-prompt-field">
-                                <label data-i18n="idle_ltx_variant_idle">Idle</label>
-                                <textarea class="form-input" data-variant-key="idle"></textarea>
-                            </div>
-                            <div class="idle-ltx-prompt-field">
-                                <label data-i18n="idle_ltx_variant_walk">Walk</label>
-                                <textarea class="form-input" data-variant-key="walk"></textarea>
-                            </div>
-                            <div class="idle-ltx-prompt-field">
-                                <label data-i18n="idle_ltx_variant_run">Run</label>
-                                <textarea class="form-input" data-variant-key="run"></textarea>
-                            </div>
-                            <div class="idle-ltx-prompt-field">
-                                <label data-i18n="idle_ltx_variant_die">Die</label>
-                                <textarea class="form-input" data-variant-key="die"></textarea>
-                            </div>
-                        </div>
-                        <div id="idle-ltx-status-line" class="idle-ltx-status" style="margin-top:0.75rem;"></div>
-                        <div style="display:flex; justify-content:flex-end; gap:0.55rem; flex-wrap:wrap; margin-top:0.85rem;">
-                            <button type="button" id="idle-ltx-modal-cancel" class="btn btn-secondary" data-i18n="idle_ltx_modal_cancel">Cancel</button>
-                            <button type="button" id="idle-ltx-modal-start" class="btn btn-primary" data-i18n="idle_ltx_modal_start">Generate 4 references</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Share modal (link, embed, social) -->
     <script>

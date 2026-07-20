@@ -8,6 +8,10 @@
 # UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS=1
 # AUTOMATIC_TASK_DB_DELETION=0
 
+# Experimental viewer modules are opt-in and disabled in production.
+BONE_CORRECTION_ENABLED=0
+ANIMATION_FITTING_ENABLED=0
+
 RESEND_API_KEY=
 # Must be a verified sender/domain in Resend
 EMAIL_FROM=noreply@autorig.online

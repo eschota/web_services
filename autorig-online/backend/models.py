@@ -545,6 +545,8 @@ class AnimationCatalogItem(BaseModel):
     purchased: bool = False
     file_name: Optional[str] = None
     preview_url: Optional[str] = None
+    download_url: Optional[str] = None
+    download_with_base_url: Optional[str] = None
     source_kind: Optional[str] = None
     animal_type: Optional[str] = None
     orientation: Optional[str] = None

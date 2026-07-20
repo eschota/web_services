@@ -1,8 +1,8 @@
-export const SPLIT_VIEW_IDS = Object.freeze(['perspective', 'top', 'front', 'left']);
+export const SPLIT_VIEW_IDS = Object.freeze(['perspective', 'top', 'front']);
 
 export const DEFAULT_SPLIT_VIEW_STATE = Object.freeze({
     mainView: 'perspective',
-    railViews: Object.freeze(['top', 'front', 'left']),
+    railViews: Object.freeze(['top', 'front']),
     maximizedView: null,
 });
 
@@ -20,7 +20,7 @@ export function normalizeSplitViewportState(value = {}) {
     const maximizedView = validViewId(value.maximizedView) ? value.maximizedView : null;
     return {
         mainView,
-        railViews: railViews.slice(0, 3),
+        railViews: railViews.slice(0, 2),
         maximizedView,
     };
 }
@@ -63,7 +63,7 @@ export function splitViewportRects(state, width, height, mainRatio = 0.72) {
     const ratio = Math.min(0.82, Math.max(0.58, Number(mainRatio) || 0.72));
     const mainWidth = Math.round(w * ratio);
     const railWidth = w - mainWidth;
-    const rows = current.railViews.length || 3;
+    const rows = current.railViews.length || 2;
     const rects = [{ id: current.mainView, x: 0, y: 0, width: mainWidth, height: h, role: 'main' }];
     let rowTop = 0;
     current.railViews.forEach((id, index) => {

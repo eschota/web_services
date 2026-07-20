@@ -1,0 +1,41 @@
+import unittest
+from pathlib import Path
+
+
+class TaskViewerContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parents[2]
+        cls.html = (root / "static" / "task.html").read_text(encoding="utf-8")
+        cls.split_source = (root / "static" / "js" / "task-split-viewer.js").read_text(encoding="utf-8")
+
+    def test_disabled_modules_are_absent_from_page_runtime(self):
+        self.assertNotIn('id="blueprint-viewer-card"', self.html)
+        self.assertNotIn('id="idle-ltx-generator-island"', self.html)
+        self.assertNotIn('id="idle-ltx-modal"', self.html)
+        self.assertNotIn("task-bone-correction-panel.js", self.html)
+        self.assertNotIn("task-animation-fitting-panel.js", self.html)
+        self.assertNotIn("animal-blueprint-viewer.js", self.html)
+        self.assertNotIn("boneCorrectionPanel?.", self.html)
+
+    def test_animation_rail_and_fps_are_inside_viewer_overlay(self):
+        overlay_index = self.html.index('id="viewer-overlay"')
+        rail_index = self.html.index('id="custom-animations-wrap"')
+        fps_index = self.html.index('id="viewer-fps"')
+        next_legacy_control_index = self.html.index('id="viewer-channel-wrap"')
+        self.assertLess(overlay_index, rail_index)
+        self.assertLess(rail_index, fps_index)
+        self.assertLess(fps_index, next_legacy_control_index)
+        self.assertIn('id="custom-anim-download-only-btn"', self.html[rail_index:fps_index])
+
+    def test_split_viewer_has_only_three_views(self):
+        self.assertIn("['perspective', 'top', 'front']", self.split_source)
+        self.assertNotIn("'left'", self.split_source)
+
+    def test_manual_rig_buttons_have_no_text_label_nodes(self):
+        self.assertNotIn("const label = document.createElement('span');\n                        label.textContent = formatManualRigLabel(key);", self.html)
+        self.assertIn("btn.setAttribute('aria-label', formatManualRigLabel(key));", self.html)
+
+
+if __name__ == "__main__":
+    unittest.main()

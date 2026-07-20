@@ -182,7 +182,6 @@ import re
 import httpx
 
 from namecheap_remote_api import router as namecheap_remote_router
-from idle_ltx_routes import register_idle_ltx_routes
 from animal_animation_library import (
     ANIMAL_CLIP_IDS,
     ANIMAL_RIG_TYPES,
@@ -214,6 +213,20 @@ from animal_animation_library import (
     validate_animation_manifest,
     validate_glb_animation_contract,
 )
+
+
+def _env_feature_enabled(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+BONE_CORRECTION_ENABLED = _env_feature_enabled("BONE_CORRECTION_ENABLED")
+ANIMATION_FITTING_ENABLED = _env_feature_enabled("ANIMATION_FITTING_ENABLED")
+
+
+def _require_feature_enabled(enabled: bool, feature_name: str) -> None:
+    if not enabled:
+        raise HTTPException(status_code=410, detail=f"{feature_name} is temporarily disabled")
 
 # Throttle poster-classification recovery triggers from GET /api/task (per task_id).
 _poster_recovery_throttle: Dict[str, float] = {}
@@ -1060,14 +1073,24 @@ async def get_current_user(
     return user
 
 
-register_idle_ltx_routes(
-    app,
-    limiter,
-    get_db=get_db,
-    get_current_user=get_current_user,
-    get_task_by_id=get_task_by_id,
-    app_url=APP_URL,
-)
+if ANIMATION_FITTING_ENABLED:
+    from idle_ltx_routes import register_idle_ltx_routes
+
+    register_idle_ltx_routes(
+        app,
+        limiter,
+        get_db=get_db,
+        get_current_user=get_current_user,
+        get_task_by_id=get_task_by_id,
+        app_url=APP_URL,
+    )
+else:
+    @app.api_route(
+        "/api/task/{task_id}/idle-ltx/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    )
+    async def api_disabled_idle_ltx(task_id: str, path: str):
+        _require_feature_enabled(False, "Animation fitting")
 
 
 async def get_anon_session(
@@ -1692,8 +1715,13 @@ async def _fetch_worker_animation_file_urls(worker_root: str, guid: str) -> List
                     continue
                 if not rel_path.lower().endswith(".fbx"):
                     continue
-                # Keep slashes in rel_path (e.g. nested folders), encode only unsafe chars.
-                out.append(f"{worker_root}/{guid}/{quote(rel_path, safe='/')}")
+                # FreeStock forwards the path after one URL decode, so escaped
+                # bytes must survive that hop. Other workers use normal quoting.
+                encoded_path = quote(rel_path, safe="/")
+                worker_host = (urlparse(worker_root).hostname or "").lower()
+                if worker_host.endswith(".freestock.online"):
+                    encoded_path = encoded_path.replace("%", "%25")
+                out.append(f"{worker_root}/{guid}/{encoded_path}")
     except Exception:
         return []
     return out
@@ -5741,6 +5769,14 @@ async def _build_animal_animation_catalog_response(
             purchased=pack_purchased,
             file_name=file_name,
             preview_url=f"/api/task/{task.id}/animations/preview/{quote(item_id)}" if ready else None,
+            download_url=(
+                f"/api/task/{task.id}/animations/download-pack"
+                f"?animal_type={quote(normalized_animal)}&orientation={quote(normalized_orientation)}"
+            ) if ready else None,
+            download_with_base_url=(
+                f"/api/task/{task.id}/animations/download-pack"
+                f"?animal_type={quote(normalized_animal)}&orientation={quote(normalized_orientation)}"
+            ) if ready else None,
             source_kind="animal_variant_pack",
             animal_type=normalized_animal,
             orientation=normalized_orientation,
@@ -6200,6 +6236,7 @@ async def api_admin_create_animation_fitting_job(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_feature_enabled(ANIMATION_FITTING_ENABLED, "Animation fitting")
     try:
         job = await create_fitting_job(db, body, admin_email=admin.email)
     except AnimationLibraryError as exc:
@@ -6216,6 +6253,7 @@ async def api_admin_list_animation_fitting_jobs(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_feature_enabled(ANIMATION_FITTING_ENABLED, "Animation fitting")
     query = select(AnimalAnimationFittingJob)
     if rig_type:
         normalized_rig = str(rig_type).strip().lower()
@@ -6241,6 +6279,7 @@ async def api_admin_get_animation_fitting_job(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_feature_enabled(ANIMATION_FITTING_ENABLED, "Animation fitting")
     try:
         return await get_fitting_job_payload(db, job_id)
     except AnimationLibraryError as exc:
@@ -6254,6 +6293,7 @@ async def api_admin_add_animation_fitting_candidate(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_feature_enabled(ANIMATION_FITTING_ENABLED, "Animation fitting")
     try:
         candidate = await add_fitting_candidate(db, job_id=job_id, request=body)
     except AnimationLibraryError as exc:
@@ -6268,6 +6308,7 @@ async def api_admin_decide_animation_fitting_candidate(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_feature_enabled(ANIMATION_FITTING_ENABLED, "Animation fitting")
     try:
         candidate = await decide_fitting_candidate(
             db,
@@ -7072,6 +7113,8 @@ async def api_get_animation_catalog(
             purchased=(purchased_all or (anim_id in purchased_ids)),
             file_name=file_name,
             preview_url=preview_url,
+            download_url=f"/api/task/{task_id}/animations/download/{quote(anim_id)}" if ready else None,
+            download_with_base_url=f"/api/task/{task_id}/animations/download-with-base/{quote(anim_id)}" if ready else None,
         ))
 
     items.sort(key=lambda x: (x.type, x.name.lower()))
@@ -13529,6 +13572,7 @@ async def api_get_task_animation_corrections(
     db: AsyncSession = Depends(get_db),
 ):
     """Public published corrections; owner/admin additionally receives its draft."""
+    _require_feature_enabled(BONE_CORRECTION_ENABLED, "Bone correction")
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -13552,6 +13596,7 @@ async def api_put_task_animation_corrections(
     db: AsyncSession = Depends(get_db),
 ):
     """Owner/admin: replace the private draft without changing public preview."""
+    _require_feature_enabled(BONE_CORRECTION_ENABLED, "Bone correction")
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -13584,6 +13629,7 @@ async def api_publish_task_animation_corrections(
     db: AsyncSession = Depends(get_db),
 ):
     """Owner/admin: atomically publish the draft and enqueue revisioned exports."""
+    _require_feature_enabled(BONE_CORRECTION_ENABLED, "Bone correction")
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -13631,6 +13677,7 @@ async def api_retry_task_animation_correction_export(
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _require_feature_enabled(BONE_CORRECTION_ENABLED, "Bone correction")
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -13662,6 +13709,7 @@ async def api_apply_task_animation_correction_export_result(
     revision: int,
     request: Request,
 ):
+    _require_feature_enabled(BONE_CORRECTION_ENABLED, "Bone correction")
     expected = ANIMATION_CORRECTION_EXPORT_TOKEN
     provided = request.headers.get("authorization", "")
     if not expected:
