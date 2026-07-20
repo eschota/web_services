@@ -14584,7 +14584,13 @@
                 scene.background = new THREE.Color(LIGHTING_CONFIG.bgColor);
 
                 // Renderer (PBR critical settings from config)
-                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false });
+                // Rail viewports intentionally skip frames in low-quality modes, so their pixels must persist.
+                renderer = new THREE.WebGLRenderer({
+                    antialias: true,
+                    alpha: true,
+                    premultipliedAlpha: false,
+                    preserveDrawingBuffer: true,
+                });
                 renderer.setClearColor(0x000000, 0);
                 renderer.setPixelRatio(getMainViewerTargetPixelRatio());
                 renderer.shadowMap.enabled = true;

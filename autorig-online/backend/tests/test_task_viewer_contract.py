@@ -32,6 +32,10 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertIn("['perspective', 'top', 'front']", self.split_source)
         self.assertNotIn("'left'", self.split_source)
 
+    def test_split_viewer_preserves_staggered_rail_frames(self):
+        self.assertIn("preserveDrawingBuffer: true", self.html)
+        self.assertIn("secondaryViewportStride: 4", self.html)
+
     def test_manual_rig_buttons_have_no_text_label_nodes(self):
         self.assertNotIn("const label = document.createElement('span');\n                        label.textContent = formatManualRigLabel(key);", self.html)
         self.assertIn("btn.setAttribute('aria-label', formatManualRigLabel(key));", self.html)
