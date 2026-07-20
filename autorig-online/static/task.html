@@ -4023,14 +4023,14 @@
                                 <div class="animation-rail-footer">
                                     <div id="custom-anim-selected-label" class="animation-rail-selection">Select an animation</div>
                                     <div class="animation-rail-downloads">
-                                        <button id="custom-anim-download-btn" class="animation-rail-icon animation-rail-download-button" type="button" disabled title="Download animation with base rig" aria-label="Download animation with base rig">
+                                        <button id="custom-anim-download-btn" class="animation-rail-icon animation-rail-download-button" type="button" disabled title="Download animation with base rig" aria-label="Download animation with base rig" onclick="TaskUI.downloadSelectedAnimationAction(true)">
                                             <img class="animation-rail-download-icon" src="/static/images/icons/animation-rig-download.svg" alt="">
                                             <span class="custom-anim-download-btn-text visually-hidden">Download animation with base rig</span>
                                         </button>
-                                        <button id="custom-anim-download-only-btn" class="animation-rail-icon animation-rail-download-button" type="button" disabled title="Download animation only" aria-label="Download animation only">
+                                        <button id="custom-anim-download-only-btn" class="animation-rail-icon animation-rail-download-button" type="button" disabled title="Download animation only" aria-label="Download animation only" onclick="TaskUI.downloadSelectedAnimationAction(false)">
                                             <img class="animation-rail-download-icon" src="/static/images/icons/animation-clip-download.svg" alt="">
                                         </button>
-                                        <button id="custom-anim-download-pack-btn" class="animation-rail-icon animation-rail-download-button hidden" type="button" disabled title="Download animation pack" aria-label="Download animation pack">
+                                        <button id="custom-anim-download-pack-btn" class="animation-rail-icon animation-rail-download-button hidden" type="button" disabled title="Download animation pack" aria-label="Download animation pack" onclick="TaskUI.downloadAnimalAnimationPackAction()">
                                             <img class="animation-rail-download-icon" src="/static/images/icons/animation-pack-download.svg" alt="">
                                             <span class="custom-anim-download-pack-btn-text visually-hidden">Download all animations</span>
                                         </button>
@@ -7860,9 +7860,6 @@
 
             setupCustomAnimationPicker() {
                 const typeSelect = document.getElementById('custom-anim-type');
-                const downloadBtn = document.getElementById('custom-anim-download-btn');
-                const downloadOnlyBtn = document.getElementById('custom-anim-download-only-btn');
-                const packBtn = document.getElementById('custom-anim-download-pack-btn');
                 const rail = document.getElementById('custom-animations-wrap');
                 const collapseBtn = document.getElementById('animation-rail-collapse');
 
@@ -7872,27 +7869,6 @@
                         this.markCustomAnimationUserInteraction();
                         this.animationTypeFilter = String(typeSelect.value || 'walk').toLowerCase();
                         this.renderAnimationCatalog();
-                    });
-                }
-                if (downloadBtn && !downloadBtn.__wired) {
-                    downloadBtn.__wired = true;
-                    downloadBtn.addEventListener('click', () => {
-                        this.markCustomAnimationUserInteraction();
-                        this.downloadSelectedAnimationAction(true);
-                    });
-                }
-                if (downloadOnlyBtn && !downloadOnlyBtn.__wired) {
-                    downloadOnlyBtn.__wired = true;
-                    downloadOnlyBtn.addEventListener('click', () => {
-                        this.markCustomAnimationUserInteraction();
-                        this.downloadSelectedAnimationAction(false);
-                    });
-                }
-                if (packBtn && !packBtn.__wired) {
-                    packBtn.__wired = true;
-                    packBtn.addEventListener('click', () => {
-                        this.markCustomAnimationUserInteraction();
-                        this.downloadAnimalAnimationPackAction();
                     });
                 }
                 if (rail && collapseBtn && !collapseBtn.__wired) {
@@ -8407,6 +8383,7 @@
             },
 
             async downloadAnimalAnimationPackAction() {
+                this.markCustomAnimationUserInteraction();
                 const selected = this.getSelectedAnimationItem();
                 const params = this.animalAnimationCatalogParams();
                 if (!selected || !selected.available || !selected.ready || !params) return;
@@ -8423,6 +8400,7 @@
             },
 
             async downloadSelectedAnimationAction(withBase = true) {
+                this.markCustomAnimationUserInteraction();
                 const selected = this.getSelectedAnimationItem();
                 if (!selected || !selected.available || !selected.ready) return;
 

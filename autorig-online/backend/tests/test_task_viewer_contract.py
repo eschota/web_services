@@ -60,6 +60,12 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertIn('window.TaskVariantPreviewBridge', self.html)
         self.assertIn("currentModelType !== 'variant'", self.html)
 
+    def test_animation_download_buttons_have_direct_ui_commands(self):
+        self.assertIn('onclick="TaskUI.downloadSelectedAnimationAction(true)"', self.html)
+        self.assertIn('onclick="TaskUI.downloadSelectedAnimationAction(false)"', self.html)
+        self.assertIn('onclick="TaskUI.downloadAnimalAnimationPackAction()"', self.html)
+        self.assertNotIn('packBtn.addEventListener', self.html)
+
     def test_split_viewer_has_only_three_views(self):
         self.assertIn("['perspective', 'top', 'front']", self.split_source)
         self.assertNotIn("'left'", self.split_source)
