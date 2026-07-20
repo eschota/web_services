@@ -3252,39 +3252,26 @@
         }
 
         .manual-rig-restart-panel {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
             margin-top: 0.75rem;
             padding: 0.5rem;
             border: 1px solid var(--border);
             border-radius: 12px;
             background: rgba(255,255,255,0.035);
         }
-        .manual-rig-restart-head {
-            display: none;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.75rem;
-            margin-bottom: 0.6rem;
-            flex-wrap: wrap;
-        }
-        .manual-rig-restart-title {
-            font-size: 0.92rem;
-            font-weight: 700;
-            color: var(--text-primary);
-        }
-        .manual-rig-restart-status {
-            font-size: 0.78rem;
-            color: var(--text-muted);
-        }
         .manual-rig-type-grid {
             display: flex;
+            flex: 1 1 auto;
             flex-wrap: nowrap;
             gap: 0.35rem;
             overflow-x: auto;
+            min-width: 0;
         }
         .manual-rig-restart-actions {
             display: flex;
-            justify-content: flex-end;
-            margin-top: 0.4rem;
+            flex: 0 0 auto;
         }
         .manual-rig-create-btn {
             width: 34px;
@@ -3306,9 +3293,9 @@
         }
         .manual-rig-type-btn {
             display: inline-flex;
-            flex: 0 0 54px;
-            width: 54px;
-            height: 54px;
+            flex: 0 0 50px;
+            width: 50px;
+            height: 50px;
             align-items: center;
             justify-content: center;
             padding: 0;
@@ -3336,8 +3323,8 @@
             transform: none;
         }
         .manual-rig-type-btn img {
-            width: 50px;
-            height: 50px;
+            width: 46px;
+            height: 46px;
             margin: 0;
             object-fit: contain;
             transform: scale(1.14);
@@ -3448,10 +3435,6 @@
             .manual-rig-type-grid {
                 display: flex;
                 flex-wrap: nowrap;
-            }
-
-            .manual-rig-restart-title {
-                overflow-wrap: anywhere;
             }
 
             .manual-rig-type-btn {
@@ -4751,11 +4734,7 @@
                         </div>
                     </div>
 
-                    <div id="manual-rig-restart-panel" class="manual-rig-restart-panel hidden" aria-label="Create a new task with another rig type">
-                        <div class="manual-rig-restart-head">
-                            <div class="manual-rig-restart-title">Create a new task with another rig type</div>
-                            <div id="manual-rig-restart-status" class="manual-rig-restart-status">Choose rig type</div>
-                        </div>
+                    <div id="manual-rig-restart-panel" class="manual-rig-restart-panel hidden" aria-label="Rig type">
                         <div id="manual-rig-type-grid" class="manual-rig-type-grid"></div>
                         <div class="manual-rig-restart-actions">
                             <button id="manual-rig-create-btn" class="manual-rig-create-btn" type="button" disabled title="Create task with selected rig" aria-label="Create task with selected rig">+</button>
@@ -15895,9 +15874,8 @@
                 async function setupManualRigRestartSelector() {
                     const panel = document.getElementById('manual-rig-restart-panel');
                     const grid = document.getElementById('manual-rig-type-grid');
-                    const status = document.getElementById('manual-rig-restart-status');
                     const action = document.getElementById('manual-rig-create-btn');
-                    if (!panel || !grid || !status || !action || grid.dataset.wired === '1') return;
+                    if (!panel || !grid || !action || grid.dataset.wired === '1') return;
                     grid.dataset.wired = '1';
 
                     let taskState = null;
@@ -15913,7 +15891,6 @@
 
                     function updateManualRigRestartControls() {
                         const selectedLabel = formatManualRigLabel(selectedKey);
-                        const currentLabel = formatManualRigLabel(activeKey);
                         const hasChange = selectedKey !== activeKey;
                         for (const button of grid.querySelectorAll('button[data-rig-key]')) {
                             const key = normalizeManualRigKey(button.dataset.rigKey);
@@ -15922,17 +15899,14 @@
                             button.disabled = restartBusy;
                         }
                         if (restartBusy) {
-                            status.textContent = `Creating ${selectedLabel} rig task...`;
                             action.title = `Creating ${selectedLabel} rig task...`;
                             action.setAttribute('aria-label', action.title);
                             action.disabled = true;
                         } else if (hasChange) {
-                            status.textContent = `Selected: ${selectedLabel} · current: ${currentLabel}`;
                             action.title = `Create new ${selectedLabel} rig task`;
                             action.setAttribute('aria-label', action.title);
                             action.disabled = false;
                         } else {
-                            status.textContent = `Current: ${currentLabel}`;
                             action.title = 'Choose another rig type';
                             action.setAttribute('aria-label', action.title);
                             action.disabled = true;
@@ -15992,8 +15966,8 @@
                             const data = await resp.json().catch(() => ({}));
                             if (!resp.ok) throw new Error(data.detail || 'Task creation failed');
                             if (!data.task_id) throw new Error('Task creation did not return a task id');
-                            status.textContent = `Started new ${selectedLabel} rig task. Reloading...`;
-                            action.textContent = `Started ${selectedLabel} rig task`;
+                            action.title = `Started ${selectedLabel} rig task`;
+                            action.setAttribute('aria-label', action.title);
                             window.setTimeout(() => {
                                 window.location.href = `/task?id=${encodeURIComponent(data.task_id)}`;
                             }, 500);
@@ -16001,7 +15975,8 @@
                             console.error('[ManualRig] Task creation failed', error);
                             restartBusy = false;
                             updateManualRigRestartControls();
-                            status.textContent = error?.message || 'Task creation failed';
+                            action.title = error?.message || 'Task creation failed';
+                            action.setAttribute('aria-label', action.title);
                         }
                     });
 

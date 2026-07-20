@@ -35,6 +35,9 @@ class TaskViewerContractTests(unittest.TestCase):
     def test_manual_rig_buttons_have_no_text_label_nodes(self):
         self.assertNotIn("const label = document.createElement('span');\n                        label.textContent = formatManualRigLabel(key);", self.html)
         self.assertIn("btn.setAttribute('aria-label', formatManualRigLabel(key));", self.html)
+        self.assertNotIn('class="manual-rig-restart-title"', self.html)
+        self.assertNotIn('id="manual-rig-restart-status"', self.html)
+        self.assertNotIn("action.textContent = `Started ${selectedLabel} rig task`;", self.html)
 
 
 if __name__ == "__main__":

@@ -14633,6 +14633,17 @@ async def index():
     return _static_html_response("index.html")
 
 
+def _task_html_response(html_content: str) -> HTMLResponse:
+    return HTMLResponse(
+        content=_inject_static_layout(html_content),
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.get("/task")
 async def task_page(
     id: Optional[str] = None,
@@ -14650,7 +14661,7 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
         )
-        return HTMLResponse(content=_inject_static_layout(html_content))
+        return _task_html_response(html_content)
     
     task_id = id.strip()
     if not task_id:
@@ -14658,7 +14669,7 @@ async def task_page(
             "<!-- TASK_SEO_PLACEHOLDER -->",
             f'<link rel="canonical" href="{(APP_URL or "https://autorig.online").rstrip("/")}/task">',
         )
-        return HTMLResponse(content=_inject_static_layout(html_content))
+        return _task_html_response(html_content)
 
     base_url = (APP_URL or "https://autorig.online").rstrip("/")
     task_url = f"{base_url}/task?id={task_id}"
@@ -14828,7 +14839,7 @@ async def task_page(
         f'<h1 class="task-status-header-title" id="task-seo-heading">{safe_task_heading}</h1>',
     )
     
-    return HTMLResponse(content=_inject_static_layout(html_content))
+    return _task_html_response(html_content)
 
 
 @app.post("/api/task/{task_id}/purchase-intent")
