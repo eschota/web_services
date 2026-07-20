@@ -47,6 +47,13 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertIn('pointer-events: auto;', self.html)
         self.assertIn('.animation-rail.is-collapsed + .animation-rail-controls', self.html)
 
+    def test_animal_catalog_loads_without_orientation_interaction(self):
+        start = self.html.index('updateAnimalVariantsPanel(task) {')
+        end = self.html.index('async loadAnimalVariants()', start)
+        method = self.html[start:end]
+        self.assertIn('if (!this.animationCatalogLoaded)', method)
+        self.assertIn('void this.loadAnimationCatalog().catch((error) => {', method)
+
     def test_split_viewer_has_only_three_views(self):
         self.assertIn("['perspective', 'top', 'front']", self.split_source)
         self.assertNotIn("'left'", self.split_source)

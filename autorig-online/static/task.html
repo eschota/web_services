@@ -7701,6 +7701,11 @@
                 const defaultAnimal = String(task?.animal_type || task?.rig_type || '').toLowerCase();
                 if (!this.animalVariantSelected && defaultAnimal) this.animalVariantSelected = defaultAnimal;
                 this.renderAnimalVariantsPanel();
+                if (!this.animationCatalogLoaded) {
+                    void this.loadAnimationCatalog().catch((error) => {
+                        console.warn('Initial animal animation catalog load failed:', error);
+                    });
+                }
 
                 const now = Date.now();
                 const shouldRefresh =
