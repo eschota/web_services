@@ -34,13 +34,18 @@ class TaskViewerContractTests(unittest.TestCase):
     def test_animation_playback_controls_do_not_constrain_category_select(self):
         head_index = self.html.index('<div class="animation-rail-head">')
         head_end_index = self.html.index('</div>', head_index)
-        controls_index = self.html.index('<div class="animation-rail-controls"', head_end_index)
+        rail_index = self.html.index('id="custom-animations-wrap"')
+        controls_index = self.html.index('<div class="animation-rail-controls"', rail_index)
+        fps_index = self.html.index('id="viewer-fps"', controls_index)
         play_index = self.html.index('id="anim-play-btn"')
         pause_index = self.html.index('id="anim-pause-btn"')
         self.assertGreater(controls_index, head_end_index)
+        self.assertLess(controls_index, fps_index)
         self.assertGreater(play_index, controls_index)
         self.assertGreater(pause_index, controls_index)
-        self.assertIn('left: calc(100% + 0.4rem);', self.html)
+        self.assertIn('z-index: 36;', self.html)
+        self.assertIn('pointer-events: auto;', self.html)
+        self.assertIn('.animation-rail.is-collapsed + .animation-rail-controls', self.html)
 
     def test_split_viewer_has_only_three_views(self):
         self.assertIn("['perspective', 'top', 'front']", self.split_source)

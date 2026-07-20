@@ -3227,10 +3227,14 @@
         }
         .animation-rail-controls {
             position: absolute;
-            top: 0;
-            left: calc(100% + 0.4rem);
+            top: 0.75rem;
+            left: calc(0.75rem + min(180px, 26%) + 0.4rem);
+            z-index: 36;
             padding: 0.45rem 0;
+            pointer-events: auto;
         }
+        .animation-rail.hidden + .animation-rail-controls,
+        .animation-rail.is-collapsed + .animation-rail-controls { display: none; }
         .animation-rail-type {
             min-width: 0;
             flex: 1 1 auto;
@@ -3550,6 +3554,10 @@
 
             .animation-rail {
                 width: min(170px, calc(100% - 1.5rem));
+            }
+
+            .animation-rail-controls {
+                left: calc(0.75rem + min(170px, calc(100% - 1.5rem)) + 0.4rem);
             }
 
             .face-rig-viewer-layout {
@@ -4007,10 +4015,6 @@
                                         <option value="walk" selected>Walk</option>
                                     </select>
                                 </div>
-                                <div class="animation-rail-controls" aria-label="Animation playback controls">
-                                    <button id="anim-play-btn" class="animation-rail-icon hidden" type="button" title="Play animation" aria-label="Play animation">&#9654;</button>
-                                    <button id="anim-pause-btn" class="animation-rail-icon hidden" type="button" title="Pause animation" aria-label="Pause animation">&#10074;&#10074;</button>
-                                </div>
                                 <select id="anim-select" class="hidden" aria-hidden="true"></select>
                                 <div id="custom-anim-stats" class="animation-rail-stats"></div>
                                 <div id="custom-anim-grid" class="custom-anim-grid animation-rail-list">
@@ -4032,6 +4036,10 @@
                                         </button>
                                     </div>
                                 </div>
+                            </div>
+                            <div class="animation-rail-controls" aria-label="Animation playback controls">
+                                <button id="anim-play-btn" class="animation-rail-icon hidden" type="button" title="Play animation" aria-label="Play animation">&#9654;</button>
+                                <button id="anim-pause-btn" class="animation-rail-icon hidden" type="button" title="Pause animation" aria-label="Pause animation">&#10074;&#10074;</button>
                             </div>
                             <div id="viewer-fps" class="viewer-fps" aria-live="off">-- FPS</div>
                             <!-- HIDDEN: Top-left Channel Selector (kept for compatibility) -->
