@@ -3219,10 +3219,17 @@
             display: none !important;
         }
         .animation-rail-head,
+        .animation-rail-controls,
         .animation-rail-downloads {
             display: flex;
             align-items: center;
             gap: 0.3rem;
+        }
+        .animation-rail-controls {
+            position: absolute;
+            top: 0;
+            left: calc(100% + 0.4rem);
+            padding: 0.45rem 0;
         }
         .animation-rail-type {
             min-width: 0;
@@ -3999,6 +4006,8 @@
                                     <select id="custom-anim-type" class="animation-rail-type" title="Animation category" aria-label="Animation category">
                                         <option value="walk" selected>Walk</option>
                                     </select>
+                                </div>
+                                <div class="animation-rail-controls" aria-label="Animation playback controls">
                                     <button id="anim-play-btn" class="animation-rail-icon hidden" type="button" title="Play animation" aria-label="Play animation">&#9654;</button>
                                     <button id="anim-pause-btn" class="animation-rail-icon hidden" type="button" title="Pause animation" aria-label="Pause animation">&#10074;&#10074;</button>
                                 </div>
