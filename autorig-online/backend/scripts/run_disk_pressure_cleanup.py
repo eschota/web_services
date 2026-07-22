@@ -77,7 +77,7 @@ def _purge_oldest_glb_cache_until(
     if not glb_cache_dir.exists():
         return removed, freed
 
-    candidates: list[tuple[float, int, Path]] = []
+    candidates: list[tuple[float, int, Path, str]] = []
     cutoff_ts = _age_cutoff_timestamp(min_age_hours)
     for path in glb_cache_dir.glob("*.glb"):
         try:
@@ -86,10 +86,10 @@ def _purge_oldest_glb_cache_until(
             continue
         if stat.st_mtime > cutoff_ts:
             continue
-        candidates.append((stat.st_mtime, stat.st_size, path))
+        candidates.append((stat.st_mtime, stat.st_size, path, upload_status))
 
     candidates.sort(key=lambda item: item[0])
-    for _mtime, size, path in candidates:
+    for _mtime, size, path, upload_status in candidates:
         cache_gb = _dir_size_bytes(glb_cache_dir) / (1024**3)
         needs_free_headroom = _free_gb() < target_free_gb
         exceeds_cap = max_cache_gb > 0 and cache_gb > max_cache_gb
