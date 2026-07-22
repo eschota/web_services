@@ -237,9 +237,10 @@ async def _purge_uploaded_video_cache_until(
     """
     Last-resort pressure cleanup for backend-cached task previews.
 
-    Only remove old videos for completed tasks that already have a successful
-    YouTube upload. Deferred/not-yet-uploaded tasks stay protected because the
-    YouTube retry worker may still need their local MP4 after worker URLs expire.
+    Only remove old videos for completed tasks that either already have a
+    successful YouTube upload or reached the terminal ``failed`` upload state.
+    Deferred/not-yet-attempted tasks stay protected because the YouTube retry
+    worker may still need their local MP4 after worker URLs expire.
     """
     from database import Task
     from sqlalchemy import select
@@ -248,20 +249,20 @@ async def _purge_uploaded_video_cache_until(
         return 0, 0
 
     result = await db.execute(
-        select(Task.id).where(
+        select(Task.id, Task.youtube_upload_status).where(
             Task.status == "done",
-            Task.youtube_upload_status == "uploaded",
-            Task.youtube_video_id.isnot(None),
+            Task.youtube_upload_status.in_(("uploaded", "failed")),
         )
     )
-    uploaded_task_ids = set(result.scalars().all())
-    if not uploaded_task_ids:
+    cleanable_task_statuses = {str(task_id): status for task_id, status in result.all()}
+    if not cleanable_task_statuses:
         return 0, 0
 
     cutoff_ts = _age_cutoff_timestamp(min_age_hours)
     candidates: list[tuple[float, int, Path]] = []
     for path in video_cache_dir.glob("*.mp4"):
-        if path.stem not in uploaded_task_ids:
+        upload_status = cleanable_task_statuses.get(path.stem)
+        if upload_status is None:
             continue
         try:
             stat = path.stat()
@@ -284,7 +285,7 @@ async def _purge_uploaded_video_cache_until(
         removed += 1
         freed += size
         print(
-            f"[Disk Video Cache] Removed YouTube-backed video {path.name} "
+            f"[Disk Video Cache] Removed {upload_status} YouTube video {path.name} "
             f"({size / (1024**2):.1f} MB); free now {_free_gb():.2f} GB"
         )
     return removed, freed
