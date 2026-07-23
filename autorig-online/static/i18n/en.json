@@ -623,5 +623,10 @@
     "viewer_split_perspective": "Perspective",
     "viewer_split_top": "Top",
     "viewer_split_front": "Front",
-    "viewer_split_blueprint_left": "Blueprint Left"
+    "viewer_split_blueprint_left": "Blueprint Left",
+    "agreement_model_sales_title": "7. Public previews, download restrictions, and model sale offers",
+    "agreement_model_sales_public_preview": "Completed task pages may provide a public interactive 3D viewer, including model and animation data transmitted to a visitor's browser for preview and animation switching. Removing download buttons does not constitute digital rights management and cannot guarantee that technically capable visitors will not extract browser-delivered preview data.",
+    "agreement_model_sales_download_access": "Download controls and protected download endpoints for task files are reserved for the task owner and the Operator's administrators. Previous credit-based unlocks do not create a continuing right to download another user's task files. Attempting to circumvent access controls is prohibited.",
+    "agreement_model_sales_offer_terms": "An authenticated user may submit a non-binding USD offer to purchase a model from a registered task owner. Submitting an offer does not create a sale, reserve the model, charge either party, grant a license, or provide download access. The author may record willingness to sell through a time-limited confirmation link. Any payment, commission, license scope, file delivery, taxes, refunds, and other transaction terms must be separately confirmed and completed with the Operator.",
+    "agreement_model_sales_notifications": "By submitting or accepting a model sale offer, the buyer and author consent to transactional emails about that offer being sent to the relevant parties and to the Operator's designated administrator. Offer records and email-delivery audit data may be retained for transaction administration, security, dispute handling, and legal compliance."
 }

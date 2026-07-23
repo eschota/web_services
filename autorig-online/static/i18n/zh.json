@@ -438,5 +438,10 @@
     "viewer_split_perspective": "透视",
     "viewer_split_top": "顶视图",
     "viewer_split_front": "前视图",
-    "viewer_split_blueprint_left": "左侧蓝图"
+    "viewer_split_blueprint_left": "左侧蓝图",
+    "agreement_model_sales_title": "7. 公开预览、下载限制和模型购买报价",
+    "agreement_model_sales_public_preview": "已完成任务的页面可能提供公开的交互式 3D 查看器。为了预览和切换动画，模型及动画数据会传输到访问者的浏览器。移除下载按钮并不构成数字版权管理，也不能保证具备技术能力的访问者无法提取已传输到浏览器的预览数据。",
+    "agreement_model_sales_download_access": "任务文件的下载控件和受保护下载接口仅供任务所有者及运营方管理员使用。先前使用积分解锁并不产生持续下载其他用户任务文件的权利。禁止规避访问控制。",
+    "agreement_model_sales_offer_terms": "已登录用户可以向已注册的任务所有者提交不具约束力的美元模型购买报价。提交报价不会形成交易、预留模型、向任何一方收费、授予许可或开放下载权限。作者可以通过有时限的确认链接记录出售意愿。付款、平台费用、许可范围、文件交付、税费、退款及其他交易条款必须另行确认，并由运营方协助完成。",
+    "agreement_model_sales_notifications": "提交或接受模型购买报价即表示买方和作者同意接收与该报价有关的交易邮件，并同意将相关通知发送给运营方指定管理员。报价记录及邮件投递审计数据可为交易管理、安全、争议处理和法律合规之目的予以保留。"
 }

@@ -75,6 +75,8 @@ from config import (
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
 )
 from viewer_environment import build_viewer_environment_from_settings
+from worker_artifact_urls import canonical_worker_artifact_url
+from model_sale_offers import build_router as build_model_sale_router
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
     Scene, SceneLike, Feedback, WorkerEndpoint, YoutubeCredentials,
@@ -1092,6 +1094,9 @@ async def get_current_user(
     return user
 
 
+app.include_router(build_model_sale_router(get_current_user))
+
+
 if ANIMATION_FITTING_ENABLED:
     from idle_ltx_routes import register_idle_ltx_routes
 
@@ -1238,6 +1243,22 @@ def _is_task_owner_or_admin(*, task, user: Optional[User], anon_session: Optiona
     if anon_session and task.owner_type == "anon" and task.owner_id == anon_session.anon_id:
         return True
     return False
+
+
+def _can_download_task(*, task: Task, user: Optional[User], request: Request) -> bool:
+    if user and is_admin_email(user.email):
+        return True
+    if user and task.owner_type == "user" and task.owner_id == user.email:
+        return True
+    anon_id = _effective_anon_id(request)
+    return bool(task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
+
+
+def _require_task_download_access(*, task: Task, user: Optional[User], request: Request) -> None:
+    if not user and not _effective_anon_id(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not _can_download_task(task=task, user=user, request=request):
+        raise HTTPException(status_code=403, detail="Only the task owner or administrator can download files")
 
 
 def _normalize_worker_url(url: str) -> str:
@@ -5171,6 +5192,7 @@ async def api_get_task(
                     return value
         return None
 
+    can_download_task = _can_download_task(task=task, user=user, request=request)
     is_admin_viewer = bool(user and is_admin_email(user.email))
     worker_api_for_response = (task.worker_api or None) if is_admin_viewer else None
     blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
@@ -5184,31 +5206,31 @@ async def api_get_task(
         progress=task.progress,
         ready_count=task.ready_count,
         total_count=task.total_count,
-        output_urls=task.output_urls,
-        ready_urls=task.ready_urls,
+        output_urls=task.output_urls if can_download_task else [],
+        ready_urls=task.ready_urls if can_download_task else [],
         video_ready=response_video_ready,
         video_url=response_video_url,
         blueprint_skeleton_ready=bool(blueprint_skeleton_url),
         blueprint_skeleton_url=blueprint_skeleton_url,
         blueprint_rig_preview_ready=bool(blueprint_rig_preview_url),
         blueprint_rig_preview_url=blueprint_rig_preview_url,
-        input_url=task.input_url,
+        input_url=task.input_url if can_download_task else None,
         input_type=task.input_type,
         animal_type=response_animal_type,
         rig_type=response_animal_type,
         rig_v2_animal_detection=rig_v2_animal_detection,
         viewer_theme_selection=viewer_theme_selection,
-        fbx_glb_output_url=task.fbx_glb_output_url,
+        fbx_glb_output_url=task.fbx_glb_output_url if can_download_task else None,
         fbx_glb_model_name=task.fbx_glb_model_name,
         fbx_glb_ready=task.fbx_glb_ready,
         fbx_glb_error=task.fbx_glb_error,
-        progress_page=task.progress_page,
+        progress_page=task.progress_page if can_download_task else None,
         worker_api=worker_api_for_response,
-        viewer_html_url=viewer_html_url,
-        quick_downloads=quick_downloads if quick_downloads else None,
+        viewer_html_url=viewer_html_url if can_download_task else None,
+        quick_downloads=(quick_downloads if quick_downloads else None) if can_download_task else None,
         prepared_glb_ready=prepared_glb_ready,
         error_message=task.error_message,
-        guid=task.guid,
+        guid=task.guid if can_download_task else None,
         content_rating=getattr(task, "content_rating", None),
         content_score=getattr(task, "content_score", None),
         content_classified_at=getattr(task, "content_classified_at", None),
@@ -5282,12 +5304,15 @@ async def api_task_progress_log(
 @app.get("/api/task/{task_id}/worker_files")
 async def api_task_worker_files(
     task_id: str,
+    request: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get list of files from worker for this task"""
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
 
     available, all_files, data, error = await _fetch_worker_model_files(task)
     if not available:
@@ -6525,19 +6550,17 @@ async def api_animal_variant_download(
     animal_type: str,
     orientation: str,
     kind: str,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
     kind = str(kind or "").strip().lower()
     if kind not in ("blend", "fbx"):
         raise HTTPException(status_code=400, detail="Unsupported variant download kind")
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required to download files")
-    if not await _has_full_task_download_purchase(db, user, task_id):
-        raise HTTPException(status_code=402, detail="Full download purchase required")
     source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, kind)
     stable_snapshot: Optional[Dict[str, Any]] = None
     if kind == "blend":
@@ -6558,12 +6581,12 @@ async def api_animal_variant_download(
 async def _animal_animation_pack_download_response(
     task: Task,
     user: Optional[User],
+    request: Request,
     db: AsyncSession,
     animal_type: str,
     orientation: str,
 ):
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    _require_task_download_access(task=task, user=user, request=request)
 
     animal_type = str(animal_type or "").strip().lower()
     orientation = str(orientation or "").strip().lower()
@@ -6571,9 +6594,6 @@ async def _animal_animation_pack_download_response(
         raise HTTPException(status_code=400, detail="Invalid animal type")
     if orientation not in ANIMAL_VARIANT_ORIENTATIONS:
         raise HTTPException(status_code=400, detail="Invalid animal orientation")
-
-    if not await _has_animal_animation_pack_purchase(db, user, task.id, animal_type, orientation):
-        raise HTTPException(status_code=402, detail="Payment required to download this animal animation pack")
 
     source_url, filename = await _resolve_animal_variant_source(task, animal_type, orientation, "fbx")
     fbx_bytes = await _download_worker_file_bytes(
@@ -6622,6 +6642,7 @@ async def _animal_animation_pack_download_response(
 async def api_download_animal_animation_pack(
     task_id: str,
     animal_type: str,
+    request: Request,
     orientation: str = "front",
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -6631,7 +6652,7 @@ async def api_download_animal_animation_pack(
         raise HTTPException(status_code=404, detail="Task not found")
     if not _is_animal_task(task):
         raise HTTPException(status_code=404, detail="Animal animation packs are available for animal rig tasks only")
-    return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
+    return await _animal_animation_pack_download_response(task, user, request, db, animal_type, orientation)
 
 
 @app.post("/api/task/{task_id}/retry", response_model=TaskCreateResponse)
@@ -6997,8 +7018,18 @@ async def api_get_purchase_state(
         (user and task.owner_type == "user" and task.owner_id == user.email) or
         (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
-    
-    # For non-owners, check purchases
+
+    can_download = _can_download_task(task=task, user=user, request=request)
+    if can_download:
+        return PurchaseStateResponse(
+            purchased_all=True,
+            purchased_files=[],
+            is_owner=is_owner,
+            login_required=False,
+            user_credits=user.balance_credits if user else 0,
+            all_files_credits=0,
+        )
+
     if not user:
         return PurchaseStateResponse(
             purchased_all=False,
@@ -7009,22 +7040,9 @@ async def api_get_purchase_state(
             all_files_credits=_download_all_files_cost(task),
         )
     
-    # Get user's purchases for this task
-    result = await db.execute(
-        select(TaskFilePurchase).where(
-            TaskFilePurchase.task_id == task_id,
-            TaskFilePurchase.user_email == user.email
-        )
-    )
-    purchases = result.scalars().all()
-    
-    # Check if "all files" was purchased (file_index is NULL)
-    purchased_all = any(p.file_index is None for p in purchases)
-    purchased_indices = [p.file_index for p in purchases if p.file_index is not None]
-    
     return PurchaseStateResponse(
-        purchased_all=purchased_all,
-        purchased_files=purchased_indices,
+        purchased_all=False,
+        purchased_files=[],
         is_owner=is_owner,
         login_required=False,
         user_credits=user.balance_credits,
@@ -7048,6 +7066,7 @@ async def api_purchase_files(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
 
     anon_id = (
         getattr(request.state, "api_key_anon_id", None)
@@ -7060,37 +7079,9 @@ async def api_purchase_files(
         (task.owner_type == "anon" and anon_id and task.owner_id == anon_id)
     )
     
-    # Check existing purchases
-    result = await db.execute(
-        select(TaskFilePurchase).where(
-            TaskFilePurchase.task_id == task_id,
-            TaskFilePurchase.user_email == user.email
-        )
-    )
-    existing = result.scalars().all()
-    already_all = any(p.file_index is None for p in existing)
-    already_indices = {p.file_index for p in existing if p.file_index is not None}
-    
-    if already_all:
-        return PurchaseResponse(
-            success=True,
-            purchased_files=list(already_indices),
-            purchased_all=True,
-            credits_remaining=user.balance_credits
-        )
-    
-    if not purchase_req.all and not purchase_req.file_indices:
-        raise HTTPException(status_code=400, detail="Must specify file_indices or all=true")
-
-    unlock = await _ensure_full_task_unlock(db, task, user)
-    if unlock.get("status") == "insufficient_credits":
-        raise HTTPException(status_code=402, detail="Insufficient credits")
-
-    await db.commit()
-
     return PurchaseResponse(
         success=True,
-        purchased_files=list(already_indices),
+        purchased_files=[],
         purchased_all=True,
         credits_remaining=user.balance_credits
     )
@@ -7196,6 +7187,7 @@ async def api_get_animation_catalog(
 async def api_purchase_animation(
     task_id: str,
     purchase_req: AnimationPurchaseRequest,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -7206,7 +7198,15 @@ async def api_purchase_animation(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
+    return AnimationPurchaseResponse(
+        success=True,
+        purchased_animation_ids=[],
+        purchased_all=True,
+        credits_remaining=user.balance_credits,
+    )
 
+    # Legacy implementation retained below for database compatibility.
     if _is_animal_task(task):
         parsed_animal = _parse_animal_animation_id(str(purchase_req.animation_id or ""))
         if parsed_animal:
@@ -7383,22 +7383,21 @@ async def api_preview_animation(
 async def api_download_animation(
     task_id: str,
     animation_id: str,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Download selected custom animation FBX if purchased."""
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
 
     anim_id = _normalize_animation_key(animation_id)
     parsed_animal = _parse_animal_animation_id(anim_id)
     if parsed_animal and _is_animal_task(task):
         animal_type, orientation, _action_key = parsed_animal
-        return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
+        return await _animal_animation_pack_download_response(task, user, request, db, animal_type, orientation)
 
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
@@ -7419,10 +7418,6 @@ async def api_download_animation(
     resolved = _resolve_animation_file(catalog_by_id[anim_id], file_map)
     if not resolved:
         raise HTTPException(status_code=404, detail="Animation file not ready")
-
-    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
-    if not (purchased_all or anim_id in purchased_ids):
-        raise HTTPException(status_code=402, detail="Payment required to download this animation")
 
     file_url = resolved["url"]
     clean_filename = resolved["clean_filename"]
@@ -7467,6 +7462,7 @@ async def api_download_animation(
 async def api_download_animation_with_base(
     task_id: str,
     animation_id: str,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -7474,18 +7470,16 @@ async def api_download_animation_with_base(
     Download a ZIP containing the package-level _all_animations FBX and the selected custom animation FBX.
     This avoids browser blocking of multiple automatic downloads from one click.
     """
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
 
     anim_id = _normalize_animation_key(animation_id)
     parsed_animal = _parse_animal_animation_id(anim_id)
     if parsed_animal and _is_animal_task(task):
         animal_type, orientation, _action_key = parsed_animal
-        return await _animal_animation_pack_download_response(task, user, db, animal_type, orientation)
+        return await _animal_animation_pack_download_response(task, user, request, db, animal_type, orientation)
 
     manifest = _load_animation_manifest()
     raw_items = manifest.get("animations") or []
@@ -7506,10 +7500,6 @@ async def api_download_animation_with_base(
     resolved = _resolve_animation_file(catalog_by_id[anim_id], file_map)
     if not resolved:
         raise HTTPException(status_code=404, detail="Animation file not ready")
-
-    purchased_ids, purchased_all = await _get_animation_purchase_state(db, user, task_id)
-    if not (purchased_all or anim_id in purchased_ids):
-        raise HTTPException(status_code=402, detail="Payment required to download this animation")
 
     base_url, base_filename = _resolve_all_animations_fbx_url(task)
     if not base_url or not base_filename:
@@ -9179,6 +9169,7 @@ async def _has_paid_access(
 async def proxy_file(
     task_id: str,
     file_index: int,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -9186,6 +9177,7 @@ async def proxy_file(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
     
     ready_urls = task.ready_urls
     if file_index < 0 or file_index >= len(ready_urls):
@@ -9217,14 +9209,6 @@ async def proxy_file(
         "json": "application/json",
     }
     content_type = content_types.get(ext, "application/octet-stream")
-    
-    # Allow preview assets without purchase; require purchase for downloads
-    if not _is_preview_asset(clean_filename):
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required to download files")
-        has_access = await _has_paid_access(db, user, task_id, file_index)
-        if not has_access:
-            raise HTTPException(status_code=402, detail="Payment required to download files")
     
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename
@@ -9264,6 +9248,7 @@ async def proxy_file(
 async def proxy_file_by_name(
     task_id: str,
     filename: str,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -9271,6 +9256,7 @@ async def proxy_file_by_name(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
     
     # Search in output_urls first, then ready_urls
     file_url = None
@@ -9318,21 +9304,12 @@ async def proxy_file_by_name(
     }
     content_type = content_types.get(ext, "application/octet-stream")
     
-    # Allow preview assets without purchase; require purchase for downloads
-    if not _is_preview_asset(clean_filename):
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required to download files")
-        has_access = await _has_paid_access(db, user, task_id, file_index)
-        if not has_access:
-            raise HTTPException(status_code=402, detail="Payment required to download files")
-        
-        # Track download event for paid files
-        if task.ga_client_id:
-            asyncio.create_task(send_ga4_event(
-                task.ga_client_id, 
-                "rig_downloaded", 
-                {"filename": clean_filename, "task_id": task_id}
-            ))
+    if task.ga_client_id:
+        asyncio.create_task(send_ga4_event(
+            task.ga_client_id,
+            "rig_downloaded",
+            {"filename": clean_filename, "task_id": task_id}
+        ))
     
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename
@@ -9510,6 +9487,8 @@ async def _load_task_bundle_meta(
 @app.get("/api/task/{task_id}/cached-files")
 async def api_task_cached_files(
     task_id: str,
+    request: Request,
+    user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -9520,6 +9499,7 @@ async def api_task_cached_files(
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
     
     cache_dir = TASK_CACHE_DIR / task_id
     
@@ -9600,20 +9580,17 @@ async def api_task_cached_files(
 async def _ensure_purchased_worker_bundle_zip_url(
     db: AsyncSession,
     user: Optional[User],
+    request: Request,
     task_id: str,
     *,
     verify_worker_byte: bool,
 ) -> Tuple[Task, str]:
-    if not user:
-        raise HTTPException(status_code=401, detail="Authentication required")
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _require_task_download_access(task=task, user=user, request=request)
     if task.status != "done":
         raise HTTPException(status_code=400, detail="Task is not completed yet")
-    if not await _has_full_task_download_purchase(db, user, task_id):
-        raise HTTPException(status_code=402, detail="Full download purchase required")
-
     zip_url = resolve_worker_full_bundle_zip_url(task)
     if not zip_url:
         raise HTTPException(status_code=404, detail="Worker bundle URL could not be resolved")
@@ -9682,6 +9659,7 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
 @app.get("/api/task/{task_id}/downloads/bundle-url")
 async def api_task_worker_bundle_url(
     task_id: str,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -9691,7 +9669,7 @@ async def api_task_worker_bundle_url(
     Browsers should download via GET /downloads/bundle (same-origin HTTPS) to avoid mixed-content warnings.
     """
     _, zip_url = await _ensure_purchased_worker_bundle_zip_url(
-        db, user, task_id, verify_worker_byte=True
+        db, user, request, task_id, verify_worker_byte=True
     )
 
     return {"task_id": task_id, "url": zip_url}
@@ -9700,11 +9678,12 @@ async def api_task_worker_bundle_url(
 async def _stream_purchased_task_bundle_zip(
     task_id: str,
     user: Optional[User],
+    request: Request,
     db: AsyncSession,
 ) -> StreamingResponse:
     """Stream full-task ZIP from worker over HTTPS (same checks as bundle-url except byte probe)."""
     task, zip_url = await _ensure_purchased_worker_bundle_zip_url(
-        db, user, task_id, verify_worker_byte=False
+        db, user, request, task_id, verify_worker_byte=False
     )
     from telegram_bot import broadcast_full_bundle_download
 
@@ -9722,23 +9701,25 @@ async def _stream_purchased_task_bundle_zip(
 @app.get("/api/task/{task_id}/downloads/bundle")
 async def api_task_download_bundle(
     task_id: str,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Stream worker ZIP over HTTPS (proxied). Same purchase checks as bundle-url; avoids http:// worker in the browser.
     """
-    return await _stream_purchased_task_bundle_zip(task_id, user, db)
+    return await _stream_purchased_task_bundle_zip(task_id, user, request, db)
 
 
 @app.get("/api/task/{task_id}/bundle.zip")
 async def api_task_download_bundle_zip(
     task_id: str,
+    request: Request,
     user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Same as /downloads/bundle — stable path next to model.glb / prepared.glb (avoids missing route on some deploys)."""
-    return await _stream_purchased_task_bundle_zip(task_id, user, db)
+    return await _stream_purchased_task_bundle_zip(task_id, user, request, db)
 
 
 @app.get("/api/task/{task_id}/viewer")
@@ -9954,9 +9935,9 @@ def _find_file_in_ready_urls(ready_urls: list, pattern: str, extension: str = No
         if pattern_lower in url_clean.lower():
             if extension:
                 if url_clean.lower().endswith(extension.lower()):
-                    return url_clean
+                    return canonical_worker_artifact_url(url_clean)
             else:
-                return url_clean
+                return canonical_worker_artifact_url(url_clean)
     return None
 
 
@@ -12204,7 +12185,7 @@ async def api_head_animations_fbx(
     return Response(
         status_code=200,
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f'inline; filename="{filename}"',
             "Cache-Control": "public, max-age=86400",
             "Access-Control-Allow-Origin": "*",
             "X-Content-Type-Options": "nosniff",
@@ -12232,6 +12213,7 @@ async def api_proxy_animations_fbx(
         media_type="application/octet-stream",
         filename=Path(filename).name,
         headers={
+            "Content-Disposition": f'inline; filename="{Path(filename).name}"',
             "Cache-Control": "public, max-age=86400",
             "Access-Control-Allow-Origin": "*",
             "X-Content-Type-Options": "nosniff",
