@@ -548,6 +548,11 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         _schedule_task_error_notification(task.id)
         return task, error
 
+    # Persist the worker binding atomically with the successful dispatch
+    # metadata. A concurrent stale-task reset can otherwise clear worker_api
+    # after the reservation commit while the worker has already accepted the
+    # job, leaving a processing task with a GUID but no worker URL.
+    task.worker_api = worker_url
     task.worker_task_id = result.task_id
     task.progress_page = result.progress_page
     task.guid = result.guid
