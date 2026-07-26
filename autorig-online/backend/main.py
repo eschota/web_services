@@ -12365,7 +12365,16 @@ async def api_proxy_animations_fbx(
             headers=response_headers,
         )
 
-    asyncio.create_task(_cache_worker_file_by_ranges(animations_url, cache_path))
+    async def _cache_in_background() -> None:
+        try:
+            await _cache_worker_file_by_ranges(animations_url, cache_path)
+        except Exception as error:
+            print(
+                f"[Animations FBX] Background cache skipped for {task_id}: "
+                f"{type(error).__name__}: {error}"
+            )
+
+    asyncio.create_task(_cache_in_background())
     return await _proxy_model_file(animations_url, Path(filename).name, as_attachment=False)
 
 
