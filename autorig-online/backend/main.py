@@ -12288,6 +12288,7 @@ async def api_head_animations_fbx(
 @app.get("/api/task/{task_id}/animations.fbx")
 async def api_proxy_animations_fbx(
     task_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy animations FBX file from worker (searches ready_urls)"""
@@ -12299,19 +12300,73 @@ async def api_proxy_animations_fbx(
     if not animations_url or not filename:
         raise HTTPException(status_code=404, detail="Animations FBX not available yet")
     cache_path = GLB_CACHE_DIR / f"{task_id}_{Path(filename).name}"
-    cached_path = await _cache_worker_file_by_ranges(animations_url, cache_path)
-    return FileResponse(
-        path=str(cached_path),
-        media_type="application/octet-stream",
-        filename=Path(filename).name,
-        headers={
-            "Content-Disposition": f'inline; filename="{Path(filename).name}"',
-            "Cache-Control": "public, max-age=86400",
-            "Access-Control-Allow-Origin": "*",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Encoding": "identity",
-        },
-    )
+    range_header = str(request.headers.get("range") or "").strip()
+    response_headers = {
+        "Content-Disposition": f'inline; filename="{Path(filename).name}"',
+        "Cache-Control": "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Encoding": "identity",
+        "Accept-Ranges": "bytes",
+    }
+    if range_header:
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header, re.IGNORECASE)
+            if not match:
+                raise HTTPException(status_code=416, detail="Invalid Range")
+            file_size = cache_path.stat().st_size
+            start = int(match.group(1))
+            end = int(match.group(2)) if match.group(2) else file_size - 1
+            if start >= file_size or end < start:
+                raise HTTPException(status_code=416, detail="Range not satisfiable")
+            end = min(end, file_size - 1)
+            with cache_path.open("rb") as source:
+                source.seek(start)
+                content = source.read(end - start + 1)
+            return Response(
+                content=content,
+                status_code=206,
+                media_type="application/octet-stream",
+                headers={
+                    **response_headers,
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Content-Length": str(len(content)),
+                },
+            )
+
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            upstream = await client.get(
+                animations_url,
+                headers={"Range": range_header, "Accept-Encoding": "identity"},
+                timeout=30.0,
+            )
+        if upstream.status_code != 206:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Animations FBX source did not honor Range (HTTP {upstream.status_code})",
+            )
+        passthrough_headers = dict(response_headers)
+        for header_name in ("content-range", "content-length", "etag", "last-modified"):
+            header_value = upstream.headers.get(header_name)
+            if header_value:
+                passthrough_headers[header_name.title()] = header_value
+        return Response(
+            content=upstream.content,
+            status_code=206,
+            media_type="application/octet-stream",
+            headers=passthrough_headers,
+        )
+
+    if cache_path.exists() and cache_path.stat().st_size > 0:
+        return FileResponse(
+            path=str(cache_path),
+            media_type="application/octet-stream",
+            filename=Path(filename).name,
+            headers=response_headers,
+        )
+
+    asyncio.create_task(_cache_worker_file_by_ranges(animations_url, cache_path))
+    return await _proxy_model_file(animations_url, Path(filename).name, as_attachment=False)
 
 
 @app.get("/api/task/{task_id}/prepared.glb")
