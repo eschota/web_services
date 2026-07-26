@@ -3560,20 +3560,6 @@ async def api_support_chat_session_post(
             row.page_url = page
         await db.commit()
 
-    # Re-select after commit instead of refreshing an expired ORM instance.
-    # This remains reliable when concurrent widget startup requests overlap.
-    row = (
-        await db.execute(
-            select(SupportChatSession)
-            .where(
-                SupportChatSession.visitor_id == visitor,
-                SupportChatSession.status == "open",
-            )
-            .order_by(SupportChatSession.id.desc())
-            .limit(1)
-        )
-    ).scalar_one()
-
     topic_ready_bool = row.telegram_thread_id is not None
     configured = bool(await support_forum_configured_bool(db))
     return SupportChatSessionPostResponse(
