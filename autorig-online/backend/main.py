@@ -3528,6 +3528,10 @@ async def api_support_chat_session_post(
     page = _support_sanitize_page_url_string(body.page_url_string)
     email = getattr(user, "email", None) if user else None
 
+    # Serialize the read-or-create section. The widget can issue overlapping
+    # startup requests, and SQLite otherwise lets both requests observe no
+    # open session before either insert commits.
+    await db.execute(text("BEGIN IMMEDIATE"))
     stmt = (
         select(SupportChatSession)
         .where(
@@ -3549,14 +3553,26 @@ async def api_support_chat_session_post(
         )
         db.add(row)
         await db.commit()
-        await db.refresh(row)
     else:
         if email:
             row.user_email = email
         if page:
             row.page_url = page
         await db.commit()
-        await db.refresh(row)
+
+    # Re-select after commit instead of refreshing an expired ORM instance.
+    # This remains reliable when concurrent widget startup requests overlap.
+    row = (
+        await db.execute(
+            select(SupportChatSession)
+            .where(
+                SupportChatSession.visitor_id == visitor,
+                SupportChatSession.status == "open",
+            )
+            .order_by(SupportChatSession.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
 
     topic_ready_bool = row.telegram_thread_id is not None
     configured = bool(await support_forum_configured_bool(db))
