@@ -3531,6 +3531,9 @@ async def api_support_chat_session_post(
     # Serialize the read-or-create section. The widget can issue overlapping
     # startup requests, and SQLite otherwise lets both requests observe no
     # open session before either insert commits.
+    # The shared request session may already have a read transaction opened by
+    # the authentication dependency, so close that read transaction first.
+    await db.commit()
     await db.execute(text("BEGIN IMMEDIATE"))
     stmt = (
         select(SupportChatSession)
