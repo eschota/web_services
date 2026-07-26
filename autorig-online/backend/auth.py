@@ -252,6 +252,7 @@ async def get_or_create_anon_session(
     )
     result = await db.execute(statement.returning(AnonSession))
     anon_session = result.scalar_one()
+    result.close()
     await db.commit()
     return anon_session
 
