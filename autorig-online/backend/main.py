@@ -11598,6 +11598,8 @@ async def _task_cache_eviction_candidates(
 
     out: List[Tuple[float, str]] = []
     for p in subs:
+        if _task_cache_dir_is_preserved(p):
+            continue
         u = _parse_uuid_dirname(p.name)
         if u is None:
             try:
@@ -11628,6 +11630,14 @@ async def _task_cache_eviction_candidates(
             out.append((ca.timestamp(), p.name))
     out.sort(key=lambda x: x[0])
     return out
+
+
+TASK_CACHE_PRESERVE_MARKER = ".preserve-download-cache"
+
+
+def _task_cache_dir_is_preserved(path: Path) -> bool:
+    """Keep manually recovered, non-regenerable downloads out of pressure eviction."""
+    return path.is_dir() and (path / TASK_CACHE_PRESERVE_MARKER).is_file()
 
 
 async def enforce_task_cache_max_size(db: AsyncSession) -> Dict[str, Any]:

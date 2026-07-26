@@ -97,6 +97,17 @@ class _RangeClient:
 
 
 class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
+    def test_preserved_task_cache_is_not_evictable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp) / "task-id"
+            task_dir.mkdir()
+            self.assertFalse(main._task_cache_dir_is_preserved(task_dir))
+            (task_dir / main.TASK_CACHE_PRESERVE_MARKER).write_text(
+                "non-regenerable owner download cache\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(main._task_cache_dir_is_preserved(task_dir))
+
     def test_download_access_for_registered_owner_admin_and_anonymous_owner(self):
         registered_task = SimpleNamespace(owner_type="user", owner_id="owner@example.com")
         main._require_task_download_access(
