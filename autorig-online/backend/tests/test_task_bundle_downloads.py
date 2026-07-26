@@ -134,6 +134,17 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(urls), 6)
         self.assertFalse(any("_video" in url for url in urls))
 
+    def test_primary_downloads_keep_pipeline_specific_json_artifacts(self):
+        task = _task()
+        task.ready_urls = task.ready_urls + [
+            f"https://worker.invalid/converter/glb/{GUID}/{GUID}_skeleton.json",
+            f"https://worker.invalid/converter/glb/{GUID}/{GUID}_rig_preview.mp4",
+        ]
+        task.output_urls = task.ready_urls
+        urls = main._task_primary_download_urls(task)
+        self.assertTrue(any(url.endswith("_skeleton.json") for url in urls))
+        self.assertFalse(any(url.endswith("_rig_preview.mp4") for url in urls))
+
     async def test_worker_internal_count_is_replaced_with_primary_count(self):
         task = _task()
         with (

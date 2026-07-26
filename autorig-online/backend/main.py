@@ -9349,17 +9349,10 @@ def _task_bundle_meta_cache_path(task_id: str) -> Path:
     return TASK_CACHE_DIR / task_id / ".meta" / "bundle.json"
 
 
-_PRIMARY_TASK_DOWNLOAD_SUFFIXES = (
-    "_all_animations.blend",
-    "_all_animations_unity.fbx",
-    "_hdrp.unitypackage",
-    "_model_prepared.glb",
-    "_model_prepared_rigged.blend",
-    "_rigged.blend",
-)
 _TASK_PREVIEW_SUFFIXES = (
     "_video.mp4",
     "_video_small.mp4",
+    "_rig_preview.mp4",
     "_video_poster.jpg",
     "_threejs_video_poster.jpg",
 )
@@ -9367,12 +9360,6 @@ _TASK_PREVIEW_SUFFIXES = (
 
 def _task_primary_download_urls(task: Task) -> List[str]:
     urls = list(dict.fromkeys((task.ready_urls or []) + (task.output_urls or [])))
-    preferred = [
-        url for url in urls
-        if urlsplit(str(url)).path.lower().endswith(_PRIMARY_TASK_DOWNLOAD_SUFFIXES)
-    ]
-    if preferred:
-        return preferred
     return [
         url for url in urls
         if not urlsplit(str(url)).path.lower().endswith(_TASK_PREVIEW_SUFFIXES)
