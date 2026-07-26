@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 import httpx
 from sqlalchemy import func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import (
@@ -233,23 +234,28 @@ async def get_or_create_anon_session(
     db: AsyncSession, 
     anon_id: str
 ) -> AnonSession:
-    """Get or create anonymous session"""
+    """Get or create an anonymous session without racing parallel page requests."""
+    now = datetime.utcnow()
+    statement = (
+        sqlite_insert(AnonSession)
+        .values(
+            anon_id=anon_id,
+            free_used=0,
+            created_at=now,
+            last_seen_at=now,
+            registered_as_agent=False,
+        )
+        .on_conflict_do_update(
+            index_elements=[AnonSession.anon_id],
+            set_={"last_seen_at": now},
+        )
+    )
+    await db.execute(statement)
+    await db.commit()
     result = await db.execute(
         select(AnonSession).where(AnonSession.anon_id == anon_id)
     )
-    anon = result.scalar_one_or_none()
-    
-    if anon:
-        anon.last_seen_at = datetime.utcnow()
-        await db.commit()
-        return anon
-    
-    anon = AnonSession(anon_id=anon_id)
-    db.add(anon)
-    await db.commit()
-    await db.refresh(anon)
-    
-    return anon
+    return result.scalar_one()
 
 
 async def increment_anon_usage(db: AsyncSession, anon_id: str) -> int:
