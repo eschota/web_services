@@ -3514,6 +3514,44 @@ async def api_support_chat_session_get(db: AsyncSession = Depends(get_db)):
     }
 
 
+_support_chat_session_lock = asyncio.Lock()
+
+
+async def _get_or_create_support_chat_session(
+    db: AsyncSession,
+    visitor: str,
+    email: Optional[str],
+    page: Optional[str],
+) -> SupportChatSession:
+    """Serialize widget startup requests within the single backend process."""
+    async with _support_chat_session_lock:
+        stmt = (
+            select(SupportChatSession)
+            .where(
+                SupportChatSession.visitor_id == visitor,
+                SupportChatSession.status == "open",
+            )
+            .order_by(SupportChatSession.id.desc())
+            .limit(1)
+        )
+        row = (await db.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            row = SupportChatSession(
+                visitor_id=visitor,
+                user_email=email,
+                page_url=page,
+                status="open",
+            )
+            db.add(row)
+        else:
+            if email:
+                row.user_email = email
+            if page:
+                row.page_url = page
+        await db.commit()
+        return row
+
+
 @app.post("/api/support-chat/session", response_model=SupportChatSessionPostResponse)
 @limiter.limit(RATE_LIMIT_SUPPORT_CHAT_SESSION)
 async def api_support_chat_session_post(
@@ -3528,40 +3566,7 @@ async def api_support_chat_session_post(
     page = _support_sanitize_page_url_string(body.page_url_string)
     email = getattr(user, "email", None) if user else None
 
-    # Serialize the read-or-create section. The widget can issue overlapping
-    # startup requests, and SQLite otherwise lets both requests observe no
-    # open session before either insert commits.
-    # The shared request session may already have a read transaction opened by
-    # the authentication dependency, so close that read transaction first.
-    await db.commit()
-    await db.execute(text("BEGIN IMMEDIATE"))
-    stmt = (
-        select(SupportChatSession)
-        .where(
-            SupportChatSession.visitor_id == visitor,
-            SupportChatSession.status == "open",
-        )
-        .order_by(SupportChatSession.id.desc())
-        .limit(1)
-    )
-    row = (await db.execute(stmt)).scalar_one_or_none()
-
-    topic_ready_bool = False
-    if row is None:
-        row = SupportChatSession(
-            visitor_id=visitor,
-            user_email=email,
-            page_url=page,
-            status="open",
-        )
-        db.add(row)
-        await db.commit()
-    else:
-        if email:
-            row.user_email = email
-        if page:
-            row.page_url = page
-        await db.commit()
+    row = await _get_or_create_support_chat_session(db, visitor, email, page)
 
     topic_ready_bool = row.telegram_thread_id is not None
     configured = bool(await support_forum_configured_bool(db))
