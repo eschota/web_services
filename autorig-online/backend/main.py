@@ -22,7 +22,7 @@ import re
 import html
 from pathlib import Path
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse, quote, unquote, parse_qsl, urlencode
+from urllib.parse import urlparse, urlsplit, quote, unquote, parse_qsl, urlencode
 from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, UploadFile, File, Form, Query
@@ -9349,6 +9349,43 @@ def _task_bundle_meta_cache_path(task_id: str) -> Path:
     return TASK_CACHE_DIR / task_id / ".meta" / "bundle.json"
 
 
+_PRIMARY_TASK_DOWNLOAD_SUFFIXES = (
+    "_all_animations.blend",
+    "_all_animations_unity.fbx",
+    "_hdrp.unitypackage",
+    "_model_prepared.glb",
+    "_model_prepared_rigged.blend",
+    "_rigged.blend",
+)
+_TASK_PREVIEW_SUFFIXES = (
+    "_video.mp4",
+    "_video_small.mp4",
+    "_video_poster.jpg",
+    "_threejs_video_poster.jpg",
+)
+
+
+def _task_primary_download_urls(task: Task) -> List[str]:
+    urls = list(dict.fromkeys((task.ready_urls or []) + (task.output_urls or [])))
+    preferred = [
+        url for url in urls
+        if urlsplit(str(url)).path.lower().endswith(_PRIMARY_TASK_DOWNLOAD_SUFFIXES)
+    ]
+    if preferred:
+        return preferred
+    return [
+        url for url in urls
+        if not urlsplit(str(url)).path.lower().endswith(_TASK_PREVIEW_SUFFIXES)
+    ]
+
+
+def _task_primary_download_names(task: Task) -> set[str]:
+    return {
+        _clean_filename_for_cache(url, task.guid)
+        for url in _task_primary_download_urls(task)
+    }
+
+
 def _bundle_meta_response(
     *,
     ready: bool,
@@ -9424,7 +9461,9 @@ def _write_cached_task_bundle_meta(task_id: str, meta: Dict[str, Any]) -> None:
 async def _worker_bundle_zip_available(zip_url: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
-            async with client.stream("GET", zip_url, headers={"Range": "bytes=0-0"}) as response:
+            # A one-byte Range can succeed through the public gateway even when
+            # a normal full response is rejected as too large.
+            async with client.stream("GET", zip_url) as response:
                 return response.status_code in (200, 206)
     except Exception:
         return False
@@ -9438,10 +9477,24 @@ async def _load_task_bundle_meta(
 ) -> Dict[str, Any]:
     zip_url = resolve_worker_full_bundle_zip_url(task)
     cached_meta = _read_cached_task_bundle_meta(task.id, zip_url)
-    if cached_meta and cached_meta.get("bundle_file_count_source") != "fallback_cache":
-        return cached_meta
+    primary_file_count = len(_task_primary_download_urls(task))
+
+    if fallback_file_count > 0:
+        local_bundle_path = _task_bundle_meta_cache_path(task.id).parent / "primary-bundle.zip"
+        local_bundle_size = (
+            local_bundle_path.stat().st_size
+            if local_bundle_path.is_file()
+            else int(fallback_total_size or 0)
+        )
+        return _bundle_meta_response(
+            ready=True,
+            source="fallback_cache",
+            file_count=int(fallback_file_count),
+            total_size=local_bundle_size,
+        )
 
     if zip_url:
+        worker_zip_available = await _worker_bundle_zip_available(zip_url)
         meta_url = f"{zip_url}.meta.json"
         try:
             async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
@@ -9452,7 +9505,9 @@ async def _load_task_bundle_meta(
                     source="worker_meta",
                     worker_zip_url=zip_url,
                 )
-                if worker_meta:
+                if worker_meta and worker_zip_available:
+                    if primary_file_count > 0:
+                        worker_meta["bundle_file_count"] = primary_file_count
                     worker_meta["bundle_file_count_source"] = "worker_meta"
                     worker_meta_cache = dict(worker_meta)
                     worker_meta_cache["worker_zip_url"] = zip_url
@@ -9461,7 +9516,7 @@ async def _load_task_bundle_meta(
         except Exception as e:
             print(f"[BundleMeta] Worker metadata unavailable for task {task.id}: {e}")
 
-        if await _worker_bundle_zip_available(zip_url):
+        if worker_zip_available:
             return _bundle_meta_response(
                 ready=False,
                 source="worker_meta_missing",
@@ -9469,14 +9524,6 @@ async def _load_task_bundle_meta(
 
     if cached_meta and cached_meta.get("bundle_file_count_source") == "fallback_cache":
         return cached_meta
-
-    if fallback_file_count > 0:
-        return _bundle_meta_response(
-            ready=True,
-            source="fallback_cache",
-            file_count=int(fallback_file_count),
-            total_size=int(fallback_total_size or 0),
-        )
 
     return _bundle_meta_response(
         ready=False,
@@ -9502,6 +9549,7 @@ async def api_task_cached_files(
     _require_task_download_access(task=task, user=user, request=request)
     
     cache_dir = TASK_CACHE_DIR / task_id
+    primary_names = _task_primary_download_names(task)
     
     # If files are already cached, return them
     if cache_dir.exists():
@@ -9509,7 +9557,7 @@ async def api_task_cached_files(
         total_size = 0
         from urllib.parse import quote
         for f in sorted(cache_dir.iterdir()):
-            if f.is_file() and not f.name.endswith('.tmp'):
+            if f.is_file() and f.name in primary_names and not f.name.endswith('.tmp'):
                 size = f.stat().st_size
                 total_size += size
                 files.append({
@@ -9535,13 +9583,7 @@ async def api_task_cached_files(
     
     # If task is done but not cached yet, trigger caching
     if task.status == "done" and (task.ready_urls or task.output_urls):
-        urls_to_cache = []
-        if task.ready_urls:
-            urls_to_cache.extend(task.ready_urls)
-        if task.output_urls:
-            urls_to_cache.extend(task.output_urls)
-        # Preserve order and remove duplicates
-        urls_to_cache = list(dict.fromkeys(urls_to_cache))
+        urls_to_cache = _task_primary_download_urls(task)
         # Start caching in background
         result = await cache_task_files(task_id, urls_to_cache, task.guid)
         total_size = sum(f["size"] for f in result["files"])
@@ -9584,7 +9626,7 @@ async def _ensure_purchased_worker_bundle_zip_url(
     task_id: str,
     *,
     verify_worker_byte: bool,
-) -> Tuple[Task, str]:
+) -> Tuple[Task, Optional[str]]:
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -9592,10 +9634,8 @@ async def _ensure_purchased_worker_bundle_zip_url(
     if task.status != "done":
         raise HTTPException(status_code=400, detail="Task is not completed yet")
     zip_url = resolve_worker_full_bundle_zip_url(task)
-    if not zip_url:
-        raise HTTPException(status_code=404, detail="Worker bundle URL could not be resolved")
 
-    if verify_worker_byte:
+    if verify_worker_byte and zip_url:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 async with client.stream(
@@ -9618,23 +9658,36 @@ async def _ensure_purchased_worker_bundle_zip_url(
 
 
 async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
-    urls_to_cache = list(dict.fromkeys((task.ready_urls or []) + (task.output_urls or [])))
+    urls_to_cache = _task_primary_download_urls(task)
+    expected_names = _task_primary_download_names(task)
     cache_dir = TASK_CACHE_DIR / task.id
     if urls_to_cache:
         await cache_task_files(task.id, urls_to_cache, task.guid)
 
     files = [
         p for p in sorted(cache_dir.iterdir())
-        if p.is_file() and not p.name.endswith(".tmp") and not p.name.startswith(".")
+        if (
+            p.is_file()
+            and p.name in expected_names
+            and not p.name.endswith(".tmp")
+            and not p.name.startswith(".")
+        )
     ] if cache_dir.exists() else []
     if not files:
-        raise HTTPException(status_code=404, detail="No downloadable task files are available")
+        raise HTTPException(
+            status_code=404,
+            detail="The worker bundle is unavailable and no primary task files could be restored",
+        )
 
     safe_guid = (task.guid or task.id).strip()
-    zip_path = Path(tempfile.gettempdir()) / f"autorig_{task.id}_{uuid.uuid4().hex}.zip"
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    bundle_dir = cache_dir / ".meta"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = bundle_dir / "primary-bundle.zip"
+    temp_zip_path = bundle_dir / f".primary-bundle.{uuid.uuid4().hex}.tmp"
+    with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for file_path in files:
             zf.write(file_path, arcname=file_path.name)
+    os.replace(temp_zip_path, zip_path)
 
     fallback_meta = _bundle_meta_response(
         ready=True,
@@ -9652,8 +9705,15 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
         media_type="application/zip",
         filename=f"{safe_guid}.zip",
         headers={"Cache-Control": "private, max-age=0"},
-        background=BackgroundTask(lambda: zip_path.unlink(missing_ok=True)),
     )
+
+
+def _has_complete_primary_task_cache(task: Task) -> bool:
+    expected_names = _task_primary_download_names(task)
+    if not expected_names:
+        return False
+    cache_dir = TASK_CACHE_DIR / task.id
+    return all((cache_dir / name).is_file() for name in expected_names)
 
 
 @app.get("/api/task/{task_id}/downloads/bundle-url")
@@ -9664,15 +9724,30 @@ async def api_task_worker_bundle_url(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Return absolute URL to the worker-hosted full bundle ZIP under /converter/glb/.
-    Requires full-task download purchase. Verifies presence via GET + Range (HEAD often 404s on static).
-    Browsers should download via GET /downloads/bundle (same-origin HTTPS) to avoid mixed-content warnings.
+    Validate download access and return the stable same-origin bundle URL.
+    Worker availability is handled by /bundle.zip, which can fall back to cached primary files.
     """
-    _, zip_url = await _ensure_purchased_worker_bundle_zip_url(
-        db, user, request, task_id, verify_worker_byte=True
+    await _ensure_purchased_worker_bundle_zip_url(
+        db, user, request, task_id, verify_worker_byte=False
     )
 
-    return {"task_id": task_id, "url": zip_url}
+    return {"task_id": task_id, "url": f"/api/task/{task_id}/bundle.zip"}
+
+
+async def _notify_task_bundle_download(task_id: str, actor: str) -> None:
+    try:
+        from telegram_bot import broadcast_full_bundle_download
+        await broadcast_full_bundle_download(task_id, actor)
+    except Exception as exc:
+        print(f"[Bundle] Download notification failed for task {task_id}: {exc}")
+
+
+def _schedule_task_bundle_download_notification(task_id: str, user: Optional[User]) -> None:
+    actor = user.email if user and user.email else "anonymous owner"
+    try:
+        asyncio.create_task(_notify_task_bundle_download(task_id, actor))
+    except Exception as exc:
+        print(f"[Bundle] Could not schedule download notification for task {task_id}: {exc}")
 
 
 async def _stream_purchased_task_bundle_zip(
@@ -9685,17 +9760,20 @@ async def _stream_purchased_task_bundle_zip(
     task, zip_url = await _ensure_purchased_worker_bundle_zip_url(
         db, user, request, task_id, verify_worker_byte=False
     )
-    from telegram_bot import broadcast_full_bundle_download
-
-    asyncio.create_task(broadcast_full_bundle_download(task_id, user.email))
+    _schedule_task_bundle_download_notification(task_id, user)
 
     safe_guid = (task.guid or task_id).strip()
     filename = f"{safe_guid}.zip"
-    try:
-        return await _proxy_model_file(zip_url, filename, as_attachment=True)
-    except HTTPException as exc:
-        print(f"[Bundle] Worker ZIP unavailable for task {task_id}: {exc.detail}; building fallback")
+    if _has_complete_primary_task_cache(task):
         return await _build_task_bundle_zip_from_cache(task)
+    if zip_url:
+        try:
+            return await _proxy_model_file(zip_url, filename, as_attachment=True)
+        except HTTPException as exc:
+            print(f"[Bundle] Worker ZIP unavailable for task {task_id}: {exc.detail}; building fallback")
+    else:
+        print(f"[Bundle] Worker ZIP URL unresolved for task {task_id}; building fallback")
+    return await _build_task_bundle_zip_from_cache(task)
 
 
 @app.get("/api/task/{task_id}/downloads/bundle")
@@ -14214,6 +14292,49 @@ def _clean_filename_for_cache(url: str, guid: str = None) -> str:
     return filename
 
 
+async def _download_worker_file_by_ranges(
+    client: httpx.AsyncClient,
+    url: str,
+    destination: Path,
+    *,
+    chunk_bytes: int = 8 * 1024 * 1024,
+) -> int:
+    offset = 0
+    total_size: Optional[int] = None
+    with destination.open("wb") as output:
+        while total_size is None or offset < total_size:
+            range_end = offset + max(1, int(chunk_bytes)) - 1
+            async with client.stream(
+                "GET",
+                url,
+                follow_redirects=True,
+                headers={"Range": f"bytes={offset}-{range_end}"},
+            ) as response:
+                if response.status_code != 206:
+                    raise RuntimeError(f"range request returned HTTP {response.status_code}")
+                content_range = str(response.headers.get("Content-Range") or "")
+                match = re.fullmatch(r"bytes\s+(\d+)-(\d+)/(\d+)", content_range, flags=re.IGNORECASE)
+                if not match:
+                    raise RuntimeError("range response is missing a valid Content-Range")
+                start, declared_end, declared_total = (int(value) for value in match.groups())
+                if start != offset or declared_end < start or declared_total <= declared_end:
+                    raise RuntimeError(f"invalid Content-Range: {content_range}")
+                written = 0
+                async for chunk in response.aiter_bytes(1024 * 1024):
+                    output.write(chunk)
+                    written += len(chunk)
+                expected = declared_end - start + 1
+                if written != expected:
+                    raise RuntimeError(
+                        f"incomplete range response: expected {expected} bytes, received {written}"
+                    )
+                offset += written
+                total_size = declared_total
+    if total_size is None or offset != total_size:
+        raise RuntimeError("ranged download did not reach the declared file size")
+    return offset
+
+
 async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> dict:
     """
     Download ready files from worker and cache them in static directory.
@@ -14263,6 +14384,27 @@ async def cache_task_files(task_id: str, ready_urls: list, guid: str = None) -> 
                             "url": f"/api/file/{task_id}/download/{quote(filename)}"
                         })
                         print(f"[Cache] Cached {filename} for task {task_id} ({size_bytes} bytes)")
+                    elif response.status_code in (413, 500, 502):
+                        temp_path = filepath.with_name(f".{filename}.{uuid.uuid4().hex}.tmp")
+                        try:
+                            size_bytes = await _download_worker_file_by_ranges(
+                                client,
+                                url,
+                                temp_path,
+                            )
+                            os.replace(temp_path, filepath)
+                            cached_files.append({
+                                "name": filename,
+                                "size": size_bytes,
+                                "url": f"/api/file/{task_id}/download/{quote(filename)}"
+                            })
+                            print(
+                                f"[Cache] Cached {filename} for task {task_id} "
+                                f"with ranged worker download ({size_bytes} bytes)"
+                            )
+                        except Exception:
+                            temp_path.unlink(missing_ok=True)
+                            raise
                     else:
                         errors.append(f"HTTP {response.status_code} for {filename}")
                     
