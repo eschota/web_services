@@ -11295,6 +11295,13 @@ def purge_task_cache_bundle_zips(
         if not zp.is_file():
             continue
         try:
+            relative_parts = zp.relative_to(TASK_CACHE_DIR).parts
+            task_dir = TASK_CACHE_DIR / relative_parts[0] if relative_parts else None
+        except ValueError:
+            task_dir = None
+        if task_dir is not None and _task_cache_dir_is_preserved(task_dir):
+            continue
+        try:
             sz = zp.stat().st_size
             zp.unlink()
             deleted += 1

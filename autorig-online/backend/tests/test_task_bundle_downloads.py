@@ -108,6 +108,34 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(main._task_cache_dir_is_preserved(task_dir))
 
+    def test_bundle_zip_purge_skips_preserved_task_cache(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            main,
+            "TASK_CACHE_DIR",
+            Path(tmp),
+        ):
+            preserved_dir = Path(tmp) / "preserved-task"
+            preserved_meta = preserved_dir / ".meta"
+            preserved_meta.mkdir(parents=True)
+            (preserved_dir / main.TASK_CACHE_PRESERVE_MARKER).write_text(
+                "preserve\n",
+                encoding="utf-8",
+            )
+            preserved_zip = preserved_meta / "primary-bundle.zip"
+            preserved_zip.write_bytes(b"preserved")
+
+            regular_dir = Path(tmp) / "regular-task"
+            regular_dir.mkdir()
+            regular_zip = regular_dir / "primary-bundle.zip"
+            regular_zip.write_bytes(b"regenerable")
+
+            deleted, freed = main.purge_task_cache_bundle_zips()
+
+            self.assertEqual(deleted, 1)
+            self.assertEqual(freed, len(b"regenerable"))
+            self.assertTrue(preserved_zip.is_file())
+            self.assertFalse(regular_zip.exists())
+
     def test_download_access_for_registered_owner_admin_and_anonymous_owner(self):
         registered_task = SimpleNamespace(owner_type="user", owner_id="owner@example.com")
         main._require_task_download_access(
