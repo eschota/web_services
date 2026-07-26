@@ -250,12 +250,10 @@ async def get_or_create_anon_session(
             set_={"last_seen_at": now},
         )
     )
-    await db.execute(statement)
+    result = await db.execute(statement.returning(AnonSession))
+    anon_session = result.scalar_one()
     await db.commit()
-    result = await db.execute(
-        select(AnonSession).where(AnonSession.anon_id == anon_id)
-    )
-    return result.scalar_one()
+    return anon_session
 
 
 async def increment_anon_usage(db: AsyncSession, anon_id: str) -> int:
