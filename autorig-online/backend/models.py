@@ -99,6 +99,9 @@ class TaskStatusResponse(BaseModel):
     poster_free3d_query: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    queue_wait_seconds: int = 0
+    processing_time_seconds: int = 0
+    total_duration_seconds: int = 0
     pipeline: str = Field(default="rig", description="``rig`` or ``convert``")
     # YouTube auto-upload (public video id when upload succeeded)
     youtube_video_id: Optional[str] = None

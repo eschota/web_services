@@ -5093,6 +5093,20 @@
                     <a id="video-youtube-link" class="video-youtube-link" href="#" target="_blank" rel="noopener noreferrer" data-i18n="task_youtube_open">Open on YouTube</a>
                 </div>
             </div>
+            <div class="queue-status-compact mt-3" id="task-duration-breakdown">
+                <div class="queue-stat">
+                    <span class="queue-stat-value" id="task-queue-duration">-</span>
+                    <span class="queue-stat-label" data-i18n="task_queue_duration">Queue</span>
+                </div>
+                <div class="queue-stat">
+                    <span class="queue-stat-value" id="task-processing-duration">-</span>
+                    <span class="queue-stat-label" data-i18n="task_processing_duration">Processing</span>
+                </div>
+                <div class="queue-stat">
+                    <span class="queue-stat-value" id="task-total-duration">-</span>
+                    <span class="queue-stat-label" data-i18n="task_total_duration">Total</span>
+                </div>
+            </div>
             <section id="animal-variants-panel" class="animal-variants-panel" aria-live="polite">
                 <div class="animal-variants-head">
                     <div>
@@ -6377,7 +6391,22 @@
             async updateUI() {
                 const task = this.task;
                 this.ensureDesktopViewerLayout();
-                
+                const formatTaskDuration = (seconds) => {
+                    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+                    const hours = Math.floor(value / 3600);
+                    const minutes = Math.floor((value % 3600) / 60);
+                    const secs = value % 60;
+                    if (hours > 0) return `${hours}h ${minutes}m`;
+                    if (minutes > 0) return `${minutes}m ${secs}s`;
+                    return `${secs}s`;
+                };
+                const queueDurationEl = document.getElementById('task-queue-duration');
+                const processingDurationEl = document.getElementById('task-processing-duration');
+                const totalDurationEl = document.getElementById('task-total-duration');
+                if (queueDurationEl) queueDurationEl.textContent = formatTaskDuration(task.queue_wait_seconds);
+                if (processingDurationEl) processingDurationEl.textContent = formatTaskDuration(task.processing_time_seconds);
+                if (totalDurationEl) totalDurationEl.textContent = formatTaskDuration(task.total_duration_seconds);
+
                 // Status
                 const statusBadge = document.getElementById('status-badge');
                 const statusText = document.getElementById('status-text');

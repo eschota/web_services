@@ -56,6 +56,125 @@ RIG_V2_WORKER_ANIMAL_TYPES = {
     "turtle",
 }
 RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
+SOURCE_PREFLIGHT_TIMEOUT_SECONDS = 8.0
+SOURCE_PREFLIGHT_MAX_ATTEMPTS = 3
+SOURCE_PREFLIGHT_BACKOFF_SECONDS = (60, 300)
+
+
+def _source_format_error(input_url: str, prefix: bytes, content_type: str) -> Optional[str]:
+    path = urlparse(input_url or "").path.lower()
+    probe = prefix.lstrip()
+    content_type_lc = (content_type or "").lower()
+    if "text/html" in content_type_lc or probe.startswith((b"<!doctype html", b"<html")):
+        return "source returned HTML instead of a 3D asset"
+    if path.endswith(".glb") and not prefix.startswith(b"glTF"):
+        return "source is not a valid binary glTF file"
+    if path.endswith(".fbx") and not (
+        prefix.startswith(b"Kaydara FBX Binary") or probe.startswith(b"; FBX")
+    ):
+        return "source is not a valid FBX file"
+    if not Path(path).suffix and not (
+        prefix.startswith(b"glTF")
+        or prefix.startswith(b"Kaydara FBX Binary")
+        or probe.startswith((b"; FBX", b"#", b"mtllib ", b"o ", b"v "))
+    ):
+        return "source format could not be recognized as GLB, FBX, or OBJ"
+    return None
+
+
+async def preflight_task_source(input_url: Optional[str]) -> Tuple[bool, str, bool]:
+    """
+    Read only the first bytes of the source before reserving a worker.
+
+    Returns (available, detail, permanent_error). Network/HTTP availability
+    failures are retryable; an invalid payload/format is terminal immediately.
+    """
+    url = (input_url or "").strip()
+    if not url:
+        return False, "source URL is missing", True
+    try:
+        timeout = httpx.Timeout(
+            SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
+            connect=SOURCE_PREFLIGHT_TIMEOUT_SECONDS,
+        )
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream(
+                "GET",
+                url,
+                headers={"Range": "bytes=0-63", "Accept-Encoding": "identity"},
+            ) as response:
+                if response.status_code not in (200, 206):
+                    return False, f"source returned HTTP {response.status_code}", False
+                prefix = b""
+                async for chunk in response.aiter_bytes():
+                    prefix += chunk
+                    if len(prefix) >= 64:
+                        break
+                prefix = prefix[:64]
+                if not prefix:
+                    return False, "source returned an empty response", False
+                size = None
+                content_range = response.headers.get("content-range") or ""
+                match = re.search(r"/(\d+)\s*$", content_range)
+                if match:
+                    size = int(match.group(1))
+                elif response.status_code == 200:
+                    raw_length = response.headers.get("content-length")
+                    if raw_length and raw_length.isdigit():
+                        size = int(raw_length)
+                if size == 0:
+                    return False, "source file is empty", True
+                format_error = _source_format_error(
+                    url,
+                    prefix,
+                    response.headers.get("content-type") or "",
+                )
+                if format_error:
+                    return False, format_error, True
+                return True, "", False
+    except httpx.TimeoutException:
+        return False, f"source did not respond within {SOURCE_PREFLIGHT_TIMEOUT_SECONDS:g}s", False
+    except httpx.HTTPError as exc:
+        return False, f"source request failed: {exc.__class__.__name__}", False
+    except Exception as exc:
+        return False, f"source check failed: {exc.__class__.__name__}", False
+
+
+async def _apply_source_preflight_failure(
+    db: AsyncSession,
+    task: Task,
+    detail: str,
+    *,
+    permanent: bool,
+) -> str:
+    now = datetime.utcnow()
+    attempts = int(getattr(task, "source_attempt_count", 0) or 0) + 1
+    task.source_attempt_count = attempts
+    task.updated_at = now
+    if permanent or attempts >= SOURCE_PREFLIGHT_MAX_ATTEMPTS:
+        task.status = "error"
+        task.source_next_retry_at = None
+        task.error_message = f"Source asset unavailable: {detail}."
+        await db.commit()
+        await db.refresh(task)
+        _schedule_task_error_notification(task.id)
+        print(
+            f"[Source Preflight] Task {task.id} failed after {attempts} attempt(s): {detail}"
+        )
+        return task.error_message
+
+    backoff_index = min(attempts - 1, len(SOURCE_PREFLIGHT_BACKOFF_SECONDS) - 1)
+    delay_seconds = SOURCE_PREFLIGHT_BACKOFF_SECONDS[backoff_index]
+    task.status = "created"
+    task.source_next_retry_at = now + timedelta(seconds=delay_seconds)
+    task.error_message = None
+    await db.commit()
+    await db.refresh(task)
+    print(
+        f"[Source Preflight] Task {task.id} retry {attempts}/"
+        f"{SOURCE_PREFLIGHT_MAX_ATTEMPTS} in {delay_seconds}s: {detail}"
+    )
+    return f"Source preflight retry scheduled: {detail}"
 
 
 def _is_transient_worker_dispatch_error(error: Optional[str]) -> bool:
@@ -498,11 +617,24 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             _schedule_task_error_notification(task.id)
             return task, task.error_message
 
+    source_ok, source_detail, source_permanent = await preflight_task_source(task.input_url)
+    if not source_ok:
+        error = await _apply_source_preflight_failure(
+            db,
+            task,
+            source_detail,
+            permanent=source_permanent,
+        )
+        return task, error
+
     # Reserve the worker only after all deterministic task metadata is valid.
-    # Otherwise malformed legacy animal tasks look like worker-side failures.
+    # Otherwise malformed metadata or an unreachable source looks like a
+    # worker-side failure and can quarantine healthy capacity.
     task.worker_api = worker_url
     task.status = "processing"
-    task.updated_at = datetime.utcnow()
+    task.source_next_retry_at = None
+    task.processing_started_at = datetime.utcnow()
+    task.updated_at = task.processing_started_at
     await db.commit()
     await db.refresh(task)
 
@@ -534,6 +666,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             task.video_ready = False
             task.video_url = None
             task.error_message = None
+            task.processing_started_at = None
             task.updated_at = datetime.utcnow()
             await db.commit()
             await db.refresh(task)

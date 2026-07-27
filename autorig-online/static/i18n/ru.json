@@ -1,4 +1,7 @@
 {
+    "task_queue_duration": "В очереди",
+    "task_processing_duration": "Обработка",
+    "task_total_duration": "Всего",
     "site_name": "AutoRig Online",
     "hero_title": "Автоматический Риггинг 3D Моделей",
     "hero_subtitle": "Загрузите вашу GLB, FBX или OBJ модель и получите ригнутую модель с анимациями за минуты",

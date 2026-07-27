@@ -1,4 +1,7 @@
 {
+    "task_queue_duration": "Queue",
+    "task_processing_duration": "Processing",
+    "task_total_duration": "Total",
     "site_name": "AutoRig Online",
     "hero_title": "Automatic 3D Model Rigging",
     "hero_subtitle": "Upload your GLB, FBX, or OBJ model and get it rigged with animations in minutes",

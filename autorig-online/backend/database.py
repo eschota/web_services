@@ -259,6 +259,9 @@ class Task(Base):
     restart_count = Column(Integer, default=0)  # Number of times task was auto-restarted
     # Stuck-hour policy: auto requeues (admin-style) before full delete; not cleared by admin_requeue
     stuck_hour_requeue_count = Column(Integer, default=0)
+    source_attempt_count = Column(Integer, default=0)
+    source_next_retry_at = Column(DateTime, nullable=True)
+    processing_started_at = Column(DateTime, nullable=True)
     last_progress_at = Column(DateTime, nullable=True)  # Last time progress changed
     
     # Video
@@ -1171,6 +1174,9 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_keywords TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN stuck_hour_requeue_count INTEGER DEFAULT 0")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN source_attempt_count INTEGER DEFAULT 0")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN source_next_retry_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN processing_started_at DATETIME")
             await _try_add_column(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 22"
             )
@@ -1595,6 +1601,15 @@ async def init_db():
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stuck_hour_requeue_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_attempt_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS source_next_retry_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMP"
             )
             await _try_add_column_any(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 22"

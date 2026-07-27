@@ -1280,6 +1280,19 @@ def _format_duration(seconds: int | None) -> str:
     return f"{sec}s"
 
 
+def _task_duration_parts(task: Task, now: datetime) -> tuple[int | None, int | None, int | None]:
+    if not task.created_at:
+        return None, None, None
+    end = task.updated_at if task.status in {"done", "error"} and task.updated_at else now
+    total = max(0, int((end - task.created_at).total_seconds()))
+    processing_started_at = getattr(task, "processing_started_at", None)
+    if not processing_started_at:
+        return total, 0, total
+    queued = max(0, int((processing_started_at - task.created_at).total_seconds()))
+    processing = max(0, int((end - processing_started_at).total_seconds()))
+    return queued, processing, total
+
+
 async def _task_video_candidate_urls(task_id: str) -> list[str]:
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Task).where(Task.id == task_id))
@@ -1591,9 +1604,7 @@ async def reserve_and_broadcast_task_done(task_id: str) -> None:
         if not task:
             return
 
-        duration = None
-        if task.created_at:
-            duration = int((datetime.utcnow() - task.created_at).total_seconds())
+        queue_wait, processing_time, duration = _task_duration_parts(task, datetime.utcnow())
         progress_url = None
         if task.guid and task.worker_api:
             worker_base = get_worker_base_url(task.worker_api)
@@ -1601,7 +1612,13 @@ async def reserve_and_broadcast_task_done(task_id: str) -> None:
 
         print(f"[Telegram] Scheduling done notification for task {task_id} (after content rating)")
         asyncio.create_task(
-            broadcast_task_done(task_id, duration_seconds=duration, progress_page=progress_url)
+            broadcast_task_done(
+                task_id,
+                duration_seconds=duration,
+                queue_wait_seconds=queue_wait,
+                processing_time_seconds=processing_time,
+                progress_page=progress_url,
+            )
         )
 
 
@@ -1629,9 +1646,7 @@ async def reserve_and_broadcast_task_error(task_id: str) -> None:
         if not task:
             return
 
-        duration = None
-        if task.created_at:
-            duration = int((datetime.utcnow() - task.created_at).total_seconds())
+        queue_wait, processing_time, duration = _task_duration_parts(task, datetime.utcnow())
         progress_url = None
         if task.guid and task.worker_api:
             worker_base = get_worker_base_url(task.worker_api)
@@ -1639,7 +1654,13 @@ async def reserve_and_broadcast_task_error(task_id: str) -> None:
 
         print(f"[Telegram] Scheduling error notification for task {task_id}")
         asyncio.create_task(
-            broadcast_task_error(task_id, duration_seconds=duration, progress_page=progress_url)
+            broadcast_task_error(
+                task_id,
+                duration_seconds=duration,
+                queue_wait_seconds=queue_wait,
+                processing_time_seconds=processing_time,
+                progress_page=progress_url,
+            )
         )
 
 
@@ -1655,7 +1676,14 @@ async def mark_task_done_notification_sent(task_id: str) -> None:
         await db.commit()
 
 
-async def broadcast_task_error(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:
+async def broadcast_task_error(
+    task_id: str,
+    *,
+    duration_seconds: int | None = None,
+    queue_wait_seconds: int | None = None,
+    processing_time_seconds: int | None = None,
+    progress_page: str | None = None,
+) -> None:
     print(f"[Telegram] broadcast_task_error called for task {task_id}")
     token = _get_token()
     if not token:
@@ -1685,9 +1713,15 @@ async def broadcast_task_error(task_id: str, *, duration_seconds: int | None = N
         print(f"[Telegram] Failed to get task details for error notification: {e}")
 
     dur = _format_duration(duration_seconds)
+    queue_dur = _format_duration(queue_wait_seconds)
+    processing_dur = _format_duration(processing_time_seconds)
     parts = [f'<a href="{html.escape(url)}">View Result</a>']
+    if queue_dur:
+        parts.append(f"queue {html.escape(queue_dur)}")
+    if processing_dur:
+        parts.append(f"processing {html.escape(processing_dur)}")
     if dur:
-        parts.append(f"duration {html.escape(dur)}")
+        parts.append(f"total {html.escape(dur)}")
     parts.append(html.escape(metrics_line))
 
     text = "ERROR <b>Task failed</b>\n" + " | ".join(parts)
@@ -1725,7 +1759,14 @@ async def broadcast_task_error(task_id: str, *, duration_seconds: int | None = N
         await mark_task_done_notification_sent(task_id)
 
 
-async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = None, progress_page: str | None = None) -> None:
+async def broadcast_task_done(
+    task_id: str,
+    *,
+    duration_seconds: int | None = None,
+    queue_wait_seconds: int | None = None,
+    processing_time_seconds: int | None = None,
+    progress_page: str | None = None,
+) -> None:
     print(f"[Telegram] broadcast_task_done called for task {task_id}")
     token = _get_token()
     if not token:
@@ -1762,11 +1803,19 @@ async def broadcast_task_done(task_id: str, *, duration_seconds: int | None = No
     rating_line = _format_content_rating_line(content_rating)
 
     dur = _format_duration(duration_seconds)
+    queue_dur = _format_duration(queue_wait_seconds)
+    processing_dur = _format_duration(processing_time_seconds)
+    timing_parts = []
+    if queue_dur:
+        timing_parts.append(f"queue {html.escape(queue_dur)}")
+    if processing_dur:
+        timing_parts.append(f"processing {html.escape(processing_dur)}")
     done_parts = [f'🔗 <a href="{html.escape(url)}">View Result</a>']
     if owner_email:
         done_parts.append(f"👤 {html.escape(owner_email)}")
     if dur:
         done_parts.append(f"⏱ {html.escape(dur)}")
+    done_parts.extend(timing_parts)
     done_parts.append(html.escape(metrics_line))
 
     text = f"✅ <b>Task completed</b>\n{rating_line}\n" + " | ".join(done_parts)

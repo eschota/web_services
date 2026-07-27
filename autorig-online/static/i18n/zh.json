@@ -1,4 +1,7 @@
 {
+    "task_queue_duration": "队列",
+    "task_processing_duration": "处理",
+    "task_total_duration": "总计",
     "site_name": "AutoRig Online",
     "hero_title": "自动3D模型绑定和动画",
     "hero_subtitle": "上传您的GLB、FBX或OBJ模型，并在一分钟内获得50+动画。导出到Unity、Unreal Engine、3ds Max、Maya、Cinema 4D。",

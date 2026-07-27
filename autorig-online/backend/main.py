@@ -721,20 +721,64 @@ async def background_task_updater():
                             print("[Background Worker] All free workers are quarantined, using degraded dispatch fallback")
 
                     if free_workers:
-                        # Pull up to N queued tasks
+                        # Pull a bounded FIFO batch, excluding tasks whose
+                        # source preflight is in backoff. A bad oldest source
+                        # must not consume the only dispatch candidate and
+                        # block every healthy task behind it.
+                        dispatch_now = datetime.utcnow()
                         queued_result = await db.execute(
                             select(Task)
-                            .where(Task.status == "created")
+                            .where(
+                                Task.status == "created",
+                                or_(
+                                    Task.source_next_retry_at.is_(None),
+                                    Task.source_next_retry_at <= dispatch_now,
+                                ),
+                            )
                             .order_by(Task.created_at)
-                            .limit(len(free_workers))
+                            .limit(max(50, len(free_workers) * 10))
                         )
                         queued_tasks = queued_result.scalars().all()
 
-                        for task, worker in zip(queued_tasks, free_workers):
-                            try:
-                                await start_task_on_worker(db, task, worker.url)
-                            except Exception as e:
-                                print(f"[Background Worker] Error dispatching task {task.id}: {e}")
+                        queued_index = 0
+                        for worker in free_workers:
+                            while queued_index < len(queued_tasks):
+                                task = queued_tasks[queued_index]
+                                queued_index += 1
+                                source_attempts_before = int(
+                                    getattr(task, "source_attempt_count", 0) or 0
+                                )
+                                try:
+                                    started_task, dispatch_error = await start_task_on_worker(
+                                        db,
+                                        task,
+                                        worker.url,
+                                    )
+                                except Exception as e:
+                                    print(f"[Background Worker] Error dispatching task {task.id}: {e}")
+                                    break
+
+                                if started_task.status == "processing":
+                                    break
+
+                                source_attempts_after = int(
+                                    getattr(started_task, "source_attempt_count", 0) or 0
+                                )
+                                if (
+                                    started_task.status == "error"
+                                    or source_attempts_after > source_attempts_before
+                                ):
+                                    print(
+                                        f"[Background Worker] Skipping task {task.id} "
+                                        f"after task-specific dispatch rejection; trying next queued task"
+                                    )
+                                    continue
+
+                                # A transient POST failure quarantines this
+                                # worker in start_task_on_worker. Do not use it
+                                # for another task during the same snapshot.
+                                if dispatch_error:
+                                    break
                     else:
                         c_q = await db.execute(
                             select(func.count()).select_from(Task).where(Task.status == "created")
@@ -5209,6 +5253,32 @@ async def api_get_task(
     response_video_ready = bool(task.video_ready or blueprint_rig_preview_url)
     response_video_url = blueprint_rig_preview_url or task.video_url
     response_animal_type = _task_response_animal_type(rig_v2_animal_detection)
+    timing_now = datetime.utcnow()
+    timing_end = (
+        task.updated_at
+        if task.status in {"done", "error"} and task.updated_at
+        else timing_now
+    )
+    processing_started_at = getattr(task, "processing_started_at", None)
+    if processing_started_at:
+        queue_wait_seconds = max(
+            0,
+            int((processing_started_at - task.created_at).total_seconds()),
+        )
+        processing_time_seconds = max(
+            0,
+            int((timing_end - processing_started_at).total_seconds()),
+        )
+    else:
+        queue_wait_seconds = max(
+            0,
+            int((timing_end - task.created_at).total_seconds()),
+        )
+        processing_time_seconds = 0
+    total_duration_seconds = max(
+        0,
+        int((timing_end - task.created_at).total_seconds()),
+    )
 
     return TaskStatusResponse(
         task_id=task.id,
@@ -5252,6 +5322,9 @@ async def api_get_task(
         poster_free3d_query=poster_free3d_query,
         created_at=task.created_at,
         updated_at=task.updated_at,
+        queue_wait_seconds=queue_wait_seconds,
+        processing_time_seconds=processing_time_seconds,
+        total_duration_seconds=total_duration_seconds,
         pipeline=getattr(task, "pipeline_kind", None) or "rig",
         youtube_video_id=getattr(task, "youtube_video_id", None),
         youtube_upload_status=getattr(task, "youtube_upload_status", None),

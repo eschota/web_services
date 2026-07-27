@@ -1,4 +1,7 @@
 {
+    "task_queue_duration": "कतार",
+    "task_processing_duration": "प्रसंस्करण",
+    "task_total_duration": "कुल",
     "site_name": "AutoRig Online",
     "hero_title": "स्वचालित 3D मॉडल रिगिंग और एनिमेशन",
     "hero_subtitle": "अपने GLB, FBX या OBJ मॉडल अपलोड करें और उन्हें 50+ एनिमेशन के साथ मिनटों में प्राप्त करें। Unity, Unreal Engine, 3ds Max, Maya, Cinema 4D में निर्यात करें।",
