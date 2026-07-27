@@ -6948,6 +6948,9 @@ async def api_restart_task(
     task.worker_task_id = None
     task.progress_page = None
     task.guid = None
+    task.processing_started_at = None
+    task.source_attempt_count = 0
+    task.source_next_retry_at = None
     task.output_urls = []
     task.ready_urls = []
     task.ready_count = 0
@@ -8978,6 +8981,9 @@ async def api_admin_restart_incomplete_tasks(
                     task.worker_task_id = None
                     task.progress_page = None
                     task.guid = None
+                    task.processing_started_at = None
+                    task.source_attempt_count = 0
+                    task.source_next_retry_at = None
                     task.output_urls = []
                     task.ready_urls = []
                     task.ready_count = 0

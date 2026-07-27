@@ -1162,6 +1162,9 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
     task.fbx_glb_error = None
     task.telegram_new_notified_at = None
     task.telegram_done_notified_at = None
+    task.processing_started_at = None
+    task.source_attempt_count = 0
+    task.source_next_retry_at = None
 
 
 async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
@@ -1198,6 +1201,8 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     task.error_message = None
     task.restart_count = current_restarts + 1
     task.last_progress_at = None
+    task.processing_started_at = None
+    task.source_next_retry_at = None
     task.updated_at = datetime.utcnow()
     
     await db.commit()
