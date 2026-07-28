@@ -9367,19 +9367,28 @@
             function setStatus(s) { statusEl.textContent = s; }
 
             function selectedAnimationManifestUrl() {
-                const selected = window.TaskUI?.animalAnimationCatalogParams?.();
-                if (!selected?.animal_type) {
-                    return `/api/task/${encodeURIComponent(taskId)}/animation-manifest`;
+                const taskUi = window.TaskUI;
+                if (taskUi?.isAnimalTask?.()) {
+                    const selected = taskUi.animalAnimationCatalogParams?.();
+                    if (!selected?.animal_type) return null;
+                    const selectedAnimalType = String(selected.animal_type).toLowerCase();
+                    const selectedOrientation = String(selected.orientation || 'front').toLowerCase();
+                    const variants = Array.isArray(taskUi.animalVariantsData?.variants)
+                        ? taskUi.animalVariantsData.variants
+                        : [];
+                    const variant = variants.find((candidate) =>
+                        String(candidate?.animal_type || '').toLowerCase() === selectedAnimalType
+                        && String(candidate?.orientation || '').toLowerCase() === selectedOrientation
+                    );
+                    const explicitManifestUrl = String(variant?.animation_manifest_url || '').trim();
+                    return explicitManifestUrl || null;
                 }
-                const query = new URLSearchParams({
-                    rig_type: String(selected.animal_type),
-                    orientation: String(selected.orientation || 'front'),
-                });
-                return `/api/task/${encodeURIComponent(taskId)}/animation-manifest?${query.toString()}`;
+                return `/api/task/${encodeURIComponent(taskId)}/animation-manifest`;
             }
 
             async function loadAnimationPlaylistManifest() {
                 const url = selectedAnimationManifestUrl();
+                if (!url) return null;
                 if (!animationManifestCache.has(url)) {
                     animationManifestCache.set(url, (async () => {
                         try {
