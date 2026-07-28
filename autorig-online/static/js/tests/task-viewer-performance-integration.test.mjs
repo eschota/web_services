@@ -36,6 +36,25 @@ test('emergency quality lowers internal resolution enough for software WebGL', (
     );
 });
 
+test('software Emergency uses basic textured materials and disables MSAA before renderer creation', () => {
+    assert.match(taskHtml, /function prepareMainViewerWebGLContext/);
+    assert.match(taskHtml, /context:\s*mainViewerWebGLSetup\.context/);
+    assert.match(taskHtml, /powerPreference:\s*'high-performance'/);
+    assert.match(taskHtml, /antialias:\s*!mainViewerSoftwareWebGL/);
+    assert.match(taskHtml, /function createMainViewerEmergencyMaterial/);
+    assert.match(taskHtml, /new THREE\.MeshBasicMaterial\(\{[\s\S]*?map:\s*sourceMaterial\.map/);
+    assert.match(taskHtml, /toneMapped:\s*false/);
+    assert.match(taskHtml, /sourceMaterial\.isMeshStandardMaterial/);
+    assert.match(taskHtml, /function restoreMainViewerEmergencyMaterials/);
+    assert.match(taskHtml, /record\.mesh\?\.material === record\.replacement/);
+    const helperStart = taskHtml.indexOf('function createMainViewerEmergencyMaterial');
+    const helperEnd = taskHtml.indexOf('function syncMainViewerEmergencyMaterials', helperStart);
+    const helperBody = taskHtml.slice(helperStart, helperEnd);
+    assert.doesNotMatch(helperBody, /normalMap|roughnessMap|metalnessMap|aoMap|envMap/);
+    assert.equal((taskHtml.match(/restoreMainViewerEmergencyMaterials\(currentModel\);/g) || []).length, 3);
+    assert.match(taskHtml, /applyViewerState\(\);\s*syncMainViewerEmergencyMaterials\(currentModel\);/);
+});
+
 test('animation clips are optimized before every viewer mixer path', () => {
     assert.match(taskHtml, /optimizeViewerAnimationClips\(gltf\.animations \|\| \[\], model, `\$\{label\} GLB`\)/);
     assert.match(taskHtml, /optimizeViewerAnimationClips\(model\.animations \|\| \[\], model, `\$\{label\} FBX`\)/);

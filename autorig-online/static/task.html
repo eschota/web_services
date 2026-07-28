@@ -11334,6 +11334,9 @@
             let mainViewerAdaptiveQualityEnabled = true;
             let mainViewerSoftwareWebGL = false;
             const mainViewerShadowBoundsCache = new WeakMap();
+            let mainViewerEmergencyMaterialCache = new WeakMap();
+            let mainViewerEmergencyMaterialRecords = [];
+            const mainViewerEmergencyMaterials = new Set();
             let mainViewerQualityMode = 'high';
             let mainViewerAdaptiveQualityState = createAdaptiveQualityState({
                 mode: 'high',
@@ -14119,6 +14122,162 @@
                 }
             }
 
+            function restoreMainViewerEmergencyMaterials(root = null) {
+                const remaining = [];
+                mainViewerEmergencyMaterialRecords.forEach((record) => {
+                    if (root && record.root !== root) {
+                        remaining.push(record);
+                        return;
+                    }
+                    if (record.mesh?.material === record.replacement) {
+                        record.mesh.material = record.original;
+                    }
+                });
+
+                const retained = new Set();
+                remaining.forEach(({ replacement }) => {
+                    const materials = Array.isArray(replacement) ? replacement : [replacement];
+                    materials.forEach((material) => {
+                        if (material?.userData?.autorigEmergencyMaterial) retained.add(material);
+                    });
+                });
+                [...mainViewerEmergencyMaterials].forEach((material) => {
+                    if (retained.has(material)) return;
+                    material?.dispose?.();
+                    mainViewerEmergencyMaterials.delete(material);
+                });
+                mainViewerEmergencyMaterialCache = new WeakMap();
+                mainViewerEmergencyMaterialRecords = remaining;
+            }
+
+            function createMainViewerEmergencyMaterial(sourceMaterial) {
+                const canSimplify = !!sourceMaterial && (
+                    sourceMaterial.isMeshStandardMaterial
+                    || sourceMaterial.isMeshPhysicalMaterial
+                    || sourceMaterial.isMeshLambertMaterial
+                    || sourceMaterial.isMeshPhongMaterial
+                );
+                if (!canSimplify || isSecsVertexPbrMaterial(sourceMaterial) || !THREE?.MeshBasicMaterial) {
+                    return sourceMaterial;
+                }
+                const useAlphaMap = !!sourceMaterial.transparent
+                    || Number(sourceMaterial.opacity) < 1
+                    || Number(sourceMaterial.alphaTest) > 0;
+                const material = new THREE.MeshBasicMaterial({
+                    name: sourceMaterial.name || '',
+                    color: sourceMaterial.color?.clone?.() || new THREE.Color(0xffffff),
+                    map: sourceMaterial.map || sourceMaterial.diffuseMap || sourceMaterial.albedoMap || null,
+                    alphaMap: useAlphaMap ? (sourceMaterial.alphaMap || null) : null,
+                    transparent: !!sourceMaterial.transparent || Number(sourceMaterial.opacity) < 1,
+                    opacity: Number.isFinite(sourceMaterial.opacity) ? sourceMaterial.opacity : 1,
+                    alphaTest: Number.isFinite(sourceMaterial.alphaTest) ? sourceMaterial.alphaTest : 0,
+                    side: sourceMaterial.side,
+                    depthTest: sourceMaterial.depthTest !== false,
+                    depthWrite: sourceMaterial.depthWrite !== false,
+                    vertexColors: !!sourceMaterial.vertexColors,
+                    wireframe: !!sourceMaterial.wireframe,
+                    fog: false,
+                    toneMapped: false,
+                    blending: sourceMaterial.blending,
+                    blendSrc: sourceMaterial.blendSrc,
+                    blendDst: sourceMaterial.blendDst,
+                    blendEquation: sourceMaterial.blendEquation,
+                    blendSrcAlpha: sourceMaterial.blendSrcAlpha,
+                    blendDstAlpha: sourceMaterial.blendDstAlpha,
+                    blendEquationAlpha: sourceMaterial.blendEquationAlpha,
+                    premultipliedAlpha: !!sourceMaterial.premultipliedAlpha,
+                    colorWrite: sourceMaterial.colorWrite !== false,
+                    polygonOffset: !!sourceMaterial.polygonOffset,
+                    polygonOffsetFactor: Number(sourceMaterial.polygonOffsetFactor || 0),
+                    polygonOffsetUnits: Number(sourceMaterial.polygonOffsetUnits || 0),
+                    clippingPlanes: sourceMaterial.clippingPlanes || null,
+                    clipIntersection: !!sourceMaterial.clipIntersection,
+                    clipShadows: !!sourceMaterial.clipShadows,
+                });
+                material.userData = {
+                    ...(sourceMaterial.userData || {}),
+                    autorigEmergencyMaterial: true,
+                    autorigSourceMaterialType: sourceMaterial.type || sourceMaterial.constructor?.name || 'Material',
+                };
+                return material;
+            }
+
+            function syncMainViewerEmergencyMaterials(root = currentModel) {
+                if (mainViewerQualityMode !== 'emergency' || !root) {
+                    restoreMainViewerEmergencyMaterials();
+                    return;
+                }
+                const existing = mainViewerEmergencyMaterialRecords.filter((record) => record.root === root);
+                if (existing.length && existing.every((record) => record.mesh?.material === record.replacement)) {
+                    return;
+                }
+                if (existing.length) restoreMainViewerEmergencyMaterials(root);
+
+                root.traverse((mesh) => {
+                    if (!mesh?.isMesh || !mesh.material) return;
+                    const original = mesh.material;
+                    const replaceOne = (sourceMaterial) => {
+                        if (!sourceMaterial) return sourceMaterial;
+                        let replacement = mainViewerEmergencyMaterialCache.get(sourceMaterial);
+                        if (!replacement) {
+                            replacement = createMainViewerEmergencyMaterial(sourceMaterial);
+                            if (replacement !== sourceMaterial) {
+                                mainViewerEmergencyMaterialCache.set(sourceMaterial, replacement);
+                                mainViewerEmergencyMaterials.add(replacement);
+                            }
+                        }
+                        return replacement;
+                    };
+                    const replacement = Array.isArray(original)
+                        ? original.map(replaceOne)
+                        : replaceOne(original);
+                    const changed = Array.isArray(original)
+                        ? replacement.some((material, index) => material !== original[index])
+                        : replacement !== original;
+                    if (!changed) return;
+                    mainViewerEmergencyMaterialRecords.push({ root, mesh, original, replacement });
+                    mesh.material = replacement;
+                });
+            }
+
+            function prepareMainViewerWebGLContext() {
+                const fallbackGpu = { software: false, renderer: '', vendor: '' };
+                const createCandidate = (antialias) => {
+                    const canvas = document.createElement('canvas');
+                    const attributes = {
+                        antialias,
+                        alpha: true,
+                        premultipliedAlpha: false,
+                        depth: true,
+                        stencil: false,
+                        preserveDrawingBuffer: false,
+                        powerPreference: 'high-performance',
+                    };
+                    const context = canvas.getContext('webgl2', attributes)
+                        || canvas.getContext('webgl', attributes)
+                        || canvas.getContext('experimental-webgl', attributes);
+                    if (!context) return { canvas, context: null, gpuInfo: fallbackGpu, antialias };
+                    const debugInfo = context.getExtension?.('WEBGL_debug_renderer_info');
+                    const gpuInfo = detectSoftwareWebGL({
+                        renderer: debugInfo
+                            ? context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+                            : context.getParameter?.(context.RENDERER),
+                        vendor: debugInfo
+                            ? context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
+                            : context.getParameter?.(context.VENDOR),
+                    });
+                    return { canvas, context, gpuInfo, antialias };
+                };
+
+                let candidate = createCandidate(true);
+                if (!candidate.context) candidate = createCandidate(false);
+                if (candidate.context && candidate.gpuInfo.software && candidate.antialias) {
+                    try { candidate.context.getExtension?.('WEBGL_lose_context')?.loseContext?.(); } catch (_) {}
+                    candidate = createCandidate(false);
+                }
+                return candidate;
+            }
+
             function getViewerSunOffset(radius = 10, viewCamera = camera) {
                 const phi = (90 - viewerState.sunInclination) * (Math.PI / 180);
                 const theta = viewerState.sunRotation * (Math.PI / 180);
@@ -14311,6 +14470,7 @@
                 renderer.setPixelRatio(getMainViewerTargetPixelRatio());
                 syncMainViewerBloomPass();
                 syncMainViewerShadowQuality();
+                syncMainViewerEmergencyMaterials();
                 if (typeof mainViewerResize === 'function') {
                     mainViewerResize();
                 }
@@ -14761,11 +14921,22 @@
 
                 // Renderer (PBR critical settings from config)
                 // Rail viewports intentionally skip frames in low-quality modes, so their pixels must persist.
+                const mainViewerWebGLSetup = prepareMainViewerWebGLContext();
+                const preflightGpuInfo = mainViewerWebGLSetup.gpuInfo;
+                mainViewerSoftwareWebGL = !!preflightGpuInfo.software;
+                if (mainViewerSoftwareWebGL) {
+                    mainViewerQualityMode = 'emergency';
+                    mainViewerAdaptiveQualityState = createAdaptiveQualityState({ mode: 'emergency' });
+                    console.warn('[Viewer] Software WebGL preflight; disabling antialias', preflightGpuInfo);
+                }
                 renderer = new THREE.WebGLRenderer({
-                    antialias: true,
+                    canvas: mainViewerWebGLSetup.canvas,
+                    context: mainViewerWebGLSetup.context,
+                    antialias: !mainViewerSoftwareWebGL,
                     alpha: true,
                     premultipliedAlpha: false,
                     preserveDrawingBuffer: false,
+                    powerPreference: 'high-performance',
                 });
                 renderer.setClearColor(0x000000, 0);
                 renderer.setPixelRatio(getMainViewerTargetPixelRatio());
@@ -15540,6 +15711,7 @@
                     
                     // Remove current model
                     if (currentModel) {
+                        restoreMainViewerEmergencyMaterials(currentModel);
                         scene.remove(currentModel);
                     }
                     
@@ -15586,6 +15758,7 @@
                         viewerThemeRuntimeApply(activeViewerTheme, `cache ${cacheKey}`);
                     }
                     applyViewerState();
+                    syncMainViewerEmergencyMaterials(currentModel);
                     configureAnimationPlaylistForCurrentModel();
                     
                     return true;
@@ -17421,6 +17594,7 @@
 
             function applyImprovedMaterials(model) {
                 if (!model) return;
+                if (model === currentModel) restoreMainViewerEmergencyMaterials(model);
                 ensureEnvironmentResponsiveMaterials(model);
                 
                 model.traverse((child) => {
@@ -17456,6 +17630,7 @@
                     }
                 });
                 applySceneEnvironmentIntensity();
+                if (model === currentModel) syncMainViewerEmergencyMaterials(model);
                 
                 window.taskDbg('[Materials] Applied improved materials to model');
             }
@@ -17648,6 +17823,7 @@
 
                 // Remove previous model
                 if (currentModel) {
+                    restoreMainViewerEmergencyMaterials(currentModel);
                     scene.remove(currentModel);
                     currentModel = null;
                 }
@@ -17868,6 +18044,7 @@
 
                 // Remove previous model
                 if (currentModel) {
+                    restoreMainViewerEmergencyMaterials(currentModel);
                     scene.remove(currentModel);
                     currentModel = null;
                 }
