@@ -75,7 +75,7 @@ from config import (
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
 )
 from viewer_environment import build_viewer_environment_from_settings
-from worker_artifact_urls import canonical_worker_artifact_url
+from worker_artifact_urls import canonical_worker_artifact_url, is_viewer_artifact_url
 from model_sale_offers import build_router as build_model_sale_router
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
@@ -162,6 +162,8 @@ from tasks import (
     get_task_no_progress_minutes,
     resolve_prepared_glb_source_url,
     admin_requeue_task_to_created,
+    persist_validated_worker_viewer_artifacts,
+    reconcile_task_viewer_artifacts,
 )
 
 from animation_corrections import (
@@ -333,6 +335,34 @@ def _schedule_poster_recovery_throttled(task_id: str) -> None:
             del _poster_recovery_throttle[k]
     schedule_task_poster_classification(task_id)
 
+
+_viewer_reconcile_schedule_throttle: Dict[str, float] = {}
+
+
+async def _run_viewer_artifact_reconciliation(task_id: str) -> None:
+    try:
+        async with AsyncSessionLocal() as background_db:
+            task = await get_task_by_id(background_db, task_id)
+            if not task or task.status != "done":
+                return
+            await reconcile_task_viewer_artifacts(background_db, task)
+    except Exception as error:
+        print(
+            f"[ViewerArtifacts] Late reconciliation failed for {task_id}: "
+            f"{type(error).__name__}: {error}"
+        )
+
+
+def _schedule_viewer_artifact_reconciliation(task_id: str) -> None:
+    now = time.monotonic()
+    last = _viewer_reconcile_schedule_throttle.get(task_id, 0.0)
+    if now - last < 300.0:
+        return
+    _viewer_reconcile_schedule_throttle[task_id] = now
+    if len(_viewer_reconcile_schedule_throttle) > 5000:
+        for key in list(_viewer_reconcile_schedule_throttle.keys())[:2500]:
+            _viewer_reconcile_schedule_throttle.pop(key, None)
+    asyncio.create_task(_run_viewer_artifact_reconciliation(task_id))
 
 def _url_path_endswith_glb(url: str) -> bool:
     """True if URL path ends with .glb (query/fragment ignored)."""
@@ -5117,6 +5147,39 @@ async def api_gumroad_ping(
     return Response(content="ok", media_type="text/plain")
 
 
+def _task_prepared_glb_ready(task: Task) -> bool:
+    """Whether either a private viewer GLB or the legacy prepared GLB is declared."""
+    optimized_cache = GLB_CACHE_DIR / f"{task.id}_prepared_viewer.glb"
+    optimized_cache_ready = optimized_cache.exists() and _validate_glb_file(optimized_cache)
+    optimized_url_ready = bool(
+        str(getattr(task, "viewer_prepared_glb_url", None) or "").strip()
+    )
+    legacy_ready = any(
+        "_model_prepared.glb" in str(url or "").lower()
+        for url in (task.ready_urls or [])
+    )
+    return bool(
+        optimized_cache_ready
+        or optimized_url_ready
+        or legacy_ready
+        or getattr(task, "fbx_glb_ready", False)
+    )
+
+def _downloadable_task_counts(
+    task: Task,
+    downloadable_output_urls: List[str],
+    downloadable_ready_urls: List[str],
+) -> Tuple[int, int]:
+    """Return ready/total counts without preview-only viewer artifacts."""
+    total_count = int(task.total_count or 0)
+    ready_count = int(task.ready_count or 0)
+    if task.output_urls:
+        total_count = min(total_count, len(downloadable_output_urls))
+    if task.ready_urls:
+        ready_count = min(ready_count, len(downloadable_ready_urls))
+    return ready_count, total_count
+
+
 @app.get("/api/task/{task_id}", response_model=TaskStatusResponse)
 async def api_get_task(
     task_id: str,
@@ -5137,6 +5200,15 @@ async def api_get_task(
     elif task.status == "done" and not task.video_ready:
         # Check video availability for completed tasks
         task = await update_task_progress(db, task)
+
+    if (
+        task.status == "done"
+        and (
+            not getattr(task, "viewer_prepared_glb_url", None)
+            or not getattr(task, "viewer_animations_glb_url", None)
+        )
+    ):
+        _schedule_viewer_artifact_reconciliation(task.id)
 
     if _task_needs_poster_classification(task):
         _schedule_poster_recovery_throttled(task.id)
@@ -5184,10 +5256,8 @@ async def api_get_task(
     # - OR for FBX tasks: fbx_glb_ready == True
     # NOTE: Removed fallback (guid is not None and status != 'created') as it
     # caused false positives - returned True before _model_prepared.glb actually exists
-    prepared_glb_ready = (
-        any('_model_prepared.glb' in url.lower() for url in (task.ready_urls or [])) or
-        task.fbx_glb_ready
-    )
+    prepared_glb_ready = _task_prepared_glb_ready(task)
+
     
     def _poster_llm_keywords_list() -> Optional[list]:
         raw = getattr(task, "poster_llm_keywords", None)
@@ -5280,14 +5350,27 @@ async def api_get_task(
         int((timing_end - task.created_at).total_seconds()),
     )
 
+    # Preview-only worker artifacts have dedicated public proxy endpoints. Their
+    # upstream URLs must never become downloadable task inventory.
+    downloadable_output_urls = [
+        url for url in (task.output_urls or []) if not is_viewer_artifact_url(url)
+    ]
+    downloadable_ready_urls = [
+        url for url in (task.ready_urls or []) if not is_viewer_artifact_url(url)
+    ]
+    downloadable_ready_count, downloadable_total_count = _downloadable_task_counts(
+        task,
+        downloadable_output_urls,
+        downloadable_ready_urls,
+    )
     return TaskStatusResponse(
         task_id=task.id,
         status=task.status,
         progress=task.progress,
-        ready_count=task.ready_count,
-        total_count=task.total_count,
-        output_urls=task.output_urls if can_download_task else [],
-        ready_urls=task.ready_urls if can_download_task else [],
+        ready_count=downloadable_ready_count,
+        total_count=downloadable_total_count,
+        output_urls=downloadable_output_urls if can_download_task else [],
+        ready_urls=downloadable_ready_urls if can_download_task else [],
         video_ready=response_video_ready,
         video_url=response_video_url,
         blueprint_skeleton_ready=bool(blueprint_skeleton_url),
@@ -5384,6 +5467,17 @@ async def api_task_progress_log(
         return {"available": False, "state": task.status, "error": str(e)}
 
 
+def _worker_file_totals(files: List[Dict[str, Any]]) -> Dict[str, int]:
+    total_size = 0
+    for item in files:
+        try:
+            size = int(item.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size > 0:
+            total_size += size
+    return {"file_count": len(files), "total_size": total_size}
+
 @app.get("/api/task/{task_id}/worker_files")
 async def api_task_worker_files(
     task_id: str,
@@ -5401,11 +5495,16 @@ async def api_task_worker_files(
     if not available:
         return {"available": False, "files": [], "error": error} if error else {"available": False, "files": []}
 
+    downloadable_files = [
+        item
+        for item in all_files
+        if not is_viewer_artifact_url(str(item.get("url") or item.get("rel_path") or ""))
+    ]
     return {
         "available": True,
         "exists": data.get("exists", False),
-        "files": all_files,
-        "totals": data.get("totals", {}),
+        "files": downloadable_files,
+        "totals": _worker_file_totals(downloadable_files),
     }
 
 
@@ -6965,6 +7064,8 @@ async def api_restart_task(
     task.fbx_glb_model_name = None
     task.fbx_glb_ready = False
     task.fbx_glb_error = None
+    task.viewer_prepared_glb_url = None
+    task.viewer_animations_glb_url = None
     
     # Clear ALL local caches for this task (so fresh files are downloaded)
     try:
@@ -7066,6 +7167,7 @@ async def api_restart_task(
         task.progress_page = result.progress_page
         task.guid = result.guid
         task.output_urls = result.output_urls
+        await persist_validated_worker_viewer_artifacts(task, result)
         task.total_count = len(result.output_urls)
         task.status = "processing"
     await db.commit()
@@ -8996,6 +9098,8 @@ async def api_admin_restart_incomplete_tasks(
                     task.fbx_glb_model_name = None
                     task.fbx_glb_ready = False
                     task.fbx_glb_error = None
+                    task.viewer_prepared_glb_url = None
+                    task.viewer_animations_glb_url = None
                     
                     # Select worker and send task
                     worker_url = await select_best_worker(db=bg_db)
@@ -9032,6 +9136,7 @@ async def api_admin_restart_incomplete_tasks(
                         task.progress_page = send_result.progress_page
                         task.guid = send_result.guid
                         task.output_urls = send_result.output_urls
+                        await persist_validated_worker_viewer_artifacts(task, send_result)
                         task.total_count = len(send_result.output_urls)
                         task.status = "processing"
                         restarted += 1
@@ -9451,7 +9556,10 @@ def _task_primary_download_urls(task: Task) -> List[str]:
     urls = list(dict.fromkeys((task.ready_urls or []) + (task.output_urls or [])))
     return [
         url for url in urls
-        if not urlsplit(str(url)).path.lower().endswith(_TASK_PREVIEW_SUFFIXES)
+        if (
+            not urlsplit(str(url)).path.lower().endswith(_TASK_PREVIEW_SUFFIXES)
+            and not is_viewer_artifact_url(url)
+        )
     ]
 
 
@@ -10989,6 +11097,43 @@ _GLB_FILE_HTTP_HEADERS: Dict[str, str] = {
 }
 _ANIMAL_VARIANT_FIRST_BYTE_TIMEOUT_SECONDS = 5.0
 
+_GLB_VIEWER_PROFILES = frozenset({"optimized", "runtime", "original"})
+_GLB_FETCH_BACKOFF_UNTIL: Dict[Tuple[str, str], float] = {}
+_GLB_FETCH_BACKOFF_MAX_ENTRIES = 512
+
+
+def _record_glb_fetch_backoff(
+    key: Tuple[str, str],
+    failure_backoff_seconds: float,
+) -> None:
+    """Remember a failed optional fetch without growing process state forever."""
+    if failure_backoff_seconds <= 0:
+        return
+
+    now = time.monotonic()
+    for expired_key, expires_at in list(_GLB_FETCH_BACKOFF_UNTIL.items()):
+        if expires_at <= now:
+            _GLB_FETCH_BACKOFF_UNTIL.pop(expired_key, None)
+
+    max_entries = max(1, int(_GLB_FETCH_BACKOFF_MAX_ENTRIES))
+    if key not in _GLB_FETCH_BACKOFF_UNTIL and len(_GLB_FETCH_BACKOFF_UNTIL) >= max_entries:
+        remove_count = len(_GLB_FETCH_BACKOFF_UNTIL) - max_entries + 1
+        oldest = sorted(
+            _GLB_FETCH_BACKOFF_UNTIL.items(),
+            key=lambda item: item[1],
+        )[:remove_count]
+        for oldest_key, _expires_at in oldest:
+            _GLB_FETCH_BACKOFF_UNTIL.pop(oldest_key, None)
+
+    _GLB_FETCH_BACKOFF_UNTIL[key] = now + failure_backoff_seconds
+
+
+def _glb_viewer_headers(profile: str) -> Dict[str, str]:
+    normalized = str(profile or "").strip().lower()
+    if normalized not in _GLB_VIEWER_PROFILES:
+        normalized = "original"
+    return {**_GLB_FILE_HTTP_HEADERS, "X-AutoRig-Viewer-Profile": normalized}
+
 
 async def _proxy_model_file(
     url: str,
@@ -11985,7 +12130,15 @@ async def purge_gallery_upstream_dead_tasks(
     }
 
 
-async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[FileResponse]:
+async def _get_cached_glb(
+    task_id: str,
+    url: str,
+    cache_name: str,
+    *,
+    profile: str = "original",
+    timeout_seconds: float = 120.0,
+    failure_backoff_seconds: float = 0.0,
+) -> Optional[FileResponse]:
     """
     Get GLB file from local cache, or download and cache it.
     Returns FileResponse for cached file, or None if download failed.
@@ -12005,7 +12158,7 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
                     path=str(cache_path),
                     media_type="model/gltf-binary",
                     filename=f"{task_id}_{cache_name}.glb",
-                    headers=dict(_GLB_FILE_HTTP_HEADERS),
+                    headers=_glb_viewer_headers(profile),
                 )
         except Exception as e:
             print(f"[GLB Cache] Error validating cached file: {e}")
@@ -12014,33 +12167,58 @@ async def _get_cached_glb(task_id: str, url: str, cache_name: str) -> Optional[F
             except:
                 pass
     
-    # Download and cache
+    # Download and cache. Optimized preview URLs use a short timeout and a
+    # process-local negative backoff so a bad optional artifact cannot delay
+    # the valid legacy fallback on every viewer request.
+    backoff_key = (cache_name, str(url or "").strip())
+    backoff_until = _GLB_FETCH_BACKOFF_UNTIL.get(backoff_key, 0.0)
+    if backoff_until > time.monotonic():
+        return None
+    if backoff_until:
+        _GLB_FETCH_BACKOFF_UNTIL.pop(backoff_key, None)
+    temp_path = cache_path.with_suffix(".tmp")
     try:
-        async with httpx.AsyncClient() as client:
-            temp_path = cache_path.with_suffix(".tmp")
-            async with client.stream("GET", url, timeout=120.0, follow_redirects=True) as response:
-                if response.status_code != 200:
+        # httpx timeouts are per network operation and reset after each chunk.
+        # Bound the complete optional-artifact transfer so a slow trickle cannot
+        # block the valid original GLB fallback indefinitely.
+        async with asyncio.timeout(timeout_seconds):
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "GET",
+                    url,
+                    timeout=timeout_seconds,
+                    follow_redirects=True,
+                ) as response:
+                    if response.status_code != 200:
+                        _record_glb_fetch_backoff(backoff_key, failure_backoff_seconds)
+                        return None
+                    size_bytes = await _stream_httpx_response_to_file(response, temp_path)
+
+                if not _validate_glb_file(temp_path):
+                    print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
+                    try:
+                        temp_path.unlink()
+                    except OSError:
+                        pass
+                    _record_glb_fetch_backoff(backoff_key, failure_backoff_seconds)
                     return None
-                size_bytes = await _stream_httpx_response_to_file(response, temp_path)
 
-            if not _validate_glb_file(temp_path):
-                print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
-                return None
+                temp_path.replace(cache_path)
+                _GLB_FETCH_BACKOFF_UNTIL.pop(backoff_key, None)
+                print(f"[GLB Cache] Cached valid GLB: {cache_path.name} ({size_bytes} bytes)")
 
-            temp_path.replace(cache_path)
-            print(f"[GLB Cache] Cached valid GLB: {cache_path.name} ({size_bytes} bytes)")
-
-            return FileResponse(
-                path=str(cache_path),
-                media_type="model/gltf-binary",
-                filename=f"{task_id}_{cache_name}.glb",
-                headers=dict(_GLB_FILE_HTTP_HEADERS),
-            )
+                return FileResponse(
+                    path=str(cache_path),
+                    media_type="model/gltf-binary",
+                    filename=f"{task_id}_{cache_name}.glb",
+                    headers=_glb_viewer_headers(profile),
+                )
     except Exception as e:
+        _record_glb_fetch_backoff(backoff_key, failure_backoff_seconds)
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
         print(f"[GLB Cache] Failed to cache {cache_name} for {task_id}: {e}")
         return None
 
@@ -12127,6 +12305,7 @@ def _strict_animation_headers(artifact) -> Dict[str, str]:
         "X-Animation-Library-Revision": artifact.library_revision,
         "X-Animation-Artifact-SHA256": artifact.animation_glb_sha256,
         "X-Animation-Clip-Count": str(artifact.animation_clip_count),
+        "X-AutoRig-Viewer-Profile": "runtime",
     }
 
 
@@ -12294,6 +12473,31 @@ async def api_proxy_animations_glb(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # A task-level optimized artifact represents the default task variant.
+    # Explicit matrix selections retain their revisioned library semantics.
+    default_variant = rig_type is None and str(orientation or "front").lower() == "front"
+    if default_variant:
+        optimized_cache_path = GLB_CACHE_DIR / f"{task_id}_animations_viewer.glb"
+        if optimized_cache_path.exists() and _validate_glb_file(optimized_cache_path):
+            return FileResponse(
+                path=str(optimized_cache_path),
+                media_type="model/gltf-binary",
+                filename=f"{task_id}_animations.glb",
+                headers=_glb_viewer_headers("optimized"),
+            )
+        optimized_url = str(getattr(task, "viewer_animations_glb_url", None) or "").strip()
+        if optimized_url:
+            result = await _get_cached_glb(
+                task_id,
+                optimized_url,
+                "animations_viewer",
+                profile="optimized",
+                timeout_seconds=6.0,
+                failure_backoff_seconds=30.0,
+            )
+            if result:
+                return result
+
     if not task.guid:
         raise HTTPException(status_code=404, detail="Model not available yet")
     
@@ -12324,13 +12528,18 @@ async def api_proxy_animations_glb(
             path=str(cache_path),
             media_type="model/gltf-binary",
             filename=f"{task_id}_animations.glb",
-            headers=dict(_GLB_FILE_HTTP_HEADERS),
+            headers=_glb_viewer_headers("runtime"),
         )
     
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
     animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
     if animations_url:
-        result = await _get_cached_glb(task_id, animations_url, "animations")
+        result = await _get_cached_glb(
+            task_id,
+            animations_url,
+            "animations",
+            profile="runtime",
+        )
         if result:
             return result
 
@@ -12469,20 +12678,47 @@ async def api_proxy_prepared_glb(
     
     from workers import get_worker_base_url
     
+    # Optimized preview cache/URL always wins over the full prepared download.
+    optimized_cache_path = GLB_CACHE_DIR / f"{task_id}_prepared_viewer.glb"
+    if optimized_cache_path.exists() and _validate_glb_file(optimized_cache_path):
+        return FileResponse(
+            path=str(optimized_cache_path),
+            media_type="model/gltf-binary",
+            filename=f"{task_id}_prepared.glb",
+            headers=_glb_viewer_headers("optimized"),
+        )
+    optimized_url = str(getattr(task, "viewer_prepared_glb_url", None) or "").strip()
+    if optimized_url:
+        result = await _get_cached_glb(
+            task_id,
+            optimized_url,
+            "prepared_viewer",
+            profile="optimized",
+            timeout_seconds=6.0,
+            failure_backoff_seconds=30.0,
+        )
+        if result:
+            return result
+
     # Check cache first (fastest path)
     cache_path = GLB_CACHE_DIR / f"{task_id}_prepared.glb"
-    if cache_path.exists():
+    if cache_path.exists() and _validate_glb_file(cache_path):
         return FileResponse(
             path=str(cache_path),
             media_type="model/gltf-binary",
             filename=f"{task_id}_prepared.glb",
-            headers=dict(_GLB_FILE_HTTP_HEADERS),
+            headers=_glb_viewer_headers("original"),
         )
     
     # 1. Try to find _model_prepared.glb in ready_urls (best option for preview)
     prepared_url = _find_file_in_ready_urls(task.ready_urls or [], "_model_prepared.glb")
     if prepared_url:
-        result = await _get_cached_glb(task_id, prepared_url, "prepared")
+        result = await _get_cached_glb(
+            task_id,
+            prepared_url,
+            "prepared",
+            profile="original",
+        )
         if result:
             return result
     
@@ -12490,13 +12726,23 @@ async def api_proxy_prepared_glb(
     if task.guid and task.worker_api:
         worker_base = get_worker_base_url(task.worker_api)
         direct_prepared_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}_model_prepared.glb"
-        result = await _get_cached_glb(task_id, direct_prepared_url, "prepared")
+        result = await _get_cached_glb(
+            task_id,
+            direct_prepared_url,
+            "prepared",
+            profile="original",
+        )
         if result:
             return result
     
     # 3. For FBX tasks, use fbx_glb_output_url
     if task.fbx_glb_output_url and task.fbx_glb_ready:
-        result = await _get_cached_glb(task_id, task.fbx_glb_output_url, "prepared")
+        result = await _get_cached_glb(
+            task_id,
+            task.fbx_glb_output_url,
+            "prepared",
+            profile="original",
+        )
         if result:
             return result
     

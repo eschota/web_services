@@ -3338,7 +3338,7 @@
             right: 0.55rem;
             bottom: 0.45rem;
             z-index: 38;
-            min-width: 58px;
+            min-width: 132px;
             padding: 0.22rem 0.38rem;
             border-radius: 5px;
             background: rgba(0,0,0,0.58);
@@ -3346,6 +3346,24 @@
             font: 700 0.68rem/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
             text-align: center;
             pointer-events: none;
+        }
+        .viewer-gpu-hint {
+            position: absolute;
+            right: 0.55rem;
+            bottom: 2.1rem;
+            z-index: 38;
+            max-width: min(330px, calc(100% - 1.1rem));
+            padding: 0.42rem 0.55rem;
+            border: 1px solid rgba(251, 191, 36, 0.55);
+            border-radius: 7px;
+            background: rgba(17, 24, 39, 0.9);
+            color: #fde68a;
+            font-size: 0.72rem;
+            line-height: 1.3;
+            pointer-events: none;
+        }
+        .viewer-gpu-hint.hidden {
+            display: none;
         }
 
         .manual-rig-restart-panel {
@@ -4042,6 +4060,7 @@
                                 <button id="anim-pause-btn" class="animation-rail-icon hidden" type="button" title="Pause animation" aria-label="Pause animation">&#10074;&#10074;</button>
                             </div>
                             <div id="viewer-fps" class="viewer-fps" aria-live="off">-- FPS</div>
+                            <div id="viewer-gpu-hint" class="viewer-gpu-hint hidden" role="status" aria-live="polite"></div>
                             <!-- HIDDEN: Top-left Channel Selector (kept for compatibility) -->
                             <div id="viewer-channel-wrap" style="position: absolute; top: 0.75rem; left: 0.75rem; pointer-events: auto; display: none; flex-direction: column; gap: 0.5rem;">
                                 <select id="viewer-channel-select" class="form-select" style="
@@ -9197,7 +9216,16 @@
             createAdaptiveQualityState,
             sampleAdaptiveQuality,
             suppressAdaptiveQuality,
-        } from '/static/js/task-adaptive-quality.js?v=2';
+        } from '/static/js/task-adaptive-quality.js?v=3';
+        import {
+            cachedRootBounds,
+            detectSoftwareWebGL,
+            secondaryViewportIntervalMs,
+            updateBackdropCover,
+        } from '/static/js/task-viewer-performance.js?v=1';
+        import {
+            optimizeAnimationClipsForViewer,
+        } from '/static/js/task-viewer-animation-optimizer.js?v=1';
         import {
             AnimationPlaylistController,
             captureRootTransform,
@@ -9580,6 +9608,28 @@
                 }
             }
 
+            function optimizeViewerAnimationClips(clips, model, label = 'viewer') {
+                const source = Array.isArray(clips) ? clips : [];
+                const result = optimizeAnimationClipsForViewer(source, model, {
+                    parseTrackName: (trackName) => THREE.PropertyBinding.parseTrackName(trackName),
+                });
+                if (result.reliable && result.droppedTracks > 0) {
+                    console.info('[ViewerAnimation] unused control tracks removed', {
+                        label,
+                        clips: source.length,
+                        droppedTracks: result.droppedTracks,
+                        requiredBones: result.requiredBoneCount,
+                        totalBones: result.totalBoneCount,
+                    });
+                } else if (!result.reliable) {
+                    console.info('[ViewerAnimation] keeping original clips (fail-open)', {
+                        label,
+                        reason: result.reason,
+                    });
+                }
+                return result.clips;
+            }
+
             function applyAnimationClipsToCurrentModel(clips, hints = []) {
                 if (currentModelType !== 'animations' || !currentModel || !Array.isArray(clips) || !clips.length) {
                     return false;
@@ -9594,7 +9644,7 @@
                         // ignore stop errors
                     }
                 }
-                animations = [...clips];
+                animations = optimizeViewerAnimationClips(clips, currentModel, 'apply clips');
                 mixer = new THREE.AnimationMixer(currentModel);
 
                 const picked = pickBestAnimationClipByHints(hints);
@@ -11251,12 +11301,15 @@
             const splitViewportCameras = {};
             const splitViewportControls = {};
             const splitViewportTextures = { top: null, front: null };
+            const splitViewportRailTargets = Object.create(null);
             let splitViewportTextureLoadSerial = 0;
-            let splitViewportShadowWarmupTarget = null;
-            const splitViewportShadowLights = {};
+            let splitViewportBlitScene = null;
+            let splitViewportBlitCamera = null;
+            let splitViewportBlitMaterial = null;
             const splitViewportShadowCatcherStates = {};
             let splitViewportShadowLastRefresh = 0;
-            const SPLIT_VIEWPORT_SHADOW_REFRESH_MS = 100;
+            const splitViewportSecondaryLastRenderAt = Object.create(null);
+            const SPLIT_VIEWPORT_SHADOW_REFRESH_MS = 200;
             let currentModel = null;
 
             let preparedLoaded = false;
@@ -11270,12 +11323,13 @@
             let mainViewerResize = () => {};
             let groundPlaneMesh = null;
             let mainViewerAdaptiveQualityEnabled = true;
+            let mainViewerSoftwareWebGL = false;
+            const mainViewerShadowBoundsCache = new WeakMap();
             let mainViewerQualityMode = 'high';
             let mainViewerAdaptiveQualityState = createAdaptiveQualityState({
                 mode: 'high',
                 ignoreUntil: performance.now() + 2000,
             });
-            let splitViewportRenderFrame = 0;
             let mainViewerLastDebugPublishAt = 0;
             const MAIN_VIEWER_QUALITY_PROFILES = {
                 high: {
@@ -11285,7 +11339,7 @@
                     bloom: true,
                     shadows: true,
                     shadowMapSize: 2048,
-                    secondaryViewportStride: 1,
+                    secondaryViewportFps: 30,
                 },
                 balanced: {
                     badge: 'BQ',
@@ -11293,8 +11347,8 @@
                     useComposer: true,
                     bloom: false,
                     shadows: true,
-                    shadowMapSize: 1024,
-                    secondaryViewportStride: 1,
+                    shadowMapSize: 512,
+                    secondaryViewportFps: 15,
                 },
                 low: {
                     badge: 'LQ',
@@ -11303,7 +11357,7 @@
                     bloom: false,
                     shadows: false,
                     shadowMapSize: 512,
-                    secondaryViewportStride: 2,
+                    secondaryViewportFps: 5,
                 },
                 emergency: {
                     badge: 'EQ',
@@ -11312,7 +11366,7 @@
                     bloom: false,
                     shadows: false,
                     shadowMapSize: 256,
-                    secondaryViewportStride: 4,
+                    secondaryViewportFps: 2,
                 }
             };
 
@@ -11877,6 +11931,9 @@
                     onInteractionView: setSplitViewportInteractionView,
                     onStateChange: (state, rects) => {
                         splitViewportShadowLastRefresh = 0;
+                        Object.keys(splitViewportSecondaryLastRenderAt).forEach((key) => {
+                            delete splitViewportSecondaryLastRenderAt[key];
+                        });
                         updateSplitViewportOverlay(state, rects);
                         updateSplitViewportCameraProjections(rects);
                         window.__taskSplitViewport = { state, interactionView: splitViewportActiveInteractionView };
@@ -12062,103 +12119,73 @@
             function updateScreenBackdropCover(texOpt = null, aspectOpt = null) {
                 const tex = texOpt || backdropSceneTexture;
                 if (!tex?.image || !camera) return;
-                const imgW = Number(tex.image.naturalWidth || tex.image.width || 0);
-                const imgH = Number(tex.image.naturalHeight || tex.image.height || 0);
-                if (!imgW || !imgH) return;
                 const viewAspect = Math.max(0.01, Number(aspectOpt || camera.aspect || 1));
-                const imageAspect = imgW / imgH;
-                tex.offset.set(0, 0);
-                tex.repeat.set(1, 1);
-                if (imageAspect > viewAspect) {
-                    const repeatX = viewAspect / imageAspect;
-                    tex.repeat.x = repeatX;
-                    tex.offset.x = (1 - repeatX) * 0.5;
-                } else {
-                    const repeatY = imageAspect / viewAspect;
-                    tex.repeat.y = repeatY;
-                    tex.offset.y = (1 - repeatY) * 0.5;
-                }
-                tex.needsUpdate = true;
-            }
-
-            function syncSplitViewportShadowLight(light) {
-                if (!light || !sunLight) return light;
-                if (light !== sunLight) {
-                    light.color.copy(sunLight.color);
-                    light.intensity = sunLight.intensity;
-                    light.castShadow = sunLight.castShadow;
-                    light.shadow.bias = sunLight.shadow.bias;
-                    light.shadow.normalBias = sunLight.shadow.normalBias;
-                    light.shadow.radius = sunLight.shadow.radius;
-                    const mapSize = Math.min(1024, sunLight.shadow.mapSize.width || 1024);
-                    if (light.shadow.mapSize.width !== mapSize || light.shadow.mapSize.height !== mapSize) {
-                        light.shadow.mapSize.set(mapSize, mapSize);
-                        light.shadow.map?.dispose?.();
-                        light.shadow.map = null;
-                    }
-                }
-                return light;
-            }
-
-            function getSplitViewportShadowLight(viewId) {
-                if (!sunLight || viewId === 'perspective') return sunLight;
-                if (!splitViewportShadowLights[viewId]) {
-                    const light = new THREE.DirectionalLight(sunLight.color.clone(), sunLight.intensity);
-                    light.name = `TaskViewerSplitShadowLight_${viewId}`;
-                    light.castShadow = true;
-                    light.visible = false;
-                    scene.add(light, light.target);
-                    splitViewportShadowLights[viewId] = light;
-                }
-                return syncSplitViewportShadowLight(splitViewportShadowLights[viewId]);
-            }
-
-            function activateSplitViewportShadowLight(viewId) {
-                const active = syncSplitViewportShadowLight(getSplitViewportShadowLight(viewId));
-                if (sunLight) sunLight.visible = active === sunLight;
-                Object.values(splitViewportShadowLights).forEach((light) => {
-                    light.visible = light === active;
-                });
-                return active;
+                updateBackdropCover(tex, viewAspect);
             }
 
             function restorePrimaryViewerShadowLight() {
                 if (sunLight) sunLight.visible = true;
-                Object.values(splitViewportShadowLights).forEach((light) => { light.visible = false; });
             }
 
-            function renderSplitViewportShadowMap(viewCamera, viewId, shadowLight) {
-                if (!renderer?.shadowMap?.enabled || !shadowLight?.castShadow || !shadowLight.shadow || !viewCamera) return;
-                updateSunShadowFocus(true, viewCamera, viewId, shadowLight);
-                if (!splitViewportShadowWarmupTarget) {
-                    splitViewportShadowWarmupTarget = new THREE.WebGLRenderTarget(1, 1, {
+            function ensureSplitViewportRailTarget(rect) {
+                const dpr = Math.max(0.5, Number(renderer?.getPixelRatio?.() || 1));
+                const width = Math.max(1, Math.ceil(Number(rect?.width || 1) * dpr));
+                const height = Math.max(1, Math.ceil(Number(rect?.height || 1) * dpr));
+                let target = splitViewportRailTargets[rect.id];
+                if (!target) {
+                    target = new THREE.WebGLRenderTarget(width, height, {
                         depthBuffer: true,
                         stencilBuffer: false,
                     });
-                    splitViewportShadowWarmupTarget.texture.generateMipmaps = false;
+                    target.texture.generateMipmaps = false;
+                    target.texture.minFilter = THREE.LinearFilter;
+                    target.texture.magFilter = THREE.LinearFilter;
+                    splitViewportRailTargets[rect.id] = target;
+                    splitViewportSecondaryLastRenderAt[rect.id] = 0;
+                } else if (target.width !== width || target.height !== height) {
+                    target.setSize(width, height);
+                    splitViewportSecondaryLastRenderAt[rect.id] = 0;
                 }
-                const previousTarget = renderer.getRenderTarget();
-                const previousScissorTest = renderer.getScissorTest();
-                try {
-                    renderer.setScissorTest(false);
-                    renderer.setRenderTarget(splitViewportShadowWarmupTarget);
-                    renderer.setViewport(0, 0, 1, 1);
-                    renderer.setScissor(0, 0, 1, 1);
-                    renderer.shadowMap.needsUpdate = true;
-                    shadowLight.shadow.needsUpdate = true;
-                    renderer.render(scene, viewCamera);
-                } finally {
-                    renderer.setRenderTarget(previousTarget);
-                    renderer.setScissorTest(previousScissorTest);
-                }
+                return target;
             }
 
-            function renderSplitViewportRect(rect, refreshShadows = false) {
+            function ensureSplitViewportBlitter() {
+                if (splitViewportBlitScene) return;
+                splitViewportBlitScene = new THREE.Scene();
+                splitViewportBlitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+                splitViewportBlitMaterial = new THREE.MeshBasicMaterial({
+                    depthTest: false,
+                    depthWrite: false,
+                    toneMapped: false,
+                });
+                const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), splitViewportBlitMaterial);
+                quad.frustumCulled = false;
+                splitViewportBlitScene.add(quad);
+            }
+
+            function blitSplitViewportRailTarget(rect, target) {
+                if (!target?.texture) return;
+                ensureSplitViewportBlitter();
+                const renderY = Math.max(0, (host.clientHeight || rect.height) - rect.y - rect.height);
+                splitViewportBlitMaterial.map = target.texture;
+                renderer.setRenderTarget(null);
+                renderer.setScissorTest(true);
+                renderer.setViewport(rect.x, renderY, rect.width, rect.height);
+                renderer.setScissor(rect.x, renderY, rect.width, rect.height);
+                renderer.clear(true, true, true);
+                renderer.render(splitViewportBlitScene, splitViewportBlitCamera);
+            }
+
+            function renderSplitViewportRect(rect, refreshShadows = false, renderTarget = null) {
                 const viewCamera = splitViewportCameras[rect.id] || camera;
                 if (!viewCamera) return;
                 if (rect.id === 'left' && isSemanticBlueprintSplitViewportVisible()) return;
-                const shadowLight = activateSplitViewportShadowLight(rect.id);
-                const renderY = Math.max(0, (host.clientHeight || rect.height) - rect.y - rect.height);
+                const isPrimaryView = rect.id === 'perspective';
+                const shadowLight = sunLight;
+                restorePrimaryViewerShadowLight();
+                const renderY = renderTarget
+                    ? 0
+                    : Math.max(0, (host.clientHeight || rect.height) - rect.y - rect.height);
                 const texture = rect.id === 'perspective'
                     ? backdropSceneTexture
                     : (splitViewportTextures[rect.id] || backdropSceneTexture);
@@ -12178,17 +12205,37 @@
                 const previousOverride = scene.overrideMaterial;
                 const previousSkyVisible = skyObject?.visible;
                 const previousGroundVisible = groundPlaneMesh?.visible;
+                const previousTarget = renderer.getRenderTarget();
+                const previousShadowEnabled = renderer.shadowMap.enabled;
                 if (skyObject) skyObject.visible = !texture;
                 if (texture) scene.background = texture;
                 try {
-                    if (refreshShadows) renderSplitViewportShadowMap(viewCamera, rect.id, shadowLight);
-                    else applySplitViewportShadowCatcherState(rect.id);
-                    renderer.setScissorTest(true);
-                    renderer.setViewport(rect.x, renderY, rect.width, rect.height);
-                    renderer.setScissor(rect.x, renderY, rect.width, rect.height);
+                    if (isPrimaryView) {
+                        applySplitViewportShadowCatcherState('perspective');
+                        if (refreshShadows && renderer.shadowMap.enabled && shadowLight?.castShadow) {
+                            updateSunShadowFocus(true, viewCamera, 'perspective', shadowLight);
+                            renderer.shadowMap.needsUpdate = true;
+                            shadowLight.shadow.needsUpdate = true;
+                        }
+                    } else if (groundPlaneMesh) {
+                        groundPlaneMesh.visible = false;
+                    }
+                    if (renderTarget) {
+                        renderer.shadowMap.enabled = false;
+                        renderer.setRenderTarget(renderTarget);
+                        renderer.setScissorTest(false);
+                        renderer.setViewport(0, 0, renderTarget.width, renderTarget.height);
+                    } else {
+                        renderer.setRenderTarget(null);
+                        renderer.setScissorTest(true);
+                        renderer.setViewport(rect.x, renderY, rect.width, rect.height);
+                        renderer.setScissor(rect.x, renderY, rect.width, rect.height);
+                    }
                     renderer.clear(true, true, true);
                     renderer.render(scene, viewCamera);
                 } finally {
+                    renderer.shadowMap.enabled = previousShadowEnabled;
+                    renderer.setRenderTarget(previousTarget);
                     scene.background = previousBackground;
                     scene.overrideMaterial = previousOverride;
                     if (skyObject && previousSkyVisible !== undefined) skyObject.visible = previousSkyVisible;
@@ -12221,31 +12268,35 @@
 
             function renderMainViewerFrame() {
                 if (!renderer || !scene || !camera) return;
+                const now = performance.now();
+                const refreshShadows = !!renderer.shadowMap.enabled && (
+                    !splitViewportShadowLastRefresh
+                    || (now - splitViewportShadowLastRefresh) >= SPLIT_VIEWPORT_SHADOW_REFRESH_MS
+                );
+                if (refreshShadows) splitViewportShadowLastRefresh = now;
                 if (splitViewportController) {
                     const previousAutoUpdate = renderer.shadowMap.autoUpdate;
-                    const now = performance.now();
-                    const refreshShadows = !splitViewportShadowLastRefresh
-                        || (now - splitViewportShadowLastRefresh) >= SPLIT_VIEWPORT_SHADOW_REFRESH_MS;
-                    if (refreshShadows) splitViewportShadowLastRefresh = now;
                     renderer.shadowMap.autoUpdate = false;
                     renderer.shadowMap.needsUpdate = false;
                     try {
                         renderer.setScissorTest(true);
-                        splitViewportRenderFrame += 1;
-                        const stride = Math.max(1, Number(getMainViewerQualityProfile().secondaryViewportStride || 1));
-                        const rects = splitViewportController.getRects();
-                        const secondaryRects = rects.filter((rect) => rect.role !== 'main');
-                        const secondaryIndex = secondaryRects.length
-                            ? Math.floor(splitViewportRenderFrame / stride) % secondaryRects.length
-                            : -1;
+                        const intervalMs = secondaryViewportIntervalMs(getMainViewerQualityProfile());
+                        const rects = [...splitViewportController.getRects()]
+                            .sort((left, right) => Number(right.role === 'main') - Number(left.role === 'main'));
                         rects.forEach((rect) => {
-                            const renderSecondary = stride === 1 || (
-                                splitViewportRenderFrame % stride === 0
-                                && rect === secondaryRects[secondaryIndex]
-                            );
-                            if (rect.role === 'main' || renderSecondary) {
+                            if (rect.id === 'left' && isSemanticBlueprintSplitViewportVisible()) return;
+                            const lastRenderAt = Number(splitViewportSecondaryLastRenderAt[rect.id] || 0);
+                            if (rect.id === 'perspective') {
                                 renderSplitViewportRect(rect, refreshShadows);
+                                splitViewportSecondaryLastRenderAt[rect.id] = now;
+                                return;
                             }
+                            const target = ensureSplitViewportRailTarget(rect);
+                            if ((now - lastRenderAt) >= intervalMs) {
+                                renderSplitViewportRect(rect, false, target);
+                                splitViewportSecondaryLastRenderAt[rect.id] = now;
+                            }
+                            blitSplitViewportRailTarget(rect, target);
                         });
                     } finally {
                         applySplitViewportShadowCatcherState('perspective');
@@ -12256,6 +12307,11 @@
                         renderer.setViewport(0, 0, host.clientWidth || 1, host.clientHeight || 1);
                     }
                     return;
+                }
+                if (refreshShadows && sunLight?.castShadow) {
+                    updateSunShadowFocus(true, camera, 'perspective', sunLight);
+                    renderer.shadowMap.needsUpdate = true;
+                    sunLight.shadow.needsUpdate = true;
                 }
                 const hasThemeBackdrop = !!(usingStaticBackdrop && backdropSceneTexture);
                 if (!hasThemeBackdrop) {
@@ -14019,8 +14075,8 @@
                 const profile = getMainViewerQualityProfile();
                 const shadowsEnabled = !!profile.shadows;
                 renderer.shadowMap.enabled = shadowsEnabled;
-                renderer.shadowMap.autoUpdate = shadowsEnabled;
-                renderer.shadowMap.needsUpdate = shadowsEnabled;
+                renderer.shadowMap.autoUpdate = false;
+                renderer.shadowMap.needsUpdate = false;
                 sunLight.castShadow = shadowsEnabled;
                 if (groundPlaneMesh) {
                     groundPlaneMesh.receiveShadow = shadowsEnabled;
@@ -14083,15 +14139,24 @@
 
                 const casterRoot = getActiveShadowCasterRoot();
                 if (casterRoot) {
-                    try {
-                        casterRoot.updateMatrixWorld?.(true);
-                        const casterBox = new THREE.Box3().setFromObject(casterRoot);
-                        casterBox.getCenter(focus);
-                        casterBox.getSize(modelSize);
-                        updateShadowCatcherPlaneFromBounds(casterBox, focus, modelSize, viewId);
+                    const cached = cachedRootBounds(mainViewerShadowBoundsCache, casterRoot, (root) => {
+                        try {
+                            const box = new THREE.Box3().setFromObject(root);
+                            if (box.isEmpty()) return null;
+                            return {
+                                box,
+                                focus: box.getCenter(new THREE.Vector3()),
+                                size: box.getSize(new THREE.Vector3()),
+                            };
+                        } catch (_) {
+                            return null;
+                        }
+                    }).value;
+                    if (cached) {
+                        focus.copy(cached.focus);
+                        modelSize.copy(cached.size);
+                        updateShadowCatcherPlaneFromBounds(cached.box, focus, modelSize, viewId);
                         hasFocus = true;
-                    } catch (error) {
-                        hasFocus = false;
                     }
                 }
                 if (!hasFocus) return;
@@ -14213,7 +14278,20 @@
                 };
             }
 
+            function syncViewerGpuHint() {
+                const hint = document.getElementById('viewer-gpu-hint');
+                if (!hint) return;
+                hint.classList.toggle('hidden', !mainViewerSoftwareWebGL);
+                if (mainViewerSoftwareWebGL) {
+                    hint.textContent = window.I18n?.t?.('viewer_software_webgl_hint')
+                        || 'Software WebGL detected. Enable hardware acceleration in Chrome settings for smoother 3D playback.';
+                }
+            }
+
+            window.addEventListener('languageChanged', syncViewerGpuHint);
+
             function applyMainViewerQuality(mode = mainViewerQualityMode, reason = 'manual') {
+                if (mainViewerSoftwareWebGL) mode = 'emergency';
                 if (!MAIN_VIEWER_QUALITY_PROFILES[mode]) return;
                 const previousMode = mainViewerQualityMode;
                 mainViewerQualityMode = mode;
@@ -14249,6 +14327,7 @@
                     now: performance.now(),
                     seconds: 1,
                     active: mainViewerAdaptiveQualityEnabled
+                        && !mainViewerSoftwareWebGL
                         && mainViewerEnabled
                         && !loadingManager?.isVisible
                         && !document.hidden,
@@ -14677,7 +14756,7 @@
                     antialias: true,
                     alpha: true,
                     premultipliedAlpha: false,
-                    preserveDrawingBuffer: true,
+                    preserveDrawingBuffer: false,
                 });
                 renderer.setClearColor(0x000000, 0);
                 renderer.setPixelRatio(getMainViewerTargetPixelRatio());
@@ -14687,6 +14766,26 @@
                 renderer.toneMapping = LIGHTING_CONFIG.toneMapping;
                 renderer.toneMappingExposure = LIGHTING_CONFIG.toneMappingExposure;
                 renderer.physicallyCorrectLights = true;
+
+                try {
+                    const context = renderer.getContext();
+                    const debugInfo = context?.getExtension?.('WEBGL_debug_renderer_info');
+                    const gpuInfo = detectSoftwareWebGL({
+                        renderer: debugInfo
+                            ? context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+                            : context?.getParameter?.(context.RENDERER),
+                        vendor: debugInfo
+                            ? context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
+                            : context?.getParameter?.(context.VENDOR),
+                    });
+                    mainViewerSoftwareWebGL = gpuInfo.software;
+                    if (mainViewerSoftwareWebGL) {
+                        mainViewerQualityMode = 'emergency';
+                        mainViewerAdaptiveQualityState = createAdaptiveQualityState({ mode: 'emergency' });
+                        console.warn('[Viewer] Software WebGL detected; forcing emergency quality', gpuInfo);
+                    }
+                    syncViewerGpuHint();
+                } catch (_) {}
 
                 host.innerHTML = '';
                 host.appendChild(renderer.domElement);
@@ -15126,7 +15225,8 @@
                             maybeAdaptMainViewerQuality(frameCount, p95FrameTime);
                             const qualityBadge = getMainViewerQualityProfile().badge;
                             if (fpsLabel) {
-                                fpsLabel.textContent = `${frameCount} FPS`;
+                                const p95Label = Number.isFinite(p95FrameTime) ? `${Math.round(p95FrameTime)}ms` : '--';
+                                fpsLabel.textContent = `${frameCount} FPS · ${qualityBadge} · ${p95Label}`;
                                 fpsLabel.title = `${mainViewerQualityMode} quality · p95 ${Math.round(p95FrameTime)} ms`;
                                 fpsLabel.dataset.quality = qualityBadge;
                                 if (frameCount >= 55) fpsLabel.style.color = '#4ade80';
@@ -15151,7 +15251,6 @@
                         if (viewerControls && splitViewportActiveInteractionView === 'perspective') viewerControls.updateFlyCamera(dt);
                         if (transformManager) transformManager.update();
                         if (playModeController?.active) playModeController.update(dt);
-                        if (!splitViewportController) updateSunShadowFocus(false);
                         if (time - mainViewerLastDebugPublishAt >= 1000) {
                             publishMainViewerDebugState();
                             mainViewerLastDebugPublishAt = time;
@@ -17665,7 +17764,7 @@
                 // Hide loading overlay after a short delay
                 setTimeout(() => hideLoadingOverlay(), 300);
 
-                animations = gltf.animations || [];
+                animations = optimizeViewerAnimationClips(gltf.animations || [], model, `${label} GLB`);
                 updateViewerAssetDiagnostics({
                     source: isAnimationPreview ? 'animations.glb' : 'prepared.glb',
                     label,
@@ -17865,7 +17964,7 @@
                 setTimeout(() => hideLoadingOverlay(), 300);
 
                 // FBX animations are stored on the model object directly
-                animations = model.animations || [];
+                animations = optimizeViewerAnimationClips(model.animations || [], model, `${label} FBX`);
                 updateViewerAssetDiagnostics({
                     source: isAnimationPreview ? 'animations.fbx' : 'fbx',
                     label,
@@ -17999,7 +18098,11 @@
                         'background animations load',
                         gltf?.parser?.json?.asset || null,
                     );
-                    const loadedAnimations = gltf.animations || [];
+                    const loadedAnimations = optimizeViewerAnimationClips(
+                        gltf.animations || [],
+                        model,
+                        'background animations GLB',
+                    );
                     
                     modelCache.animations = model;
                     modelCache.animationsData = loadedAnimations;

@@ -274,6 +274,10 @@ class Task(Base):
     fbx_glb_ready = Column(Boolean, default=False)
     fbx_glb_error = Column(Text, nullable=True)
 
+    # Preview-only GLBs. These are never included in downloadable artifact lists.
+    viewer_prepared_glb_url = Column(String(1024), nullable=True)
+    viewer_animations_glb_url = Column(String(1024), nullable=True)
+
     # Telegram notification tracking
     telegram_new_notified_at = Column(DateTime, nullable=True)
     telegram_done_notified_at = Column(DateTime, nullable=True)
@@ -1151,6 +1155,8 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_model_name VARCHAR(64)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_ready BOOLEAN DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN fbx_glb_error TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_prepared_glb_url VARCHAR(1024)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_animations_glb_url VARCHAR(1024)")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN viewer_settings TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN face_rig_analysis TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN face_rig_analysis_updated_at DATETIME")
@@ -1554,6 +1560,12 @@ async def init_db():
                 )
             except Exception:
                 pass
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS viewer_prepared_glb_url VARCHAR(1024)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS viewer_animations_glb_url VARCHAR(1024)"
+            )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_rating VARCHAR(20) NOT NULL DEFAULT 'unknown'"
             )

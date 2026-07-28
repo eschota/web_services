@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
 
 from database import WorkerEndpoint, Task
+from worker_artifact_urls import parse_worker_artifact_payload
 from config import (
     WORKERS, 
     PROGRESS_BATCH_SIZE, 
@@ -52,6 +53,8 @@ class WorkerTaskResult:
     output_urls: List[str] = None
     progress_page: Optional[str] = None
     guid: Optional[str] = None
+    viewer_prepared_glb_url: Optional[str] = None
+    viewer_animations_glb_url: Optional[str] = None
     error: Optional[str] = None
     
     def __post_init__(self):
@@ -470,7 +473,11 @@ async def send_task_to_worker(
                 
                 # Extract data from response
                 task_id = data.get("task_id", data.get("id"))
-                output_urls = data.get("output_urls", [])
+                (
+                    output_urls,
+                    viewer_prepared_glb_url,
+                    viewer_animations_glb_url,
+                ) = parse_worker_artifact_payload(data)
                 progress_page = data.get("progress_page", data.get("progress_url"))
                 
                 # Try to extract GUID
@@ -485,7 +492,9 @@ async def send_task_to_worker(
                     task_id=task_id,
                     output_urls=output_urls,
                     progress_page=progress_page,
-                    guid=guid
+                    guid=guid,
+                    viewer_prepared_glb_url=viewer_prepared_glb_url,
+                    viewer_animations_glb_url=viewer_animations_glb_url,
                 )
             else:
                 return WorkerTaskResult(

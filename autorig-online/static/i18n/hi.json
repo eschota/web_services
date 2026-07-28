@@ -441,6 +441,7 @@
     "viewer_split_perspective": "Perspective",
     "viewer_split_top": "Top",
     "viewer_split_front": "Front",
+    "viewer_software_webgl_hint": "सॉफ़्टवेयर WebGL सक्रिय है। बेहतर 3D प्रदर्शन के लिए Chrome सेटिंग में हार्डवेयर एक्सेलेरेशन चालू करें।",
     "viewer_split_blueprint_left": "Blueprint Left",
     "agreement_model_sales_title": "7. सार्वजनिक प्रीव्यू, डाउनलोड प्रतिबंध और मॉडल खरीद प्रस्ताव",
     "agreement_model_sales_public_preview": "पूर्ण कार्य पृष्ठ सार्वजनिक इंटरैक्टिव 3D व्यूअर दे सकते हैं। प्रीव्यू और एनीमेशन बदलने के लिए मॉडल तथा एनीमेशन डेटा आगंतुक के ब्राउज़र में भेजा जाता है। डाउनलोड बटन हटाना DRM सुरक्षा नहीं है और यह गारंटी नहीं देता कि तकनीकी रूप से सक्षम आगंतुक ब्राउज़र को भेजे गए प्रीव्यू डेटा को निकाल नहीं पाएगा।",

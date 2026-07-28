@@ -4,6 +4,7 @@ Task management for AutoRig Online
 import asyncio
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Optional, Tuple, List, Dict, Any
 from urllib.parse import urlparse
 import httpx
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import Task, User, AnonSession, AsyncSessionLocal
@@ -19,6 +20,10 @@ from config import APP_URL
 from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
 from task_timeout_contract import task_hard_timeout_reference
+from worker_artifact_urls import (
+    canonical_worker_artifact_url,
+    viewer_artifact_kind,
+)
 from workers import (
     select_best_worker,
     send_task_to_worker,
@@ -59,6 +64,9 @@ RIG_V2_ANIMAL_DECISION_THRESHOLD = 0.62
 SOURCE_PREFLIGHT_TIMEOUT_SECONDS = 8.0
 SOURCE_PREFLIGHT_MAX_ATTEMPTS = 3
 SOURCE_PREFLIGHT_BACKOFF_SECONDS = (60, 300)
+VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS = 4.0
+VIEWER_RECONCILE_BACKOFF_SECONDS = 300.0
+_viewer_reconcile_last_attempt: Dict[str, float] = {}
 
 
 def _source_format_error(input_url: str, prefix: bytes, content_type: str) -> Optional[str]:
@@ -494,6 +502,7 @@ async def _start_fbx_preconvert_async(task_id: str, first_worker_url: str, input
                     task.progress_page = result.progress_page
                     task.guid = result.guid
                     task.output_urls = result.output_urls
+                    await persist_validated_worker_viewer_artifacts(task, result)
                     task.total_count = len(result.output_urls)
                     task.status = "processing"
                     task.last_progress_at = datetime.utcnow()
@@ -690,6 +699,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     task.progress_page = result.progress_page
     task.guid = result.guid
     task.output_urls = result.output_urls
+    await persist_validated_worker_viewer_artifacts(task, result)
     task.total_count = len(result.output_urls)
     task.status = "processing"
     # Start stale timer from (re)dispatch moment, not from original task creation time.
@@ -818,13 +828,15 @@ def _worker_outputs_look_complete(urls: List[str]) -> bool:
     return has_video and has_poster and has_download
 
 
-async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
-    """Use worker model-files API to recover concrete output URLs for animal/_100k layouts."""
+async def _fetch_concrete_worker_artifacts(
+    task: Task,
+) -> Tuple[List[str], Optional[str], Optional[str]]:
+    """Recover downloadable and private viewer artifacts from model-files."""
     if not task.guid or not task.worker_api:
-        return []
+        return [], None, None
     worker_base = get_worker_base_url(task.worker_api)
     if not worker_base:
-        return []
+        return [], None, None
 
     files_url = f"{worker_base.rstrip('/')}/api-converter-glb/model-files/{task.guid}"
     worker_root = f"{worker_base.rstrip('/')}/converter/glb"
@@ -832,13 +844,15 @@ async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
         async with httpx.AsyncClient() as client:
             resp = await client.get(files_url, timeout=8.0)
         if resp.status_code != 200:
-            return []
+            return [], None, None
         data = resp.json() if resp.content else {}
     except Exception:
-        return []
+        return [], None, None
 
     urls: List[str] = []
     seen = set()
+    viewer_prepared: Optional[str] = None
+    viewer_animations: Optional[str] = None
     for folder_data in (data.get("folders") or {}).values():
         if not isinstance(folder_data, dict):
             continue
@@ -847,14 +861,160 @@ async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
                 continue
             name = str(item.get("name") or "")
             rel_path = str(item.get("rel_path") or "")
-            if not rel_path or not _is_primary_worker_output(name):
+            if not rel_path:
                 continue
             url = f"{worker_root}/{task.guid}/{rel_path}"
+            kind = viewer_artifact_kind(url)
+            if kind == "prepared":
+                viewer_prepared = viewer_prepared or canonical_worker_artifact_url(url)
+                continue
+            if kind == "animations":
+                viewer_animations = viewer_animations or canonical_worker_artifact_url(url)
+                continue
+            if not _is_primary_worker_output(name):
+                continue
             if url not in seen:
                 seen.add(url)
                 urls.append(url)
+    return urls, viewer_prepared, viewer_animations
+
+
+async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
+    """Backward-compatible downloadable-only model-files helper."""
+    urls, _viewer_prepared, _viewer_animations = await _fetch_concrete_worker_artifacts(task)
     return urls
 
+
+async def _probe_remote_glb_artifact(url: Optional[str]) -> bool:
+    """Validate HTTP reachability plus GLB magic/version/declared total length."""
+    candidate = str(url or "").strip()
+    if not candidate:
+        return False
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            async with client.stream(
+                "GET",
+                candidate,
+                headers={"Range": "bytes=0-11", "Accept-Encoding": "identity"},
+                timeout=VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS,
+            ) as response:
+                if response.status_code not in (200, 206):
+                    return False
+                total_size: Optional[int] = None
+                content_range = str(response.headers.get("content-range") or "")
+                match = re.fullmatch(r"bytes\s+\d+-\d+/(\d+)", content_range, re.IGNORECASE)
+                if match:
+                    total_size = int(match.group(1))
+                elif response.status_code == 200:
+                    content_length = str(response.headers.get("content-length") or "")
+                    if content_length.isdigit():
+                        total_size = int(content_length)
+
+                header = bytearray()
+                async for chunk in response.aiter_bytes(chunk_size=12):
+                    if chunk:
+                        header.extend(chunk[: 12 - len(header)])
+                    if len(header) >= 12:
+                        break
+    except Exception:
+        return False
+
+    if len(header) != 12 or header[:4] != b"glTF":
+        return False
+    version = int.from_bytes(header[4:8], "little")
+    declared_size = int.from_bytes(header[8:12], "little")
+    return version in (1, 2) and declared_size >= 12 and total_size == declared_size
+
+
+async def _validated_viewer_artifact_urls(
+    prepared_url: Optional[str],
+    animations_url: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    candidates = (prepared_url, animations_url)
+    checks = await asyncio.gather(
+        *(_probe_remote_glb_artifact(url) for url in candidates),
+        return_exceptions=True,
+    )
+    return tuple(
+        canonical_worker_artifact_url(str(url))
+        if url and check is True
+        else None
+        for url, check in zip(candidates, checks)
+    )  # type: ignore[return-value]
+
+
+async def persist_validated_worker_viewer_artifacts(task: Task, result: Any) -> None:
+    """Persist worker-declared viewer URLs only when their GLB headers are live."""
+    prepared, animations = await _validated_viewer_artifact_urls(
+        getattr(result, "viewer_prepared_glb_url", None),
+        getattr(result, "viewer_animations_glb_url", None),
+    )
+    if prepared:
+        task.viewer_prepared_glb_url = prepared
+    if animations:
+        task.viewer_animations_glb_url = animations
+
+
+async def reconcile_task_viewer_artifacts(
+    db: AsyncSession,
+    task: Task,
+    *,
+    force: bool = False,
+) -> Task:
+    """Bounded late discovery for completed tasks whose viewer export arrived later."""
+    expected_status = task.status
+    expected_guid = task.guid
+    expected_worker_api = task.worker_api
+    if not task.guid or not task.worker_api:
+        return task
+    if task.viewer_prepared_glb_url and task.viewer_animations_glb_url:
+        return task
+
+    now = time.monotonic()
+    last_attempt = _viewer_reconcile_last_attempt.get(task.id, 0.0)
+    if not force and now - last_attempt < VIEWER_RECONCILE_BACKOFF_SECONDS:
+        return task
+    _viewer_reconcile_last_attempt[task.id] = now
+    if len(_viewer_reconcile_last_attempt) > 4096:
+        cutoff = now - VIEWER_RECONCILE_BACKOFF_SECONDS
+        for key, attempted_at in list(_viewer_reconcile_last_attempt.items()):
+            if attempted_at < cutoff:
+                _viewer_reconcile_last_attempt.pop(key, None)
+
+    _downloads, prepared_candidate, animations_candidate = await _fetch_concrete_worker_artifacts(task)
+    prepared, animations = await _validated_viewer_artifact_urls(
+        None if task.viewer_prepared_glb_url else prepared_candidate,
+        None if task.viewer_animations_glb_url else animations_candidate,
+    )
+    updates: Dict[str, Any] = {}
+    if prepared:
+        updates["viewer_prepared_glb_url"] = prepared
+    if animations:
+        updates["viewer_animations_glb_url"] = animations
+    if updates:
+        # Viewer metadata can be generated long after a task completed. Keep the
+        # terminal timestamp stable because it drives duration and gallery order.
+        if expected_status in ("done", "error"):
+            updates["updated_at"] = Task.updated_at
+        result = await db.execute(
+            update(Task)
+            .where(
+                Task.id == task.id,
+                Task.status == expected_status,
+                Task.guid == expected_guid,
+                Task.worker_api == expected_worker_api,
+            )
+            .values(**updates)
+        )
+        if int(getattr(result, "rowcount", 0) or 0) != 1:
+            # The task was restarted/reassigned while the worker was being
+            # probed. Never attach stale viewer artifacts to the new run.
+            await db.rollback()
+            await db.refresh(task)
+            return task
+        await db.commit()
+        await db.refresh(task)
+    return task
 
 async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
     """Return terminal worker failure text from {guid}_progress.txt, if present."""
@@ -993,8 +1153,26 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     # initial task response may contain legacy placeholder URLs. Reconcile from
     # model-files once the actual downloadable set is present.
     if task.status not in ("done", "error") and task.guid and task.worker_api:
-        concrete_urls = await _fetch_concrete_worker_output_urls(task)
-        if concrete_urls and _worker_outputs_look_complete(concrete_urls):
+        (
+            concrete_urls,
+            viewer_prepared_glb_url,
+            viewer_animations_glb_url,
+        ) = await _fetch_concrete_worker_artifacts(task)
+        validated_prepared_url, validated_animations_url = await _validated_viewer_artifact_urls(
+            None if task.viewer_prepared_glb_url else viewer_prepared_glb_url,
+            None if task.viewer_animations_glb_url else viewer_animations_glb_url,
+        )
+        if validated_prepared_url:
+            task.viewer_prepared_glb_url = validated_prepared_url
+            task.updated_at = datetime.utcnow()
+        if validated_animations_url:
+            task.viewer_animations_glb_url = validated_animations_url
+            task.updated_at = datetime.utcnow()
+        if (
+            task.status not in ("done", "error")
+            and concrete_urls
+            and _worker_outputs_look_complete(concrete_urls)
+        ):
             task.output_urls = concrete_urls
             task.ready_urls = concrete_urls
             task.total_count = len(concrete_urls)
@@ -1160,6 +1338,8 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
     task.fbx_glb_model_name = None
     task.fbx_glb_ready = False
     task.fbx_glb_error = None
+    task.viewer_prepared_glb_url = None
+    task.viewer_animations_glb_url = None
     task.telegram_new_notified_at = None
     task.telegram_done_notified_at = None
     task.processing_started_at = None
@@ -1203,6 +1383,8 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     task.last_progress_at = None
     task.processing_started_at = None
     task.source_next_retry_at = None
+    task.viewer_prepared_glb_url = None
+    task.viewer_animations_glb_url = None
     task.updated_at = datetime.utcnow()
     
     await db.commit()

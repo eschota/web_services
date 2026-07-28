@@ -6,6 +6,7 @@ export function createAdaptiveQualityState(options = {}) {
         mode,
         lowSeconds: 0,
         highSeconds: 0,
+        severeSamples: 0,
         cooldownUntil: Number(options.cooldownUntil) || 0,
         ignoreUntil: Number(options.ignoreUntil) || 0,
         recoveryProbe: null,
@@ -18,6 +19,7 @@ export function suppressAdaptiveQuality(state, now, durationMs = 2000) {
         ...state,
         lowSeconds: 0,
         highSeconds: 0,
+        severeSamples: 0,
         ignoreUntil: Math.max(Number(state?.ignoreUntil) || 0, Number(now) + Math.max(0, Number(durationMs) || 0)),
     };
 }
@@ -29,13 +31,38 @@ export function sampleAdaptiveQuality(state, sample = {}) {
     const p95FrameTime = Number(sample.p95FrameTime);
     const seconds = Math.max(0.1, Number(sample.seconds) || 1);
 
-    if (sample.active === false || now < current.ignoreUntil || now < current.cooldownUntil) {
+    if (sample.active === false || now < current.ignoreUntil) {
         return { state: current, change: null };
     }
 
     const isLow = fps < 29 || (Number.isFinite(p95FrameTime) && p95FrameTime > 42);
     const isSevere = fps < 20;
     const isHealthy = fps > 45 && Number.isFinite(p95FrameTime) && p95FrameTime < 28;
+
+    // Severe performance needs an immediate escape hatch. Do not make an
+    // 11 FPS client wait through high -> balanced -> low cooldowns.
+    if (isSevere) {
+        current.severeSamples = (Number(current.severeSamples) || 0) + 1;
+        const from = current.mode;
+        if (current.severeSamples >= 2 && current.mode !== 'emergency') {
+            current.mode = 'emergency';
+        } else if (current.mode === 'high' || current.mode === 'balanced') {
+            current.mode = 'low';
+        }
+        if (current.mode !== from) {
+            current.lowSeconds = 0;
+            current.highSeconds = 0;
+            current.cooldownUntil = 0;
+            current.recoveryProbe = null;
+            return { state: current, change: { from, to: current.mode, reason: `severe-fps-${fps}` } };
+        }
+    } else {
+        current.severeSamples = 0;
+    }
+
+    if (now < current.cooldownUntil) {
+        return { state: current, change: null };
+    }
 
     if (current.recoveryProbe && now < current.recoveryProbe.until && isLow) {
         const next = {
@@ -54,7 +81,7 @@ export function sampleAdaptiveQuality(state, sample = {}) {
     current.highSeconds = isHealthy ? current.highSeconds + seconds : 0;
 
     const index = VIEWER_QUALITY_ORDER.indexOf(current.mode);
-    const lowThreshold = isSevere ? 2 : 3;
+    const lowThreshold = 3;
     if (current.lowSeconds >= lowThreshold && index < VIEWER_QUALITY_ORDER.length - 1) {
         const from = current.mode;
         current.mode = VIEWER_QUALITY_ORDER[index + 1];

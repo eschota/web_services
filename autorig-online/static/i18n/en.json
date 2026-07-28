@@ -626,6 +626,7 @@
     "viewer_split_perspective": "Perspective",
     "viewer_split_top": "Top",
     "viewer_split_front": "Front",
+    "viewer_software_webgl_hint": "Software WebGL is active. Enable hardware acceleration in Chrome settings for smoother 3D playback.",
     "viewer_split_blueprint_left": "Blueprint Left",
     "agreement_model_sales_title": "7. Public previews, download restrictions, and model sale offers",
     "agreement_model_sales_public_preview": "Completed task pages may provide a public interactive 3D viewer, including model and animation data transmitted to a visitor's browser for preview and animation switching. Removing download buttons does not constitute digital rights management and cannot guarantee that technically capable visitors will not extract browser-delivered preview data.",

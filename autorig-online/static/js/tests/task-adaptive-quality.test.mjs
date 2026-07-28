@@ -20,10 +20,20 @@ test('degrades after three seconds below 29 FPS', () => {
     assert.equal(result.change?.to, 'balanced');
 });
 
-test('degrades after two seconds below 20 FPS', () => {
-    let state = adaptive.createAdaptiveQualityState({ mode: 'balanced' });
-    state = adaptive.sampleAdaptiveQuality(state, { fps: 19, p95FrameTime: 60, now: 1000 }).state;
-    const result = adaptive.sampleAdaptiveQuality(state, { fps: 19, p95FrameTime: 60, now: 2000 });
+test('severe FPS drops directly to low then emergency within two samples', () => {
+    let state = adaptive.createAdaptiveQualityState({ mode: 'high' });
+    const first = adaptive.sampleAdaptiveQuality(state, { fps: 11, p95FrameTime: 90, now: 1000 });
+    assert.equal(first.state.mode, 'low');
+    assert.equal(first.change?.reason, 'severe-fps-11');
+    state = first.state;
+    const result = adaptive.sampleAdaptiveQuality(state, { fps: 11, p95FrameTime: 90, now: 2000 });
+    assert.equal(result.state.mode, 'emergency');
+    assert.equal(result.change?.reason, 'severe-fps-11');
+});
+
+test('severe FPS bypasses a prior quality cooldown', () => {
+    const state = adaptive.createAdaptiveQualityState({ mode: 'balanced', cooldownUntil: 10000 });
+    const result = adaptive.sampleAdaptiveQuality(state, { fps: 11, p95FrameTime: 90, now: 1000 });
     assert.equal(result.state.mode, 'low');
 });
 
