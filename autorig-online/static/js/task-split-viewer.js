@@ -98,6 +98,77 @@ export function splitViewportNdc(rect, x, y) {
     };
 }
 
+export function splitViewportControlAnchor(rects, width, height, inset = 12) {
+    const viewportWidth = Math.max(1, Number(width) || 1);
+    const viewportHeight = Math.max(1, Number(height) || 1);
+    const safeInset = Math.max(0, Number(inset) || 0);
+    const candidates = Array.isArray(rects) ? rects : [];
+    const rect = candidates.find((item) => item?.role === 'maximized')
+        || candidates.find((item) => item?.role === 'main')
+        || candidates.find((item) => item?.id === 'perspective')
+        || { id: 'perspective', x: 0, y: 0, width: viewportWidth, height: viewportHeight, role: 'main' };
+    const x = Number(rect.x) || 0;
+    const y = Number(rect.y) || 0;
+    const rectWidth = Math.max(1, Number(rect.width) || viewportWidth);
+    const rectHeight = Math.max(1, Number(rect.height) || viewportHeight);
+    return {
+        viewId: String(rect.id || 'perspective'),
+        centerX: x + rectWidth / 2,
+        bottom: Math.max(safeInset, viewportHeight - (y + rectHeight) + safeInset),
+        width: rectWidth,
+    };
+}
+
+export function viewerGroundTransform(bounds, centerXZ = true) {
+    const min = bounds?.min || {};
+    const max = bounds?.max || {};
+    const values = [min.x, min.y, min.z, max.x, max.y, max.z].map(Number);
+    if (!values.every(Number.isFinite)) return null;
+    const [minX, minY, minZ, maxX, , maxZ] = values;
+    return {
+        x: centerXZ ? -((minX + maxX) / 2) : 0,
+        y: -minY,
+        z: centerXZ ? -((minZ + maxZ) / 2) : 0,
+    };
+}
+
+export function viewerPerspectiveFitDistance(size, aspect, fovDegrees = 45, viewId = 'perspective', padding = 1.25) {
+    const sx = Math.max(0.001, Math.abs(Number(size?.x) || 0));
+    const sy = Math.max(0.001, Math.abs(Number(size?.y) || 0));
+    const sz = Math.max(0.001, Math.abs(Number(size?.z) || 0));
+    const safeAspect = Math.max(0.05, Number(aspect) || 1);
+    const safeFov = Math.min(80, Math.max(18, Number(fovDegrees) || 45));
+    const safePadding = Math.max(1, Number(padding) || 1);
+    const verticalTan = Math.max(0.001, Math.tan((safeFov * Math.PI / 180) / 2));
+    const horizontalTan = Math.max(0.001, verticalTan * safeAspect);
+
+    if (viewId === 'top' || viewId === 'front') {
+        const horizontalSpan = sx;
+        const verticalSpan = viewId === 'top' ? sz : sy;
+        const depthSpan = viewId === 'top' ? sy : sz;
+        const projectedDistance = Math.max(
+            horizontalSpan * 0.5 / horizontalTan,
+            verticalSpan * 0.5 / verticalTan,
+        );
+        return (depthSpan * 0.5 + projectedDistance) * safePadding;
+    }
+
+    const radius = Math.max(0.05, Math.hypot(sx, sy, sz) / 2);
+    const limitingHalfFov = Math.min(
+        Math.atan(verticalTan),
+        Math.atan(horizontalTan),
+    );
+    return radius / Math.max(0.001, Math.sin(limitingHalfFov)) * safePadding;
+}
+
+export function logicalRenderTargetViewportSize(targetWidth, targetHeight, pixelRatio) {
+    const safePixelRatio = Math.max(0.01, Number(pixelRatio) || 1);
+    return {
+        width: Math.max(1, Number(targetWidth) || 1) / safePixelRatio,
+        height: Math.max(1, Number(targetHeight) || 1) / safePixelRatio,
+    };
+}
+
 export function isSplitViewportControlTarget(target) {
     return Boolean(target?.closest?.('button, select, input, textarea, a, label, [role="button"], [data-split-viewport-no-activate]'));
 }

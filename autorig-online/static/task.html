@@ -845,16 +845,30 @@
             accent-color: var(--accent);
         }
         
-        /* View Mode Selector (T-Pose / RIG / Animation) - Vertical */
+        /* View Mode Selector (Animation / Play / Ragdoll) */
+        .viewer-mode-dock {
+            position: absolute;
+            left: 36%;
+            bottom: 0.75rem;
+            transform: translateX(-50%);
+            z-index: 40;
+            max-width: calc(72% - 1rem);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+        }
         .view-mode-selector {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
+            flex-wrap: nowrap;
             gap: 0.25rem;
             background: rgba(0,0,0,0.6);
             border: 1px solid rgba(255,255,255,0.15);
             border-radius: 8px;
             padding: 0.25rem;
             backdrop-filter: blur(12px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.32);
         }
         .view-mode-selector button {
             padding: 0.4rem 0.5rem;
@@ -878,6 +892,11 @@
             background: var(--accent);
             border-color: var(--accent);
             color: #fff;
+        }
+        .view-mode-selector button.is-disabled {
+            cursor: help;
+            opacity: 0.48;
+            filter: saturate(0.55);
         }
         .view-mode-selector button.ready-pulse {
             border-color: #51cf66;
@@ -3519,21 +3538,20 @@
                 min-height: 300px;
             }
 
-            #viewer-rigtype-wrap {
-                top: auto !important;
-                right: 0.5rem !important;
-                bottom: 0.5rem !important;
-                left: auto !important;
+            .viewer-mode-dock {
+                bottom: max(0.5rem, env(safe-area-inset-bottom));
                 max-width: calc(100% - 1rem);
-                transform: none !important;
-                align-items: flex-end !important;
             }
 
             .view-mode-selector {
                 flex-direction: row;
                 flex-wrap: wrap;
-                justify-content: flex-end;
+                justify-content: center;
                 max-width: 100%;
+            }
+
+            .animation-rail:not(.is-collapsed) {
+                bottom: 3.75rem;
             }
 
             .view-mode-selector button {
@@ -4170,8 +4188,8 @@
                                 ">🏠</button>
             </div>
             
-                            <!-- Right side: View Mode Selector + Zoom (moved lower) -->
-                            <div id="viewer-rigtype-wrap" style="position: absolute; top: 50%; right: 0.75rem; transform: translateY(-50%); pointer-events: auto; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;">
+                            <!-- Bottom-center mode controls for the active main viewport -->
+                            <div id="viewer-rigtype-wrap" class="viewer-mode-dock" data-split-viewport-no-activate>
                                 <!-- View Mode Buttons: Animation / Play / Ragdoll -->
                                 <div class="view-mode-selector" id="view-mode-selector">
                                     <button id="view-mode-anim" class="active" title="Animation Mode">Anim</button>
@@ -9211,7 +9229,13 @@
         } from '/static/js/animation-preview-policy.js?v=3';
         import FaceRigController from '/static/js/FaceRigController.js?v=6';
         import { PlayModeController } from '/static/js/task-play-mode.js?v=38';
-        import { TaskSplitViewportController } from '/static/js/task-split-viewer.js?v=20260720-cleanup-v1';
+        import {
+            TaskSplitViewportController,
+            logicalRenderTargetViewportSize,
+            splitViewportControlAnchor,
+            viewerGroundTransform,
+            viewerPerspectiveFitDistance,
+        } from '/static/js/task-split-viewer.js?v=20260729-floor-controls-v1';
         import {
             createAdaptiveQualityState,
             sampleAdaptiveQuality,
@@ -11866,6 +11890,18 @@
                 const overlay = document.getElementById('viewer-split-overlay');
                 if (!overlay || !splitViewportController) return;
                 const rects = rectsOpt || splitViewportController.getRects();
+                const modeDock = document.getElementById('viewer-rigtype-wrap');
+                if (modeDock) {
+                    const anchor = splitViewportControlAnchor(
+                        rects,
+                        host?.clientWidth || 1,
+                        host?.clientHeight || 1,
+                    );
+                    modeDock.style.left = `${anchor.centerX}px`;
+                    modeDock.style.bottom = `${anchor.bottom}px`;
+                    modeDock.style.maxWidth = `${Math.max(1, anchor.width - 16)}px`;
+                    modeDock.dataset.anchorView = anchor.viewId;
+                }
                 overlay.replaceChildren(...rects.map((rect) => {
                     const pane = document.createElement('div');
                     pane.className = 'viewer-split-pane';
@@ -11948,7 +11984,11 @@
                         });
                         updateSplitViewportOverlay(state, rects);
                         updateSplitViewportCameraProjections(rects);
-                        window.__taskSplitViewport = { state, interactionView: splitViewportActiveInteractionView };
+                        const cachedBoundsInfo = currentModel?.userData?.autorigViewerPreciseBoundsInfo;
+                        if (currentModel?.userData?.autorigViewerFramingReady && cachedBoundsInfo) {
+                            fitSplitAuxiliaryCameras(currentModel, cachedBoundsInfo);
+                        }
+                        window.__taskSplitViewport = { state, rects, interactionView: splitViewportActiveInteractionView };
                     },
                 });
                 setSplitViewportInteractionView('perspective');
@@ -11977,11 +12017,10 @@
 
             function fitSplitAuxiliaryCameras(model, boundsInfoOpt = null) {
                 if (!splitViewportController || !model || !THREE) return;
-                const boundsInfo = boundsInfoOpt || getModelBoundsInfo(model);
+                const boundsInfo = boundsInfoOpt || getModelBoundsInfo(model, { precise: true });
                 if (!boundsInfo) return;
                 const center = boundsInfo.center.clone();
                 const target = center.clone();
-                target.y = Math.max(center.y, boundsInfo.box.min.y + boundsInfo.size.y * 0.45);
                 const directions = {
                     top: new THREE.Vector3(0, 1, 0),
                     front: new THREE.Vector3(0, 0, 1),
@@ -11997,8 +12036,8 @@
                     viewCamera.aspect = aspect;
                     let distance;
                     if (viewCamera.isOrthographicCamera) {
-                        const visibleHeight = Math.max(boundsInfo.size.y, 0.08) * 1.18;
-                        const visibleWidth = Math.max(boundsInfo.size.z, 0.08) * 1.18;
+                        const visibleHeight = Math.max(viewId === 'top' ? boundsInfo.size.z : boundsInfo.size.y, 0.08) * 1.55;
+                        const visibleWidth = Math.max(boundsInfo.size.x, 0.08) * 1.55;
                         const halfHeight = Math.max(visibleHeight * 0.5, visibleWidth * 0.5 / aspect, 0.1);
                         viewCamera.userData.autorigOrthoHalfHeight = halfHeight;
                         viewCamera.left = -halfHeight * aspect;
@@ -12009,11 +12048,16 @@
                         distance = Math.max(boundsInfo.radius * 2, boundsInfo.maxDim * 2, 1);
                     } else {
                         viewCamera.fov = Math.min(80, Math.max(18, Number(camera?.fov || 45)));
-                        const fovRad = THREE.MathUtils.degToRad(viewCamera.fov);
-                        const hFov = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
-                        const fitHeight = (Math.max(boundsInfo.size.y, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(fovRad / 2));
-                        const fitWidth = (Math.max(boundsInfo.size.x, boundsInfo.size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(hFov / 2));
-                        distance = Math.max(fitHeight, fitWidth, boundsInfo.radius * 1.5, boundsInfo.maxDim * 1.45, 0.85);
+                        distance = Math.max(
+                            viewerPerspectiveFitDistance(
+                                boundsInfo.size,
+                                aspect,
+                                viewCamera.fov,
+                                viewId,
+                                1.9,
+                            ),
+                            0.85,
+                        );
                     }
                     viewCamera.position.copy(target).add(direction.clone().multiplyScalar(distance));
                     if (viewId === 'top') viewCamera.up.set(0, 0, -1);
@@ -12236,7 +12280,12 @@
                         renderer.shadowMap.enabled = false;
                         renderer.setRenderTarget(renderTarget);
                         renderer.setScissorTest(false);
-                        renderer.setViewport(0, 0, renderTarget.width, renderTarget.height);
+                        const logicalViewport = logicalRenderTargetViewportSize(
+                            renderTarget.width,
+                            renderTarget.height,
+                            renderer.getPixelRatio(),
+                        );
+                        renderer.setViewport(0, 0, logicalViewport.width, logicalViewport.height);
                     } else {
                         renderer.setRenderTarget(null);
                         renderer.setScissorTest(true);
@@ -12636,11 +12685,13 @@
                 };
             }
 
-            function updateShadowCatcherPlaneForModel(model, viewId = 'perspective') {
+            function updateShadowCatcherPlaneForModel(model, viewId = 'perspective', precise = false, boundsBox = null) {
                 if (!model || !THREE || !groundPlaneMesh) return false;
                 try {
                     model.updateMatrixWorld?.(true);
-                    const box = new THREE.Box3().setFromObject(model);
+                    const box = boundsBox?.clone
+                        ? boundsBox.clone()
+                        : new THREE.Box3().setFromObject(model, precise);
                     if (box.isEmpty()) return false;
                     const focus = box.getCenter(new THREE.Vector3());
                     const modelSize = box.getSize(new THREE.Vector3());
@@ -13549,32 +13600,37 @@
             }
 
             function snapCurrentModelToGround(options = {}) {
-                if (!currentModel || !THREE) return;
-                if (playModeController?.active) return;
+                if (!currentModel || !THREE) return null;
+                if (playModeController?.active) return null;
                 const centerXZ = !!options.centerXZ;
                 const force = options.force !== false;
+                const precise = options.precise === true;
                 try {
                     currentModel.updateMatrixWorld(true);
-                    const box = new THREE.Box3().setFromObject(currentModel);
-                    if (!Number.isFinite(box.min.y) || !Number.isFinite(box.max.y)) return;
-                    const deltaY = -box.min.y;
-                    if (force || Math.abs(deltaY) > 0.002) {
-                        currentModel.position.y += deltaY;
+                    const box = new THREE.Box3().setFromObject(currentModel, precise);
+                    const transform = viewerGroundTransform(box, centerXZ);
+                    if (!transform) return null;
+                    const applied = new THREE.Vector3(0, 0, 0);
+                    if (force || Math.abs(transform.y) > 0.002) {
+                        currentModel.position.y += transform.y;
+                        applied.y = transform.y;
                     }
                     if (centerXZ) {
-                        currentModel.updateMatrixWorld(true);
-                        const centeredBox = new THREE.Box3().setFromObject(currentModel);
-                        const center = centeredBox.getCenter(new THREE.Vector3());
-                        currentModel.position.x -= center.x;
-                        currentModel.position.z -= center.z;
+                        currentModel.position.x += transform.x;
+                        currentModel.position.z += transform.z;
+                        applied.x = transform.x;
+                        applied.z = transform.z;
                     }
                     currentModel.updateMatrixWorld(true);
-                    updateShadowCatcherPlaneForModel(currentModel);
+                    const groundedBox = box.clone().translate(applied);
+                    updateShadowCatcherPlaneForModel(currentModel, 'perspective', false, groundedBox);
+                    return getModelBoundsInfo(currentModel, { box: groundedBox });
                 } catch (error) {
                     if (!window.__snapGroundWarningShown) {
                         window.__snapGroundWarningShown = true;
                         console.warn('[Viewer] snapCurrentModelToGround failed:', error);
                     }
+                    return null;
                 }
             }
 
@@ -13606,10 +13662,12 @@
                 return stats;
             }
 
-            function getModelBoundsInfo(model) {
+            function getModelBoundsInfo(model, options = {}) {
                 if (!model || !THREE) return null;
                 model.updateMatrixWorld?.(true);
-                const box = new THREE.Box3().setFromObject(model);
+                const box = options.box?.clone
+                    ? options.box.clone()
+                    : new THREE.Box3().setFromObject(model, options.precise === true);
                 const finiteBox = Number.isFinite(box.min.x + box.min.y + box.min.z + box.max.x + box.max.y + box.max.z);
                 if (!finiteBox) return null;
                 const center = box.getCenter(new THREE.Vector3());
@@ -13857,7 +13915,10 @@
                 camera.fov = nextFov;
                 const hostWidth = Math.max(1, host?.clientWidth || renderer?.domElement?.clientWidth || 1280);
                 const hostHeight = Math.max(1, host?.clientHeight || renderer?.domElement?.clientHeight || Math.round(hostWidth * 9 / 16));
-                camera.aspect = hostWidth / hostHeight;
+                const perspectiveRect = splitViewportController?.getRect?.('perspective');
+                camera.aspect = perspectiveRect
+                    ? Math.max(0.05, perspectiveRect.width / Math.max(1, perspectiveRect.height))
+                    : hostWidth / hostHeight;
                 camera.updateProjectionMatrix?.();
 
                 const size = boundsInfo.size;
@@ -13865,19 +13926,11 @@
                 const target = center.clone();
                 target.y = Math.max(center.y, boundsInfo.box.min.y + size.y * 0.45);
 
-                const fovRad = THREE.MathUtils.degToRad(nextFov);
-                const halfTan = Math.tan(fovRad / 2);
-                const hFov = 2 * Math.atan(halfTan * Math.max(0.1, camera.aspect || (16 / 9)));
-                const fitHeightDistance = (Math.max(size.y, 0.08) * 0.5) / Math.max(0.001, halfTan);
-                const fitWidthDistance = (Math.max(size.x, size.z, 0.08) * 0.5) / Math.max(0.001, Math.tan(hFov / 2));
-                const sphereDistance = boundsInfo.radius / Math.max(0.001, Math.sin(fovRad / 2));
+                const padding = options.distanceMultiplier || (forceWideCameraFitOnce ? 3.2 : 1.35);
                 const distance = Math.max(
-                    fitHeightDistance,
-                    fitWidthDistance,
-                    sphereDistance,
-                    boundsInfo.maxDim * 1.8,
-                    0.85
-                ) * (options.distanceMultiplier || (forceWideCameraFitOnce ? 3.2 : 1.25));
+                    viewerPerspectiveFitDistance(size, camera.aspect, nextFov, 'perspective', padding),
+                    0.85,
+                );
                 forceWideCameraFitOnce = false;
 
                 const direction = getCameraHintDirection();
@@ -15739,7 +15792,35 @@
                         viewerControls.setAOSettings(viewerState.aoSettings);
                         viewerControls.setModel(currentModel);
                     }
-                    snapCurrentModelToGround({ centerXZ: true, force: true });
+                    let cachedBoundsInfo = null;
+                    if (cacheKey === 'animations') {
+                        const groundedSnapshot = animationPlaylistRootSnapshots.get(currentModel);
+                        const preciseBoundsInfo = currentModel.userData?.autorigViewerPreciseBoundsInfo || null;
+                        if (groundedSnapshot) {
+                            restoreRootTransform(currentModel, groundedSnapshot);
+                        }
+                        if (groundedSnapshot && preciseBoundsInfo) {
+                            cachedBoundsInfo = preciseBoundsInfo;
+                            updateShadowCatcherPlaneForModel(
+                                currentModel,
+                                'perspective',
+                                false,
+                                preciseBoundsInfo.box,
+                            );
+                        } else {
+                            cachedBoundsInfo = snapCurrentModelToGround({
+                                centerXZ: true,
+                                force: true,
+                                precise: true,
+                            });
+                            if (cachedBoundsInfo) {
+                                currentModel.userData.autorigViewerPreciseBoundsInfo = cachedBoundsInfo;
+                                animationPlaylistRootSnapshots.set(currentModel, captureRootTransform(currentModel));
+                            }
+                        }
+                    } else {
+                        cachedBoundsInfo = snapCurrentModelToGround({ centerXZ: true, force: true });
+                    }
                     applyImprovedMaterials(currentModel);
                     if (transformManager) transformManager.setModel(currentModel);
                     if (hierarchyNavigator) {
@@ -15747,7 +15828,7 @@
                         window.updateHierarchyUI?.();
                     }
                     if (window.recreateWireframe) window.recreateWireframe();
-                    const cachedBoundsInfo = getModelBoundsInfo(currentModel);
+                    cachedBoundsInfo = cachedBoundsInfo || getModelBoundsInfo(currentModel);
                     if (isSavedCameraUsableForBounds(cachedBoundsInfo)) {
                         restoreSavedCameraOrRefit(currentModel, `cache ${cacheKey}`, cachedBoundsInfo);
                     } else if (!fitCameraToModelBounds(currentModel, `cache ${cacheKey}`, { boundsInfo: cachedBoundsInfo })) {
@@ -15829,7 +15910,8 @@
                         [playModeBtn, ragdollModeBtn].forEach((button) => {
                             if (!button) return;
                             button.classList.toggle('hidden', hidden);
-                            button.disabled = !allowed;
+                            button.classList.toggle('is-disabled', !allowed);
+                            button.removeAttribute('disabled');
                             button.title = allowed
                                 ? (button.id === 'view-mode-play'
                                     ? 'Play Mode (WASD + Space + Shift, Alt ragdoll)'
@@ -15853,7 +15935,7 @@
                             playModeEligibility = {
                                 checked: true,
                                 allowed: false,
-                                hidden: true,
+                                hidden: false,
                                 reason: tr('viewer_play_humanoid_only', 'Play mode is available for humanoid rigs only.'),
                             };
                             applyPlayModeButtonAvailability(playModeEligibility);
@@ -17969,6 +18051,33 @@
                     currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
                 }
 
+                if (isAnimationPreview && mixer && animations.length) {
+                    const framingModel = currentModel;
+                    const framingMixer = mixer;
+                    requestAnimationFrame(() => {
+                        if (currentModel !== framingModel || mixer !== framingMixer) return;
+                        framingMixer.update(0);
+                        const animatedBoundsInfo = snapCurrentModelToGround({ centerXZ: true, force: true, precise: true });
+                        animationPlaylistRootSnapshots.set(framingModel, captureRootTransform(framingModel));
+                        framingModel.userData.autorigViewerFramingReady = true;
+                        framingModel.userData.autorigViewerPreciseBoundsInfo = animatedBoundsInfo;
+                        if (animatedBoundsInfo) {
+                            fitCameraToModelBounds(framingModel, `animated pose ${label}`, {
+                                boundsInfo: animatedBoundsInfo,
+                                distanceMultiplier: 1.35,
+                            });
+                            updateViewerAssetDiagnostics({
+                                source: 'animations.glb',
+                                label,
+                                model: framingModel,
+                                boundsInfo: animatedBoundsInfo,
+                                animationCount: animations.length,
+                                reason: `animated pose ${label}`,
+                            });
+                        }
+                    });
+                }
+
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';
                 setStatus(statusText);
                 configureAnimationPlaylistForCurrentModel();
@@ -18168,6 +18277,25 @@
                 if (isAnimationPreview && currentModel) {
                     currentModel.userData = currentModel.userData || {};
                     currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
+                }
+
+                if (isAnimationPreview && mixer && animations.length) {
+                    const framingModel = currentModel;
+                    const framingMixer = mixer;
+                    requestAnimationFrame(() => {
+                        if (currentModel !== framingModel || mixer !== framingMixer) return;
+                        framingMixer.update(0);
+                        const animatedBoundsInfo = snapCurrentModelToGround({ centerXZ: true, force: true, precise: true });
+                        animationPlaylistRootSnapshots.set(framingModel, captureRootTransform(framingModel));
+                        framingModel.userData.autorigViewerFramingReady = true;
+                        framingModel.userData.autorigViewerPreciseBoundsInfo = animatedBoundsInfo;
+                        if (animatedBoundsInfo) {
+                            fitCameraToModelBounds(framingModel, `animated pose ${label}`, {
+                                boundsInfo: animatedBoundsInfo,
+                                distanceMultiplier: 1.35,
+                            });
+                        }
+                    });
                 }
 
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';

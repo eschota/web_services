@@ -70,9 +70,11 @@ class TaskViewerContractTests(unittest.TestCase):
         self.assertIn("['perspective', 'top', 'front']", self.split_source)
         self.assertNotIn("'left'", self.split_source)
 
-    def test_split_viewer_preserves_staggered_rail_frames(self):
-        self.assertIn("preserveDrawingBuffer: true", self.html)
-        self.assertIn("secondaryViewportStride: 4", self.html)
+    def test_split_viewer_uses_cached_time_based_rail_frames(self):
+        self.assertIn("preserveDrawingBuffer: false", self.html)
+        self.assertIn("secondaryViewportIntervalMs(getMainViewerQualityProfile())", self.html)
+        self.assertIn("ensureSplitViewportRailTarget(rect)", self.html)
+        self.assertNotIn("secondaryViewportStride", self.html)
 
     def test_perspective_zoom_is_not_blocked_by_stale_interaction_state(self):
         self.assertIn("splitViewportController?.setInteractionView('perspective');", self.html)
