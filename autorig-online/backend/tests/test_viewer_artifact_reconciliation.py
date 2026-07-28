@@ -56,6 +56,41 @@ class _ModelFilesClient:
         return _ModelFilesResponse()
 
 
+class _TaskStatusResponse:
+    status_code = 200
+    content = b"{}"
+
+    @staticmethod
+    def json():
+        return {
+            "viewer_prepared_glb_url": (
+                f"https://converter-f13.freestock.online/converter/glb/{GUID}/"
+                f"{GUID}_model_prepared_viewer.glb"
+            ),
+            "viewer_animations_glb_url": (
+                f"https://converter-f13.freestock.online/converter/glb/{GUID}/"
+                f"{GUID}_all_animations_viewer.glb"
+            ),
+        }
+
+
+class _TaskStatusClient:
+    requested_url = None
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def get(self, url, **_kwargs):
+        type(self).requested_url = url
+        return _TaskStatusResponse()
+
+
 class ViewerArtifactReconciliationTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_files_separates_viewer_glbs_from_download_counts(self):
         task = SimpleNamespace(
@@ -73,6 +108,31 @@ class ViewerArtifactReconciliationTests(unittest.IsolatedAsyncioTestCase):
                     f"{GUID}/{GUID}_model_prepared.glb"
                 ),
             ],
+        )
+        self.assertEqual(
+            prepared,
+            f"https://f13.freestock.online/{GUID}/{GUID}_model_prepared_viewer.glb",
+        )
+        self.assertEqual(
+            animations,
+            f"https://f13.freestock.online/{GUID}/{GUID}_all_animations_viewer.glb",
+        )
+
+    async def test_task_status_discovers_hidden_viewer_artifact_urls(self):
+        _TaskStatusClient.requested_url = None
+        task = SimpleNamespace(
+            worker_api="https://converter-f13.freestock.online/api-converter-glb",
+            worker_task_id="worker task/with spaces",
+        )
+        with patch.object(tasks.httpx, "AsyncClient", _TaskStatusClient):
+            prepared, animations = await tasks._fetch_worker_status_viewer_artifacts(task)
+
+        self.assertEqual(
+            _TaskStatusClient.requested_url,
+            (
+                "https://converter-f13.freestock.online/api-converter-glb/status/"
+                "worker%20task%2Fwith%20spaces"
+            ),
         )
         self.assertEqual(
             prepared,

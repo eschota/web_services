@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 import httpx
 
 from sqlalchemy import select, desc, update
@@ -885,6 +885,46 @@ async def _fetch_concrete_worker_output_urls(task: Task) -> List[str]:
     return urls
 
 
+async def _fetch_worker_status_viewer_artifacts(
+    task: Task,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Read dedicated optional viewer URLs from the worker task-status contract."""
+    worker_api = str(getattr(task, "worker_api", None) or "").strip()
+    worker_task_id = str(getattr(task, "worker_task_id", None) or "").strip()
+    if not worker_api or not worker_task_id:
+        return None, None
+    status_url = (
+        f"{worker_api.rstrip('/')}/status/"
+        f"{quote(worker_task_id, safe='')}"
+    )
+    try:
+        async with httpx.AsyncClient(
+            timeout=VIEWER_ARTIFACT_PROBE_TIMEOUT_SECONDS,
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(status_url)
+        if response.status_code != 200:
+            return None, None
+        payload = response.json() if response.content else {}
+        if not isinstance(payload, dict):
+            return None, None
+    except Exception:
+        return None, None
+
+    prepared = (
+        payload.get("viewer_prepared_glb_url")
+        or payload.get("viewerPreparedGlbUrl")
+    )
+    animations = (
+        payload.get("viewer_animations_glb_url")
+        or payload.get("viewerAnimationsGlbUrl")
+    )
+    return (
+        canonical_worker_artifact_url(str(prepared)) if prepared else None,
+        canonical_worker_artifact_url(str(animations)) if animations else None,
+    )
+
+
 async def _probe_remote_glb_artifact(url: Optional[str]) -> bool:
     """Validate HTTP reachability plus GLB magic/version/declared total length."""
     candidate = str(url or "").strip()
@@ -981,7 +1021,15 @@ async def reconcile_task_viewer_artifacts(
             if attempted_at < cutoff:
                 _viewer_reconcile_last_attempt.pop(key, None)
 
-    _downloads, prepared_candidate, animations_candidate = await _fetch_concrete_worker_artifacts(task)
+    status_prepared, status_animations = await _fetch_worker_status_viewer_artifacts(task)
+    if status_prepared and status_animations:
+        prepared_candidate, animations_candidate = status_prepared, status_animations
+    else:
+        _downloads, model_files_prepared, model_files_animations = (
+            await _fetch_concrete_worker_artifacts(task)
+        )
+        prepared_candidate = status_prepared or model_files_prepared
+        animations_candidate = status_animations or model_files_animations
     prepared, animations = await _validated_viewer_artifact_urls(
         None if task.viewer_prepared_glb_url else prepared_candidate,
         None if task.viewer_animations_glb_url else animations_candidate,
