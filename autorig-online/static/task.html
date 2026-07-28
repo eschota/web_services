@@ -11370,7 +11370,7 @@
                 },
                 emergency: {
                     badge: 'EQ',
-                    pixelRatioCap: 0.65,
+                    pixelRatioCap: 0.4,
                     useComposer: false,
                     bloom: false,
                     shadows: false,
@@ -14063,7 +14063,7 @@
 
             function getMainViewerTargetPixelRatio() {
                 const dpr = window.devicePixelRatio || 1;
-                return Math.max(0.65, Math.min(dpr, getMainViewerQualityProfile().pixelRatioCap));
+                return Math.max(0.4, Math.min(dpr, getMainViewerQualityProfile().pixelRatioCap));
             }
 
             function shouldUseMainViewerComposer() {

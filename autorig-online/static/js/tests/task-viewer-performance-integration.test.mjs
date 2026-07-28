@@ -25,6 +25,17 @@ test('viewer exposes quality, p95 timing, and the localized software WebGL warni
     assert.match(taskHtml, /mainViewerSoftwareWebGL = gpuInfo\.software/);
 });
 
+test('emergency quality lowers internal resolution enough for software WebGL', () => {
+    assert.match(
+        taskHtml,
+        /emergency:\s*\{[\s\S]*?pixelRatioCap:\s*0\.4[\s\S]*?secondaryViewportFps:\s*2/,
+    );
+    assert.match(
+        taskHtml,
+        /return Math\.max\(0\.4,\s*Math\.min\(dpr,\s*getMainViewerQualityProfile\(\)\.pixelRatioCap\)\)/,
+    );
+});
+
 test('animation clips are optimized before every viewer mixer path', () => {
     assert.match(taskHtml, /optimizeViewerAnimationClips\(gltf\.animations \|\| \[\], model, `\$\{label\} GLB`\)/);
     assert.match(taskHtml, /optimizeViewerAnimationClips\(model\.animations \|\| \[\], model, `\$\{label\} FBX`\)/);
