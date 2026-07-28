@@ -55,21 +55,18 @@
           #model-sale-custom{width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid #555;background:#0f0f16;color:#fff}
           .model-sale-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
           #model-sale-status{min-height:22px;margin-top:12px;color:#b7c0ff}
+          html.model-sale-downloads-blocked #downloads-card,
+          html.model-sale-downloads-blocked #custom-anim-download-btn,
+          html.model-sale-downloads-blocked #custom-anim-download-pack-btn,
+          html.model-sale-downloads-blocked #download-all-btn,
+          html.model-sale-downloads-blocked [onclick*="downloadAnimalVariant"],
+          html.model-sale-downloads-blocked [onclick*="downloadSelectedAnimation"]{display:none!important}
         `;
         document.head.appendChild(style);
     }
 
     function hideForeignDownloads() {
-        document.getElementById('downloads-card')?.classList.add('hidden');
-        [
-            '#custom-anim-download-btn',
-            '#custom-anim-download-pack-btn',
-            '#download-all-btn',
-            '[onclick*="downloadAnimalVariant"]',
-            '[onclick*="downloadSelectedAnimation"]'
-        ].forEach((selector) => {
-            document.querySelectorAll(selector).forEach((el) => el.classList.add('hidden'));
-        });
+        document.documentElement.classList.add('model-sale-downloads-blocked');
     }
 
     function createUi() {
@@ -162,12 +159,6 @@
             window.ModelSaleOfferState = state;
             if (state.can_download) return;
             hideForeignDownloads();
-            new MutationObserver(hideForeignDownloads).observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['class']
-            });
             if (state.offer_available) createUi();
             else {
                 const card = document.createElement('section');
