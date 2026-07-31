@@ -12,11 +12,12 @@ def run(coro):
 
 
 class _FakeQuery:
-    def __init__(self, data, chat_id=777, message_id=42):
+    def __init__(self, data, chat_id=777, message_id=42, user_id=555):
         self.data = data
         self.message = SimpleNamespace(
             chat=SimpleNamespace(id=chat_id), message_id=message_id
         )
+        self.from_user = SimpleNamespace(id=user_id) if user_id else None
         self.answers = []
 
     async def answer(self, text="", **kw):
@@ -65,8 +66,9 @@ class GenerateCallbackTests(unittest.TestCase):
             self.assertEqual(len(spawned), 1)
             bot.send_message.assert_awaited_once()
             kwargs = bot.send_message.await_args.kwargs
-            self.assertEqual(kwargs["chat_id"], 777)
-            self.assertEqual(kwargs["reply_to_message_id"], 42)
+            # the status message goes to the presser's DM, not the group
+            self.assertEqual(kwargs["chat_id"], 555)
+            self.assertIn("личку", query.answers[0])
 
         run(scenario())
 
@@ -385,5 +387,69 @@ class SubmitReplyThreadingTests(unittest.TestCase):
             self.assertEqual(
                 remembered, {"chat_id": 777, "task_id": "new-task", "message_id": 4242}
             )
+
+        run(scenario())
+
+
+class DmRoutingTests(unittest.TestCase):
+    def test_results_go_to_the_pressers_dm(self):
+        async def scenario():
+            query = _FakeQuery("rfg:c8691854-bdd2-4503-9281-fdc8cafdb0d7", chat_id=-100777, user_id=555)
+            update = SimpleNamespace(callback_query=query)
+            bot = AsyncMock()
+            bot.send_message.return_value = SimpleNamespace(message_id=9001)
+            context = SimpleNamespace(bot=bot)
+            spawned = []
+            with patch.object(telegram_bot, "reserve_notification", new=AsyncMock(return_value=True)):
+                with patch.object(telegram_bot.asyncio, "create_task",
+                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
+                    await telegram_bot._handle_generate_callback(update, context)
+            self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], 555)
+            self.assertEqual(len(spawned), 1)
+
+        run(scenario())
+
+    def test_falls_back_to_origin_chat_when_dm_is_closed(self):
+        async def scenario():
+            query = _FakeQuery("rfg:c8691854-bdd2-4503-9281-fdc8cafdb0d7", chat_id=-100777, user_id=555)
+            update = SimpleNamespace(callback_query=query)
+            bot = AsyncMock()
+            calls = {"n": 0}
+
+            async def send(**kwargs):
+                calls["n"] += 1
+                if kwargs["chat_id"] == 555:
+                    raise RuntimeError("Forbidden: bot can't initiate conversation with a user")
+                return SimpleNamespace(message_id=9002)
+
+            bot.send_message = AsyncMock(side_effect=send)
+            context = SimpleNamespace(bot=bot)
+            spawned = []
+            with patch.object(telegram_bot, "reserve_notification", new=AsyncMock(return_value=True)):
+                with patch.object(telegram_bot.asyncio, "create_task",
+                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
+                    await telegram_bot._handle_generate_callback(update, context)
+            # tried the DM, then posted in the originating chat
+            self.assertEqual(calls["n"], 2)
+            self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], -100777)
+            self.assertEqual(len(spawned), 1)
+
+        run(scenario())
+
+    def test_dm_press_stays_in_the_dm(self):
+        async def scenario():
+            # pressing inside the DM itself: chat id == user id, no second send
+            query = _FakeQuery("rfg:c8691854-bdd2-4503-9281-fdc8cafdb0d7", chat_id=555, user_id=555)
+            update = SimpleNamespace(callback_query=query)
+            bot = AsyncMock()
+            bot.send_message.return_value = SimpleNamespace(message_id=9003)
+            context = SimpleNamespace(bot=bot)
+            with patch.object(telegram_bot, "reserve_notification", new=AsyncMock(return_value=True)):
+                with patch.object(telegram_bot.asyncio, "create_task",
+                                  side_effect=lambda coro: coro.close()):
+                    await telegram_bot._handle_generate_callback(update, context)
+            bot.send_message.assert_awaited_once()
+            self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], 555)
+            self.assertEqual(bot.send_message.await_args.kwargs["reply_to_message_id"], 42)
 
         run(scenario())

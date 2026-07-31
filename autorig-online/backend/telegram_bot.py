@@ -2285,22 +2285,41 @@ async def _handle_generate_callback(update, context) -> None:
     if chat is None:
         await query.answer("Нет чата")
         return
-    chat_id = int(chat.id)
+    origin_chat_id = int(chat.id)
+    user = getattr(query, "from_user", None)
+    user_id = int(getattr(user, "id", 0) or 0)
 
-    reserved = await reserve_notification(chat_id, "renderfin_gen", task_id)
+    reserved = await reserve_notification(origin_chat_id, "renderfin_gen", task_id)
     if not reserved:
         await query.answer("Генерация уже запущена для этой задачи")
         return
-    await query.answer("Запускаю генерацию…")
 
     bot = context.bot
-    status_message = await bot.send_message(
-        chat_id=chat_id,
-        text="⏳ Генерация запущена: строим промпт…",
-        reply_to_message_id=query.message.message_id,
-    )
+    # Deliver the validation image and the model to the person who asked for
+    # them: their DM if the bot may write there, otherwise the origin chat.
+    chat_id, status_message_id, reply_to = origin_chat_id, 0, query.message.message_id
+    if user_id and user_id != origin_chat_id:
+        try:
+            dm = await bot.send_message(
+                chat_id=user_id,
+                text="⏳ Генерация запущена: строим промпт…",
+            )
+            chat_id, status_message_id, reply_to = user_id, dm.message_id, None
+            await query.answer("Запускаю генерацию — результат пришлю в личку")
+        except Exception as e:
+            print(f"[Telegram][Renderfin] DM to {user_id} unavailable ({e}); using chat {origin_chat_id}")
+
+    if not status_message_id:
+        await query.answer("Запускаю генерацию…")
+        status_message = await bot.send_message(
+            chat_id=chat_id,
+            text="⏳ Генерация запущена: строим промпт…",
+            reply_to_message_id=reply_to,
+        )
+        status_message_id = status_message.message_id
+
     asyncio.create_task(
-        _run_generation(bot, chat_id, task_id, query.message.message_id, status_message.message_id)
+        _run_generation(bot, chat_id, task_id, reply_to, status_message_id)
     )
 
 
