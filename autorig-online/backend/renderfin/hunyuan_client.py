@@ -53,7 +53,7 @@ def _headers(worker: Dict[str, str]) -> Dict[str, str]:
     return {"Authorization": f"Bearer {worker['token']}"}
 
 
-async def worker_state(
+async def server_status(
     client: httpx.AsyncClient, worker: Dict[str, str]
 ) -> Optional[Dict[str, Any]]:
     try:
@@ -63,35 +63,64 @@ async def worker_state(
         if resp.status_code != 200:
             return None
         data = resp.json()
-        hunyuan = data.get("hunyuan")
-        return hunyuan if isinstance(hunyuan, dict) else None
+        return data if isinstance(data, dict) else None
     except Exception:
         return None
 
 
+async def worker_state(
+    client: httpx.AsyncClient, worker: Dict[str, str]
+) -> Optional[Dict[str, Any]]:
+    data = await server_status(client, worker)
+    if not data:
+        return None
+    hunyuan = data.get("hunyuan")
+    return hunyuan if isinstance(hunyuan, dict) else None
+
+
+def _load_score(status: Dict[str, Any], hunyuan: Dict[str, Any]) -> int:
+    """Lower is better. Hunyuan shares the box's single-consumer queue with
+    Blender/OCConvert jobs, so box-level depth matters more than the hunyuan
+    sub-queue alone."""
+    summary = status.get("tasks_summary")
+    depth = 0
+    if isinstance(summary, dict):
+        try:
+            depth = int(summary.get("queue_size") or 0) + int(summary.get("processing") or 0)
+        except Exception:
+            depth = 0
+    else:
+        try:
+            depth = int(hunyuan.get("queue_size") or 0)
+        except Exception:
+            depth = 0
+    if str(hunyuan.get("service_state") or "") != "idle":
+        depth += 1
+    return depth
+
+
 async def pick_worker(client: httpx.AsyncClient) -> Dict[str, str]:
-    """Prefer an idle enabled worker; else the enabled one with the shortest queue."""
+    """Pick the enabled worker with the shallowest overall queue."""
     pool = workers()
     if not pool:
         raise HunyuanClientError("no Hunyuan workers configured")
-    enabled: List[Tuple[int, Dict[str, str]]] = []
-    for worker in pool:
-        state = await worker_state(client, worker)
-        if not state or not state.get("enabled") or not state.get("installed"):
+    candidates: List[Tuple[int, int, Dict[str, str]]] = []
+    for index, worker in enumerate(pool):
+        status = await server_status(client, worker)
+        if not status:
             continue
-        if str(state.get("service_state") or "") == "idle":
-            return worker
-        try:
-            queue_size = int(state.get("queue_size") or 0)
-        except Exception:
-            queue_size = 0
-        enabled.append((queue_size, worker))
-    if enabled:
-        enabled.sort(key=lambda pair: pair[0])
-        return enabled[0][1]
-    raise HunyuanClientError(
-        "no enabled Hunyuan worker among " + ", ".join(w["name"] for w in pool)
-    )
+        hunyuan = status.get("hunyuan")
+        if not isinstance(hunyuan, dict):
+            continue
+        if not hunyuan.get("enabled") or not hunyuan.get("installed"):
+            continue
+        candidates.append((_load_score(status, hunyuan), index, worker))
+    if not candidates:
+        raise HunyuanClientError(
+            "no enabled Hunyuan worker among " + ", ".join(w["name"] for w in pool)
+        )
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates[0][2]
 
 
 async def submit(

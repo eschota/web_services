@@ -111,6 +111,45 @@ class WorkerSelectionTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_box_level_queue_beats_idle_hunyuan_flag(self):
+        """Hunyuan shares the box queue with rig/convert jobs: an 'idle' hunyuan
+        runtime on a box with a backlog must lose to an emptier box."""
+
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                busy = "15131" in str(request.url)
+                return httpx.Response(200, json={
+                    "hunyuan": {"enabled": True, "installed": True,
+                                "service_state": "idle", "queue_size": 0},
+                    "tasks_summary": {
+                        "queue_size": 2 if busy else 0,
+                        "processing": 1,
+                    },
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    worker = await hunyuan_client.pick_worker(client)
+            self.assertEqual(worker["name"], "f13")
+
+        run(scenario())
+
+    def test_unreachable_worker_skipped(self):
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                if "15131" in str(request.url):
+                    raise httpx.ConnectError("boom")
+                return httpx.Response(200, json={
+                    "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"}
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    worker = await hunyuan_client.pick_worker(client)
+            self.assertEqual(worker["name"], "f13")
+
+        run(scenario())
+
     def test_no_enabled_worker_raises(self):
         async def scenario():
             def handler(request: httpx.Request) -> httpx.Response:
