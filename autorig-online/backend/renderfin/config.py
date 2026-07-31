@@ -33,7 +33,9 @@ ALLOWED_HTTP_HOSTS = {
 # "user:password" for workers behind the basic-auth nginx edge (worker-4090)
 WORKER_BASIC_AUTH = os.getenv("RENDERFIN_WORKER_BASIC_AUTH", "")
 
-TASK_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_TASK_TIMEOUT_SECONDS", "1800"))
+# A shared ComfyUI box can hold a submitted prompt behind other work for a long
+# time; the wall-clock ceiling has to cover the queue wait, not just the render.
+TASK_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_TASK_TIMEOUT_SECONDS", "5400"))
 PUMP_TICK_SECONDS = float(os.getenv("RENDERFIN_PUMP_TICK_SECONDS", "1.5"))
 DISPATCH_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_DISPATCH_INTERVAL_SECONDS", "5"))
 STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
