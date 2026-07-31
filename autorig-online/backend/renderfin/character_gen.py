@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import aiosqlite
+import httpx
 
-from . import config, turntable
+from . import config, hunyuan_client, turntable
 from .models import (
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
@@ -200,6 +201,36 @@ class CharacterGenManager:
         print(f"[Renderfin][CharGen] job {job.id} flux done -> {job.isolated_url}")
 
     async def _stage_hunyuan(self, job: CharacterGenJob) -> None:
+        if hunyuan_client.is_configured():
+            await self._stage_hunyuan_converter(job)
+        else:
+            await self._stage_hunyuan_comfy(job)
+        job.stage = CHARGEN_STAGE_TURNTABLE
+        await self._persist(job)
+        print(f"[Renderfin][CharGen] job {job.id} hunyuan done -> {job.glb_url}")
+
+    async def _stage_hunyuan_converter(self, job: CharacterGenJob) -> None:
+        """Preferred path: the converter workers' Hunyuan3D 2.1 PBR API (F2/F7/F13)."""
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            if not job.hunyuan_task_id or not job.hunyuan_task_id.startswith("http"):
+                worker, status_url = await hunyuan_client.submit(
+                    client, image_url=job.isolated_url
+                )
+                # store the status_url so a service restart can resume polling
+                job.hunyuan_task_id = status_url
+                await self._persist(job)
+                print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker}")
+            payload = await hunyuan_client.wait_for_model(client, job.hunyuan_task_id)
+            model_url = str((payload.get("output_urls") or {}).get("model"))
+            data = await hunyuan_client.download_model(client, model_url)
+        user_dir = config.RENDER_DIR / job.user_name
+        user_dir.mkdir(parents=True, exist_ok=True)
+        glb_path = user_dir / f"{job.id}.glb"
+        glb_path.write_bytes(data)
+        job.glb_url = f"{config.PUBLIC_BASE_URL}/render/{job.user_name}/{job.id}.glb"
+
+    async def _stage_hunyuan_comfy(self, job: CharacterGenJob) -> None:
+        """Fallback: ComfyUI image_to_3d workflow via the render queue."""
         if not job.hunyuan_task_id or self.queue.get(job.hunyuan_task_id) is None:
             task = await self.queue.enqueue(
                 RenderPrompt(
@@ -212,9 +243,6 @@ class CharacterGenManager:
             await self._persist(job)
         task = await self._await_render(job.hunyuan_task_id, HUNYUAN_STAGE_TIMEOUT)
         job.glb_url = task.output_url
-        job.stage = CHARGEN_STAGE_TURNTABLE
-        await self._persist(job)
-        print(f"[Renderfin][CharGen] job {job.id} hunyuan done -> {job.glb_url}")
 
     async def _stage_turntable(self, job: CharacterGenJob) -> None:
         glb_task = self.queue.get(job.hunyuan_task_id)

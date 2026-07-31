@@ -11,6 +11,9 @@ ExecStart=/root/autorig-online/venv/bin/python -m telegram_bot
 Restart=always
 RestartSec=5
 
+# Shared backend env first (OPENAI/OPENROUTER keys, RENDERFIN_* URLs — same API
+# config as the webserver vision path), then bot-specific overrides.
+EnvironmentFile=-/etc/autorig-online/environment
 EnvironmentFile=/etc/autorig-telegram.env
 Environment="PYTHONPATH=/root/autorig-online/backend"
 Environment="HOME=/root"

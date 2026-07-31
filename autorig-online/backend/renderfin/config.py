@@ -34,6 +34,23 @@ PUMP_TICK_SECONDS = float(os.getenv("RENDERFIN_PUMP_TICK_SECONDS", "1.5"))
 DISPATCH_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_DISPATCH_INTERVAL_SECONDS", "5"))
 STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
 
+# Hunyuan3D image-to-3D via converter workers (POST /api-converter-glb/generate-3d).
+# When a token is configured this path is preferred over the ComfyUI image_to_3d workflow.
+HUNYUAN_WORKERS = [
+    u.strip().rstrip("/")
+    for u in os.getenv(
+        "RENDERFIN_HUNYUAN_WORKERS",
+        "https://converter-f2.freestock.online,"
+        "https://converter-f7.freestock.online,"
+        "https://converter-f13.freestock.online",
+    ).split(",")
+    if u.strip()
+]
+HUNYUAN_API_TOKEN = os.getenv("HUNYUAN_API_TOKEN", "").strip()
+HUNYUAN_QUALITY = os.getenv("RENDERFIN_HUNYUAN_QUALITY", "standard").strip() or "standard"
+HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))
+HUNYUAN_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_TIMEOUT_SECONDS", "3600"))
+
 # Turntable rendering (character_gen stage 3)
 TURNTABLE_NODE = os.getenv("RENDERFIN_TURNTABLE_NODE", "node")
 TURNTABLE_SCRIPT = os.getenv(

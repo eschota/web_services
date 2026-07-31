@@ -96,6 +96,81 @@ async def _wait_stage(manager, job_id, stages, timeout=5.0):
     raise AssertionError(f"job never reached {stages}: {manager.get(job_id).stage}")
 
 
+class HunyuanConverterPathTests(unittest.TestCase):
+    def test_converter_api_used_when_token_configured(self):
+        import httpx
+
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    calls = []
+
+                    def handler(request: httpx.Request) -> httpx.Response:
+                        calls.append((request.method, str(request.url)))
+                        url = str(request.url)
+                        if url.endswith("/api-converter-glb/server-status"):
+                            return httpx.Response(200, json={
+                                "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"}
+                            })
+                        if url.endswith("/api-converter-glb/generate-3d"):
+                            assert request.headers["Authorization"] == "Bearer test-token"
+                            return httpx.Response(202, json={
+                                "task_id": "h-1", "status": "Pending",
+                                "status_url": "https://converter-f2.freestock.online/api-converter-glb/generate-3d/status/h-1",
+                            })
+                        if "/generate-3d/status/" in url:
+                            return httpx.Response(200, json={
+                                "status": "Completed", "progress": 100,
+                                "output_urls": {"model": "https://converter-f2.freestock.online/out/h-1/model.glb"},
+                            })
+                        if url.endswith("/out/h-1/model.glb"):
+                            return httpx.Response(200, content=b"GLB!" * 400)
+                        return httpx.Response(404)
+
+                    transport = httpx.MockTransport(handler)
+                    real_client = httpx.AsyncClient
+
+                    def patched_client(*a, **k):
+                        k["transport"] = transport
+                        return real_client(*a, **k)
+
+                    async def fake_turntable(glb_path, out_path, **kw):
+                        from pathlib import Path as _P
+                        _P(out_path).parent.mkdir(parents=True, exist_ok=True)
+                        _P(out_path).write_bytes(b"MP4!" * 500)
+                        return _P(out_path)
+
+                    from renderfin import character_gen as cg_mod
+
+                    with patch.object(config, "HUNYUAN_API_TOKEN", "test-token"):
+                        with patch.object(config, "HUNYUAN_WORKERS", ["https://converter-f2.freestock.online"]):
+                            with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.01):
+                                with patch.object(cg_mod.httpx, "AsyncClient", side_effect=patched_client):
+                                    with patch.object(cg_mod.turntable, "render_turntable", side_effect=fake_turntable):
+                                        job = await manager.create(prompt="orc", user_name="bot")
+                                        job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_READY, CHARGEN_STAGE_FAILED})
+
+                    self.assertEqual(job.stage, CHARGEN_STAGE_READY, job.error)
+                    # only the flux render went through the ComfyUI queue
+                    self.assertEqual(len(queue.enqueued), 1)
+                    self.assertEqual(queue.enqueued[0].prompt.type, "t_pose")
+                    self.assertTrue(job.hunyuan_task_id.startswith("https://"))
+                    glb = config.RENDER_DIR / "bot" / f"{job.id}.glb"
+                    self.assertTrue(glb.is_file())
+                    self.assertTrue(job.glb_url.endswith(f"{job.id}.glb"))
+                    self.assertTrue(any("/generate-3d" in u for _, u in calls))
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+
 class CharacterGenTests(unittest.TestCase):
     def test_full_pipeline_happy_path(self):
         async def scenario():

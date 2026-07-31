@@ -40,6 +40,7 @@ for seed in "${REPO_ROOT}/deploy/renderfin-servers/"*.json; do
 done
 sudo chown -R www-data:www-data /var/autorig/renderfin
 sudo cp -f "${REPO_ROOT}/deploy/autorig-renderfin.service" /etc/systemd/system/autorig-renderfin.service
+sudo cp -f "${REPO_ROOT}/deploy/autorig-telegram.service" /etc/systemd/system/autorig-telegram.service
 if [[ ! -f /etc/autorig-renderfin.env ]]; then
   sudo cp "${REPO_ROOT}/deploy/autorig-renderfin.env.example" /etc/autorig-renderfin.env
   echo "    installed /etc/autorig-renderfin.env from example — review RENDERFIN_WORKER_BASIC_AUTH"
