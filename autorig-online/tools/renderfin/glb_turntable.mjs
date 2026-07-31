@@ -22,6 +22,13 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VENDOR = path.join(HERE, 'vendor');
 
+// Node < 22 has no global WebSocket; fall back to the vendored dependency-free `ws`.
+let WebSocketImpl = globalThis.WebSocket;
+if (!WebSocketImpl) {
+    const { createRequire } = await import('node:module');
+    WebSocketImpl = createRequire(import.meta.url)(path.join(VENDOR, 'ws', 'index.js'));
+}
+
 function fail(message) {
     console.error(`[glb_turntable] ${message}`);
     process.exit(1);
@@ -198,7 +205,7 @@ function startHarnessServer({ glbPath, size }) {
 
 class CdpClient {
     constructor(url) {
-        this.socket = new WebSocket(url);
+        this.socket = new WebSocketImpl(url);
         this.nextId = 1;
         this.pending = new Map();
         this.socket.onmessage = (event) => {
@@ -211,7 +218,7 @@ class CdpClient {
         };
     }
     async open() {
-        if (this.socket.readyState === WebSocket.OPEN) return;
+        if (this.socket.readyState === WebSocketImpl.OPEN) return;
         await new Promise((resolve, reject) => { this.socket.onopen = resolve; this.socket.onerror = () => reject(new Error('CDP connection failed')); });
     }
     command(method, params = {}) {

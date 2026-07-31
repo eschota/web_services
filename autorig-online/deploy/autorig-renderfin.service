@@ -4,8 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
+# Matches autorig.service on this host: the production tree lives under /root,
+# so www-data + ProtectHome cannot read it.
+User=root
+Group=root
 WorkingDirectory=/root/autorig-online/backend
 Environment="PATH=/root/autorig-online/venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=-/etc/autorig-online/environment
@@ -18,7 +20,7 @@ TimeoutStopSec=45
 # Security
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=false
 ReadWritePaths=/var/autorig/renderfin
 PrivateTmp=true
 
