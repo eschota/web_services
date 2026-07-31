@@ -193,6 +193,11 @@ class RenderQueue:
     async def tick(self) -> None:
         """One scheduler pass (kept separate for tests)."""
         self._tick_count += 1
+        if self._tick_count % 200 == 0:
+            counts: Dict[str, int] = {}
+            for t in self._tasks.values():
+                counts[t.status] = counts.get(t.status, 0) + 1
+            print(f"[Renderfin][Queue] heartbeat tick={self._tick_count} tasks={counts}")
         if self._tick_count % config.STATUS_REFRESH_TICKS == 1:
             await self._refresh_servers()
         now = time.time()
