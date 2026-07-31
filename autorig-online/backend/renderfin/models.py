@@ -139,6 +139,10 @@ class CharacterGenJob(BaseModel):
     telegram_status_message_id: int = 0
     delivered: Dict[str, str] = Field(default_factory=dict)
     warning: str = ""
+    # Automatic stage retries: attempts per stage and when to try again.
+    attempts: Dict[str, int] = Field(default_factory=dict)
+    retry_at: float = 0
+    last_error: str = ""
     image_url: str = ""       # full t_pose render
     isolated_url: str = ""    # alpha-isolated character
     glb_url: str = ""
@@ -162,6 +166,9 @@ class CharacterGenJob(BaseModel):
             "video_url": self.video_url or None,
             "error": self.error or None,
             "warning": self.warning or None,
+            "attempts": dict(self.attempts or {}),
+            "retry_at": self.retry_at or None,
+            "last_error": self.last_error or None,
             "telegram_chat_id": self.telegram_chat_id or None,
             "telegram_message_id": self.telegram_message_id or None,
             "delivered": dict(self.delivered or {}),

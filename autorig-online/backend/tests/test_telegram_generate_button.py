@@ -353,3 +353,37 @@ class DeleteCallbackTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubmitReplyThreadingTests(unittest.TestCase):
+    def test_submit_stores_reply_target(self):
+        """The completion notice must land under the message the user acted on."""
+
+        async def scenario():
+            query = _FakeQuery("rfs:11111111-2222-3333-4444-555566667777", message_id=4242)
+            update = SimpleNamespace(callback_query=query)
+            bot = AsyncMock()
+            context = SimpleNamespace(bot=bot)
+            import render_prompting
+
+            remembered = {}
+
+            async def fake_remember(chat_id, task_id, message_id):
+                remembered.update(
+                    {"chat_id": chat_id, "task_id": task_id, "message_id": message_id}
+                )
+
+            with patch.object(telegram_bot, "reserve_notification", new=AsyncMock(return_value=True)):
+                with patch.object(render_prompting, "poll_character_gen",
+                                  new=AsyncMock(return_value={"glb_url": "https://x/m.glb"})):
+                    with patch.object(telegram_bot, "_submit_generated_model",
+                                      new=AsyncMock(return_value=("new-task", None))):
+                        with patch.object(render_prompting, "mark_character_gen_submitted", new=AsyncMock()):
+                            with patch.object(telegram_bot, "remember_task_reply_target", new=fake_remember):
+                                await telegram_bot._handle_submit_callback(update, context)
+
+            self.assertEqual(
+                remembered, {"chat_id": 777, "task_id": "new-task", "message_id": 4242}
+            )
+
+        run(scenario())

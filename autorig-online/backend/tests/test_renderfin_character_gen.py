@@ -236,9 +236,17 @@ class CharacterGenTests(unittest.TestCase):
                 manager = CharacterGenManager(queue, db_path=config.DB_PATH)
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="x", user_name="bot")
-                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_FAILED})
+                    from renderfin import character_gen as cg_mod
+
+                    with patch.object(cg_mod, "RETRY_BACKOFF_SECONDS", (0.0, 0.0, 0.0)):
+                        with patch.object(cg_mod, "RETRY_TICK_SECONDS", 0.05):
+                            job = await manager.create(prompt="x", user_name="bot")
+                            # retried automatically first, reported only at the end
+                            job = await _wait_stage(
+                                manager, job.id, {CHARGEN_STAGE_FAILED}, timeout=10.0
+                            )
                     self.assertIn("boom", job.error)
+                    self.assertEqual(job.attempts.get("flux_render"), 3)
                 finally:
                     await manager.stop()
                     await queue.stop()
@@ -484,3 +492,142 @@ class ResurrectDoneTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AutoRetryTests(unittest.TestCase):
+    def test_stage_failure_retries_automatically(self):
+        """Infrastructure hiccups must heal themselves, not wait on a button."""
+
+        async def scenario():
+            with _Env():
+                from renderfin import character_gen as cg_mod
+                from renderfin.models import CHARGEN_STAGE_TURNTABLE
+
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    calls = {"n": 0}
+
+                    async def flaky_turntable(glb_path, out_path, **kw):
+                        calls["n"] += 1
+                        if calls["n"] == 1:
+                            raise RuntimeError("Chrome exited during startup")
+                        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                        Path(out_path).write_bytes(b"MP4!" * 500)
+                        return Path(out_path)
+
+                    with patch.object(cg_mod, "RETRY_BACKOFF_SECONDS", (0.0, 0.0, 0.0)):
+                        with patch.object(cg_mod, "RETRY_TICK_SECONDS", 0.05):
+                            with patch.object(cg_mod.turntable, "render_turntable",
+                                              side_effect=flaky_turntable):
+                                job = await manager.create(prompt="orc", user_name="bot")
+                                job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                                await manager.approve_image(job.id)
+                                job = await _wait_stage(
+                                    manager, job.id,
+                                    {CHARGEN_STAGE_READY, CHARGEN_STAGE_FAILED},
+                                    timeout=10.0,
+                                )
+
+                    self.assertEqual(job.stage, CHARGEN_STAGE_READY, job.error)
+                    self.assertEqual(calls["n"], 2)
+                    self.assertEqual(job.attempts.get(CHARGEN_STAGE_TURNTABLE), 1)
+                    self.assertTrue(job.video_url)
+
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_failure_reported_only_after_attempts_exhausted(self):
+        async def scenario():
+            with _Env():
+                from renderfin import character_gen as cg_mod
+
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    calls = {"n": 0}
+
+                    async def always_fails(glb_path, out_path, **kw):
+                        calls["n"] += 1
+                        raise RuntimeError("ffmpeg missing")
+
+                    with patch.object(cg_mod, "RETRY_BACKOFF_SECONDS", (0.0, 0.0, 0.0)):
+                        with patch.object(cg_mod, "RETRY_TICK_SECONDS", 0.05):
+                            with patch.object(cg_mod, "MAX_STAGE_ATTEMPTS", 3):
+                                with patch.object(cg_mod.turntable, "render_turntable",
+                                                  side_effect=always_fails):
+                                    job = await manager.create(prompt="orc", user_name="bot")
+                                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                                    await manager.approve_image(job.id)
+                                    job = await _wait_stage(
+                                        manager, job.id, {CHARGEN_STAGE_FAILED}, timeout=10.0
+                                    )
+
+                    # 3 attempts before the user is told anything
+                    self.assertEqual(calls["n"], 3)
+                    self.assertIn("ffmpeg missing", job.error)
+
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_retry_schedule_survives_restart(self):
+        async def scenario():
+            with _Env():
+                from renderfin import character_gen as cg_mod
+
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                job_id = None
+                try:
+                    async def fails(glb_path, out_path, **kw):
+                        raise RuntimeError("transient")
+
+                    # long backoff: the retry is still pending when we restart
+                    with patch.object(cg_mod, "RETRY_BACKOFF_SECONDS", (3600.0,)):
+                        with patch.object(cg_mod.turntable, "render_turntable", side_effect=fails):
+                            job = await manager.create(prompt="orc", user_name="bot")
+                            job_id = job.id
+                            job = await _wait_stage(manager, job_id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                            await manager.approve_image(job_id)
+                            await asyncio.sleep(0.5)
+                            self.assertTrue(manager.get(job_id).retry_at > 0)
+                finally:
+                    await manager.stop()
+
+                async def ok_turntable(glb_path, out_path, **kw):
+                    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(out_path).write_bytes(b"MP4!" * 500)
+                    return Path(out_path)
+
+                manager2 = CharacterGenManager(queue, db_path=config.DB_PATH)
+                with patch.object(cg_mod, "RETRY_TICK_SECONDS", 0.05):
+                    with patch.object(cg_mod.turntable, "render_turntable", side_effect=ok_turntable):
+                        await manager2.start()
+                        try:
+                            revived = manager2.get(job_id)
+                            # still scheduled, not lost and not spun immediately
+                            self.assertTrue(revived.retry_at > 0)
+                            revived.retry_at = 1.0  # make it due
+                            await manager2._persist(revived)
+                            job = await _wait_stage(manager2, job_id, {CHARGEN_STAGE_READY}, timeout=10.0)
+                            self.assertTrue(job.video_url)
+                        finally:
+                            await manager2.stop()
+                await queue.stop()
+
+        run(scenario())

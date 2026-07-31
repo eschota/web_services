@@ -485,6 +485,33 @@ async def pop_notification_message_id(chat_id: int, event_type: str, event_key: 
         return message_id
 
 
+async def peek_notification_message_id(chat_id: int, event_type: str, event_key: str) -> int | None:
+    """Read a stored message id without consuming the reservation."""
+    async with AsyncSessionLocal() as db:
+        rs = await db.execute(
+            select(TelegramNotification)
+            .where(TelegramNotification.chat_id == chat_id)
+            .where(TelegramNotification.event_type == event_type)
+            .where(TelegramNotification.event_key == event_key)
+        )
+        rec = rs.scalar_one_or_none()
+        if not rec or not rec.message_id:
+            return None
+        return int(rec.message_id)
+
+
+async def remember_task_reply_target(chat_id: int, task_id: str, message_id: int) -> None:
+    """Thread the eventual 'Task completed' notice under the message the user
+    acted on, so it is not lost in the chat flow."""
+    if not (chat_id and task_id and message_id):
+        return
+    try:
+        await reserve_notification(chat_id, "task_reply_to", task_id)
+        await attach_notification_message_id(chat_id, "task_reply_to", task_id, message_id)
+    except Exception as e:
+        print(f"[Telegram] reply target store failed for {task_id}: {e}")
+
+
 async def release_notification(chat_id: int, event_type: str, event_key: str) -> None:
     """Drop a reservation so the action can be retried (e.g. after a failed generation)."""
     from sqlalchemy import delete as sa_delete
@@ -1866,6 +1893,7 @@ async def broadcast_task_done(
     if not video_path:
         # Fallback: at least notify completion
         async def _one_text(chat_id: int):
+            reply_to = await peek_notification_message_id(chat_id, "task_reply_to", task_id)
             old_message_id = await pop_notification_message_id(chat_id, "task_new", task_id)
             if old_message_id:
                 await _send_with_retry(
@@ -1876,12 +1904,13 @@ async def broadcast_task_done(
             if not reserved:
                 print(f"[Telegram] Skip duplicate done notification for chat={chat_id}, task={task_id}")
                 return None
-            return await _send_with_retry(lambda cid=chat_id: bot.send_message(
+            return await _send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(
                 chat_id=cid,
                 text=text,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False,
                 reply_markup=generate_markup,
+                reply_to_message_id=rt,
             ), retry_network=False)
 
         results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
@@ -1896,6 +1925,7 @@ async def broadcast_task_done(
 
     async def _one(chat_id: int):
         async with sem:
+            reply_to = await peek_notification_message_id(chat_id, "task_reply_to", task_id)
             old_message_id = await pop_notification_message_id(chat_id, "task_new", task_id)
             if old_message_id:
                 await _send_with_retry(
@@ -1919,6 +1949,7 @@ async def broadcast_task_done(
                             parse_mode=ParseMode.HTML,
                             supports_streaming=True,
                             reply_markup=generate_markup,
+                            reply_to_message_id=reply_to,
                         )
                     finally:
                         try:
@@ -1930,12 +1961,13 @@ async def broadcast_task_done(
             result = await _send_with_retry(_send, retry_network=False)
             if result is None:
                 print(f"[Telegram] send_video failed for chat={chat_id}, task={task_id}; sending text fallback")
-                return await _send_with_retry(lambda cid=chat_id: bot.send_message(
+                return await _send_with_retry(lambda cid=chat_id, rt=reply_to: bot.send_message(
                     chat_id=cid,
                     text=text,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=False,
                     reply_markup=generate_markup,
+                    reply_to_message_id=rt,
                 ), retry_network=False)
             return result
 
@@ -2315,6 +2347,8 @@ async def _handle_submit_callback(update, context) -> None:
         if task_id is None:
             raise RuntimeError(error or "не удалось создать задачу")
         await render_prompting.mark_character_gen_submitted(job_id)
+        # thread the completion notice under this very message
+        await remember_task_reply_target(chat_id, task_id, query.message.message_id)
         url = _task_url(task_id)
         new_caption = (
             f"🚀 <b>Отправлено в полный пайплайн</b>\n"

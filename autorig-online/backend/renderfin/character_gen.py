@@ -48,7 +48,13 @@ _ACTIVE_STAGES = (CHARGEN_STAGE_FLUX, CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_TURNT
 # Stage waits include time spent queued behind other renders on a shared
 # worker, so they are deliberately generous and env-tunable.
 FLUX_STAGE_TIMEOUT = float(os.getenv("RENDERFIN_CHARGEN_FLUX_TIMEOUT", "3600"))
-HUNYUAN_STAGE_TIMEOUT = float(os.getenv("RENDERFIN_CHARGEN_HUNYUAN_TIMEOUT", "5400"))
+HUNYUAN_STAGE_TIMEOUT = float(os.getenv("RENDERFIN_CHARGEN_HUNYUAN_TIMEOUT", "16200"))
+
+# Automatic stage recovery: how many times a stage retries itself before the
+# job is reported as failed, and how long to wait between attempts.
+MAX_STAGE_ATTEMPTS = int(os.getenv("RENDERFIN_CHARGEN_STAGE_ATTEMPTS", "3"))
+RETRY_BACKOFF_SECONDS = (30.0, 120.0, 600.0)
+RETRY_TICK_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_RETRY_TICK", "15"))
 
 
 class CharacterGenManager:
@@ -58,6 +64,8 @@ class CharacterGenManager:
         self._db: Optional[aiosqlite.Connection] = None
         self._jobs: Dict[str, CharacterGenJob] = {}
         self._runners: Dict[str, asyncio.Task] = {}
+        self._retry_task: Optional[asyncio.Task] = None
+        self._stopped = asyncio.Event()
 
     async def start(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,11 +76,45 @@ class CharacterGenManager:
         await self._db.commit()
         await self._load()
         for job in self._jobs.values():
-            if job.stage in _ACTIVE_STAGES:
+            if job.stage in _ACTIVE_STAGES and not job.retry_at:
                 print(f"[Renderfin][CharGen] resuming job {job.id} at stage {job.stage}")
                 self._spawn(job)
+        self._retry_task = asyncio.create_task(self._retry_loop())
+
+    async def _retry_loop(self) -> None:
+        """Re-spawn stages whose retry delay has elapsed (survives restarts)."""
+        while not self._stopped.is_set():
+            try:
+                now = time.time()
+                for job in list(self._jobs.values()):
+                    if job.stage not in _ACTIVE_STAGES or not job.retry_at:
+                        continue
+                    if job.retry_at > now:
+                        continue
+                    job.retry_at = 0
+                    await self._persist(job)
+                    print(
+                        f"[Renderfin][CharGen] retrying job {job.id} at stage {job.stage}"
+                    )
+                    self._spawn(job)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[Renderfin][CharGen] retry loop error: {exc}")
+            try:
+                await asyncio.wait_for(self._stopped.wait(), timeout=RETRY_TICK_SECONDS)
+            except asyncio.TimeoutError:
+                pass
 
     async def stop(self) -> None:
+        self._stopped.set()
+        if self._retry_task:
+            self._retry_task.cancel()
+            try:
+                await self._retry_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._retry_task = None
         for runner in self._runners.values():
             runner.cancel()
         for runner in list(self._runners.values()):
@@ -256,6 +298,8 @@ class CharacterGenManager:
             if previous is None or previous.status == TASK_ERROR:
                 job.flux_task_id = ""
         job.error = ""
+        job.retry_at = 0
+        job.attempts = {}
         await self._persist(job)
         self._spawn(job)
         return job, True
@@ -277,6 +321,8 @@ class CharacterGenManager:
         job.video_url = ""
         job.error = ""
         job.warning = ""
+        job.retry_at = 0
+        job.attempts = {}
         job.stage = CHARGEN_STAGE_FLUX
         await self._persist(job)
         self._spawn(job)
@@ -304,12 +350,53 @@ class CharacterGenManager:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            job.error = str(exc)[:1000]
-            job.stage = CHARGEN_STAGE_FAILED
-            await self._persist(job)
-            print(f"[Renderfin][CharGen] job {job.id} FAILED: {exc}")
+            await self._handle_stage_error(job, exc)
         finally:
             self._runners.pop(job.id, None)
+
+    async def _handle_stage_error(self, job: CharacterGenJob, exc: Exception) -> None:
+        """Retry the failed stage automatically before bothering the user.
+
+        Most failures here are infrastructure (a busy/rebooting farm box, a
+        chrome or ffmpeg hiccup, a network blip), and the user asked for the
+        result regardless — so the pipeline heals itself and only reports a
+        failure once the retries are exhausted.
+        """
+        stage = job.stage
+        attempts = dict(job.attempts or {})
+        attempts[stage] = attempts.get(stage, 0) + 1
+        job.attempts = attempts
+        job.last_error = str(exc)[:1000]
+        count = attempts[stage]
+
+        if count >= MAX_STAGE_ATTEMPTS:
+            job.error = job.last_error
+            job.stage = CHARGEN_STAGE_FAILED
+            job.retry_at = 0
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} FAILED after {count} "
+                f"attempts at {stage}: {exc}"
+            )
+            return
+
+        # drop references to the dead attempt so the retry starts clean
+        if stage == CHARGEN_STAGE_HUNYUAN:
+            job.hunyuan_task_id = ""
+            job.hunyuan_worker = ""
+        elif stage == CHARGEN_STAGE_FLUX:
+            previous = self.queue.get(job.flux_task_id) if job.flux_task_id else None
+            if previous is None or previous.status == TASK_ERROR:
+                job.flux_task_id = ""
+
+        delay = RETRY_BACKOFF_SECONDS[min(count - 1, len(RETRY_BACKOFF_SECONDS) - 1)]
+        job.retry_at = time.time() + delay
+        job.error = ""  # not a terminal failure: nothing to deliver yet
+        await self._persist(job)
+        print(
+            f"[Renderfin][CharGen] job {job.id} stage {stage} attempt {count} "
+            f"failed ({exc}); retrying in {int(delay)}s"
+        )
 
     async def _await_render(self, task_id: str, timeout: float):
         task = await self.queue.wait_for(task_id, timeout=timeout)
