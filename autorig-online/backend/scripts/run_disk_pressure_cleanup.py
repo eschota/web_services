@@ -65,6 +65,30 @@ def _age_cutoff_timestamp(min_age_hours: float) -> float:
     return time.time() - max(0.0, float(min_age_hours)) * 3600.0
 
 
+# The GLB cache holds every artifact re-downloadable from a worker, not only
+# .glb: in production it is mostly *_all_animations_unity.fbx. Pruning just
+# "*.glb" left the cap unenforceable (11 of 13 GB were invisible to it).
+GLB_CACHE_PRUNABLE_SUFFIXES = (".glb", ".fbx", ".tmp")
+# Never touch something that may still be streaming to disk.
+GLB_CACHE_HARD_MIN_AGE_SECONDS = 600.0
+
+
+def _glb_cache_candidates(glb_cache_dir: Path, cutoff_ts: float) -> list[tuple[float, int, Path]]:
+    candidates: list[tuple[float, int, Path]] = []
+    for path in glb_cache_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in GLB_CACHE_PRUNABLE_SUFFIXES:
+            continue
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        if stat.st_mtime > cutoff_ts:
+            continue
+        candidates.append((stat.st_mtime, stat.st_size, path))
+    candidates.sort(key=lambda item: item[0])
+    return candidates
+
+
 def _purge_oldest_glb_cache_until(
     *,
     glb_cache_dir: Path,
@@ -77,18 +101,25 @@ def _purge_oldest_glb_cache_until(
     if not glb_cache_dir.exists():
         return removed, freed
 
-    candidates: list[tuple[float, int, Path]] = []
     cutoff_ts = _age_cutoff_timestamp(min_age_hours)
-    for path in glb_cache_dir.glob("*.glb"):
-        try:
-            stat = path.stat()
-        except FileNotFoundError:
-            continue
-        if stat.st_mtime > cutoff_ts:
-            continue
-        candidates.append((stat.st_mtime, stat.st_size, path))
+    candidates = _glb_cache_candidates(glb_cache_dir, cutoff_ts)
 
-    candidates.sort(key=lambda item: item[0])
+    cache_gb_now = _dir_size_bytes(glb_cache_dir) / (1024**3)
+    still_pressured = _free_gb() < target_free_gb or (
+        max_cache_gb > 0 and cache_gb_now > max_cache_gb
+    )
+    if not candidates and still_pressured:
+        # Everything is younger than the preferred age but the disk (or the cap)
+        # says otherwise: fall back to anything that is not actively being
+        # written. These files are caches; a miss just re-downloads them.
+        relaxed_cutoff = time.time() - GLB_CACHE_HARD_MIN_AGE_SECONDS
+        candidates = _glb_cache_candidates(glb_cache_dir, relaxed_cutoff)
+        if candidates:
+            print(
+                f"[Disk Prepass] No GLB cache entry older than {min_age_hours}h; "
+                f"relaxing to {GLB_CACHE_HARD_MIN_AGE_SECONDS / 60:.0f} min under pressure"
+            )
+
     for _mtime, size, path in candidates:
         cache_gb = _dir_size_bytes(glb_cache_dir) / (1024**3)
         needs_free_headroom = _free_gb() < target_free_gb

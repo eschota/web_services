@@ -1137,9 +1137,24 @@ async def broadcast_disk_usage_warning(
     if not chat_ids:
         return
 
-    sem = asyncio.Semaphore(3)
     hour_bucket = datetime.utcnow().strftime("%Y-%m-%d-%H")
     event_key = f"pressure_{hour_bucket}"
+
+    # Process-independent guard: the cleanup timer fires every minute, and a
+    # single failed DB reservation (sqlite write contention) used to turn that
+    # into a per-minute alert storm. The stamp file makes the hourly cadence
+    # hold even if the DB write races or rolls back.
+    stamp = Path("/var/autorig/disk_pressure_alert.stamp")
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == event_key:
+            print(f"[Telegram] Disk-pressure warning already sent this hour ({hour_bucket})")
+            return
+        stamp.write_text(event_key, encoding="utf-8")
+    except Exception as e:
+        print(f"[Telegram] Disk-pressure stamp unavailable ({e}); falling back to DB guard")
+
+    sem = asyncio.Semaphore(1)
 
     async def _one(chat_id: int):
         async with sem:
