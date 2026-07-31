@@ -21,6 +21,24 @@ SSH tunnel.
   RENDERFIN_HUNYUAN_WORKERS=http://127.0.0.1:17013
   ```
 
+## First-run warmup (important)
+
+On a fresh runtime the very first generation downloads ~19 texture-pipeline model
+files from HuggingFace while also loading the shape model; that race can crash the
+Gradio subprocess (access violation, exit 3221225477). Warm the runtime **once**
+before serving traffic so the models are cached:
+
+```powershell
+& 'R:\SECS\.ai-tools\hunyuan3d\runtime\Hunyuan3D2_WinPortable\python_standalone\python.exe' -u `
+  'R:\3d_hunyuan_rollout_commit\hunyuan3d_runtime_bootstrap.py' `
+  --source 'R:\SECS\.ai-tools\hunyuan3d\runtime\Hunyuan3D2_WinPortable\Hunyuan3D-2.1\gradio_app.py' `
+  --views 6 --resolution 512 --texture-size 2048 --port 18099 `
+  --cache-path 'R:\SECS\.ai-tools\hunyuan3d\runtime\Hunyuan3D2_WinPortable\service_cache\warmup'
+```
+
+Wait until it prints `Uvicorn running on http://127.0.0.1:18099`, then Ctrl-C.
+After that, task generations start cleanly.
+
 ## Keep it running
 
 `start_local_hunyuan_and_tunnel.ps1` starts the service (if down) and holds the
