@@ -257,6 +257,7 @@ class SubmitCallbackTests(unittest.TestCase):
                                           new=AsyncMock()) as mark:
                             await telegram_bot._handle_submit_callback(update, context)
             submit.assert_awaited_once_with("https://x/render/bot/h1.glb")
+            self.assertIn("полный пайплайн", bot.edit_message_caption.await_args.kwargs["caption"])
             mark.assert_awaited_once_with("11111111-2222-3333-4444-555566667777")
             bot.edit_message_caption.assert_awaited_once()
             self.assertIsNone(bot.edit_message_caption.await_args.kwargs["reply_markup"])
@@ -278,6 +279,43 @@ class SubmitCallbackTests(unittest.TestCase):
                                       new=AsyncMock(side_effect=RuntimeError("gone"))):
                         await telegram_bot._handle_submit_callback(update, context)
             release.assert_awaited_once()
+
+        run(scenario())
+
+
+class SubmitPipelineKindTests(unittest.TestCase):
+    def test_submit_uses_convert_pipeline_for_retopology(self):
+        """pipeline_kind must be 'convert': 'rig' is only_rig and skips retopology."""
+
+        async def scenario():
+            captured = {}
+
+            class _FakeTask:
+                id = "new-task-id"
+
+            async def fake_create(db, **kwargs):
+                captured.update(kwargs)
+                return _FakeTask(), None
+
+            class _FakeSession:
+                async def __aenter__(self):
+                    return object()
+
+                async def __aexit__(self, *a):
+                    return False
+
+            import tasks as tasks_module
+
+            with patch.object(telegram_bot, "AsyncSessionLocal", _FakeSession):
+                with patch.object(tasks_module, "create_conversion_task", new=fake_create):
+                    task_id, error = await telegram_bot._submit_generated_model(
+                        "https://x/render/bot/model.glb"
+                    )
+            self.assertEqual(task_id, "new-task-id")
+            self.assertIsNone(error)
+            self.assertEqual(captured["pipeline_kind"], "convert")
+            self.assertEqual(captured["task_type"], "t_pose")
+            self.assertTrue(captured["input_url"].endswith(".glb"))
 
         run(scenario())
 

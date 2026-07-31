@@ -2428,10 +2428,13 @@ async def _handle_generate_callback(update, context) -> None:
 
 
 async def _submit_generated_model(glb_url: str) -> tuple[str | None, str | None]:
-    """Create a standard autorig rig task from the generated GLB.
+    """Create the FULL conversion task from the generated GLB.
 
-    Returns (task_id, error). Dispatch is handled by the main backend's
-    background loop, which picks up status=created tasks within seconds.
+    pipeline_kind="convert" with type="t_pose" runs the complete worker
+    scenario — retopology (1k/10k/100k), bake, autorig, animation retarget and
+    every export format — whereas "rig" is only_rig and skips retopology.
+    Dispatch is handled by the main backend's background loop, which picks up
+    status=created tasks within seconds.
     """
     from tasks import create_conversion_task
 
@@ -2443,7 +2446,7 @@ async def _submit_generated_model(glb_url: str) -> tuple[str | None, str | None]
             owner_type="anon",
             owner_id="telegram-bot",
             created_via_api=True,
-            pipeline_kind="rig",
+            pipeline_kind="convert",
         )
         if task is None:
             return None, error or "task creation failed"
@@ -2484,9 +2487,10 @@ async def _handle_submit_callback(update, context) -> None:
         await render_prompting.mark_character_gen_submitted(job_id)
         url = _task_url(task_id)
         new_caption = (
-            f"🚀 <b>Отправлено в пайплайн</b>\n"
+            f"🚀 <b>Отправлено в полный пайплайн</b>\n"
             f'🔗 <a href="{html.escape(url)}">Task {html.escape(task_id[:8])}…</a> — '
-            f"риг, ретопология и форматы приедут обычным уведомлением."
+            f"ретопология 1k/10k/100k, запечка, риг, анимации и все форматы; "
+            f"по готовности придёт обычное уведомление."
         )
         try:
             await context.bot.edit_message_caption(
