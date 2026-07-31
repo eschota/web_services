@@ -2133,7 +2133,12 @@ async def _chargen_edit_status(bot, chat_id: int, message_id: int, text: str) ->
 
 async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: int | None,
                           status_message_id: int) -> None:
-    """Phase 1 entry (🎨 button): prompt -> flux render -> image review message."""
+    """🎨 button: build the prompt and hand the job to renderfin.
+
+    Delivery of every result (image review, model video, failures) is done by
+    the renderfin service itself, so it survives a bot restart. This coroutine
+    only has to get the job created.
+    """
     import render_prompting
 
     try:
@@ -2147,12 +2152,10 @@ async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: 
         job_id = await render_prompting.start_character_gen(
             plan, source_task_id=task_id, telegram_chat_id=chat_id
         )
-        await _watch_image_phase(
-            bot, chat_id, job_id,
-            reply_to_message_id=reply_to_message_id,
-            status_message_id=status_message_id,
-            task_id=task_id,
+        await render_prompting.set_character_gen_telegram_context(
+            job_id, chat_id=chat_id, status_message_id=status_message_id
         )
+        print(f"[Telegram][Renderfin] job {job_id} started for task {task_id}")
     except Exception as e:
         print(f"[Telegram][Renderfin] generation failed for task {task_id}: {e}")
         await _chargen_edit_status(
@@ -2160,196 +2163,6 @@ async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: 
             f"❌ Ошибка генерации: {html.escape(str(e)[:300])}\nКнопку можно нажать ещё раз.",
         )
         await release_notification(chat_id, "renderfin_gen", task_id)
-
-
-async def _watch_image_phase(bot, chat_id: int, job_id: str, *,
-                             reply_to_message_id: int | None,
-                             status_message_id: int | None,
-                             task_id: str = "") -> None:
-    """Poll until the Flux render awaits validation, then post it with buttons."""
-    import render_prompting
-    from telegram.constants import ParseMode
-
-    deadline = asyncio.get_event_loop().time() + CHARGEN_TOTAL_TIMEOUT_SECONDS
-    status: dict = {}
-    stage = ""
-    while asyncio.get_event_loop().time() < deadline:
-        await asyncio.sleep(CHARGEN_POLL_INTERVAL_SECONDS)
-        try:
-            status = await render_prompting.poll_character_gen(job_id)
-        except Exception as e:
-            print(f"[Telegram][Renderfin] poll failed for job {job_id}: {e}")
-            continue
-        stage = str(status.get("stage") or "")
-        if stage in ("awaiting_image_approval", "failed", "discarded", "ready"):
-            break
-    else:
-        stage = "failed"
-        status = {"error": "рендер изображения не уложился в таймаут"}
-
-    task_id = task_id or str(status.get("source_task_id") or "")
-    prompt_preview = html.escape(str(status.get("prompt") or "")[:300])
-
-    if stage == "discarded":
-        return
-    if stage == "failed":
-        message = f"❌ Рендер не удался: {html.escape(str(status.get('error') or '')[:300])}"
-        if status_message_id:
-            await _chargen_edit_status(bot, chat_id, status_message_id,
-                                       message + "\nКнопку можно нажать ещё раз.")
-        else:
-            try:
-                await bot.send_message(
-                    chat_id=chat_id, text=message,
-                    reply_to_message_id=reply_to_message_id,
-                    reply_markup=_chargen_retry_markup(job_id),
-                )
-            except Exception:
-                pass
-        if task_id:
-            await release_notification(chat_id, "renderfin_gen", task_id)
-        return
-
-    image_url = str(status.get("image_url") or "")
-    isolated_url = str(status.get("isolated_url") or "")
-    warning = str(status.get("warning") or "")
-    caption = (
-        f"🖼 <b>T-поза готова</b> — делаем 3D-модель?\n"
-        f"<i>{prompt_preview}</i>\n"
-        f'✂️ <a href="{html.escape(isolated_url)}">PNG с альфой</a>'
-    )
-    if warning:
-        caption += f"\n⚠️ {html.escape(warning[:150])}"
-    image_bytes = await _download_bytes(image_url)
-    sent = None
-    try:
-        if image_bytes:
-            sent = await bot.send_photo(
-                chat_id=chat_id, photo=image_bytes, caption=caption,
-                parse_mode=ParseMode.HTML,
-                reply_to_message_id=reply_to_message_id,
-                reply_markup=_chargen_image_review_markup(job_id),
-            )
-        else:
-            sent = await bot.send_message(
-                chat_id=chat_id,
-                text=caption + f'\n🖼 <a href="{html.escape(image_url)}">Изображение</a>',
-                parse_mode=ParseMode.HTML,
-                reply_to_message_id=reply_to_message_id,
-                reply_markup=_chargen_image_review_markup(job_id),
-            )
-    except Exception as e:
-        print(f"[Telegram][Renderfin] image review send failed for job {job_id}: {e}")
-        return
-    if sent is not None:
-        # remember where the review lives so a bot restart can re-attach
-        await render_prompting.set_character_gen_telegram_context(
-            job_id, chat_id=chat_id, message_id=sent.message_id
-        )
-    if status_message_id:
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=status_message_id)
-        except Exception:
-            pass
-    print(f"[Telegram][Renderfin] image review posted: job={job_id}")
-
-
-async def _watch_model_phase(bot, chat_id: int, job_id: str, photo_message_id: int) -> None:
-    """After approval: poll hunyuan+turntable, deliver the review video."""
-    import render_prompting
-    from telegram.constants import ParseMode
-
-    deadline = asyncio.get_event_loop().time() + CHARGEN_TOTAL_TIMEOUT_SECONDS
-    last_stage = ""
-    status: dict = {}
-    stage = ""
-    while asyncio.get_event_loop().time() < deadline:
-        await asyncio.sleep(CHARGEN_POLL_INTERVAL_SECONDS)
-        try:
-            status = await render_prompting.poll_character_gen(job_id)
-        except Exception as e:
-            print(f"[Telegram][Renderfin] poll failed for job {job_id}: {e}")
-            continue
-        stage = str(status.get("stage") or "")
-        if stage in ("ready", "failed", "discarded"):
-            break
-        if stage != last_stage:
-            last_stage = stage
-            label = _CHARGEN_STAGE_LABELS.get(stage, stage)
-            try:
-                await bot.edit_message_caption(
-                    chat_id=chat_id, message_id=photo_message_id,
-                    caption=f"⏳ {html.escape(label)}…", parse_mode=ParseMode.HTML,
-                )
-            except Exception:
-                pass
-    else:
-        stage = "failed"
-        status = {"error": "3D-генерация не уложилась в таймаут"}
-
-    prompt_preview = html.escape(str(status.get("prompt") or "")[:300])
-
-    if stage == "discarded":
-        return
-    if stage == "failed":
-        err = html.escape(str(status.get("error") or "")[:250])
-        text = (
-            f"❌ 3D не удалось: {err}\n"
-            "«Повторить 3D» — продолжить с этого места, «Перегенерировать» — новая картинка."
-        )
-        try:
-            await bot.edit_message_caption(
-                chat_id=chat_id, message_id=photo_message_id,
-                caption=text, parse_mode=ParseMode.HTML,
-                reply_markup=_chargen_retry_markup(job_id),
-            )
-        except Exception:
-            try:
-                await bot.send_message(
-                    chat_id=chat_id, text=text, parse_mode=ParseMode.HTML,
-                    reply_to_message_id=photo_message_id,
-                    reply_markup=_chargen_retry_markup(job_id),
-                )
-            except Exception:
-                pass
-        return
-
-    video_url = str(status.get("video_url") or "")
-    glb_url = str(status.get("glb_url") or "")
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-    review_markup = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Сабмитить", callback_data=f"rfs:{job_id}"),
-            InlineKeyboardButton("🗑 Удалить", callback_data=f"rfd:{job_id}"),
-        ]
-    ])
-    caption = (
-        f"🎨 <b>3D-модель сгенерирована</b>\n"
-        f"<i>{prompt_preview}</i>\n"
-        f'🧊 <a href="{html.escape(glb_url)}">GLB</a>'
-    )
-    video_bytes = await _download_bytes(video_url)
-    if video_bytes:
-        await bot.send_video(
-            chat_id=chat_id, video=video_bytes, caption=caption,
-            parse_mode=ParseMode.HTML, supports_streaming=True,
-            reply_to_message_id=photo_message_id, reply_markup=review_markup,
-        )
-    else:
-        await bot.send_message(
-            chat_id=chat_id, text=caption + f'\n🎬 <a href="{html.escape(video_url)}">Видео</a>',
-            parse_mode=ParseMode.HTML,
-            reply_to_message_id=photo_message_id, reply_markup=review_markup,
-        )
-    try:
-        await bot.edit_message_caption(
-            chat_id=chat_id, message_id=photo_message_id,
-            caption="✅ Изображение одобрено — модель ниже.",
-        )
-    except Exception:
-        pass
-    print(f"[Telegram][Renderfin] model review delivered: job={job_id}")
 
 
 async def _handle_approve_callback(update, context) -> None:
@@ -2380,9 +2193,6 @@ async def _handle_approve_callback(update, context) -> None:
         )
     except Exception:
         pass
-    asyncio.create_task(
-        _watch_model_phase(context.bot, chat_id, job_id, query.message.message_id)
-    )
 
 
 async def _handle_regen_callback(update, context) -> None:
@@ -2413,13 +2223,6 @@ async def _handle_regen_callback(update, context) -> None:
         )
     except Exception:
         pass
-    asyncio.create_task(
-        _watch_image_phase(
-            context.bot, chat_id, job_id,
-            reply_to_message_id=query.message.message_id,
-            status_message_id=None,
-        )
-    )
 
 
 async def _handle_generate_callback(update, context) -> None:
@@ -2565,9 +2368,13 @@ async def _handle_resume_callback(update, context) -> None:
         return
     await query.answer("Продолжаем…")
     chat_id = int(query.message.chat.id)
-    asyncio.create_task(
-        _watch_model_phase(context.bot, chat_id, job_id, query.message.message_id)
-    )
+    try:
+        await context.bot.edit_message_caption(
+            chat_id=chat_id, message_id=query.message.message_id,
+            caption="♻️ Повторяем 3D-генерацию…",
+        )
+    except Exception:
+        pass
 
 
 async def _handle_delete_callback(update, context) -> None:
@@ -2602,56 +2409,23 @@ async def _handle_delete_callback(update, context) -> None:
 
 
 async def _reattach_chargen_watchers(bot) -> None:
-    """Re-spawn watchers for jobs that were in flight when the bot restarted.
-
-    Jobs parked at awaiting_image_approval need nothing: their review message
-    already carries stateless callback buttons this process handles.
-    """
+    """Delivery of in-flight jobs is owned by the renderfin service, which
+    persists them and keeps retrying until Telegram accepts each result. This
+    only reports what is still pending so a restart is visible in the log."""
     import render_prompting
 
-    # renderfin may still be coming up when the bot starts (both restart together)
-    jobs = []
     for attempt in range(6):
         try:
             jobs = await render_prompting.list_active_character_gen_jobs()
             if jobs:
-                break
-        except Exception as e:
-            print(f"[Telegram][Renderfin] watcher reattach attempt {attempt + 1}: {e}")
-        await asyncio.sleep(5)
-    if not jobs:
-        return
-    resumed = 0
-    for job in jobs:
-        chat_id = int(job.get("telegram_chat_id") or 0)
-        job_id = str(job.get("job_id") or "")
-        stage = str(job.get("stage") or "")
-        if not chat_id or not job_id:
-            continue
-        if stage == "flux_render":
-            asyncio.create_task(
-                _watch_image_phase(
-                    bot, chat_id, job_id,
-                    reply_to_message_id=int(job.get("telegram_message_id") or 0) or None,
-                    status_message_id=None,
-                    task_id=str(job.get("source_task_id") or ""),
+                stages = ", ".join(
+                    f"{str(j.get('job_id'))[:8]}={j.get('stage')}" for j in jobs
                 )
-            )
-            resumed += 1
-        elif stage in ("hunyuan", "turntable"):
-            message_id = int(job.get("telegram_message_id") or 0)
-            if not message_id:
-                try:
-                    sent = await bot.send_message(
-                        chat_id=chat_id, text="⏳ Продолжаю генерацию 3D-модели…"
-                    )
-                    message_id = sent.message_id
-                except Exception:
-                    continue
-            asyncio.create_task(_watch_model_phase(bot, chat_id, job_id, message_id))
-            resumed += 1
-    if resumed:
-        print(f"[Telegram][Renderfin] re-attached {resumed} watcher(s) after restart")
+                print(f"[Telegram][Renderfin] {len(jobs)} job(s) in flight: {stages}")
+            return
+        except Exception as e:
+            print(f"[Telegram][Renderfin] job list attempt {attempt + 1}: {e}")
+        await asyncio.sleep(5)
 
 
 async def run_polling() -> None:

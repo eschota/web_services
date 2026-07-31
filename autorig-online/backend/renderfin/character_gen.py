@@ -180,7 +180,12 @@ class CharacterGenManager:
         return job, True
 
     async def set_telegram_context(
-        self, job_id: str, *, chat_id: int = 0, message_id: int = 0
+        self,
+        job_id: str,
+        *,
+        chat_id: int = 0,
+        message_id: int = 0,
+        status_message_id: int = 0,
     ):
         job = self._jobs.get(job_id)
         if job is None:
@@ -189,8 +194,36 @@ class CharacterGenManager:
             job.telegram_chat_id = int(chat_id)
         if message_id:
             job.telegram_message_id = int(message_id)
+        if status_message_id:
+            job.telegram_status_message_id = int(status_message_id)
         await self._persist(job)
         return job
+
+    async def mark_delivered(
+        self,
+        job_id: str,
+        kind: str,
+        marker: str,
+        *,
+        message_id: int = 0,
+        clear_status_message: bool = False,
+    ):
+        """Record that a result was handed to Telegram (idempotency marker)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        delivered = dict(job.delivered or {})
+        delivered[kind] = marker or ""
+        job.delivered = delivered
+        if message_id:
+            job.telegram_message_id = int(message_id)
+        if clear_status_message:
+            job.telegram_status_message_id = 0
+        await self._persist(job)
+        return job
+
+    def all_jobs(self) -> list:
+        return list(self._jobs.values())
 
     def active_jobs(self) -> list:
         """Jobs a client may still be waiting on (used to re-attach watchers)."""

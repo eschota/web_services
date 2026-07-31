@@ -131,9 +131,13 @@ class CharacterGenJob(BaseModel):
     flux_task_id: str = ""
     hunyuan_task_id: str = ""
     hunyuan_worker: str = ""
-    # Telegram context so the bot can re-attach watchers after a restart
+    # Telegram context: renderfin delivers results itself so they survive
+    # bot restarts. `delivered` maps delivery kind -> the content marker that
+    # was delivered (image/video url, error text), keeping it idempotent.
     telegram_chat_id: int = 0
     telegram_message_id: int = 0
+    telegram_status_message_id: int = 0
+    delivered: Dict[str, str] = Field(default_factory=dict)
     warning: str = ""
     image_url: str = ""       # full t_pose render
     isolated_url: str = ""    # alpha-isolated character
@@ -160,4 +164,5 @@ class CharacterGenJob(BaseModel):
             "warning": self.warning or None,
             "telegram_chat_id": self.telegram_chat_id or None,
             "telegram_message_id": self.telegram_message_id or None,
+            "delivered": dict(self.delivered or {}),
         }

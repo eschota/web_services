@@ -11,6 +11,7 @@ from .api import router
 from .character_gen import CharacterGenManager
 from .queue import RenderQueue
 from .registry import ServerRegistry
+from .telegram_delivery import TelegramDeliveryService
 
 
 def _install_masks() -> None:
@@ -36,15 +37,19 @@ async def lifespan(app: FastAPI):
     await queue.start()
     chargen = CharacterGenManager(queue)
     await chargen.start()
+    delivery = TelegramDeliveryService(chargen)
+    await delivery.start()
     app.state.registry = registry
     app.state.render_queue = queue
     app.state.character_gen = chargen
+    app.state.delivery = delivery
     print(
         f"[Renderfin] up: {len(registry.all())} server(s), data dir {config.DATA_DIR}"
     )
     try:
         yield
     finally:
+        await delivery.stop()
         await chargen.stop()
         await queue.stop()
 

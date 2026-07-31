@@ -99,7 +99,9 @@ class RunGenerationTests(unittest.TestCase):
 
         run(scenario())
 
-    def test_image_phase_sends_photo_with_validation_buttons(self):
+    def test_generation_creates_job_and_registers_chat(self):
+        """The bot only has to create the job: renderfin owns delivery."""
+
         async def scenario():
             bot = AsyncMock()
             import render_prompting
@@ -112,72 +114,21 @@ class RunGenerationTests(unittest.TestCase):
                 mask_url="https://x/render/masks/t_pose.jpg",
                 source="llm",
             )
-            statuses = iter([
-                {"stage": "awaiting_image_approval",
-                 "prompt": "a detailed orc warrior full body T-pose front view",
-                 "image_url": "https://x/render/bot/f1.png",
-                 "isolated_url": "https://x/render/bot/f1_Isolated.png",
-                 "source_task_id": "task-1"},
-            ])
+            ctx = {}
+
+            async def fake_ctx(job_id, **kwargs):
+                ctx.update({"job_id": job_id, **kwargs})
 
             with patch.object(render_prompting, "build_render_request", new=AsyncMock(return_value=plan)):
-                with patch.object(render_prompting, "start_character_gen", new=AsyncMock(return_value="j1")):
-                    with patch.object(render_prompting, "poll_character_gen", new=AsyncMock(side_effect=lambda jid: next(statuses))):
-                        with patch.object(telegram_bot, "_download_bytes", new=AsyncMock(return_value=b"PNGDATA")):
-                            with patch.object(telegram_bot, "CHARGEN_POLL_INTERVAL_SECONDS", 0):
-                                await telegram_bot._run_generation(bot, 777, "task-1", 42, 99)
+                with patch.object(render_prompting, "start_character_gen", new=AsyncMock(return_value="j1")) as start:
+                    with patch.object(render_prompting, "set_character_gen_telegram_context", new=fake_ctx):
+                        await telegram_bot._run_generation(bot, 777, "task-1", 42, 99)
 
-            bot.send_photo.assert_awaited_once()
-            kwargs = bot.send_photo.await_args.kwargs
-            self.assertEqual(kwargs["reply_to_message_id"], 42)
-            buttons = [b for row in kwargs["reply_markup"].inline_keyboard for b in row]
-            self.assertEqual(
-                [b.callback_data for b in buttons], ["rfa:j1", "rfr:j1", "rfd:j1"]
-            )
-            bot.send_video.assert_not_awaited()
-
-        run(scenario())
-
-    def test_model_phase_sends_video_with_review_buttons(self):
-        async def scenario():
-            bot = AsyncMock()
-            import render_prompting
-
-            statuses = iter([
-                {"stage": "ready", "prompt": "orc",
-                 "video_url": "https://x/render/bot/j1_turntable.mp4",
-                 "glb_url": "https://x/render/bot/j1.glb"},
-            ])
-            with patch.object(render_prompting, "poll_character_gen", new=AsyncMock(side_effect=lambda jid: next(statuses))):
-                with patch.object(telegram_bot, "_download_bytes", new=AsyncMock(return_value=b"MP4DATA")):
-                    with patch.object(telegram_bot, "CHARGEN_POLL_INTERVAL_SECONDS", 0):
-                        await telegram_bot._watch_model_phase(bot, 777, "j1", 55)
-
-            bot.send_video.assert_awaited_once()
-            kwargs = bot.send_video.await_args.kwargs
-            self.assertEqual(kwargs["reply_to_message_id"], 55)
-            buttons = [b for row in kwargs["reply_markup"].inline_keyboard for b in row]
-            self.assertEqual([b.callback_data for b in buttons], ["rfs:j1", "rfd:j1"])
-
-        run(scenario())
-
-    def test_model_phase_failure_offers_regenerate(self):
-        async def scenario():
-            bot = AsyncMock()
-            import render_prompting
-
-            statuses = iter([
-                {"stage": "failed", "prompt": "orc", "error": "boom"},
-            ])
-            with patch.object(render_prompting, "poll_character_gen", new=AsyncMock(side_effect=lambda jid: next(statuses))):
-                with patch.object(telegram_bot, "CHARGEN_POLL_INTERVAL_SECONDS", 0):
-                    await telegram_bot._watch_model_phase(bot, 777, "j1", 55)
-
-            bot.edit_message_caption.assert_awaited()
-            kwargs = bot.edit_message_caption.await_args.kwargs
-            self.assertIn("3D не удалось", kwargs["caption"])
-            buttons = [b for row in kwargs["reply_markup"].inline_keyboard for b in row]
-            self.assertEqual([b.callback_data for b in buttons], ["rfe:j1", "rfr:j1", "rfd:j1"])
+            self.assertEqual(start.await_args.kwargs["telegram_chat_id"], 777)
+            self.assertEqual(start.await_args.kwargs["source_task_id"], "task-1")
+            self.assertEqual(ctx, {"job_id": "j1", "chat_id": 777, "status_message_id": 99})
+            # no result is sent from the bot process
+            bot.send_photo.assert_not_awaited()
             bot.send_video.assert_not_awaited()
 
         run(scenario())
@@ -192,13 +143,10 @@ class ApproveRegenCallbackTests(unittest.TestCase):
             context = SimpleNamespace(bot=bot)
             import render_prompting
 
-            spawned = []
             with patch.object(render_prompting, "approve_character_gen_image",
-                              new=AsyncMock(return_value={"transitioned": True, "stage": "hunyuan"})):
-                with patch.object(telegram_bot.asyncio, "create_task",
-                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
-                    await telegram_bot._handle_approve_callback(update, context)
-            self.assertEqual(len(spawned), 1)
+                              new=AsyncMock(return_value={"transitioned": True, "stage": "hunyuan"})) as approve:
+                await telegram_bot._handle_approve_callback(update, context)
+            approve.assert_awaited_once_with("11111111-2222-3333-4444-555566667777")
             bot.edit_message_caption.assert_awaited_once()
             self.assertIn("Генерируем 3D", query.answers[0])
 
@@ -227,13 +175,10 @@ class ApproveRegenCallbackTests(unittest.TestCase):
             context = SimpleNamespace(bot=bot)
             import render_prompting
 
-            spawned = []
             with patch.object(render_prompting, "regenerate_character_gen_image",
-                              new=AsyncMock(return_value={"transitioned": True, "stage": "flux_render"})):
-                with patch.object(telegram_bot.asyncio, "create_task",
-                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
-                    await telegram_bot._handle_regen_callback(update, context)
-            self.assertEqual(len(spawned), 1)
+                              new=AsyncMock(return_value={"transitioned": True, "stage": "flux_render"})) as regen:
+                await telegram_bot._handle_regen_callback(update, context)
+            regen.assert_awaited_once_with("11111111-2222-3333-4444-555566667777")
             self.assertIn("Перегенерируем", query.answers[0])
 
         run(scenario())
@@ -283,42 +228,34 @@ class SubmitCallbackTests(unittest.TestCase):
         run(scenario())
 
 
-class WatcherReattachTests(unittest.TestCase):
-    def test_restart_reattaches_watchers_by_stage(self):
-        """A bot restart must not orphan in-flight jobs."""
+class RestartReportTests(unittest.TestCase):
+    def test_restart_reports_in_flight_jobs_without_sending(self):
+        """Delivery belongs to renderfin; the bot must not re-send anything."""
 
         async def scenario():
             import render_prompting
 
             jobs = [
-                {"job_id": "j-flux", "stage": "flux_render", "telegram_chat_id": 777,
-                 "source_task_id": "t1"},
-                {"job_id": "j-3d", "stage": "hunyuan", "telegram_chat_id": 777,
-                 "telegram_message_id": 55},
-                {"job_id": "j-wait", "stage": "awaiting_image_approval",
-                 "telegram_chat_id": 777, "telegram_message_id": 60},
-                {"job_id": "j-nochat", "stage": "turntable", "telegram_chat_id": 0},
+                {"job_id": "j-flux", "stage": "flux_render", "telegram_chat_id": 777},
+                {"job_id": "j-3d", "stage": "hunyuan", "telegram_chat_id": 777},
             ]
-            spawned = []
             bot = AsyncMock()
             with patch.object(render_prompting, "list_active_character_gen_jobs",
                               new=AsyncMock(return_value=jobs)):
-                with patch.object(telegram_bot.asyncio, "create_task",
-                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
-                    await telegram_bot._reattach_chargen_watchers(bot)
-            # flux + hunyuan get watchers; awaiting (stateless buttons) and
-            # chat-less jobs do not
-            self.assertEqual(len(spawned), 2)
+                await telegram_bot._reattach_chargen_watchers(bot)
+            bot.send_message.assert_not_awaited()
+            bot.send_photo.assert_not_awaited()
 
         run(scenario())
 
-    def test_reattach_survives_api_failure(self):
+    def test_restart_survives_api_failure(self):
         async def scenario():
             import render_prompting
 
             with patch.object(render_prompting, "list_active_character_gen_jobs",
                               new=AsyncMock(side_effect=RuntimeError("renderfin down"))):
-                await telegram_bot._reattach_chargen_watchers(AsyncMock())
+                with patch.object(telegram_bot.asyncio, "sleep", new=AsyncMock()):
+                    await telegram_bot._reattach_chargen_watchers(AsyncMock())
 
         run(scenario())
 
@@ -331,13 +268,10 @@ class ResumeCallbackTests(unittest.TestCase):
             context = SimpleNamespace(bot=AsyncMock())
             import render_prompting
 
-            spawned = []
             with patch.object(render_prompting, "resume_character_gen",
-                              new=AsyncMock(return_value={"transitioned": True, "stage": "hunyuan"})):
-                with patch.object(telegram_bot.asyncio, "create_task",
-                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
-                    await telegram_bot._handle_resume_callback(update, context)
-            self.assertEqual(len(spawned), 1)
+                              new=AsyncMock(return_value={"transitioned": True, "stage": "hunyuan"})) as resume:
+                await telegram_bot._handle_resume_callback(update, context)
+            resume.assert_awaited_once_with("11111111-2222-3333-4444-555566667777")
             self.assertIn("Продолжаем", query.answers[0])
 
         run(scenario())

@@ -91,7 +91,14 @@ def hunyuan_workers() -> list[dict]:
     return []
 HUNYUAN_QUALITY = os.getenv("RENDERFIN_HUNYUAN_QUALITY", "standard").strip() or "standard"
 HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))
-HUNYUAN_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_TIMEOUT_SECONDS", "3600"))
+# A standard-quality generation takes ~65 min on the farm's GTX 1080 Ti boxes
+# and queues behind conversion jobs, so the ceiling has to be generous.
+HUNYUAN_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_TIMEOUT_SECONDS", "14400"))
+
+# Telegram delivery (renderfin owns delivery so results survive bot restarts)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_API_BASE = os.getenv("TELEGRAM_API_BASE", "https://api.telegram.org").rstrip("/")
+DELIVERY_TICK_SECONDS = float(os.getenv("RENDERFIN_DELIVERY_TICK_SECONDS", "5"))
 
 # Turntable rendering (character_gen stage 3)
 TURNTABLE_NODE = os.getenv("RENDERFIN_TURNTABLE_NODE", "node")
