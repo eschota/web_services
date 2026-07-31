@@ -108,12 +108,18 @@ async def _cache_entry_upstream_url(db, path: Path) -> str:
     task_id, _, remainder = path.name.partition("_")
     if not task_id or not remainder:
         return ""
-    result = await db.execute(select(Task.ready_urls).where(Task.id == task_id))
+    # ready_urls is a python property over the "ready_urls" TEXT column, so the
+    # ORM attribute cannot be selected directly.
+    result = await db.execute(select(Task._ready_urls).where(Task.id == task_id))
     row = result.first()
     if not row or not row[0]:
         return ""
-    for url in row[0]:
-        if url.rsplit("/", 1)[-1] == remainder:
+    try:
+        urls = json.loads(row[0]) or []
+    except Exception:
+        return ""
+    for url in urls:
+        if isinstance(url, str) and url.rsplit("/", 1)[-1] == remainder:
             return url
     return ""
 
