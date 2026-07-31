@@ -120,8 +120,11 @@ def _purge_oldest_glb_cache_until(
                 f"relaxing to {GLB_CACHE_HARD_MIN_AGE_SECONDS / 60:.0f} min under pressure"
             )
 
+    # Track the cache size incrementally: rescanning the whole directory per
+    # deletion made this O(n^2) over ~700 files, every 60 seconds.
+    cache_bytes = _dir_size_bytes(glb_cache_dir)
     for _mtime, size, path in candidates:
-        cache_gb = _dir_size_bytes(glb_cache_dir) / (1024**3)
+        cache_gb = cache_bytes / (1024**3)
         needs_free_headroom = _free_gb() < target_free_gb
         exceeds_cap = max_cache_gb > 0 and cache_gb > max_cache_gb
         if not needs_free_headroom and not exceeds_cap:
@@ -132,10 +135,11 @@ def _purge_oldest_glb_cache_until(
             continue
         removed += 1
         freed += size
+        cache_bytes = max(0, cache_bytes - size)
         print(
             f"[Disk Prepass] Removed GLB cache {path.name} "
             f"({size / (1024**2):.1f} MB); free now {_free_gb():.2f} GB, "
-            f"glb_cache now {(_dir_size_bytes(glb_cache_dir) / (1024**3)):.2f} GB"
+            f"glb_cache now {(cache_bytes / (1024**3)):.2f} GB"
         )
     return removed, freed
 

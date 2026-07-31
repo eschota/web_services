@@ -430,11 +430,25 @@ async def ingest_support_reply_from_forum_message(
         await db.commit()
 
 
+# sqlite is opened with a StaticPool (database.py), so every AsyncSessionLocal in
+# this process shares ONE connection and therefore one transaction. Two chats
+# reserving concurrently would then interleave: a sibling's rollback on
+# IntegrityError discards the other's pending INSERT, the reservation silently
+# vanishes and the "once per hour" guard turns into one message per run. Every
+# reservation write is serialized here so that cannot happen.
+_notification_write_lock = asyncio.Lock()
+
+
 async def reserve_notification(chat_id: int, event_type: str, event_key: str) -> bool:
     """
     Reserve a per-chat notification key atomically.
     Returns True if reserved now, False if it was already reserved/sent earlier.
     """
+    async with _notification_write_lock:
+        return await _reserve_notification_locked(chat_id, event_type, event_key)
+
+
+async def _reserve_notification_locked(chat_id: int, event_type: str, event_key: str) -> bool:
     async with AsyncSessionLocal() as db:
         rec = TelegramNotification(
             chat_id=chat_id,

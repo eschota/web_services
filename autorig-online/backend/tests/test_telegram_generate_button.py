@@ -453,3 +453,29 @@ class DmRoutingTests(unittest.TestCase):
             self.assertEqual(bot.send_message.await_args.kwargs["reply_to_message_id"], 42)
 
         run(scenario())
+
+
+class NotificationReservationTests(unittest.TestCase):
+    def test_concurrent_reservations_are_serialized(self):
+        """sqlite runs on a StaticPool: all sessions share one transaction, so a
+        sibling's rollback used to discard another chat's pending INSERT and the
+        hourly guard silently vanished for that chat."""
+
+        async def scenario():
+            active = {"now": 0, "max": 0}
+
+            async def fake_locked(chat_id, event_type, event_key):
+                active["now"] += 1
+                active["max"] = max(active["max"], active["now"])
+                await asyncio.sleep(0.01)
+                active["now"] -= 1
+                return True
+
+            with patch.object(telegram_bot, "_reserve_notification_locked", new=fake_locked):
+                await asyncio.gather(*[
+                    telegram_bot.reserve_notification(cid, "disk_pressure", "pressure_x")
+                    for cid in range(6)
+                ])
+            self.assertEqual(active["max"], 1)
+
+        run(scenario())
