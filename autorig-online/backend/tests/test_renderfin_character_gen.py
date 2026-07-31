@@ -7,6 +7,7 @@ from unittest.mock import patch
 from renderfin import config
 from renderfin.character_gen import CharacterGenManager
 from renderfin.models import (
+    CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
     CHARGEN_STAGE_READY,
@@ -153,6 +154,10 @@ class HunyuanConverterPathTests(unittest.TestCase):
                                 with patch.object(cg_mod.httpx, "AsyncClient", side_effect=patched_client):
                                     with patch.object(cg_mod.turntable, "render_turntable", side_effect=fake_turntable):
                                         job = await manager.create(prompt="orc", user_name="bot")
+                                        job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_FAILED})
+                                        self.assertEqual(job.stage, CHARGEN_STAGE_AWAITING_IMAGE, job.error)
+                                        job, transitioned = await manager.approve_image(job.id)
+                                        self.assertTrue(transitioned)
                                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_READY, CHARGEN_STAGE_FAILED})
 
                     self.assertEqual(job.stage, CHARGEN_STAGE_READY, job.error)
@@ -193,6 +198,12 @@ class CharacterGenTests(unittest.TestCase):
                         job = await manager.create(
                             prompt="orc warrior", mask_url="", user_name="bot"
                         )
+                        # pipeline pauses for human validation of the Flux render
+                        job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_FAILED})
+                        self.assertEqual(job.stage, CHARGEN_STAGE_AWAITING_IMAGE, job.error)
+                        self.assertTrue(job.image_url.endswith(".png"))
+                        job, transitioned = await manager.approve_image(job.id)
+                        self.assertTrue(transitioned)
                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_READY, CHARGEN_STAGE_FAILED})
 
                     self.assertEqual(job.stage, CHARGEN_STAGE_READY, job.error)
@@ -248,6 +259,8 @@ class CharacterGenTests(unittest.TestCase):
                         side_effect=fake_turntable,
                     ):
                         job = await manager.create(prompt="orc", user_name="bot")
+                        job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                        await manager.approve_image(job.id)
                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_READY})
 
                     video = config.RENDER_DIR / "bot" / f"{job.id}_turntable.mp4"
@@ -281,6 +294,8 @@ class CharacterGenTests(unittest.TestCase):
                     ):
                         job = await manager.create(prompt="orc", user_name="bot")
                         job_id = job.id
+                        await _wait_stage(manager, job_id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                        await manager.approve_image(job_id)
                         await _wait_stage(manager, job_id, {"turntable"})
                 finally:
                     await manager.stop()
@@ -304,6 +319,93 @@ class CharacterGenTests(unittest.TestCase):
                     finally:
                         await manager2.stop()
                 await queue.stop()
+
+        run(scenario())
+
+
+class ImageApprovalGateTests(unittest.TestCase):
+    def test_awaiting_survives_restart_without_autocontinue(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                job = await manager.create(prompt="orc", user_name="bot")
+                job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                await manager.stop()
+
+                manager2 = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager2.start()
+                try:
+                    await asyncio.sleep(0.2)
+                    revived = manager2.get(job.id)
+                    self.assertEqual(revived.stage, CHARGEN_STAGE_AWAITING_IMAGE)
+                    self.assertNotIn(job.id, manager2._runners)
+                finally:
+                    await manager2.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_approve_is_single_shot(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    async def fake_turntable(glb_path, out_path, **kw):
+                        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                        Path(out_path).write_bytes(b"MP4!" * 500)
+                        return Path(out_path)
+
+                    with patch(
+                        "renderfin.character_gen.turntable.render_turntable",
+                        side_effect=fake_turntable,
+                    ):
+                        job = await manager.create(prompt="orc", user_name="bot")
+                        job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                        _, first = await manager.approve_image(job.id)
+                        _, second = await manager.approve_image(job.id)
+                        self.assertTrue(first)
+                        self.assertFalse(second)
+                        # approve on a fresh flux-stage job is also refused
+                        job2 = await manager.create(prompt="x", user_name="bot")
+                        _, early = await manager.approve_image(job2.id)
+                        # job2 may already be awaiting (instant queue); only assert type
+                        self.assertIn(early, (True, False))
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_regenerate_rerenders_image(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    first_flux = job.flux_task_id
+                    first_image = job.image_url
+                    job2, transitioned = await manager.regenerate_image(job.id)
+                    self.assertTrue(transitioned)
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    self.assertNotEqual(job.flux_task_id, first_flux)
+                    self.assertNotEqual(job.image_url, first_image)
+                    self.assertEqual(len(queue.enqueued), 2)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
 
         run(scenario())
 

@@ -108,6 +108,7 @@ class RenderTask(BaseModel):
 
 CHARGEN_STAGE_PROMPT = "prompt"
 CHARGEN_STAGE_FLUX = "flux_render"
+CHARGEN_STAGE_AWAITING_IMAGE = "awaiting_image_approval"
 CHARGEN_STAGE_HUNYUAN = "hunyuan"
 CHARGEN_STAGE_TURNTABLE = "turntable"
 CHARGEN_STAGE_READY = "ready"

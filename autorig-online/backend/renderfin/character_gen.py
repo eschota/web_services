@@ -17,6 +17,7 @@ import httpx
 
 from . import config, hunyuan_client, turntable
 from .models import (
+    CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
     CHARGEN_STAGE_FLUX,
@@ -149,6 +150,40 @@ class CharacterGenManager:
         await self._persist(job)
         return job
 
+    async def approve_image(self, job_id: str):
+        """Human approved the Flux render: continue to the 3D stage.
+
+        Returns (job, transitioned) — transitioned is False when the job was
+        not awaiting approval (double-press, wrong stage), so callers can skip
+        spawning a duplicate watcher.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None, False
+        if job.stage != CHARGEN_STAGE_AWAITING_IMAGE:
+            return job, False
+        job.stage = CHARGEN_STAGE_HUNYUAN
+        job.error = ""
+        await self._persist(job)
+        self._spawn(job)
+        return job, True
+
+    async def regenerate_image(self, job_id: str):
+        """Re-run the Flux stage with a fresh seed (same prompt/mask)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None, False
+        if job.stage not in (CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_FAILED):
+            return job, False
+        job.flux_task_id = ""
+        job.image_url = ""
+        job.isolated_url = ""
+        job.error = ""
+        job.stage = CHARGEN_STAGE_FLUX
+        await self._persist(job)
+        self._spawn(job)
+        return job, True
+
     # ---------- pipeline ----------
 
     def _spawn(self, job: CharacterGenJob) -> None:
@@ -160,6 +195,10 @@ class CharacterGenManager:
         try:
             if job.stage == CHARGEN_STAGE_FLUX:
                 await self._stage_flux(job)
+            if job.stage == CHARGEN_STAGE_AWAITING_IMAGE:
+                # paused for human validation of the Flux render; approve_image
+                # or regenerate_image resumes the pipeline
+                return
             if job.stage == CHARGEN_STAGE_HUNYUAN:
                 await self._stage_hunyuan(job)
             if job.stage == CHARGEN_STAGE_TURNTABLE:
@@ -196,9 +235,9 @@ class CharacterGenManager:
         task = await self._await_render(job.flux_task_id, FLUX_STAGE_TIMEOUT)
         job.image_url = task.output_url
         job.isolated_url = task.extra_outputs.get("isolated") or task.output_url
-        job.stage = CHARGEN_STAGE_HUNYUAN
+        job.stage = CHARGEN_STAGE_AWAITING_IMAGE
         await self._persist(job)
-        print(f"[Renderfin][CharGen] job {job.id} flux done -> {job.isolated_url}")
+        print(f"[Renderfin][CharGen] job {job.id} flux done, awaiting approval -> {job.image_url}")
 
     async def _stage_hunyuan(self, job: CharacterGenJob) -> None:
         if hunyuan_client.is_configured():

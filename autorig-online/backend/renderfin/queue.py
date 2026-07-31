@@ -194,8 +194,12 @@ class RenderQueue:
             await self._refresh_servers()
         now = time.time()
         if now - self._last_dispatch >= config.DISPATCH_INTERVAL_SECONDS:
-            dispatched = await self._dispatch_one()
-            if dispatched:
+            # dispatch in parallel: keep going while there are pending tasks
+            # AND free capable servers (one in-flight task per server)
+            dispatched_any = False
+            while await self._dispatch_one():
+                dispatched_any = True
+            if dispatched_any:
                 self._last_dispatch = now
         await self._poll_rendering()
 

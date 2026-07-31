@@ -2076,9 +2076,44 @@ CHARGEN_TOTAL_TIMEOUT_SECONDS = 3600
 
 _CHARGEN_STAGE_LABELS = {
     "flux_render": "рендерим T-позу (Flux)",
+    "awaiting_image_approval": "ждём подтверждения изображения",
     "hunyuan": "генерируем 3D-модель (Hunyuan3D)",
     "turntable": "рендерим видео-облёт",
 }
+
+
+def _chargen_image_review_markup(job_id: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Сделать 3D-модель", callback_data=f"rfa:{job_id}"),
+            InlineKeyboardButton("🔁 Перегенерировать", callback_data=f"rfr:{job_id}"),
+        ],
+        [InlineKeyboardButton("🗑 Отмена", callback_data=f"rfd:{job_id}")],
+    ])
+
+
+def _chargen_retry_markup(job_id: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔁 Перегенерировать", callback_data=f"rfr:{job_id}"),
+            InlineKeyboardButton("🗑 Отмена", callback_data=f"rfd:{job_id}"),
+        ]
+    ])
+
+
+async def _download_bytes(url: str, timeout: float = 120.0) -> bytes | None:
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                return resp.content
+    except Exception as e:
+        print(f"[Telegram][Renderfin] download failed {url}: {e}")
+    return None
 
 
 async def _chargen_edit_status(bot, chat_id: int, message_id: int, text: str) -> None:
@@ -2095,86 +2130,24 @@ async def _chargen_edit_status(bot, chat_id: int, message_id: int, text: str) ->
 
 async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: int | None,
                           status_message_id: int) -> None:
+    """Phase 1 entry (🎨 button): prompt -> flux render -> image review message."""
     import render_prompting
-    from telegram.constants import ParseMode
 
     try:
         plan = await render_prompting.build_render_request(task_id)
         prompt_preview = html.escape(plan.prompt[:300])
         await _chargen_edit_status(
             bot, chat_id, status_message_id,
-            f"⏳ Промпт готов ({plan.source}, телосложение: {plan.body_type}), запускаем рендер…\n"
+            f"⏳ Промпт готов ({plan.source}, телосложение: {plan.body_type}), рендерим T-позу…\n"
             f"<i>{prompt_preview}</i>",
         )
         job_id = await render_prompting.start_character_gen(plan, source_task_id=task_id)
-
-        deadline = asyncio.get_event_loop().time() + CHARGEN_TOTAL_TIMEOUT_SECONDS
-        last_stage = ""
-        status: dict = {}
-        while asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(CHARGEN_POLL_INTERVAL_SECONDS)
-            try:
-                status = await render_prompting.poll_character_gen(job_id)
-            except Exception as e:
-                print(f"[Telegram][Renderfin] poll failed for job {job_id}: {e}")
-                continue
-            stage = str(status.get("stage") or "")
-            if stage in ("ready", "failed", "discarded"):
-                break
-            if stage != last_stage:
-                last_stage = stage
-                label = _CHARGEN_STAGE_LABELS.get(stage, stage)
-                await _chargen_edit_status(
-                    bot, chat_id, status_message_id,
-                    f"⏳ Генерация: {html.escape(label)}…\n<i>{prompt_preview}</i>",
-                )
-        else:
-            raise RuntimeError("генерация не уложилась в таймаут")
-
-        stage = str(status.get("stage") or "")
-        if stage != "ready":
-            raise RuntimeError(str(status.get("error") or f"стадия {stage}"))
-
-        video_url = str(status.get("video_url") or "")
-        glb_url = str(status.get("glb_url") or "")
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-        review_markup = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Сабмитить", callback_data=f"rfs:{job_id}"),
-                InlineKeyboardButton("🗑 Удалить", callback_data=f"rfd:{job_id}"),
-            ]
-        ])
-        caption = (
-            f"🎨 <b>3D-модель сгенерирована</b>\n"
-            f"<i>{prompt_preview}</i>\n"
-            f'🧊 <a href="{html.escape(glb_url)}">GLB</a>'
+        await _watch_image_phase(
+            bot, chat_id, job_id,
+            reply_to_message_id=reply_to_message_id,
+            status_message_id=status_message_id,
+            task_id=task_id,
         )
-        video_bytes = None
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.get(video_url)
-                if resp.status_code == 200:
-                    video_bytes = resp.content
-        except Exception as e:
-            print(f"[Telegram][Renderfin] turntable download failed: {e}")
-        if video_bytes:
-            await bot.send_video(
-                chat_id=chat_id, video=video_bytes, caption=caption,
-                parse_mode=ParseMode.HTML, supports_streaming=True,
-                reply_to_message_id=reply_to_message_id, reply_markup=review_markup,
-            )
-        else:
-            await bot.send_message(
-                chat_id=chat_id, text=caption + f'\n🎬 <a href="{html.escape(video_url)}">Видео</a>',
-                parse_mode=ParseMode.HTML,
-                reply_to_message_id=reply_to_message_id, reply_markup=review_markup,
-            )
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=status_message_id)
-        except Exception:
-            pass
-        print(f"[Telegram][Renderfin] generation delivered: task={task_id} job={job_id}")
     except Exception as e:
         print(f"[Telegram][Renderfin] generation failed for task {task_id}: {e}")
         await _chargen_edit_status(
@@ -2182,6 +2155,244 @@ async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: 
             f"❌ Ошибка генерации: {html.escape(str(e)[:300])}\nКнопку можно нажать ещё раз.",
         )
         await release_notification(chat_id, "renderfin_gen", task_id)
+
+
+async def _watch_image_phase(bot, chat_id: int, job_id: str, *,
+                             reply_to_message_id: int | None,
+                             status_message_id: int | None,
+                             task_id: str = "") -> None:
+    """Poll until the Flux render awaits validation, then post it with buttons."""
+    import render_prompting
+    from telegram.constants import ParseMode
+
+    deadline = asyncio.get_event_loop().time() + CHARGEN_TOTAL_TIMEOUT_SECONDS
+    status: dict = {}
+    stage = ""
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(CHARGEN_POLL_INTERVAL_SECONDS)
+        try:
+            status = await render_prompting.poll_character_gen(job_id)
+        except Exception as e:
+            print(f"[Telegram][Renderfin] poll failed for job {job_id}: {e}")
+            continue
+        stage = str(status.get("stage") or "")
+        if stage in ("awaiting_image_approval", "failed", "discarded", "ready"):
+            break
+    else:
+        stage = "failed"
+        status = {"error": "рендер изображения не уложился в таймаут"}
+
+    task_id = task_id or str(status.get("source_task_id") or "")
+    prompt_preview = html.escape(str(status.get("prompt") or "")[:300])
+
+    if stage == "discarded":
+        return
+    if stage == "failed":
+        message = f"❌ Рендер не удался: {html.escape(str(status.get('error') or '')[:300])}"
+        if status_message_id:
+            await _chargen_edit_status(bot, chat_id, status_message_id,
+                                       message + "\nКнопку можно нажать ещё раз.")
+        else:
+            try:
+                await bot.send_message(chat_id=chat_id, text=message,
+                                       reply_to_message_id=reply_to_message_id)
+            except Exception:
+                pass
+        if task_id:
+            await release_notification(chat_id, "renderfin_gen", task_id)
+        return
+
+    image_url = str(status.get("image_url") or "")
+    isolated_url = str(status.get("isolated_url") or "")
+    caption = (
+        f"🖼 <b>T-поза готова</b> — делаем 3D-модель?\n"
+        f"<i>{prompt_preview}</i>\n"
+        f'✂️ <a href="{html.escape(isolated_url)}">PNG с альфой</a>'
+    )
+    image_bytes = await _download_bytes(image_url)
+    try:
+        if image_bytes:
+            await bot.send_photo(
+                chat_id=chat_id, photo=image_bytes, caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=reply_to_message_id,
+                reply_markup=_chargen_image_review_markup(job_id),
+            )
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=caption + f'\n🖼 <a href="{html.escape(image_url)}">Изображение</a>',
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=reply_to_message_id,
+                reply_markup=_chargen_image_review_markup(job_id),
+            )
+    except Exception as e:
+        print(f"[Telegram][Renderfin] image review send failed for job {job_id}: {e}")
+        return
+    if status_message_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=status_message_id)
+        except Exception:
+            pass
+    print(f"[Telegram][Renderfin] image review posted: job={job_id}")
+
+
+async def _watch_model_phase(bot, chat_id: int, job_id: str, photo_message_id: int) -> None:
+    """After approval: poll hunyuan+turntable, deliver the review video."""
+    import render_prompting
+    from telegram.constants import ParseMode
+
+    deadline = asyncio.get_event_loop().time() + CHARGEN_TOTAL_TIMEOUT_SECONDS
+    last_stage = ""
+    status: dict = {}
+    stage = ""
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(CHARGEN_POLL_INTERVAL_SECONDS)
+        try:
+            status = await render_prompting.poll_character_gen(job_id)
+        except Exception as e:
+            print(f"[Telegram][Renderfin] poll failed for job {job_id}: {e}")
+            continue
+        stage = str(status.get("stage") or "")
+        if stage in ("ready", "failed", "discarded"):
+            break
+        if stage != last_stage:
+            last_stage = stage
+            label = _CHARGEN_STAGE_LABELS.get(stage, stage)
+            try:
+                await bot.edit_message_caption(
+                    chat_id=chat_id, message_id=photo_message_id,
+                    caption=f"⏳ {html.escape(label)}…", parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+    else:
+        stage = "failed"
+        status = {"error": "3D-генерация не уложилась в таймаут"}
+
+    prompt_preview = html.escape(str(status.get("prompt") or "")[:300])
+
+    if stage == "discarded":
+        return
+    if stage == "failed":
+        err = html.escape(str(status.get("error") or "")[:250])
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id, message_id=photo_message_id,
+                caption=f"❌ 3D не удалось: {err}\nМожно перегенерировать изображение.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_chargen_retry_markup(job_id),
+            )
+        except Exception:
+            pass
+        return
+
+    video_url = str(status.get("video_url") or "")
+    glb_url = str(status.get("glb_url") or "")
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    review_markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Сабмитить", callback_data=f"rfs:{job_id}"),
+            InlineKeyboardButton("🗑 Удалить", callback_data=f"rfd:{job_id}"),
+        ]
+    ])
+    caption = (
+        f"🎨 <b>3D-модель сгенерирована</b>\n"
+        f"<i>{prompt_preview}</i>\n"
+        f'🧊 <a href="{html.escape(glb_url)}">GLB</a>'
+    )
+    video_bytes = await _download_bytes(video_url)
+    if video_bytes:
+        await bot.send_video(
+            chat_id=chat_id, video=video_bytes, caption=caption,
+            parse_mode=ParseMode.HTML, supports_streaming=True,
+            reply_to_message_id=photo_message_id, reply_markup=review_markup,
+        )
+    else:
+        await bot.send_message(
+            chat_id=chat_id, text=caption + f'\n🎬 <a href="{html.escape(video_url)}">Видео</a>',
+            parse_mode=ParseMode.HTML,
+            reply_to_message_id=photo_message_id, reply_markup=review_markup,
+        )
+    try:
+        await bot.edit_message_caption(
+            chat_id=chat_id, message_id=photo_message_id,
+            caption="✅ Изображение одобрено — модель ниже.",
+        )
+    except Exception:
+        pass
+    print(f"[Telegram][Renderfin] model review delivered: job={job_id}")
+
+
+async def _handle_approve_callback(update, context) -> None:
+    import render_prompting
+
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(r"^rfa:([0-9a-fA-F-]{8,64})$", query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    job_id = match.group(1)
+    try:
+        payload = await render_prompting.approve_character_gen_image(job_id)
+    except Exception as e:
+        await query.answer(f"Ошибка: {str(e)[:150]}")
+        return
+    if not payload.get("transitioned"):
+        await query.answer(f"Уже в работе (стадия: {payload.get('stage')})")
+        return
+    await query.answer("Генерируем 3D-модель…")
+    chat_id = int(query.message.chat.id)
+    try:
+        await context.bot.edit_message_caption(
+            chat_id=chat_id, message_id=query.message.message_id,
+            caption="⏳ Генерируем 3D-модель (обычно 5-10 минут)…",
+        )
+    except Exception:
+        pass
+    asyncio.create_task(
+        _watch_model_phase(context.bot, chat_id, job_id, query.message.message_id)
+    )
+
+
+async def _handle_regen_callback(update, context) -> None:
+    import render_prompting
+
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(r"^rfr:([0-9a-fA-F-]{8,64})$", query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    job_id = match.group(1)
+    try:
+        payload = await render_prompting.regenerate_character_gen_image(job_id)
+    except Exception as e:
+        await query.answer(f"Ошибка: {str(e)[:150]}")
+        return
+    if not payload.get("transitioned"):
+        await query.answer(f"Сейчас нельзя (стадия: {payload.get('stage')})")
+        return
+    await query.answer("Перегенерируем изображение…")
+    chat_id = int(query.message.chat.id)
+    try:
+        await context.bot.edit_message_caption(
+            chat_id=chat_id, message_id=query.message.message_id,
+            caption="🔁 Рендерим новый вариант T-позы…",
+        )
+    except Exception:
+        pass
+    asyncio.create_task(
+        _watch_image_phase(
+            context.bot, chat_id, job_id,
+            reply_to_message_id=query.message.message_id,
+            status_message_id=None,
+        )
+    )
 
 
 async def _handle_generate_callback(update, context) -> None:
@@ -2335,6 +2546,8 @@ async def run_polling() -> None:
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", _start_cmd))
     app.add_handler(CallbackQueryHandler(_handle_generate_callback, pattern=r"^rfg:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=r"^rfa:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_regen_callback, pattern=r"^rfr:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_submit_callback, pattern=r"^rfs:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_delete_callback, pattern=r"^rfd:[0-9a-fA-F-]{8,64}$"))
 

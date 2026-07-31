@@ -293,6 +293,24 @@ async def poll_character_gen(job_id: str) -> Dict[str, Any]:
     return resp.json()
 
 
+async def approve_character_gen_image(job_id: str) -> Dict[str, Any]:
+    """Approve the Flux render; pipeline continues to the 3D stage."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/approve-image")
+    if resp.status_code != 200:
+        raise RuntimeError(f"character-gen approve failed: HTTP {resp.status_code}")
+    return resp.json()
+
+
+async def regenerate_character_gen_image(job_id: str) -> Dict[str, Any]:
+    """Re-render the Flux image with a fresh seed (same prompt/mask)."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/regenerate-image")
+    if resp.status_code != 200:
+        raise RuntimeError(f"character-gen regenerate failed: HTTP {resp.status_code}")
+    return resp.json()
+
+
 async def discard_character_gen(job_id: str) -> Dict[str, Any]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/discard")
