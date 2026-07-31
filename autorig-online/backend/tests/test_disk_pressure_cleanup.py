@@ -110,10 +110,41 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
 if __name__ == "__main__":
     unittest.main()
 
-class GlbCachePruneTests(unittest.TestCase):
-    """The GLB cache is mostly *_all_animations_unity.fbx in production, so a
-    pruner that only globbed '*.glb' could never enforce the cap."""
+async def _upstream_url(_db, path):
+    return f"https://worker.example/{path.name}"
 
+
+async def _upstream_alive(_url):
+    return True
+
+
+async def _upstream_gone(_url):
+    return False
+
+
+class _FakeRow:
+    def __init__(self, value):
+        self._value = value
+
+    def first(self):
+        return (self._value,) if self._value is not None else None
+
+
+class _UrlDb:
+    """Minimal db stub: maps task id -> ready_urls."""
+
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    async def execute(self, query):
+        # the query is select(Task.ready_urls).where(Task.id == task_id);
+        # tests drive resolution through _cache_entry_upstream_url instead
+        raise NotImplementedError
+
+
+class GlbCachePruneTests(unittest.IsolatedAsyncioTestCase):
+    """The cache holds the last copy of many deliverables (workers purge their
+    outputs), so eviction must verify the upstream can still serve them."""
     @staticmethod
     def _write(path: Path, size_mb: int, age_hours: float) -> Path:
         path.write_bytes(b"\0" * (size_mb * 1024 * 1024))
@@ -121,15 +152,16 @@ class GlbCachePruneTests(unittest.TestCase):
         os.utime(path, (when, when))
         return path
 
-    def test_fbx_artifacts_are_evicted_oldest_first(self):
+    async def test_fbx_artifacts_are_evicted_oldest_first(self):
         with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
             cache = Path(tmp)
             self._write(cache / "a_all_animations_unity.fbx", 40, 48)
             self._write(cache / "b_all_animations_unity.fbx", 40, 36)
             self._write(cache / "c_prepared.glb", 20, 30)
 
-            with patch.object(cleanup, "_free_gb", return_value=100.0):
-                removed, freed = cleanup._purge_oldest_glb_cache_until(
+            with patch.object(cleanup, "_free_gb", return_value=100.0),                  patch.object(cleanup, "_cache_entry_upstream_url", new=_upstream_url),                  patch.object(cleanup, "_upstream_is_available", new=_upstream_alive):
+                removed, freed = await cleanup._purge_oldest_glb_cache_until(
+                    None,
                     glb_cache_dir=cache,
                     target_free_gb=1.0,      # no free-space pressure
                     max_cache_gb=0.05,       # ~51 MB cap forces eviction
@@ -141,14 +173,15 @@ class GlbCachePruneTests(unittest.TestCase):
             self.assertFalse((cache / "a_all_animations_unity.fbx").exists())
             self.assertTrue((cache / "c_prepared.glb").exists())
 
-    def test_pressure_relaxes_the_age_preference(self):
+    async def test_pressure_relaxes_the_age_preference(self):
         with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
             cache = Path(tmp)
             for name in ("x.fbx", "y.fbx", "z.glb"):
                 self._write(cache / name, 30, 1)  # all younger than min_age
 
-            with patch.object(cleanup, "_free_gb", return_value=0.5):
-                removed, _freed = cleanup._purge_oldest_glb_cache_until(
+            with patch.object(cleanup, "_free_gb", return_value=0.5),                  patch.object(cleanup, "_cache_entry_upstream_url", new=_upstream_url),                  patch.object(cleanup, "_upstream_is_available", new=_upstream_alive):
+                removed, _freed = await cleanup._purge_oldest_glb_cache_until(
+                    None,
                     glb_cache_dir=cache,
                     target_free_gb=5.0,
                     max_cache_gb=0.02,
@@ -156,13 +189,14 @@ class GlbCachePruneTests(unittest.TestCase):
                 )
             self.assertGreater(removed, 0)
 
-    def test_files_still_being_written_are_protected(self):
+    async def test_files_still_being_written_are_protected(self):
         with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
             cache = Path(tmp)
             self._write(cache / "fresh.fbx", 30, 0)
 
-            with patch.object(cleanup, "_free_gb", return_value=0.5):
-                removed, _ = cleanup._purge_oldest_glb_cache_until(
+            with patch.object(cleanup, "_free_gb", return_value=0.5),                  patch.object(cleanup, "_cache_entry_upstream_url", new=_upstream_url),                  patch.object(cleanup, "_upstream_is_available", new=_upstream_alive):
+                removed, _ = await cleanup._purge_oldest_glb_cache_until(
+                    None,
                     glb_cache_dir=cache,
                     target_free_gb=5.0,
                     max_cache_gb=0.01,
@@ -171,14 +205,15 @@ class GlbCachePruneTests(unittest.TestCase):
             self.assertEqual(removed, 0)
             self.assertTrue((cache / "fresh.fbx").is_file())
 
-    def test_unrelated_files_are_never_touched(self):
+    async def test_unrelated_files_are_never_touched(self):
         with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
             cache = Path(tmp)
             self._write(cache / "keep.json", 30, 100)
             self._write(cache / "drop.fbx", 30, 100)
 
-            with patch.object(cleanup, "_free_gb", return_value=0.5):
-                cleanup._purge_oldest_glb_cache_until(
+            with patch.object(cleanup, "_free_gb", return_value=0.5),                  patch.object(cleanup, "_cache_entry_upstream_url", new=_upstream_url),                  patch.object(cleanup, "_upstream_is_available", new=_upstream_alive):
+                await cleanup._purge_oldest_glb_cache_until(
+                    None,
                     glb_cache_dir=cache,
                     target_free_gb=5.0,
                     max_cache_gb=0.01,
@@ -187,14 +222,15 @@ class GlbCachePruneTests(unittest.TestCase):
             self.assertTrue((cache / "keep.json").is_file())
             self.assertFalse((cache / "drop.fbx").is_file())
 
-    def test_eviction_stops_once_under_cap(self):
+    async def test_eviction_stops_once_under_cap(self):
         with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
             cache = Path(tmp)
             for i in range(4):
                 self._write(cache / f"f{i}.fbx", 25, 48 + i)
 
-            with patch.object(cleanup, "_free_gb", return_value=100.0):
-                removed, _ = cleanup._purge_oldest_glb_cache_until(
+            with patch.object(cleanup, "_free_gb", return_value=100.0),                  patch.object(cleanup, "_cache_entry_upstream_url", new=_upstream_url),                  patch.object(cleanup, "_upstream_is_available", new=_upstream_alive):
+                removed, _ = await cleanup._purge_oldest_glb_cache_until(
+                    None,
                     glb_cache_dir=cache,
                     target_free_gb=1.0,
                     max_cache_gb=0.06,
@@ -202,3 +238,98 @@ class GlbCachePruneTests(unittest.TestCase):
                 )
             self.assertGreater(removed, 0)
             self.assertLess(removed, 4)
+
+    async def test_entry_is_kept_when_the_worker_no_longer_serves_it(self):
+        """Regression: workers purge their outputs, so an unreachable upstream
+        means the cache file is the LAST copy of a user deliverable."""
+        with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
+            cache = Path(tmp)
+            self._write(cache / "task1_a_all_animations_unity.fbx", 40, 100)
+            self._write(cache / "task2_b_all_animations_unity.fbx", 40, 90)
+
+            with patch.object(cleanup, "_free_gb", return_value=0.5), \
+                 patch.object(cleanup, "_cache_entry_upstream_url", new=_upstream_url), \
+                 patch.object(cleanup, "_upstream_is_available", new=_upstream_gone):
+                removed, freed = await cleanup._purge_oldest_glb_cache_until(
+                    None,
+                    glb_cache_dir=cache,
+                    target_free_gb=5.0,
+                    max_cache_gb=0.01,
+                    min_age_hours=24,
+                )
+
+            self.assertEqual(removed, 0)
+            self.assertEqual(freed, 0)
+            self.assertTrue((cache / "task1_a_all_animations_unity.fbx").is_file())
+            self.assertTrue((cache / "task2_b_all_animations_unity.fbx").is_file())
+
+    async def test_entry_without_a_known_upstream_is_kept(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
+            cache = Path(tmp)
+            self._write(cache / "orphan_file.fbx", 30, 100)
+
+            async def _no_url(_db, _path):
+                return ""
+
+            with patch.object(cleanup, "_free_gb", return_value=0.5), \
+                 patch.object(cleanup, "_cache_entry_upstream_url", new=_no_url), \
+                 patch.object(cleanup, "_upstream_is_available", new=_upstream_alive):
+                removed, _ = await cleanup._purge_oldest_glb_cache_until(
+                    None,
+                    glb_cache_dir=cache,
+                    target_free_gb=5.0,
+                    max_cache_gb=0.01,
+                    min_age_hours=24,
+                )
+            self.assertEqual(removed, 0)
+            self.assertTrue((cache / "orphan_file.fbx").is_file())
+
+    async def test_abandoned_partials_are_dropped_without_probing(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
+            cache = Path(tmp)
+            self._write(cache / "half_download.fbx.ab12cd.tmp", 30, 100)
+
+            probed = {"n": 0}
+
+            async def _count(_db, _path):
+                probed["n"] += 1
+                return ""
+
+            with patch.object(cleanup, "_free_gb", return_value=0.5), \
+                 patch.object(cleanup, "_cache_entry_upstream_url", new=_count), \
+                 patch.object(cleanup, "_upstream_is_available", new=_upstream_gone):
+                removed, _ = await cleanup._purge_oldest_glb_cache_until(
+                    None,
+                    glb_cache_dir=cache,
+                    target_free_gb=5.0,
+                    max_cache_gb=0.01,
+                    min_age_hours=24,
+                )
+            self.assertEqual(removed, 1)
+            self.assertEqual(probed["n"], 0)
+            self.assertFalse((cache / "half_download.fbx.ab12cd.tmp").exists())
+
+    async def test_probe_budget_is_bounded(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
+            cache = Path(tmp)
+            for i in range(8):
+                self._write(cache / f"t{i}_x_all_animations_unity.fbx", 10, 50 + i)
+
+            probed = {"n": 0}
+
+            async def _count(_db, _path):
+                probed["n"] += 1
+                return ""
+
+            with patch.object(cleanup, "_free_gb", return_value=0.5), \
+                 patch.object(cleanup, "GLB_CACHE_MAX_PROBES", 3), \
+                 patch.object(cleanup, "_cache_entry_upstream_url", new=_count), \
+                 patch.object(cleanup, "_upstream_is_available", new=_upstream_gone):
+                await cleanup._purge_oldest_glb_cache_until(
+                    None,
+                    glb_cache_dir=cache,
+                    target_free_gb=5.0,
+                    max_cache_gb=0.01,
+                    min_age_hours=24,
+                )
+            self.assertEqual(probed["n"], 3)

@@ -65,12 +65,57 @@ def _age_cutoff_timestamp(min_age_hours: float) -> float:
     return time.time() - max(0.0, float(min_age_hours)) * 3600.0
 
 
-# The GLB cache holds every artifact re-downloadable from a worker, not only
-# .glb: in production it is mostly *_all_animations_unity.fbx. Pruning just
-# "*.glb" left the cap unenforceable (11 of 13 GB were invisible to it).
-GLB_CACHE_PRUNABLE_SUFFIXES = (".glb", ".fbx", ".tmp")
+# The GLB cache is *mostly* *_all_animations_unity.fbx, so a pruner that globbed
+# only "*.glb" could never enforce the cap. But those files are NOT regenerable
+# on their own: /api/task/{id}/animations.fbx is a pass-through proxy to the
+# converter worker, and workers purge their output. Once a worker has purged it,
+# the cache copy is the LAST copy of a user deliverable. So the pruner may only
+# delete an entry after confirming the upstream still serves it.
+GLB_CACHE_PRUNABLE_SUFFIXES = (".glb", ".fbx")
+# Abandoned partial downloads carry no value once they are old.
+GLB_CACHE_ORPHAN_SUFFIXES = (".tmp",)
 # Never touch something that may still be streaming to disk.
 GLB_CACHE_HARD_MIN_AGE_SECONDS = 600.0
+# Upstream probing is network-bound; keep it bounded per run.
+GLB_CACHE_MAX_PROBES = int(os.getenv("GLB_CACHE_MAX_UPSTREAM_PROBES", "60"))
+GLB_CACHE_PROBE_TIMEOUT_SECONDS = float(os.getenv("GLB_CACHE_PROBE_TIMEOUT", "8"))
+
+
+async def _upstream_is_available(url: str) -> bool:
+    """True only when the worker still serves this artifact."""
+    if not url or not url.startswith(("http://", "https://")):
+        return False
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(
+            timeout=GLB_CACHE_PROBE_TIMEOUT_SECONDS, follow_redirects=True
+        ) as client:
+            resp = await client.head(url)
+            if resp.status_code == 405:  # some workers reject HEAD
+                resp = await client.get(url, headers={"Range": "bytes=0-1024"})
+                return resp.status_code in (200, 206)
+            return resp.status_code == 200
+    except Exception:
+        return False
+
+
+async def _cache_entry_upstream_url(db, path: Path) -> str:
+    """Resolve the worker URL a cache entry was copied from, if any."""
+    from database import Task
+    from sqlalchemy import select
+
+    task_id, _, remainder = path.name.partition("_")
+    if not task_id or not remainder:
+        return ""
+    result = await db.execute(select(Task.ready_urls).where(Task.id == task_id))
+    row = result.first()
+    if not row or not row[0]:
+        return ""
+    for url in row[0]:
+        if url.rsplit("/", 1)[-1] == remainder:
+            return url
+    return ""
 
 
 def _glb_cache_candidates(glb_cache_dir: Path, cutoff_ts: float) -> list[tuple[float, int, Path]]:
@@ -89,29 +134,58 @@ def _glb_cache_candidates(glb_cache_dir: Path, cutoff_ts: float) -> list[tuple[f
     return candidates
 
 
-def _purge_oldest_glb_cache_until(
+async def _purge_oldest_glb_cache_until(
+    db,
     *,
     glb_cache_dir: Path,
     target_free_gb: float,
     max_cache_gb: float,
     min_age_hours: float,
 ) -> tuple[int, int]:
+    """Evict cache entries oldest-first, but only ones the worker can still serve.
+
+    The cache holds the only surviving copy of many deliverables (workers purge
+    their outputs), so an entry is deleted exclusively after its upstream URL
+    answers 200. Abandoned *.tmp partials are dropped without a probe.
+    """
     removed = 0
     freed = 0
     if not glb_cache_dir.exists():
         return removed, freed
 
+    cache_bytes = _dir_size_bytes(glb_cache_dir)
+
+    def _pressured() -> bool:
+        over_cap = max_cache_gb > 0 and (cache_bytes / (1024**3)) > max_cache_gb
+        return _free_gb() < target_free_gb or over_cap
+
+    # 1. Orphan partial downloads: pure garbage, no probe needed.
+    orphan_cutoff = _age_cutoff_timestamp(max(1.0, min_age_hours))
+    for path in sorted(glb_cache_dir.iterdir()):
+        if not _pressured():
+            break
+        if not path.is_file() or path.suffix.lower() not in GLB_CACHE_ORPHAN_SUFFIXES:
+            continue
+        try:
+            stat = path.stat()
+            if stat.st_mtime > orphan_cutoff:
+                continue
+            size = stat.st_size
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        removed += 1
+        freed += size
+        cache_bytes = max(0, cache_bytes - size)
+        print(f"[Disk Prepass] Removed abandoned partial {path.name} ({size / (1024**2):.1f} MB)")
+
+    if not _pressured():
+        return removed, freed
+
+    # 2. Real cache entries, oldest first, each verified re-downloadable.
     cutoff_ts = _age_cutoff_timestamp(min_age_hours)
     candidates = _glb_cache_candidates(glb_cache_dir, cutoff_ts)
-
-    cache_gb_now = _dir_size_bytes(glb_cache_dir) / (1024**3)
-    still_pressured = _free_gb() < target_free_gb or (
-        max_cache_gb > 0 and cache_gb_now > max_cache_gb
-    )
-    if not candidates and still_pressured:
-        # Everything is younger than the preferred age but the disk (or the cap)
-        # says otherwise: fall back to anything that is not actively being
-        # written. These files are caches; a miss just re-downloads them.
+    if not candidates:
         relaxed_cutoff = time.time() - GLB_CACHE_HARD_MIN_AGE_SECONDS
         candidates = _glb_cache_candidates(glb_cache_dir, relaxed_cutoff)
         if candidates:
@@ -120,15 +194,19 @@ def _purge_oldest_glb_cache_until(
                 f"relaxing to {GLB_CACHE_HARD_MIN_AGE_SECONDS / 60:.0f} min under pressure"
             )
 
-    # Track the cache size incrementally: rescanning the whole directory per
-    # deletion made this O(n^2) over ~700 files, every 60 seconds.
-    cache_bytes = _dir_size_bytes(glb_cache_dir)
+    probes = 0
+    kept_last_copy = 0
     for _mtime, size, path in candidates:
-        cache_gb = cache_bytes / (1024**3)
-        needs_free_headroom = _free_gb() < target_free_gb
-        exceeds_cap = max_cache_gb > 0 and cache_gb > max_cache_gb
-        if not needs_free_headroom and not exceeds_cap:
+        if not _pressured():
             break
+        if probes >= GLB_CACHE_MAX_PROBES:
+            print(f"[Disk Prepass] Upstream probe budget reached ({GLB_CACHE_MAX_PROBES})")
+            break
+        upstream = await _cache_entry_upstream_url(db, path)
+        probes += 1
+        if not upstream or not await _upstream_is_available(upstream):
+            kept_last_copy += 1
+            continue
         try:
             path.unlink()
         except FileNotFoundError:
@@ -137,14 +215,20 @@ def _purge_oldest_glb_cache_until(
         freed += size
         cache_bytes = max(0, cache_bytes - size)
         print(
-            f"[Disk Prepass] Removed GLB cache {path.name} "
+            f"[Disk Prepass] Removed re-downloadable {path.name} "
             f"({size / (1024**2):.1f} MB); free now {_free_gb():.2f} GB, "
             f"glb_cache now {(cache_bytes / (1024**3)):.2f} GB"
+        )
+    if kept_last_copy:
+        print(
+            f"[Disk Prepass] Kept {kept_last_copy} cache entrie(s): the worker no "
+            "longer serves them, so these are the last copy"
         )
     return removed, freed
 
 
-def _filesystem_prepass(
+async def _filesystem_prepass(
+    db,
     *,
     target_free_gb: float,
     glb_cache_max_gb: float,
@@ -184,7 +268,8 @@ def _filesystem_prepass(
         summary["prepass_glb_cache_gb_after"] = _dir_size_bytes(GLB_CACHE_DIR) / (1024**3)
         return summary
 
-    gd, gb = _purge_oldest_glb_cache_until(
+    gd, gb = await _purge_oldest_glb_cache_until(
+        db,
         glb_cache_dir=GLB_CACHE_DIR,
         target_free_gb=target_free_gb,
         max_cache_gb=float(glb_cache_max_gb),
@@ -353,15 +438,18 @@ async def run() -> None:
         buffer_gb=float(DISK_CLEANUP_TARGET_BUFFER_GB),
     )
     before = _disk_snapshot()
-    prepass = _filesystem_prepass(
-        target_free_gb=target_free_gb,
-        glb_cache_max_gb=float(GLB_CACHE_MAX_GB),
-        glb_cache_min_age_hours=float(GLB_CACHE_MIN_AGE_HOURS),
-    )
-    after_prepass = _disk_snapshot()
 
     await init_db()
     async with AsyncSessionLocal() as db:
+        # the prepass needs the DB: an entry may only be evicted once its
+        # upstream worker URL is confirmed to still serve it
+        prepass = await _filesystem_prepass(
+            db,
+            target_free_gb=target_free_gb,
+            glb_cache_max_gb=float(GLB_CACHE_MAX_GB),
+            glb_cache_min_age_hours=float(GLB_CACHE_MIN_AGE_HOURS),
+        )
+        after_prepass = _disk_snapshot()
         task_cache_summary = await _enforce_periodic_task_cache_max_size(
             db,
             max_gb=float(PERIODIC_TASK_CACHE_MAX_GB),
