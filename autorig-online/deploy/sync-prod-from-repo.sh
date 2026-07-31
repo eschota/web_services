@@ -26,6 +26,29 @@ echo "==> pip install -r backend/requirements.txt → ${PROD_ROOT}/venv"
 # Use `python -m pip` so packages always land in PROD_ROOT venv (pip shim can point elsewhere).
 sudo "${PROD_ROOT}/venv/bin/python" -m pip install -r "${REPO_ROOT}/backend/requirements.txt" -q
 
-sudo systemctl restart autorig
+# --- Renderfin service (render queue + character generation) ---
+echo "==> renderfin: data dirs, masks, worker registry seed, systemd unit"
+sudo mkdir -p /var/autorig/renderfin/render/masks /var/autorig/renderfin/servers /var/autorig/renderfin/db /var/autorig/renderfin/tmp
+sudo cp -f "${REPO_ROOT}/backend/renderfin/assets/masks/"* /var/autorig/renderfin/render/masks/
+# Seed worker registry only for servers not already registered (runtime edits win)
+for seed in "${REPO_ROOT}/deploy/renderfin-servers/"*.json; do
+  name="$(basename "${seed}")"
+  if [[ ! -f "/var/autorig/renderfin/servers/${name}" ]]; then
+    sudo cp "${seed}" "/var/autorig/renderfin/servers/${name}"
+    echo "    seeded ${name}"
+  fi
+done
+sudo chown -R www-data:www-data /var/autorig/renderfin
+sudo cp -f "${REPO_ROOT}/deploy/autorig-renderfin.service" /etc/systemd/system/autorig-renderfin.service
+if [[ ! -f /etc/autorig-renderfin.env ]]; then
+  sudo cp "${REPO_ROOT}/deploy/autorig-renderfin.env.example" /etc/autorig-renderfin.env
+  echo "    installed /etc/autorig-renderfin.env from example — review RENDERFIN_WORKER_BASIC_AUTH"
+fi
+sudo systemctl daemon-reload
+sudo systemctl enable autorig-renderfin >/dev/null 2>&1 || true
 
-echo "OK: canonical root tree verified; autorig restarted."
+sudo systemctl restart autorig
+sudo systemctl restart autorig-renderfin
+sudo systemctl restart autorig-telegram || echo "WARN: autorig-telegram restart failed (unit missing?)"
+
+echo "OK: canonical root tree verified; autorig + renderfin + telegram restarted."

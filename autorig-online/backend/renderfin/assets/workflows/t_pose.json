@@ -1,0 +1,618 @@
+{
+  "5": {
+    "inputs": {
+      "width": [
+        "139",
+        0
+      ],
+      "height": [
+        "139",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "11": {
+    "inputs": {
+      "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "DualCLIPLoader"
+    }
+  },
+  "12": {
+    "inputs": {
+      "unet_name": "flux1-schnell.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "16": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "25": {
+    "inputs": {
+      "noise_seed": 650639755073450
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "29": {
+    "inputs": {
+      "conditioning": [
+        "252",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "30": {
+    "inputs": {
+      "type": "openpose",
+      "control_net": [
+        "33",
+        0
+      ]
+    },
+    "class_type": "SetUnionControlNetType",
+    "_meta": {
+      "title": "SetUnionControlNetType"
+    }
+  },
+  "33": {
+    "inputs": {
+      "control_net_name": "FLUX.1-dev-ControlNet-Union-Pro-2.0-fp8.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "44": {
+    "inputs": {
+      "image": "$image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "64": {
+    "inputs": {
+      "target_width": [
+        "139",
+        0
+      ],
+      "target_height": [
+        "139",
+        1
+      ],
+      "padding_color": "black",
+      "interpolation": "area",
+      "image": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "ResizeAndPadImage",
+    "_meta": {
+      "title": "ResizeAndPadImage"
+    }
+  },
+  "114": {
+    "inputs": {
+      "images": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "139": {
+    "inputs": {
+      "width": 1024,
+      "height": 1280
+    },
+    "class_type": "HelperNodes_WidthHeight",
+    "_meta": {
+      "title": "Image Dimensions"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "$output_url",
+      "images": [
+        "278",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image Original"
+    }
+  },
+  "157": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "lora_1": {
+        "on": true,
+        "lora": "aidmaMJ6.1-FLUX-v0.5.safetensors",
+        "strength": 0.4
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "12",
+        0
+      ],
+      "clip": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "Power Lora Loader (rgthree)"
+    }
+  },
+  "168": {
+    "inputs": {
+      "part1": [
+        "175",
+        0
+      ],
+      "part2": [
+        "171",
+        0
+      ],
+      "part3": "",
+      "part4": "",
+      "separator": ""
+    },
+    "class_type": "CR Combine Prompt",
+    "_meta": {
+      "title": "⚙️ CR Combine Prompt"
+    }
+  },
+  "171": {
+    "inputs": {
+      "text": "$prompt"
+    },
+    "class_type": "CR Text",
+    "_meta": {
+      "title": "🔤 CR Text Main Prompt"
+    }
+  },
+  "175": {
+    "inputs": {
+      "text": "aidmamj6.1, "
+    },
+    "class_type": "CR Text",
+    "_meta": {
+      "title": "🔤 CR Text Lora Trigger Word"
+    }
+  },
+  "177": {
+    "inputs": {
+      "output": "",
+      "source": [
+        "168",
+        0
+      ]
+    },
+    "class_type": "Display Any (rgthree)",
+    "_meta": {
+      "title": "Display Any (rgthree)"
+    }
+  },
+  "179": {
+    "inputs": {
+      "model_name": "4x_NMKD-Siax_200k.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "180": {
+    "inputs": {
+      "upscale_model": [
+        "179",
+        0
+      ],
+      "image": [
+        "256",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "182": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 0.5,
+      "image": [
+        "180",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "Upscale Image By"
+    }
+  },
+  "211": {
+    "inputs": {
+      "method": "Mixture of Diffusers",
+      "tile_width": 544,
+      "tile_height": 544,
+      "tile_overlap": 32,
+      "tile_batch_size": 4,
+      "model": [
+        "157",
+        0
+      ]
+    },
+    "class_type": "TiledDiffusion",
+    "_meta": {
+      "title": "Tiled Diffusion"
+    }
+  },
+  "214": {
+    "inputs": {
+      "pixels": [
+        "182",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "222": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 1123072455738058,
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "start_at_step": 1,
+      "end_at_step": 6,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "211",
+        0
+      ],
+      "positive": [
+        "253",
+        0
+      ],
+      "negative": [
+        "29",
+        0
+      ],
+      "latent_image": [
+        "277",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced)"
+    }
+  },
+  "223": {
+    "inputs": {
+      "tile_size": 1024,
+      "fast": true,
+      "samples": [
+        "222",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeTiled_TiledDiffusion",
+    "_meta": {
+      "title": "Tiled VAE Decode"
+    }
+  },
+  "252": {
+    "inputs": {
+      "text": [
+        "168",
+        0
+      ],
+      "clip": [
+        "157",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "253": {
+    "inputs": {
+      "strength": 0.5,
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "252",
+        0
+      ],
+      "negative": [
+        "29",
+        0
+      ],
+      "control_net": [
+        "30",
+        0
+      ],
+      "image": [
+        "64",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Apply ControlNet"
+    }
+  },
+  "254": {
+    "inputs": {
+      "noise": [
+        "25",
+        0
+      ],
+      "guider": [
+        "255",
+        0
+      ],
+      "sampler": [
+        "16",
+        0
+      ],
+      "sigmas": [
+        "259",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "255": {
+    "inputs": {
+      "model": [
+        "157",
+        0
+      ],
+      "conditioning": [
+        "253",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "BasicGuider"
+    }
+  },
+  "256": {
+    "inputs": {
+      "samples": [
+        "254",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "259": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 4,
+      "denoise": 1,
+      "model": [
+        "157",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "BasicScheduler"
+    }
+  },
+  "261": {
+    "inputs": {
+      "text": "aidmafluxpro1.1, \n"
+    },
+    "class_type": "CR Text",
+    "_meta": {
+      "title": "🔤 CR Text Lora Trigger Word"
+    }
+  },
+  "265": {
+    "inputs": {
+      "text": "aidmaimageupgrader, "
+    },
+    "class_type": "CR Text",
+    "_meta": {
+      "title": "🔤 CR Text Lora Trigger Word"
+    }
+  },
+  "273": {
+    "inputs": {
+      "images": [
+        "278",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "277": {
+    "inputs": {
+      "anything": [
+        "214",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "278": {
+    "inputs": {
+      "anything": [
+        "223",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "279": {
+    "inputs": {
+      "images": [
+        "256",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "300": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": false,
+      "background": "Alpha",
+      "background_color": "#ffffff",
+      "image": [
+        "278",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "Remove Background (RMBG)"
+    }
+  },
+  "301": {
+    "inputs": {
+      "filename_prefix": "$output_url_Isolated",
+      "images": [
+        "300",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image Isolated"
+    }
+  },
+  "280": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_abvex_00005_.png&type=temp&subfolder=&rand=0.2317788914507266"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_abvex_00006_.png&type=temp&subfolder=&rand=0.08093575305165301"
+          }
+        ]
+      },
+      "image_a": [
+        "256",
+        0
+      ],
+      "image_b": [
+        "278",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "Image Comparer (rgthree)"
+    }
+  }
+}

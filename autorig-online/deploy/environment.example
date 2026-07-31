@@ -22,4 +22,10 @@ MARKETING_POSTAL_ADDRESS=
 # TELEGRAM_BOT_TOKEN=...
 # TELEGRAM_NOTIFICATION_CHAT_ID=-1001234567890
 
+# Renderfin character generation (🎨 Сгенерировать button in the Telegram bot).
+# The bot needs the internal renderfin URL plus OPENAI_API_KEY/OPENROUTER_API_KEY
+# for Flux prompt generation (fallback template works without them).
+# RENDERFIN_INTERNAL_URL=http://127.0.0.1:8010/renderfin
+# RENDERFIN_PUBLIC_BASE_URL=https://autorig.online/renderfin
+
 # Site support uses the same group (forum topics): resolved from TELEGRAM_NOTIFICATION_CHAT_ID if set, else earliest active telegram_chats row with negative chat_id.

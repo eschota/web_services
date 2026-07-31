@@ -1,0 +1,755 @@
+{
+  "6": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "10": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "11": {
+    "inputs": {
+      "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "DualCLIPLoader"
+    }
+  },
+  "29": {
+    "inputs": {
+      "conditioning": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "45": {
+    "inputs": {
+      "model": "RMBG-2.0",
+      "sensitivity": 1,
+      "process_res": 1024,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": false,
+      "background": "Color",
+      "background_color": "#ffffff",
+      "image": [
+        "145",
+        0
+      ]
+    },
+    "class_type": "RMBG",
+    "_meta": {
+      "title": "Remove Background (RMBG)"
+    }
+  },
+  "52": {
+    "inputs": {
+      "images": [
+        "132",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "82": {
+    "inputs": {
+      "samples": [
+        "98",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "83": {
+    "inputs": {
+      "images": [
+        "104",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "86": {
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "96",
+        0
+      ]
+    },
+    "class_type": "DifferentialDiffusion",
+    "_meta": {
+      "title": "Differential Diffusion"
+    }
+  },
+  "89": {
+    "inputs": {
+      "noise_mask": true,
+      "positive": [
+        "29",
+        0
+      ],
+      "negative": [
+        "29",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ],
+      "pixels": [
+        "103",
+        1
+      ],
+      "mask": [
+        "103",
+        2
+      ]
+    },
+    "class_type": "InpaintModelConditioning",
+    "_meta": {
+      "title": "InpaintModelConditioning"
+    }
+  },
+  "96": {
+    "inputs": {
+      "unet_name": "FLUX.1-Fill-dev_fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "98": {
+    "inputs": {
+      "noise": [
+        "99",
+        0
+      ],
+      "guider": [
+        "100",
+        0
+      ],
+      "sampler": [
+        "101",
+        0
+      ],
+      "sigmas": [
+        "102",
+        0
+      ],
+      "latent_image": [
+        "89",
+        2
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "99": {
+    "inputs": {
+      "noise_seed": 128037816288237
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "100": {
+    "inputs": {
+      "model": [
+        "86",
+        0
+      ],
+      "conditioning": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "BasicGuider"
+    }
+  },
+  "101": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect"
+    }
+  },
+  "102": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 33,
+      "denoise": 1,
+      "model": [
+        "86",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "BasicScheduler"
+    }
+  },
+  "103": {
+    "inputs": {
+      "downscale_algorithm": "bilinear",
+      "upscale_algorithm": "bicubic",
+      "preresize": false,
+      "preresize_mode": "ensure minimum resolution",
+      "preresize_min_width": 1024,
+      "preresize_min_height": 1024,
+      "preresize_max_width": 16384,
+      "preresize_max_height": 16384,
+      "mask_fill_holes": true,
+      "mask_expand_pixels": 0,
+      "mask_invert": false,
+      "mask_blend_pixels": 32,
+      "mask_hipass_filter": 0.1,
+      "extend_for_outpainting": true,
+      "extend_up_factor": 1.07,
+      "extend_down_factor": 1.08,
+      "extend_left_factor": 1.5,
+      "extend_right_factor": 1.5,
+      "context_from_mask_extend_factor": 1.2,
+      "output_resize_to_target_size": false,
+      "output_target_width": 1024,
+      "output_target_height": 1280,
+      "output_padding": "32",
+      "device_mode": "gpu (much faster)",
+      "image": [
+        "126",
+        0
+      ],
+      "mask": [
+        "130",
+        0
+      ]
+    },
+    "class_type": "InpaintCropImproved",
+    "_meta": {
+      "title": "✂️ Inpaint Crop"
+    }
+  },
+  "104": {
+    "inputs": {
+      "stitcher": [
+        "103",
+        0
+      ],
+      "inpainted_image": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "InpaintStitchImproved",
+    "_meta": {
+      "title": "✂️ Inpaint Stitch"
+    }
+  },
+  "105": {
+    "inputs": {
+      "images": [
+        "103",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "106": {
+    "inputs": {
+      "images": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "111": {
+    "inputs": {
+      "images": [
+        "147",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "122": {
+    "inputs": {
+      "fill": "telea",
+      "falloff": 0,
+      "image": [
+        "155",
+        0
+      ],
+      "mask": [
+        "133",
+        0
+      ]
+    },
+    "class_type": "INPAINT_MaskedFill",
+    "_meta": {
+      "title": "Fill Masked Area"
+    }
+  },
+  "123": {
+    "inputs": {
+      "images": [
+        "126",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "125": {
+    "inputs": {
+      "images": [
+        "134",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "126": {
+    "inputs": {
+      "blur": 50,
+      "falloff": 10,
+      "image": [
+        "122",
+        0
+      ],
+      "mask": [
+        "136",
+        0
+      ]
+    },
+    "class_type": "INPAINT_MaskedBlur",
+    "_meta": {
+      "title": "Blur Masked Area"
+    }
+  },
+  "128": {
+    "inputs": {
+      "images": [
+        "135",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "130": {
+    "inputs": {
+      "sensitivity": 1,
+      "mask_blur": 0,
+      "mask_offset": 10,
+      "smooth": 0,
+      "fill_holes": false,
+      "invert_output": false,
+      "mask": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskEnhancer",
+    "_meta": {
+      "title": "Mask Enhancer (RMBG) 🖼️"
+    }
+  },
+  "132": {
+    "inputs": {
+      "mask": [
+        "130",
+        0
+      ]
+    },
+    "class_type": "MaskToImage",
+    "_meta": {
+      "title": "Convert Mask to Image"
+    }
+  },
+  "133": {
+    "inputs": {
+      "sensitivity": 1,
+      "mask_blur": 0,
+      "mask_offset": 10,
+      "smooth": 0,
+      "fill_holes": true,
+      "invert_output": false,
+      "mask": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskEnhancer",
+    "_meta": {
+      "title": "Mask Enhancer (RMBG) 🖼️"
+    }
+  },
+  "134": {
+    "inputs": {
+      "mask": [
+        "133",
+        0
+      ]
+    },
+    "class_type": "MaskToImage",
+    "_meta": {
+      "title": "Convert Mask to Image"
+    }
+  },
+  "135": {
+    "inputs": {
+      "mask": [
+        "136",
+        0
+      ]
+    },
+    "class_type": "MaskToImage",
+    "_meta": {
+      "title": "Convert Mask to Image"
+    }
+  },
+  "136": {
+    "inputs": {
+      "sensitivity": 1,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "smooth": 0,
+      "fill_holes": true,
+      "invert_output": false,
+      "mask": [
+        "151",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskEnhancer",
+    "_meta": {
+      "title": "Mask Enhancer (RMBG) 🖼️"
+    }
+  },
+  "137": {
+    "inputs": {
+      "images": [
+        "122",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "142": {
+    "inputs": {
+      "filename_prefix": "$output_url_Isolated",
+      "images": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image Isolated"
+    }
+  },
+  "143": {
+    "inputs": {
+      "filename_prefix": "$output_url_Background",
+      "images": [
+        "104",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image Background"
+    }
+  },
+  "145": {
+    "inputs": {
+      "image": "$image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image Original"
+    }
+  },
+  "146": {
+    "inputs": {
+      "image": [
+        "155",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "147": {
+    "inputs": {
+      "ckpt_name": "depth_anything_v2_vitg.pth",
+      "resolution": 1472,
+      "float32_output": true,
+      "image": [
+        "104",
+        0
+      ]
+    },
+    "class_type": "DepthAnythingV2Preprocessor",
+    "_meta": {
+      "title": "Depth Anything V2 - Relative"
+    }
+  },
+  "148": {
+    "inputs": {
+      "filename_prefix": "$output_url_ZBuffer",
+      "tonemap": "linear",
+      "version": 1,
+      "start_frame": 1001,
+      "frame_pad": 4,
+      "save_workflow": "none",
+      "images": [
+        "147",
+        0
+      ]
+    },
+    "class_type": "SaveEXR",
+    "_meta": {
+      "title": "Save EXR"
+    }
+  },
+  "151": {
+    "inputs": {
+      "mode": "combine",
+      "mask_1": [
+        "152",
+        0
+      ],
+      "mask_2": [
+        "174",
+        1
+      ],
+      "mask_3": [
+        "157",
+        0
+      ],
+      "mask_4": [
+        "156",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskCombiner",
+    "_meta": {
+      "title": "Mask Combiner (RMBG) 🎭"
+    }
+  },
+  "152": {
+    "inputs": {
+      "shape": "circle",
+      "frames": 1,
+      "location_x": 512,
+      "location_y": 1280,
+      "grow": 0,
+      "frame_width": [
+        "146",
+        0
+      ],
+      "frame_height": [
+        "146",
+        1
+      ],
+      "shape_width": 1024,
+      "shape_height": 600
+    },
+    "class_type": "CreateShapeMask",
+    "_meta": {
+      "title": "Create Shape Mask"
+    }
+  },
+  "155": {
+    "inputs": {
+      "target_width": 1024,
+      "target_height": 1280,
+      "padding_color": "white",
+      "interpolation": "area",
+      "image": [
+        "145",
+        0
+      ]
+    },
+    "class_type": "ResizeAndPadImage",
+    "_meta": {
+      "title": "ResizeAndPadImage"
+    }
+  },
+  "156": {
+    "inputs": {
+      "shape": "square",
+      "frames": 1,
+      "location_x": 512,
+      "location_y": 1280,
+      "grow": 0,
+      "frame_width": [
+        "146",
+        0
+      ],
+      "frame_height": [
+        "146",
+        1
+      ],
+      "shape_width": 1024,
+      "shape_height": 256
+    },
+    "class_type": "CreateShapeMask",
+    "_meta": {
+      "title": "Create Shape Mask"
+    }
+  },
+  "157": {
+    "inputs": {
+      "shape": "square",
+      "frames": 1,
+      "location_x": 512,
+      "location_y": 0,
+      "grow": 0,
+      "frame_width": [
+        "146",
+        0
+      ],
+      "frame_height": [
+        "146",
+        1
+      ],
+      "shape_width": 1024,
+      "shape_height": 256
+    },
+    "class_type": "CreateShapeMask",
+    "_meta": {
+      "title": "Create Shape Mask"
+    }
+  },
+  "171": {
+    "inputs": {
+      "mask": [
+        "174",
+        1
+      ]
+    },
+    "class_type": "MaskToImage",
+    "_meta": {
+      "title": "Convert Mask to Image"
+    }
+  },
+  "172": {
+    "inputs": {
+      "images": [
+        "171",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "174": {
+    "inputs": {
+      "width": 1024,
+      "height": 1280,
+      "scale_by": 1,
+      "upscale_method": "lanczos",
+      "resize_mode": "pad",
+      "pad_color": "#FFFFFF",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "45",
+        0
+      ],
+      "mask": [
+        "45",
+        1
+      ]
+    },
+    "class_type": "AILab_ImageMaskResize",
+    "_meta": {
+      "title": "Image Mask Resize (RMBG) 🖼️🎭"
+    }
+  },
+  "175": {
+    "inputs": {
+      "images": [
+        "155",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  }
+}

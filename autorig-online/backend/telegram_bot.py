@@ -485,6 +485,20 @@ async def pop_notification_message_id(chat_id: int, event_type: str, event_key: 
         return message_id
 
 
+async def release_notification(chat_id: int, event_type: str, event_key: str) -> None:
+    """Drop a reservation so the action can be retried (e.g. after a failed generation)."""
+    from sqlalchemy import delete as sa_delete
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sa_delete(TelegramNotification)
+            .where(TelegramNotification.chat_id == chat_id)
+            .where(TelegramNotification.event_type == event_type)
+            .where(TelegramNotification.event_key == event_key)
+        )
+        await db.commit()
+
+
 async def _task_telegram_metrics(task_id: str) -> dict[str, int]:
     now = datetime.utcnow()
     current_from = now - timedelta(hours=24)
@@ -1843,6 +1857,12 @@ async def broadcast_task_done(
         f"video_path={video_path} last_video_status={last_video_status}"
     )
 
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    generate_markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🎨 Сгенерировать", callback_data=f"rfg:{task_id}")]]
+    )
+
     if not video_path:
         # Fallback: at least notify completion
         async def _one_text(chat_id: int):
@@ -1860,7 +1880,8 @@ async def broadcast_task_done(
                 chat_id=cid,
                 text=text,
                 parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False
+                disable_web_page_preview=False,
+                reply_markup=generate_markup,
             ), retry_network=False)
 
         results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
@@ -1897,6 +1918,7 @@ async def broadcast_task_done(
                             caption=caption,
                             parse_mode=ParseMode.HTML,
                             supports_streaming=True,
+                            reply_markup=generate_markup,
                         )
                     finally:
                         try:
@@ -1912,7 +1934,8 @@ async def broadcast_task_done(
                     chat_id=cid,
                     text=text,
                     parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=False
+                    disable_web_page_preview=False,
+                    reply_markup=generate_markup,
                 ), retry_network=False)
             return result
 
@@ -2044,15 +2067,276 @@ async def _start_cmd(update, context):
     await update.message.reply_text("✅ Subscribed. You will receive task notifications here.")
 
 
+# ---------------------------------------------------------------------------
+# Renderfin character generation (🎨 Сгенерировать button on done notifications)
+# ---------------------------------------------------------------------------
+
+CHARGEN_POLL_INTERVAL_SECONDS = 10
+CHARGEN_TOTAL_TIMEOUT_SECONDS = 3600
+
+_CHARGEN_STAGE_LABELS = {
+    "flux_render": "рендерим T-позу (Flux)",
+    "hunyuan": "генерируем 3D-модель (Hunyuan3D)",
+    "turntable": "рендерим видео-облёт",
+}
+
+
+async def _chargen_edit_status(bot, chat_id: int, message_id: int, text: str) -> None:
+    from telegram.constants import ParseMode
+
+    try:
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text,
+                                    parse_mode=ParseMode.HTML)
+    except Exception as e:
+        # "message is not modified" and similar are harmless
+        if "not modified" not in str(e).lower():
+            print(f"[Telegram][Renderfin] status edit failed: {e}")
+
+
+async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: int | None,
+                          status_message_id: int) -> None:
+    import render_prompting
+    from telegram.constants import ParseMode
+
+    try:
+        plan = await render_prompting.build_render_request(task_id)
+        prompt_preview = html.escape(plan.prompt[:300])
+        await _chargen_edit_status(
+            bot, chat_id, status_message_id,
+            f"⏳ Промпт готов ({plan.source}, телосложение: {plan.body_type}), запускаем рендер…\n"
+            f"<i>{prompt_preview}</i>",
+        )
+        job_id = await render_prompting.start_character_gen(plan, source_task_id=task_id)
+
+        deadline = asyncio.get_event_loop().time() + CHARGEN_TOTAL_TIMEOUT_SECONDS
+        last_stage = ""
+        status: dict = {}
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(CHARGEN_POLL_INTERVAL_SECONDS)
+            try:
+                status = await render_prompting.poll_character_gen(job_id)
+            except Exception as e:
+                print(f"[Telegram][Renderfin] poll failed for job {job_id}: {e}")
+                continue
+            stage = str(status.get("stage") or "")
+            if stage in ("ready", "failed", "discarded"):
+                break
+            if stage != last_stage:
+                last_stage = stage
+                label = _CHARGEN_STAGE_LABELS.get(stage, stage)
+                await _chargen_edit_status(
+                    bot, chat_id, status_message_id,
+                    f"⏳ Генерация: {html.escape(label)}…\n<i>{prompt_preview}</i>",
+                )
+        else:
+            raise RuntimeError("генерация не уложилась в таймаут")
+
+        stage = str(status.get("stage") or "")
+        if stage != "ready":
+            raise RuntimeError(str(status.get("error") or f"стадия {stage}"))
+
+        video_url = str(status.get("video_url") or "")
+        glb_url = str(status.get("glb_url") or "")
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        review_markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Сабмитить", callback_data=f"rfs:{job_id}"),
+                InlineKeyboardButton("🗑 Удалить", callback_data=f"rfd:{job_id}"),
+            ]
+        ])
+        caption = (
+            f"🎨 <b>3D-модель сгенерирована</b>\n"
+            f"<i>{prompt_preview}</i>\n"
+            f'🧊 <a href="{html.escape(glb_url)}">GLB</a>'
+        )
+        video_bytes = None
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.get(video_url)
+                if resp.status_code == 200:
+                    video_bytes = resp.content
+        except Exception as e:
+            print(f"[Telegram][Renderfin] turntable download failed: {e}")
+        if video_bytes:
+            await bot.send_video(
+                chat_id=chat_id, video=video_bytes, caption=caption,
+                parse_mode=ParseMode.HTML, supports_streaming=True,
+                reply_to_message_id=reply_to_message_id, reply_markup=review_markup,
+            )
+        else:
+            await bot.send_message(
+                chat_id=chat_id, text=caption + f'\n🎬 <a href="{html.escape(video_url)}">Видео</a>',
+                parse_mode=ParseMode.HTML,
+                reply_to_message_id=reply_to_message_id, reply_markup=review_markup,
+            )
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=status_message_id)
+        except Exception:
+            pass
+        print(f"[Telegram][Renderfin] generation delivered: task={task_id} job={job_id}")
+    except Exception as e:
+        print(f"[Telegram][Renderfin] generation failed for task {task_id}: {e}")
+        await _chargen_edit_status(
+            bot, chat_id, status_message_id,
+            f"❌ Ошибка генерации: {html.escape(str(e)[:300])}\nКнопку можно нажать ещё раз.",
+        )
+        await release_notification(chat_id, "renderfin_gen", task_id)
+
+
+async def _handle_generate_callback(update, context) -> None:
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(r"^rfg:([0-9a-fA-F-]{8,64})$", query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    task_id = match.group(1)
+    chat = query.message.chat if query.message else None
+    if chat is None:
+        await query.answer("Нет чата")
+        return
+    chat_id = int(chat.id)
+
+    reserved = await reserve_notification(chat_id, "renderfin_gen", task_id)
+    if not reserved:
+        await query.answer("Генерация уже запущена для этой задачи")
+        return
+    await query.answer("Запускаю генерацию…")
+
+    bot = context.bot
+    status_message = await bot.send_message(
+        chat_id=chat_id,
+        text="⏳ Генерация запущена: строим промпт…",
+        reply_to_message_id=query.message.message_id,
+    )
+    asyncio.create_task(
+        _run_generation(bot, chat_id, task_id, query.message.message_id, status_message.message_id)
+    )
+
+
+async def _submit_generated_model(glb_url: str) -> tuple[str | None, str | None]:
+    """Create a standard autorig rig task from the generated GLB.
+
+    Returns (task_id, error). Dispatch is handled by the main backend's
+    background loop, which picks up status=created tasks within seconds.
+    """
+    from tasks import create_conversion_task
+
+    async with AsyncSessionLocal() as db:
+        task, error = await create_conversion_task(
+            db,
+            input_url=glb_url,
+            task_type="t_pose",
+            owner_type="anon",
+            owner_id="telegram-bot",
+            created_via_api=True,
+            pipeline_kind="rig",
+        )
+        if task is None:
+            return None, error or "task creation failed"
+        return task.id, None
+
+
+async def _handle_submit_callback(update, context) -> None:
+    import render_prompting
+    from telegram.constants import ParseMode
+
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(r"^rfs:([0-9a-fA-F-]{8,64})$", query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    job_id = match.group(1)
+    chat_id = int(query.message.chat.id) if query.message else 0
+    if not chat_id:
+        await query.answer("Нет чата")
+        return
+
+    reserved = await reserve_notification(chat_id, "renderfin_submit", job_id)
+    if not reserved:
+        await query.answer("Уже отправлено в пайплайн")
+        return
+    await query.answer("Отправляю в пайплайн…")
+
+    try:
+        status = await render_prompting.poll_character_gen(job_id)
+        glb_url = str(status.get("glb_url") or "")
+        if not glb_url:
+            raise RuntimeError("у джоба нет GLB")
+        task_id, error = await _submit_generated_model(glb_url)
+        if task_id is None:
+            raise RuntimeError(error or "не удалось создать задачу")
+        await render_prompting.mark_character_gen_submitted(job_id)
+        url = _task_url(task_id)
+        new_caption = (
+            f"🚀 <b>Отправлено в пайплайн</b>\n"
+            f'🔗 <a href="{html.escape(url)}">Task {html.escape(task_id[:8])}…</a> — '
+            f"риг, ретопология и форматы приедут обычным уведомлением."
+        )
+        try:
+            await context.bot.edit_message_caption(
+                chat_id=chat_id, message_id=query.message.message_id,
+                caption=new_caption, parse_mode=ParseMode.HTML, reply_markup=None,
+            )
+        except Exception:
+            await context.bot.send_message(
+                chat_id=chat_id, text=new_caption, parse_mode=ParseMode.HTML,
+                reply_to_message_id=query.message.message_id,
+            )
+        print(f"[Telegram][Renderfin] job {job_id} submitted as task {task_id}")
+    except Exception as e:
+        print(f"[Telegram][Renderfin] submit failed for job {job_id}: {e}")
+        await release_notification(chat_id, "renderfin_submit", job_id)
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Сабмит не удался: {html.escape(str(e)[:300])}",
+                reply_to_message_id=query.message.message_id,
+            )
+        except Exception:
+            pass
+
+
+async def _handle_delete_callback(update, context) -> None:
+    import render_prompting
+
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(r"^rfd:([0-9a-fA-F-]{8,64})$", query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    job_id = match.group(1)
+    await query.answer("Удаляю…")
+    try:
+        await render_prompting.discard_character_gen(job_id)
+    except Exception as e:
+        print(f"[Telegram][Renderfin] discard failed for job {job_id}: {e}")
+    try:
+        await context.bot.delete_message(
+            chat_id=query.message.chat.id, message_id=query.message.message_id
+        )
+    except Exception as e:
+        print(f"[Telegram][Renderfin] review message delete failed: {e}")
+
+
 async def run_polling() -> None:
     token = _get_token()
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+    from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", _start_cmd))
+    app.add_handler(CallbackQueryHandler(_handle_generate_callback, pattern=r"^rfg:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_submit_callback, pattern=r"^rfs:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_delete_callback, pattern=r"^rfd:[0-9a-fA-F-]{8,64}$"))
 
     group_filter = filters.ChatType.GROUP | filters.ChatType.SUPERGROUP
     print("[Telegram] Support forum reply handler (resolved chat_id from env or telegram_chats)")
@@ -2065,7 +2349,10 @@ async def run_polling() -> None:
 
     await app.initialize()
     await app.start()
-    await app.updater.start_polling(drop_pending_updates=True)
+    await app.updater.start_polling(
+        drop_pending_updates=True,
+        allowed_updates=["message", "callback_query"],
+    )
     
     # Log startup info
     active_chats = await get_active_chat_ids()

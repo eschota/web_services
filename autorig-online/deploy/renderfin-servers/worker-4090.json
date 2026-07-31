@@ -1,0 +1,12 @@
+{
+  "render_server_name": "worker-4090",
+  "render_server_url": "https://worker-4090.renderfin.qwertystock.com",
+  "gpu_name": "RTX 4090",
+  "status": "online",
+  "available_workflows": [
+    "image_to_3d.json",
+    "gen_animation_by_url.json"
+  ],
+  "workflow_overrides": {},
+  "basic_auth": true
+}

@@ -1,0 +1,12 @@
+{
+  "render_server_name": "f12",
+  "render_server_url": "http://37.192.2.126:8288",
+  "gpu_name": "RTX 3080",
+  "status": "online",
+  "available_workflows": [
+    "gen_image.json",
+    "gen_animation_by_url.json"
+  ],
+  "workflow_overrides": {},
+  "basic_auth": false
+}

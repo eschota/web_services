@@ -1,0 +1,12 @@
+{
+  "render_server_name": "Raptor",
+  "render_server_url": "http://5.129.157.224:8288",
+  "gpu_name": "RTX 3080 Ti",
+  "status": "online",
+  "available_workflows": [
+    "gen_image.json",
+    "gen_animation_by_url.json"
+  ],
+  "workflow_overrides": {},
+  "basic_auth": false
+}

@@ -1,0 +1,26 @@
+[Unit]
+Description=AutoRig Renderfin Service (ComfyUI render queue + character generation)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/root/autorig-online/backend
+Environment="PATH=/root/autorig-online/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-/etc/autorig-online/environment
+EnvironmentFile=-/etc/autorig-renderfin.env
+ExecStart=/root/autorig-online/venv/bin/python3 -m uvicorn renderfin.app:app --host 127.0.0.1 --port 8010 --workers 1 --no-access-log
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/autorig/renderfin
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
