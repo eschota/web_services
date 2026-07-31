@@ -2072,7 +2072,9 @@ async def _start_cmd(update, context):
 # ---------------------------------------------------------------------------
 
 CHARGEN_POLL_INTERVAL_SECONDS = 10
-CHARGEN_TOTAL_TIMEOUT_SECONDS = 3600
+# Must exceed the server-side budget (hunyuan stage + turntable + queue wait),
+# otherwise the bot declares a failure the server would still complete.
+CHARGEN_TOTAL_TIMEOUT_SECONDS = 7800
 
 _CHARGEN_STAGE_LABELS = {
     "flux_render": "рендерим T-позу (Flux)",
@@ -2099,9 +2101,10 @@ def _chargen_retry_markup(job_id: str):
 
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("♻️ Повторить 3D", callback_data=f"rfe:{job_id}"),
             InlineKeyboardButton("🔁 Перегенерировать", callback_data=f"rfr:{job_id}"),
-            InlineKeyboardButton("🗑 Отмена", callback_data=f"rfd:{job_id}"),
-        ]
+        ],
+        [InlineKeyboardButton("🗑 Отмена", callback_data=f"rfd:{job_id}")],
     ])
 
 
@@ -2141,7 +2144,9 @@ async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: 
             f"⏳ Промпт готов ({plan.source}, телосложение: {plan.body_type}), рендерим T-позу…\n"
             f"<i>{prompt_preview}</i>",
         )
-        job_id = await render_prompting.start_character_gen(plan, source_task_id=task_id)
+        job_id = await render_prompting.start_character_gen(
+            plan, source_task_id=task_id, telegram_chat_id=chat_id
+        )
         await _watch_image_phase(
             bot, chat_id, job_id,
             reply_to_message_id=reply_to_message_id,
@@ -2194,8 +2199,11 @@ async def _watch_image_phase(bot, chat_id: int, job_id: str, *,
                                        message + "\nКнопку можно нажать ещё раз.")
         else:
             try:
-                await bot.send_message(chat_id=chat_id, text=message,
-                                       reply_to_message_id=reply_to_message_id)
+                await bot.send_message(
+                    chat_id=chat_id, text=message,
+                    reply_to_message_id=reply_to_message_id,
+                    reply_markup=_chargen_retry_markup(job_id),
+                )
             except Exception:
                 pass
         if task_id:
@@ -2204,22 +2212,26 @@ async def _watch_image_phase(bot, chat_id: int, job_id: str, *,
 
     image_url = str(status.get("image_url") or "")
     isolated_url = str(status.get("isolated_url") or "")
+    warning = str(status.get("warning") or "")
     caption = (
         f"🖼 <b>T-поза готова</b> — делаем 3D-модель?\n"
         f"<i>{prompt_preview}</i>\n"
         f'✂️ <a href="{html.escape(isolated_url)}">PNG с альфой</a>'
     )
+    if warning:
+        caption += f"\n⚠️ {html.escape(warning[:150])}"
     image_bytes = await _download_bytes(image_url)
+    sent = None
     try:
         if image_bytes:
-            await bot.send_photo(
+            sent = await bot.send_photo(
                 chat_id=chat_id, photo=image_bytes, caption=caption,
                 parse_mode=ParseMode.HTML,
                 reply_to_message_id=reply_to_message_id,
                 reply_markup=_chargen_image_review_markup(job_id),
             )
         else:
-            await bot.send_message(
+            sent = await bot.send_message(
                 chat_id=chat_id,
                 text=caption + f'\n🖼 <a href="{html.escape(image_url)}">Изображение</a>',
                 parse_mode=ParseMode.HTML,
@@ -2229,6 +2241,11 @@ async def _watch_image_phase(bot, chat_id: int, job_id: str, *,
     except Exception as e:
         print(f"[Telegram][Renderfin] image review send failed for job {job_id}: {e}")
         return
+    if sent is not None:
+        # remember where the review lives so a bot restart can re-attach
+        await render_prompting.set_character_gen_telegram_context(
+            job_id, chat_id=chat_id, message_id=sent.message_id
+        )
     if status_message_id:
         try:
             await bot.delete_message(chat_id=chat_id, message_id=status_message_id)
@@ -2276,15 +2293,25 @@ async def _watch_model_phase(bot, chat_id: int, job_id: str, photo_message_id: i
         return
     if stage == "failed":
         err = html.escape(str(status.get("error") or "")[:250])
+        text = (
+            f"❌ 3D не удалось: {err}\n"
+            "«Повторить 3D» — продолжить с этого места, «Перегенерировать» — новая картинка."
+        )
         try:
             await bot.edit_message_caption(
                 chat_id=chat_id, message_id=photo_message_id,
-                caption=f"❌ 3D не удалось: {err}\nМожно перегенерировать изображение.",
-                parse_mode=ParseMode.HTML,
+                caption=text, parse_mode=ParseMode.HTML,
                 reply_markup=_chargen_retry_markup(job_id),
             )
         except Exception:
-            pass
+            try:
+                await bot.send_message(
+                    chat_id=chat_id, text=text, parse_mode=ParseMode.HTML,
+                    reply_to_message_id=photo_message_id,
+                    reply_markup=_chargen_retry_markup(job_id),
+                )
+            except Exception:
+                pass
         return
 
     video_url = str(status.get("video_url") or "")
@@ -2516,6 +2543,33 @@ async def _handle_submit_callback(update, context) -> None:
             pass
 
 
+async def _handle_resume_callback(update, context) -> None:
+    """♻️ retry the 3D stage of a failed job without re-rendering the image."""
+    import render_prompting
+
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(r"^rfe:([0-9a-fA-F-]{8,64})$", query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    job_id = match.group(1)
+    try:
+        payload = await render_prompting.resume_character_gen(job_id)
+    except Exception as e:
+        await query.answer(f"Ошибка: {str(e)[:150]}")
+        return
+    if not payload.get("transitioned"):
+        await query.answer(f"Сейчас нельзя (стадия: {payload.get('stage')})")
+        return
+    await query.answer("Продолжаем…")
+    chat_id = int(query.message.chat.id)
+    asyncio.create_task(
+        _watch_model_phase(context.bot, chat_id, job_id, query.message.message_id)
+    )
+
+
 async def _handle_delete_callback(update, context) -> None:
     import render_prompting
 
@@ -2527,9 +2581,16 @@ async def _handle_delete_callback(update, context) -> None:
         await query.answer("Некорректные данные кнопки")
         return
     job_id = match.group(1)
+    chat_id = int(query.message.chat.id) if query.message else 0
     await query.answer("Удаляю…")
     try:
-        await render_prompting.discard_character_gen(job_id)
+        payload = await render_prompting.discard_character_gen(job_id)
+        # let the 🎨 button work again for this task
+        source_task_id = str(payload.get("source_task_id") or "")
+        if chat_id and source_task_id:
+            await release_notification(chat_id, "renderfin_gen", source_task_id)
+        if chat_id:
+            await release_notification(chat_id, "renderfin_submit", job_id)
     except Exception as e:
         print(f"[Telegram][Renderfin] discard failed for job {job_id}: {e}")
     try:
@@ -2538,6 +2599,52 @@ async def _handle_delete_callback(update, context) -> None:
         )
     except Exception as e:
         print(f"[Telegram][Renderfin] review message delete failed: {e}")
+
+
+async def _reattach_chargen_watchers(bot) -> None:
+    """Re-spawn watchers for jobs that were in flight when the bot restarted.
+
+    Jobs parked at awaiting_image_approval need nothing: their review message
+    already carries stateless callback buttons this process handles.
+    """
+    import render_prompting
+
+    try:
+        jobs = await render_prompting.list_active_character_gen_jobs()
+    except Exception as e:
+        print(f"[Telegram][Renderfin] watcher reattach skipped: {e}")
+        return
+    resumed = 0
+    for job in jobs:
+        chat_id = int(job.get("telegram_chat_id") or 0)
+        job_id = str(job.get("job_id") or "")
+        stage = str(job.get("stage") or "")
+        if not chat_id or not job_id:
+            continue
+        if stage == "flux_render":
+            asyncio.create_task(
+                _watch_image_phase(
+                    bot, chat_id, job_id,
+                    reply_to_message_id=int(job.get("telegram_message_id") or 0) or None,
+                    status_message_id=None,
+                    task_id=str(job.get("source_task_id") or ""),
+                )
+            )
+            resumed += 1
+        elif stage in ("hunyuan", "turntable"):
+            message_id = int(job.get("telegram_message_id") or 0)
+            if not message_id:
+                try:
+                    sent = await bot.send_message(
+                        chat_id=chat_id, text="⏳ Продолжаю генерацию 3D-модели…"
+                    )
+                    message_id = sent.message_id
+                except Exception:
+                    continue
+            asyncio.create_task(_watch_model_phase(bot, chat_id, job_id, message_id))
+            resumed += 1
+    if resumed:
+        print(f"[Telegram][Renderfin] re-attached {resumed} watcher(s) after restart")
 
 
 async def run_polling() -> None:
@@ -2552,6 +2659,7 @@ async def run_polling() -> None:
     app.add_handler(CallbackQueryHandler(_handle_generate_callback, pattern=r"^rfg:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=r"^rfa:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_regen_callback, pattern=r"^rfr:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_resume_callback, pattern=r"^rfe:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_submit_callback, pattern=r"^rfs:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_delete_callback, pattern=r"^rfd:[0-9a-fA-F-]{8,64}$"))
 
@@ -2572,6 +2680,8 @@ async def run_polling() -> None:
     )
     
     # Log startup info
+    await _reattach_chargen_watchers(app.bot)
+
     active_chats = await get_active_chat_ids()
     print(f"[Telegram] Bot started. Active subscribers: {len(active_chats)}")
     if len(active_chats) == 0:

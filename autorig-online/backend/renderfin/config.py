@@ -23,7 +23,10 @@ PUBLIC_BASE_URL = os.getenv(
 
 ALLOWED_HTTP_HOSTS = {
     h.strip()
-    for h in os.getenv("RENDERFIN_ALLOWED_HTTP_HOSTS", "5.129.157.224,127.0.0.1,localhost").split(",")
+    for h in os.getenv(
+        "RENDERFIN_ALLOWED_HTTP_HOSTS",
+        "5.129.157.224,37.192.2.126,127.0.0.1,localhost",
+    ).split(",")
     if h.strip()
 }
 
@@ -72,11 +75,20 @@ def hunyuan_workers() -> list[dict]:
         print(f"[Renderfin] hunyuan workers file unreadable: {exc}")
     if workers:
         return workers
-    return [
-        {"name": url, "url": url, "token": HUNYUAN_API_TOKEN}
-        for url in HUNYUAN_WORKERS
-        if HUNYUAN_API_TOKEN
-    ]
+    # Single-token fallback only makes sense for one box: farm boxes each
+    # provision their own token, so pairing many URLs with one token would
+    # authenticate against at most one of them.
+    if HUNYUAN_API_TOKEN and len(HUNYUAN_WORKERS) == 1:
+        url = HUNYUAN_WORKERS[0]
+        return [{"name": url, "url": url, "token": HUNYUAN_API_TOKEN}]
+    if HUNYUAN_WORKERS and not HUNYUAN_API_TOKEN:
+        print("[Renderfin] RENDERFIN_HUNYUAN_WORKERS set but no token configured")
+    elif len(HUNYUAN_WORKERS) > 1:
+        print(
+            "[Renderfin] ignoring RENDERFIN_HUNYUAN_WORKERS: several boxes need "
+            f"per-worker tokens in {HUNYUAN_WORKERS_FILE}"
+        )
+    return []
 HUNYUAN_QUALITY = os.getenv("RENDERFIN_HUNYUAN_QUALITY", "standard").strip() or "standard"
 HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))
 HUNYUAN_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_TIMEOUT_SECONDS", "3600"))

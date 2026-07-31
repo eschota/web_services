@@ -64,6 +64,8 @@ class RenderQueue:
         self._stopped = asyncio.Event()
         self._last_dispatch = 0.0
         self._tick_count = 0
+        self._finishers: Dict[str, asyncio.Task] = {}
+        self._download_slots = asyncio.Semaphore(3)
 
     # ---------- lifecycle ----------
 
@@ -83,6 +85,9 @@ class RenderQueue:
 
     async def stop(self) -> None:
         self._stopped.set()
+        for finisher in list(self._finishers.values()):
+            finisher.cancel()
+        self._finishers.clear()
         if self._pump_task:
             self._pump_task.cancel()
             try:
@@ -114,9 +119,19 @@ class RenderQueue:
                 print(f"[Renderfin][Queue] resurrect skip: {exc}")
                 continue
             if task.status == TASK_RENDERING:
-                task.status = TASK_PENDING
-                task.server_name = ""
-                task.comfy_prompt_id = ""
+                # Keep following a render that is still identifiable on a known
+                # server instead of burning GPU time on a fresh submit.
+                still_known = bool(
+                    task.server_name
+                    and task.comfy_prompt_id
+                    and self.registry.get(task.server_name) is not None
+                )
+                if still_known:
+                    task.started_at = time.time()
+                else:
+                    task.status = TASK_PENDING
+                    task.server_name = ""
+                    task.comfy_prompt_id = ""
                 await self._persist(task)
             self._tasks[task.id] = task
         if self._tasks:
@@ -148,6 +163,21 @@ class RenderQueue:
 
     def all_tasks(self) -> List[RenderTask]:
         return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
+
+    async def cancel(self, task_id: str, *, reason: str = "cancelled") -> bool:
+        """Stop a queued/running task and best-effort interrupt the worker."""
+        task = self._tasks.get(task_id)
+        if task is None or task.status in (TASK_DONE, TASK_ERROR):
+            return False
+        if task.status == TASK_RENDERING and task.server_name and self._client is not None:
+            server = self.registry.get(task.server_name)
+            if server is not None:
+                try:
+                    await comfy_adapter.interrupt(self._client, server)
+                except Exception as exc:
+                    print(f"[Renderfin][Queue] interrupt {task.server_name} failed: {exc}")
+        await self._fail(task, reason)
+        return True
 
     async def wait_for(self, task_id: str, timeout: float = 1800) -> RenderTask:
         """Convenience for in-process callers (character_gen)."""
@@ -204,11 +234,9 @@ class RenderQueue:
         if now - self._last_dispatch >= config.DISPATCH_INTERVAL_SECONDS:
             # dispatch in parallel: keep going while there are pending tasks
             # AND free capable servers (one in-flight task per server)
-            dispatched_any = False
             while await self._dispatch_one():
-                dispatched_any = True
-            if dispatched_any:
-                self._last_dispatch = now
+                pass
+            self._last_dispatch = now
         await self._poll_rendering()
 
     async def _refresh_servers(self) -> None:
@@ -251,8 +279,21 @@ class RenderQueue:
             try:
                 await self._submit_task(task, server)
                 return True
+            except (ValueError, KeyError) as exc:
+                # bad workflow/template/prompt: the task is broken, not the box
+                print(f"[Renderfin][Queue] task {task.id} rejected: {exc}")
+                await self._fail(task, f"invalid render request: {exc}")
+                continue
             except Exception as exc:
-                print(f"[Renderfin][Queue] submit {task.id} to {server.render_server_name} failed: {exc}")
+                print(
+                    f"[Renderfin][Queue] submit {task.id} to "
+                    f"{server.render_server_name} failed: {exc}"
+                )
+                task.submit_failures += 1
+                if task.submit_failures >= 3:
+                    await self._fail(task, f"submit failed 3x: {exc}")
+                else:
+                    await self._persist(task)
                 server.status = "render_error"
                 self.registry.save(server)
                 continue
@@ -326,10 +367,24 @@ class RenderQueue:
                     err = json.dumps(entry.get("status", {}))[:500]
                 await self._fail(task, f"comfy error: {err}")
                 continue
-            try:
-                await self._finish(task, server, entry or {})
-            except Exception as exc:
-                await self._fail(task, f"artifact download failed: {exc}")
+            # Finish (download artifacts) off the pump so a slow transfer cannot
+            # stall dispatch or status polling for every other task.
+            if task.id in self._finishers and not self._finishers[task.id].done():
+                continue
+            self._finishers[task.id] = asyncio.create_task(
+                self._finish_guarded(task, server, entry or {})
+            )
+
+    async def _finish_guarded(self, task: RenderTask, server: RenderServer, entry: dict) -> None:
+        try:
+            async with self._download_slots:
+                await self._finish(task, server, entry)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._fail(task, f"artifact download failed: {exc}")
+        finally:
+            self._finishers.pop(task.id, None)
 
     async def _finish(self, task: RenderTask, server: RenderServer, entry: dict) -> None:
         assert self._client is not None

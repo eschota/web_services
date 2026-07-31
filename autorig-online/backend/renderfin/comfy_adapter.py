@@ -198,6 +198,12 @@ async def download_artifact(
     return resp.content
 
 
+async def interrupt(client: httpx.AsyncClient, server: RenderServer) -> None:
+    """Ask ComfyUI to stop the current prompt (best effort)."""
+    base = _validate_server_url(server.render_server_url)
+    await client.post(f"{base}/interrupt", timeout=15.0, auth=_auth_for(server))
+
+
 async def check_server_online(client: httpx.AsyncClient, server: RenderServer) -> bool:
     try:
         base = _validate_server_url(server.render_server_url)

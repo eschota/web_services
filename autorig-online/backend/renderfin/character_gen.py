@@ -27,6 +27,7 @@ from .models import (
     CHARGEN_STAGE_SUBMITTED,
     CHARGEN_STAGE_TURNTABLE,
     TASK_DONE,
+    TASK_ERROR,
     CharacterGenJob,
     RenderPrompt,
 )
@@ -116,6 +117,7 @@ class CharacterGenManager:
         mask_url: str = "",
         user_name: str = "autorig-bot",
         source_task_id: str = "",
+        telegram_chat_id: int = 0,
     ) -> CharacterGenJob:
         mask_url = (mask_url or "").strip() or f"{config.PUBLIC_BASE_URL}/render/masks/t_pose.jpg"
         job = CharacterGenJob(
@@ -124,6 +126,7 @@ class CharacterGenManager:
             mask_url=mask_url,
             user_name=user_name,
             source_task_id=source_task_id,
+            telegram_chat_id=int(telegram_chat_id or 0),
         )
         self._jobs[job.id] = job
         await self._persist(job)
@@ -140,6 +143,11 @@ class CharacterGenManager:
         runner = self._runners.pop(job_id, None)
         if runner:
             runner.cancel()
+        # stop the GPU work too, otherwise the render keeps running and would
+        # write back into files we are about to delete
+        for task_id in (job.flux_task_id, job.hunyuan_task_id):
+            if task_id and not task_id.startswith("http"):
+                await self.queue.cancel(task_id, reason="job discarded")
         job.stage = CHARGEN_STAGE_DISCARDED
         await self._persist(job)
         self._cleanup_artifacts(job)
@@ -171,6 +179,24 @@ class CharacterGenManager:
         self._spawn(job)
         return job, True
 
+    async def set_telegram_context(
+        self, job_id: str, *, chat_id: int = 0, message_id: int = 0
+    ):
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        if chat_id:
+            job.telegram_chat_id = int(chat_id)
+        if message_id:
+            job.telegram_message_id = int(message_id)
+        await self._persist(job)
+        return job
+
+    def active_jobs(self) -> list:
+        """Jobs a client may still be waiting on (used to re-attach watchers)."""
+        watchable = set(_ACTIVE_STAGES) | {CHARGEN_STAGE_AWAITING_IMAGE}
+        return [j for j in self._jobs.values() if j.stage in watchable]
+
     async def resume(self, job_id: str):
         """Retry a failed job from its furthest completed stage, reusing any
         still-alive render task (unlike regenerate, no new render is enqueued)."""
@@ -187,8 +213,15 @@ class CharacterGenManager:
             job.stage = CHARGEN_STAGE_TURNTABLE
         elif job.isolated_url:
             job.stage = CHARGEN_STAGE_HUNYUAN
+            # the previous 3D attempt is the reason we are here: never re-poll it
+            job.hunyuan_task_id = ""
+            job.hunyuan_worker = ""
         else:
             job.stage = CHARGEN_STAGE_FLUX
+            # keep following the previous render only if it is still alive
+            previous = self.queue.get(job.flux_task_id) if job.flux_task_id else None
+            if previous is None or previous.status == TASK_ERROR:
+                job.flux_task_id = ""
         job.error = ""
         await self._persist(job)
         self._spawn(job)
@@ -204,7 +237,13 @@ class CharacterGenManager:
         job.flux_task_id = ""
         job.image_url = ""
         job.isolated_url = ""
+        # a regenerated image invalidates everything downstream
+        job.hunyuan_task_id = ""
+        job.hunyuan_worker = ""
+        job.glb_url = ""
+        job.video_url = ""
         job.error = ""
+        job.warning = ""
         job.stage = CHARGEN_STAGE_FLUX
         await self._persist(job)
         self._spawn(job)
@@ -260,15 +299,30 @@ class CharacterGenManager:
             await self._persist(job)
         task = await self._await_render(job.flux_task_id, FLUX_STAGE_TIMEOUT)
         job.image_url = task.output_url
-        job.isolated_url = task.extra_outputs.get("isolated") or task.output_url
+        isolated = task.extra_outputs.get("isolated")
+        if not isolated:
+            # Hunyuan works far better on a matted character; say so instead of
+            # silently feeding it the full frame.
+            job.warning = "RMBG isolated render missing; using the full frame for 3D"
+            print(f"[Renderfin][CharGen] job {job.id} WARNING: {job.warning}")
+        job.isolated_url = isolated or task.output_url
         job.stage = CHARGEN_STAGE_AWAITING_IMAGE
         await self._persist(job)
         print(f"[Renderfin][CharGen] job {job.id} flux done, awaiting approval -> {job.image_url}")
 
     async def _stage_hunyuan(self, job: CharacterGenJob) -> None:
-        if hunyuan_client.is_configured():
+        pool = hunyuan_client.workers()
+        if pool:
+            print(
+                f"[Renderfin][CharGen] job {job.id} 3D via converter API: "
+                + ", ".join(w["name"] for w in pool)
+            )
             await self._stage_hunyuan_converter(job)
         else:
+            print(
+                f"[Renderfin][CharGen] job {job.id} 3D via ComfyUI fallback "
+                "(no Hunyuan workers configured)"
+            )
             await self._stage_hunyuan_comfy(job)
         job.stage = CHARGEN_STAGE_TURNTABLE
         await self._persist(job)

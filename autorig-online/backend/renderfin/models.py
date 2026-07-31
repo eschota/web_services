@@ -81,6 +81,7 @@ class RenderTask(BaseModel):
     output_path: str = ""
     extra_outputs: Dict[str, str] = Field(default_factory=dict)  # e.g. isolated -> path/url
     error: str = ""
+    submit_failures: int = 0
     created_at: float = Field(default_factory=time.time)
     started_at: float = 0
     finished_at: float = 0
@@ -130,6 +131,10 @@ class CharacterGenJob(BaseModel):
     flux_task_id: str = ""
     hunyuan_task_id: str = ""
     hunyuan_worker: str = ""
+    # Telegram context so the bot can re-attach watchers after a restart
+    telegram_chat_id: int = 0
+    telegram_message_id: int = 0
+    warning: str = ""
     image_url: str = ""       # full t_pose render
     isolated_url: str = ""    # alpha-isolated character
     glb_url: str = ""
@@ -152,4 +157,7 @@ class CharacterGenJob(BaseModel):
             "glb_url": self.glb_url or None,
             "video_url": self.video_url or None,
             "error": self.error or None,
+            "warning": self.warning or None,
+            "telegram_chat_id": self.telegram_chat_id or None,
+            "telegram_message_id": self.telegram_message_id or None,
         }

@@ -48,6 +48,31 @@ fi
 sudo systemctl daemon-reload
 sudo systemctl enable autorig-renderfin >/dev/null 2>&1 || true
 
+# Farm tunnels: the converter facades drop Authorization, so the Hunyuan API is
+# reached over ssh port-forwards (config: /etc/autorig-farm-tunnels.conf).
+if [[ -f /etc/autorig-farm-tunnels.conf ]]; then
+  sudo install -m 0755 "${REPO_ROOT}/deploy/renderfin-farm-tunnels/farm-tunnels.sh" \
+    "${REPO_ROOT}/deploy/renderfin-farm-tunnels/farm-tunnels.sh"
+  sudo cp -f "${REPO_ROOT}/deploy/renderfin-farm-tunnels/autorig-farm-tunnels.service" \
+    /etc/systemd/system/autorig-farm-tunnels.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable autorig-farm-tunnels >/dev/null 2>&1 || true
+  sudo systemctl restart autorig-farm-tunnels || echo "WARN: farm tunnels failed to start"
+else
+  echo "    note: /etc/autorig-farm-tunnels.conf absent — Hunyuan tunnels not configured"
+fi
+if [[ ! -f /etc/autorig-renderfin-hunyuan.json ]]; then
+  echo "    note: /etc/autorig-renderfin-hunyuan.json absent — 3D stage will fall back to ComfyUI"
+  echo "          (see deploy/autorig-renderfin-hunyuan.json.example)"
+fi
+
+# nginx: /renderfin/ locations are required for the pipeline (masks in, artifacts out)
+if [[ "${SKIP_NGINX:-0}" != "1" ]]; then
+  echo "==> nginx: install config + reload"
+  sudo cp -a "${REPO_ROOT}/deploy/nginx.conf" "${NGINX_CONF_DST:-/etc/nginx/sites-available/autorig.online}"
+  sudo nginx -t && sudo systemctl reload nginx
+fi
+
 sudo systemctl restart autorig
 sudo systemctl restart autorig-renderfin
 sudo systemctl restart autorig-telegram || echo "WARN: autorig-telegram restart failed (unit missing?)"

@@ -34,13 +34,19 @@ def _looks_like_server(body: Dict[str, Any]) -> bool:
 
 @router.get("/health")
 async def health(request: Request) -> Dict[str, Any]:
+    from . import hunyuan_client
+
     queue = _queue(request)
     tasks = queue.all_tasks()
+    pool = hunyuan_client.workers()
     return {
         "ok": True,
         "servers": len(_registry(request).all()),
         "pending": sum(1 for t in tasks if t.status == "Pending"),
         "rendering": sum(1 for t in tasks if t.status == "Rendering"),
+        "hunyuan_workers": [w["name"] for w in pool],
+        "hunyuan_path": "converter-api" if pool else "comfy-fallback",
+        "active_jobs": len(_chargen(request).active_jobs()),
     }
 
 
@@ -98,6 +104,12 @@ class CharacterGenRequest(BaseModel):
     mask_url: str = ""
     user_name: str = "autorig-bot"
     source_task_id: str = ""
+    telegram_chat_id: int = 0
+
+
+class TelegramContextRequest(BaseModel):
+    chat_id: int = 0
+    message_id: int = 0
 
 
 @router.post("/api-character-gen")
@@ -110,7 +122,26 @@ async def api_character_gen(request: Request, body: CharacterGenRequest) -> Dict
         mask_url=body.mask_url,
         user_name=body.user_name,
         source_task_id=body.source_task_id,
+        telegram_chat_id=body.telegram_chat_id,
     )
+    return job.public_dict()
+
+
+@router.get("/api-character-gen")
+async def api_character_gen_list(request: Request) -> Dict[str, Any]:
+    """Jobs a client may still be waiting on — used to re-attach bot watchers."""
+    return {"jobs": [j.public_dict() for j in _chargen(request).active_jobs()]}
+
+
+@router.post("/api-character-gen/{job_id}/telegram-context")
+async def api_character_gen_telegram_context(
+    request: Request, job_id: str, body: TelegramContextRequest
+) -> Dict[str, Any]:
+    job = await _chargen(request).set_telegram_context(
+        job_id, chat_id=body.chat_id, message_id=body.message_id
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
     return job.public_dict()
 
 

@@ -263,7 +263,11 @@ async def build_render_request(task_id: str) -> RenderGenPlan:
 
 
 async def start_character_gen(
-    plan: RenderGenPlan, *, source_task_id: str = "", user_name: str = "autorig-bot"
+    plan: RenderGenPlan,
+    *,
+    source_task_id: str = "",
+    user_name: str = "autorig-bot",
+    telegram_chat_id: int = 0,
 ) -> str:
     """POST the plan to the renderfin character-gen pipeline. Returns job_id."""
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -275,6 +279,7 @@ async def start_character_gen(
                 "mask_url": plan.mask_url,
                 "user_name": user_name,
                 "source_task_id": source_task_id,
+                "telegram_chat_id": telegram_chat_id,
             },
         )
     if resp.status_code != 200:
@@ -290,6 +295,41 @@ async def poll_character_gen(job_id: str) -> Dict[str, Any]:
         resp = await client.get(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}")
     if resp.status_code != 200:
         raise RuntimeError(f"character-gen status failed: HTTP {resp.status_code}")
+    return resp.json()
+
+
+async def list_active_character_gen_jobs() -> list:
+    """Jobs still in flight (used by the bot to re-attach watchers on startup)."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{RENDERFIN_INTERNAL_URL}/api-character-gen")
+        if resp.status_code != 200:
+            return []
+        return list(resp.json().get("jobs") or [])
+    except Exception as exc:
+        print(f"[RenderPrompting] active job list failed: {exc}")
+        return []
+
+
+async def set_character_gen_telegram_context(
+    job_id: str, *, chat_id: int = 0, message_id: int = 0
+) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            await client.post(
+                f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/telegram-context",
+                json={"chat_id": chat_id, "message_id": message_id},
+            )
+    except Exception as exc:
+        print(f"[RenderPrompting] telegram context update failed: {exc}")
+
+
+async def resume_character_gen(job_id: str) -> Dict[str, Any]:
+    """Retry a failed job from its furthest completed stage."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/resume")
+    if resp.status_code != 200:
+        raise RuntimeError(f"character-gen resume failed: HTTP {resp.status_code}")
     return resp.json()
 
 

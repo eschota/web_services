@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "Install as /etc/autorig-renderfin-hunyuan.json (chmod 600).",
+    "Every converter box provisions its OWN Hunyuan bearer token in",
+    "%LOCALAPPDATA%\\AutoRig\\hunyuan_api_token — one shared token does not work.",
+    "The public converter facades drop the Authorization header, so point url at",
+    "the loopback port published by autorig-farm-tunnels.service."
+  ],
+  "workers": [
+    {"name": "f7", "url": "http://127.0.0.1:15131", "token": "<f7 hunyuan_api_token>"},
+    {"name": "f13", "url": "http://127.0.0.1:15267", "token": "<f13 hunyuan_api_token>"}
+  ]
+}

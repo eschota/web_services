@@ -177,7 +177,7 @@ class RunGenerationTests(unittest.TestCase):
             kwargs = bot.edit_message_caption.await_args.kwargs
             self.assertIn("3D не удалось", kwargs["caption"])
             buttons = [b for row in kwargs["reply_markup"].inline_keyboard for b in row]
-            self.assertEqual([b.callback_data for b in buttons], ["rfr:j1", "rfd:j1"])
+            self.assertEqual([b.callback_data for b in buttons], ["rfe:j1", "rfr:j1", "rfd:j1"])
             bot.send_video.assert_not_awaited()
 
         run(scenario())
@@ -283,6 +283,80 @@ class SubmitCallbackTests(unittest.TestCase):
         run(scenario())
 
 
+class WatcherReattachTests(unittest.TestCase):
+    def test_restart_reattaches_watchers_by_stage(self):
+        """A bot restart must not orphan in-flight jobs."""
+
+        async def scenario():
+            import render_prompting
+
+            jobs = [
+                {"job_id": "j-flux", "stage": "flux_render", "telegram_chat_id": 777,
+                 "source_task_id": "t1"},
+                {"job_id": "j-3d", "stage": "hunyuan", "telegram_chat_id": 777,
+                 "telegram_message_id": 55},
+                {"job_id": "j-wait", "stage": "awaiting_image_approval",
+                 "telegram_chat_id": 777, "telegram_message_id": 60},
+                {"job_id": "j-nochat", "stage": "turntable", "telegram_chat_id": 0},
+            ]
+            spawned = []
+            bot = AsyncMock()
+            with patch.object(render_prompting, "list_active_character_gen_jobs",
+                              new=AsyncMock(return_value=jobs)):
+                with patch.object(telegram_bot.asyncio, "create_task",
+                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
+                    await telegram_bot._reattach_chargen_watchers(bot)
+            # flux + hunyuan get watchers; awaiting (stateless buttons) and
+            # chat-less jobs do not
+            self.assertEqual(len(spawned), 2)
+
+        run(scenario())
+
+    def test_reattach_survives_api_failure(self):
+        async def scenario():
+            import render_prompting
+
+            with patch.object(render_prompting, "list_active_character_gen_jobs",
+                              new=AsyncMock(side_effect=RuntimeError("renderfin down"))):
+                await telegram_bot._reattach_chargen_watchers(AsyncMock())
+
+        run(scenario())
+
+
+class ResumeCallbackTests(unittest.TestCase):
+    def test_resume_retries_3d_stage(self):
+        async def scenario():
+            query = _FakeQuery("rfe:11111111-2222-3333-4444-555566667777", message_id=55)
+            update = SimpleNamespace(callback_query=query)
+            context = SimpleNamespace(bot=AsyncMock())
+            import render_prompting
+
+            spawned = []
+            with patch.object(render_prompting, "resume_character_gen",
+                              new=AsyncMock(return_value={"transitioned": True, "stage": "hunyuan"})):
+                with patch.object(telegram_bot.asyncio, "create_task",
+                                  side_effect=lambda coro: (spawned.append(coro), coro.close())[0]):
+                    await telegram_bot._handle_resume_callback(update, context)
+            self.assertEqual(len(spawned), 1)
+            self.assertIn("Продолжаем", query.answers[0])
+
+        run(scenario())
+
+    def test_resume_refused_when_not_failed(self):
+        async def scenario():
+            query = _FakeQuery("rfe:11111111-2222-3333-4444-555566667777", message_id=55)
+            update = SimpleNamespace(callback_query=query)
+            context = SimpleNamespace(bot=AsyncMock())
+            import render_prompting
+
+            with patch.object(render_prompting, "resume_character_gen",
+                              new=AsyncMock(return_value={"transitioned": False, "stage": "ready"})):
+                await telegram_bot._handle_resume_callback(update, context)
+            self.assertIn("нельзя", query.answers[0])
+
+        run(scenario())
+
+
 class SubmitPipelineKindTests(unittest.TestCase):
     def test_submit_uses_convert_pipeline_for_retopology(self):
         """pipeline_kind must be 'convert': 'rig' is only_rig and skips retopology."""
@@ -329,10 +403,16 @@ class DeleteCallbackTests(unittest.TestCase):
             context = SimpleNamespace(bot=bot)
             import render_prompting
 
-            with patch.object(render_prompting, "discard_character_gen", new=AsyncMock()) as discard:
-                await telegram_bot._handle_delete_callback(update, context)
+            release = AsyncMock()
+            with patch.object(render_prompting, "discard_character_gen",
+                              new=AsyncMock(return_value={"source_task_id": "task-1"})) as discard:
+                with patch.object(telegram_bot, "release_notification", new=release):
+                    await telegram_bot._handle_delete_callback(update, context)
             discard.assert_awaited_once_with("11111111-2222-3333-4444-555566667777")
             bot.delete_message.assert_awaited_once_with(chat_id=777, message_id=42)
+            # the 🎨 button must work again after a cancel
+            released = [c.args for c in release.await_args_list]
+            self.assertIn((777, "renderfin_gen", "task-1"), released)
 
         run(scenario())
 
