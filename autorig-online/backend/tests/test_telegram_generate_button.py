@@ -479,3 +479,61 @@ class NotificationReservationTests(unittest.TestCase):
             self.assertEqual(active["max"], 1)
 
         run(scenario())
+
+
+class PrivateChatScopeTests(unittest.TestCase):
+    """DMs are reserved for the 3D generation pipeline; general site traffic
+    stays in the group chats."""
+
+    def _chat_rows(self):
+        # (chat_id, chat_type)
+        return [(-100777, "supergroup"), (555, "private"), (666, "private")]
+
+    def _patch_db(self, rows):
+        class _Result:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def all(self):
+                return list(self._rows)
+
+        class _Session:
+            def __init__(self, rows):
+                self._rows = rows
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def execute(self, _q):
+                return _Result(self._rows)
+
+        return patch.object(telegram_bot, "AsyncSessionLocal", lambda: _Session(rows))
+
+    def test_broadcast_list_excludes_private_chats(self):
+        async def scenario():
+            with self._patch_db(self._chat_rows()):
+                with patch.object(telegram_bot, "TELEGRAM_NOTIFICATION_CHAT_ID", None):
+                    everyone = await telegram_bot.get_active_chat_ids()
+                    broadcast = await telegram_bot.get_broadcast_chat_ids()
+            self.assertEqual(sorted(everyone), [-100777, 555, 666])
+            self.assertEqual(broadcast, [-100777])
+
+        run(scenario())
+
+    def test_private_chat_that_submitted_a_task_is_resolved(self):
+        async def scenario():
+            with self._patch_db([(555,), (666,)]):
+                chats = await telegram_bot.private_chats_awaiting_task("task-1")
+            self.assertEqual(chats, [555, 666])
+
+        run(scenario())
+
+    def test_no_task_id_means_no_private_recipients(self):
+        async def scenario():
+            with self._patch_db([(555,)]):
+                self.assertEqual(await telegram_bot.private_chats_awaiting_task(""), [])
+
+        run(scenario())

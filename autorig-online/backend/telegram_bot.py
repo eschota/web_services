@@ -250,18 +250,49 @@ async def upsert_chat(chat_id: int, chat_type, title: str | None) -> None:
         await db.commit()
 
 
-async def get_active_chat_ids() -> list[int]:
+async def get_active_chat_ids(*, include_private: bool = True) -> list[int]:
+    """Subscribed chats.
+
+    Private chats are reserved for the 3D generation pipeline (validation image,
+    model video, their buttons and failures). General site traffic - task
+    notifications, disk pressure, startup stats - is group-only, so callers that
+    broadcast such messages pass include_private=False.
+    """
     chat_ids: list[int] = []
     if TELEGRAM_NOTIFICATION_CHAT_ID is not None and int(TELEGRAM_NOTIFICATION_CHAT_ID) != 0:
         chat_ids.append(int(TELEGRAM_NOTIFICATION_CHAT_ID))
 
     async with AsyncSessionLocal() as db:
-        rs = await db.execute(select(TelegramChat.chat_id).where(TelegramChat.is_active.is_(True)))
-        for row in rs.all():
-            chat_id = int(row[0])
+        query = select(TelegramChat.chat_id, TelegramChat.chat_type).where(
+            TelegramChat.is_active.is_(True)
+        )
+        rs = await db.execute(query)
+        for chat_id, chat_type in rs.all():
+            chat_id = int(chat_id)
+            if not include_private and str(chat_type or "").lower() == "private":
+                continue
             if chat_id not in chat_ids:
                 chat_ids.append(chat_id)
     return chat_ids
+
+
+async def get_broadcast_chat_ids() -> list[int]:
+    """Chats that receive general site notifications (never private DMs)."""
+    return await get_active_chat_ids(include_private=False)
+
+
+async def private_chats_awaiting_task(task_id: str) -> list[int]:
+    """Private chats that asked for this task: they pressed Submit on a
+    generated model, so its completion belongs to the generation pipeline."""
+    if not task_id:
+        return []
+    async with AsyncSessionLocal() as db:
+        rs = await db.execute(
+            select(TelegramNotification.chat_id)
+            .where(TelegramNotification.event_type == "task_reply_to")
+            .where(TelegramNotification.event_key == task_id)
+        )
+        return [int(row[0]) for row in rs.all()]
 
 
 # =============================================================================
@@ -703,7 +734,7 @@ async def broadcast_new_task(
     else:
         print(f"[Telegram] Caption too long for photo task {task_id}: {len(text)} chars")
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     print(f"[Telegram] Sending new task notification to {len(chat_ids)} chat(s)")
     if not chat_ids:
         return
@@ -779,7 +810,7 @@ async def broadcast_purchase_intent(
         else:
             text += f"\n🎬 <b>Animation:</b> {html.escape(anim_name or anim_id)}"
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -831,7 +862,7 @@ async def broadcast_ltx_video_generation_started(
         parts.append(f"🌄 {html.escape(background_hint[:120])}")
     text = "🎬 <b>LTX reference generation started</b>\n" + " | ".join(parts)
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
     sem = asyncio.Semaphore(3)
@@ -878,7 +909,7 @@ async def broadcast_animation_fitting_started(
         parts.append(f'🎥 <a href="{html.escape(video_url)}">Reference video</a>')
     text = "🧬 <b>Animation fitting started</b>\n" + " | ".join(parts)
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
     sem = asyncio.Semaphore(3)
@@ -920,7 +951,7 @@ async def broadcast_full_bundle_download(task_id: str, user_email: str | None = 
         f"{task_id}\0{(user_email or '')}\0{hour_bucket}".encode()
     ).hexdigest()[:48]
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -980,7 +1011,7 @@ async def broadcast_credits_purchase_click(
     if page_url:
         text += f'\nPage: <a href="{html.escape(page_url)}">open</a>'
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1030,7 +1061,7 @@ async def broadcast_youtube_token_refresh_needed(detail: str = "") -> None:
     )
 
     bot = Bot(token=token)
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1088,7 +1119,7 @@ async def broadcast_disk_space_low(
     )
 
     bot = Bot(token=token)
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1147,7 +1178,7 @@ async def broadcast_disk_usage_warning(
     )
 
     bot = Bot(token=token)
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1206,7 +1237,7 @@ async def broadcast_feedback_submitted(
     bot = Bot(token=token)
     text = f"📝 <b>New Feedback Submitted!</b>\n👤 User: {html.escape(user_email)}\n💬 Text: {html.escape(text_content[:500])}"
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1253,7 +1284,7 @@ async def broadcast_crypto_payment_submitted(
         f"{who}{note_line}"
     )
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1306,7 +1337,7 @@ async def broadcast_credits_purchased(
             f"Sale: {html.escape(sale_id)}"
         )
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1528,7 +1559,7 @@ async def broadcast_task_restarted(task_id: str, reason: str = "manual", admin_e
     admin_line = f" | 👤 Admin: {html.escape(admin_email)}" if admin_email else ""
     text = f'🔄 <b>Task restarted</b> ({html.escape(reason)})\n🔗 <a href="{html.escape(url)}">Task</a>{input_info}{admin_line}'
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     print(f"[Telegram] Sending restart notification to {len(chat_ids)} chat(s)")
     if not chat_ids:
         return
@@ -1563,7 +1594,7 @@ async def broadcast_worker_stalled(
     from telegram.constants import ParseMode
 
     bot = Bot(token=token)
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1640,7 +1671,7 @@ async def broadcast_bulk_restart_summary(total: int, restarted: int, errors: lis
         f"✅ Restarted: {restarted}/{total}{error_line}"
     )
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         return
 
@@ -1799,7 +1830,7 @@ async def broadcast_task_error(
         text += f'\nWorker logs: <a href="{html.escape(resolved_progress)}">open</a>'
     text += f"\n<code>{html.escape(error_message)}</code>"
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         print("[Telegram] No active chats, skipping error notification")
         return
@@ -1902,7 +1933,11 @@ async def broadcast_task_done(
     if not video_path:
         video_path, video_wait_seconds, last_video_status = await _download_video_from_worker(task_id)
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
+    # a model submitted from the generation flow belongs to that private chat
+    for private_id in await private_chats_awaiting_task(task_id):
+        if private_id not in chat_ids:
+            chat_ids.append(private_id)
     if not chat_ids:
         print("[Telegram] No active chats, skipping done notification")
         return
@@ -2062,7 +2097,7 @@ async def broadcast_server_startup() -> None:
         f"📱 Active chats: {active_chats}"
     )
 
-    chat_ids = await get_active_chat_ids()
+    chat_ids = await get_broadcast_chat_ids()
     if not chat_ids:
         print("[Telegram] No active chats for startup notification")
         return
@@ -2125,7 +2160,15 @@ async def _start_cmd(update, context):
     # Get current subscriber count
     active_chats = await get_active_chat_ids()
     print(f"[Telegram] New subscriber added. Total active chats: {len(active_chats)}")
-    await update.message.reply_text("✅ Subscribed. You will receive task notifications here.")
+    if str(getattr(chat, "type", "")).lower() == "private":
+        await update.message.reply_text(
+            "✅ Подписка оформлена.\n"
+            "Сюда приходят только генерации 3D-моделей: "
+            "картинка на валидацию, готовая модель и кнопки. "
+            "Остальные уведомления сайта остаются в группе."
+        )
+    else:
+        await update.message.reply_text("✅ Subscribed. You will receive task notifications here.")
 
 
 # ---------------------------------------------------------------------------
