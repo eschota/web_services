@@ -2609,10 +2609,17 @@ async def _reattach_chargen_watchers(bot) -> None:
     """
     import render_prompting
 
-    try:
-        jobs = await render_prompting.list_active_character_gen_jobs()
-    except Exception as e:
-        print(f"[Telegram][Renderfin] watcher reattach skipped: {e}")
+    # renderfin may still be coming up when the bot starts (both restart together)
+    jobs = []
+    for attempt in range(6):
+        try:
+            jobs = await render_prompting.list_active_character_gen_jobs()
+            if jobs:
+                break
+        except Exception as e:
+            print(f"[Telegram][Renderfin] watcher reattach attempt {attempt + 1}: {e}")
+        await asyncio.sleep(5)
+    if not jobs:
         return
     resumed = 0
     for job in jobs:
