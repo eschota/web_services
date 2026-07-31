@@ -1,6 +1,7 @@
 """Configuration for the renderfin service (env-driven, mirrors backend/config.py style)."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -35,18 +36,47 @@ DISPATCH_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_DISPATCH_INTERVAL_SECONDS
 STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
 
 # Hunyuan3D image-to-3D via converter workers (POST /api-converter-glb/generate-3d).
-# When a token is configured this path is preferred over the ComfyUI image_to_3d workflow.
+# Each farm box provisions its OWN bearer token, so the authoritative source is a
+# JSON file: [{"name": "f7", "url": "https://converter-f7...", "token": "..."}].
+# RENDERFIN_HUNYUAN_WORKERS + HUNYUAN_API_TOKEN remain as a single-token fallback.
+HUNYUAN_WORKERS_FILE = Path(
+    os.getenv("RENDERFIN_HUNYUAN_WORKERS_FILE", "/etc/autorig-renderfin-hunyuan.json")
+)
 HUNYUAN_WORKERS = [
     u.strip().rstrip("/")
-    for u in os.getenv(
-        "RENDERFIN_HUNYUAN_WORKERS",
-        "https://converter-f2.freestock.online,"
-        "https://converter-f7.freestock.online,"
-        "https://converter-f13.freestock.online",
-    ).split(",")
+    for u in os.getenv("RENDERFIN_HUNYUAN_WORKERS", "").split(",")
     if u.strip()
 ]
 HUNYUAN_API_TOKEN = os.getenv("HUNYUAN_API_TOKEN", "").strip()
+
+
+def hunyuan_workers() -> list[dict]:
+    """Resolve the Hunyuan worker pool as [{name, url, token}]."""
+    workers: list[dict] = []
+    try:
+        if HUNYUAN_WORKERS_FILE.is_file():
+            data = json.loads(HUNYUAN_WORKERS_FILE.read_text(encoding="utf-8"))
+            entries = data.get("workers") if isinstance(data, dict) else data
+            for entry in entries or []:
+                url = str(entry.get("url") or "").strip().rstrip("/")
+                token = str(entry.get("token") or "").strip() or HUNYUAN_API_TOKEN
+                if url and token:
+                    workers.append(
+                        {
+                            "name": str(entry.get("name") or url),
+                            "url": url,
+                            "token": token,
+                        }
+                    )
+    except Exception as exc:  # a broken file must not take the service down
+        print(f"[Renderfin] hunyuan workers file unreadable: {exc}")
+    if workers:
+        return workers
+    return [
+        {"name": url, "url": url, "token": HUNYUAN_API_TOKEN}
+        for url in HUNYUAN_WORKERS
+        if HUNYUAN_API_TOKEN
+    ]
 HUNYUAN_QUALITY = os.getenv("RENDERFIN_HUNYUAN_QUALITY", "standard").strip() or "standard"
 HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))
 HUNYUAN_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_TIMEOUT_SECONDS", "3600"))

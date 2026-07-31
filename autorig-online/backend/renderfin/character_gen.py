@@ -275,19 +275,32 @@ class CharacterGenManager:
         print(f"[Renderfin][CharGen] job {job.id} hunyuan done -> {job.glb_url}")
 
     async def _stage_hunyuan_converter(self, job: CharacterGenJob) -> None:
-        """Preferred path: the converter workers' Hunyuan3D 2.1 PBR API (F2/F7/F13)."""
+        """Preferred path: the converter workers' Hunyuan3D 2.1 PBR API (per-box token)."""
         async with httpx.AsyncClient(follow_redirects=True) as client:
-            if not job.hunyuan_task_id or not job.hunyuan_task_id.startswith("http"):
+            worker = None
+            if job.hunyuan_task_id.startswith("http"):
+                # resuming: the owning worker is derivable from the stored status url
+                worker = hunyuan_client.worker_for_url(job.hunyuan_task_id)
+                if worker is None:
+                    print(
+                        f"[Renderfin][CharGen] job {job.id}: worker for "
+                        f"{job.hunyuan_task_id} is gone, resubmitting"
+                    )
+                    job.hunyuan_task_id = ""
+            if worker is None:
                 worker, status_url = await hunyuan_client.submit(
                     client, image_url=job.isolated_url
                 )
                 # store the status_url so a service restart can resume polling
                 job.hunyuan_task_id = status_url
+                job.hunyuan_worker = worker["name"]
                 await self._persist(job)
-                print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker}")
-            payload = await hunyuan_client.wait_for_model(client, job.hunyuan_task_id)
+                print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker['name']}")
+            payload = await hunyuan_client.wait_for_model(
+                client, worker, job.hunyuan_task_id
+            )
             model_url = str((payload.get("output_urls") or {}).get("model"))
-            data = await hunyuan_client.download_model(client, model_url)
+            data = await hunyuan_client.download_model(client, worker, model_url)
         user_dir = config.RENDER_DIR / job.user_name
         user_dir.mkdir(parents=True, exist_ok=True)
         glb_path = user_dir / f"{job.id}.glb"

@@ -129,6 +129,7 @@ class CharacterGenJob(BaseModel):
     stage: str = CHARGEN_STAGE_FLUX
     flux_task_id: str = ""
     hunyuan_task_id: str = ""
+    hunyuan_worker: str = ""
     image_url: str = ""       # full t_pose render
     isolated_url: str = ""    # alpha-isolated character
     glb_url: str = ""

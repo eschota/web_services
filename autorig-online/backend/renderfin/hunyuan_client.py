@@ -1,10 +1,13 @@
 """Client for the converter workers' Hunyuan3D 2.1 image-to-3D API.
 
 Contract: R:\\3d\\HUNYUAN_IMAGE_TO_3D_API.md —
-POST {worker}/api-converter-glb/generate-3d  (Bearer HUNYUAN_API_TOKEN)
+POST {worker}/api-converter-glb/generate-3d  (Bearer token, provisioned per box)
 GET  {worker}/api-converter-glb/generate-3d/status/{task_id}
 Status: Pending/Downloading/GeneratingShape/GeneratingPBR/Packaging/Completed/Failed
 Completed payload carries output_urls: {model, previews, report}.
+
+Every farm box has its OWN bearer token, so a worker travels as
+{name, url, token} and is never authenticated with a shared secret.
 """
 from __future__ import annotations
 
@@ -21,17 +24,41 @@ class HunyuanClientError(RuntimeError):
     pass
 
 
-def _headers() -> Dict[str, str]:
-    return {"Authorization": f"Bearer {config.HUNYUAN_API_TOKEN}"}
+def workers() -> List[Dict[str, str]]:
+    return config.hunyuan_workers()
 
 
 def is_configured() -> bool:
-    return bool(config.HUNYUAN_API_TOKEN and config.HUNYUAN_WORKERS)
+    return bool(workers())
 
 
-async def _worker_hunyuan_state(client: httpx.AsyncClient, worker: str) -> Optional[Dict[str, Any]]:
+def worker_by_name(name: str) -> Optional[Dict[str, str]]:
+    for worker in workers():
+        if worker["name"] == name:
+            return worker
+    return None
+
+
+def worker_for_url(url: str) -> Optional[Dict[str, str]]:
+    """Find the worker owning a status/artifact URL (used when resuming a job)."""
+    url = (url or "").strip()
+    for worker in workers():
+        if url.startswith(worker["url"]):
+            return worker
+    return None
+
+
+def _headers(worker: Dict[str, str]) -> Dict[str, str]:
+    return {"Authorization": f"Bearer {worker['token']}"}
+
+
+async def worker_state(
+    client: httpx.AsyncClient, worker: Dict[str, str]
+) -> Optional[Dict[str, Any]]:
     try:
-        resp = await client.get(f"{worker}/api-converter-glb/server-status", timeout=10.0)
+        resp = await client.get(
+            f"{worker['url']}/api-converter-glb/server-status", timeout=12.0
+        )
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -41,20 +68,28 @@ async def _worker_hunyuan_state(client: httpx.AsyncClient, worker: str) -> Optio
         return None
 
 
-async def pick_worker(client: httpx.AsyncClient) -> str:
-    """Prefer an idle enabled worker; fall back to the first enabled one."""
-    enabled: List[str] = []
-    for worker in config.HUNYUAN_WORKERS:
-        state = await _worker_hunyuan_state(client, worker)
+async def pick_worker(client: httpx.AsyncClient) -> Dict[str, str]:
+    """Prefer an idle enabled worker; else the enabled one with the shortest queue."""
+    pool = workers()
+    if not pool:
+        raise HunyuanClientError("no Hunyuan workers configured")
+    enabled: List[Tuple[int, Dict[str, str]]] = []
+    for worker in pool:
+        state = await worker_state(client, worker)
         if not state or not state.get("enabled") or not state.get("installed"):
             continue
         if str(state.get("service_state") or "") == "idle":
             return worker
-        enabled.append(worker)
+        try:
+            queue_size = int(state.get("queue_size") or 0)
+        except Exception:
+            queue_size = 0
+        enabled.append((queue_size, worker))
     if enabled:
-        return enabled[0]
+        enabled.sort(key=lambda pair: pair[0])
+        return enabled[0][1]
     raise HunyuanClientError(
-        f"no enabled Hunyuan worker among {', '.join(config.HUNYUAN_WORKERS)}"
+        "no enabled Hunyuan worker among " + ", ".join(w["name"] for w in pool)
     )
 
 
@@ -65,7 +100,7 @@ async def submit(
     seed: Optional[int] = None,
     quality: Optional[str] = None,
     background_method: str = "auto",
-) -> Tuple[str, str]:
+) -> Tuple[Dict[str, str], str]:
     """Create a generation task. Returns (worker, status_url)."""
     worker = await pick_worker(client)
     body: Dict[str, Any] = {
@@ -76,14 +111,14 @@ async def submit(
     if seed:
         body["seed"] = int(seed) & 0xFFFFFFFF
     resp = await client.post(
-        f"{worker}/api-converter-glb/generate-3d",
+        f"{worker['url']}/api-converter-glb/generate-3d",
         json=body,
-        headers=_headers(),
+        headers=_headers(worker),
         timeout=30.0,
     )
     if resp.status_code not in (200, 202):
         raise HunyuanClientError(
-            f"generate-3d on {worker} failed: HTTP {resp.status_code} {resp.text[:300]}"
+            f"generate-3d on {worker['name']} failed: HTTP {resp.status_code} {resp.text[:300]}"
         )
     payload = resp.json()
     status_url = str(payload.get("status_url") or "")
@@ -91,12 +126,13 @@ async def submit(
     if not status_url:
         if not task_id:
             raise HunyuanClientError(f"generate-3d returned no status_url/task_id: {payload}")
-        status_url = f"{worker}/api-converter-glb/generate-3d/status/{task_id}"
+        status_url = f"{worker['url']}/api-converter-glb/generate-3d/status/{task_id}"
     return worker, status_url
 
 
 async def wait_for_model(
     client: httpx.AsyncClient,
+    worker: Dict[str, str],
     status_url: str,
     *,
     timeout: Optional[float] = None,
@@ -107,7 +143,7 @@ async def wait_for_model(
     last_status = ""
     while time.time() < deadline:
         try:
-            resp = await client.get(status_url, headers=_headers(), timeout=30.0)
+            resp = await client.get(status_url, headers=_headers(worker), timeout=30.0)
         except Exception as exc:
             print(f"[Renderfin][Hunyuan] status poll error: {exc}")
             await asyncio.sleep(config.HUNYUAN_POLL_SECONDS)
@@ -117,6 +153,7 @@ async def wait_for_model(
             status = str(payload.get("status") or "")
             if status != last_status:
                 last_status = status
+                print(f"[Renderfin][Hunyuan] {worker['name']}: {status}")
                 if on_progress:
                     try:
                         on_progress(status, payload)
@@ -129,14 +166,21 @@ async def wait_for_model(
                 return payload
             if status == "Failed":
                 raise HunyuanClientError(
-                    f"generation failed: {payload.get('error') or 'unknown error'}"
+                    f"generation failed on {worker['name']}: "
+                    f"{payload.get('error') or 'unknown error'}"
                 )
+        elif resp.status_code == 404:
+            raise HunyuanClientError(f"task vanished on {worker['name']} (HTTP 404)")
         await asyncio.sleep(config.HUNYUAN_POLL_SECONDS)
     raise HunyuanClientError("generation timed out")
 
 
-async def download_model(client: httpx.AsyncClient, model_url: str) -> bytes:
-    resp = await client.get(model_url, headers=_headers(), timeout=300.0, follow_redirects=True)
+async def download_model(
+    client: httpx.AsyncClient, worker: Dict[str, str], model_url: str
+) -> bytes:
+    resp = await client.get(
+        model_url, headers=_headers(worker), timeout=300.0, follow_redirects=True
+    )
     if resp.status_code != 200:
         raise HunyuanClientError(f"model download failed: HTTP {resp.status_code} {model_url}")
     if len(resp.content) < 1024:

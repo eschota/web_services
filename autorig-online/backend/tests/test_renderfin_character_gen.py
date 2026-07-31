@@ -148,8 +148,13 @@ class HunyuanConverterPathTests(unittest.TestCase):
 
                     from renderfin import character_gen as cg_mod
 
-                    with patch.object(config, "HUNYUAN_API_TOKEN", "test-token"):
-                        with patch.object(config, "HUNYUAN_WORKERS", ["https://converter-f2.freestock.online"]):
+                    fake_pool = [{
+                        "name": "f2",
+                        "url": "https://converter-f2.freestock.online",
+                        "token": "test-token",
+                    }]
+                    with patch.object(config, "hunyuan_workers", lambda: fake_pool):
+                        with patch.object(config, "HUNYUAN_API_TOKEN", "test-token"):
                             with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.01):
                                 with patch.object(cg_mod.httpx, "AsyncClient", side_effect=patched_client):
                                     with patch.object(cg_mod.turntable, "render_turntable", side_effect=fake_turntable):
