@@ -1,0 +1,15 @@
+[Unit]
+Description=AutoRig Renderfin farm SSH tunnels (Hunyuan3D bearer-auth path)
+After=network-online.target
+Wants=network-online.target
+Before=autorig-renderfin.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/root/autorig-online/deploy/renderfin-farm-tunnels/farm-tunnels.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
