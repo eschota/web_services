@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -121,12 +122,17 @@ async def submit(
             f"generate-3d on {worker['name']} failed: HTTP {resp.status_code} {resp.text[:300]}"
         )
     payload = resp.json()
-    status_url = str(payload.get("status_url") or "")
     task_id = str(payload.get("task_id") or "")
-    if not status_url:
-        if not task_id:
-            raise HunyuanClientError(f"generate-3d returned no status_url/task_id: {payload}")
+    if task_id:
+        # The worker builds status_url from the Host header and drops the port,
+        # so it can point at an unrelated service. Always re-base on the worker.
         status_url = f"{worker['url']}/api-converter-glb/generate-3d/status/{task_id}"
+    else:
+        advertised = str(payload.get("status_url") or "")
+        path = urlsplit(advertised).path if advertised else ""
+        if not path:
+            raise HunyuanClientError(f"generate-3d returned no status_url/task_id: {payload}")
+        status_url = f"{worker['url']}{path}"
     return worker, status_url
 
 
@@ -141,6 +147,7 @@ async def wait_for_model(
     """Poll until Completed; returns the final status payload (with output_urls)."""
     deadline = time.time() + (timeout or config.HUNYUAN_TIMEOUT_SECONDS)
     last_status = ""
+    misses = 0
     while time.time() < deadline:
         try:
             resp = await client.get(status_url, headers=_headers(worker), timeout=30.0)
@@ -170,7 +177,10 @@ async def wait_for_model(
                     f"{payload.get('error') or 'unknown error'}"
                 )
         elif resp.status_code == 404:
-            raise HunyuanClientError(f"task vanished on {worker['name']} (HTTP 404)")
+            # Tolerate a transient miss (worker restart window) before giving up.
+            misses += 1
+            if misses >= 5:
+                raise HunyuanClientError(f"task vanished on {worker['name']} (HTTP 404)")
         await asyncio.sleep(config.HUNYUAN_POLL_SECONDS)
     raise HunyuanClientError("generation timed out")
 
