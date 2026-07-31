@@ -410,5 +410,72 @@ class ImageApprovalGateTests(unittest.TestCase):
         run(scenario())
 
 
+class ResumeTests(unittest.TestCase):
+    def test_resume_failed_job_reuses_finished_flux_render(self):
+        async def scenario():
+            with _Env():
+                from renderfin.models import CHARGEN_STAGE_FAILED as FAILED
+
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    flux_id = job.flux_task_id
+                    # simulate a stage-timeout failure that lost the flux result
+                    job.stage = FAILED
+                    job.error = "render task timed out"
+                    job.image_url = ""
+                    job.isolated_url = ""
+                    await manager._persist(job)
+
+                    job, transitioned = await manager.resume(job.id)
+                    self.assertTrue(transitioned)
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    # reused the existing (already Done) render — no new enqueue
+                    self.assertEqual(job.flux_task_id, flux_id)
+                    self.assertEqual(len(queue.enqueued), 1)
+                    self.assertTrue(job.image_url)
+
+                    # resume refuses non-failed jobs
+                    _, again = await manager.resume(job.id)
+                    self.assertFalse(again)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+
+class ResurrectDoneTests(unittest.TestCase):
+    def test_recent_done_tasks_loaded_after_restart(self):
+        async def scenario():
+            with _Env():
+                from renderfin.models import RenderPrompt, TASK_DONE
+
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                task = await queue.enqueue(
+                    RenderPrompt(prompt="a", type="t_pose", image_url="https://h/m.jpg")
+                )
+                self.assertEqual(task.status, TASK_DONE)
+                await queue.stop()
+
+                queue2 = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue2.start()
+                try:
+                    revived = queue2.get(task.id)
+                    self.assertIsNotNone(revived)
+                    self.assertEqual(revived.status, TASK_DONE)
+                finally:
+                    await queue2.stop()
+
+        run(scenario())
+
+
 if __name__ == "__main__":
     unittest.main()

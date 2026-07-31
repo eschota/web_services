@@ -99,9 +99,12 @@ class RenderQueue:
 
     async def _resurrect(self) -> None:
         assert self._db is not None
+        # active tasks restart from Pending; recent finished tasks are loaded
+        # read-only so in-flight character_gen jobs can resume against them
+        day_ago = time.time() - 86400
         async with self._db.execute(
-            "SELECT payload FROM render_tasks WHERE status IN (?, ?)",
-            (TASK_PENDING, TASK_RENDERING),
+            "SELECT payload FROM render_tasks WHERE status IN (?, ?) OR created_at > ?",
+            (TASK_PENDING, TASK_RENDERING, day_ago),
         ) as cur:
             rows = await cur.fetchall()
         for (payload,) in rows:
@@ -114,8 +117,8 @@ class RenderQueue:
                 task.status = TASK_PENDING
                 task.server_name = ""
                 task.comfy_prompt_id = ""
+                await self._persist(task)
             self._tasks[task.id] = task
-            await self._persist(task)
         if self._tasks:
             print(f"[Renderfin][Queue] resurrected {len(self._tasks)} task(s)")
 

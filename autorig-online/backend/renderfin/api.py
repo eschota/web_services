@@ -132,6 +132,16 @@ async def api_character_gen_approve_image(request: Request, job_id: str) -> Dict
     return payload
 
 
+@router.post("/api-character-gen/{job_id}/resume")
+async def api_character_gen_resume(request: Request, job_id: str) -> Dict[str, Any]:
+    job, transitioned = await _chargen(request).resume(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    payload = job.public_dict()
+    payload["transitioned"] = transitioned
+    return payload
+
+
 @router.post("/api-character-gen/{job_id}/regenerate-image")
 async def api_character_gen_regenerate_image(request: Request, job_id: str) -> Dict[str, Any]:
     job, transitioned = await _chargen(request).regenerate_image(job_id)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 from typing import Dict, Optional
@@ -43,8 +44,10 @@ CREATE INDEX IF NOT EXISTS idx_chargen_stage ON chargen_jobs(stage);
 
 _ACTIVE_STAGES = (CHARGEN_STAGE_FLUX, CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_TURNTABLE)
 
-FLUX_STAGE_TIMEOUT = 1800
-HUNYUAN_STAGE_TIMEOUT = 1800
+# Stage waits include time spent queued behind other renders on a shared
+# worker, so they are deliberately generous and env-tunable.
+FLUX_STAGE_TIMEOUT = float(os.getenv("RENDERFIN_CHARGEN_FLUX_TIMEOUT", "3600"))
+HUNYUAN_STAGE_TIMEOUT = float(os.getenv("RENDERFIN_CHARGEN_HUNYUAN_TIMEOUT", "5400"))
 
 
 class CharacterGenManager:
@@ -163,6 +166,29 @@ class CharacterGenManager:
         if job.stage != CHARGEN_STAGE_AWAITING_IMAGE:
             return job, False
         job.stage = CHARGEN_STAGE_HUNYUAN
+        job.error = ""
+        await self._persist(job)
+        self._spawn(job)
+        return job, True
+
+    async def resume(self, job_id: str):
+        """Retry a failed job from its furthest completed stage, reusing any
+        still-alive render task (unlike regenerate, no new render is enqueued)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None, False
+        if job.stage != CHARGEN_STAGE_FAILED:
+            return job, False
+        if job.video_url:
+            job.stage = CHARGEN_STAGE_READY
+            await self._persist(job)
+            return job, True
+        if job.glb_url:
+            job.stage = CHARGEN_STAGE_TURNTABLE
+        elif job.isolated_url:
+            job.stage = CHARGEN_STAGE_HUNYUAN
+        else:
+            job.stage = CHARGEN_STAGE_FLUX
         job.error = ""
         await self._persist(job)
         self._spawn(job)
