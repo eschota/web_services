@@ -423,6 +423,134 @@ class ImageApprovalGateTests(unittest.TestCase):
         run(scenario())
 
 
+class TwoVariantTests(unittest.TestCase):
+    def test_both_styles_are_rendered_and_offered(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await manager.create(
+                        prompt="orc warrior", prompt_b="low-poly orc warrior", user_name="bot"
+                    )
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    self.assertEqual(len(queue.enqueued), 2)
+                    self.assertEqual(
+                        [t.prompt.prompt for t in queue.enqueued],
+                        ["orc warrior", "low-poly orc warrior"],
+                    )
+                    self.assertTrue(job.image_url)
+                    self.assertTrue(job.image_url_b)
+                    self.assertNotEqual(job.image_url, job.image_url_b)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_choosing_the_second_variant_feeds_it_to_3d(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    variant_b_image = job.image_url_b
+                    variant_b_isolated = job.isolated_url_b
+                    self.assertTrue(variant_b_isolated)
+
+                    job, ok = await manager.approve_image(job.id, variant="b")
+                    self.assertTrue(ok)
+                    self.assertEqual(job.chosen_variant, "b")
+                    # the chosen render becomes the one the 3D stage consumes
+                    self.assertEqual(job.image_url, variant_b_image)
+                    self.assertEqual(job.isolated_url, variant_b_isolated)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_single_prompt_still_renders_one_variant(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    self.assertEqual(len(queue.enqueued), 1)
+                    self.assertFalse(job.image_url_b)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_second_variant_failure_does_not_sink_the_job(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    original = queue.enqueue
+
+                    async def enqueue_second_fails(prompt):
+                        task = await original(prompt)
+                        if prompt.prompt.startswith("low-poly"):
+                            task.status = TASK_ERROR
+                            task.error = "variant B boom"
+                            task.output_path = ""
+                            task.extra_outputs.clear()
+                        return task
+
+                    queue.enqueue = enqueue_second_fails
+                    job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    self.assertTrue(job.image_url)
+                    self.assertFalse(job.image_url_b)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_regenerate_clears_both_variants(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    first_b = job.image_url_b
+                    await manager.regenerate_image(job.id)
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    self.assertTrue(job.image_url_b)
+                    self.assertNotEqual(job.image_url_b, first_b)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+
 class ResumeTests(unittest.TestCase):
     def test_resume_failed_job_reuses_finished_flux_render(self):
         async def scenario():

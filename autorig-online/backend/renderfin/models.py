@@ -125,12 +125,21 @@ class CharacterGenJob(BaseModel):
     # Human-facing running number across every generated model.
     seq: int = 0
     prompt: str = ""
+    # Second style rendered from the same subject so the user can pick the
+    # better base for the 3D model.
+    prompt_b: str = ""
     negative_prompt: str = ""
     mask_url: str = ""
+    # the second style may call for a different build, hence its own pose mask
+    mask_url_b: str = ""
     user_name: str = "autorig-bot"
     source_task_id: str = ""
     stage: str = CHARGEN_STAGE_FLUX
     flux_task_id: str = ""
+    flux_task_id_b: str = ""
+    image_url_b: str = ""
+    isolated_url_b: str = ""
+    chosen_variant: str = ""
     hunyuan_task_id: str = ""
     hunyuan_worker: str = ""
     # Telegram context: renderfin delivers results itself so they survive
@@ -161,10 +170,15 @@ class CharacterGenJob(BaseModel):
             "prompt": self.prompt,
             "negative_prompt": self.negative_prompt,
             "mask_url": self.mask_url,
+            "mask_url_b": self.mask_url_b or None,
             "user_name": self.user_name,
             "source_task_id": self.source_task_id,
+            "prompt_b": self.prompt_b or None,
             "image_url": self.image_url or None,
             "isolated_url": self.isolated_url or None,
+            "image_url_b": self.image_url_b or None,
+            "isolated_url_b": self.isolated_url_b or None,
+            "chosen_variant": self.chosen_variant or None,
             "glb_url": self.glb_url or None,
             "video_url": self.video_url or None,
             "error": self.error or None,

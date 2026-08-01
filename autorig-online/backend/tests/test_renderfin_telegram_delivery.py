@@ -124,11 +124,68 @@ class DeliveryTickTests(unittest.TestCase):
             self.assertEqual(payload["photo"], "https://x/a.png")
             markup = json.loads(payload["reply_markup"])
             data = [b["callback_data"] for row in markup["inline_keyboard"] for b in row]
-            self.assertEqual(data, [f"rfa:{job.id}", f"rfr:{job.id}", f"rfd:{job.id}"])
+            self.assertEqual(data, [f"rfa:{job.id}:a", f"rfr:{job.id}", f"rfd:{job.id}"])
             self.assertEqual(manager.marks[0][1], DELIVERY_IMAGE)
             self.assertEqual(job.telegram_status_message_id, 0)
 
         run(scenario())
+
+    def test_two_variants_sent_as_a_group_with_a_button_each(self):
+        async def scenario():
+            sent = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                sent.append((request.url.path, dict(httpx.QueryParams(request.content.decode()))))
+                # sendMediaGroup answers with a list of messages, not one message
+                if request.url.path.endswith("sendMediaGroup"):
+                    return httpx.Response(
+                        200, json={"ok": True, "result": [{"message_id": 500}, {"message_id": 501}]}
+                    )
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 502}})
+
+            job = _job(
+                stage=CHARGEN_STAGE_AWAITING_IMAGE,
+                image_url="https://x/a.png",
+                isolated_url="https://x/a_Isolated.png",
+                image_url_b="https://x/b.png",
+                isolated_url_b="https://x/b_Isolated.png",
+            )
+            service, manager, client = self._service([job], handler)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.tick()
+            await client.aclose()
+
+            paths = [p for p, _ in sent]
+            self.assertIn("/botT/sendMediaGroup", paths)
+            group = json.loads(dict(sent[0][1])["media"])
+            self.assertEqual([m["media"] for m in group], ["https://x/a.png", "https://x/b.png"])
+
+            choice = dict(sent[1][1])
+            markup = json.loads(choice["reply_markup"])
+            data = [b["callback_data"] for row in markup["inline_keyboard"] for b in row]
+            self.assertEqual(
+                data,
+                [f"rfa:{job.id}:a", f"rfa:{job.id}:b", f"rfr:{job.id}", f"rfd:{job.id}"],
+            )
+            self.assertEqual(manager.marks[0][1], DELIVERY_IMAGE)
+
+        run(scenario())
+
+    def test_second_variant_alone_is_a_new_delivery(self):
+        """A regenerated pair must not be suppressed by the first pair's marker."""
+        job = _job(
+            stage=CHARGEN_STAGE_AWAITING_IMAGE,
+            image_url="https://x/a.png",
+            image_url_b="https://x/b.png",
+        )
+        job.delivered[DELIVERY_IMAGE] = "https://x/a.png|https://x/old-b.png"
+        self.assertEqual(pending_delivery(job), DELIVERY_IMAGE)
+        # a review delivered before two-variant rendering keeps its bare marker
+        single = _job(stage=CHARGEN_STAGE_AWAITING_IMAGE, image_url="https://x/a.png")
+        single.delivered[DELIVERY_IMAGE] = "https://x/a.png"
+        self.assertIsNone(pending_delivery(single))
+        job.delivered[DELIVERY_IMAGE] = "https://x/a.png|https://x/b.png"
+        self.assertIsNone(pending_delivery(job))
 
     def test_model_video_sent_with_submit_buttons(self):
         async def scenario():

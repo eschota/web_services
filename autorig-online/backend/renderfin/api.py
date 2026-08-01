@@ -100,8 +100,10 @@ async def api_render_get_task_by_url(
 
 class CharacterGenRequest(BaseModel):
     prompt: str
+    prompt_b: str = ""
     negative_prompt: str = ""
     mask_url: str = ""
+    mask_url_b: str = ""
     user_name: str = "autorig-bot"
     source_task_id: str = ""
     telegram_chat_id: int = 0
@@ -119,8 +121,10 @@ async def api_character_gen(request: Request, body: CharacterGenRequest) -> Dict
         raise HTTPException(status_code=400, detail="prompt required")
     job = await _chargen(request).create(
         prompt=body.prompt,
+        prompt_b=body.prompt_b,
         negative_prompt=body.negative_prompt,
         mask_url=body.mask_url,
+        mask_url_b=body.mask_url_b,
         user_name=body.user_name,
         source_task_id=body.source_task_id,
         telegram_chat_id=body.telegram_chat_id,
@@ -158,8 +162,10 @@ async def api_character_gen_status(request: Request, job_id: str) -> Dict[str, A
 
 
 @router.post("/api-character-gen/{job_id}/approve-image")
-async def api_character_gen_approve_image(request: Request, job_id: str) -> Dict[str, Any]:
-    job, transitioned = await _chargen(request).approve_image(job_id)
+async def api_character_gen_approve_image(
+    request: Request, job_id: str, variant: str = Query(default="a")
+) -> Dict[str, Any]:
+    job, transitioned = await _chargen(request).approve_image(job_id, variant)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     payload = job.public_dict()

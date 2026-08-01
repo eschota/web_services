@@ -148,11 +148,38 @@ class ApproveRegenCallbackTests(unittest.TestCase):
             with patch.object(render_prompting, "approve_character_gen_image",
                               new=AsyncMock(return_value={"transitioned": True, "stage": "hunyuan"})) as approve:
                 await telegram_bot._handle_approve_callback(update, context)
-            approve.assert_awaited_once_with("11111111-2222-3333-4444-555566667777")
-            bot.edit_message_caption.assert_awaited_once()
-            self.assertIn("Генерируем 3D", query.answers[0])
+            approve.assert_awaited_once_with(
+                "11111111-2222-3333-4444-555566667777", variant="a"
+            )
+            # the choice message may be a text message or a photo caption
+            edits = bot.edit_message_text.await_count + bot.edit_message_caption.await_count
+            self.assertEqual(edits, 1)
+            self.assertIn("первого", query.answers[0])
 
         run(scenario())
+
+    def test_second_variant_button_picks_variant_b(self):
+        async def scenario():
+            query = _FakeQuery("rfa:11111111-2222-3333-4444-555566667777:b", message_id=55)
+            update = SimpleNamespace(callback_query=query)
+            bot = AsyncMock()
+            context = SimpleNamespace(bot=bot)
+            import render_prompting
+
+            with patch.object(render_prompting, "approve_character_gen_image",
+                              new=AsyncMock(return_value={"transitioned": True, "stage": "hunyuan"})) as approve:
+                await telegram_bot._handle_approve_callback(update, context)
+            approve.assert_awaited_once_with(
+                "11111111-2222-3333-4444-555566667777", variant="b"
+            )
+
+        run(scenario())
+
+    def test_variant_callback_data_fits_telegram_limit(self):
+        job_id = "11111111-2222-3333-4444-555566667777"
+        for data in (f"rfa:{job_id}:a", f"rfa:{job_id}:b"):
+            self.assertLessEqual(len(data.encode("utf-8")), 64)
+            self.assertRegex(data, telegram_bot._APPROVE_PATTERN)
 
     def test_approve_double_press_refused(self):
         async def scenario():

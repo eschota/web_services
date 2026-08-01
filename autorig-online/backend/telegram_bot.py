@@ -2180,24 +2180,17 @@ CHARGEN_POLL_INTERVAL_SECONDS = 10
 # otherwise the bot declares a failure the server would still complete.
 CHARGEN_TOTAL_TIMEOUT_SECONDS = 7800
 
+# Approve callback carries the chosen render: "rfa:{job}:a" | "rfa:{job}:b".
+# The trailing variant is optional so buttons sent before two-variant rendering
+# still resolve (they mean variant "a").
+_APPROVE_PATTERN = r"^rfa:([0-9a-fA-F-]{8,64})(?::([ab]))?$"
+
 _CHARGEN_STAGE_LABELS = {
     "flux_render": "рендерим T-позу (Flux)",
     "awaiting_image_approval": "ждём подтверждения изображения",
     "hunyuan": "генерируем 3D-модель (Hunyuan3D)",
     "turntable": "рендерим видео-облёт",
 }
-
-
-def _chargen_image_review_markup(job_id: str):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Сделать 3D-модель", callback_data=f"rfa:{job_id}"),
-            InlineKeyboardButton("🔁 Перегенерировать", callback_data=f"rfr:{job_id}"),
-        ],
-        [InlineKeyboardButton("🗑 Отмена", callback_data=f"rfd:{job_id}")],
-    ])
 
 
 def _chargen_retry_markup(job_id: str):
@@ -2275,28 +2268,31 @@ async def _handle_approve_callback(update, context) -> None:
     query = update.callback_query
     if not query or not query.data:
         return
-    match = re.match(r"^rfa:([0-9a-fA-F-]{8,64})$", query.data)
+    match = re.match(_APPROVE_PATTERN, query.data)
     if not match:
         await query.answer("Некорректные данные кнопки")
         return
-    job_id = match.group(1)
+    job_id, variant = match.group(1), (match.group(2) or "a")
     try:
-        payload = await render_prompting.approve_character_gen_image(job_id)
+        payload = await render_prompting.approve_character_gen_image(job_id, variant=variant)
     except Exception as e:
         await query.answer(f"Ошибка: {str(e)[:150]}")
         return
     if not payload.get("transitioned"):
         await query.answer(f"Уже в работе (стадия: {payload.get('stage')})")
         return
-    await query.answer("Генерируем 3D-модель…")
+    label = "второго" if variant == "b" else "первого"
+    await query.answer(f"Делаю 3D из {label} варианта…")
     chat_id = int(query.message.chat.id)
-    try:
-        await context.bot.edit_message_caption(
-            chat_id=chat_id, message_id=query.message.message_id,
-            caption="⏳ Генерируем 3D-модель (обычно 5-10 минут)…",
-        )
-    except Exception:
-        pass
+    text = f"⏳ Генерируем 3D-модель из {label} варианта (обычно 10-60 минут)…"
+    for edit in (context.bot.edit_message_text, context.bot.edit_message_caption):
+        try:
+            kwargs = {"chat_id": chat_id, "message_id": query.message.message_id}
+            kwargs["text" if edit is context.bot.edit_message_text else "caption"] = text
+            await edit(**kwargs)
+            break
+        except Exception:
+            continue
 
 
 async def _handle_regen_callback(update, context) -> None:
@@ -2563,7 +2559,7 @@ async def run_polling() -> None:
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", _start_cmd))
     app.add_handler(CallbackQueryHandler(_handle_generate_callback, pattern=r"^rfg:[0-9a-fA-F-]{8,64}$"))
-    app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=r"^rfa:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=_APPROVE_PATTERN))
     app.add_handler(CallbackQueryHandler(_handle_regen_callback, pattern=r"^rfr:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_resume_callback, pattern=r"^rfe:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_submit_callback, pattern=r"^rfs:[0-9a-fA-F-]{8,64}$"))

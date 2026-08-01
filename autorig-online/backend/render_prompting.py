@@ -8,6 +8,7 @@ code changes. A deterministic template + keyword heuristic covers LLM outages.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -50,6 +51,12 @@ class RenderGenPlan:
     body_type: str
     mask_url: str
     source: str  # "llm" | "template"
+    # second style rendered alongside so the user can pick the better 3D base
+    prompt_b: str = ""
+    # the cartoon style usually reads as a different build, and only the fat and
+    # dwarf skeletons carry openpose face keypoints, so it gets its own mask
+    body_type_b: str = ""
+    mask_url_b: str = ""
 
 
 def mask_url_for_body_type(body_type: str) -> str:
@@ -67,10 +74,12 @@ def body_type_from_keywords(text: str) -> str:
     return "normal"
 
 
-def _load_instruction() -> str:
+def _load_instruction(style: str = "base") -> str:
+    """Instruction text for one render style ("base" | "lowpoly")."""
+    key = "instruction_lowpoly" if style == "lowpoly" else "instruction"
     try:
         data = json.loads(_INSTRUCTION_PATH.read_text(encoding="utf-8"))
-        return str(data.get("instruction") or "").strip()
+        return str(data.get(key) or "").strip()
     except Exception as exc:
         print(f"[RenderPrompting] instruction load failed: {exc}")
         return ""
@@ -117,24 +126,107 @@ def _poster_data_url(task_id: str) -> Optional[str]:
     return None
 
 
+# Fixed sentences shared by the fallback prompts. Every clause here is a
+# measured fix, not decoration:
+#   - no "character sheet"/"turnaround": Flux builds a multi-panel layout with
+#     annotation text and the 3D stage fails on it
+#   - no "silhouette": Flux renders a literal black cutout
+#   - no "even lighting"/"studio"/"white background": the first reads as no form
+#     shadow at all, the others pull a floor sweep and a contact shadow that
+#     RMBG cuts through, leaving a dirty edge at the ankles
+#   - the margin clause: the pose skeletons put fingertips within 31-91px of the
+#     frame edge, and a clipped hand reconstructs as a truncated stump
+#   - "arms straight out to the sides", never "stretched", which reads as a
+#     stretch deformation on the limbs
+_BASE_STYLE_PHRASE = "full-body stylized 3D game character render"
+_LOWPOLY_STYLE_PHRASE = "full-body low-poly cartoon 3D game character render"
+
+_POSE_SENTENCE = (
+    "It stands alone in a strict T-pose, arms straight out to the sides, hands open "
+    "and empty, legs straight and slightly apart, seen head-on at eye level, whole "
+    "figure inside the frame with clear margin past the fingertips and open backdrop "
+    "between the arms and torso and between the legs."
+)
+
+_BASE_TAIL = (
+    "Broad soft frontal light with balanced fill on both sides and a faint edge light "
+    "lifting the figure off a plain flat mid-grey backdrop, shadowless with no ground "
+    "plane and no vignette, bilaterally symmetric, sharp deep focus, no perspective "
+    "distortion, no text."
+)
+
+_LOWPOLY_TAIL = (
+    "Faceted flat-shaded polygonal surfaces with visible clean polygon edges, chunky "
+    "simplified geometry, bold saturated colour blocking in flat blocks with hard "
+    "boundaries, high contrast, smooth uncluttered opaque surfaces. "
+) + _BASE_TAIL
+
+# Marketplace boilerplate describes the file, not the character, and eats the
+# text budget that CLIP-L actually reads.
+_JUNK_RE = re.compile(
+    r"\b(rigged|animated|game[- ]?ready|low[- ]?poly|high[- ]?poly|pbr|textures?|uv|"
+    r"unwrapped|fbx|obj|glb|gltf|blend(?:er)?|maya|mixamo|unity|unreal|free|download|"
+    r"pack|asset|sale|polycount|topology|quads|tris|4k|8k|hd|v\d+|20\d\d)\b",
+    re.I,
+)
+
+
+def _clean_metadata_text(text: str) -> str:
+    """Strip store boilerplate, credits and years out of scraped metadata."""
+    text = re.sub(r"\bby\s+[A-Za-z0-9_.-]+", " ", text or "", flags=re.I)
+    text = _JUNK_RE.sub(" ", text)
+    text = re.sub(r"[|_/\\]+", " ", text)
+    words = [w for w in re.split(r"[\s,]+", text) if len(w) > 1]
+    # duplicated tokens get weighted by T5 and drown the subject
+    seen, kept = set(), []
+    for word in words:
+        low = word.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        kept.append(word)
+    return " ".join(kept).strip(" ,.-")
+
+
+def lowpoly_variant(prompt: str) -> str:
+    """Same subject, restated as the low-poly cartoon style.
+
+    Only the style and light sentences are swapped, so both variants describe
+    the same character and stay comparable side by side.
+    """
+    subject = (prompt or "").split(".")[0].strip().rstrip(",")
+    if not subject:
+        subject = "A stylized humanoid character"
+    subject = subject.replace(_BASE_STYLE_PHRASE, "").strip().rstrip(",")
+    # the style phrase must land inside the first sentence: CLIP-L only reads
+    # the first ~77 tokens and that is what carries the global style signal
+    return " ".join([f"{subject}, {_LOWPOLY_STYLE_PHRASE}.", _POSE_SENTENCE, _LOWPOLY_TAIL])[:1800]
+
+
 def build_template_plan(meta: Dict[str, str]) -> RenderGenPlan:
     """Deterministic fallback when no LLM is available."""
     title = meta.get("title") or meta.get("animal_type") or meta.get("detector") or "stylized 3d character"
     description = (meta.get("description") or "").strip()
     keywords = (meta.get("keywords") or "").strip()
-    parts = [f"full body character concept of {title.strip()}"]
-    if description:
-        parts.append(description[:400])
-    if keywords:
-        parts.append(keywords[:200])
-    parts.append(
-        "full body, T-pose, arms stretched horizontally, front view, character sheet, "
-        "neutral studio background, even lighting, stylized 3D game character, "
-        "high detail, PBR materials"
-    )
     body_type = body_type_from_keywords(" ".join([title, description, keywords]))
+
+    subject = _clean_metadata_text(title) or "stylized humanoid"
+    detail = _clean_metadata_text(f"{description} {keywords}")[:220]
+    opening = f"A {subject}"
+    if detail:
+        opening += f", {detail}"
+    opening += f", {_BASE_STYLE_PHRASE}."
+    prompt = " ".join([
+        opening,
+        _POSE_SENTENCE,
+        "Every surface is fully opaque with a clearly stated finish: matte woven "
+        "fabric, satin worn leather and brushed metal fittings, hair a compact shape "
+        "close to the head and clothing close-fitting.",
+        _BASE_TAIL,
+    ])[:1800]
     return RenderGenPlan(
-        prompt=", ".join(parts)[:1800],
+        prompt=prompt,
+        prompt_b=lowpoly_variant(prompt),
         negative_prompt=DEFAULT_NEGATIVE_PROMPT,
         body_type=body_type,
         mask_url=mask_url_for_body_type(body_type),
@@ -157,9 +249,13 @@ def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _plan_from_llm_json(parsed: Dict[str, Any]) -> Optional[RenderGenPlan]:
+    """One style's answer. The two styles are separate calls and merged after."""
     prompt = str(parsed.get("flux_prompt") or "").strip()
     if len(prompt) < 20:
         return None
+    # negative_prompt is inert: t_pose.json has no $negative_prompt placeholder
+    # and the workflow zeroes the negative conditioning before sampling. It is
+    # still filled so the other workflows that do read it keep working.
     negative = str(parsed.get("negative_prompt") or "").strip() or DEFAULT_NEGATIVE_PROMPT
     body_type = str(parsed.get("body_type") or "normal").strip().lower()
     if body_type not in BODY_TYPES:
@@ -173,8 +269,10 @@ def _plan_from_llm_json(parsed: Dict[str, Any]) -> Optional[RenderGenPlan]:
     )
 
 
-async def _llm_generate(meta: Dict[str, str], poster_data_url: Optional[str]) -> Optional[RenderGenPlan]:
-    instruction = _load_instruction()
+async def _llm_generate(
+    meta: Dict[str, str], poster_data_url: Optional[str], style: str = "base"
+) -> Optional[RenderGenPlan]:
+    instruction = _load_instruction(style)
     if not instruction:
         return None
     meta_text = "\n".join(f"{key}: {value}" for key, value in meta.items()) or "(no metadata)"
@@ -256,10 +354,28 @@ async def build_render_request(task_id: str) -> RenderGenPlan:
     meta = _task_metadata_summary(task) if task is not None else {}
     poster = _poster_data_url(task_id)
 
-    plan = await _llm_generate(meta, poster)
-    if plan is not None:
-        return plan
-    return build_template_plan(meta)
+    # both styles are written in parallel, so two prompts cost one call of latency
+    base, lowpoly = await asyncio.gather(
+        _llm_generate(meta, poster, "base"),
+        _llm_generate(meta, poster, "lowpoly"),
+        return_exceptions=True,
+    )
+    if isinstance(base, Exception):
+        print(f"[RenderPrompting] base style failed: {base}")
+        base = None
+    if isinstance(lowpoly, Exception):
+        print(f"[RenderPrompting] lowpoly style failed: {lowpoly}")
+        lowpoly = None
+
+    plan = base or build_template_plan(meta)
+    if lowpoly is not None:
+        plan.prompt_b = lowpoly.prompt
+        plan.body_type_b = lowpoly.body_type
+        plan.mask_url_b = lowpoly.mask_url
+    elif not plan.prompt_b:
+        # one style still beats none: restate the subject in the cartoon style
+        plan.prompt_b = lowpoly_variant(plan.prompt)
+    return plan
 
 
 async def start_character_gen(
@@ -275,6 +391,8 @@ async def start_character_gen(
             f"{RENDERFIN_INTERNAL_URL}/api-character-gen",
             json={
                 "prompt": plan.prompt,
+                "prompt_b": plan.prompt_b,
+                "mask_url_b": plan.mask_url_b,
                 "negative_prompt": plan.negative_prompt,
                 "mask_url": plan.mask_url,
                 "user_name": user_name,
@@ -339,10 +457,13 @@ async def resume_character_gen(job_id: str) -> Dict[str, Any]:
     return resp.json()
 
 
-async def approve_character_gen_image(job_id: str) -> Dict[str, Any]:
-    """Approve the Flux render; pipeline continues to the 3D stage."""
+async def approve_character_gen_image(job_id: str, *, variant: str = "a") -> Dict[str, Any]:
+    """Approve one rendered variant; the pipeline continues to the 3D stage."""
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/approve-image")
+        resp = await client.post(
+            f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/approve-image",
+            params={"variant": variant},
+        )
     if resp.status_code != 200:
         raise RuntimeError(f"character-gen approve failed: HTTP {resp.status_code}")
     return resp.json()

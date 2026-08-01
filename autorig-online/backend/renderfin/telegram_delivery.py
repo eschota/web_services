@@ -49,16 +49,29 @@ def _api_url(method: str) -> str:
     return f"{config.TELEGRAM_API_BASE}/bot{config.TELEGRAM_BOT_TOKEN}/{method}"
 
 
-def _image_markup(job_id: str) -> str:
-    return json.dumps({
-        "inline_keyboard": [
+def _image_markup(job_id: str, two_variants: bool = False) -> str:
+    """One button per rendered variant: whichever the user picks becomes the
+    base for the 3D model."""
+    if two_variants:
+        rows = [
             [
-                {"text": "✅ Сделать 3D-модель", "callback_data": f"rfa:{job_id}"},
+                {"text": "1️⃣ 3D из первого", "callback_data": f"rfa:{job_id}:a"},
+                {"text": "2️⃣ 3D из второго", "callback_data": f"rfa:{job_id}:b"},
+            ],
+            [
+                {"text": "🔁 Перегенерировать", "callback_data": f"rfr:{job_id}"},
+                {"text": "🗑 Отмена", "callback_data": f"rfd:{job_id}"},
+            ],
+        ]
+    else:
+        rows = [
+            [
+                {"text": "✅ Сделать 3D-модель", "callback_data": f"rfa:{job_id}:a"},
                 {"text": "🔁 Перегенерировать", "callback_data": f"rfr:{job_id}"},
             ],
             [{"text": "🗑 Отмена", "callback_data": f"rfd:{job_id}"}],
         ]
-    })
+    return json.dumps({"inline_keyboard": rows})
 
 
 def _model_markup(job_id: str) -> str:
@@ -82,6 +95,17 @@ def _retry_markup(job_id: str) -> str:
             [{"text": "🗑 Отмена", "callback_data": f"rfd:{job_id}"}],
         ]
     })
+
+
+def _image_marker(job: CharacterGenJob) -> str:
+    """Identity of the rendered pair: a regenerated variant re-delivers.
+
+    Single-variant jobs keep the bare image url as their marker, so reviews
+    already delivered before two-variant rendering existed are not re-sent.
+    """
+    if not job.image_url_b:
+        return job.image_url
+    return f"{job.image_url}|{job.image_url_b}"
 
 
 def _prompt_preview(job: CharacterGenJob, limit: int = 300) -> str:
@@ -131,18 +155,51 @@ async def _delete_message(client: httpx.AsyncClient, chat_id: int, message_id: i
 async def deliver_image_review(
     client: httpx.AsyncClient, job: CharacterGenJob, stats: Optional[Dict[str, int]] = None
 ) -> Optional[int]:
-    caption = (
-        f"🖼 <b>T-поза готова</b> — делаем 3D-модель?\n"
+    """Send the rendered variants and ask which one becomes the 3D model."""
+    header = (
+        f"🖼 <b>T-поза готова</b>\n"
         f"<code>{format_stats(job, stats)}</code>\n"
-        f"<i>{_prompt_preview(job)}</i>\n"
-        f'✂️ <a href="{html.escape(job.isolated_url)}">PNG с альфой</a>'
+        f"<i>{_prompt_preview(job)}</i>"
     )
     if job.warning:
-        caption += f"\n⚠️ {html.escape(job.warning[:150])}"
+        header += f"\n⚠️ {html.escape(job.warning[:150])}"
+
+    if job.image_url_b:
+        # both styles in one album, then the choice under it
+        media = [
+            {
+                "type": "photo",
+                "media": job.image_url,
+                "caption": header + "\n1️⃣ базовый стиль",
+                "parse_mode": "HTML",
+            },
+            {
+                "type": "photo",
+                "media": job.image_url_b,
+                "caption": "2️⃣ low-poly cartoon PBR",
+                "parse_mode": "HTML",
+            },
+        ]
+        await _call(client, "sendMediaGroup", {
+            "chat_id": job.telegram_chat_id,
+            "media": json.dumps(media),
+        })
+        result = await _call(client, "sendMessage", {
+            "chat_id": job.telegram_chat_id,
+            "text": (
+                "Какой вариант отправляем в 3D?\n"
+                f'✂️ <a href="{html.escape(job.isolated_url)}">альфа 1</a> · '
+                f'<a href="{html.escape(job.isolated_url_b)}">альфа 2</a>'
+            ),
+            "parse_mode": "HTML",
+            "reply_markup": _image_markup(job.id, two_variants=True),
+        })
+        return int((result or {}).get("message_id") or 0)
+
     result = await _call(client, "sendPhoto", {
         "chat_id": job.telegram_chat_id,
         "photo": job.image_url,
-        "caption": caption,
+        "caption": header + f'\n✂️ <a href="{html.escape(job.isolated_url)}">PNG с альфой</a>',
         "parse_mode": "HTML",
         "reply_markup": _image_markup(job.id),
     })
@@ -221,7 +278,7 @@ def pending_delivery(job: CharacterGenJob) -> Optional[str]:
         if delivered.get(DELIVERY_RETRY) != marker:
             return DELIVERY_RETRY
     if job.stage == CHARGEN_STAGE_AWAITING_IMAGE and job.image_url:
-        if delivered.get(DELIVERY_IMAGE) != job.image_url:
+        if delivered.get(DELIVERY_IMAGE) != _image_marker(job):
             return DELIVERY_IMAGE
     if job.stage == CHARGEN_STAGE_READY and job.video_url:
         if delivered.get(DELIVERY_MODEL) != job.video_url:
@@ -326,7 +383,7 @@ class TelegramDeliveryService:
             stats = None
         if kind == DELIVERY_IMAGE:
             message_id = await deliver_image_review(self._client, job, stats)
-            marker = job.image_url
+            marker = _image_marker(job)
         elif kind == DELIVERY_MODEL:
             message_id = await deliver_model_review(self._client, job, stats)
             marker = job.video_url

@@ -178,8 +178,10 @@ class CharacterGenManager:
         self,
         *,
         prompt: str,
+        prompt_b: str = "",
         negative_prompt: str = "",
         mask_url: str = "",
+        mask_url_b: str = "",
         user_name: str = "autorig-bot",
         source_task_id: str = "",
         telegram_chat_id: int = 0,
@@ -188,8 +190,10 @@ class CharacterGenManager:
         job = CharacterGenJob(
             seq=self._next_seq(),
             prompt=prompt,
+            prompt_b=prompt_b,
             negative_prompt=negative_prompt,
             mask_url=mask_url,
+            mask_url_b=(mask_url_b or "").strip(),
             user_name=user_name,
             source_task_id=source_task_id,
             telegram_chat_id=int(telegram_chat_id or 0),
@@ -227,8 +231,8 @@ class CharacterGenManager:
         await self._persist(job)
         return job
 
-    async def approve_image(self, job_id: str):
-        """Human approved the Flux render: continue to the 3D stage.
+    async def approve_image(self, job_id: str, variant: str = "a"):
+        """Human picked a variant: continue to the 3D stage with that image.
 
         Returns (job, transitioned) — transitioned is False when the job was
         not awaiting approval (double-press, wrong stage), so callers can skip
@@ -239,6 +243,13 @@ class CharacterGenManager:
             return None, False
         if job.stage != CHARGEN_STAGE_AWAITING_IMAGE:
             return job, False
+        variant = (variant or "a").strip().lower()
+        if variant == "b" and job.isolated_url_b:
+            job.chosen_variant = "b"
+            job.image_url = job.image_url_b
+            job.isolated_url = job.isolated_url_b
+        else:
+            job.chosen_variant = "a"
         job.stage = CHARGEN_STAGE_HUNYUAN
         job.error = ""
         await self._persist(job)
@@ -356,8 +367,12 @@ class CharacterGenManager:
         if job.stage not in (CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_FAILED):
             return job, False
         job.flux_task_id = ""
+        job.flux_task_id_b = ""
         job.image_url = ""
         job.isolated_url = ""
+        job.image_url_b = ""
+        job.isolated_url_b = ""
+        job.chosen_variant = ""
         # a regenerated image invalidates everything downstream
         job.hunyuan_task_id = ""
         job.hunyuan_worker = ""
@@ -448,19 +463,35 @@ class CharacterGenManager:
             raise RuntimeError(f"render task {task_id} failed: {task.error or task.status}")
         return task
 
-    async def _stage_flux(self, job: CharacterGenJob) -> None:
-        if not job.flux_task_id or self.queue.get(job.flux_task_id) is None:
-            task = await self.queue.enqueue(
-                RenderPrompt(
-                    prompt=job.prompt,
-                    negative_prompt=job.negative_prompt,
-                    image_url=job.mask_url,
-                    type="t_pose",
-                    user_name=job.user_name,
-                )
+    async def _enqueue_flux(self, job: CharacterGenJob, prompt: str, mask_url: str = ""):
+        return await self.queue.enqueue(
+            RenderPrompt(
+                prompt=prompt,
+                negative_prompt=job.negative_prompt,
+                image_url=mask_url or job.mask_url,
+                type="t_pose",
+                user_name=job.user_name,
             )
+        )
+
+    async def _stage_flux(self, job: CharacterGenJob) -> None:
+        """Render both style variants so the user picks the better 3D base.
+
+        The two renders are queued together and go to different workers when
+        the farm has capacity, so two variants cost roughly one render of
+        wall-clock time.
+        """
+        if not job.flux_task_id or self.queue.get(job.flux_task_id) is None:
+            task = await self._enqueue_flux(job, job.prompt)
             job.flux_task_id = task.id
             await self._persist(job)
+        if job.prompt_b and (
+            not job.flux_task_id_b or self.queue.get(job.flux_task_id_b) is None
+        ):
+            task_b = await self._enqueue_flux(job, job.prompt_b, job.mask_url_b)
+            job.flux_task_id_b = task_b.id
+            await self._persist(job)
+
         task = await self._await_render(job.flux_task_id, FLUX_STAGE_TIMEOUT)
         job.image_url = task.output_url
         isolated = task.extra_outputs.get("isolated")
@@ -470,9 +501,26 @@ class CharacterGenManager:
             job.warning = "RMBG isolated render missing; using the full frame for 3D"
             print(f"[Renderfin][CharGen] job {job.id} WARNING: {job.warning}")
         job.isolated_url = isolated or task.output_url
+
+        if job.flux_task_id_b:
+            # a failed second variant must not sink the job: one image is enough
+            try:
+                task_b = await self._await_render(job.flux_task_id_b, FLUX_STAGE_TIMEOUT)
+                job.image_url_b = task_b.output_url
+                job.isolated_url_b = (
+                    task_b.extra_outputs.get("isolated") or task_b.output_url
+                )
+            except Exception as exc:
+                print(f"[Renderfin][CharGen] job {job.id} variant B failed: {exc}")
+                job.flux_task_id_b = ""
+
         job.stage = CHARGEN_STAGE_AWAITING_IMAGE
         await self._persist(job)
-        print(f"[Renderfin][CharGen] job {job.id} flux done, awaiting approval -> {job.image_url}")
+        variants = 2 if job.image_url_b else 1
+        print(
+            f"[Renderfin][CharGen] job {job.id} flux done ({variants} variant(s)), "
+            f"awaiting approval -> {job.image_url}"
+        )
 
     async def _stage_hunyuan(self, job: CharacterGenJob) -> None:
         pool = hunyuan_client.workers()
