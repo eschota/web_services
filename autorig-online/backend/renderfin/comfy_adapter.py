@@ -108,11 +108,40 @@ async def submit(
     return prompt_id
 
 
+async def queue_contains(
+    client: httpx.AsyncClient, server: RenderServer, prompt_id: str
+) -> bool:
+    """Is this prompt still running or queued on the worker?
+
+    ComfyUI answers /history for an unknown prompt with HTTP 200 and an empty
+    object - identical to "queued but not started". Only /queue can tell the
+    two apart, and the difference matters: a prompt the worker forgot (restart,
+    crash) would otherwise hold the slot until the timeout expires.
+    """
+    base = _validate_server_url(server.render_server_url)
+    resp = await client.get(f"{base}/queue", timeout=15.0, auth=_auth_for(server))
+    if resp.status_code != 200:
+        return True  # cannot tell: assume it is still there
+    try:
+        payload = resp.json()
+    except Exception:
+        return True
+    for bucket in ("queue_running", "queue_pending"):
+        for entry in payload.get(bucket) or []:
+            if isinstance(entry, (list, tuple)):
+                if any(item == prompt_id for item in entry if isinstance(item, str)):
+                    return True
+            elif isinstance(entry, dict) and entry.get("prompt_id") == prompt_id:
+                return True
+    return False
+
+
 async def poll_history(
     client: httpx.AsyncClient, server: RenderServer, prompt_id: str
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
     """GET /history/{prompt_id}. Returns (state, entry) where state is one of
-    'pending', 'success', 'error' (port of RenderfinHistoryPollPolicy)."""
+    'pending', 'unknown', 'success', 'error'. 'unknown' means the worker has no
+    record of the prompt, which the caller must disambiguate against /queue."""
     base = _validate_server_url(server.render_server_url)
     resp = await client.get(f"{base}/history/{prompt_id}", timeout=30.0, auth=_auth_for(server))
     if resp.status_code != 200:
@@ -123,7 +152,7 @@ async def poll_history(
         return "pending", None
     entry = payload.get(prompt_id)
     if not isinstance(entry, dict):
-        return "pending", None
+        return "unknown", None
     status = entry.get("status") or {}
     status_str = str(status.get("status_str") or "").lower()
     if status_str == "success":

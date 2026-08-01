@@ -1,5 +1,6 @@
 import asyncio
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -214,3 +215,92 @@ class QueueDispatchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LostPromptTests(unittest.TestCase):
+    """ComfyUI answers /history for a forgotten prompt with HTTP 200 and {} -
+    identical to 'queued but not started'. Waiting that out held the only
+    worker hostage for the whole timeout."""
+
+    def test_prompt_missing_from_history_and_queue_is_requeued(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                registry.save(_server())
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="t_pose", image_url="https://h/m.jpg")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = "raptor"
+                    task.comfy_prompt_id = "gone-prompt"
+                    task.started_at = time.time()
+
+                    async def unknown(*a, **k):
+                        return "unknown", None
+
+                    async def not_queued(*a, **k):
+                        return False
+
+                    with patch("renderfin.comfy_adapter.poll_history", side_effect=unknown):
+                        with patch("renderfin.comfy_adapter.queue_contains", side_effect=not_queued):
+                            await queue._poll_rendering()
+
+                    revived = queue.get(task.id)
+                    self.assertEqual(revived.status, TASK_PENDING)
+                    self.assertEqual(revived.server_name, "")
+                    self.assertEqual(revived.comfy_prompt_id, "")
+                    # the server is free again immediately
+                    self.assertEqual(queue._busy_servers(), {})
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_prompt_still_queued_upstream_keeps_waiting(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                registry.save(_server())
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="t_pose", image_url="https://h/m.jpg")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = "raptor"
+                    task.comfy_prompt_id = "waiting-prompt"
+                    task.started_at = time.time()
+
+                    async def unknown(*a, **k):
+                        return "unknown", None
+
+                    async def queued(*a, **k):
+                        return True
+
+                    with patch("renderfin.comfy_adapter.poll_history", side_effect=unknown):
+                        with patch("renderfin.comfy_adapter.queue_contains", side_effect=queued):
+                            await queue._poll_rendering()
+
+                    still = queue.get(task.id)
+                    self.assertEqual(still.status, TASK_RENDERING)
+                    self.assertEqual(still.comfy_prompt_id, "waiting-prompt")
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+
+class StageTimeoutOrderingTests(unittest.TestCase):
+    def test_stage_ceiling_exceeds_the_queue_ceiling(self):
+        """A stage that gives up before the queue does abandons a task that is
+        still holding a worker."""
+        from renderfin import character_gen
+
+        self.assertGreater(character_gen.FLUX_STAGE_TIMEOUT, config.TASK_TIMEOUT_SECONDS)
+        self.assertGreater(character_gen.HUNYUAN_STAGE_TIMEOUT, config.HUNYUAN_TIMEOUT_SECONDS)

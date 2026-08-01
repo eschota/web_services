@@ -45,10 +45,18 @@ CREATE INDEX IF NOT EXISTS idx_chargen_stage ON chargen_jobs(stage);
 
 _ACTIVE_STAGES = (CHARGEN_STAGE_FLUX, CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_TURNTABLE)
 
-# Stage waits include time spent queued behind other renders on a shared
-# worker, so they are deliberately generous and env-tunable.
-FLUX_STAGE_TIMEOUT = float(os.getenv("RENDERFIN_CHARGEN_FLUX_TIMEOUT", "3600"))
-HUNYUAN_STAGE_TIMEOUT = float(os.getenv("RENDERFIN_CHARGEN_HUNYUAN_TIMEOUT", "16200"))
+# A stage waits on a queue task, so its ceiling MUST exceed the queue's own
+# ceiling - otherwise the stage gives up while the task keeps holding a worker,
+# and the job fails with a timeout the queue would still have honoured.
+_STAGE_SLACK_SECONDS = 600.0
+FLUX_STAGE_TIMEOUT = float(
+    os.getenv("RENDERFIN_CHARGEN_FLUX_TIMEOUT", "")
+    or config.TASK_TIMEOUT_SECONDS + _STAGE_SLACK_SECONDS
+)
+HUNYUAN_STAGE_TIMEOUT = float(
+    os.getenv("RENDERFIN_CHARGEN_HUNYUAN_TIMEOUT", "")
+    or config.HUNYUAN_TIMEOUT_SECONDS + _STAGE_SLACK_SECONDS
+)
 
 # Automatic stage recovery: how many times a stage retries itself before the
 # job is reported as failed, and how long to wait between attempts.

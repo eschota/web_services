@@ -357,7 +357,31 @@ class RenderQueue:
                     self._client, server, task.comfy_prompt_id
                 )
             except Exception as exc:
-                print(f"[Renderfin][Queue] poll {task.id} failed: {exc}")
+                print(f"[Renderfin][Queue] poll {task.id} failed: {exc!r}")
+                continue
+            if state == "unknown":
+                # the worker has no record of this prompt: either it is queued
+                # but not started, or the worker forgot it (restart/crash).
+                # Only /queue distinguishes the two, and a forgotten prompt
+                # would otherwise hold this server for the whole timeout.
+                try:
+                    still_queued = await comfy_adapter.queue_contains(
+                        self._client, server, task.comfy_prompt_id
+                    )
+                except Exception as exc:
+                    print(f"[Renderfin][Queue] queue check {task.id} failed: {exc!r}")
+                    continue
+                if still_queued:
+                    continue
+                print(
+                    f"[Renderfin][Queue] task {task.id} vanished from "
+                    f"{task.server_name}; requeueing"
+                )
+                task.status = TASK_PENDING
+                task.server_name = ""
+                task.comfy_prompt_id = ""
+                task.started_at = 0
+                await self._persist(task)
                 continue
             if state == "pending":
                 continue
