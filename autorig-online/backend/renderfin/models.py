@@ -122,6 +122,8 @@ class CharacterGenJob(BaseModel):
     """Composite pipeline job: flux t_pose render -> hunyuan image_to_3d -> turntable video."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    # Human-facing running number across every generated model.
+    seq: int = 0
     prompt: str = ""
     negative_prompt: str = ""
     mask_url: str = ""
@@ -154,6 +156,7 @@ class CharacterGenJob(BaseModel):
     def public_dict(self) -> Dict[str, Any]:
         return {
             "job_id": self.id,
+            "seq": self.seq,
             "stage": self.stage,
             "prompt": self.prompt,
             "negative_prompt": self.negative_prompt,

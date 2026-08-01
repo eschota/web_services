@@ -36,6 +36,9 @@ class _FakeManager:
     def all_jobs(self):
         return list(self.jobs.values())
 
+    def stats(self):
+        return {"total": len(self.jobs), "current_24h": 7, "previous_24h": 5, "delta_24h": 2}
+
     async def mark_delivered(self, job_id, kind, marker, *, message_id=0, clear_status_message=False):
         job = self.jobs[job_id]
         delivered = dict(job.delivered or {})
@@ -323,3 +326,43 @@ class RetryNoticeTests(unittest.TestCase):
 
         job = _job(stage=CHARGEN_STAGE_HUNYUAN, last_error="", retry_at=0)
         self.assertIsNone(pending_delivery(job))
+
+
+class RunningNumberTests(unittest.TestCase):
+    def test_caption_carries_the_number_and_daily_throughput(self):
+        async def scenario():
+            sent = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                sent.append(dict(httpx.QueryParams(request.content.decode())))
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+            job = _job(
+                seq=42,
+                stage=CHARGEN_STAGE_READY,
+                video_url="https://x/v.mp4",
+                glb_url="https://x/m.glb",
+            )
+            manager = _FakeManager([job])
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            service = TelegramDeliveryService(manager, client=client)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.tick()
+            await client.aclose()
+            caption = sent[0]["caption"]
+            self.assertIn("#42", caption)
+            self.assertIn("24ч 7", caption)
+            self.assertIn("+2", caption)
+
+        run(scenario())
+
+    def test_trend_arrows_follow_the_delta(self):
+        from renderfin.telegram_delivery import format_stats
+
+        job = _job(seq=5)
+        self.assertIn("🟢⇈", format_stats(job, {"current_24h": 20, "delta_24h": 12}))
+        self.assertIn("🟢↗", format_stats(job, {"current_24h": 9, "delta_24h": 3}))
+        self.assertIn("⚪→", format_stats(job, {"current_24h": 9, "delta_24h": 0}))
+        self.assertIn("🔴↘", format_stats(job, {"current_24h": 4, "delta_24h": -2}))
+        self.assertIn("🔴⇊", format_stats(job, {"current_24h": 1, "delta_24h": -11}))
+        self.assertEqual(format_stats(job, None), "#5")

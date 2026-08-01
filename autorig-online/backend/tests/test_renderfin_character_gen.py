@@ -631,3 +631,100 @@ class AutoRetryTests(unittest.TestCase):
                 await queue.stop()
 
         run(scenario())
+
+
+class RunningNumberTests(unittest.TestCase):
+    def test_each_job_gets_the_next_number(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    a = await manager.create(prompt="one", user_name="bot")
+                    b = await manager.create(prompt="two", user_name="bot")
+                    c = await manager.create(prompt="three", user_name="bot")
+                    self.assertEqual([a.seq, b.seq, c.seq], [1, 2, 3])
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_numbering_continues_after_restart(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                first = await manager.create(prompt="one", user_name="bot")
+                await manager.stop()
+
+                manager2 = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager2.start()
+                try:
+                    second = await manager2.create(prompt="two", user_name="bot")
+                    self.assertEqual(second.seq, first.seq + 1)
+                finally:
+                    await manager2.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_existing_jobs_are_numbered_on_startup(self):
+        async def scenario():
+            with _Env():
+                import json as _json
+
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                job = await manager.create(prompt="legacy", user_name="bot")
+                # simulate a row written before the counter existed
+                job.seq = 0
+                await manager._persist(job)
+                await manager.stop()
+
+                manager2 = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager2.start()
+                try:
+                    self.assertGreater(manager2.get(job.id).seq, 0)
+                finally:
+                    await manager2.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_stats_compare_the_last_two_days(self):
+        async def scenario():
+            with _Env():
+                import time as _time
+
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    now = _time.time()
+                    recent = await manager.create(prompt="today", user_name="bot")
+                    older = await manager.create(prompt="yesterday", user_name="bot")
+                    ancient = await manager.create(prompt="last week", user_name="bot")
+                    older.created_at = now - 30 * 3600      # previous 24h window
+                    ancient.created_at = now - 200 * 3600   # outside both windows
+                    stats = manager.stats()
+                    self.assertEqual(stats["current_24h"], 1)
+                    self.assertEqual(stats["previous_24h"], 1)
+                    self.assertEqual(stats["delta_24h"], 0)
+                    self.assertEqual(stats["total"], 3)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())

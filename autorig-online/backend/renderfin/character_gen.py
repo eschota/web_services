@@ -83,6 +83,7 @@ class CharacterGenManager:
         await self._db.executescript(_SCHEMA)
         await self._db.commit()
         await self._load()
+        await self._backfill_seq()
         for job in self._jobs.values():
             if job.stage in _ACTIVE_STAGES and not job.retry_at:
                 print(f"[Renderfin][CharGen] resuming job {job.id} at stage {job.stage}")
@@ -146,6 +147,20 @@ class CharacterGenManager:
             except Exception as exc:
                 print(f"[Renderfin][CharGen] load skip: {exc}")
 
+    async def _backfill_seq(self) -> None:
+        """Number the jobs that predate the running counter, oldest first."""
+        unnumbered = sorted(
+            (j for j in self._jobs.values() if not j.seq), key=lambda j: j.created_at
+        )
+        if not unnumbered:
+            return
+        nxt = max((int(j.seq or 0) for j in self._jobs.values()), default=0) + 1
+        for job in unnumbered:
+            job.seq = nxt
+            nxt += 1
+            await self._persist(job)
+        print(f"[Renderfin][CharGen] numbered {len(unnumbered)} existing job(s)")
+
     async def _persist(self, job: CharacterGenJob) -> None:
         job.updated_at = time.time()
         if self._db is None:
@@ -171,6 +186,7 @@ class CharacterGenManager:
     ) -> CharacterGenJob:
         mask_url = (mask_url or "").strip() or f"{config.PUBLIC_BASE_URL}/render/masks/t_pose.jpg"
         job = CharacterGenJob(
+            seq=self._next_seq(),
             prompt=prompt,
             negative_prompt=negative_prompt,
             mask_url=mask_url,
@@ -271,6 +287,26 @@ class CharacterGenManager:
             job.telegram_status_message_id = 0
         await self._persist(job)
         return job
+
+    def _next_seq(self) -> int:
+        """Running number over every job ever created (gaps are fine)."""
+        return max((int(j.seq or 0) for j in self._jobs.values()), default=0) + 1
+
+    def stats(self) -> Dict[str, int]:
+        """Throughput of the last 24h against the 24h before it."""
+        now = time.time()
+        day = 24 * 3600
+        current = sum(1 for j in self._jobs.values() if j.created_at >= now - day)
+        previous = sum(
+            1 for j in self._jobs.values()
+            if now - 2 * day <= j.created_at < now - day
+        )
+        return {
+            "total": len(self._jobs),
+            "current_24h": current,
+            "previous_24h": previous,
+            "delta_24h": current - previous,
+        }
 
     def all_jobs(self) -> list:
         return list(self._jobs.values())

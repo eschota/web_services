@@ -88,6 +88,27 @@ def _prompt_preview(job: CharacterGenJob, limit: int = 300) -> str:
     return html.escape((job.prompt or "")[:limit])
 
 
+def format_stats(job: CharacterGenJob, stats: Optional[Dict[str, int]]) -> str:
+    """"#12 | 24ч 7 | 🟢↗ +2" - same shape as the site's task notifications."""
+    seq = int(job.seq or 0)
+    if not stats:
+        return f"#{seq}" if seq else ""
+    current = int(stats.get("current_24h") or 0)
+    delta = int(stats.get("delta_24h") or 0)
+    if delta >= 10:
+        trend = "🟢⇈"
+    elif delta > 0:
+        trend = "🟢↗"
+    elif delta <= -10:
+        trend = "🔴⇊"
+    elif delta < 0:
+        trend = "🔴↘"
+    else:
+        trend = "⚪→"
+    delta_str = f"+{delta}" if delta > 0 else str(delta)
+    return f"#{seq} | 24ч {current} | {trend} {delta_str}"
+
+
 async def _call(client: httpx.AsyncClient, method: str, payload: Dict[str, Any]) -> Optional[dict]:
     resp = await client.post(_api_url(method), data=payload, timeout=90.0)
     if resp.status_code != 200:
@@ -108,10 +129,11 @@ async def _delete_message(client: httpx.AsyncClient, chat_id: int, message_id: i
 
 
 async def deliver_image_review(
-    client: httpx.AsyncClient, job: CharacterGenJob
+    client: httpx.AsyncClient, job: CharacterGenJob, stats: Optional[Dict[str, int]] = None
 ) -> Optional[int]:
     caption = (
         f"🖼 <b>T-поза готова</b> — делаем 3D-модель?\n"
+        f"<code>{format_stats(job, stats)}</code>\n"
         f"<i>{_prompt_preview(job)}</i>\n"
         f'✂️ <a href="{html.escape(job.isolated_url)}">PNG с альфой</a>'
     )
@@ -128,10 +150,11 @@ async def deliver_image_review(
 
 
 async def deliver_model_review(
-    client: httpx.AsyncClient, job: CharacterGenJob
+    client: httpx.AsyncClient, job: CharacterGenJob, stats: Optional[Dict[str, int]] = None
 ) -> Optional[int]:
     caption = (
         f"🎨 <b>3D-модель готова</b>\n"
+        f"<code>{format_stats(job, stats)}</code>\n"
         f"<i>{_prompt_preview(job)}</i>\n"
         f'🧊 <a href="{html.escape(job.glb_url)}">GLB</a>'
     )
@@ -166,6 +189,7 @@ async def deliver_retry_notice(client: httpx.AsyncClient, job: CharacterGenJob) 
 async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Optional[int]:
     text = (
         f"❌ <b>Генерация не удалась</b>\n"
+        f"<code>#{int(job.seq or 0)}</code>\n"
         f"<i>{_prompt_preview(job, 200)}</i>\n"
         f"{html.escape((job.error or '')[:250])}\n"
         "«Повторить 3D» продолжит с этого места, «Перегенерировать» — новая картинка."
@@ -295,11 +319,16 @@ class TelegramDeliveryService:
             await self.manager.mark_delivered(job.id, kind, marker, message_id=0)
             print(f"[Renderfin][Delivery] retry notice sent for job {job.id}")
             return
+        stats = None
+        try:
+            stats = self.manager.stats()
+        except Exception:
+            stats = None
         if kind == DELIVERY_IMAGE:
-            message_id = await deliver_image_review(self._client, job)
+            message_id = await deliver_image_review(self._client, job, stats)
             marker = job.image_url
         elif kind == DELIVERY_MODEL:
-            message_id = await deliver_model_review(self._client, job)
+            message_id = await deliver_model_review(self._client, job, stats)
             marker = job.video_url
         else:
             message_id = await deliver_failure(self._client, job)
