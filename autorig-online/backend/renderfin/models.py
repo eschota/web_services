@@ -107,6 +107,18 @@ class RenderTask(BaseModel):
         }
 
 
+class SentMessage(BaseModel):
+    """One Telegram message this pipeline put in a chat.
+
+    The timestamp is not decoration: a bot may only delete its own message
+    while it is under 48h old, so an id without a send time cannot be filtered
+    before the API call and every sweep would retry ids that can never go.
+    """
+
+    id: int
+    at: float = Field(default_factory=time.time)
+
+
 CHARGEN_STAGE_PROMPT = "prompt"
 CHARGEN_STAGE_FLUX = "flux_render"
 CHARGEN_STAGE_AWAITING_IMAGE = "awaiting_image_approval"
@@ -134,6 +146,10 @@ class CharacterGenJob(BaseModel):
     mask_url_b: str = ""
     user_name: str = "autorig-bot"
     source_task_id: str = ""
+    # The conversion task this job became when it was submitted. Its
+    # completion is what makes the job finished, so it is what triggers the
+    # chat cleanup.
+    submitted_task_id: str = ""
     stage: str = CHARGEN_STAGE_FLUX
     flux_task_id: str = ""
     flux_task_id_b: str = ""
@@ -148,6 +164,12 @@ class CharacterGenJob(BaseModel):
     telegram_chat_id: int = 0
     telegram_message_id: int = 0
     telegram_status_message_id: int = 0
+    # Every message this job put in the chat, so a finished job can take its
+    # own cards back out again instead of leaving them to pile up.
+    telegram_messages: List[SentMessage] = Field(default_factory=list)
+    # Ids this chat will never accept a delete for (too old, already gone).
+    # Kept so a permanent refusal is not retried on every tick forever.
+    telegram_undeletable: List[int] = Field(default_factory=list)
     delivered: Dict[str, str] = Field(default_factory=dict)
     warning: str = ""
     # When the current stage was entered. Stage deadlines are measured from
@@ -178,6 +200,7 @@ class CharacterGenJob(BaseModel):
             "mask_url_b": self.mask_url_b or None,
             "user_name": self.user_name,
             "source_task_id": self.source_task_id,
+            "submitted_task_id": self.submitted_task_id or None,
             "prompt_b": self.prompt_b or None,
             "image_url": self.image_url or None,
             "isolated_url": self.isolated_url or None,
@@ -194,5 +217,6 @@ class CharacterGenJob(BaseModel):
             "last_error": self.last_error or None,
             "telegram_chat_id": self.telegram_chat_id or None,
             "telegram_message_id": self.telegram_message_id or None,
+            "telegram_messages": [m.model_dump() for m in self.telegram_messages],
             "delivered": dict(self.delivered or {}),
         }

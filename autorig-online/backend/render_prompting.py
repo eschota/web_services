@@ -516,9 +516,33 @@ async def discard_character_gen(job_id: str) -> Dict[str, Any]:
     return resp.json()
 
 
-async def mark_character_gen_submitted(job_id: str) -> None:
+async def mark_character_gen_submitted(job_id: str, task_id: str = "") -> None:
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            await client.post(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/mark-submitted")
+            await client.post(
+                f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/mark-submitted",
+                params={"task_id": task_id} if task_id else None,
+            )
     except Exception as exc:
         print(f"[RenderPrompting] mark-submitted failed: {exc}")
+
+
+async def cleanup_character_gen_chat(task_id: str) -> int:
+    """Ask renderfin to remove a finished job's cards from the private chat.
+
+    Best effort by design: a chat that cannot be tidied is not a reason to
+    hold up anything the user is actually waiting for.
+    """
+    if not task_id:
+        return 0
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{RENDERFIN_INTERNAL_URL}/api-character-gen/cleanup-for-task/{task_id}"
+            )
+        if resp.status_code != 200:
+            return 0
+        return int(resp.json().get("cleaned") or 0)
+    except Exception as exc:
+        print(f"[RenderPrompting] chat cleanup failed for task {task_id}: {exc}")
+        return 0

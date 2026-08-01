@@ -545,6 +545,23 @@ async def peek_notification_message_id(chat_id: int, event_type: str, event_key:
         return int(rec.message_id)
 
 
+async def _cleanup_generation_chat(task_id: str) -> None:
+    """Take a finished generation's cards out of the private chat.
+
+    The completion notice has already been sent by this point, so the image
+    review, the turntable card and their now-dead buttons are just clutter.
+    Groups are never touched - renderfin only cleans private chats.
+    """
+    try:
+        import render_prompting
+
+        cleaned = await render_prompting.cleanup_character_gen_chat(task_id)
+        if cleaned:
+            print(f"[Telegram] cleaned {cleaned} generation message(s) for task {task_id}")
+    except Exception as exc:
+        print(f"[Telegram] generation chat cleanup failed for {task_id}: {exc}")
+
+
 async def remember_task_reply_target(chat_id: int, task_id: str, message_id: int) -> None:
     """Thread the eventual 'Task completed' notice under the message the user
     acted on, so it is not lost in the chat flow."""
@@ -1975,6 +1992,7 @@ async def broadcast_task_done(
                 disable_web_page_preview=False,
                 reply_markup=generate_markup,
                 reply_to_message_id=rt,
+                allow_sending_without_reply=True,
             ), retry_network=False)
 
         results = await asyncio.gather(*[_one_text(cid) for cid in chat_ids])
@@ -1982,6 +2000,7 @@ async def broadcast_task_done(
         print(f"[Telegram] Done notification sent to {sent_count}/{len(chat_ids)} chat(s)")
         if sent_count > 0:
             await mark_task_done_notification_sent(task_id)
+            await _cleanup_generation_chat(task_id)
         return
 
     sem = asyncio.Semaphore(2)
@@ -2014,6 +2033,7 @@ async def broadcast_task_done(
                             supports_streaming=True,
                             reply_markup=generate_markup,
                             reply_to_message_id=reply_to,
+                            allow_sending_without_reply=True,
                         )
                     finally:
                         try:
@@ -2032,12 +2052,15 @@ async def broadcast_task_done(
                     disable_web_page_preview=False,
                     reply_markup=generate_markup,
                     reply_to_message_id=rt,
+                allow_sending_without_reply=True,
                 ), retry_network=False)
             return result
 
     results = await asyncio.gather(*[_one(cid) for cid in chat_ids])
     sent_count = sum(1 for r in results if r is not None)
     print(f"[Telegram] Done video notification sent to {sent_count}/{len(chat_ids)} chat(s)")
+    if sent_count > 0:
+        await _cleanup_generation_chat(task_id)
     if sent_count > 0:
         await mark_task_done_notification_sent(task_id)
 
@@ -2433,7 +2456,7 @@ async def _handle_submit_callback(update, context) -> None:
         task_id, error = await _submit_generated_model(glb_url)
         if task_id is None:
             raise RuntimeError(error or "не удалось создать задачу")
-        await render_prompting.mark_character_gen_submitted(job_id)
+        await render_prompting.mark_character_gen_submitted(job_id, task_id)
         # thread the completion notice under this very message
         await remember_task_reply_target(chat_id, task_id, query.message.message_id)
         url = _task_url(task_id)

@@ -29,6 +29,7 @@ from .models import (
     TASK_DONE,
     TASK_ERROR,
     CharacterGenJob,
+    SentMessage,
     RenderPrompt,
 )
 from .queue import RenderQueue
@@ -251,13 +252,27 @@ class CharacterGenManager:
         self._cleanup_artifacts(job)
         return job
 
-    async def mark_submitted(self, job_id: str) -> Optional[CharacterGenJob]:
+    async def mark_submitted(
+        self, job_id: str, task_id: str = ""
+    ) -> Optional[CharacterGenJob]:
         job = self._jobs.get(job_id)
         if job is None:
             return None
         job.stage = CHARGEN_STAGE_SUBMITTED
+        if task_id:
+            job.submitted_task_id = str(task_id)
         await self._persist(job)
         return job
+
+    def job_for_task(self, task_id: str) -> Optional[CharacterGenJob]:
+        """The job that produced this conversion task, if any."""
+        task_id = str(task_id or "")
+        if not task_id:
+            return None
+        for job in self._jobs.values():
+            if job.submitted_task_id == task_id:
+                return job
+        return None
 
     async def approve_image(self, job_id: str, variant: str = "a"):
         """Human picked a variant: continue to the 3D stage with that image.
@@ -301,6 +316,32 @@ class CharacterGenManager:
             job.telegram_message_id = int(message_id)
         if status_message_id:
             job.telegram_status_message_id = int(status_message_id)
+        await self._persist(job)
+        return job
+
+    async def record_messages(self, job_id: str, message_ids, at: float = 0.0):
+        """Remember messages this job put in the chat, so it can remove them."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        stamp = at or time.time()
+        known = {m.id for m in job.telegram_messages}
+        job.telegram_messages = list(job.telegram_messages) + [
+            SentMessage(id=int(mid), at=stamp)
+            for mid in message_ids
+            if int(mid or 0) and int(mid) not in known
+        ]
+        await self._persist(job)
+        return job
+
+    async def set_telegram_messages(self, job_id: str, messages, *, undeletable=None):
+        """Replace the tracked message list (used after a cleanup sweep)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        job.telegram_messages = list(messages)
+        if undeletable is not None:
+            job.telegram_undeletable = list(undeletable)
         await self._persist(job)
         return job
 

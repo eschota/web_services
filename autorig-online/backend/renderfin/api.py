@@ -201,9 +201,30 @@ async def api_character_gen_discard(request: Request, job_id: str) -> Dict[str, 
     return job.public_dict()
 
 
+@router.post("/api-character-gen/cleanup-for-task/{task_id}")
+async def api_character_gen_cleanup_for_task(request: Request, task_id: str) -> Dict[str, Any]:
+    """Take a finished job's cards back out of the private chat.
+
+    Called once the conversion the job was submitted as has reached its end,
+    which is the point where the job is genuinely done and its buttons are
+    dead weight. Unknown task ids are fine: most conversions have no job.
+    """
+    manager = _chargen(request)
+    job = manager.job_for_task(task_id)
+    if job is None:
+        return {"cleaned": 0, "job_id": None}
+    delivery = getattr(request.app.state, "delivery", None)
+    if delivery is None:
+        raise HTTPException(status_code=503, detail="delivery service not running")
+    cleaned = await delivery.cleanup_chat(job)
+    return {"cleaned": cleaned, "job_id": job.id}
+
+
 @router.post("/api-character-gen/{job_id}/mark-submitted")
-async def api_character_gen_mark_submitted(request: Request, job_id: str) -> Dict[str, Any]:
-    job = await _chargen(request).mark_submitted(job_id)
+async def api_character_gen_mark_submitted(
+    request: Request, job_id: str, task_id: str = Query(default="")
+) -> Dict[str, Any]:
+    job = await _chargen(request).mark_submitted(job_id, task_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job.public_dict()

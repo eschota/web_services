@@ -232,7 +232,11 @@ class SubmitCallbackTests(unittest.TestCase):
                             await telegram_bot._handle_submit_callback(update, context)
             submit.assert_awaited_once_with("https://x/render/bot/h1.glb")
             self.assertIn("полный пайплайн", bot.edit_message_caption.await_args.kwargs["caption"])
-            mark.assert_awaited_once_with("11111111-2222-3333-4444-555566667777")
+            # the task id travels with the mark so the job can be found again
+            # when that conversion finishes and its cards can be cleaned up
+            mark.assert_awaited_once_with(
+                "11111111-2222-3333-4444-555566667777", "new-task-id"
+            )
             bot.edit_message_caption.assert_awaited_once()
             self.assertIsNone(bot.edit_message_caption.await_args.kwargs["reply_markup"])
 

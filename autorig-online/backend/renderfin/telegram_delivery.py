@@ -28,9 +28,11 @@ import httpx
 from . import config
 from .models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
+    CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
     CHARGEN_STAGE_READY,
     CharacterGenJob,
+    SentMessage,
 )
 
 DELIVERY_IMAGE = "image"
@@ -39,6 +41,24 @@ DELIVERY_FAILED = "failed"
 DELIVERY_RETRY = "retry"
 
 _MAX_ATTEMPTS = 6
+
+
+def is_private_chat(chat_id: int) -> bool:
+    """Bot API ids: a user DM is positive, groups and channels are negative.
+
+    Cleanup is DM-only. A group is a shared log nobody asked us to rewrite.
+    """
+    return int(chat_id or 0) > 0
+
+# A bot may only delete its own message while it is under 48h old. Filtering
+# locally keeps every sweep from re-attempting ids the API will never accept.
+DELETE_WINDOW_SECONDS = 47 * 3600
+# Stages whose cards are finished business and may be taken back out of the
+# chat. Deliberately a whitelist, never "not active": `ready` and `failed` are
+# not active either, and their cards carry the only buttons that can move the
+# job on. `submitted` is excluded too - the conversion is still running and
+# that message is the reply anchor for its completion notice.
+CLEANABLE_STAGES = (CHARGEN_STAGE_DISCARDED,)
 
 
 def is_configured() -> bool:
@@ -152,9 +172,22 @@ async def _delete_message(client: httpx.AsyncClient, chat_id: int, message_id: i
         pass  # the status message may already be gone
 
 
+def _message_ids(result: Any) -> List[int]:
+    """Ids out of a Bot API result.
+
+    sendMediaGroup answers with a LIST of messages while every other method
+    answers with one; reading .get("message_id") off the list raises.
+    """
+    if isinstance(result, list):
+        return [int(m.get("message_id") or 0) for m in result if isinstance(m, dict)]
+    if isinstance(result, dict):
+        return [int(result.get("message_id") or 0)]
+    return []
+
+
 async def deliver_image_review(
     client: httpx.AsyncClient, job: CharacterGenJob, stats: Optional[Dict[str, int]] = None
-) -> Optional[int]:
+) -> List[int]:
     """Send the rendered variants and ask which one becomes the 3D model."""
     header = (
         f"🖼 <b>T-поза готова</b>\n"
@@ -180,7 +213,7 @@ async def deliver_image_review(
                 "parse_mode": "HTML",
             },
         ]
-        await _call(client, "sendMediaGroup", {
+        album = await _call(client, "sendMediaGroup", {
             "chat_id": job.telegram_chat_id,
             "media": json.dumps(media),
         })
@@ -194,7 +227,7 @@ async def deliver_image_review(
             "parse_mode": "HTML",
             "reply_markup": _image_markup(job.id, two_variants=True),
         })
-        return int((result or {}).get("message_id") or 0)
+        return _message_ids(album) + _message_ids(result)
 
     result = await _call(client, "sendPhoto", {
         "chat_id": job.telegram_chat_id,
@@ -203,12 +236,12 @@ async def deliver_image_review(
         "parse_mode": "HTML",
         "reply_markup": _image_markup(job.id),
     })
-    return int((result or {}).get("message_id") or 0)
+    return _message_ids(result)
 
 
 async def deliver_model_review(
     client: httpx.AsyncClient, job: CharacterGenJob, stats: Optional[Dict[str, int]] = None
-) -> Optional[int]:
+) -> List[int]:
     caption = (
         f"🎨 <b>3D-модель готова</b>\n"
         f"<code>{format_stats(job, stats)}</code>\n"
@@ -223,10 +256,10 @@ async def deliver_model_review(
         "supports_streaming": "true",
         "reply_markup": _model_markup(job.id),
     })
-    return int((result or {}).get("message_id") or 0)
+    return _message_ids(result)
 
 
-async def deliver_retry_notice(client: httpx.AsyncClient, job: CharacterGenJob) -> Optional[int]:
+async def deliver_retry_notice(client: httpx.AsyncClient, job: CharacterGenJob) -> List[int]:
     """Tell the owner a stage is being retried, so a long wait is not silence."""
     stage = _STAGE_LABELS.get(job.stage, job.stage)
     attempt = int((job.attempts or {}).get(job.stage, 0))
@@ -240,10 +273,10 @@ async def deliver_retry_notice(client: httpx.AsyncClient, job: CharacterGenJob) 
         "text": text,
         "parse_mode": "HTML",
     })
-    return int((result or {}).get("message_id") or 0)
+    return _message_ids(result)
 
 
-async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Optional[int]:
+async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> List[int]:
     text = (
         f"❌ <b>Генерация не удалась</b>\n"
         f"<code>#{int(job.seq or 0)}</code>\n"
@@ -257,7 +290,7 @@ async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Op
         "parse_mode": "HTML",
         "reply_markup": _retry_markup(job.id),
     })
-    return int((result or {}).get("message_id") or 0)
+    return _message_ids(result)
 
 
 _STAGE_LABELS = {
@@ -326,18 +359,86 @@ class TelegramDeliveryService:
 
     async def _loop(self) -> None:
         while not self._stopped.is_set():
-            try:
-                await self.tick()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                print(f"[Renderfin][Delivery] loop error: {exc}")
+            for pass_name, run_pass in (
+                ("delivery", self.tick),
+                ("cleanup", self.cleanup_tick),
+            ):
+                try:
+                    await run_pass()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    print(f"[Renderfin][Delivery] {pass_name} pass error: {exc}")
             try:
                 await asyncio.wait_for(
                     self._stopped.wait(), timeout=config.DELIVERY_TICK_SECONDS
                 )
             except asyncio.TimeoutError:
                 pass
+
+    async def _forget(self, job: CharacterGenJob, deleted: List[int], dead: List[int]) -> None:
+        keep = [m for m in job.telegram_messages if m.id not in set(deleted) | set(dead)]
+        undeletable = list(dict.fromkeys(list(job.telegram_undeletable) + dead))
+        await self.manager.set_telegram_messages(
+            job.id, keep, undeletable=undeletable
+        )
+
+    async def cleanup_chat(self, job: CharacterGenJob) -> int:
+        """Take this job's own messages back out of a private chat.
+
+        Returns how many were removed. Never raises: cleanup is hygiene, and a
+        chat that refuses a delete must not stop anything else from happening.
+        """
+        if self._client is None or not job.telegram_messages:
+            return 0
+        if not is_private_chat(job.telegram_chat_id):
+            return 0
+        now = time.time()
+        refused = set(job.telegram_undeletable or [])
+        deleted: List[int] = []
+        dead: List[int] = []
+        for message in list(job.telegram_messages):
+            if message.id in refused:
+                continue
+            if now - message.at > DELETE_WINDOW_SECONDS:
+                # past the window Telegram allows; stop asking
+                dead.append(message.id)
+                continue
+            try:
+                await _call(
+                    self._client,
+                    "deleteMessage",
+                    {"chat_id": job.telegram_chat_id, "message_id": message.id},
+                )
+                deleted.append(message.id)
+            except Exception as exc:
+                # already gone, too old, or otherwise permanently refused:
+                # retrying every tick forever would only flood the API
+                dead.append(message.id)
+                print(
+                    f"[Renderfin][Delivery] cannot delete {message.id} in "
+                    f"{job.telegram_chat_id}: {exc}"
+                )
+        if deleted or dead:
+            await self._forget(job, deleted, dead)
+        if deleted:
+            print(
+                f"[Renderfin][Delivery] cleaned {len(deleted)} message(s) for "
+                f"job {job.id} ({job.stage})"
+            )
+        return len(deleted)
+
+    async def cleanup_tick(self) -> None:
+        """Sweep finished jobs. Isolated from delivery so it cannot wedge it."""
+        if self._client is None:
+            return
+        for job in list(self.manager.all_jobs()):
+            if job.stage not in CLEANABLE_STAGES or not job.telegram_messages:
+                continue
+            try:
+                await self.cleanup_chat(job)
+            except Exception as exc:
+                print(f"[Renderfin][Delivery] cleanup failed for {job.id}: {exc}")
 
     async def tick(self) -> None:
         """One reconciliation pass (kept separate for tests)."""
@@ -371,7 +472,8 @@ class TelegramDeliveryService:
     async def _deliver(self, job: CharacterGenJob, kind: str) -> None:
         assert self._client is not None
         if kind == DELIVERY_RETRY:
-            message_id = await deliver_retry_notice(self._client, job)
+            sent = await deliver_retry_notice(self._client, job)
+            await self.manager.record_messages(job.id, sent)
             marker = f"{job.stage}:{(job.attempts or {}).get(job.stage, 0)}"
             await self.manager.mark_delivered(job.id, kind, marker, message_id=0)
             print(f"[Renderfin][Delivery] retry notice sent for job {job.id}")
@@ -382,20 +484,27 @@ class TelegramDeliveryService:
         except Exception:
             stats = None
         if kind == DELIVERY_IMAGE:
-            message_id = await deliver_image_review(self._client, job, stats)
+            sent = await deliver_image_review(self._client, job, stats)
             marker = _image_marker(job)
         elif kind == DELIVERY_MODEL:
-            message_id = await deliver_model_review(self._client, job, stats)
+            sent = await deliver_model_review(self._client, job, stats)
             marker = job.video_url
         else:
-            message_id = await deliver_failure(self._client, job)
+            sent = await deliver_failure(self._client, job)
             marker = job.error
+        # record before anything else can fail: an id we sent but did not write
+        # down is a card that can never be cleaned up
+        await self.manager.record_messages(job.id, sent)
         # the interim "⏳ …" message has served its purpose
         if job.telegram_status_message_id:
             await _delete_message(
                 self._client, job.telegram_chat_id, job.telegram_status_message_id
             )
         await self.manager.mark_delivered(
-            job.id, kind, marker, message_id=message_id, clear_status_message=True
+            job.id,
+            kind,
+            marker,
+            message_id=(sent[-1] if sent else 0),
+            clear_status_message=True,
         )
         print(f"[Renderfin][Delivery] {kind} delivered for job {job.id}")
