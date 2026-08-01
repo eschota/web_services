@@ -269,6 +269,53 @@ def _plan_from_llm_json(parsed: Dict[str, Any]) -> Optional[RenderGenPlan]:
     )
 
 
+VISION_CONFIG_PATH = Path(
+    os.getenv("AUTORIG_VISION_CONFIG", "/root/autorig/ai_vision_animal_type_detect.json")
+)
+
+
+def _vision_config() -> Dict[str, Any]:
+    """Credentials the web server itself uses for its vision calls.
+
+    The env vars are the primary source, but they have gone stale before while
+    this file stayed current, so it is read as a second set of candidates
+    rather than only when the env is empty.
+    """
+    try:
+        data = json.loads(VISION_CONFIG_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _llm_attempts() -> list:
+    """(url, key, model, extra_headers) candidates, best first, deduped by key."""
+    config = _vision_config()
+    openai_url = os.getenv("OPENAI_API_URL", "").strip() or str(
+        config.get("open_ai_api_url_string") or ""
+    ).strip() or "https://api.openai.com/v1/chat/completions"
+    openrouter_url = os.getenv("OPENROUTER_API_URL", "").strip() or str(
+        config.get("open_router_api_url_string") or ""
+    ).strip() or "https://openrouter.ai/api/v1/chat/completions"
+    openai_model = os.getenv("OPENAI_RENDER_PROMPT_MODEL", "gpt-4o-mini").strip()
+    openrouter_model = os.getenv("OPENROUTER_RENDER_PROMPT_MODEL", "openai/gpt-4o-mini").strip()
+    referer = {"HTTP-Referer": "https://autorig.online", "X-Title": "AutoRig Render Prompt"}
+
+    candidates = [
+        (openai_url, os.getenv("OPENAI_API_KEY", "").strip(), openai_model, {}),
+        (openrouter_url, os.getenv("OPENROUTER_API_KEY", "").strip(), openrouter_model, referer),
+        (openai_url, str(config.get("open_AI_api_key") or "").strip(), openai_model, {}),
+        (openrouter_url, str(config.get("open_router_api_key") or "").strip(), openrouter_model, referer),
+    ]
+    attempts, seen = [], set()
+    for url, key, model, headers in candidates:
+        if not key or (url, key) in seen:
+            continue
+        seen.add((url, key))
+        attempts.append((url, key, model, headers))
+    return attempts
+
+
 async def _llm_generate(
     meta: Dict[str, str], poster_data_url: Optional[str], style: str = "base"
 ) -> Optional[RenderGenPlan]:
@@ -282,27 +329,10 @@ async def _llm_generate(
     if poster_data_url:
         content.append({"type": "image_url", "image_url": {"url": poster_data_url, "detail": "low"}})
 
-    attempts = []
-    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if openai_key:
-        attempts.append(
-            (
-                os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions").strip(),
-                openai_key,
-                os.getenv("OPENAI_RENDER_PROMPT_MODEL", "gpt-4o-mini").strip(),
-                {},
-            )
-        )
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
-    if openrouter_key:
-        attempts.append(
-            (
-                os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions").strip(),
-                openrouter_key,
-                os.getenv("OPENROUTER_RENDER_PROMPT_MODEL", "openai/gpt-4o-mini").strip(),
-                {"HTTP-Referer": "https://autorig.online", "X-Title": "AutoRig Render Prompt"},
-            )
-        )
+    attempts = _llm_attempts()
+    if not attempts:
+        print("[RenderPrompting] no LLM credentials; falling back to the template")
+        return None
 
     for api_url, api_key, model, extra_headers in attempts:
         payload = {

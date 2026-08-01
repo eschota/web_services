@@ -353,3 +353,41 @@ class ApproveVariantTests(unittest.TestCase):
             self.assertIn("/api-character-gen/j-1/approve-image", seen["url"])
 
         run(scenario())
+
+
+class LlmCredentialTests(unittest.TestCase):
+    def test_env_first_then_the_web_server_config(self):
+        cfg = {
+            "open_AI_api_key": "sk-cfg-openai",
+            "open_router_api_key": "sk-cfg-router",
+            "open_ai_api_url_string": "https://cfg.openai/v1/chat/completions",
+        }
+        env = {"OPENAI_API_KEY": "sk-env-openai", "OPENROUTER_API_KEY": ""}
+        with patch.object(render_prompting, "_vision_config", return_value=cfg):
+            with patch.dict(render_prompting.os.environ, env, clear=False):
+                attempts = render_prompting._llm_attempts()
+        keys = [a[1] for a in attempts]
+        # the env key is tried first, but a stale one must not block the config
+        self.assertEqual(keys[0], "sk-env-openai")
+        self.assertIn("sk-cfg-openai", keys)
+        self.assertIn("sk-cfg-router", keys)
+
+    def test_no_credentials_yields_no_attempts(self):
+        with patch.object(render_prompting, "_vision_config", return_value={}):
+            with patch.dict(
+                render_prompting.os.environ,
+                {"OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""},
+                clear=False,
+            ):
+                self.assertEqual(render_prompting._llm_attempts(), [])
+
+    def test_the_same_key_is_not_tried_twice(self):
+        cfg = {"open_AI_api_key": "sk-same"}
+        with patch.object(render_prompting, "_vision_config", return_value=cfg):
+            with patch.dict(
+                render_prompting.os.environ,
+                {"OPENAI_API_KEY": "sk-same", "OPENROUTER_API_KEY": ""},
+                clear=False,
+            ):
+                attempts = render_prompting._llm_attempts()
+        self.assertEqual(len(attempts), 1)

@@ -33,6 +33,11 @@ class _Env:
             patch.object(config, "TMP_DIR", root / "tmp"),
             patch.object(config, "SERVERS_DIR", root / "servers"),
             patch.object(config, "DB_PATH", root / "db" / "renderfin.db"),
+            # never read the live farm config: on a machine that has one, the
+            # hunyuan stage would take the converter-API path and hit the network
+            patch.object(config, "HUNYUAN_WORKERS_FILE", root / "no-workers.json"),
+            patch.object(config, "HUNYUAN_WORKERS", []),
+            patch.object(config, "HUNYUAN_API_TOKEN", ""),
         ]
 
     def __enter__(self):
