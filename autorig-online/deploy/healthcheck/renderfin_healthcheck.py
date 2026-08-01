@@ -100,10 +100,19 @@ def check_renderfin(report: Report) -> Dict[str, Any]:
         report.fail(f"renderfin /health unreachable: {exc!r}")
         return {}
     workers = health.get("hunyuan_workers") or []
-    if workers:
-        report.ok(f"hunyuan workers: {', '.join(workers)} ({health.get('hunyuan_path')})")
-    else:
+    if not workers:
         report.fail("no hunyuan workers configured — 3D stage would fall back to ComfyUI")
+    else:
+        usable, unusable = _hunyuan_worker_health()
+        report.ok(f"hunyuan workers: {', '.join(workers)} ({health.get('hunyuan_path')})")
+        if unusable:
+            # a configured box that cannot take a job is not a spare: every job
+            # piles onto whatever is left, and throughput drops with no error
+            report.fail(
+                f"{len(unusable)} hunyuan worker(s) cannot take work: "
+                + "; ".join(unusable)
+                + (f" | usable: {', '.join(usable)}" if usable else " | NONE usable")
+            )
 
     try:
         dashboard = _get_json(f"{RENDERFIN}/api-render")
@@ -160,7 +169,10 @@ def check_generation_jobs(report: Report) -> None:
         if stage == "failed":
             failed.append(f"{job['id'][:8]}: {(job.get('error') or '')[:60]}")
         if stage in ACTIVE_STAGES:
-            idle = now - float(job.get("updated_at") or job.get("created_at") or now)
+            # updated_at is refreshed by a service restart, so a job stuck for a
+            # day looked minutes old; stage_started_at is the real stage clock
+            anchor = job.get("stage_started_at") or job.get("updated_at") or job.get("created_at")
+            idle = now - float(anchor or now)
             if idle > STAGE_STALL_SECONDS and not job.get("retry_at"):
                 stalled.append(f"{job['id'][:8]} at {stage} for {idle / 3600:.1f}h")
         delivered = job.get("delivered") or {}
@@ -176,6 +188,48 @@ def check_generation_jobs(report: Report) -> None:
         report.fail(f"{len(undelivered)} finished job(s) never delivered: " + ", ".join(undelivered[:3]))
 
 
+HUNYUAN_WORKERS_FILE = "/etc/autorig-renderfin-hunyuan.json"
+
+
+def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
+    """(usable, unusable) worker names, judged the same way renderfin judges them."""
+    try:
+        with open(HUNYUAN_WORKERS_FILE, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        return [], []
+    entries = data.get("workers") if isinstance(data, dict) else data
+    usable: List[str] = []
+    unusable: List[str] = []
+    for entry in entries or []:
+        name = str(entry.get("name") or entry.get("url") or "?")
+        url = str(entry.get("url") or "").rstrip("/")
+        token = str(entry.get("token") or "")
+        if not url:
+            continue
+        request = urllib.request.Request(
+            f"{url}/api-converter-glb/server-status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as resp:
+                status = json.load(resp)
+        except Exception as exc:
+            unusable.append(f"{name} unreachable ({repr(exc)[:50]})")
+            continue
+        hunyuan = status.get("hunyuan")
+        if not isinstance(hunyuan, dict):
+            unusable.append(f"{name} reports no hunyuan module")
+        elif not hunyuan.get("enabled") or not hunyuan.get("installed"):
+            unusable.append(
+                f"{name} hunyuan enabled={hunyuan.get('enabled')} "
+                f"installed={hunyuan.get('installed')}"
+            )
+        else:
+            usable.append(name)
+    return usable, unusable
+
+
 def check_farm_tunnels(report: Report) -> None:
     conf = "/etc/autorig-farm-tunnels.conf"
     if not os.path.isfile(conf):
@@ -186,6 +240,7 @@ def check_farm_tunnels(report: Report) -> None:
         if len(parts) != 4 or line.strip().startswith("#"):
             continue
         name, _ssh_port, local_port, _remote = parts
+        last_error = "no response"
         for path in ("/api-converter-glb/server-status", "/queue"):
             try:
                 with urllib.request.urlopen(
@@ -194,10 +249,18 @@ def check_farm_tunnels(report: Report) -> None:
                     if resp.status == 200:
                         report.ok(f"tunnel {name} (:{local_port}) alive")
                         break
-            except Exception:
+                    last_error = f"HTTP {resp.status}"
+            except urllib.error.HTTPError as exc:
+                # the port answered, so the tunnel itself is up
+                report.ok(f"tunnel {name} (:{local_port}) alive (HTTP {exc.code})")
+                break
+            except Exception as exc:
+                last_error = repr(exc)[:80]
                 continue
         else:
-            report.fail(f"tunnel {name} (:{local_port}) down")
+            # carry the reason: "down" alone does not say whether the tunnel
+            # died or the box behind it stopped answering
+            report.fail(f"tunnel {name} (:{local_port}) down: {last_error}")
 
 
 def notify(report: Report) -> None:
