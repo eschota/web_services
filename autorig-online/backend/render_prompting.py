@@ -8,7 +8,6 @@ code changes. A deterministic template + keyword heuristic covers LLM outages.
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import os
@@ -51,12 +50,10 @@ class RenderGenPlan:
     body_type: str
     mask_url: str
     source: str  # "llm" | "template"
-    # second style rendered alongside so the user can pick the better 3D base
+    # Second style of the SAME character, so the operator picks a look rather
+    # than a different character. Both variants deliberately share one mask:
+    # a different pose skeleton would change the build too.
     prompt_b: str = ""
-    # the cartoon style usually reads as a different build, and only the fat and
-    # dwarf skeletons carry openpose face keypoints, so it gets its own mask
-    body_type_b: str = ""
-    mask_url_b: str = ""
 
 
 def mask_url_for_body_type(body_type: str) -> str:
@@ -74,12 +71,11 @@ def body_type_from_keywords(text: str) -> str:
     return "normal"
 
 
-def _load_instruction(style: str = "base") -> str:
-    """Instruction text for one render style ("base" | "lowpoly")."""
-    key = "instruction_lowpoly" if style == "lowpoly" else "instruction"
+def _load_instruction() -> str:
+    """The single character-description instruction."""
     try:
         data = json.loads(_INSTRUCTION_PATH.read_text(encoding="utf-8"))
-        return str(data.get(key) or "").strip()
+        return str(data.get("instruction") or "").strip()
     except Exception as exc:
         print(f"[RenderPrompting] instruction load failed: {exc}")
         return ""
@@ -126,8 +122,8 @@ def _poster_data_url(task_id: str) -> Optional[str]:
     return None
 
 
-# Fixed sentences shared by the fallback prompts. Every clause here is a
-# measured fix, not decoration:
+# Fixed sentences wrapped around the character description. Every clause here
+# is a measured fix, not decoration:
 #   - no "character sheet"/"turnaround": Flux builds a multi-panel layout with
 #     annotation text and the 3D stage fails on it
 #   - no "silhouette": Flux renders a literal black cutout
@@ -155,11 +151,47 @@ _BASE_TAIL = (
     "distortion, no text."
 )
 
+# The base style gets material contrast; the cartoon style gets the opposite -
+# fewer, larger, flatter faces. Naming triangles explicitly is what makes FLUX
+# actually drop the polygon count instead of rendering a smooth model in bright
+# colours, and coarse geometry is also what Hunyuan3D reconstructs best.
+_BASE_MATERIALS = (
+    "Every surface is fully opaque with a clearly stated finish, matte woven fabric "
+    "against satin worn leather and brushed metal fittings, so the materials read "
+    "apart from each other."
+)
+
+_LOWPOLY_MATERIALS = (
+    "Built from very few large flat triangles, visible triangular facets across every "
+    "surface with hard creased edges between them, each facet catching the light as "
+    "one flat tone, chunky blocky limbs, mitten hands with a separated thumb, simple "
+    "rounded boots, all shapes reduced to their coarsest form with no fine detail, no "
+    "fabric weave, no wrinkles and no small parts."
+)
+
 _LOWPOLY_TAIL = (
-    "Faceted flat-shaded polygonal surfaces with visible clean polygon edges, chunky "
-    "simplified geometry, bold saturated colour blocking in flat blocks with hard "
-    "boundaries, high contrast, smooth uncluttered opaque surfaces. "
+    "Low-poly flat-shaded cartoon game asset, faceted triangular geometry, bold "
+    "saturated colour blocking in flat blocks with hard boundaries, high contrast, "
+    "smooth uncluttered opaque surfaces. "
 ) + _BASE_TAIL
+
+
+def compose_prompt(subject: str, outfit: str, *, lowpoly: bool = False) -> str:
+    """Wrap one character description in one style.
+
+    Both styles are built from the SAME subject and outfit on purpose. Writing
+    the two prompts independently produced two different characters - a slim
+    teenager in a white puffer next to a chunky figure in a red parka - which
+    makes the choice meaningless: the operator is supposed to pick a style, not
+    a character.
+    """
+    subject = (subject or "").strip().rstrip(",.") or "a stylized humanoid character"
+    outfit = (outfit or "").strip().rstrip(",.")
+    who = f"{subject} wearing {outfit}" if outfit else subject
+    style = _LOWPOLY_STYLE_PHRASE if lowpoly else _BASE_STYLE_PHRASE
+    materials = _LOWPOLY_MATERIALS if lowpoly else _BASE_MATERIALS
+    tail = _LOWPOLY_TAIL if lowpoly else _BASE_TAIL
+    return " ".join([f"{who}, {style}.", _POSE_SENTENCE, materials, tail])[:1800]
 
 # Marketplace boilerplate describes the file, not the character, and eats the
 # text budget that CLIP-L actually reads.
@@ -189,44 +221,36 @@ def _clean_metadata_text(text: str) -> str:
 
 
 def lowpoly_variant(prompt: str) -> str:
-    """Same subject, restated as the low-poly cartoon style.
+    """Restate an already-composed base prompt in the cartoon style.
 
-    Only the style and light sentences are swapped, so both variants describe
-    the same character and stay comparable side by side.
+    Only used when a prompt arrives without its parts (an old job, a caller
+    that supplied free text). The normal path composes both styles from the
+    same subject via compose_prompt.
     """
     subject = (prompt or "").split(".")[0].strip().rstrip(",")
-    if not subject:
-        subject = "A stylized humanoid character"
     subject = subject.replace(_BASE_STYLE_PHRASE, "").strip().rstrip(",")
-    # the style phrase must land inside the first sentence: CLIP-L only reads
-    # the first ~77 tokens and that is what carries the global style signal
-    return " ".join([f"{subject}, {_LOWPOLY_STYLE_PHRASE}.", _POSE_SENTENCE, _LOWPOLY_TAIL])[:1800]
+    return compose_prompt(subject, "", lowpoly=True)
 
 
 def build_template_plan(meta: Dict[str, str]) -> RenderGenPlan:
-    """Deterministic fallback when no LLM is available."""
+    """Deterministic fallback when no LLM is available.
+
+    Composes the same way the LLM path does, so both variants still describe
+    one character even when nobody could write a better description.
+    """
     title = meta.get("title") or meta.get("animal_type") or meta.get("detector") or "stylized 3d character"
     description = (meta.get("description") or "").strip()
     keywords = (meta.get("keywords") or "").strip()
     body_type = body_type_from_keywords(" ".join([title, description, keywords]))
 
-    subject = _clean_metadata_text(title) or "stylized humanoid"
-    detail = _clean_metadata_text(f"{description} {keywords}")[:220]
-    opening = f"A {subject}"
+    subject = f"a {_clean_metadata_text(title) or 'stylized humanoid'}"
+    detail = _clean_metadata_text(f"{description} {keywords}")[:200]
     if detail:
-        opening += f", {detail}"
-    opening += f", {_BASE_STYLE_PHRASE}."
-    prompt = " ".join([
-        opening,
-        _POSE_SENTENCE,
-        "Every surface is fully opaque with a clearly stated finish: matte woven "
-        "fabric, satin worn leather and brushed metal fittings, hair a compact shape "
-        "close to the head and clothing close-fitting.",
-        _BASE_TAIL,
-    ])[:1800]
+        subject += f", {detail}"
+    outfit = "close-fitting clothing in muted colours with hair a compact shape close to the head"
     return RenderGenPlan(
-        prompt=prompt,
-        prompt_b=lowpoly_variant(prompt),
+        prompt=compose_prompt(subject, outfit),
+        prompt_b=compose_prompt(subject, outfit, lowpoly=True),
         negative_prompt=DEFAULT_NEGATIVE_PROMPT,
         body_type=body_type,
         mask_url=mask_url_for_body_type(body_type),
@@ -249,19 +273,27 @@ def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _plan_from_llm_json(parsed: Dict[str, Any]) -> Optional[RenderGenPlan]:
-    """One style's answer. The two styles are separate calls and merged after."""
-    prompt = str(parsed.get("flux_prompt") or "").strip()
-    if len(prompt) < 20:
-        return None
+    """One character description becomes both style prompts."""
+    subject = str(parsed.get("subject") or "").strip()
+    outfit = str(parsed.get("outfit") or "").strip()
+    if len(subject) < 15:
+        # tolerate the older single-prompt shape rather than dropping to the
+        # template, which knows nothing about the character
+        legacy = str(parsed.get("flux_prompt") or "").strip()
+        if len(legacy) < 20:
+            return None
+        subject, outfit = legacy, ""
+
+    body_type = str(parsed.get("body_type") or "normal").strip().lower()
+    if body_type not in BODY_TYPES:
+        body_type = "normal"
     # negative_prompt is inert: t_pose.json has no $negative_prompt placeholder
     # and the workflow zeroes the negative conditioning before sampling. It is
     # still filled so the other workflows that do read it keep working.
     negative = str(parsed.get("negative_prompt") or "").strip() or DEFAULT_NEGATIVE_PROMPT
-    body_type = str(parsed.get("body_type") or "normal").strip().lower()
-    if body_type not in BODY_TYPES:
-        body_type = "normal"
     return RenderGenPlan(
-        prompt=prompt[:1800],
+        prompt=compose_prompt(subject, outfit),
+        prompt_b=compose_prompt(subject, outfit, lowpoly=True),
         negative_prompt=negative[:800],
         body_type=body_type,
         mask_url=mask_url_for_body_type(body_type),
@@ -317,9 +349,9 @@ def _llm_attempts() -> list:
 
 
 async def _llm_generate(
-    meta: Dict[str, str], poster_data_url: Optional[str], style: str = "base"
+    meta: Dict[str, str], poster_data_url: Optional[str]
 ) -> Optional[RenderGenPlan]:
-    instruction = _load_instruction(style)
+    instruction = _load_instruction()
     if not instruction:
         return None
     meta_text = "\n".join(f"{key}: {value}" for key, value in meta.items()) or "(no metadata)"
@@ -384,27 +416,12 @@ async def build_render_request(task_id: str) -> RenderGenPlan:
     meta = _task_metadata_summary(task) if task is not None else {}
     poster = _poster_data_url(task_id)
 
-    # both styles are written in parallel, so two prompts cost one call of latency
-    base, lowpoly = await asyncio.gather(
-        _llm_generate(meta, poster, "base"),
-        _llm_generate(meta, poster, "lowpoly"),
-        return_exceptions=True,
-    )
-    if isinstance(base, Exception):
-        print(f"[RenderPrompting] base style failed: {base}")
-        base = None
-    if isinstance(lowpoly, Exception):
-        print(f"[RenderPrompting] lowpoly style failed: {lowpoly}")
-        lowpoly = None
-
-    plan = base or build_template_plan(meta)
-    if lowpoly is not None:
-        plan.prompt_b = lowpoly.prompt
-        plan.body_type_b = lowpoly.body_type
-        plan.mask_url_b = lowpoly.mask_url
-    elif not plan.prompt_b:
-        # one style still beats none: restate the subject in the cartoon style
-        plan.prompt_b = lowpoly_variant(plan.prompt)
+    # ONE call: the character is described once and rendered in two styles, so
+    # the two images show the same character. Two calls invented two different
+    # characters, which made the choice meaningless.
+    plan = await _llm_generate(meta, poster)
+    if plan is None:
+        plan = build_template_plan(meta)
     return plan
 
 
@@ -422,7 +439,6 @@ async def start_character_gen(
             json={
                 "prompt": plan.prompt,
                 "prompt_b": plan.prompt_b,
-                "mask_url_b": plan.mask_url_b,
                 "negative_prompt": plan.negative_prompt,
                 "mask_url": plan.mask_url,
                 "user_name": user_name,

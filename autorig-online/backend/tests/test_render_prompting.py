@@ -142,21 +142,26 @@ class PromptAntiPatternTests(unittest.TestCase):
             self.assertIn("between the arms and torso", prompt)
             self.assertIn("T-pose", prompt)
 
-    def test_shipped_instructions_teach_the_same_rules(self):
+    def test_the_shipped_instruction_teaches_the_pipeline_traps(self):
         import json as _json
 
-        data = _json.loads(
-            (render_prompting._INSTRUCTION_PATH).read_text(encoding="utf-8")
-        )
-        for key in ("instruction", "instruction_lowpoly"):
-            text = data[key]
-            self.assertGreater(len(text), 2000, key)
-            # each instruction must name the pipeline traps the LLM cannot see
-            self.assertIn("glass", text)          # stripped by sanitize_prompt
-            self.assertIn("negative", text.lower())  # never reaches the model
-            self.assertIn("T-pose", text)
-            for body_type in BODY_TYPES:
-                self.assertIn(body_type, text)
+        data = _json.loads(render_prompting._INSTRUCTION_PATH.read_text(encoding="utf-8"))
+        text = data["instruction"]
+        self.assertGreater(len(text), 2000)
+        # traps the model cannot see from the prompt alone
+        self.assertIn("glass", text)          # stripped by sanitize_prompt
+        self.assertIn("SAME CHARACTER", text)  # one character, two styles
+        for body_type in BODY_TYPES:
+            self.assertIn(body_type, text)
+        # the instruction must not invite style words: the pipeline adds those,
+        # and anything the model says about them makes the two renders diverge
+        self.assertIn("Never mention lighting", text)
+
+    def test_the_instruction_no_longer_ships_a_second_style(self):
+        import json as _json
+
+        data = _json.loads(render_prompting._INSTRUCTION_PATH.read_text(encoding="utf-8"))
+        self.assertNotIn("instruction_lowpoly", data)
 
 
 class LowPolyVariantTests(unittest.TestCase):
@@ -179,64 +184,83 @@ class LowPolyVariantTests(unittest.TestCase):
         # the base style tail must not leak into the low-poly variant
         self.assertNotIn("character sheet, neutral studio", variant)
 
-    def test_both_styles_are_written_in_one_pass(self):
+    def test_one_call_produces_both_styles_of_the_same_character(self):
         async def scenario():
-            styles = []
+            calls = []
 
-            async def fake_llm(meta, poster, style="base"):
-                styles.append(style)
-                if style == "lowpoly":
-                    return RenderGenPlan(
-                        prompt="low-poly goblin scout, faceted geometry",
-                        negative_prompt="",
-                        body_type="dwarf",
-                        mask_url=mask_url_for_body_type("dwarf"),
-                        source="llm",
-                    )
-                return RenderGenPlan(
-                    prompt="a detailed goblin scout in worn leather",
-                    negative_prompt="",
-                    body_type="goblin",
-                    mask_url=mask_url_for_body_type("goblin"),
-                    source="llm",
+            async def fake_llm(meta, poster):
+                calls.append(meta)
+                return render_prompting._plan_from_llm_json(
+                    {
+                        "subject": "a slim teenage boy with a round face and short black hair",
+                        "outfit": "a cream white puffer jacket, a deep red scarf and charcoal trousers",
+                        "body_type": "normal",
+                    }
                 )
 
             with patch.object(render_prompting, "_llm_generate", new=fake_llm):
                 with patch.object(render_prompting, "_poster_data_url", return_value=None):
                     plan = await render_prompting.build_render_request("t1")
 
-            self.assertEqual(sorted(styles), ["base", "lowpoly"])
-            self.assertEqual(plan.prompt, "a detailed goblin scout in worn leather")
-            self.assertEqual(plan.prompt_b, "low-poly goblin scout, faceted geometry")
-            # each style picks its own pose skeleton
-            self.assertIn("t_pose_goblin.jpg", plan.mask_url)
-            self.assertIn("t_pose_dwarf.jpg", plan.mask_url_b)
+            # one call: two calls invented two different characters
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(plan.prompt_b)
+            self.assertNotEqual(plan.prompt, plan.prompt_b)
 
         run(scenario())
 
-    def test_lowpoly_style_failure_still_yields_two_prompts(self):
-        async def scenario():
-            async def fake_llm(meta, poster, style="base"):
-                if style == "lowpoly":
-                    raise RuntimeError("LLM down")
-                return RenderGenPlan(
-                    prompt="a detailed goblin scout in worn leather",
-                    negative_prompt="",
-                    body_type="goblin",
-                    mask_url=mask_url_for_body_type("goblin"),
-                    source="llm",
-                )
+    def test_the_two_variants_describe_the_same_character(self):
+        plan = _plan_from_llm_json(
+            {
+                "subject": "a slim teenage boy with a round face and short black hair",
+                "outfit": "a cream white puffer jacket, a deep red scarf and charcoal trousers",
+                "body_type": "normal",
+            }
+        )
+        # every identity-carrying word must appear in both renders
+        for token in (
+            "slim teenage boy",
+            "round face",
+            "short black hair",
+            "cream white puffer jacket",
+            "deep red scarf",
+            "charcoal trousers",
+        ):
+            self.assertIn(token, plan.prompt, "base render lost the character")
+            self.assertIn(token, plan.prompt_b, "cartoon render lost the character")
+        # and only the style differs
+        self.assertIn("low-poly cartoon", plan.prompt_b)
+        self.assertNotIn("low-poly", plan.prompt)
 
-            with patch.object(render_prompting, "_llm_generate", new=fake_llm):
-                with patch.object(render_prompting, "_poster_data_url", return_value=None):
-                    plan = await render_prompting.build_render_request("t1")
+    def test_both_variants_use_one_pose_skeleton(self):
+        """A different mask would change the build, not just the look."""
+        plan = _plan_from_llm_json(
+            {"subject": "a stout dwarf smith with a broad face", "outfit": "a leather apron", "body_type": "dwarf"}
+        )
+        self.assertIn("t_pose_dwarf.jpg", plan.mask_url)
+        self.assertFalse(hasattr(plan, "mask_url_b"))
 
-            self.assertIn("low-poly", plan.prompt_b)
-            self.assertIn("goblin scout", plan.prompt_b)
-            # no mask of its own: variant B falls back to the base skeleton
-            self.assertEqual(plan.mask_url_b, "")
+    def test_the_cartoon_style_asks_for_triangles(self):
+        plan = _plan_from_llm_json(
+            {"subject": "a slim teenage boy", "outfit": "a white jacket", "body_type": "normal"}
+        )
+        for token in ("triangles", "triangular facets", "coarsest form"):
+            self.assertIn(token, plan.prompt_b)
+        # the base render must not be simplified
+        self.assertNotIn("triangles", plan.prompt)
 
-        run(scenario())
+    def test_a_legacy_single_prompt_answer_still_works(self):
+        plan = _plan_from_llm_json(
+            {"flux_prompt": "a detailed goblin scout in worn leather armour", "body_type": "goblin"}
+        )
+        self.assertIn("goblin scout", plan.prompt)
+        self.assertIn("goblin scout", plan.prompt_b)
+
+    def test_template_fallback_also_describes_one_character(self):
+        plan = build_template_plan({"title": "orc warrior", "description": "green skin"})
+        self.assertIn("orc warrior", plan.prompt)
+        self.assertIn("orc warrior", plan.prompt_b)
+        self.assertIn("low-poly cartoon", plan.prompt_b)
 
     def test_both_styles_failing_falls_back_to_the_template(self):
         async def scenario():
