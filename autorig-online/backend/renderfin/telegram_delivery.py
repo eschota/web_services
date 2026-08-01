@@ -36,6 +36,7 @@ from .models import (
 DELIVERY_IMAGE = "image"
 DELIVERY_MODEL = "model"
 DELIVERY_FAILED = "failed"
+DELIVERY_RETRY = "retry"
 
 _MAX_ATTEMPTS = 6
 
@@ -145,6 +146,23 @@ async def deliver_model_review(
     return int((result or {}).get("message_id") or 0)
 
 
+async def deliver_retry_notice(client: httpx.AsyncClient, job: CharacterGenJob) -> Optional[int]:
+    """Tell the owner a stage is being retried, so a long wait is not silence."""
+    stage = _STAGE_LABELS.get(job.stage, job.stage)
+    attempt = int((job.attempts or {}).get(job.stage, 0))
+    text = (
+        f"🔁 <b>Повторяю: {html.escape(stage)}</b> (попытка {attempt + 1})\n"
+        f"<i>{_prompt_preview(job, 160)}</i>\n"
+        f"{html.escape((job.last_error or '')[:200])}"
+    )
+    result = await _call(client, "sendMessage", {
+        "chat_id": job.telegram_chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+    })
+    return int((result or {}).get("message_id") or 0)
+
+
 async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Optional[int]:
     text = (
         f"❌ <b>Генерация не удалась</b>\n"
@@ -161,11 +179,23 @@ async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Op
     return int((result or {}).get("message_id") or 0)
 
 
+_STAGE_LABELS = {
+    "flux_render": "рендер T-позы",
+    "hunyuan": "3D-модель",
+    "turntable": "видео-облёт",
+}
+
+
 def pending_delivery(job: CharacterGenJob) -> Optional[str]:
     """Which delivery (if any) this job still owes its chat."""
     if not job.telegram_chat_id:
         return None
     delivered = job.delivered or {}
+    # an automatic retry is progress worth reporting, not silence
+    if job.retry_at and job.last_error:
+        marker = f"{job.stage}:{(job.attempts or {}).get(job.stage, 0)}"
+        if delivered.get(DELIVERY_RETRY) != marker:
+            return DELIVERY_RETRY
     if job.stage == CHARGEN_STAGE_AWAITING_IMAGE and job.image_url:
         if delivered.get(DELIVERY_IMAGE) != job.image_url:
             return DELIVERY_IMAGE
@@ -259,6 +289,12 @@ class TelegramDeliveryService:
 
     async def _deliver(self, job: CharacterGenJob, kind: str) -> None:
         assert self._client is not None
+        if kind == DELIVERY_RETRY:
+            message_id = await deliver_retry_notice(self._client, job)
+            marker = f"{job.stage}:{(job.attempts or {}).get(job.stage, 0)}"
+            await self.manager.mark_delivered(job.id, kind, marker, message_id=0)
+            print(f"[Renderfin][Delivery] retry notice sent for job {job.id}")
+            return
         if kind == DELIVERY_IMAGE:
             message_id = await deliver_image_review(self._client, job)
             marker = job.image_url

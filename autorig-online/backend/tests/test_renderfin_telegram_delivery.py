@@ -274,3 +274,52 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetryNoticeTests(unittest.TestCase):
+    def test_scheduled_retry_is_reported_once_per_attempt(self):
+        """A long silent wait is indistinguishable from a hang: each automatic
+        retry tells the owner, but only once per attempt."""
+
+        async def scenario():
+            sent = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                sent.append(dict(httpx.QueryParams(request.content.decode())))
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+
+            from renderfin.models import CHARGEN_STAGE_HUNYUAN
+            from renderfin.telegram_delivery import DELIVERY_RETRY
+
+            job = _job(
+                stage=CHARGEN_STAGE_HUNYUAN,
+                retry_at=9e9,
+                last_error="worker rebooted",
+                attempts={CHARGEN_STAGE_HUNYUAN: 1},
+            )
+            self.assertEqual(pending_delivery(job), DELIVERY_RETRY)
+
+            manager = _FakeManager([job])
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            service = TelegramDeliveryService(manager, client=client)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.tick()
+                await service.tick()   # same attempt: no second message
+            await client.aclose()
+
+            self.assertEqual(len(sent), 1)
+            self.assertIn("Повторяю", sent[0]["text"])
+            self.assertIn("3D-модель", sent[0]["text"])
+            self.assertIsNone(pending_delivery(job))
+
+            # a further attempt is reported again
+            job.attempts = {CHARGEN_STAGE_HUNYUAN: 2}
+            self.assertEqual(pending_delivery(job), DELIVERY_RETRY)
+
+        run(scenario())
+
+    def test_no_retry_notice_without_a_scheduled_retry(self):
+        from renderfin.models import CHARGEN_STAGE_HUNYUAN
+
+        job = _job(stage=CHARGEN_STAGE_HUNYUAN, last_error="", retry_at=0)
+        self.assertIsNone(pending_delivery(job))
