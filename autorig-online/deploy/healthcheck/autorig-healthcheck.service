@@ -1,0 +1,13 @@
+[Unit]
+Description=AutoRig stability check (site + 3D generation pipeline)
+After=network-online.target autorig.service autorig-renderfin.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/autorig-online/backend
+EnvironmentFile=-/etc/autorig-online/environment
+EnvironmentFile=-/etc/autorig-telegram.env
+ExecStart=/root/autorig-online/venv/bin/python3 /root/autorig-online/deploy/healthcheck/renderfin_healthcheck.py --notify
+# a failing check is the point of the job, not a unit failure
+SuccessExitStatus=0 1

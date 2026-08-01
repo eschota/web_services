@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the AutoRig stability check every 6 hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+# survive downtime: run immediately if the machine was off at the due time
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
