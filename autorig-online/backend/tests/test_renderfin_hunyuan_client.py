@@ -240,3 +240,35 @@ class PollToleranceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StaleTokenTests(unittest.TestCase):
+    """A box re-provisions its token on restart; that is not the job's fault."""
+
+    def _submit(self, status_code):
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                if request.url.path.endswith("/server-status"):
+                    return httpx.Response(200, json={
+                        "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"}
+                    })
+                return httpx.Response(status_code, json={"error": "unauthorized"})
+
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    await hunyuan_client.submit(client, image_url="https://x/a.png")
+
+        return scenario
+
+    def test_401_is_a_wait_not_a_job_failure(self):
+        with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+            run(self._submit(401)())
+        self.assertIn("rejected our token", str(caught.exception))
+
+    def test_403_is_a_wait_too(self):
+        with self.assertRaises(hunyuan_client.NoWorkerAvailable):
+            run(self._submit(403)())
+
+    def test_a_real_rejection_still_fails_the_job(self):
+        with self.assertRaises(hunyuan_client.HunyuanClientError):
+            run(self._submit(500)())

@@ -795,6 +795,17 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_a_job_failed_by_a_stale_token_is_revived(self):
+        for message in (
+            'generate-3d on f13 failed: HTTP 401 {"error":"unauthorized"}',
+            "f7 rejected our token (HTTP 401)",
+            "generate-3d on f7 failed: HTTP 403 forbidden",
+        ):
+            self.assertTrue(
+                character_gen._failed_on_empty_fleet(CharacterGenJob(error=message)),
+                message,
+            )
+
     def test_a_genuinely_failed_job_is_left_alone(self):
         job = CharacterGenJob(error="generation failed on f13: out of memory")
         self.assertFalse(character_gen._failed_on_empty_fleet(job))

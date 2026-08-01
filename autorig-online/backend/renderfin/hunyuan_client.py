@@ -155,6 +155,14 @@ async def submit(
         headers=_headers(worker),
         timeout=30.0,
     )
+    if resp.status_code in (401, 403):
+        # The box re-provisions its token on restart, so ours goes stale
+        # without anything being wrong with the job. Same class as an empty
+        # fleet: wait for the credentials to be fixed rather than burning the
+        # job's attempts and reporting a failure the user cannot act on.
+        raise NoWorkerAvailable(
+            f"{worker['name']} rejected our token (HTTP {resp.status_code})"
+        )
     if resp.status_code not in (200, 202):
         raise HunyuanClientError(
             f"generate-3d on {worker['name']} failed: HTTP {resp.status_code} {resp.text[:300]}"

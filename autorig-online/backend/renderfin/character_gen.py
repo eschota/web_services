@@ -70,7 +70,15 @@ FLEET_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_FLEET_WAIT", "300"))
 # Jobs that were failed by an empty fleet before it was treated as a wait.
 # They are indistinguishable from a real failure only by their message, so it
 # is matched here and they are revived rather than left for a human.
-_FLEET_ERROR_MARKERS = ("no enabled hunyuan worker", "no hunyuan workers configured")
+_FLEET_ERROR_MARKERS = (
+    "no enabled hunyuan worker",
+    "no hunyuan workers configured",
+    "rejected our token",
+    # jobs failed by a stale token before it was treated as a wait
+    '"error":"unauthorized"',
+    "http 401",
+    "http 403",
+)
 
 
 def _failed_on_empty_fleet(job: CharacterGenJob) -> bool:

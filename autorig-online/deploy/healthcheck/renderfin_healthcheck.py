@@ -220,14 +220,46 @@ def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
         hunyuan = status.get("hunyuan")
         if not isinstance(hunyuan, dict):
             unusable.append(f"{name} reports no hunyuan module")
-        elif not hunyuan.get("enabled") or not hunyuan.get("installed"):
+            continue
+        if not hunyuan.get("enabled") or not hunyuan.get("installed"):
             unusable.append(
                 f"{name} hunyuan enabled={hunyuan.get('enabled')} "
                 f"installed={hunyuan.get('installed')}"
             )
+            continue
+        # server-status does not check the bearer, so a stale token only shows
+        # up on the endpoint that matters. Jobs wait out a rejection rather
+        # than failing, which is right for them and silent for everyone else -
+        # this is the one place it gets said out loud.
+        reason = _hunyuan_auth_error(url, token)
+        if reason:
+            unusable.append(f"{name} {reason}")
         else:
             usable.append(name)
     return usable, unusable
+
+
+def _hunyuan_auth_error(url: str, token: str) -> str:
+    """Empty when the worker accepts our credentials.
+
+    Probes with a deliberately invalid body: a 400 means the bearer was
+    accepted and the request got as far as validation, which is all we ask.
+    """
+    request = urllib.request.Request(
+        f"{url}/api-converter-glb/generate-3d",
+        data=b"{}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(request, timeout=20).close()
+        return ""
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return f"rejects our token (HTTP {exc.code}) - refresh /etc/autorig-renderfin-hunyuan.json"
+        return ""
+    except Exception as exc:
+        return f"generate-3d unreachable ({repr(exc)[:50]})"
 
 
 def check_farm_tunnels(report: Report) -> None:
