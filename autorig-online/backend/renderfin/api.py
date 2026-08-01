@@ -110,6 +110,7 @@ class CharacterGenRequest(BaseModel):
 class TelegramContextRequest(BaseModel):
     chat_id: int = 0
     message_id: int = 0
+    status_message_id: int = 0
 
 
 @router.post("/api-character-gen")
@@ -138,7 +139,10 @@ async def api_character_gen_telegram_context(
     request: Request, job_id: str, body: TelegramContextRequest
 ) -> Dict[str, Any]:
     job = await _chargen(request).set_telegram_context(
-        job_id, chat_id=body.chat_id, message_id=body.message_id
+        job_id,
+        chat_id=body.chat_id,
+        message_id=body.message_id,
+        status_message_id=body.status_message_id,
     )
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")

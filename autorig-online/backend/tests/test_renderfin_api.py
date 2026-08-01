@@ -130,3 +130,58 @@ class ApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TelegramContextContractTests(unittest.TestCase):
+    """The bot and the service must agree on this payload: a mismatch made every
+    button press fail with 'unexpected keyword argument'."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.patches = [
+            patch.object(config, "DATA_DIR", root),
+            patch.object(config, "RENDER_DIR", root / "render"),
+            patch.object(config, "DB_DIR", root / "db"),
+            patch.object(config, "TMP_DIR", root / "tmp"),
+            patch.object(config, "SERVERS_DIR", root / "servers"),
+            patch.object(config, "DB_PATH", root / "db" / "renderfin.db"),
+        ]
+        for p in self.patches:
+            p.start()
+        from renderfin.app import app
+
+        self.client = TestClient(app)
+        self.client.__enter__()
+
+    def tearDown(self):
+        self.client.__exit__(None, None, None)
+        for p in self.patches:
+            p.stop()
+        self.tmp.cleanup()
+
+    def test_client_helper_kwargs_match_the_endpoint(self):
+        import inspect
+
+        import render_prompting
+        from renderfin.api import TelegramContextRequest
+
+        params = set(inspect.signature(
+            render_prompting.set_character_gen_telegram_context
+        ).parameters) - {"job_id"}
+        self.assertTrue(
+            params <= set(TelegramContextRequest.model_fields),
+            f"client sends {params}, endpoint accepts {set(TelegramContextRequest.model_fields)}",
+        )
+
+    def test_endpoint_accepts_every_field_the_bot_sends(self):
+        job = self.client.post(
+            "/renderfin/api-character-gen",
+            json={"prompt": "orc", "user_name": "bot"},
+        ).json()
+        resp = self.client.post(
+            f"/renderfin/api-character-gen/{job['job_id']}/telegram-context",
+            json={"chat_id": 777, "message_id": 42, "status_message_id": 99},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["telegram_chat_id"], 777)

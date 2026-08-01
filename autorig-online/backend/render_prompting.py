@@ -312,13 +312,19 @@ async def list_active_character_gen_jobs() -> list:
 
 
 async def set_character_gen_telegram_context(
-    job_id: str, *, chat_id: int = 0, message_id: int = 0
+    job_id: str, *, chat_id: int = 0, message_id: int = 0, status_message_id: int = 0
 ) -> None:
+    """Tell renderfin where to deliver: the chat, the review message and the
+    interim status message it should clean up once the result is out."""
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             await client.post(
                 f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}/telegram-context",
-                json={"chat_id": chat_id, "message_id": message_id},
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "status_message_id": status_message_id,
+                },
             )
     except Exception as exc:
         print(f"[RenderPrompting] telegram context update failed: {exc}")
