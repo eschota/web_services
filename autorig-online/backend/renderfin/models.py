@@ -150,6 +150,11 @@ class CharacterGenJob(BaseModel):
     telegram_status_message_id: int = 0
     delivered: Dict[str, str] = Field(default_factory=dict)
     warning: str = ""
+    # When the current stage was entered. Stage deadlines are measured from
+    # here, not from when the runner happened to start, so a service restart
+    # cannot hand a stuck job a fresh timeout window.
+    stage_started_at: float = 0
+    timed_stage: str = ""
     # Automatic stage retries: attempts per stage and when to try again.
     attempts: Dict[str, int] = Field(default_factory=dict)
     retry_at: float = 0
@@ -183,6 +188,7 @@ class CharacterGenJob(BaseModel):
             "video_url": self.video_url or None,
             "error": self.error or None,
             "warning": self.warning or None,
+            "stage_started_at": self.stage_started_at or None,
             "attempts": dict(self.attempts or {}),
             "retry_at": self.retry_at or None,
             "last_error": self.last_error or None,

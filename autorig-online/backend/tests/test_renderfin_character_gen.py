@@ -10,7 +10,9 @@ from renderfin.models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
+    CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_TURNTABLE,
     TASK_DONE,
     TASK_ERROR,
 )
@@ -49,7 +51,12 @@ class _Env:
     def __exit__(self, *exc):
         for p in self.patches:
             p.stop()
-        self.tmp.cleanup()
+        # the sqlite handle can outlive the test on Windows; a temp dir we
+        # could not remove must not be reported as a test failure
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
 
 
 class _InstantQueue(RenderQueue):
@@ -549,6 +556,124 @@ class TwoVariantTests(unittest.TestCase):
                     job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                     self.assertTrue(job.image_url_b)
                     self.assertNotEqual(job.image_url_b, first_b)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+
+class StageDeadlineTests(unittest.TestCase):
+    """A restart must not hand a stuck stage a fresh timeout window."""
+
+    def _manager(self):
+        registry = ServerRegistry()
+        queue = _InstantQueue(registry, db_path=config.DB_PATH)
+        return queue, CharacterGenManager(queue, db_path=config.DB_PATH)
+
+    def test_budget_shrinks_as_the_stage_runs(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    first = manager._stage_budget(job, 3600.0)
+                    self.assertAlmostEqual(first, 3600.0, delta=5)
+                    # pretend the stage has been running for an hour already
+                    job.stage_started_at -= 1800
+                    second = manager._stage_budget(job, 3600.0)
+                    self.assertAlmostEqual(second, 1800.0, delta=5)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_restart_resumes_the_same_window(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                job = await manager.create(prompt="orc", user_name="bot")
+                job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                job.stage = CHARGEN_STAGE_HUNYUAN
+                manager._stage_budget(job, 3600.0)
+                job.stage_started_at -= 3000  # 50 minutes in
+                await manager._persist(job)
+                await manager.stop()
+
+                manager2 = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager2.start()
+                try:
+                    revived = manager2.get(job.id)
+                    self.assertEqual(revived.stage, CHARGEN_STAGE_HUNYUAN)
+                    budget = manager2._stage_budget(revived, 3600.0)
+                    self.assertLess(budget, 700, "restart handed the stage a fresh window")
+                finally:
+                    await manager2.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_exhausted_window_leaves_no_time(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    manager._stage_budget(job, 3600.0)
+                    job.stage_started_at -= 7200
+                    self.assertEqual(manager._stage_budget(job, 3600.0), 0.0)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_new_stage_starts_a_new_window(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    manager._stage_budget(job, 3600.0)
+                    job.stage_started_at -= 3000
+                    job.stage = CHARGEN_STAGE_TURNTABLE
+                    self.assertAlmostEqual(manager._stage_budget(job, 3600.0), 3600.0, delta=5)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_retry_earns_a_fresh_window(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    manager._stage_budget(job, 3600.0)
+                    job.stage_started_at -= 3500
+                    await manager._handle_stage_error(job, RuntimeError("boom"))
+                    self.assertEqual(job.stage_started_at, 0)
+                    self.assertAlmostEqual(manager._stage_budget(job, 3600.0), 3600.0, delta=5)
                 finally:
                     await manager.stop()
                     await queue.stop()

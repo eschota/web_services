@@ -355,6 +355,9 @@ class CharacterGenManager:
         job.error = ""
         job.retry_at = 0
         job.attempts = {}
+        # an explicit resume is a fresh attempt, so it earns a fresh window
+        job.stage_started_at = 0
+        job.timed_stage = ""
         await self._persist(job)
         self._spawn(job)
         return job, True
@@ -382,6 +385,8 @@ class CharacterGenManager:
         job.warning = ""
         job.retry_at = 0
         job.attempts = {}
+        job.stage_started_at = 0
+        job.timed_stage = ""
         job.stage = CHARGEN_STAGE_FLUX
         await self._persist(job)
         self._spawn(job)
@@ -448,6 +453,8 @@ class CharacterGenManager:
             if previous is None or previous.status == TASK_ERROR:
                 job.flux_task_id = ""
 
+        job.stage_started_at = 0
+        job.timed_stage = ""
         delay = RETRY_BACKOFF_SECONDS[min(count - 1, len(RETRY_BACKOFF_SECONDS) - 1)]
         job.retry_at = time.time() + delay
         job.error = ""  # not a terminal failure: nothing to deliver yet
@@ -456,6 +463,21 @@ class CharacterGenManager:
             f"[Renderfin][CharGen] job {job.id} stage {stage} attempt {count} "
             f"failed ({exc}); retrying in {int(delay)}s"
         )
+
+    def _stage_budget(self, job: CharacterGenJob, ceiling: float) -> float:
+        """Seconds this stage has left.
+
+        The clock starts when the stage is entered and is persisted with the
+        job, so a service restart resumes the same window instead of handing a
+        stuck job a fresh one. Without this a job that a farm box has silently
+        dropped never reaches its retry path: every restart re-enters the stage
+        and grants another full ceiling.
+        """
+        now = time.time()
+        if job.timed_stage != job.stage or not job.stage_started_at:
+            job.timed_stage = job.stage
+            job.stage_started_at = now
+        return max(0.0, ceiling - (now - job.stage_started_at))
 
     async def _await_render(self, task_id: str, timeout: float):
         task = await self.queue.wait_for(task_id, timeout=timeout)
@@ -492,7 +514,9 @@ class CharacterGenManager:
             job.flux_task_id_b = task_b.id
             await self._persist(job)
 
-        task = await self._await_render(job.flux_task_id, FLUX_STAGE_TIMEOUT)
+        task = await self._await_render(
+            job.flux_task_id, self._stage_budget(job, FLUX_STAGE_TIMEOUT)
+        )
         job.image_url = task.output_url
         isolated = task.extra_outputs.get("isolated")
         if not isolated:
@@ -505,7 +529,9 @@ class CharacterGenManager:
         if job.flux_task_id_b:
             # a failed second variant must not sink the job: one image is enough
             try:
-                task_b = await self._await_render(job.flux_task_id_b, FLUX_STAGE_TIMEOUT)
+                task_b = await self._await_render(
+                    job.flux_task_id_b, self._stage_budget(job, FLUX_STAGE_TIMEOUT)
+                )
                 job.image_url_b = task_b.output_url
                 job.isolated_url_b = (
                     task_b.extra_outputs.get("isolated") or task_b.output_url
@@ -563,7 +589,10 @@ class CharacterGenManager:
                 await self._persist(job)
                 print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker['name']}")
             payload = await hunyuan_client.wait_for_model(
-                client, worker, job.hunyuan_task_id
+                client,
+                worker,
+                job.hunyuan_task_id,
+                timeout=self._stage_budget(job, HUNYUAN_STAGE_TIMEOUT),
             )
             model_url = str((payload.get("output_urls") or {}).get("model"))
             data = await hunyuan_client.download_model(client, worker, model_url)
@@ -585,7 +614,9 @@ class CharacterGenManager:
             )
             job.hunyuan_task_id = task.id
             await self._persist(job)
-        task = await self._await_render(job.hunyuan_task_id, HUNYUAN_STAGE_TIMEOUT)
+        task = await self._await_render(
+            job.hunyuan_task_id, self._stage_budget(job, HUNYUAN_STAGE_TIMEOUT)
+        )
         job.glb_url = task.output_url
 
     async def _stage_turntable(self, job: CharacterGenJob) -> None:
