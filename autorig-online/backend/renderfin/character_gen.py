@@ -62,6 +62,24 @@ HUNYUAN_STAGE_TIMEOUT = float(
 # job is reported as failed, and how long to wait between attempts.
 MAX_STAGE_ATTEMPTS = int(os.getenv("RENDERFIN_CHARGEN_STAGE_ATTEMPTS", "3"))
 RETRY_BACKOFF_SECONDS = (30.0, 120.0, 600.0)
+# An empty 3D fleet says nothing about the job, so waiting is free and giving
+# up is wrong: the user pressed the button and is owed the result whenever the
+# farm comes back. These waits do not count against the job's attempts.
+FLEET_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_FLEET_WAIT", "300"))
+# Jobs that were failed by an empty fleet before it was treated as a wait.
+# They are indistinguishable from a real failure only by their message, so it
+# is matched here and they are revived rather than left for a human.
+_FLEET_ERROR_MARKERS = ("no enabled hunyuan worker", "no hunyuan workers configured")
+
+
+def _failed_on_empty_fleet(job: CharacterGenJob) -> bool:
+    """Only the terminal reason counts.
+
+    last_error is deliberately not consulted: it survives a revival, so a job
+    that later fails for a real reason would keep matching and be revived
+    forever.
+    """
+    return any(marker in (job.error or "").lower() for marker in _FLEET_ERROR_MARKERS)
 RETRY_TICK_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_RETRY_TICK", "15"))
 
 
@@ -96,6 +114,16 @@ class CharacterGenManager:
             try:
                 now = time.time()
                 for job in list(self._jobs.values()):
+                    if job.stage == CHARGEN_STAGE_FAILED and _failed_on_empty_fleet(job):
+                        # the farm, not the job, was broken: put it back in the
+                        # pipeline. If the fleet is still empty it parks again,
+                        # so this costs one check per FLEET_WAIT_SECONDS.
+                        print(
+                            f"[Renderfin][CharGen] reviving job {job.id}: it was "
+                            f"failed by an empty 3D fleet"
+                        )
+                        await self.resume(job.id)
+                        continue
                     if job.stage not in _ACTIVE_STAGES or not job.retry_at:
                         continue
                     if job.retry_at > now:
@@ -353,6 +381,7 @@ class CharacterGenManager:
             if previous is None or previous.status == TASK_ERROR:
                 job.flux_task_id = ""
         job.error = ""
+        job.last_error = ""
         job.retry_at = 0
         job.attempts = {}
         # an explicit resume is a fresh attempt, so it earns a fresh window
@@ -427,10 +456,26 @@ class CharacterGenManager:
         failure once the retries are exhausted.
         """
         stage = job.stage
+        job.last_error = str(exc)[:1000]
+
+        if isinstance(exc, hunyuan_client.NoWorkerAvailable):
+            # Not this job's fault and not fixable by retrying harder: park it
+            # in place and keep checking. Attempts are untouched, and the stage
+            # clock is pushed along so waiting for the farm cannot time it out.
+            job.retry_at = time.time() + FLEET_WAIT_SECONDS
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} waiting for a 3D worker "
+                f"({exc}); re-checking in {int(FLEET_WAIT_SECONDS)}s"
+            )
+            return
+
         attempts = dict(job.attempts or {})
         attempts[stage] = attempts.get(stage, 0) + 1
         job.attempts = attempts
-        job.last_error = str(exc)[:1000]
         count = attempts[stage]
 
         if count >= MAX_STAGE_ATTEMPTS:

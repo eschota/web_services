@@ -21,6 +21,15 @@ import httpx
 from . import config
 
 
+class NoWorkerAvailable(RuntimeError):
+    """The whole 3D fleet is unusable right now.
+
+    Distinct from HunyuanClientError because it says nothing about the job: no
+    number of retries fixes it and retrying costs nothing, so the pipeline
+    waits it out instead of spending the job's attempts and giving up.
+    """
+
+
 class HunyuanClientError(RuntimeError):
     pass
 
@@ -103,7 +112,7 @@ async def pick_worker(client: httpx.AsyncClient) -> Dict[str, str]:
     """Pick the enabled worker with the shallowest overall queue."""
     pool = workers()
     if not pool:
-        raise HunyuanClientError("no Hunyuan workers configured")
+        raise NoWorkerAvailable("no Hunyuan workers configured")
     candidates: List[Tuple[int, int, Dict[str, str]]] = []
     for index, worker in enumerate(pool):
         status = await server_status(client, worker)
@@ -116,7 +125,7 @@ async def pick_worker(client: httpx.AsyncClient) -> Dict[str, str]:
             continue
         candidates.append((_load_score(status, hunyuan), index, worker))
     if not candidates:
-        raise HunyuanClientError(
+        raise NoWorkerAvailable(
             "no enabled Hunyuan worker among " + ", ".join(w["name"] for w in pool)
         )
     candidates.sort(key=lambda item: (item[0], item[1]))

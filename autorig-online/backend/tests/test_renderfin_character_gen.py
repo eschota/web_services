@@ -4,10 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from renderfin import config
+import time
+
+from renderfin import character_gen, config, hunyuan_client
 from renderfin.character_gen import CharacterGenManager
 from renderfin.models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
+    CharacterGenJob,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
     CHARGEN_STAGE_HUNYUAN,
@@ -107,6 +110,19 @@ async def _wait_stage(manager, job_id, stages, timeout=5.0):
             return job
         await asyncio.sleep(0.02)
     raise AssertionError(f"job never reached {stages}: {manager.get(job_id).stage}")
+
+
+async def _idle_job(manager, **fields):
+    """Register a job with the manager without spawning a runner for it.
+
+    Tests that drive a stage handler directly must not race _run: mutating
+    job.stage while the runner is still choosing a branch makes it fall
+    through into the real stage and hit the network.
+    """
+    job = CharacterGenJob(prompt="orc", user_name="bot", **fields)
+    manager._jobs[job.id] = job
+    await manager._persist(job)
+    return job
 
 
 class HunyuanConverterPathTests(unittest.TestCase):
@@ -578,9 +594,7 @@ class StageDeadlineTests(unittest.TestCase):
                 await queue.start()
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="orc", user_name="bot")
-                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
-                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
                     first = manager._stage_budget(job, 3600.0)
                     self.assertAlmostEqual(first, 3600.0, delta=5)
                     # pretend the stage has been running for an hour already
@@ -599,9 +613,7 @@ class StageDeadlineTests(unittest.TestCase):
                 queue, manager = self._manager()
                 await queue.start()
                 await manager.start()
-                job = await manager.create(prompt="orc", user_name="bot")
-                job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
-                job.stage = CHARGEN_STAGE_HUNYUAN
+                job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
                 manager._stage_budget(job, 3600.0)
                 job.stage_started_at -= 3000  # 50 minutes in
                 await manager._persist(job)
@@ -627,9 +639,7 @@ class StageDeadlineTests(unittest.TestCase):
                 await queue.start()
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="orc", user_name="bot")
-                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
-                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
                     manager._stage_budget(job, 3600.0)
                     job.stage_started_at -= 7200
                     self.assertEqual(manager._stage_budget(job, 3600.0), 0.0)
@@ -646,9 +656,7 @@ class StageDeadlineTests(unittest.TestCase):
                 await queue.start()
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="orc", user_name="bot")
-                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
-                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
                     manager._stage_budget(job, 3600.0)
                     job.stage_started_at -= 3000
                     job.stage = CHARGEN_STAGE_TURNTABLE
@@ -666,9 +674,7 @@ class StageDeadlineTests(unittest.TestCase):
                 await queue.start()
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="orc", user_name="bot")
-                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
-                    job.stage = CHARGEN_STAGE_HUNYUAN
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
                     manager._stage_budget(job, 3600.0)
                     job.stage_started_at -= 3500
                     await manager._handle_stage_error(job, RuntimeError("boom"))
@@ -679,6 +685,129 @@ class StageDeadlineTests(unittest.TestCase):
                     await queue.stop()
 
         run(scenario())
+
+
+class EmptyFleetTests(unittest.TestCase):
+    """An empty 3D fleet is a wait, not a job failure.
+
+    The farm boxes came back from a restart without their Hunyuan module and
+    every queued job burned its retries and reported a failure to the owner,
+    who was owed the result whenever the farm returned.
+    """
+
+    def _manager(self):
+        registry = ServerRegistry()
+        queue = _InstantQueue(registry, db_path=config.DB_PATH)
+        return queue, CharacterGenManager(queue, db_path=config.DB_PATH)
+
+    async def _park(self, manager, job):
+        """Take the job out of the retry loop's reach before teardown.
+
+        These tests drive _handle_stage_error directly and leave the job in an
+        active stage; the loop would then spawn it against a torn-down env.
+        """
+        job.stage = CHARGEN_STAGE_DISCARDED
+        job.retry_at = 0
+        await manager._persist(job)
+
+    def test_missing_fleet_parks_the_job_without_spending_an_attempt(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    await manager._handle_stage_error(
+                        job, hunyuan_client.NoWorkerAvailable("no enabled Hunyuan worker among f7, f13")
+                    )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertEqual(job.attempts, {})
+                    self.assertEqual(job.error, "")
+                    self.assertGreater(job.retry_at, time.time())
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_waiting_for_the_fleet_cannot_time_the_stage_out(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    manager._stage_budget(job, 3600.0)
+                    job.stage_started_at -= 3500  # nearly out of time
+                    await manager._handle_stage_error(
+                        job, hunyuan_client.NoWorkerAvailable("no enabled Hunyuan worker")
+                    )
+                    self.assertAlmostEqual(manager._stage_budget(job, 3600.0), 3600.0, delta=5)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_real_failure_still_spends_an_attempt(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    await manager._handle_stage_error(job, RuntimeError("generation failed on f13"))
+                    self.assertEqual(job.attempts.get(CHARGEN_STAGE_HUNYUAN), 1)
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_job_already_failed_by_an_empty_fleet_is_revived(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_FAILED,
+                        isolated_url="https://x/a_Isolated.png",
+                        error="no enabled Hunyuan worker among f7, f13",
+                    )
+                    # no manual resume: the retry loop must notice on its own
+                    revived = await _wait_stage(manager, job.id, {CHARGEN_STAGE_HUNYUAN})
+                    runner = manager._runners.pop(job.id, None)
+                    if runner is not None:
+                        runner.cancel()
+                    self.assertEqual(revived.error, "")
+                    self.assertEqual(revived.attempts, {})
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_genuinely_failed_job_is_left_alone(self):
+        job = CharacterGenJob(error="generation failed on f13: out of memory")
+        self.assertFalse(character_gen._failed_on_empty_fleet(job))
+        job2 = CharacterGenJob(error="no enabled Hunyuan worker among f7, f13")
+        self.assertTrue(character_gen._failed_on_empty_fleet(job2))
+
+    def test_a_stale_last_error_does_not_revive_forever(self):
+        """last_error survives a revival, so it must not drive the decision."""
+        job = CharacterGenJob(
+            error="chrome crashed rendering the turntable",
+            last_error="no enabled Hunyuan worker among f7, f13",
+        )
+        self.assertFalse(character_gen._failed_on_empty_fleet(job))
 
 
 class ResumeTests(unittest.TestCase):
@@ -939,7 +1068,10 @@ class RunningNumberTests(unittest.TestCase):
                 import json as _json
 
                 registry = ServerRegistry()
-                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                # the queue keeps its own file: this is the only test that opens
+                # a second manager while the queue is still holding the first,
+                # and sharing one sqlite file makes the second open block
+                queue = _InstantQueue(registry, db_path=config.DB_DIR / "queue.db")
                 await queue.start()
                 manager = CharacterGenManager(queue, db_path=config.DB_PATH)
                 await manager.start()

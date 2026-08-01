@@ -157,10 +157,19 @@ class WorkerSelectionTests(unittest.TestCase):
 
             with patch.object(config, "hunyuan_workers", lambda: POOL):
                 async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                    with self.assertRaises(hunyuan_client.HunyuanClientError):
+                    # a distinct type: an empty fleet says nothing about the job,
+                    # so the pipeline waits it out instead of spending attempts
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable):
                         await hunyuan_client.pick_worker(client)
 
         run(scenario())
+
+    def test_empty_fleet_is_not_a_job_failure(self):
+        """NoWorkerAvailable must not be caught as a per-job HunyuanClientError."""
+        self.assertFalse(
+            issubclass(hunyuan_client.NoWorkerAvailable, hunyuan_client.HunyuanClientError)
+        )
+        self.assertTrue(issubclass(hunyuan_client.NoWorkerAvailable, RuntimeError))
 
     def test_worker_for_url_resolves_owner(self):
         with patch.object(config, "hunyuan_workers", lambda: POOL):
