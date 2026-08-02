@@ -806,6 +806,42 @@ class EmptyFleetTests(unittest.TestCase):
                 message,
             )
 
+    def test_a_farm_side_post_processing_failure_parks_the_job(self):
+        """The generation was paid for and succeeded; the box then failed to
+        finish its own post-processing. Retrying the job cannot fix that."""
+
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    await manager._handle_stage_error(
+                        job,
+                        RuntimeError(
+                            "generation failed on f13: Vertex-PBR manifest is missing "
+                            "or invalid: [Errno 2] No such file or directory"
+                        ),
+                    )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertEqual(job.attempts, {}, "an attempt must not be spent")
+                    self.assertEqual(job.error, "")
+                    # far enough out not to re-pay for a GPU hour every 5 minutes
+                    self.assertGreater(job.retry_at - time.time(), 600)
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_job_already_failed_that_way_is_revived(self):
+        job = CharacterGenJob(
+            error="generation failed on f7: Vertex-PBR manifest is missing or invalid"
+        )
+        self.assertTrue(character_gen._failed_on_empty_fleet(job))
+
     def test_a_genuinely_failed_job_is_left_alone(self):
         job = CharacterGenJob(error="generation failed on f13: out of memory")
         self.assertFalse(character_gen._failed_on_empty_fleet(job))

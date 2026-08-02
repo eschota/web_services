@@ -263,6 +263,72 @@ class GlbCachePruneTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((cache / "task1_a_all_animations_unity.fbx").is_file())
             self.assertTrue((cache / "task2_b_all_animations_unity.fbx").is_file())
 
+    async def test_the_probe_budget_is_not_spent_on_the_same_entries_twice(self):
+        """Regression: the oldest entries are the ones whose upstream is long
+        gone, so every run burned its whole budget on them and freed nothing."""
+        with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp, \
+             tempfile.TemporaryDirectory(prefix="autorig-memo-") as memo_dir:
+            cache = Path(tmp)
+            # two ancient entries the worker has purged, one newer it still serves
+            self._write(cache / "old1_all_animations_unity.fbx", 40, 300)
+            self._write(cache / "old2_all_animations_unity.fbx", 40, 290)
+            self._write(cache / "fresh_all_animations_unity.fbx", 40, 100)
+
+            probed = []
+
+            async def _probe(url):
+                probed.append(url)
+                return "fresh" in url
+
+            async def _url(_db, path):
+                return f"https://worker/{path.name}"
+
+            memo = Path(memo_dir) / "memo.json"
+            with patch.object(cleanup, "_free_gb", return_value=0.5), \
+                 patch.object(cleanup, "LAST_COPY_MEMO_PATH", memo), \
+                 patch.object(cleanup, "GLB_CACHE_MAX_PROBES", 2), \
+                 patch.object(cleanup, "_cache_entry_upstream_url", new=_url), \
+                 patch.object(cleanup, "_upstream_is_available", new=_probe):
+                # first pass: the budget is spent on the two dead entries
+                removed, _ = await cleanup._purge_oldest_glb_cache_until(
+                    None, glb_cache_dir=cache, target_free_gb=5.0,
+                    max_cache_gb=0.01, min_age_hours=24,
+                )
+                self.assertEqual(removed, 0)
+                self.assertEqual(len(probed), 2)
+
+                # second pass: the verdict is remembered, so the budget reaches
+                # the entry that CAN be freed
+                probed.clear()
+                removed, _ = await cleanup._purge_oldest_glb_cache_until(
+                    None, glb_cache_dir=cache, target_free_gb=5.0,
+                    max_cache_gb=0.01, min_age_hours=24,
+                )
+
+            self.assertEqual(removed, 1, "the freeable entry was never reached")
+            self.assertFalse((cache / "fresh_all_animations_unity.fbx").is_file())
+            # the last copies are still untouched
+            self.assertTrue((cache / "old1_all_animations_unity.fbx").is_file())
+            self.assertTrue((cache / "old2_all_animations_unity.fbx").is_file())
+            self.assertNotIn("https://worker/old1_all_animations_unity.fbx", probed)
+
+    async def test_a_memo_entry_expires_so_it_is_not_a_blacklist(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-memo-") as memo_dir:
+            memo = Path(memo_dir) / "memo.json"
+            stale = time.time() - (cleanup.LAST_COPY_MEMO_TTL_SECONDS + 60)
+            memo.write_text('{"gone.fbx": %f, "recent.fbx": %f}' % (stale, time.time()))
+            with patch.object(cleanup, "LAST_COPY_MEMO_PATH", memo):
+                loaded = cleanup._load_last_copy_memo()
+            self.assertNotIn("gone.fbx", loaded, "a worker can start serving it again")
+            self.assertIn("recent.fbx", loaded)
+
+    async def test_a_corrupt_memo_is_ignored_rather_than_fatal(self):
+        with tempfile.TemporaryDirectory(prefix="autorig-memo-") as memo_dir:
+            memo = Path(memo_dir) / "memo.json"
+            memo.write_text("not json at all")
+            with patch.object(cleanup, "LAST_COPY_MEMO_PATH", memo):
+                self.assertEqual(cleanup._load_last_copy_memo(), {})
+
     async def test_entry_without_a_known_upstream_is_kept(self):
         with tempfile.TemporaryDirectory(prefix="autorig-glb-cache-") as tmp:
             cache = Path(tmp)

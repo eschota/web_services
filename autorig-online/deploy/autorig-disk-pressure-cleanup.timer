@@ -2,9 +2,14 @@
 Description=Run AutoRig pressure-only disk cleanup periodically
 
 [Timer]
-OnBootSec=1min
-OnUnitActiveSec=1min
-RandomizedDelaySec=0
+# The pass walks the whole cache and costs ~5s of CPU, and it only acts when
+# the disk is actually under pressure - which does not develop in a minute.
+# Running it every minute burned CPU continuously to decide there was nothing
+# to do; a quarter hour is well inside the headroom the pressure thresholds
+# leave, and RandomizedDelaySec keeps it off the same second as everything else.
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
 Persistent=true
 
 [Install]

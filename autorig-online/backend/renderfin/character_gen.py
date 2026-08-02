@@ -67,10 +67,31 @@ RETRY_BACKOFF_SECONDS = (30.0, 120.0, 600.0)
 # up is wrong: the user pressed the button and is owed the result whenever the
 # farm comes back. These waits do not count against the job's attempts.
 FLEET_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_FLEET_WAIT", "300"))
+# Some failures arrive only AFTER a full 3D generation has been paid for, so
+# re-checking every five minutes would burn a GPU-hour to rediscover the same
+# broken post-processor. They still must not fail the job.
+FARM_BREAKAGE_WAIT_SECONDS = float(
+    os.getenv("RENDERFIN_CHARGEN_FARM_BREAKAGE_WAIT", "1800")
+)
+# Known farm-side pipeline breakages: the generation itself succeeded and the
+# box then failed to finish its own post-processing. Nothing about the job is
+# wrong, so retrying the job harder cannot help and giving up is not allowed.
+_FARM_BREAKAGE_MARKERS = (
+    "vertex-pbr manifest is missing",
+    "vertex-pbr manifest contract",
+    "blender vertex-pbr pipeline failed",
+)
+
+
+def _is_farm_breakage(text: str) -> bool:
+    low = (text or "").lower()
+    return any(marker in low for marker in _FARM_BREAKAGE_MARKERS)
 # Jobs that were failed by an empty fleet before it was treated as a wait.
 # They are indistinguishable from a real failure only by their message, so it
 # is matched here and they are revived rather than left for a human.
 _FLEET_ERROR_MARKERS = (
+    "vertex-pbr manifest is missing",
+    "blender vertex-pbr pipeline failed",
     "no enabled hunyuan worker",
     "no hunyuan workers configured",
     "rejected our token",
@@ -520,6 +541,19 @@ class CharacterGenManager:
         """
         stage = job.stage
         job.last_error = str(exc)[:1000]
+
+        if _is_farm_breakage(str(exc)):
+            job.retry_at = time.time() + FARM_BREAKAGE_WAIT_SECONDS
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} parked on a farm-side "
+                f"post-processing failure ({exc}); re-checking in "
+                f"{int(FARM_BREAKAGE_WAIT_SECONDS / 60)}min"
+            )
+            return
 
         if isinstance(exc, hunyuan_client.NoWorkerAvailable):
             # Not this job's fault and not fixable by retrying harder: park it

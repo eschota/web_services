@@ -78,6 +78,40 @@ GLB_CACHE_ORPHAN_SUFFIXES = (".tmp",)
 GLB_CACHE_HARD_MIN_AGE_SECONDS = 600.0
 # Upstream probing is network-bound; keep it bounded per run.
 GLB_CACHE_MAX_PROBES = int(os.getenv("GLB_CACHE_MAX_UPSTREAM_PROBES", "60"))
+# Verdicts are remembered so the probe budget is spent on entries nobody has
+# asked about yet. Re-checked weekly: a worker can be rebuilt and start serving
+# an artifact again, and this must not become a permanent blacklist.
+LAST_COPY_MEMO_PATH = Path(
+    os.getenv("GLB_CACHE_LAST_COPY_MEMO", "/var/autorig/glb_cache_last_copy.json")
+)
+LAST_COPY_MEMO_TTL_SECONDS = float(
+    os.getenv("GLB_CACHE_LAST_COPY_TTL_SECONDS", str(7 * 24 * 3600))
+)
+
+
+def _load_last_copy_memo() -> dict:
+    try:
+        data = json.loads(LAST_COPY_MEMO_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+    except Exception:
+        return {}
+    fresh_after = time.time() - LAST_COPY_MEMO_TTL_SECONDS
+    return {
+        name: float(at)
+        for name, at in data.items()
+        if isinstance(at, (int, float)) and float(at) > fresh_after
+    }
+
+
+def _save_last_copy_memo(memo: dict) -> None:
+    try:
+        LAST_COPY_MEMO_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = LAST_COPY_MEMO_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(memo), encoding="utf-8")
+        tmp.replace(LAST_COPY_MEMO_PATH)
+    except Exception as exc:
+        print(f"[Disk Prepass] could not persist last-copy memo: {exc}")
 GLB_CACHE_PROBE_TIMEOUT_SECONDS = float(os.getenv("GLB_CACHE_PROBE_TIMEOUT", "8"))
 
 
@@ -202,9 +236,17 @@ async def _purge_oldest_glb_cache_until(
 
     probes = 0
     kept_last_copy = 0
+    memo = _load_last_copy_memo()
+    memo_hits = 0
+    now = time.time()
     for _mtime, size, path in candidates:
         if not _pressured():
             break
+        if path.name in memo:
+            # already established as the last copy; do not spend a probe on it
+            memo_hits += 1
+            kept_last_copy += 1
+            continue
         if probes >= GLB_CACHE_MAX_PROBES:
             print(f"[Disk Prepass] Upstream probe budget reached ({GLB_CACHE_MAX_PROBES})")
             break
@@ -212,7 +254,9 @@ async def _purge_oldest_glb_cache_until(
         probes += 1
         if not upstream or not await _upstream_is_available(upstream):
             kept_last_copy += 1
+            memo[path.name] = now
             continue
+        memo.pop(path.name, None)
         try:
             path.unlink()
         except FileNotFoundError:
@@ -225,10 +269,19 @@ async def _purge_oldest_glb_cache_until(
             f"({size / (1024**2):.1f} MB); free now {_free_gb():.2f} GB, "
             f"glb_cache now {(cache_bytes / (1024**3)):.2f} GB"
         )
+    _save_last_copy_memo(memo)
     if kept_last_copy:
         print(
-            f"[Disk Prepass] Kept {kept_last_copy} cache entrie(s): the worker no "
-            "longer serves them, so these are the last copy"
+            f"[Disk Prepass] Kept {kept_last_copy} cache entrie(s) ({memo_hits} from "
+            "memo): the worker no longer serves them, so these are the last copy"
+        )
+    if _pressured() and removed == 0 and probes < GLB_CACHE_MAX_PROBES:
+        # every candidate is the last copy and the cache is still over its cap:
+        # nothing here can be freed safely, and silence would read as "handled"
+        print(
+            f"[Disk Prepass] OVER CAP with nothing safe to delete: "
+            f"{cache_bytes / (1024**3):.2f} GB cached, cap {max_cache_gb:.1f} GB, "
+            f"{kept_last_copy} entrie(s) are the only surviving copy"
         )
     return removed, freed
 
