@@ -272,3 +272,51 @@ class StaleTokenTests(unittest.TestCase):
     def test_a_real_rejection_still_fails_the_job(self):
         with self.assertRaises(hunyuan_client.HunyuanClientError):
             run(self._submit(500)())
+
+
+class ParkedWorkerTests(unittest.TestCase):
+    """A box can be taken out of the pool without losing how to reach it."""
+
+    def _pool_from(self, entries):
+        import json as _json
+        import tempfile
+        from pathlib import Path as _P
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _P(tmp) / "workers.json"
+            path.write_text(_json.dumps(entries), encoding="utf-8")
+            with patch.object(config, "HUNYUAN_WORKERS_FILE", path):
+                return config.hunyuan_workers()
+
+    def test_a_disabled_worker_is_not_offered(self):
+        pool = self._pool_from([
+            {"name": "f7", "url": "https://f7", "token": "t", "enabled": False,
+             "disabled_reason": "reboots without shutting down cleanly"},
+            {"name": "f13", "url": "https://f13", "token": "t"},
+        ])
+        self.assertEqual([w["name"] for w in pool], ["f13"])
+
+    def test_the_disabled_alias_works_too(self):
+        pool = self._pool_from([
+            {"name": "f7", "url": "https://f7", "token": "t", "disabled": True},
+            {"name": "f13", "url": "https://f13", "token": "t"},
+        ])
+        self.assertEqual([w["name"] for w in pool], ["f13"])
+
+    def test_re_enabling_is_one_word(self):
+        entry = {"name": "f7", "url": "https://f7", "token": "t", "enabled": True}
+        self.assertEqual([w["name"] for w in self._pool_from([entry])], ["f7"])
+
+    def test_a_parked_worker_cannot_be_picked(self):
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(200, json={
+                    "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"}
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: []):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable):
+                        await hunyuan_client.pick_worker(client)
+
+        run(scenario())

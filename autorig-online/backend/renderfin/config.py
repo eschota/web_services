@@ -65,6 +65,15 @@ def hunyuan_workers() -> list[dict]:
             for entry in entries or []:
                 url = str(entry.get("url") or "").strip().rstrip("/")
                 token = str(entry.get("token") or "").strip() or HUNYUAN_API_TOKEN
+                # A box can be parked without deleting how to reach it, so
+                # putting it back is one word rather than a reconstruction.
+                if entry.get("enabled") is False or entry.get("disabled") is True:
+                    print(
+                        f"[Renderfin] hunyuan worker {entry.get('name') or url} "
+                        f"is disabled in {HUNYUAN_WORKERS_FILE.name}: "
+                        f"{entry.get('disabled_reason') or 'no reason given'}"
+                    )
+                    continue
                 if url and token:
                     workers.append(
                         {

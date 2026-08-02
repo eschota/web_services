@@ -207,6 +207,10 @@ def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
         token = str(entry.get("token") or "")
         if not url:
             continue
+        if entry.get("enabled") is False or entry.get("disabled") is True:
+            # parked on purpose: reported, but not as something to fix
+            usable.append(f"{name} (parked: {entry.get('disabled_reason') or 'no reason'})")
+            continue
         request = urllib.request.Request(
             f"{url}/api-converter-glb/server-status",
             headers={"Authorization": f"Bearer {token}"},
