@@ -167,3 +167,81 @@ test('keeps unsupported constant properties unchanged', () => {
     assert.equal(result.droppedTracks, 0);
     assert.equal(result.clips[0], clips[0]);
 });
+
+test('makes required root position motion in-place without mutating source clip or track', () => {
+    const rootTrack = keyframeTrack(
+        'Root.position',
+        [0, 0.5, 1],
+        [1, 2, 3, 4, 5, 6, -2, 7, 8],
+        3,
+    );
+    const deformTrack = keyframeTrack(
+        'Deform.position',
+        [0, 0.5, 1],
+        [0, 1, 0, 0.25, 2, 0.5, 0.5, 3, 1],
+        3,
+    );
+    const sourceClip = clip('Walk', [rootTrack, deformTrack]);
+    const sourceRootValues = [...rootTrack.values];
+    const sourceDeformValues = [...deformTrack.values];
+
+    const result = optimizer.optimizeAnimationClipsForViewer(
+        [sourceClip],
+        modelFixture(),
+        { parseTrackName },
+    );
+
+    assert.equal(result.reliable, true);
+    assert.equal(result.rootMotionTracksLocked, 1);
+    assert.notEqual(result.clips[0], sourceClip);
+    assert.notEqual(result.clips[0].tracks[0], rootTrack);
+    assert.equal(result.clips[0].tracks[1], deformTrack);
+    assert.deepEqual([...result.clips[0].tracks[0].values], [
+        1, 2, 3,
+        1, 5, 3,
+        1, 7, 3,
+    ]);
+    assert.deepEqual([...rootTrack.values], sourceRootValues);
+    assert.deepEqual([...deformTrack.values], sourceDeformValues);
+    assert.equal(sourceClip.tracks[0], rootTrack);
+    assert.equal(sourceClip.tracks[1], deformTrack);
+});
+
+test('pure root-motion helper preserves Y and leaves source data immutable', () => {
+    const rootTrack = keyframeTrack(
+        'Root.position',
+        [0, 1],
+        [10, -1, 20, 30, 4, 40],
+        3,
+    );
+    const sourceClip = clip('Run', [rootTrack]);
+    const optimized = optimizer.makeRootMotionInPlace(
+        sourceClip,
+        new Set(['Root']),
+        { parseTrackName },
+    );
+
+    assert.notEqual(optimized, sourceClip);
+    assert.notEqual(optimized.tracks[0], rootTrack);
+    assert.deepEqual([...optimized.tracks[0].values], [10, -1, 20, 10, 4, 20]);
+    assert.deepEqual([...rootTrack.values], [10, -1, 20, 30, 4, 40]);
+});
+
+test('root-motion in-place policy can be disabled explicitly', () => {
+    const rootTrack = keyframeTrack(
+        'Root.position',
+        [0, 1],
+        [1, 2, 3, 4, 5, 6],
+        3,
+    );
+    const sourceClip = clip('Travel', [rootTrack]);
+    const result = optimizer.optimizeAnimationClipsForViewer(
+        [sourceClip],
+        modelFixture(),
+        { parseTrackName, inPlaceRootMotion: false },
+    );
+
+    assert.equal(result.rootMotionTracksLocked, 0);
+    assert.equal(result.clips[0], sourceClip);
+    assert.equal(result.clips[0].tracks[0], rootTrack);
+});

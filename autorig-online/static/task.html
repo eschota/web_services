@@ -9322,7 +9322,7 @@
             RigEditor, ViewerControls, RigType, CameraMode, MaterialChannel,
             TransformMode, TransformManager, SelectionSystem, GizmoLoader,
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
-        } from '/static/js/rig-editor.js?v=68';
+        } from '/static/js/rig-editor.js?v=69';
         import {
             isSecsVertexPbrMaterial,
             prepareSecsVertexPbrModel,
@@ -9360,7 +9360,7 @@
         } from '/static/js/task-viewer-performance.js?v=1';
         import {
             optimizeAnimationClipsForViewer,
-        } from '/static/js/task-viewer-animation-optimizer.js?v=1';
+        } from '/static/js/task-viewer-animation-optimizer.js?v=2';
         import {
             AnimationPlaylistController,
             captureRootTransform,
@@ -9653,24 +9653,53 @@
                 next.play();
                 currentAction = next;
                 mixer.timeScale = 1;
+                stabilizeAnimationPreviewPose(`clip change: ${clip.name || name}`, {
+                    fitCamera: !currentModel?.userData?.autorigViewerFramingReady,
+                });
                 return next;
             }
 
-            function stabilizeAnimationPreviewPose(reason = 'animation preview') {
+            function stabilizeAnimationPreviewPose(reason = 'animation preview', options = {}) {
                 if (!currentModel || currentModelType !== 'animations') return;
                 try {
                     if (mixer) {
                         mixer.update(0);
                     }
-                    currentModel.updateMatrixWorld(true);
-                    snapCurrentModelToGround({ centerXZ: true, force: true });
-                    currentModel.userData.autorigAnimationGroundLocked = true;
-                    updateShadowCatcherPlaneForModel(currentModel);
-                    window.taskDbg('[Viewer] Stabilized animation preview ground pose:', reason, {
-                        y: currentModel.position.y
+                    currentModel.traverse?.((node) => {
+                        // Three.js computes the default frustum bounds from the
+                        // bind-pose geometry. A skinned clip can move every
+                        // rendered part outside those stale bounds, so keep the
+                        // animated meshes renderable in all three viewports.
+                        if (node?.isSkinnedMesh) node.frustumCulled = false;
                     });
+                    currentModel.updateMatrixWorld(true);
+                    const animatedBoundsInfo = snapCurrentModelToGround({
+                        centerXZ: true,
+                        force: true,
+                        precise: true,
+                    });
+                    currentModel.userData.autorigAnimationGroundLocked = true;
+                    currentModel.userData.autorigViewerFramingReady = true;
+                    currentModel.userData.autorigViewerPreciseBoundsInfo = animatedBoundsInfo;
+                    animationPlaylistRootSnapshots.set(currentModel, captureRootTransform(currentModel));
+                    updateShadowCatcherPlaneForModel(currentModel);
+                    if (animatedBoundsInfo && options.fitCamera === true) {
+                        fitCameraToModelBounds(currentModel, reason, {
+                            boundsInfo: animatedBoundsInfo,
+                            distanceMultiplier: 1.35,
+                        });
+                    } else if (animatedBoundsInfo) {
+                        fitSplitAuxiliaryCameras(currentModel, animatedBoundsInfo);
+                    }
+                    window.taskDbg('[Viewer] Stabilized animation preview ground pose:', reason, {
+                        y: currentModel.position.y,
+                        preciseBounds: !!animatedBoundsInfo,
+                        cameraFitted: !!animatedBoundsInfo && options.fitCamera === true,
+                    });
+                    return animatedBoundsInfo;
                 } catch (error) {
                     console.warn('[Viewer] Failed to stabilize animation preview pose:', error);
+                    return null;
                 }
             }
 
@@ -9962,9 +9991,7 @@
             function cloneRootPositionTrackRelativeToBind(track, scaleFactor = 1) {
                 const next = track.clone();
                 if (!next?.values || next.values.length < 3) return next;
-                const sourceBaseX = Number(next.values[0]) || 0;
                 const sourceBaseY = Number(next.values[1]) || 0;
-                const sourceBaseZ = Number(next.values[2]) || 0;
                 const target = findAnimationTrackTargetObject(track);
                 const bindX = Number(target?.position?.x);
                 const bindY = Number(target?.position?.y);
@@ -9973,9 +10000,12 @@
                 const baseY = Number.isFinite(bindY) ? bindY : 0;
                 const baseZ = Number.isFinite(bindZ) ? bindZ : 0;
                 for (let index = 0; index < next.values.length; index += 3) {
-                    next.values[index] = baseX + (((Number(next.values[index]) || 0) - sourceBaseX) * scaleFactor);
+                    // External catalog FBX clips are previewed in-place: keep
+                    // vertical motion, but do not let locomotion move the
+                    // character out of the viewer camera on X/Z.
+                    next.values[index] = baseX;
                     next.values[index + 1] = baseY + (((Number(next.values[index + 1]) || 0) - sourceBaseY) * scaleFactor);
-                    next.values[index + 2] = baseZ + (((Number(next.values[index + 2]) || 0) - sourceBaseZ) * scaleFactor);
+                    next.values[index + 2] = baseZ;
                 }
                 return next;
             }
@@ -17751,6 +17781,72 @@
             const TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS = 0.94;
             const TEXTURELESS_PREVIEW_MATERIAL_METALNESS = 0.02;
             const TEXTURELESS_PREVIEW_MATERIAL_ENV_INTENSITY = 0.45;
+            const TEXTURELESS_SKINNED_FALLBACK_COLOR = new THREE.Color(0xa9cfe3);
+            const TEXTURELESS_SKINNED_FALLBACK_ROUGHNESS = 0.38;
+            const TEXTURELESS_SKINNED_FALLBACK_METALNESS = 0.42;
+            const TEXTURELESS_SKINNED_FALLBACK_ENV_INTENSITY = 1.0;
+
+            function materialHasAuthoredViewerTextureMap(material) {
+                if (!material) return false;
+                const syntheticAOTexture = viewerControls?.bakedAOTexture || null;
+                return VIEWER_TEXTURE_MAP_KEYS.some((key) => {
+                    const texture = material[key];
+                    if (!texture) return false;
+                    return key !== 'aoMap' || texture !== syntheticAOTexture;
+                });
+            }
+
+            function collectSharedDefaultSkinnedMaterials(model) {
+                const usage = new Map();
+                model?.traverse?.((child) => {
+                    if (!child?.isSkinnedMesh || !child.material) return;
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach((material) => {
+                        if (!material || (!material.isMeshStandardMaterial && !material.isMeshPhysicalMaterial)) return;
+                        if (isSecsVertexPbrMaterial(material) || materialHasAuthoredViewerTextureMap(material)) return;
+                        const entry = usage.get(material) || { meshes: new Set(), material };
+                        entry.meshes.add(child.uuid || child.id || child.name);
+                        usage.set(material, entry);
+                    });
+                });
+
+                const fallbackMaterials = new Set();
+                usage.forEach(({ material, meshes }) => {
+                    const color = material?.color;
+                    const isDefaultColor = !color || (color.r > 0.9 && color.g > 0.9 && color.b > 0.9);
+                    if (meshes.size >= 2 && isDefaultColor) fallbackMaterials.add(material);
+                });
+                return fallbackMaterials;
+            }
+
+            function detachSyntheticAOFromFallbackMaterials(model, fallbackMaterials) {
+                const syntheticAOTexture = viewerControls?.bakedAOTexture || null;
+                if (!syntheticAOTexture || !fallbackMaterials?.size) return 0;
+                let detached = 0;
+                fallbackMaterials.forEach((material) => {
+                    if (material?.aoMap !== syntheticAOTexture) return;
+                    material.aoMap = null;
+                    material.aoMapIntensity = 0;
+                    material.needsUpdate = true;
+                    detached += 1;
+                });
+                if (!detached) return 0;
+
+                let stillUsed = false;
+                model?.traverse?.((child) => {
+                    if (stillUsed || !child?.isMesh || !child.material) return;
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    stillUsed = materials.some((material) => material?.aoMap === syntheticAOTexture);
+                });
+                if (!stillUsed) {
+                    syntheticAOTexture.dispose?.();
+                    viewerControls.bakedAOTexture = null;
+                }
+                console.info('[ViewerMaterials] Detached synthetic AO from shared textureless skinned material', {
+                    detached,
+                });
+                return detached;
+            }
 
             function createEnvironmentResponsiveMaterial(sourceMat) {
                 if (!sourceMat || sourceMat.isMeshStandardMaterial || sourceMat.isMeshPhysicalMaterial) {
@@ -17837,42 +17933,53 @@
                 if (!model) return;
                 if (model === currentModel) restoreMainViewerEmergencyMaterials(model);
                 ensureEnvironmentResponsiveMaterials(model);
+                const sharedDefaultSkinnedMaterials = collectSharedDefaultSkinnedMaterials(model);
                 
                 model.traverse((child) => {
                     if (child.isMesh && child.material) {
                         const materials = Array.isArray(child.material) ? child.material : [child.material];
                         materials.forEach((mat) => {
                             if (!mat) return;
-                            // Explicit Unity-parity policy: tame only overdriven KHR specular
-                            // values. Base-color, normal and metallic/roughness slots are untouched.
-                            sanitizeViewerPbrMaterial(mat);
                             if (isSecsVertexPbrMaterial(mat)) return;
 
-                            // GLB/PBR textures are authoritative for the website preview.
-                            const hasTexture = materialHasViewerTextureMap(mat) || mat.diffuseMap || mat.albedoMap;
-                            
-                            if (!hasTexture) {
-                                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-                                    // Check if color is default white or unset
-                                    const isDefaultColor = !mat.color ||
-                                        (mat.color.r > 0.9 && mat.color.g > 0.9 && mat.color.b > 0.9);
+                            // Authored GLB/PBR textures are authoritative. Do not
+                            // alter their color, texture slots or scalar PBR data.
+                            const hasTexture = materialHasAuthoredViewerTextureMap(mat) || mat.diffuseMap || mat.albedoMap;
+                            if (hasTexture) return;
 
-                                    if (isDefaultColor) {
-                                        mat.color.copy(TEXTURELESS_PREVIEW_MATERIAL_COLOR);
-                                    }
+                            // Textureless materials may still carry excessive
+                            // imported specular values, so bound only this path.
+                            sanitizeViewerPbrMaterial(mat);
+                            
+                            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                                const isDefaultColor = !mat.color ||
+                                    (mat.color.r > 0.9 && mat.color.g > 0.9 && mat.color.b > 0.9);
+                                const isSharedSkinnedFallback = sharedDefaultSkinnedMaterials.has(mat);
+
+                                if (isSharedSkinnedFallback) {
+                                    mat.color.copy(TEXTURELESS_SKINNED_FALLBACK_COLOR);
+                                    mat.metalness = TEXTURELESS_SKINNED_FALLBACK_METALNESS;
+                                    mat.roughness = TEXTURELESS_SKINNED_FALLBACK_ROUGHNESS;
+                                    mat.envMapIntensity = TEXTURELESS_SKINNED_FALLBACK_ENV_INTENSITY;
+                                    mat.userData = {
+                                        ...(mat.userData || {}),
+                                        autorigTexturelessSkinnedFallback: true,
+                                    };
+                                } else {
+                                    if (isDefaultColor) mat.color.copy(TEXTURELESS_PREVIEW_MATERIAL_COLOR);
                                     mat.metalness = Math.min(Number.isFinite(mat.metalness) ? mat.metalness : TEXTURELESS_PREVIEW_MATERIAL_METALNESS, 0.04);
                                     mat.roughness = Math.max(Number.isFinite(mat.roughness) ? mat.roughness : TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS, TEXTURELESS_PREVIEW_MATERIAL_ROUGHNESS);
                                     mat.envMapIntensity = TEXTURELESS_PREVIEW_MATERIAL_ENV_INTENSITY;
-                                    mat.needsUpdate = true;
-
-                                    window.taskDbg('[Materials] Applied improved material (no texture):', child.name);
                                 }
-                            } else if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
                                 mat.needsUpdate = true;
+                                window.taskDbg('[Materials] Applied textureless material fallback:', child.name, {
+                                    sharedSkinned: isSharedSkinnedFallback,
+                                });
                             }
                         });
                     }
                 });
+                detachSyntheticAOFromFallbackMaterials(model, sharedDefaultSkinnedMaterials);
                 applySceneEnvironmentIntensity();
                 if (model === currentModel) syncMainViewerEmergencyMaterials(model);
                 
@@ -18072,13 +18179,9 @@
                 
                 loadingManager.updateProgress(85, `Processing ${label}...`);
 
-                // Remove previous model
-                if (currentModel) {
-                    restoreMainViewerEmergencyMaterials(currentModel);
-                    scene.remove(currentModel);
-                    currentModel = null;
-                }
-
+                // Prepare and validate the candidate before swapping it into
+                // the live scene. A rejected GLB must not blank a model that is
+                // already working in the viewer.
                 const model = gltf.scene;
                 try {
                     prepareVertexPbrForViewer(model, `load ${label}`, gltf?.parser?.json?.asset || null);
@@ -18088,6 +18191,12 @@
                     loadingManager.setItemStatus(label, 'error');
                     loadingManager.hide();
                     return false;
+                }
+
+                if (currentModel) {
+                    restoreMainViewerEmergencyMaterials(currentModel);
+                    scene.remove(currentModel);
+                    currentModel = null;
                 }
                 scene.add(model);
                 currentModel = model;
@@ -18220,36 +18329,24 @@
                     currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
                 }
 
-                if (isAnimationPreview && mixer && animations.length) {
-                    const framingModel = currentModel;
-                    const framingMixer = mixer;
-                    requestAnimationFrame(() => {
-                        if (currentModel !== framingModel || mixer !== framingMixer) return;
-                        framingMixer.update(0);
-                        const animatedBoundsInfo = snapCurrentModelToGround({ centerXZ: true, force: true, precise: true });
-                        animationPlaylistRootSnapshots.set(framingModel, captureRootTransform(framingModel));
-                        framingModel.userData.autorigViewerFramingReady = true;
-                        framingModel.userData.autorigViewerPreciseBoundsInfo = animatedBoundsInfo;
-                        if (animatedBoundsInfo) {
-                            fitCameraToModelBounds(framingModel, `animated pose ${label}`, {
-                                boundsInfo: animatedBoundsInfo,
-                                distanceMultiplier: 1.35,
-                            });
-                            updateViewerAssetDiagnostics({
-                                source: 'animations.glb',
-                                label,
-                                model: framingModel,
-                                boundsInfo: animatedBoundsInfo,
-                                animationCount: animations.length,
-                                reason: `animated pose ${label}`,
-                            });
-                        }
-                    });
-                }
-
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';
                 setStatus(statusText);
                 configureAnimationPlaylistForCurrentModel();
+                if (isAnimationPreview && mixer && animations.length) {
+                    const animatedBoundsInfo = stabilizeAnimationPreviewPose(`animated pose ${label}`, {
+                        fitCamera: !currentModel?.userData?.autorigViewerFramingReady,
+                    });
+                    if (animatedBoundsInfo) {
+                        updateViewerAssetDiagnostics({
+                            source: 'animations.glb',
+                            label,
+                            model: currentModel,
+                            boundsInfo: animatedBoundsInfo,
+                            animationCount: animations.length,
+                            reason: `animated pose ${label}`,
+                        });
+                    }
+                }
                 window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
@@ -18464,28 +18561,14 @@
                     currentModel.userData.autorigLtxBasePose = captureAnimationPreviewBindPose(currentModel);
                 }
 
-                if (isAnimationPreview && mixer && animations.length) {
-                    const framingModel = currentModel;
-                    const framingMixer = mixer;
-                    requestAnimationFrame(() => {
-                        if (currentModel !== framingModel || mixer !== framingMixer) return;
-                        framingMixer.update(0);
-                        const animatedBoundsInfo = snapCurrentModelToGround({ centerXZ: true, force: true, precise: true });
-                        animationPlaylistRootSnapshots.set(framingModel, captureRootTransform(framingModel));
-                        framingModel.userData.autorigViewerFramingReady = true;
-                        framingModel.userData.autorigViewerPreciseBoundsInfo = animatedBoundsInfo;
-                        if (animatedBoundsInfo) {
-                            fitCameraToModelBounds(framingModel, `animated pose ${label}`, {
-                                boundsInfo: animatedBoundsInfo,
-                                distanceMultiplier: 1.35,
-                            });
-                        }
-                    });
-                }
-
                 const statusText = animations.length ? `Ready (${animations.length} animations)` : 'Ready (no animations)';
                 setStatus(statusText);
                 configureAnimationPlaylistForCurrentModel();
+                if (isAnimationPreview && mixer && animations.length) {
+                    stabilizeAnimationPreviewPose(`animated pose ${label}`, {
+                        fitCamera: !currentModel?.userData?.autorigViewerFramingReady,
+                    });
+                }
                 window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);

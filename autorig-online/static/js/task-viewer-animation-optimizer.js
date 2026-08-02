@@ -188,6 +188,75 @@ function cloneClipWithTracks(clip, tracks) {
     return clone;
 }
 
+function clonePositionTrackWithInPlaceXZ(track, epsilon = 1e-6) {
+    const times = track?.times;
+    const values = track?.values;
+    const keyCount = Number(times?.length || 0);
+    const valueSize = Number(track?.getValueSize?.() || (keyCount ? values?.length / keyCount : 0));
+    if (
+        typeof track?.clone !== 'function'
+        || !keyCount
+        || valueSize !== 3
+        || Number(values?.length || 0) !== keyCount * valueSize
+    ) return null;
+
+    const firstX = Number(values[0]);
+    const firstZ = Number(values[2]);
+    if (!Number.isFinite(firstX) || !Number.isFinite(firstZ)) return null;
+
+    let changed = false;
+    for (let key = 0; key < keyCount; key += 1) {
+        const offset = key * valueSize;
+        const x = Number(values[offset]);
+        const y = Number(values[offset + 1]);
+        const z = Number(values[offset + 2]);
+        if (![x, y, z].every(Number.isFinite)) return null;
+        if (!valuesNearlyEqual(x, firstX, epsilon) || !valuesNearlyEqual(z, firstZ, epsilon)) {
+            changed = true;
+        }
+    }
+    if (!changed) return track;
+
+    const clone = track.clone();
+    try {
+        const copiedValues = Array.isArray(values)
+            ? [...values]
+            : new (values.constructor || Float32Array)(values);
+        for (let key = 0; key < keyCount; key += 1) {
+            const offset = key * valueSize;
+            copiedValues[offset] = firstX;
+            copiedValues[offset + 2] = firstZ;
+        }
+        clone.values = copiedValues;
+        return clone;
+    } catch (_) {
+        return null;
+    }
+}
+
+export function makeRootMotionInPlace(clip, rootBoneNames, options = {}) {
+    const names = rootBoneNames instanceof Set
+        ? rootBoneNames
+        : new Set(Array.isArray(rootBoneNames) ? rootBoneNames : []);
+    const sourceTracks = Array.isArray(clip?.tracks) ? clip.tracks : [];
+    if (!names.size || !sourceTracks.length) return clip;
+
+    let changed = false;
+    const tracks = sourceTracks.map((track) => {
+        const binding = trackBinding(track, options.parseTrackName);
+        if (binding.propertyName !== 'position' || !names.has(binding.targetName)) return track;
+        const inPlaceTrack = clonePositionTrackWithInPlaceXZ(
+            track,
+            Math.max(0, Number(options.valueEpsilon) || 1e-6),
+        );
+        if (inPlaceTrack && inPlaceTrack !== track) changed = true;
+        return inPlaceTrack || track;
+    });
+
+    if (!changed) return clip;
+    return cloneClipWithTracks(clip, tracks) || clip;
+}
+
 export function optimizeAnimationClipsForViewer(clips, model, options = {}) {
     const sourceClips = Array.isArray(clips) ? clips : [];
     if (!sourceClips.length || !model?.traverse) {
@@ -203,11 +272,27 @@ export function optimizeAnimationClipsForViewer(clips, model, options = {}) {
         let droppedTracks = 0;
         let restTracksDropped = 0;
         let constantTracksCollapsed = 0;
+        let rootMotionTracksLocked = 0;
+        const requiredRootNames = new Set();
+        usage.requiredBones.forEach((bone) => {
+            if (bone?.parent?.isBone && usage.requiredBones.has(bone.parent)) return;
+            const name = String(bone?.name || '');
+            if (name && usage.namedObjects.get(name)?.size === 1) requiredRootNames.add(name);
+        });
         const optimizedClips = sourceClips.map((clip) => {
-            const sourceTracks = Array.isArray(clip?.tracks) ? clip.tracks : [];
+            const inPlaceClip = options.inPlaceRootMotion === false
+                ? clip
+                : makeRootMotionInPlace(clip, requiredRootNames, options);
+            const sourceTracks = Array.isArray(inPlaceClip?.tracks) ? inPlaceClip.tracks : [];
             if (!sourceTracks.length) return clip;
+            if (inPlaceClip !== clip) {
+                rootMotionTracksLocked += sourceTracks.reduce(
+                    (count, track, index) => count + (track !== clip.tracks[index] ? 1 : 0),
+                    0,
+                );
+            }
             const keptTracks = [];
-            let clipChanged = false;
+            let clipChanged = inPlaceClip !== clip;
             sourceTracks.forEach((track) => {
                 const binding = trackBinding(track, options.parseTrackName);
                 if (!binding.targetName) {
@@ -263,6 +348,7 @@ export function optimizeAnimationClipsForViewer(clips, model, options = {}) {
             droppedTracks,
             restTracksDropped,
             constantTracksCollapsed,
+            rootMotionTracksLocked,
             requiredBoneCount: usage.requiredBones.size,
             totalBoneCount: usage.allBones.size,
         };

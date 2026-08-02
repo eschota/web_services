@@ -6,6 +6,7 @@ import {
     ViewerControls,
     materialHasAuthoredTextureMaps,
     materialNeedsSyntheticAO,
+    markSkinnedMaterialsWithoutSyntheticAO,
     modelNeedsSyntheticAO,
 } from '../rig-editor.js';
 
@@ -102,4 +103,22 @@ test('textureless fallback still receives the synthetic AO texture', () => {
     assert.equal(bakeCalls, 1);
     assert.equal(material.aoMap, bakedAO);
     assert.equal(material.aoMapIntensity, 1);
+});
+
+test('animated textureless materials use live lighting instead of stale bind-pose AO', () => {
+    const material = pbrMaterial();
+    const skinnedMesh = { ...mesh(material), isSkinnedMesh: true };
+    const animatedModel = model([skinnedMesh]);
+    const controls = viewerHarness();
+    let bakeCalls = 0;
+    controls.bakeAOForModel = () => { bakeCalls += 1; };
+
+    assert.equal(markSkinnedMaterialsWithoutSyntheticAO(animatedModel), 1);
+    assert.equal(materialNeedsSyntheticAO(material), false);
+
+    controls.setModel(animatedModel);
+
+    assert.equal(bakeCalls, 0);
+    assert.equal(material.aoMap, undefined);
+    assert.equal(material.userData.autorigSkipSyntheticAO, true);
 });

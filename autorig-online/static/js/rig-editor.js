@@ -43,7 +43,25 @@ export function materialHasAuthoredTextureMaps(material, syntheticAOTexture = nu
 export function materialNeedsSyntheticAO(material, syntheticAOTexture = null) {
     if (!material || (!material.isMeshStandardMaterial && !material.isMeshPhysicalMaterial)) return false;
     if (isSecsVertexPbrMaterial(material)) return false;
+    if (material.userData?.autorigSkipSyntheticAO === true) return false;
     return !materialHasAuthoredTextureMaps(material, syntheticAOTexture);
+}
+
+export function markSkinnedMaterialsWithoutSyntheticAO(model, syntheticAOTexture = null) {
+    if (!model?.traverse) return 0;
+    const marked = new Set();
+    model.traverse((child) => {
+        if (!child?.isSkinnedMesh || !child.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => {
+            if (!material || marked.has(material)) return;
+            if (!materialNeedsSyntheticAO(material, syntheticAOTexture)) return;
+            material.userData = material.userData || {};
+            material.userData.autorigSkipSyntheticAO = true;
+            marked.add(material);
+        });
+    });
+    return marked.size;
 }
 
 export function modelNeedsSyntheticAO(model, syntheticAOTexture = null) {
@@ -2301,6 +2319,7 @@ export class ViewerControls {
         // Synthetic cavity AO is only a fallback for truly textureless PBR.
         // Authored BaseColor/Normal/MetallicRoughness/etc. must match Unity.
         const previousBakedAOTexture = this.bakedAOTexture;
+        const animatedAoSkips = markSkinnedMaterialsWithoutSyntheticAO(model, previousBakedAOTexture);
         const needsSyntheticAO = modelNeedsSyntheticAO(model, previousBakedAOTexture);
         detachSyntheticAOFromModel(model, previousBakedAOTexture);
         if (needsSyntheticAO) {
@@ -2308,7 +2327,9 @@ export class ViewerControls {
         } else {
             previousBakedAOTexture?.dispose?.();
             this.bakedAOTexture = null;
-            console.log('[ViewerControls] Skipped synthetic AO: all renderable PBR materials are textured');
+            console.log('[ViewerControls] Skipped synthetic AO: authored textures or animated fallback lighting is authoritative', {
+                animatedMaterials: animatedAoSkips,
+            });
         }
 
         // Enable real-time shadows and inject adjustments into all PBR materials

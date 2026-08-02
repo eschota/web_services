@@ -10,19 +10,39 @@ test('rail render targets convert physical pixels back to logical viewport units
     assert.doesNotMatch(source, /renderer\.setViewport\(0,\s*0,\s*renderTarget\.width,\s*renderTarget\.height\)/);
 });
 
-test('animated preview is precisely grounded and reframed after the mixer is ready', () => {
+test('animated preview is synchronously grounded and reframed after the mixer is ready', () => {
     const glbMixerIndex = source.indexOf('mixer = animations.length ? new THREE.AnimationMixer(model) : null;');
-    const glbFramingIndex = source.indexOf('snapCurrentModelToGround({ centerXZ: true, force: true, precise: true });', glbMixerIndex);
-    const glbSnapshotIndex = source.indexOf('animationPlaylistRootSnapshots.set(framingModel, captureRootTransform(framingModel));', glbFramingIndex);
-    const glbFitIndex = source.indexOf('fitCameraToModelBounds(framingModel, `animated pose ${label}`', glbFramingIndex);
+    const glbConfigureIndex = source.indexOf('configureAnimationPlaylistForCurrentModel();', glbMixerIndex);
+    const glbFramingIndex = source.indexOf('stabilizeAnimationPreviewPose(`animated pose ${label}`', glbConfigureIndex);
+    const stabilizationStart = source.indexOf("function stabilizeAnimationPreviewPose(reason = 'animation preview', options = {})");
+    const stabilizationEnd = source.indexOf('function normalizeClipKey', stabilizationStart);
+    const stabilizationSource = source.slice(stabilizationStart, stabilizationEnd);
+    const loadModelStart = source.indexOf('async function loadModel(');
+    const loadModelEnd = source.indexOf('// Load FBX model with animations', loadModelStart);
     assert.ok(glbMixerIndex >= 0);
-    assert.ok(glbFramingIndex > glbMixerIndex);
-    assert.ok(glbSnapshotIndex > glbFramingIndex);
-    assert.ok(glbFitIndex > glbFramingIndex);
-    assert.match(source, /autorigViewerPreciseBoundsInfo\s*=\s*animatedBoundsInfo/);
+    assert.ok(glbConfigureIndex > glbMixerIndex);
+    assert.ok(glbFramingIndex > glbConfigureIndex);
+    assert.match(stabilizationSource, /snapCurrentModelToGround\(\{[\s\S]*precise:\s*true/);
+    assert.match(stabilizationSource, /animationPlaylistRootSnapshots\.set\(currentModel, captureRootTransform\(currentModel\)\)/);
+    assert.match(stabilizationSource, /autorigViewerPreciseBoundsInfo\s*=\s*animatedBoundsInfo/);
+    assert.match(stabilizationSource, /fitCameraToModelBounds\(currentModel, reason/);
+    assert.match(stabilizationSource, /node\?\.isSkinnedMesh\) node\.frustumCulled = false/);
+    assert.doesNotMatch(source.slice(loadModelStart, loadModelEnd), /requestAnimationFrame\(/);
     assert.match(source, /fitSplitAuxiliaryCameras\(currentModel,\s*cachedBoundsInfo\)/);
     assert.doesNotMatch(source, /fitCameraToModelBounds\(currentModel,\s*'split viewport layout'/);
     assert.match(source, /updateShadowCatcherPlaneForModel\(currentModel,\s*'perspective',\s*false,\s*groundedBox\)/);
+});
+
+test('external FBX locomotion keeps root X/Z in-place after bind-pose rebasing', () => {
+    const helperStart = source.indexOf('function cloneRootPositionTrackRelativeToBind(');
+    const helperEnd = source.indexOf('function customClipPositionScaleFactor', helperStart);
+    const helperSource = source.slice(helperStart, helperEnd);
+    assert.ok(helperStart >= 0 && helperEnd > helperStart);
+    assert.match(helperSource, /next\.values\[index\] = baseX;/);
+    assert.match(helperSource, /next\.values\[index \+ 2\] = baseZ;/);
+    assert.match(helperSource, /next\.values\[index \+ 1\] = baseY \+ \(\(\(Number\(next\.values\[index \+ 1\]\)/);
+    assert.doesNotMatch(helperSource, /sourceBaseX\) \* scaleFactor/);
+    assert.doesNotMatch(helperSource, /sourceBaseZ\) \* scaleFactor/);
 });
 
 test('animation cache swaps restore grounded root and reuse precise framing bounds', () => {
