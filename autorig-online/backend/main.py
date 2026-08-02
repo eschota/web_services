@@ -10,7 +10,7 @@ import asyncio
 import time
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any, Tuple, Set
+from typing import Optional, List, Dict, Any, Tuple, Set, Callable
 import hashlib
 import hmac
 import secrets
@@ -75,6 +75,7 @@ from config import (
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
 )
 from viewer_environment import build_viewer_environment_from_settings
+from viewer_theme_contract import validate_viewer_theme_lighting
 from worker_artifact_urls import canonical_worker_artifact_url, is_viewer_artifact_url
 from model_sale_offers import build_router as build_model_sale_router
 from database import (
@@ -1574,6 +1575,36 @@ def _infer_worker_root_and_guid(task) -> tuple[Optional[str], Optional[str]]:
                 guid = _extract_guid_from_text(url)
 
     return worker_root, guid
+
+
+def _derive_legacy_animations_glb_url(task) -> Optional[str]:
+    """Build the exact legacy animation GLB URL from trusted task assignment."""
+    worker_api = str(getattr(task, "worker_api", None) or "").strip()
+    raw_guid = str(getattr(task, "guid", None) or "").strip()
+    if not worker_api or not raw_guid:
+        return None
+    try:
+        guid = str(uuid.UUID(raw_guid))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+    from workers import get_worker_base_url
+
+    worker_base = str(get_worker_base_url(worker_api) or "").strip()
+    try:
+        parsed = urlsplit(worker_base)
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        return None
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    candidate = f"{origin}/converter/glb/{guid}/{guid}_all_animations.glb"
+    return canonical_worker_artifact_url(candidate)
 
 
 def _task_urls_indicate_animation_bundle(combined_urls: List[str]) -> bool:
@@ -11132,7 +11163,11 @@ def _glb_viewer_headers(profile: str) -> Dict[str, str]:
     normalized = str(profile or "").strip().lower()
     if normalized not in _GLB_VIEWER_PROFILES:
         normalized = "original"
-    return {**_GLB_FILE_HTTP_HEADERS, "X-AutoRig-Viewer-Profile": normalized}
+    return {
+        **_GLB_FILE_HTTP_HEADERS,
+        "Content-Disposition": "inline",
+        "X-AutoRig-Viewer-Profile": normalized,
+    }
 
 
 async def _proxy_model_file(
@@ -11330,6 +11365,64 @@ def _validate_glb_file(path: Path) -> bool:
         print(f"[GLB Validate] Length mismatch for {path.name}: header says {expected_length}, actual {actual_size}")
         return False
     return True
+
+
+_MAX_VIEWER_GLB_JSON_BYTES = 32 * 1024 * 1024
+
+
+def _validate_viewer_animation_glb_file(path: Path) -> bool:
+    """Require a complete GLB v2 with renderable meshes and playable animation."""
+    if not _validate_glb_file(path):
+        return False
+    try:
+        with path.open("rb") as source:
+            header = source.read(12)
+            if int.from_bytes(header[4:8], "little") != 2:
+                return False
+            payload = None
+            while source.tell() + 8 <= path.stat().st_size:
+                chunk_header = source.read(8)
+                if len(chunk_header) != 8:
+                    return False
+                chunk_length = int.from_bytes(chunk_header[:4], "little")
+                chunk_type = chunk_header[4:8]
+                if chunk_length < 0 or source.tell() + chunk_length > path.stat().st_size:
+                    return False
+                if chunk_type == b"JSON":
+                    if chunk_length <= 0 or chunk_length > _MAX_VIEWER_GLB_JSON_BYTES:
+                        return False
+                    raw_json = source.read(chunk_length).rstrip(b" \t\r\n\x00")
+                    payload = json.loads(raw_json.decode("utf-8"))
+                    break
+                source.seek(chunk_length, os.SEEK_CUR)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return False
+
+    if not isinstance(payload, dict):
+        return False
+    meshes = payload.get("meshes")
+    animations = payload.get("animations")
+    has_mesh = (
+        isinstance(meshes, list)
+        and any(
+            isinstance(mesh, dict)
+            and isinstance(mesh.get("primitives"), list)
+            and bool(mesh["primitives"])
+            for mesh in meshes
+        )
+    )
+    has_animation = (
+        isinstance(animations, list)
+        and any(
+            isinstance(animation, dict)
+            and isinstance(animation.get("channels"), list)
+            and bool(animation["channels"])
+            and isinstance(animation.get("samplers"), list)
+            and bool(animation["samplers"])
+            for animation in animations
+        )
+    )
+    return bool(has_mesh and has_animation)
 
 
 async def _stream_httpx_response_to_file(
@@ -12138,6 +12231,7 @@ async def _get_cached_glb(
     profile: str = "original",
     timeout_seconds: float = 120.0,
     failure_backoff_seconds: float = 0.0,
+    validator: Optional[Callable[[Path], bool]] = None,
 ) -> Optional[FileResponse]:
     """
     Get GLB file from local cache, or download and cache it.
@@ -12145,12 +12239,13 @@ async def _get_cached_glb(
     Validates GLB integrity before caching and when serving.
     """
     cache_path = GLB_CACHE_DIR / f"{task_id}_{cache_name}.glb"
+    validate_file = validator or _validate_glb_file
     
     # Check if already cached
     if cache_path.exists():
         # Validate cached file is not corrupted
         try:
-            if not _validate_glb_file(cache_path):
+            if not validate_file(cache_path):
                 print(f"[GLB Cache] Cached file corrupted, deleting: {cache_path.name}")
                 cache_path.unlink()
             else:
@@ -12194,7 +12289,7 @@ async def _get_cached_glb(
                         return None
                     size_bytes = await _stream_httpx_response_to_file(response, temp_path)
 
-                if not _validate_glb_file(temp_path):
+                if not validate_file(temp_path):
                     print(f"[GLB Cache] Downloaded file is invalid/incomplete for {task_id}_{cache_name}")
                     try:
                         temp_path.unlink()
@@ -12478,13 +12573,18 @@ async def api_proxy_animations_glb(
     default_variant = rig_type is None and str(orientation or "front").lower() == "front"
     if default_variant:
         optimized_cache_path = GLB_CACHE_DIR / f"{task_id}_animations_viewer.glb"
-        if optimized_cache_path.exists() and _validate_glb_file(optimized_cache_path):
+        if optimized_cache_path.exists() and _validate_viewer_animation_glb_file(optimized_cache_path):
             return FileResponse(
                 path=str(optimized_cache_path),
                 media_type="model/gltf-binary",
                 filename=f"{task_id}_animations.glb",
                 headers=_glb_viewer_headers("optimized"),
             )
+        if optimized_cache_path.exists():
+            try:
+                optimized_cache_path.unlink()
+            except OSError:
+                pass
         optimized_url = str(getattr(task, "viewer_animations_glb_url", None) or "").strip()
         if optimized_url:
             result = await _get_cached_glb(
@@ -12494,6 +12594,7 @@ async def api_proxy_animations_glb(
                 profile="optimized",
                 timeout_seconds=6.0,
                 failure_backoff_seconds=30.0,
+                validator=_validate_viewer_animation_glb_file,
             )
             if result:
                 return result
@@ -12523,27 +12624,50 @@ async def api_proxy_animations_glb(
 
     # Legacy cache for pre-library animal tasks and humanoid/T-pose tasks.
     cache_path = GLB_CACHE_DIR / f"{task_id}_animations.glb"
-    if cache_path.exists() and _validate_glb_file(cache_path):
+    if cache_path.exists() and _validate_viewer_animation_glb_file(cache_path):
         return FileResponse(
             path=str(cache_path),
             media_type="model/gltf-binary",
             filename=f"{task_id}_animations.glb",
             headers=_glb_viewer_headers("runtime"),
         )
+    if cache_path.exists():
+        try:
+            cache_path.unlink()
+        except OSError:
+            pass
     
-    # Try to find animations GLB in ready_urls (must end with .glb, not .blend)
+    # Try to find animations GLB in ready_urls (must end with .glb, not .blend).
     animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
-    if animations_url:
+    declared_url = canonical_worker_artifact_url(animations_url) if animations_url else None
+    if declared_url:
         result = await _get_cached_glb(
             task_id,
-            animations_url,
+            declared_url,
             "animations",
             profile="runtime",
+            validator=_validate_viewer_animation_glb_file,
         )
         if result:
             return result
 
-    raise HTTPException(status_code=404, detail="Animations GLB is not declared by the task")
+    # Older workers generated the exact GLB but intentionally omitted it from
+    # the public download inventory. Read it only from the persisted trusted
+    # worker assignment and keep it behind this viewer endpoint/cache.
+    direct_url = _derive_legacy_animations_glb_url(task)
+    if direct_url and direct_url != declared_url:
+        result = await _get_cached_glb(
+            task_id,
+            direct_url,
+            "animations",
+            profile="runtime",
+            failure_backoff_seconds=30.0,
+            validator=_validate_viewer_animation_glb_file,
+        )
+        if result:
+            return result
+
+    raise HTTPException(status_code=404, detail="Animations GLB is not available for this task")
 
 
 @app.head("/api/task/{task_id}/animations.fbx")
@@ -13264,6 +13388,10 @@ def _load_viewer_theme_json(image_path: Path) -> Dict[str, Any]:
     data = _read_json_file(str(json_path))
     if not isinstance(data, dict):
         raise RuntimeError(f"Viewer theme JSON is invalid for {theme_id}: {json_path}")
+    try:
+        validate_viewer_theme_lighting(data)
+    except ValueError as exc:
+        raise RuntimeError(f"Viewer theme lighting is invalid for {theme_id}: {exc}") from exc
     theme_id = _slugify_viewer_theme(str(data.get("theme_id") or theme_id))
     viewer_path = VIEWER_THEME_VIEWER_DIR / f"{theme_id}.jpg"
     thumb_path = VIEWER_THEME_THUMB_DIR / f"{theme_id}.jpg"
@@ -13416,6 +13544,11 @@ async def api_admin_save_viewer_theme(
     clean["admin_edited_bool"] = True
 
     merged = {**existing, **clean}
+
+    try:
+        validate_viewer_theme_lighting(merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     _atomic_write_json_file(str(_viewer_theme_json_path_for_image(image_path)), merged)
 

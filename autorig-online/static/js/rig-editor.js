@@ -5,6 +5,74 @@
 
 import { isSecsVertexPbrMaterial } from './vertex-pbr-material.js?v=2';
 
+export const AUTHORED_MATERIAL_TEXTURE_SLOTS = Object.freeze([
+    'map',
+    'normalMap',
+    'roughnessMap',
+    'metalnessMap',
+    'emissiveMap',
+    'alphaMap',
+    'aoMap',
+    'bumpMap',
+    'displacementMap',
+    'lightMap',
+    'specularMap',
+    'specularColorMap',
+    'specularIntensityMap',
+    'clearcoatMap',
+    'clearcoatNormalMap',
+    'clearcoatRoughnessMap',
+    'transmissionMap',
+    'thicknessMap',
+    'sheenColorMap',
+    'sheenRoughnessMap',
+    'iridescenceMap',
+    'iridescenceThicknessMap',
+    'anisotropyMap',
+]);
+
+export function materialHasAuthoredTextureMaps(material, syntheticAOTexture = null) {
+    if (!material || typeof material !== 'object') return false;
+    return AUTHORED_MATERIAL_TEXTURE_SLOTS.some((slot) => {
+        const texture = material[slot];
+        if (!texture) return false;
+        return slot !== 'aoMap' || texture !== syntheticAOTexture;
+    });
+}
+
+export function materialNeedsSyntheticAO(material, syntheticAOTexture = null) {
+    if (!material || (!material.isMeshStandardMaterial && !material.isMeshPhysicalMaterial)) return false;
+    if (isSecsVertexPbrMaterial(material)) return false;
+    return !materialHasAuthoredTextureMaps(material, syntheticAOTexture);
+}
+
+export function modelNeedsSyntheticAO(model, syntheticAOTexture = null) {
+    if (!model?.traverse) return false;
+    let needsSyntheticAO = false;
+    model.traverse((child) => {
+        if (needsSyntheticAO || !child?.isMesh || !child.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        needsSyntheticAO = materials.some((material) => materialNeedsSyntheticAO(material, syntheticAOTexture));
+    });
+    return needsSyntheticAO;
+}
+
+function detachSyntheticAOFromModel(model, syntheticAOTexture) {
+    if (!model?.traverse || !syntheticAOTexture) return 0;
+    let detached = 0;
+    model.traverse((child) => {
+        if (!child?.isMesh || !child.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => {
+            if (material?.aoMap !== syntheticAOTexture) return;
+            material.aoMap = null;
+            material.needsUpdate = true;
+            detached += 1;
+        });
+    });
+    return detached;
+}
+
 // Rig types enum
 export const RigType = {
     CHAR: 'char',
@@ -1274,6 +1342,11 @@ export class ViewerControls {
 
         const isVertexPbr = isSecsVertexPbrMaterial(material);
         const previousOnBeforeCompile = material.onBeforeCompile;
+        // Mark the material before Three.js compiles it. A material can be
+        // shared by many meshes and setModel() visits every mesh before the
+        // first render. Marking only inside onBeforeCompile chained the same
+        // shader patch once per mesh and produced duplicate GLSL declarations.
+        material._postProcInjected = true;
         
         console.log('[ViewerControls] Injecting post-processing into material:', {
             type: material.type,
@@ -1581,7 +1654,6 @@ export class ViewerControls {
             
             // Store shader reference for later uniform updates
             material.userData.shader = shader;
-            material._postProcInjected = true;
         };
         
         material.needsUpdate = true;
@@ -2225,10 +2297,20 @@ export class ViewerControls {
     setModel(model) {
         this.model = model;
         this.originalMaterials.clear();
-        
-        // Bake AO texture for the model
-        this.bakeAOForModel(model);
-        
+
+        // Synthetic cavity AO is only a fallback for truly textureless PBR.
+        // Authored BaseColor/Normal/MetallicRoughness/etc. must match Unity.
+        const previousBakedAOTexture = this.bakedAOTexture;
+        const needsSyntheticAO = modelNeedsSyntheticAO(model, previousBakedAOTexture);
+        detachSyntheticAOFromModel(model, previousBakedAOTexture);
+        if (needsSyntheticAO) {
+            this.bakeAOForModel(model);
+        } else {
+            previousBakedAOTexture?.dispose?.();
+            this.bakedAOTexture = null;
+            console.log('[ViewerControls] Skipped synthetic AO: all renderable PBR materials are textured');
+        }
+
         // Enable real-time shadows and inject adjustments into all PBR materials
         model.traverse((child) => {
             if (child.isMesh) {
@@ -2241,8 +2323,8 @@ export class ViewerControls {
                     if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
                         this.injectPostProcessing(mat);
                         
-                        // Apply baked AO if material doesn't have its own aoMap
-                        if (!isSecsVertexPbrMaterial(mat) && !mat.aoMap && this.bakedAOTexture) {
+                        // Apply synthetic AO only to a genuinely textureless fallback material.
+                        if (materialNeedsSyntheticAO(mat, previousBakedAOTexture) && this.bakedAOTexture) {
                             mat.aoMap = this.bakedAOTexture;
                             mat.aoMapIntensity = 1.0;
                             mat.needsUpdate = true;
@@ -2277,6 +2359,8 @@ export class ViewerControls {
     bakeAOForModel(model) {
         if (!this.renderer) {
             console.warn('[ViewerControls] Cannot bake AO - no renderer');
+            this.bakedAOTexture?.dispose?.();
+            this.bakedAOTexture = null;
             return;
         }
         
@@ -2333,8 +2417,18 @@ export class ViewerControls {
         }
         
         console.log('[ViewerControls] Rebaking AO...');
-        
-        // Bake new AO texture
+
+        const previousBakedAOTexture = this.bakedAOTexture;
+        if (!modelNeedsSyntheticAO(this.model, previousBakedAOTexture)) {
+            detachSyntheticAOFromModel(this.model, previousBakedAOTexture);
+            previousBakedAOTexture?.dispose?.();
+            this.bakedAOTexture = null;
+            console.log('[ViewerControls] Skipped synthetic AO rebake: authored textures are authoritative');
+            return null;
+        }
+        detachSyntheticAOFromModel(this.model, previousBakedAOTexture);
+
+        // Bake new AO texture only for textureless fallback materials.
         this.bakeAOForModel(this.model);
         
         if (!this.bakedAOTexture) {
@@ -2351,10 +2445,11 @@ export class ViewerControls {
                     const originalKey = `${child.uuid}_${idx}`;
                     const originalMat = this.originalMaterials.get(originalKey);
 
-                    if (isSecsVertexPbrMaterial(originalMat || mat)) return;
-                    
-                    // If original didn't have aoMap, update with new baked one
-                    if (!originalMat?.aoMap && mat.aoMap !== this.bakedAOTexture) {
+                    const sourceMaterial = originalMat || mat;
+                    if (!materialNeedsSyntheticAO(sourceMaterial, previousBakedAOTexture)) return;
+
+                    // Update only a textureless fallback; authored texture slots remain intact.
+                    if (mat.aoMap !== this.bakedAOTexture) {
                         mat.aoMap = this.bakedAOTexture;
                         mat.aoMapIntensity = 1.0;
                         mat.needsUpdate = true;
@@ -3122,6 +3217,7 @@ export class TransformManager {
             : null;
         
         this.mode = TransformMode.SELECT;
+        this.interactionEnabled = options.interactionEnabled !== false;
         this.snapEnabled = true;
         this.snapSettings = { ...SnapSettings };
         
@@ -3202,6 +3298,7 @@ export class TransformManager {
      * Pointer down handler
      */
     _onPointerDown(event) {
+        if (!this.interactionEnabled) return;
         if (event.button !== 0) return; // Left click only
         if (this.pointerEventFilter && !this.pointerEventFilter(event)) return;
 
@@ -3246,6 +3343,7 @@ export class TransformManager {
      * Pointer move handler
      */
     _onPointerMove(event) {
+        if (!this.interactionEnabled) return;
         if (this.pointerEventFilter && !this.pointerEventFilter(event)) return;
         const mouse = this._getMouse(event);
         
@@ -3271,6 +3369,7 @@ export class TransformManager {
      * Pointer up handler
      */
     _onPointerUp(event) {
+        if (!this.interactionEnabled) return;
         if (this.isDragging) {
             this.isDragging = false;
             this.dragAxis = null;
@@ -3383,6 +3482,10 @@ export class TransformManager {
      * Update gizmo based on current selection
      */
     _updateGizmoForSelection() {
+        if (!this.interactionEnabled) {
+            this.gizmoLoader.hideAllGizmos();
+            return;
+        }
         const selected = this.selectionSystem.getSelected();
         
         if (!selected) {
@@ -3423,7 +3526,10 @@ export class TransformManager {
         this.mode = mode;
         
         // Update selection system
-        if (mode === TransformMode.SELECT) {
+        if (!this.interactionEnabled) {
+            this.selectionSystem.disableSelectionMode();
+            this.gizmoLoader.hideAllGizmos();
+        } else if (mode === TransformMode.SELECT) {
             this.selectionSystem.enableSelectionMode(this.model);
             this.gizmoLoader.hideAllGizmos();
         } else {
@@ -3442,8 +3548,39 @@ export class TransformManager {
         this.model = model;
         this.selectionSystem.deselectAll();
         
-        if (this.mode === TransformMode.SELECT) {
+        if (this.interactionEnabled && this.mode === TransformMode.SELECT) {
             this.selectionSystem.enableSelectionMode(model);
+        } else {
+            this.selectionSystem.disableSelectionMode();
+            this.gizmoLoader.hideAllGizmos();
+        }
+    }
+
+    /**
+     * Enable editing interactions only for the T-pose/Rig modes. Public
+     * animation, play and ragdoll previews must not expose selection helpers.
+     */
+    setInteractionEnabled(enabled) {
+        this.interactionEnabled = !!enabled;
+        if (!this.interactionEnabled) {
+            this.isDragging = false;
+            this.dragAxis = null;
+            this.dragStartPoint = null;
+            this.dragStartValue = null;
+            if (this.controls) this.controls.enabled = true;
+            if (this.renderer?.domElement) this.renderer.domElement.style.cursor = '';
+            this.selectionSystem.disableSelectionMode();
+            this.selectionSystem.deselectAll();
+            this.gizmoLoader.hideAllGizmos();
+            return;
+        }
+
+        if (this.mode === TransformMode.SELECT) {
+            this.selectionSystem.enableSelectionMode(this.model);
+            this.gizmoLoader.hideAllGizmos();
+        } else {
+            this.selectionSystem.disableSelectionMode();
+            this._updateGizmoForSelection();
         }
     }
     
@@ -3487,6 +3624,7 @@ export class TransformManager {
      * Handle keyboard shortcuts
      */
     handleKeyDown(key) {
+        if (!this.interactionEnabled) return false;
         const keyLower = key.toLowerCase();
         
         switch (keyLower) {
@@ -3515,6 +3653,7 @@ export class TransformManager {
      * Update (call in animation loop)
      */
     update() {
+        if (!this.interactionEnabled) return;
         this.selectionSystem.update();
         
         // Keep gizmo attached to selected object

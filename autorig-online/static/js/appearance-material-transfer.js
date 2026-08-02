@@ -239,6 +239,7 @@ function recordSummary(record) {
 export function transferAppearanceMaterials(targetRoot, sourceRoot, {
     materialCloner = cloneAppearanceMaterial,
     validateMatch = null,
+    abortOnAmbiguous = true,
 } = {}) {
     const targetRecords = collectRenderableMeshes(targetRoot);
     const sourceRecords = collectRenderableMeshes(sourceRoot);
@@ -272,7 +273,7 @@ export function transferAppearanceMaterials(targetRoot, sourceRoot, {
         }
     });
 
-    if (report.ambiguous.length) {
+    if (report.ambiguous.length && abortOnAmbiguous) {
         report.aborted = true;
         report.abortedReason = 'ambiguous-mesh-match';
         return report;

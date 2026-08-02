@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -22,7 +23,18 @@ GUID = "226c54c6-8570-410c-b3cf-ddad22bd4e5b"
 
 
 def _valid_glb() -> bytes:
-    return b"glTF" + (2).to_bytes(4, "little") + (12).to_bytes(4, "little")
+    payload = json.dumps(
+        {
+            "asset": {"version": "2.0"},
+            "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+            "animations": [{"channels": [{"sampler": 0, "target": {"node": 0, "path": "rotation"}}], "samplers": [{"input": 1, "output": 2}]}],
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    payload += b" " * ((4 - len(payload) % 4) % 4)
+    chunk = len(payload).to_bytes(4, "little") + b"JSON" + payload
+    total = 12 + len(chunk)
+    return b"glTF" + (2).to_bytes(4, "little") + total.to_bytes(4, "little") + chunk
 
 
 def _request() -> Request:
@@ -48,6 +60,11 @@ def _task(**overrides):
 
 
 class ViewerArtifactContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_viewer_headers_are_inline_not_download_attachments(self):
+        headers = main._glb_viewer_headers("optimized")
+        self.assertEqual(headers["Content-Disposition"], "inline")
+        self.assertEqual(headers["X-AutoRig-Viewer-Profile"], "optimized")
+
     def test_task_model_has_nullable_viewer_url_columns(self):
         self.assertTrue(Task.viewer_prepared_glb_url.nullable)
         self.assertTrue(Task.viewer_animations_glb_url.nullable)

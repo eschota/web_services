@@ -4026,9 +4026,9 @@
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-shadow-y-offset">Y offset</label><input type="range" id="viewer-admin-shadow-y-offset" min="-2" max="2" step="0.001" value="0.005" /><span id="viewer-admin-shadow-y-offset-val" class="viewer-admin-shadow-val">0.005</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-sun-rotation">Sun rot</label><input type="range" id="viewer-admin-animal-sun-rotation" min="-180" max="180" step="1" value="45" /><span id="viewer-admin-animal-sun-rotation-val" class="viewer-admin-shadow-val">45°</span></div>
                         <div class="viewer-admin-shadow-field"><label for="viewer-admin-animal-sun-inclination">Sun inc</label><input type="range" id="viewer-admin-animal-sun-inclination" min="0" max="90" step="1" value="45" /><span id="viewer-admin-animal-sun-inclination-val" class="viewer-admin-shadow-val">45°</span></div>
-                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-sun-intensity">Sun power</label><input type="range" id="viewer-admin-sun-intensity" min="0" max="5" step="0.05" value="2" /><span id="viewer-admin-sun-intensity-val" class="viewer-admin-shadow-val">2.00</span></div>
-                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-env-ibl">Env IBL</label><input type="range" id="viewer-admin-env-ibl" min="0" max="10" step="0.01" value="1" /><span id="viewer-admin-env-ibl-val" class="viewer-admin-shadow-val">1.00</span></div>
-                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-reflect">Reflect</label><input type="range" id="viewer-admin-reflect" min="0" max="10" step="0.01" value="3" /><span id="viewer-admin-reflect-val" class="viewer-admin-shadow-val">3.00</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-sun-intensity">Sun power</label><input type="range" id="viewer-admin-sun-intensity" min="0" max="3.5" step="0.05" value="2" /><span id="viewer-admin-sun-intensity-val" class="viewer-admin-shadow-val">2.00</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-env-ibl">Env IBL</label><input type="range" id="viewer-admin-env-ibl" min="0" max="2" step="0.01" value="1" /><span id="viewer-admin-env-ibl-val" class="viewer-admin-shadow-val">1.00</span></div>
+                        <div class="viewer-admin-shadow-field"><label for="viewer-admin-reflect">Reflect</label><input type="range" id="viewer-admin-reflect" min="0" max="4" step="0.01" value="3" /><span id="viewer-admin-reflect-val" class="viewer-admin-shadow-val">3.00</span></div>
                         <button type="button" class="btn btn-primary" id="viewer-admin-theme-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Save theme</button>
                         <button type="button" class="btn btn-secondary" id="viewer-admin-camera-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Save camera globally</button>
                         <button type="button" class="btn btn-secondary" id="viewer-admin-default-save-btn" style="padding:0.28rem 0.65rem;font-size:0.72rem;">Save globally</button>
@@ -4304,7 +4304,7 @@
                                         <!-- Main Light -->
                                     <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
                                         <label style="font-size: 0.7rem; color: rgba(255,255,255,0.6); min-width: 55px;">Light</label>
-                                        <input type="range" id="light-main-slider" min="0" max="10" step="0.01" value="3" style="
+                                        <input type="range" id="light-main-slider" min="0" max="3.5" step="0.01" value="3" style="
                                             flex: 1;
                                             height: 4px;
                                             border-radius: 2px;
@@ -4317,7 +4317,7 @@
                                     <!-- Environment -->
                                     <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
                                         <label style="font-size: 0.7rem; color: rgba(255,255,255,0.6); min-width: 55px;">Env</label>
-                                        <input type="range" id="light-env-slider" min="0" max="10" step="0.01" value="1" style="
+                                        <input type="range" id="light-env-slider" min="0" max="2" step="0.01" value="1" style="
                                             flex: 1;
                                             height: 4px;
                                             border-radius: 2px;
@@ -4330,7 +4330,7 @@
                                     <!-- Reflection -->
                                     <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem;">
                                         <label style="font-size: 0.7rem; color: rgba(255,255,255,0.6); min-width: 55px;">Reflect</label>
-                                        <input type="range" id="light-reflect-slider" min="0" max="10" step="0.01" value="3" style="
+                                        <input type="range" id="light-reflect-slider" min="0" max="4" step="0.01" value="3" style="
                                             flex: 1;
                                             height: 4px;
                                             border-radius: 2px;
@@ -5297,6 +5297,7 @@
     <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
+    <script src="/static/js/animation-catalog-retry.js?v=1"></script>
     <script>
         (function initTaskPageDebug() {
             try {
@@ -5710,6 +5711,10 @@
             animationCatalog: null,
             animationCatalogLoaded: false,
             animationCatalogHash: null,
+            animationCatalogRetryTimer: null,
+            animationCatalogRetryAttempt: 0,
+            animationCatalogRetryHash: null,
+            animationCatalogRequestSequence: 0,
             selectedAnimationId: null,
             animationApplyToken: 0,
             animationTypeFilter: 'walk',
@@ -8106,6 +8111,72 @@
                 });
             },
 
+            animationCatalogStateHash() {
+                return this.taskCatalogTaskKey(this.task)
+                    + `|${this.purchaseState?.user_credits || 0}`
+                    + `|${this.purchaseState?.purchased_all ? 'unlocked' : 'locked'}`;
+            },
+
+            clearAnimationCatalogRetry(resetAttempt = true) {
+                if (this.animationCatalogRetryTimer) {
+                    clearTimeout(this.animationCatalogRetryTimer);
+                    this.animationCatalogRetryTimer = null;
+                }
+                if (resetAttempt) {
+                    this.animationCatalogRetryAttempt = 0;
+                    this.animationCatalogRetryHash = null;
+                }
+            },
+
+            scheduleAnimationCatalogRetry(stateHash, catalog, reason = 'catalog inventory pending') {
+                const policy = window.AnimationCatalogRetryPolicy;
+                if (!policy?.shouldRetry?.(this.task?.status, catalog)) {
+                    this.clearAnimationCatalogRetry(true);
+                    return false;
+                }
+
+                if (this.animationCatalogRetryHash !== stateHash) {
+                    this.clearAnimationCatalogRetry(true);
+                    this.animationCatalogRetryHash = stateHash;
+                }
+                if (this.animationCatalogRetryTimer) return true;
+
+                const delayMs = policy.delayForAttempt(this.animationCatalogRetryAttempt);
+                if (delayMs === null) {
+                    window.taskDbg('[Viewer] Animation catalog retry limit reached:', reason);
+                    return false;
+                }
+
+                this.animationCatalogRetryAttempt += 1;
+                const attempt = this.animationCatalogRetryAttempt;
+                window.taskDbg(`[Viewer] Animation catalog refresh ${attempt}/${policy.RETRY_DELAYS_MS.length} scheduled in ${delayMs}ms:`, reason);
+                this.animationCatalogRetryTimer = setTimeout(() => {
+                    this.animationCatalogRetryTimer = null;
+                    if (this.animationCatalogStateHash() !== stateHash || this.task?.status !== 'done') {
+                        this.clearAnimationCatalogRetry(true);
+                        return;
+                    }
+                    this.animationCatalogLoaded = false;
+                    void this.loadAnimationCatalog(true).catch((error) => {
+                        console.warn('[Viewer] Scheduled animation catalog refresh failed:', error);
+                    });
+                }, delayMs);
+                return true;
+            },
+
+            async refreshAnimationCatalogAfterViewerAssetLoad(source = 'animation asset') {
+                if (!this.taskId || this.task?.status !== 'done') return;
+                this.clearAnimationCatalogRetry(true);
+                this.animationCatalogLoaded = false;
+                this.animationCatalogHash = null;
+                window.taskDbg('[Viewer] Animation asset loaded; forcing catalog refresh:', source);
+                try {
+                    await this.loadAnimationCatalog(true);
+                } catch (error) {
+                    console.warn('[Viewer] Animation catalog refresh after asset load failed:', error);
+                }
+            },
+
             async loadAnimationCatalog(force = false) {
                 if (!this.taskId) return;
                 const wrap = document.getElementById('custom-animations-wrap');
@@ -8115,22 +8186,22 @@
                     return;
                 }
 
-                const stateHash = this.taskCatalogTaskKey(this.task)
-                    + `|${this.purchaseState?.user_credits || 0}`
-                    + `|${this.purchaseState?.purchased_all ? 'unlocked' : 'locked'}`;
+                const stateHash = this.animationCatalogStateHash();
 
                 if (!force && this.animationCatalogLoaded && this.animationCatalogHash === stateHash) {
                     return;
                 }
 
+                const requestSequence = ++this.animationCatalogRequestSequence;
                 try {
                     const params = this.animalAnimationCatalogParams();
                     const query = params
                         ? `?animal_type=${encodeURIComponent(params.animal_type)}&orientation=${encodeURIComponent(params.orientation)}`
                         : '';
-                    const resp = await fetch(`/api/task/${this.taskId}/animations/catalog${query}`);
+                    const resp = await fetch(`/api/task/${this.taskId}/animations/catalog${query}`, { cache: 'no-store' });
                     if (!resp.ok) throw new Error(`Catalog HTTP ${resp.status}`);
                     const data = await resp.json();
+                    if (requestSequence !== this.animationCatalogRequestSequence) return;
                     this.animationCatalog = data;
                     this.animationCatalogLoaded = true;
                     this.animationCatalogHash = stateHash;
@@ -8138,6 +8209,11 @@
                     const allRaw = Array.isArray(data.animations) ? data.animations : [];
                     const all = allRaw.filter(a => Boolean(a?.available) && Boolean(a?.ready));
                     if (!all.length) {
+                        this.scheduleAnimationCatalogRetry(
+                            stateHash,
+                            data,
+                            `${allRaw.length} catalog entries reported but none are ready`,
+                        );
                         wrap.classList.remove('hidden');
                         window.__taskPageBoot?.revealElement(wrap, 0);
                         const grid = document.getElementById('custom-anim-grid');
@@ -8149,6 +8225,8 @@
                         this.stopAnimalAnimationAutoplay();
                         return;
                     }
+
+                    this.clearAnimationCatalogRetry(true);
 
                     // Keep selected animation if still present.
                     const selectedId = this.normalizeAnimationKey(this.selectedAnimationId);
@@ -8167,6 +8245,7 @@
                     this.syncAnimationPlaylistClip(window.AnimationPlaylistBridge?.currentEntry?.());
                     this.scheduleAnimalAnimationAutoplay();
                 } catch (e) {
+                    if (requestSequence !== this.animationCatalogRequestSequence) return;
                     console.warn('Failed to load animation catalog:', e);
                     wrap.classList.remove('hidden');
                     window.__taskPageBoot?.revealElement(wrap, 0);
@@ -9211,7 +9290,7 @@
             RigEditor, ViewerControls, RigType, CameraMode, MaterialChannel,
             TransformMode, TransformManager, SelectionSystem, GizmoLoader,
             HierarchyNavigator, TPoseReference, SnapSettings, TransformSystemTests
-        } from '/static/js/rig-editor.js?v=66';
+        } from '/static/js/rig-editor.js?v=68';
         import {
             isSecsVertexPbrMaterial,
             prepareSecsVertexPbrModel,
@@ -9219,7 +9298,7 @@
         import {
             cloneAppearanceMaterial,
             transferAppearanceMaterials,
-        } from '/static/js/appearance-material-transfer.js?v=1';
+        } from '/static/js/appearance-material-transfer.js?v=2';
         import {
             animationPreviewCandidates,
             preferredMovingClip,
@@ -9255,6 +9334,11 @@
             captureRootTransform,
             restoreRootTransform,
         } from '/static/js/animation-playlist-controller.js?v=1';
+        import {
+            safeViewerMaterialEnvironmentIntensity,
+            sanitizeViewerLightingValues,
+            sanitizeViewerPbrMaterial,
+        } from '/static/js/viewer-pbr-safety.js?v=1';
         window.AnimationPreviewPolicy = {
             animationPreviewCandidates,
             preferredMovingClip,
@@ -9274,7 +9358,7 @@
         function taskAnimationAssetUrl(extension) {
             const state = window.TaskUI?.task || {};
             const version = encodeURIComponent(
-                `${String(state.guid || state.updated_at || state.ready_count || 'pending')}-animation-preview-v3`
+                `${String(state.guid || state.updated_at || state.ready_count || 'pending')}-animation-preview-v4`
             );
             return `/api/task/${taskId}/animations.${extension}?v=${version}`;
         }
@@ -11730,9 +11814,15 @@
                     if (resp.ok) {
                         const settings = await resp.json();
                         applyLoadedViewerCameraSettings(settings.camera, 'viewer settings preload');
-                        viewerState.mainLightIntensity = settings.mainLightIntensity !== undefined ? settings.mainLightIntensity : 3.0;
-                        viewerState.envIntensity = settings.envIntensity !== undefined ? settings.envIntensity : 1.0;
-                        viewerState.reflectionIntensity = settings.reflectionIntensity !== undefined ? settings.reflectionIntensity : 3.0;
+                        const safeLighting = sanitizeViewerLightingValues({
+                            sunIntensity: settings.mainLightIntensity,
+                            environmentIntensity: settings.envIntensity,
+                            reflectionIntensity: settings.reflectionIntensity,
+                        }, { sunIntensity: 3.0, environmentIntensity: 1.0, reflectionIntensity: 3.0 });
+                        viewerState.mainLightIntensity = safeLighting.sunIntensity;
+                        viewerState.envIntensity = safeLighting.environmentIntensity;
+                        viewerState.reflectionIntensity = safeLighting.reflectionIntensity;
+                        viewerTaskLightingLoaded = true;
                         viewerState.modelRotation = normalizeSettingsModelRotation(settings.modelRotation, settings);
                         viewerState.bgColor = settings.bgColor || '#000000';
                         viewerState.groundColor = settings.groundColor || '#222222';
@@ -11855,6 +11945,7 @@
             let viewerThemeUserPicked = false;
             let viewerThemeAutoSelectRequested = false;
             let appliedTaskViewerThemeSelectionId = '';
+            let viewerTaskLightingLoaded = false;
             let viewerSettingsSyncInterval = null;
             let viewerSettingsSyncInFlight = false;
 
@@ -12132,15 +12223,33 @@
                 return entries;
             }
 
+            function sanitizeCurrentViewerLighting() {
+                const safe = sanitizeViewerLightingValues({
+                    sunIntensity: viewerState?.mainLightIntensity,
+                    environmentIntensity: viewerState?.envIntensity,
+                    reflectionIntensity: viewerState?.reflectionIntensity,
+                }, { sunIntensity: 3.0, environmentIntensity: 1.0, reflectionIntensity: 3.0 });
+                viewerState.mainLightIntensity = safe.sunIntensity;
+                viewerState.envIntensity = safe.environmentIntensity;
+                viewerState.reflectionIntensity = safe.reflectionIntensity;
+                return safe;
+            }
+
             function getSceneEnvironmentIntensity() {
-                return Math.max(0, LIGHTING_CONFIG.envIntensity * _themeNumber(viewerState?.envIntensity, 1.0));
+                const safe = sanitizeCurrentViewerLighting();
+                return Math.max(0, LIGHTING_CONFIG.envIntensity * safe.environmentIntensity);
             }
 
             function applyModelEnvironmentIntensity(model = currentModel) {
                 if (!model) return 0;
-                const reflect = Math.max(0, _themeNumber(viewerState?.reflectionIntensity, 1.0));
-                const sceneEnv = getSceneEnvironmentIntensity();
-                const materialEnvIntensity = reflect * sceneEnv;
+                const safe = sanitizeCurrentViewerLighting();
+                const reflect = safe.reflectionIntensity;
+                const sceneEnv = Math.max(0, LIGHTING_CONFIG.envIntensity * safe.environmentIntensity);
+                const materialEnvIntensity = safeViewerMaterialEnvironmentIntensity(
+                    safe.environmentIntensity,
+                    reflect,
+                    LIGHTING_CONFIG.envIntensity,
+                );
                 let changed = 0;
                 collectEnvironmentResponsiveMaterials(model).forEach(({ mat }) => {
                     if (!mat || mat.envMapIntensity === undefined) return;
@@ -12890,43 +12999,59 @@
 
             function viewerThemeRuntimeApply(theme, reason = '', options = {}) {
                 if (!theme) return;
+                const preserveLighting = options.preserveLighting === true;
                 const shadow = theme.shadow_settings || {};
                 const sun = theme.sun_settings || {};
                 const env = theme.environment_settings || {};
                 const plane = String(theme.plane_color || '').trim();
                 if (plane) viewerState.groundColor = plane;
-                if (shadow.opacity !== undefined) {
-                    viewerState.shadow_opacity_float = _themeNumber(shadow.opacity, viewerState.shadow_opacity_float || 0.5);
-                    viewerState.shadowIntensity = viewerState.shadow_opacity_float;
+                if (!preserveLighting) {
+                    if (shadow.opacity !== undefined) {
+                        viewerState.shadow_opacity_float = _themeNumber(shadow.opacity, viewerState.shadow_opacity_float || 0.5);
+                        viewerState.shadowIntensity = viewerState.shadow_opacity_float;
+                    }
+                    if (shadow.softness !== undefined) {
+                        viewerState.shadow_softness_float = _themeNumber(shadow.softness, viewerState.shadow_softness_float || viewerState.shadowRadius || 1.0);
+                        viewerState.shadowRadius = viewerState.shadow_softness_float;
+                    }
+                    if (shadow.sun_multiplier !== undefined) viewerState.shadow_light_intensity_float = _themeNumber(shadow.sun_multiplier, viewerState.shadow_light_intensity_float || 1.0);
+                    if (shadow.shadow_y_offset !== undefined) viewerState.shadow_y_offset_float = _themeNumber(shadow.shadow_y_offset, viewerState.shadow_y_offset_float || 0.0);
+                    if (sun.rotation !== undefined) viewerState.sunRotation = _themeNumber(sun.rotation, viewerState.sunRotation);
+                    if (sun.inclination !== undefined) viewerState.sunInclination = _themeNumber(sun.inclination, viewerState.sunInclination);
+                    const safeThemeLighting = sanitizeViewerLightingValues({
+                        sunIntensity: sun.intensity,
+                        environmentIntensity: env.intensity,
+                        reflectionIntensity: env.reflection_intensity,
+                    }, {
+                        sunIntensity: viewerState.mainLightIntensity,
+                        environmentIntensity: viewerState.envIntensity,
+                        reflectionIntensity: viewerState.reflectionIntensity,
+                    });
+                    if (sun.intensity !== undefined) viewerState.mainLightIntensity = safeThemeLighting.sunIntensity;
+                    if (env.intensity !== undefined) viewerState.envIntensity = safeThemeLighting.environmentIntensity;
+                    if (env.reflection_intensity !== undefined) viewerState.reflectionIntensity = safeThemeLighting.reflectionIntensity;
                 }
-                if (shadow.softness !== undefined) {
-                    viewerState.shadow_softness_float = _themeNumber(shadow.softness, viewerState.shadow_softness_float || viewerState.shadowRadius || 1.0);
-                    viewerState.shadowRadius = viewerState.shadow_softness_float;
-                }
-                if (shadow.sun_multiplier !== undefined) viewerState.shadow_light_intensity_float = _themeNumber(shadow.sun_multiplier, viewerState.shadow_light_intensity_float || 1.0);
-                if (shadow.shadow_y_offset !== undefined) viewerState.shadow_y_offset_float = _themeNumber(shadow.shadow_y_offset, viewerState.shadow_y_offset_float || 0.0);
-                if (sun.rotation !== undefined) viewerState.sunRotation = _themeNumber(sun.rotation, viewerState.sunRotation);
-                if (sun.inclination !== undefined) viewerState.sunInclination = _themeNumber(sun.inclination, viewerState.sunInclination);
-                if (sun.intensity !== undefined) viewerState.mainLightIntensity = _themeNumber(sun.intensity, viewerState.mainLightIntensity);
-                if (env.intensity !== undefined) viewerState.envIntensity = _themeNumber(env.intensity, viewerState.envIntensity);
-                if (env.reflection_intensity !== undefined) viewerState.reflectionIntensity = _themeNumber(env.reflection_intensity, viewerState.reflectionIntensity);
                 if (!options.skipCamera) {
                     applyViewerThemeCameraTransform(theme.camera_transform || {}, reason || 'theme');
                 }
                 try { applyViewerState(); updateViewerUI(); syncViewerAdminThemeControlsFromState(); } catch (_) {}
                 try { applySceneEnvironmentIntensity(); } catch (_) {}
-                window.taskDbg?.('[ViewerTheme] applied settings', { id: theme.theme_id || theme.id, reason });
+                window.taskDbg?.('[ViewerTheme] applied settings', {
+                    id: theme.theme_id || theme.id,
+                    reason,
+                    preserveLighting,
+                });
             }
             window.viewerThemeRuntimeApply = viewerThemeRuntimeApply;
 
-            function applyViewerTheme(theme, reason = '') {
+            function applyViewerTheme(theme, reason = '', options = {}) {
                 if (!theme || !theme.src) return;
                 activeViewerTheme = theme;
                 window.__activeViewerTheme = theme;
                 window.__pendingViewerThemeSettings = theme;
                 applyViewerBackdropUrl(theme.src, reason || 'theme');
                 syncSplitViewportBackdropTextures(theme, reason || 'theme');
-                viewerThemeRuntimeApply(theme, reason || 'theme');
+                viewerThemeRuntimeApply(theme, reason || 'theme', options);
             }
 
             function findViewerThemeForTaskSelection(taskState) {
@@ -12946,7 +13071,7 @@
                 }
                 const match = findViewerThemeForTaskSelection(taskState);
                 if (!match?.src) return false;
-                applyViewerTheme(match, reason);
+                applyViewerTheme(match, reason, { preserveLighting: viewerTaskLightingLoaded });
                 appliedTaskViewerThemeSelectionId = String(match.theme_id || match.id || selectionId || '').trim();
                 refreshThemeStripPressed(String(match.theme_id || match.id || ''));
                 return true;
@@ -13024,7 +13149,7 @@
                             return;
                         }
                         viewerState.viewer_theme_selection = data.selection || themeSelectionFromTheme(match, 'server');
-                        applyViewerTheme(match, `auto-select:${data?.selection?.provider_string || 'server'}`);
+                        applyViewerTheme(match, `auto-select:${data?.selection?.provider_string || 'server'}`, { preserveLighting: viewerTaskLightingLoaded });
                         refreshThemeStripPressed(id);
                     }
                 } catch (e) {
@@ -13080,7 +13205,7 @@
                 strip.dataset.backdropWired = '1';
                 if (first) {
                     viewerState.viewer_theme_selection = viewerState.viewer_theme_selection || themeSelectionFromTheme(first, 'initial');
-                    applyViewerTheme(first, 'init persisted selection');
+                    applyViewerTheme(first, 'init persisted selection', { preserveLighting: viewerTaskLightingLoaded });
                 }
                 void requestViewerThemeAutoSelect(taskState, 'init');
             }
@@ -13324,7 +13449,8 @@
                 if (!sceneInited) return;
                 
                 // 1. Lighting
-                let mainFactor = viewerState.mainLightIntensity;
+                const safeLighting = sanitizeCurrentViewerLighting();
+                let mainFactor = safeLighting.sunIntensity;
                 
                 // Day/Night Cycle Logic
                 const hour = viewerState.timeOfDay;
@@ -15836,7 +15962,7 @@
                     }
                     if (activeViewerTheme?.src) {
                         applyViewerBackdropUrl(activeViewerTheme.src, `cache ${cacheKey}`);
-                        viewerThemeRuntimeApply(activeViewerTheme, `cache ${cacheKey}`);
+                        viewerThemeRuntimeApply(activeViewerTheme, `cache ${cacheKey}`, { preserveLighting: viewerTaskLightingLoaded });
                     }
                     applyViewerState();
                     syncMainViewerEmergencyMaterials(currentModel);
@@ -15881,6 +16007,7 @@
                         if (saveRigWrap) {
                             saveRigWrap.classList.toggle('hidden', !visible);
                         }
+                        transformManager?.setInteractionEnabled?.(visible);
                     };
 
                     let playModeEligibility = {
@@ -17684,6 +17811,9 @@
                         const materials = Array.isArray(child.material) ? child.material : [child.material];
                         materials.forEach((mat) => {
                             if (!mat) return;
+                            // Explicit Unity-parity policy: tame only overdriven KHR specular
+                            // values. Base-color, normal and metallic/roughness slots are untouched.
+                            sanitizeViewerPbrMaterial(mat);
                             if (isSecsVertexPbrMaterial(mat)) return;
 
                             // GLB/PBR textures are authoritative for the website preview.
@@ -17809,15 +17939,22 @@
                         return cloned;
                     },
                     validateMatch: validateViewerAppearanceMatch,
+                    // Preserve the FBX material on ambiguous meshes while still
+                    // hydrating every deterministic match. A valid animated
+                    // model must not be discarded solely because repeated mesh
+                    // names make a few appearance matches ambiguous.
+                    abortOnAmbiguous: false,
                 });
                 model.userData = model.userData || {};
                 model.userData.autorigAppearanceTransferReport = report;
                 if (!report.complete) {
-                    throw new Error(
+                    console.warn(
+                        '[ViewerAppearance] Partial prepared appearance transfer; preserving FBX materials for unresolved meshes:',
                         `Prepared appearance transfer incomplete for ${label}: ` +
                         `${report.transferredMeshCount}/${report.targetMeshCount} meshes; ` +
                         `${report.unmatched.length} unmatched, ${report.ambiguous.length} ambiguous, ` +
                         `${report.incompatible.length} incompatible`,
+                        report,
                     );
                 }
                 prepareVertexPbrForViewer(model, 'hydrated animation FBX appearance');
@@ -18022,7 +18159,7 @@
                 }
                 if (activeViewerTheme?.src) {
                     applyViewerBackdropUrl(activeViewerTheme.src, `model load ${label}`);
-                    viewerThemeRuntimeApply(activeViewerTheme, `model load ${label}`);
+                    viewerThemeRuntimeApply(activeViewerTheme, `model load ${label}`, { preserveLighting: viewerTaskLightingLoaded });
                 }
                 // Mark loading complete
                 loadingManager.updateProgress(100, `${label} loaded!`);
@@ -18084,6 +18221,9 @@
                 window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
+                if (isAnimationPreview && animations.length) {
+                    void window.TaskUI?.refreshAnimationCatalogAfterViewerAssetLoad?.(`${label} GLB`);
+                }
                 return true;
             }
 
@@ -18142,12 +18282,25 @@
                 loadingManager.updateProgress(85, `Processing ${label}...`);
 
                 if (isCanonicalTaskAnimationFbxUrl(fbxUrl)) {
+                    let renderableMeshCount = 0;
+                    model.traverse?.((child) => {
+                        if (child?.isMesh && child.geometry) renderableMeshCount += 1;
+                    });
+                    if (!renderableMeshCount || !Array.isArray(model.animations) || !model.animations.length) {
+                        console.error(
+                            '[ViewerAppearance] Refusing invalid animation FBX:',
+                            { renderableMeshCount, animationCount: model.animations?.length || 0 },
+                        );
+                        loadingManager.setItemStatus(label, 'error');
+                        return false;
+                    }
                     try {
                         await hydrateCanonicalAnimationFbxAppearance(model, label);
                     } catch (error) {
-                        console.error('[ViewerAppearance] Refusing unhydrated animation FBX:', error);
-                        loadingManager.setItemStatus(label, 'error');
-                        return false;
+                        // Appearance hydration is an enhancement. Keep a valid
+                        // skinned FBX playable with its own materials when the
+                        // prepared donor is unavailable or incompatible.
+                        console.warn('[ViewerAppearance] Using original animation FBX appearance:', error);
                     }
                 }
 
@@ -18249,7 +18402,7 @@
                 }
                 if (activeViewerTheme?.src) {
                     applyViewerBackdropUrl(activeViewerTheme.src, `model load ${label}`);
-                    viewerThemeRuntimeApply(activeViewerTheme, `model load ${label}`);
+                    viewerThemeRuntimeApply(activeViewerTheme, `model load ${label}`, { preserveLighting: viewerTaskLightingLoaded });
                 }
                 // Mark loading complete
                 loadingManager.updateProgress(100, `${label} loaded!`);
@@ -18304,6 +18457,9 @@
                 window.taskDbg('[Viewer] Status:', statusText);
                 window.__taskPageBoot?.revealElement('model-viewer-wrap', 2);
                 window.__taskPageBoot?.markViewerReady(`${label} ready`);
+                if (isAnimationPreview && animations.length) {
+                    void window.TaskUI?.refreshAnimationCatalogAfterViewerAssetLoad?.(`${label} FBX`);
+                }
                 return true;
             }
 
@@ -18421,7 +18577,10 @@
                     modelCache.animations = model;
                     modelCache.animationsData = loadedAnimations;
                     animationsLoaded = true;
-                    
+                    if (loadedAnimations.length) {
+                        void window.TaskUI?.refreshAnimationCatalogAfterViewerAssetLoad?.('background Animations GLB');
+                    }
+
                     window.taskDbg('[Viewer] ✓ Background animations loaded and cached!', loadedAnimations.length, 'animations');
                     
                     // Show notification that animations are ready
