@@ -13,12 +13,18 @@ from __future__ import annotations
 
 import asyncio
 import time
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 import httpx
 
 from . import config
+
+
+# How many generations of ours a single box may hold at once. The converter
+# runs one at a time, so anything above one only buys an opaque backlog.
+WORKER_INFLIGHT_CAP = int(os.getenv("RENDERFIN_HUNYUAN_INFLIGHT_CAP", "1"))
 
 
 class TaskVanished(RuntimeError):
@@ -116,13 +122,26 @@ def _load_score(status: Dict[str, Any], hunyuan: Dict[str, Any]) -> int:
     return depth
 
 
-async def pick_worker(client: httpx.AsyncClient) -> Dict[str, str]:
-    """Pick the enabled worker with the shallowest overall queue."""
+async def pick_worker(
+    client: httpx.AsyncClient, in_flight: Optional[Dict[str, int]] = None
+) -> Dict[str, str]:
+    """Pick the enabled worker with the shallowest overall queue.
+
+    `in_flight` is how many of OUR jobs each worker is already holding. A box
+    that runs one generation at a time gains nothing from being handed more,
+    and a job waiting in its queue is invisible to us, so a worker at its cap
+    is not a candidate and the job waits on our side instead.
+    """
     pool = workers()
     if not pool:
         raise NoWorkerAvailable("no Hunyuan workers configured")
+    in_flight = in_flight or {}
+    at_capacity: List[str] = []
     candidates: List[Tuple[int, int, Dict[str, str]]] = []
     for index, worker in enumerate(pool):
+        if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
+            at_capacity.append(worker["name"])
+            continue
         status = await server_status(client, worker)
         if not status:
             continue
@@ -133,6 +152,12 @@ async def pick_worker(client: httpx.AsyncClient) -> Dict[str, str]:
             continue
         candidates.append((_load_score(status, hunyuan), index, worker))
     if not candidates:
+        if at_capacity:
+            # not a fault: every box is busy with work of ours. Waiting for a
+            # slot is the correct outcome and must not spend an attempt.
+            raise NoWorkerAvailable(
+                "every Hunyuan worker is at capacity: " + ", ".join(at_capacity)
+            )
         raise NoWorkerAvailable(
             "no enabled Hunyuan worker among " + ", ".join(w["name"] for w in pool)
         )
@@ -147,9 +172,10 @@ async def submit(
     seed: Optional[int] = None,
     quality: Optional[str] = None,
     background_method: str = "auto",
+    in_flight: Optional[Dict[str, int]] = None,
 ) -> Tuple[Dict[str, str], str]:
     """Create a generation task. Returns (worker, status_url)."""
-    worker = await pick_worker(client)
+    worker = await pick_worker(client, in_flight)
     body: Dict[str, Any] = {
         "image_url": image_url,
         "quality": quality or config.HUNYUAN_QUALITY,

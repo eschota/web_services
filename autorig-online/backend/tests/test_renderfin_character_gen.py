@@ -878,6 +878,65 @@ class EmptyFleetTests(unittest.TestCase):
         job = CharacterGenJob(error="task vanished on f7 (HTTP 404)")
         self.assertTrue(character_gen._failed_on_empty_fleet(job))
 
+    def test_waiting_for_a_slot_is_a_queue_not_an_outage(self):
+        """A full pool is re-checked in a minute; a dead farm in five."""
+
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    slot = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    await manager._handle_stage_error(
+                        slot,
+                        hunyuan_client.NoWorkerAvailable(
+                            "every Hunyuan worker is at capacity: f13"
+                        ),
+                    )
+                    slot_wait = slot.retry_at - time.time()
+
+                    outage = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    await manager._handle_stage_error(
+                        outage,
+                        hunyuan_client.NoWorkerAvailable("no enabled Hunyuan worker among f13"),
+                    )
+                    outage_wait = outage.retry_at - time.time()
+
+                    self.assertLess(slot_wait, outage_wait)
+                    self.assertEqual(slot.attempts, {})
+                    self.assertEqual(outage.attempts, {})
+                    await self._park(manager, slot)
+                    await self._park(manager, outage)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_in_flight_is_counted_per_worker(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN,
+                                    hunyuan_task_id="https://f13/s/1", hunyuan_worker="f13")
+                    await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN,
+                                    hunyuan_task_id="https://f13/s/2", hunyuan_worker="f13")
+                    # parked, no task out there: must not count against the box
+                    await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN, hunyuan_worker="f13")
+                    # a different stage is not holding a worker either
+                    await _idle_job(manager, stage=CHARGEN_STAGE_TURNTABLE,
+                                    hunyuan_task_id="https://f13/s/3", hunyuan_worker="f13")
+                    self.assertEqual(manager.in_flight_by_worker(), {"f13": 2})
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_a_genuinely_failed_job_is_left_alone(self):
         job = CharacterGenJob(error="generation failed on f13: out of memory")
         self.assertFalse(character_gen._failed_on_empty_fleet(job))

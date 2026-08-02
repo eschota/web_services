@@ -67,6 +67,9 @@ RETRY_BACKOFF_SECONDS = (30.0, 120.0, 600.0)
 # up is wrong: the user pressed the button and is owed the result whenever the
 # farm comes back. These waits do not count against the job's attempts.
 FLEET_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_FLEET_WAIT", "300"))
+# Waiting for a busy box to free up is ordinary queueing, so it is re-checked
+# far more often than a farm that is actually down.
+SLOT_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_SLOT_WAIT", "60"))
 # Some failures arrive only AFTER a full 3D generation has been paid for, so
 # re-checking every five minutes would burn a GPU-hour to rediscover the same
 # broken post-processor. They still must not fail the job.
@@ -407,6 +410,18 @@ class CharacterGenManager:
         await self._persist(job)
         return job
 
+    def in_flight_by_worker(self) -> Dict[str, int]:
+        """How many generations each box is holding for us right now."""
+        counts: Dict[str, int] = {}
+        for job in self._jobs.values():
+            if (
+                job.stage == CHARGEN_STAGE_HUNYUAN
+                and job.hunyuan_task_id
+                and job.hunyuan_worker
+            ):
+                counts[job.hunyuan_worker] = counts.get(job.hunyuan_worker, 0) + 1
+        return counts
+
     def _next_seq(self) -> int:
         """Running number over every job ever created (gaps are fine)."""
         return max((int(j.seq or 0) for j in self._jobs.values()), default=0) + 1
@@ -580,17 +595,23 @@ class CharacterGenManager:
             return
 
         if isinstance(exc, hunyuan_client.NoWorkerAvailable):
+            # a full pool is a queue, not an outage: look again soon
+            wait = (
+                SLOT_WAIT_SECONDS
+                if "at capacity" in str(exc)
+                else FLEET_WAIT_SECONDS
+            )
             # Not this job's fault and not fixable by retrying harder: park it
             # in place and keep checking. Attempts are untouched, and the stage
             # clock is pushed along so waiting for the farm cannot time it out.
-            job.retry_at = time.time() + FLEET_WAIT_SECONDS
+            job.retry_at = time.time() + wait
             job.stage_started_at = 0
             job.timed_stage = ""
             job.error = ""
             await self._persist(job)
             print(
                 f"[Renderfin][CharGen] job {job.id} waiting for a 3D worker "
-                f"({exc}); re-checking in {int(FLEET_WAIT_SECONDS)}s"
+                f"({exc}); re-checking in {int(wait)}s"
             )
             return
 
@@ -747,7 +768,9 @@ class CharacterGenManager:
                     job.hunyuan_task_id = ""
             if worker is None:
                 worker, status_url = await hunyuan_client.submit(
-                    client, image_url=job.isolated_url
+                    client,
+                    image_url=job.isolated_url,
+                    in_flight=self.in_flight_by_worker(),
                 )
                 # store the status_url so a service restart can resume polling
                 job.hunyuan_task_id = status_url

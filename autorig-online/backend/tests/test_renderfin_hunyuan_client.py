@@ -320,3 +320,45 @@ class ParkedWorkerTests(unittest.TestCase):
                         await hunyuan_client.pick_worker(client)
 
         run(scenario())
+
+
+class InFlightCapTests(unittest.TestCase):
+    """A box that runs one generation at a time is handed one at a time."""
+
+    @staticmethod
+    def _ok_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"},
+            "tasks_summary": {"queue_size": 0},
+        })
+
+    def test_a_busy_worker_is_not_offered(self):
+        async def scenario():
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(self._ok_handler)) as c:
+                    busy = {w["name"]: 1 for w in POOL}
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+                        await hunyuan_client.pick_worker(c, busy)
+            # the message must say queue, not outage: they are handled differently
+            self.assertIn("at capacity", str(caught.exception))
+
+        run(scenario())
+
+    def test_a_free_worker_is_still_offered(self):
+        async def scenario():
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(self._ok_handler)) as c:
+                    worker = await hunyuan_client.pick_worker(c, {POOL[0]["name"]: 1})
+            self.assertNotEqual(worker["name"], POOL[0]["name"])
+
+        run(scenario())
+
+    def test_an_empty_pool_still_reads_as_an_outage(self):
+        async def scenario():
+            with patch.object(config, "hunyuan_workers", lambda: []):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(self._ok_handler)) as c:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+                        await hunyuan_client.pick_worker(c, {})
+            self.assertNotIn("at capacity", str(caught.exception))
+
+        run(scenario())
