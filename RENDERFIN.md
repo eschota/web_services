@@ -1,0 +1,244 @@
+# Renderfin: генерация 3D-персонажей на autorig.online
+
+Нажатие кнопки в Telegram превращается в ригнутого анимированного персонажа.
+Этот документ — единственный источник правды по конвейеру: что происходит на
+каждом этапе, где что лежит, как это деплоить и что здесь ведёт себя не так,
+как ожидаешь.
+
+Детали, которые нужны при отладке, вынесены в
+[`.claude/skills/renderfin-pipeline/`](.claude/skills/renderfin-pipeline/) —
+там же лежит скилл, который Claude подхватывает автоматически, когда работа
+касается этого конвейера. Начинать при разборе поломки лучше с
+[`references/gotchas.md`](.claude/skills/renderfin-pipeline/references/gotchas.md).
+
+---
+
+## Как пушить, чтобы ничего не потерялось
+
+**Продовое дерево `/root/autorig-online` не принимает `git pull`.** У него своя
+параллельная история: та же работа, закоммиченная локально с другими SHA.
+`git pull --ff-only` там сообщает о расхождении и прерывается — это нормально и
+менять это не нужно.
+
+Порядок деплоя:
+
+```bash
+# 1. Проверить, что прод-копия ещё совпадает с тем, от чего вы отталкивались.
+#    Иначе можно молча затереть правку, сделанную прямо на проде.
+git show HEAD~1:autorig-online/backend/renderfin/foo.py | sha256sum
+ssh autorig-vps "sha256sum /root/autorig-online/backend/renderfin/foo.py"
+
+# 2. Скопировать только изменённые файлы.
+scp autorig-online/backend/renderfin/foo.py \
+    autorig-vps:/root/autorig-online/backend/renderfin/
+
+# 3. Прогнать тесты там, где код будет работать.
+ssh autorig-vps "cd /root/autorig-online/backend && \
+  PYTHONPATH=/root/autorig-online/backend \
+  /root/autorig-online/venv/bin/pytest tests/test_renderfin_*.py -q"
+
+# 4. Перезапустить.
+ssh autorig-vps "systemctl restart autorig-renderfin.service"
+```
+
+`PYTHONPATH` обязателен: без него тесты на проде не находят модули backend.
+
+**В git пушить обычным способом**, в `main` репозитория `web_services`. Если
+push отклонён — кто-то запушил параллельно; `git rebase origin/main` и заново,
+merge-коммиты здесь не нужны.
+
+Локально десять тестовых модулей импортируют `main` и требуют `slowapi`,
+которого нет на рабочей машине. Их исключают — точная команда в
+[`references/runbook.md`](.claude/skills/renderfin-pipeline/references/runbook.md).
+
+---
+
+## Этапы
+
+```
+   [Telegram: Сгенерировать]
+              │
+              ▼
+    ┌──────────────────┐   один LLM-вызов описывает персонажа ОДИН раз;
+    │  промпт          │   из этого описания собираются два стиля
+    └──────────────────┘
+              │
+              ▼
+    ┌──────────────────┐   flux_render
+    │  Flux T-поза ×2  │   два рендера одного персонажа: реалистичный
+    └──────────────────┘   и low-poly cartoon, ставятся в очередь вместе
+              │
+              ▼
+    ┌──────────────────┐   awaiting_image_approval
+    │  ВЫБОР ОПЕРАТОРА │   ← единственное решение человека во всём потоке
+    └──────────────────┘
+              │
+              ▼
+    ┌──────────────────┐   hunyuan
+    │  Hunyuan3D 2.1   │   выбранный PNG с альфой → GLB
+    └──────────────────┘
+              │
+              ▼
+    ┌──────────────────┐   turntable
+    │  видео-облёт 6с  │   headless Chrome + ffmpeg на самом VPS
+    └──────────────────┘
+              │
+              ▼
+    ┌──────────────────┐   ready → submitted (автоматически, без кнопки)
+    │  полный конверт  │   ретопология, запечка, риг, анимации, форматы
+    └──────────────────┘
+```
+
+Стадии в коде: `renderfin/models.py`, константы `CHARGEN_STAGE_*`.
+Тупиковые: `discarded` (оператор отменил), `failed`.
+
+### 1. Промпт
+
+`backend/render_prompting.py` + `backend/render_prompt_instruction.json`.
+
+Один вызов LLM возвращает `subject`, `outfit` (с цветом на каждой названной
+детали) и `body_type`. Оба промпта собираются из **одного и того же** описания
+функцией `compose_prompt()`, и оба используют одну маску позы — иначе
+получаются два разных персонажа, и выбор теряет смысл.
+
+Модель не пишет ничего про свет, фон, позу, кадрирование и материалы: это
+добавляет конвейер, по-разному для каждого стиля. Подробности и измерения по
+маскам — в [`references/prompts.md`](.claude/skills/renderfin-pipeline/references/prompts.md).
+
+Креденшелы берутся из env, затем из того же vision-конфига, которым пользуется
+вебсервер (`/root/autorig/ai_vision_animal_type_detect.json`), по очереди — так
+протухший ключ не отключает LLM-путь молча. Если LLM недоступен целиком,
+работает детерминированный шаблон; он тоже собирает оба стиля из одного
+описания.
+
+### 2. Рендер T-позы (Flux)
+
+Воркфлоу `backend/renderfin/assets/workflows/t_pose.json`, очередь
+`renderfin/queue.py`, ComfyUI-боксы фермы.
+
+- flux1-schnell + FLUX.1-dev-ControlNet-Union-Pro-2.0 (openpose) + LoRA aidmaMJ6.1
+- база 1024×1024 → апскейл ×4 → ×0.5 ⇒ **итог 2048×2048**
+- RMBG-2.0 даёт второй выход `*_Isolated.png` — именно он идёт в 3D
+- потолок задачи в очереди 5400 с; стадия — на 600 с больше, иначе стадия
+  сдаётся, пока задача ещё держит воркер
+
+Провал второго варианта не топит задачу: одного изображения достаточно.
+
+### 3. Hunyuan3D
+
+`renderfin/hunyuan_client.py`. Идёт **не через ComfyUI**, а через API самих
+конвертер-воркеров: `POST /api-converter-glb/generate-3d` с bearer-токеном,
+затем опрос `.../generate-3d/status/<id>`, затем скачивание GLB.
+
+- воркеры и токены: `/etc/autorig-renderfin-hunyuan.json` (права 600)
+- у каждого бокса свой токен, и он перевыпускается при перезапуске машины
+- бокс выбирается по глубине его общей очереди; бокс без модуля Hunyuan
+  пропускается
+- потолок 4 часа; стадия — на 600 с больше
+
+Публичные HTTPS-фасады срезают заголовок `Authorization`, поэтому ходим через
+SSH-туннели на loopback самого бокса. См.
+[`references/farm.md`](.claude/skills/renderfin-pipeline/references/farm.md).
+
+### 4. Видео-облёт
+
+`tools/renderfin/glb_turntable.mjs` — 6 секунд, 180 кадров, three.js в headless
+Chrome (SwiftShader, без GPU) + ffmpeg. Работает на самом VPS, не на ферме.
+
+### 5. Полный конверт
+
+Готовая модель уходит в обычный конвейер autorig автоматически, кнопки нет.
+
+`create_conversion_task(..., pipeline_kind=...)` в `backend/tasks.py` различает
+два сценария:
+
+| `pipeline_kind` | Что уходит воркеру | Что делает воркер |
+|---|---|---|
+| `rig` | payload Auto Rig с `mode=only_rig` | только риг, без ретопологии |
+| `convert` | минимальный `{input_url, type}` | полный сценарий |
+
+Генерация персонажей submit'ит с **`pipeline_kind="convert"`, `type="t_pose"`** —
+воркер сам прогоняет ретопологию 1k/10k/100k, запечку, авториг, анимации и
+экспорт во все форматы (blend/fbx/unitypackage + корневой glb). Отдельных
+параметров на эти шаги нет: это настройка самого конвертера.
+
+Когда конверт завершается, бот присылает уведомление о готовности и убирает из
+личного чата карточки этой задачи.
+
+---
+
+## Живучесть: что не должно ронять задачу
+
+Оператор нажал кнопку и обязан получить результат. Несколько состояний выглядят
+как ошибка, но о самой задаче не говорят ничего — они **паркуют задачу и ждут**,
+не тратя попытку:
+
+- `NoWorkerAvailable` — ни на одном боксе нет включённого Hunyuan
+- 401/403 от воркера — бокс перевыпустил токен
+- `TaskVanished` — бокс перезагрузился и забыл принятую задачу
+- поломка постобработки на ферме (не записан Vertex-PBR манифест)
+
+Уже упавшие по этим причинам оживают сами: retry-loop сверяет текст финальной
+ошибки со списком `_FLEET_ERROR_MARKERS` в `renderfin/character_gen.py`.
+Добавляя новое такое состояние, добавьте туда маркер — иначе те, что уже
+упали, останутся лежать.
+
+Плата за это — тишина: навсегда сломанное состояние запаркует всё, и никто не
+узнает. Поэтому healthcheck проверяет воркеров тем же способом, каким их
+выбирает renderfin, и отдельно стучится в эндпоинт, который реально проверяет
+токен.
+
+---
+
+## Telegram: одна задача — одна строка
+
+У работающей задачи ровно одно сообщение, которое переписывается на каждой
+смене стадии, включая ретраи. В нём порядковый номер, суточная пропускная
+способность, субъект и текущая стадия.
+
+Единственные кнопки во всём потоке — выбор одного из двух рендеров. Карточки,
+чей момент прошёл, удаляются: два рендера с кнопками — после выбора, сообщение
+об ошибке — когда стадия снова пошла.
+
+Чистка только для личных чатов: группа — общий журнал, его не переписываем.
+Бот не может удалять свои сообщения старше 48 часов, поэтому id хранятся с
+временем отправки, а отказ запоминается и не повторяется.
+
+Доставкой занимается **renderfin, а не бот** — так результат переживает
+перезапуск бота.
+
+---
+
+## Карта файлов
+
+| Что | Где |
+|---|---|
+| Сервис | `autorig-renderfin`, 127.0.0.1:8010, nginx `/renderfin/` |
+| Оркестратор | `backend/renderfin/character_gen.py` |
+| Очередь рендера | `backend/renderfin/queue.py`, `comfy_adapter.py` |
+| Hunyuan | `backend/renderfin/hunyuan_client.py` |
+| Доставка в Telegram | `backend/renderfin/telegram_delivery.py` |
+| Промпты | `backend/render_prompting.py`, `render_prompt_instruction.json` |
+| Бот | `backend/telegram_bot.py` |
+| Воркфлоу и маски | `backend/renderfin/assets/` |
+| Видео-облёт | `tools/renderfin/glb_turntable.mjs` |
+| Состояние | sqlite `/var/autorig/renderfin/db/renderfin.db`, таблица `chargen_jobs` |
+| Артефакты | `/var/autorig/renderfin/render/<user>/` |
+| Пул Hunyuan | `/etc/autorig-renderfin-hunyuan.json` |
+| Туннели | `autorig-farm-tunnels`, `/etc/autorig-farm-tunnels.conf` |
+| Healthcheck | `deploy/healthcheck/renderfin_healthcheck.py` + таймер раз в 6 ч |
+| Очистка диска | `backend/scripts/run_disk_pressure_cleanup.py` + таймер раз в 15 мин |
+
+---
+
+## Куда смотреть дальше
+
+- [Ловушки](.claude/skills/renderfin-pipeline/references/gotchas.md) — поведение
+  Flux, Blender, Telegram и конвертер-API, которое удивляет. **Читать первым при
+  разборе поломки.**
+- [Ферма](.claude/skills/renderfin-pipeline/references/farm.md) — боксы,
+  туннели, токены, как вывести и вернуть воркера.
+- [Регламент](.claude/skills/renderfin-pipeline/references/runbook.md) —
+  healthcheck, очистка диска, обновление токенов, оживление задач, команды тестов.
+- [Промпты](.claude/skills/renderfin-pipeline/references/prompts.md) — два стиля,
+  измерения по маскам, анти-паттерны.
