@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -265,6 +266,7 @@ async def deliver_model_review(
 
 
 DIGEST_STATE_PATH = config.DB_DIR / "digest_messages.json"
+DIGEST_MAX_ROWS = int(os.getenv("RENDERFIN_DIGEST_MAX_ROWS", "25"))
 
 
 # The operator asked for a restart button "to clean up and refresh the
@@ -317,7 +319,11 @@ def digest_text(jobs: List[CharacterGenJob], stats: Optional[Dict[str, int]] = N
             summary += f" · ❌ {int(stats['failed'])}"
         summary += f" · {_stats_line(stats)}"
         lines.append(f"<code>{summary}</code>")
-    for job in sorted(jobs, key=lambda j: int(j.seq or 0)):
+    # Telegram caps a message at 4096 characters, so a queue long enough to
+    # reach that would silently fail to send. The tail is summarised instead.
+    ordered = sorted(jobs, key=lambda j: int(j.seq or 0))
+    shown, hidden = ordered[:DIGEST_MAX_ROWS], ordered[DIGEST_MAX_ROWS:]
+    for job in shown:
         stage = _STAGE_LABELS.get(job.stage, job.stage)
         row = f"#{int(job.seq or 0)} · {html.escape(stage)}"
         attempt = int((job.attempts or {}).get(job.stage, 0))
@@ -329,6 +335,13 @@ def digest_text(jobs: List[CharacterGenJob], stats: Optional[Dict[str, int]] = N
         if subject:
             row += f" — <i>{html.escape(subject)}</i>"
         lines.append(row)
+    if hidden:
+        by_stage: Dict[str, int] = {}
+        for job in hidden:
+            label = _STAGE_LABELS.get(job.stage, job.stage)
+            by_stage[label] = by_stage.get(label, 0) + 1
+        tail = ", ".join(f"{n}× {html.escape(k)}" for k, n in sorted(by_stage.items()))
+        lines.append(f"… и ещё {len(hidden)}: {tail}")
     return "\n".join(lines)
 
 
@@ -416,7 +429,7 @@ _STAGE_LABELS = {
     "flux_render": "рендер T-позы",
     "hunyuan": "3D-модель",
     "turntable": "видео-облёт",
-    "submitted": "полный пайплайн: ретопология, риг, анимации",
+    "submitted": "полный пайплайн",
 }
 
 
