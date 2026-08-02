@@ -90,6 +90,7 @@ def _is_farm_breakage(text: str) -> bool:
 # They are indistinguishable from a real failure only by their message, so it
 # is matched here and they are revived rather than left for a human.
 _FLEET_ERROR_MARKERS = (
+    "task vanished on",
     "vertex-pbr manifest is missing",
     "blender vertex-pbr pipeline failed",
     "no enabled hunyuan worker",
@@ -552,6 +553,22 @@ class CharacterGenManager:
                 f"[Renderfin][CharGen] job {job.id} parked on a farm-side "
                 f"post-processing failure ({exc}); re-checking in "
                 f"{int(FARM_BREAKAGE_WAIT_SECONDS / 60)}min"
+            )
+            return
+
+        if isinstance(exc, hunyuan_client.TaskVanished):
+            # drop the dead handle so the stage submits again, and do not spend
+            # an attempt: a crashing box would otherwise exhaust every job
+            job.hunyuan_task_id = ""
+            job.hunyuan_worker = ""
+            job.retry_at = time.time() + FLEET_WAIT_SECONDS
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} lost its 3D task ({exc}); "
+                "resubmitting"
             )
             return
 

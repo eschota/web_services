@@ -842,6 +842,42 @@ class EmptyFleetTests(unittest.TestCase):
         )
         self.assertTrue(character_gen._failed_on_empty_fleet(job))
 
+    def test_a_lost_task_is_resubmitted_without_spending_an_attempt(self):
+        """f7 reboots without shutting down cleanly and forgets its task
+        registry; a job must not be charged for that."""
+
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        hunyuan_task_id="https://f7/status/h-1",
+                        hunyuan_worker="f7",
+                    )
+                    await manager._handle_stage_error(
+                        job, hunyuan_client.TaskVanished("task vanished on f7 (HTTP 404)")
+                    )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertEqual(job.attempts, {})
+                    # the dead handle is dropped so the stage submits again
+                    self.assertEqual(job.hunyuan_task_id, "")
+                    self.assertEqual(job.hunyuan_worker, "")
+                    self.assertGreater(job.retry_at, time.time())
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_job_already_failed_by_a_lost_task_is_revived(self):
+        job = CharacterGenJob(error="task vanished on f7 (HTTP 404)")
+        self.assertTrue(character_gen._failed_on_empty_fleet(job))
+
     def test_a_genuinely_failed_job_is_left_alone(self):
         job = CharacterGenJob(error="generation failed on f13: out of memory")
         self.assertFalse(character_gen._failed_on_empty_fleet(job))

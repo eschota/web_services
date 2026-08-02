@@ -205,7 +205,7 @@ class PollToleranceTests(unittest.TestCase):
 
         run(scenario())
 
-    def test_persistent_404_fails(self):
+    def test_persistent_404_is_a_lost_task_not_a_job_failure(self):
         async def scenario():
             def handler(request: httpx.Request) -> httpx.Response:
                 return httpx.Response(404, json={"error": "Task not found"})
@@ -213,7 +213,7 @@ class PollToleranceTests(unittest.TestCase):
             worker = POOL[0]
             with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.01):
                 async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                    with self.assertRaises(hunyuan_client.HunyuanClientError):
+                    with self.assertRaises(hunyuan_client.TaskVanished):
                         await hunyuan_client.wait_for_model(
                             client, worker, worker["url"] + "/status/x", timeout=10
                         )

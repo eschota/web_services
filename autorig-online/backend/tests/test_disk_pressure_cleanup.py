@@ -145,6 +145,19 @@ class _UrlDb:
 class GlbCachePruneTests(unittest.IsolatedAsyncioTestCase):
     """The cache holds the last copy of many deliverables (workers purge their
     outputs), so eviction must verify the upstream can still serve them."""
+
+    def setUp(self):
+        # the last-copy memo is a real file on a real path: without redirecting
+        # it, one test's verdicts silently become another's, and a test that
+        # counts probes sees none
+        self._memo_dir = tempfile.TemporaryDirectory(prefix="autorig-memo-")
+        patcher = patch.object(
+            cleanup, "LAST_COPY_MEMO_PATH", Path(self._memo_dir.name) / "memo.json"
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self._memo_dir.cleanup)
+
     @staticmethod
     def _write(path: Path, size_mb: int, age_hours: float) -> Path:
         path.write_bytes(b"\0" * (size_mb * 1024 * 1024))

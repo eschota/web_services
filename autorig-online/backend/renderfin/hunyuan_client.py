@@ -21,6 +21,14 @@ import httpx
 from . import config
 
 
+class TaskVanished(RuntimeError):
+    """The worker forgot a task it had accepted.
+
+    Distinct from a generation failure: the box restarted, so there is nothing
+    to report and nothing to fix - the work is resubmitted.
+    """
+
+
 class NoWorkerAvailable(RuntimeError):
     """The whole 3D fleet is unusable right now.
 
@@ -226,7 +234,11 @@ async def wait_for_model(
             # Tolerate a transient miss (worker restart window) before giving up.
             misses += 1
             if misses >= 5:
-                raise HunyuanClientError(f"task vanished on {worker['name']} (HTTP 404)")
+                # The box lost its task registry - it reboots without shutting
+                # down cleanly - so the work is simply gone. Nothing about the
+                # job caused this and nothing about the job can fix it: it is
+                # resubmitted rather than charged an attempt.
+                raise TaskVanished(f"task vanished on {worker['name']} (HTTP 404)")
         await asyncio.sleep(config.HUNYUAN_POLL_SECONDS)
     raise HunyuanClientError("generation timed out")
 
