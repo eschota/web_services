@@ -50,6 +50,8 @@ test('animation rail stays interactive on narrow screens and keeps accessibility
     assert.match(source, /const setAnimationRailCollapsed = \(collapsed\) => \{/);
     assert.match(source, /collapseBtn\.setAttribute\('aria-expanded',\s*String\(!collapsed\)\)/);
     assert.match(source, /aria-expanded="true"/);
+    assert.match(source, /#custom-animations-wrap\.is-collapsed ~ #viewer-camera-wrap\s*\{[\s\S]*left:\s*calc\(0\.75rem \+ 38px \+ 0\.4rem\)/);
+    assert.match(source, /@media \(max-width: 980px\)[\s\S]*#viewer-camera-wrap\s*\{[\s\S]*min\(170px,\s*calc\(100% - 1\.5rem\)\)/);
 });
 
 test('fullscreen keeps the viewer overlay and controls in the fullscreen tree', () => {
