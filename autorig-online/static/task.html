@@ -5789,7 +5789,11 @@
                 await this.loadPurchaseState();
                 
                 // Start polling
-                await this.fetchTask();
+                // The first task-state hydration must also run for a tab that was
+                // opened in the background. Viewer boot can otherwise cache a
+                // terminal response before the tab becomes visible, leaving the
+                // server-rendered "Processing 0/0" placeholders on screen.
+                await this.fetchTask({ allowHidden: true });
                 await this.resumePendingDownloadUnlockIfNeeded(params);
                 this.startTaskPolling();
                 
@@ -6368,8 +6372,36 @@
                 }, 4000);
             },
 
-            async fetchTask() {
-                if (!this.taskId || this.fetchInFlight || document.hidden) return;
+            async applyTaskState(taskState, options = {}) {
+                if (!taskState || typeof taskState !== 'object') return null;
+
+                this.task = taskState;
+                this.taskFetchedAt = Date.now();
+                window.dispatchEvent(new CustomEvent('taskDataUpdated', { detail: taskState }));
+                if (window.I18n) {
+                    try {
+                        I18n.applyTranslations();
+                    } catch (error) {
+                        console.warn('Task translations failed before state render:', error);
+                    }
+                }
+                await this.updateUI();
+                window.__taskPageBoot?.markTaskReady('Task data loaded');
+
+                if (taskState.status === 'done' || taskState.status === 'error') {
+                    if (options.refreshFinalLog) {
+                        try { await this.refreshProgressLog(); } catch (_) {}
+                    }
+                    // A terminal viewer-side refresh must not start or retain a
+                    // polling loop merely to repair the page header.
+                    this.stopPolling();
+                }
+                return taskState;
+            },
+
+            async fetchTask(options = {}) {
+                const allowHidden = options?.allowHidden === true;
+                if (!this.taskId || this.fetchInFlight || (document.hidden && !allowHidden)) return;
                 window.__taskPerf?.measureStart('fetchTask');
                 try {
                     this.fetchInFlight = true;
@@ -6383,24 +6415,12 @@
                         return;
                     }
                     
-                    this.task = await response.json();
-                    this.taskFetchedAt = Date.now();
-                    window.dispatchEvent(new CustomEvent('taskDataUpdated', { detail: this.task }));
-                    if (window.I18n) {
-                        I18n.applyTranslations();
-                    }
-                    await this.updateUI();
-                    window.__taskPageBoot?.markTaskReady('Task data loaded');
+                    const taskState = await response.json();
+                    await this.applyTaskState(taskState, { refreshFinalLog: true });
                     window.__taskPerf?.measureEnd('TaskPage', 'fetchTask', {
                         status: this.task?.status || 'unknown',
                         preparedGlbReady: !!this.task?.prepared_glb_ready
                     });
-                    
-                    // Stop periodic fetch + progress log when pipeline finished (final log fetch first)
-                    if (this.task.status === 'done' || this.task.status === 'error') {
-                        try { await this.refreshProgressLog(); } catch (_) {}
-                        this.stopPolling();
-                    }
                 } catch (error) {
                     console.error('Fetch error:', error);
                     window.__taskPerf?.log('TaskPage', 'fetchTask failed', { message: error?.message || String(error) });
@@ -18761,9 +18781,8 @@
 
                 const r = await fetch(`/api/task/${taskId}`, { cache: 'no-store' });
                 const t = await r.json();
-                if (window.TaskUI) {
-                    window.TaskUI.task = t;
-                    window.TaskUI.taskFetchedAt = Date.now();
+                if (window.TaskUI?.applyTaskState) {
+                    await window.TaskUI.applyTaskState(t, { refreshFinalLog: false });
                 }
                 return t;
             }

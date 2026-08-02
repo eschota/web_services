@@ -1,4 +1,5 @@
 import importlib.util
+import ast
 import os
 import tempfile
 import time
@@ -12,6 +13,25 @@ SPEC = importlib.util.spec_from_file_location("run_disk_pressure_cleanup", SCRIP
 cleanup = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(cleanup)
+
+
+class DiskPressureCleanupEntrypointContractTests(unittest.TestCase):
+    def test_timer_does_not_import_or_call_schema_initializer(self):
+        tree = ast.parse(SCRIPT_PATH.read_text(encoding="utf-8"))
+        database_imports = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "database"
+            for alias in node.names
+        }
+        called_names = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+
+        self.assertNotIn("init_db", database_imports)
+        self.assertNotIn("init_db", called_names)
 
 
 class _ScalarRows:

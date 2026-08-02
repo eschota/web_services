@@ -7,32 +7,49 @@ import json
 
 from sqlalchemy import (
     Column, String, Integer, BigInteger, Boolean, DateTime, Text, Float,
-    UniqueConstraint, ForeignKey, create_engine, event, Index, text,
+    UniqueConstraint, ForeignKey, event, Index, text,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from config import DATABASE_URL
 
 # =============================================================================
 # Engine and Session Setup
 # =============================================================================
-# For SQLite, we want to enable WAL mode for better concurrency
-@event.listens_for(create_engine(DATABASE_URL.replace("sqlite+aiosqlite", "sqlite")), "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    if "sqlite" in DATABASE_URL:
-        cursor = dbapi_connection.cursor()
+def set_sqlite_pragma(dbapi_connection, _connection_record):
+    """Apply the concurrency contract to every real SQLite connection."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
+    finally:
         cursor.close()
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-    poolclass=StaticPool if "sqlite" in DATABASE_URL else None,
-)
+
+def _create_database_engine(database_url: str):
+    parsed_url = make_url(database_url)
+    is_sqlite = parsed_url.get_backend_name() == "sqlite"
+    is_memory_sqlite = is_sqlite and (
+        parsed_url.database in (None, "", ":memory:")
+        or str(parsed_url.query.get("mode") or "").lower() == "memory"
+    )
+    engine_kwargs = {"echo": False}
+    if is_sqlite:
+        engine_kwargs.update(
+            connect_args={"check_same_thread": False, "timeout": 30.0},
+            poolclass=StaticPool if is_memory_sqlite else NullPool,
+        )
+    db_engine = create_async_engine(database_url, **engine_kwargs)
+    if is_sqlite:
+        event.listen(db_engine.sync_engine, "connect", set_sqlite_pragma)
+    return db_engine
+
+
+engine = _create_database_engine(DATABASE_URL)
 
 AsyncSessionLocal = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

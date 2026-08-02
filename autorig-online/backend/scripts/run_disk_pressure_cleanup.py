@@ -483,7 +483,7 @@ async def run() -> None:
         PERIODIC_TASK_CACHE_MAX_GB,
         VIDEO_CACHE_MIN_AGE_HOURS,
     )
-    from database import AsyncSessionLocal, init_db
+    from database import AsyncSessionLocal
     from main import (
         GLB_CACHE_DIR,
         TASK_CACHE_DIR,
@@ -497,8 +497,6 @@ async def run() -> None:
         buffer_gb=float(DISK_CLEANUP_TARGET_BUFFER_GB),
     )
     before = _disk_snapshot()
-
-    await init_db()
     async with AsyncSessionLocal() as db:
         # the prepass needs the DB: an entry may only be evicted once its
         # upstream worker URL is confirmed to still serve it
