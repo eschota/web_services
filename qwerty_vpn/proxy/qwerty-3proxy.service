@@ -1,0 +1,15 @@
+[Unit]
+Description=QwertyStock VPN 3proxy
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/run/3proxy.pid
+LimitNOFILE=1048576
+ExecStart=/usr/local/bin/3proxy /root/qwerty_vpn/proxy/3proxy.cfg
+ExecReload=/bin/kill -USR1 $MAINPID
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

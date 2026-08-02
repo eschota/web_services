@@ -62,9 +62,10 @@ cat > /etc/3proxy/3proxy.cfg << 'EOF'
 daemon
 pidfile /var/run/3proxy.pid
 
-log /var/log/3proxy/3proxy.log D
+log /var/log/3proxy/3proxy.log H
 logformat "L%t %N %p %E %C:%c %R:%r %O %I %h %T"
-rotate 7
+rotate 168
+archiver gz /usr/bin/gzip -1 %F
 
 timeouts 1 5 30 60 180 1800 15 60
 maxconn 1000
@@ -111,7 +112,7 @@ After=network.target
 Type=forking
 PIDFile=/var/run/3proxy.pid
 ExecStart=/usr/local/bin/3proxy /etc/3proxy/3proxy.cfg
-ExecReload=/bin/kill -HUP $MAINPID
+ExecReload=/bin/kill -USR1 $MAINPID
 Restart=always
 RestartSec=5
 
