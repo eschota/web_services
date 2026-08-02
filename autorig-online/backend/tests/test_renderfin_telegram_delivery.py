@@ -1,7 +1,9 @@
 import asyncio
 import json
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -11,8 +13,10 @@ from renderfin.models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_FAILED,
     CHARGEN_STAGE_DISCARDED,
+    CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_TURNTABLE,
     CharacterGenJob,
     SentMessage,
 )
@@ -111,11 +115,8 @@ class PendingDeliveryTests(unittest.TestCase):
         self.assertEqual(pending_delivery(failed), DELIVERY_FAILED)
 
     def test_in_progress_and_chatless_jobs_are_never_pending(self):
-        # an in-flight job owes its one progress line
-        self.assertEqual(pending_delivery(_job(stage=CHARGEN_STAGE_HUNYUAN)), DELIVERY_PROGRESS)
-        running = _job(stage=CHARGEN_STAGE_HUNYUAN)
-        running.delivered = {DELIVERY_PROGRESS: telegram_delivery._progress_marker(running)}
-        self.assertIsNone(pending_delivery(running))
+        # a running job owes nothing of its own: it is a line in the queue message
+        self.assertIsNone(pending_delivery(_job(stage=CHARGEN_STAGE_HUNYUAN)))
         self.assertIsNone(
             pending_delivery(
                 _job(stage=CHARGEN_STAGE_READY, video_url="https://x/v.mp4", telegram_chat_id=0)
@@ -368,65 +369,178 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ProgressLineTests(unittest.TestCase):
-    """A running job keeps exactly one line, rewritten as it moves."""
+class QueueDigestTests(unittest.TestCase):
+    """The chat shows the queue, not a message per job."""
 
-    def test_a_retry_rewrites_the_line_instead_of_sending_another(self):
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="autorig-digest-")
+        patcher = patch.object(
+            telegram_delivery, "DIGEST_STATE_PATH", Path(self._dir.name) / "digest.json"
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self._dir.cleanup)
+
+    def _service(self, jobs, handler):
+        manager = _FakeManager(jobs)
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return TelegramDeliveryService(manager, client=client), manager, client
+
+    def test_every_unfinished_job_is_one_line_of_one_message(self):
         async def scenario():
             sent = []
 
             def handler(request: httpx.Request) -> httpx.Response:
                 sent.append((request.url.path, dict(httpx.QueryParams(request.content.decode()))))
-                return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 90}})
 
-            job = _job(stage=CHARGEN_STAGE_HUNYUAN)
-            manager = _FakeManager([job])
-            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-            service = TelegramDeliveryService(manager, client=client)
+            jobs = [
+                _job(seq=1, stage=CHARGEN_STAGE_HUNYUAN),
+                _job(seq=2, stage=CHARGEN_STAGE_FLUX),
+                _job(seq=3, stage="submitted"),
+            ]
+            service, _, client = self._service(jobs, handler)
             with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
-                await service.tick()          # first line
-                await service.tick()          # unchanged: nothing to say
-                job.attempts = {CHARGEN_STAGE_HUNYUAN: 1}
-                job.retry_at = 9e9
-                job.last_error = "worker rebooted"
-                await service.tick()          # a retry: same message, new text
+                await service.digest_tick()
             await client.aclose()
 
-            methods = [path.rsplit("/", 1)[-1] for path, _ in sent]
-            self.assertEqual(methods, ["sendMessage", "editMessageText"])
-            self.assertIn("попытка 2", sent[1][1]["text"])
-            self.assertEqual(int(sent[1][1]["message_id"]), 7)
+            posts = [p for p, _ in sent if p.endswith("sendMessage")]
+            self.assertEqual(len(posts), 1, "one message for the whole queue")
+            text = dict(sent[0][1])["text"]
+            for seq in ("#1", "#2", "#3"):
+                self.assertIn(seq, text)
+            self.assertIn("В работе: 3", text)
 
         run(scenario())
 
-    def test_the_line_says_which_stage_is_running(self):
-        job = _job(stage=CHARGEN_STAGE_HUNYUAN)
-        self.assertIn("3D-модель", telegram_delivery.progress_text(job))
-
-    def test_a_finished_job_owes_no_line(self):
-        for stage in (CHARGEN_STAGE_DISCARDED, CHARGEN_STAGE_AWAITING_IMAGE):
-            job = _job(stage=stage)
-            self.assertNotEqual(pending_delivery(job), DELIVERY_PROGRESS)
-
-    def test_a_lost_progress_message_is_sent_again(self):
+    def test_the_message_is_rewritten_not_repeated(self):
         async def scenario():
             sent = []
 
             def handler(request: httpx.Request) -> httpx.Response:
                 sent.append(request.url.path.rsplit("/", 1)[-1])
-                if request.url.path.endswith("editMessageText"):
-                    return httpx.Response(400, json={"ok": False, "description": "message to edit not found"})
-                return httpx.Response(200, json={"ok": True, "result": {"message_id": 9}})
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 91}})
 
-            job = _job(stage=CHARGEN_STAGE_HUNYUAN, telegram_status_message_id=5)
+            job = _job(seq=1, stage=CHARGEN_STAGE_HUNYUAN)
+            service, _, client = self._service([job], handler)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.digest_tick()          # posted
+                await service.digest_tick()          # unchanged: silent
+                job.stage = CHARGEN_STAGE_TURNTABLE
+                await service.digest_tick()          # changed: edited in place
+            await client.aclose()
+
+            self.assertEqual(sent, ["sendMessage", "editMessageText"])
+
+        run(scenario())
+
+    def test_an_empty_queue_leaves_an_empty_chat(self):
+        async def scenario():
+            sent = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                sent.append(request.url.path.rsplit("/", 1)[-1])
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 92}})
+
+            job = _job(seq=1, stage=CHARGEN_STAGE_HUNYUAN)
+            service, _, client = self._service([job], handler)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.digest_tick()
+                job.stage = CHARGEN_STAGE_DISCARDED
+                await service.digest_tick()
+            await client.aclose()
+
+            self.assertEqual(sent, ["sendMessage", "deleteMessage"])
+
+        run(scenario())
+
+    def test_finished_work_is_not_listed(self):
+        for stage in (CHARGEN_STAGE_DISCARDED, CHARGEN_STAGE_FAILED):
+            self.assertNotIn(stage, telegram_delivery.UNFINISHED_STAGES)
+        for stage in (CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_AWAITING_IMAGE, "submitted"):
+            self.assertIn(stage, telegram_delivery.UNFINISHED_STAGES)
+
+    def test_group_chats_get_no_queue_message(self):
+        async def scenario():
+            sent = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                sent.append(request.url.path)
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 93}})
+
+            job = _job(seq=1, stage=CHARGEN_STAGE_HUNYUAN, telegram_chat_id=-100123)
+            service, _, client = self._service([job], handler)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.digest_tick()
+            await client.aclose()
+            self.assertEqual(sent, [])
+
+        run(scenario())
+
+
+class StartupSweepTests(unittest.TestCase):
+    """A restart empties the chat, then the queue is re-posted into it."""
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory(prefix="autorig-digest-")
+        patcher = patch.object(
+            telegram_delivery, "DIGEST_STATE_PATH", Path(self._dir.name) / "digest.json"
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self._dir.cleanup)
+
+    def test_everything_tracked_is_removed_whatever_its_kind_or_stage(self):
+        async def scenario():
+            deleted = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                deleted.append(int(dict(httpx.QueryParams(request.content.decode()))["message_id"]))
+                return httpx.Response(200, json={"ok": True, "result": True})
+
+            running = _job(seq=1, stage=CHARGEN_STAGE_HUNYUAN)
+            running.telegram_messages = [
+                # recorded before delivery kinds existed: no kind at all, which
+                # is exactly what the stale-card rule could never reach
+                SentMessage(id=10, at=time.time(), kind=""),
+                SentMessage(id=11, at=time.time(), kind=DELIVERY_PROGRESS),
+            ]
+            waiting = _job(seq=2, stage=CHARGEN_STAGE_AWAITING_IMAGE, image_url="https://x/a.png")
+            waiting.telegram_messages = [SentMessage(id=12, at=time.time(), kind=DELIVERY_IMAGE)]
+            waiting.delivered = {DELIVERY_IMAGE: "https://x/a.png"}
+
+            manager = _FakeManager([running, waiting])
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            service = TelegramDeliveryService(manager, client=client)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.sweep_private_chats()
+            await client.aclose()
+
+            self.assertEqual(sorted(deleted), [10, 11, 12])
+            self.assertEqual(running.telegram_messages, [])
+            # and the review must be owed again, or it is never re-posted
+            self.assertEqual(pending_delivery(waiting), DELIVERY_IMAGE)
+
+        run(scenario())
+
+    def test_a_group_chat_is_left_alone(self):
+        async def scenario():
+            deleted = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                deleted.append(request.url.path)
+                return httpx.Response(200, json={"ok": True, "result": True})
+
+            job = _job(seq=1, stage=CHARGEN_STAGE_HUNYUAN, telegram_chat_id=-100123)
+            job.telegram_messages = [SentMessage(id=10, at=time.time(), kind="")]
             manager = _FakeManager([job])
             client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
             service = TelegramDeliveryService(manager, client=client)
             with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
-                await service.tick()
+                await service.sweep_private_chats()
             await client.aclose()
-            self.assertEqual(sent, ["editMessageText", "sendMessage"])
-            self.assertEqual(job.telegram_status_message_id, 9)
+            self.assertEqual(deleted, [])
+            self.assertEqual(len(job.telegram_messages), 1)
 
         run(scenario())
 

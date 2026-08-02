@@ -2478,6 +2478,27 @@ async def _auto_submit_loop() -> None:
         await asyncio.sleep(20)
 
 
+async def _handle_queue_refresh_callback(update, context) -> None:
+    """The queue message's own button: wipe the chat and re-post what is live.
+
+    This is the startup sweep on demand. It deliberately does not restart the
+    service: the outcome the operator wants is a clean chat showing current
+    statuses, and a button that can take the pipeline down mid-generation is a
+    worse way to get it.
+    """
+    import render_prompting
+
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer("Чищу чат…")
+    try:
+        removed = await render_prompting.sweep_character_gen_chats()
+        print(f"[Telegram][Renderfin] queue refresh removed {removed} message(s)")
+    except Exception as exc:
+        await query.answer(f"Не вышло: {str(exc)[:150]}", show_alert=True)
+
+
 async def _handle_submit_callback(update, context) -> None:
     import render_prompting
     from telegram.constants import ParseMode
@@ -2638,6 +2659,7 @@ async def run_polling() -> None:
     app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=_APPROVE_PATTERN))
     app.add_handler(CallbackQueryHandler(_handle_regen_callback, pattern=r"^rfr:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_resume_callback, pattern=r"^rfe:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_queue_refresh_callback, pattern=r"^rfq:refresh$"))
     app.add_handler(CallbackQueryHandler(_handle_submit_callback, pattern=r"^rfs:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_delete_callback, pattern=r"^rfd:[0-9a-fA-F-]{8,64}$"))
 

@@ -119,6 +119,25 @@ def _prompt_preview(job: CharacterGenJob, limit: int = 300) -> str:
     return html.escape((job.prompt or "")[:limit])
 
 
+def _stats_line(stats: Optional[Dict[str, int]]) -> str:
+    """"24ч 7 | 🟢↗ +2" - the throughput half of the notification header."""
+    if not stats:
+        return ""
+    current = int(stats.get("current_24h") or 0)
+    delta = int(stats.get("delta_24h") or 0)
+    if delta >= 10:
+        trend = "🟢⇈"
+    elif delta > 0:
+        trend = "🟢↗"
+    elif delta <= -10:
+        trend = "🔴⇊"
+    elif delta < 0:
+        trend = "🔴↘"
+    else:
+        trend = "⚪️→"
+    return f"24ч {current} | {trend} {delta:+d}"
+
+
 def format_stats(job: CharacterGenJob, stats: Optional[Dict[str, int]]) -> str:
     """"#12 | 24ч 7 | 🟢↗ +2" - same shape as the site's task notifications."""
     seq = int(job.seq or 0)
@@ -245,6 +264,74 @@ async def deliver_model_review(
     return _message_ids(result)
 
 
+DIGEST_STATE_PATH = config.DB_DIR / "digest_messages.json"
+
+
+# The operator asked for a restart button "to clean up and refresh the
+# statuses". That is exactly what the startup sweep does, so the button runs
+# the sweep rather than bouncing a production service from a chat message -
+# same outcome, without handing a Telegram button the power to take the
+# pipeline down mid-generation.
+DIGEST_REFRESH_CALLBACK = "rfq:refresh"
+
+
+def _digest_markup() -> str:
+    return json.dumps({
+        "inline_keyboard": [[
+            {"text": "🔄 Очистить и обновить", "callback_data": DIGEST_REFRESH_CALLBACK}
+        ]]
+    })
+
+
+def _digest_state() -> Dict[str, Any]:
+    try:
+        return json.loads(DIGEST_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_digest_state(state: Dict[str, Any]) -> None:
+    try:
+        DIGEST_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = DIGEST_STATE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        tmp.replace(DIGEST_STATE_PATH)
+    except Exception as exc:
+        print(f"[Renderfin][Delivery] could not persist digest state: {exc}")
+
+
+def digest_text(jobs: List[CharacterGenJob], stats: Optional[Dict[str, int]] = None) -> str:
+    """The whole queue in one message: what is running and how far along.
+
+    One message per job was still a wall of text once thirty were in flight.
+    What the operator asked to see is the queue, so that is what this is.
+    """
+    if not jobs:
+        return ""
+    lines = [f"🧩 <b>В работе: {len(jobs)}</b>"]
+    if stats:
+        summary = f"✅ {int(stats.get('done') or 0)} готово"
+        if stats.get("done_24h"):
+            summary += f" · {int(stats['done_24h'])} за 24ч"
+        if stats.get("failed"):
+            summary += f" · ❌ {int(stats['failed'])}"
+        summary += f" · {_stats_line(stats)}"
+        lines.append(f"<code>{summary}</code>")
+    for job in sorted(jobs, key=lambda j: int(j.seq or 0)):
+        stage = _STAGE_LABELS.get(job.stage, job.stage)
+        row = f"#{int(job.seq or 0)} · {html.escape(stage)}"
+        attempt = int((job.attempts or {}).get(job.stage, 0))
+        if attempt:
+            row += f" · попытка {attempt + 1}"
+        if job.retry_at and job.last_error:
+            row += " · жду воркер" if "worker" in job.last_error.lower() else " · повтор"
+        subject = (job.prompt or "").split(",")[0].strip()[:48]
+        if subject:
+            row += f" — <i>{html.escape(subject)}</i>"
+        lines.append(row)
+    return "\n".join(lines)
+
+
 def progress_text(job: CharacterGenJob, stats: Optional[Dict[str, int]] = None) -> str:
     """What this job is doing right now, in one line plus its subject.
 
@@ -336,6 +423,17 @@ _STAGE_LABELS = {
 # Stages that keep a live progress line. `submitted` is included: the
 # conversion is the longest part of the job and silence there is what made the
 # chat impossible to read.
+# What the operator asked to see in the chat: work that is not finished.
+# awaiting_image_approval is included because it is waiting on THEM.
+UNFINISHED_STAGES = (
+    CHARGEN_STAGE_FLUX,
+    CHARGEN_STAGE_AWAITING_IMAGE,
+    CHARGEN_STAGE_HUNYUAN,
+    CHARGEN_STAGE_TURNTABLE,
+    CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_SUBMITTED,
+)
+
 PROGRESS_STAGES = (
     CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_HUNYUAN,
@@ -375,10 +473,6 @@ def pending_delivery(job: CharacterGenJob) -> Optional[str]:
     # A running job keeps ONE line in the chat that is rewritten as it moves.
     # Retries used to arrive as their own message each time, which is most of
     # what made the chat unreadable.
-    if job.stage in PROGRESS_STAGES:
-        marker = _progress_marker(job)
-        if delivered.get(DELIVERY_PROGRESS) != marker:
-            return DELIVERY_PROGRESS
     if job.stage == CHARGEN_STAGE_AWAITING_IMAGE and job.image_url:
         if delivered.get(DELIVERY_IMAGE) != _image_marker(job):
             return DELIVERY_IMAGE
@@ -410,6 +504,10 @@ class TelegramDeliveryService:
         if self._client is None:
             self._client = httpx.AsyncClient(follow_redirects=True)
         self._stopped.clear()
+        try:
+            await self.sweep_private_chats()
+        except Exception as exc:
+            print(f"[Renderfin][Delivery] startup sweep failed: {exc}")
         self._task = asyncio.create_task(self._loop())
         print("[Renderfin][Delivery] telegram delivery reconciler started")
 
@@ -430,6 +528,7 @@ class TelegramDeliveryService:
         while not self._stopped.is_set():
             for pass_name, run_pass in (
                 ("delivery", self.tick),
+                ("queue", self.digest_tick),
                 ("cleanup", self.cleanup_tick),
             ):
                 try:
@@ -452,7 +551,9 @@ class TelegramDeliveryService:
             job.id, keep, undeletable=undeletable
         )
 
-    async def cleanup_chat(self, job: CharacterGenJob, only: Optional[set] = None) -> int:
+    async def cleanup_chat(
+        self, job: CharacterGenJob, only: Optional[set] = None, sweep_all: bool = False
+    ) -> int:
         """Take this job's own messages back out of a private chat.
 
         `only` limits the sweep to certain delivery kinds, which is how a card
@@ -473,7 +574,7 @@ class TelegramDeliveryService:
         for message in list(job.telegram_messages):
             if message.id in refused:
                 continue
-            if only is not None and message.kind not in only:
+            if not sweep_all and only is not None and message.kind not in only:
                 continue
             if now - message.at > DELETE_WINDOW_SECONDS:
                 # past the window Telegram allows; stop asking
@@ -496,12 +597,103 @@ class TelegramDeliveryService:
                 )
         if deleted or dead:
             await self._forget(job, deleted, dead)
+        if sweep_all:
+            await self.manager.mark_delivered(job.id, DELIVERY_IMAGE, "")
+            await self.manager.mark_delivered(job.id, DELIVERY_MODEL, "")
+            await self.manager.mark_delivered(job.id, DELIVERY_FAILED, "")
         if deleted:
             print(
                 f"[Renderfin][Delivery] cleaned {len(deleted)} message(s) for "
                 f"job {job.id} ({job.stage})"
             )
         return len(deleted)
+
+    async def sweep_private_chats(self) -> int:
+        """Empty the private chats of everything this pipeline put there.
+
+        Run once at startup. The operator asked for a chat that shows the
+        current queue and nothing else, so a restart wipes what is there and
+        the next pass re-posts only the unfinished work. Cards recorded before
+        delivery kinds existed carry no kind at all, which is why a rule based
+        on kinds could never reach them and they accumulated.
+        """
+        if self._client is None:
+            return 0
+        removed = 0
+        for job in list(self.manager.all_jobs()):
+            if not job.telegram_messages or not is_private_chat(job.telegram_chat_id):
+                continue
+            try:
+                removed += await self.cleanup_chat(job, sweep_all=True)
+            except Exception as exc:
+                print(f"[Renderfin][Delivery] sweep failed for {job.id}: {exc}")
+
+        # drop the previous queue message too: it is re-posted below the clean slate
+        state = _digest_state()
+        for chat_id, entry in list(state.items()):
+            message_id = int((entry or {}).get("id") or 0)
+            if message_id:
+                await _delete_message(self._client, int(chat_id), message_id)
+        _save_digest_state({})
+        print(f"[Renderfin][Delivery] startup sweep removed {removed} message(s)")
+        return removed
+
+    async def digest_tick(self) -> None:
+        """Keep one message per chat listing the unfinished queue."""
+        if self._client is None:
+            return
+        by_chat: Dict[int, List[CharacterGenJob]] = {}
+        for job in self.manager.all_jobs():
+            if job.stage in UNFINISHED_STAGES and is_private_chat(job.telegram_chat_id):
+                by_chat.setdefault(int(job.telegram_chat_id), []).append(job)
+
+        stats = None
+        try:
+            stats = self.manager.stats()
+        except Exception:
+            stats = None
+
+        state = _digest_state()
+        for chat_id in set(list(by_chat) + [int(c) for c in state]):
+            jobs = by_chat.get(chat_id) or []
+            entry = state.get(str(chat_id)) or {}
+            message_id = int(entry.get("id") or 0)
+            text = digest_text(jobs, stats)
+
+            if not text:
+                # nothing left to show: an empty queue means an empty chat
+                if message_id:
+                    await _delete_message(self._client, chat_id, message_id)
+                    state.pop(str(chat_id), None)
+                continue
+            if entry.get("text") == text:
+                continue
+            if message_id:
+                try:
+                    await _call(self._client, "editMessageText", {
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "text": text,
+                        "parse_mode": "HTML",
+                        "reply_markup": _digest_markup(),
+                    })
+                    state[str(chat_id)] = {"id": message_id, "text": text}
+                    continue
+                except Exception as exc:
+                    if "not modified" in str(exc).lower():
+                        state[str(chat_id)] = {"id": message_id, "text": text}
+                        continue
+                    # the message is gone; fall through and post a new one
+            result = await _call(self._client, "sendMessage", {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "reply_markup": _digest_markup(),
+            })
+            ids = _message_ids(result)
+            if ids:
+                state[str(chat_id)] = {"id": ids[-1], "text": text}
+        _save_digest_state(state)
 
     async def cleanup_tick(self) -> None:
         """Sweep finished jobs and stale cards. Isolated so it cannot wedge delivery."""

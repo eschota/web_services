@@ -420,11 +420,18 @@ class CharacterGenManager:
             1 for j in self._jobs.values()
             if now - 2 * day <= j.created_at < now - day
         )
+        done = sum(1 for j in self._jobs.values() if j.stage == CHARGEN_STAGE_SUBMITTED)
         return {
             "total": len(self._jobs),
             "current_24h": current,
             "previous_24h": previous,
             "delta_24h": current - previous,
+            "done": done,
+            "done_24h": sum(
+                1 for j in self._jobs.values()
+                if j.stage == CHARGEN_STAGE_SUBMITTED and j.updated_at >= now - day
+            ),
+            "failed": sum(1 for j in self._jobs.values() if j.stage == CHARGEN_STAGE_FAILED),
         }
 
     def all_jobs(self) -> list:

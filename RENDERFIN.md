@@ -47,8 +47,9 @@ ssh autorig-vps "systemctl restart autorig-renderfin.service"
 push отклонён — кто-то запушил параллельно; `git rebase origin/main` и заново,
 merge-коммиты здесь не нужны.
 
-Локально десять тестовых модулей импортируют `main` и требуют `slowapi`,
-которого нет на рабочей машине. Их исключают — точная команда в
+Локально одиннадцать тестовых модулей импортируют `main` и требуют `slowapi`,
+которого нет на рабочей машине. Их исключают, и список растёт по мере того, как
+другие добавляют тесты, трогающие `main`. Точная команда в
 [`references/runbook.md`](.claude/skills/renderfin-pipeline/references/runbook.md).
 
 ---

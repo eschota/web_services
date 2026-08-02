@@ -201,6 +201,20 @@ async def api_character_gen_discard(request: Request, job_id: str) -> Dict[str, 
     return job.public_dict()
 
 
+@router.post("/api-character-gen/sweep-chats")
+async def api_character_gen_sweep_chats(request: Request) -> Dict[str, Any]:
+    """Empty the private chats and let the next pass re-post the live queue.
+
+    Same thing the service does at startup. Exposed so the operator can ask for
+    it from the chat without anyone restarting a service by hand.
+    """
+    delivery = getattr(request.app.state, "delivery", None)
+    if delivery is None:
+        raise HTTPException(status_code=503, detail="delivery service not running")
+    removed = await delivery.sweep_private_chats()
+    return {"removed": removed}
+
+
 @router.post("/api-character-gen/cleanup-for-task/{task_id}")
 async def api_character_gen_cleanup_for_task(request: Request, task_id: str) -> Dict[str, Any]:
     """Take a finished job's cards back out of the private chat.

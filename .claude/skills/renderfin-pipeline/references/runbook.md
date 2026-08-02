@@ -23,7 +23,10 @@ Two of its checks exist because their absence hid a real outage:
 
 ## Tests
 
-Locally, ten modules import `main` and need `slowapi`, which is not installed:
+Locally, eleven modules import `main` and need `slowapi`, which is not
+installed. The list grows as other people add tests that touch `main`; when a
+new collection error says `No module named 'slowapi'`, add that module here
+rather than treating it as a failure:
 
 ```bash
 cd autorig-online/backend && python -m pytest tests/ -q \
@@ -36,7 +39,7 @@ cd autorig-online/backend && python -m pytest tests/ -q \
   --ignore=tests/test_viewer_artifact_hardening.py \
   --ignore=tests/test_viewer_artifact_reconciliation.py \
   --ignore=tests/test_viewer_artifact_review_regressions.py \
-  --ignore=tests/test_custom_animation_billing.py
+  --ignore=tests/test_custom_animation_billing.py   --ignore=tests/test_legacy_animation_glb_fallback.py
 ```
 
 On production, everything runs, but `PYTHONPATH` is required:

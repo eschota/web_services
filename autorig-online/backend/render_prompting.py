@@ -543,6 +543,15 @@ async def mark_character_gen_submitted(job_id: str, task_id: str = "") -> None:
         print(f"[RenderPrompting] mark-submitted failed: {exc}")
 
 
+async def sweep_character_gen_chats() -> int:
+    """Empty the private chats; the next delivery pass re-posts the live queue."""
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/sweep-chats")
+    if resp.status_code != 200:
+        raise RuntimeError(f"sweep failed: HTTP {resp.status_code} {resp.text[:200]}")
+    return int(resp.json().get("removed") or 0)
+
+
 async def cleanup_character_gen_chat(task_id: str) -> int:
     """Ask renderfin to remove a finished job's cards from the private chat.
 
