@@ -43,6 +43,21 @@ test('mode controls are bottom-centered and animal-only restrictions stay visibl
     assert.match(source, /ragdollModeBtn\?\.addEventListener\('click'/);
 });
 
+test('animation rail stays interactive on narrow screens and keeps accessibility state synchronized', () => {
+    assert.doesNotMatch(source, /#model-viewer-wrap,\s*#custom-animations-wrap,\s*#blueprint-viewer-card/);
+    assert.doesNotMatch(source, /#custom-animations-wrap,\s*#blueprint-viewer-card\s*\{\s*position:\s*static\s*!important/);
+    assert.match(source, /\.animation-rail\s*\{[\s\S]*position:\s*absolute;[\s\S]*z-index:\s*35;/);
+    assert.match(source, /const setAnimationRailCollapsed = \(collapsed\) => \{/);
+    assert.match(source, /collapseBtn\.setAttribute\('aria-expanded',\s*String\(!collapsed\)\)/);
+    assert.match(source, /aria-expanded="true"/);
+});
+
+test('fullscreen keeps the viewer overlay and controls in the fullscreen tree', () => {
+    assert.match(source, /const targetElement = document\.getElementById\('model-viewer-container'\) \|\| host;/);
+    assert.doesNotMatch(source, /const targetElement = host;/);
+    assert.match(source, /#model-viewer-container:fullscreen,[\s\S]*height:\s*100vh\s*!important;/);
+});
+
 test('perspective uses its actual split rect and auxiliary views use projected axes', () => {
     assert.match(source, /const perspectiveRect = splitViewportController\?\.getRect\?\.\('perspective'\)/);
     assert.match(source, /viewerPerspectiveFitDistance\(\s*boundsInfo\.size,\s*aspect,\s*viewCamera\.fov,\s*viewId,\s*1\.9/s);

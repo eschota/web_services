@@ -1678,6 +1678,21 @@
             min-height: 0;
         }
 
+        #model-viewer-container:fullscreen,
+        #model-viewer-container:-webkit-full-screen {
+            width: 100vw !important;
+            height: 100vh !important;
+            aspect-ratio: auto !important;
+            background: #05070d;
+        }
+
+        #model-viewer-container:fullscreen #model-viewer,
+        #model-viewer-container:-webkit-full-screen #model-viewer {
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 0 !important;
+        }
+
         #model-viewer {
             position: relative;
             z-index: 1;
@@ -3492,7 +3507,6 @@
             }
 
             #model-viewer-wrap,
-            #custom-animations-wrap,
             #blueprint-viewer-card {
                 width: 100%;
                 max-width: 100%;
@@ -3500,7 +3514,6 @@
                 box-sizing: border-box;
             }
 
-              #custom-animations-wrap,
               #blueprint-viewer-card {
                   position: static !important;
                   margin-top: 0 !important;
@@ -4046,7 +4059,7 @@
                             <div id="viewer-split-overlay" aria-label="Three camera viewport layout"></div>
                             <div id="custom-animations-wrap" class="animation-rail hidden boot-deferred-section boot-reveal-surface" aria-label="Animations">
                                 <div class="animation-rail-head">
-                                    <button id="animation-rail-collapse" class="animation-rail-icon" type="button" title="Collapse animations" aria-label="Collapse animations">&#9776;</button>
+                                    <button id="animation-rail-collapse" class="animation-rail-icon" type="button" title="Collapse animations" aria-label="Collapse animations" aria-expanded="true">&#9776;</button>
                                     <select id="custom-anim-type" class="animation-rail-type" title="Animation category" aria-label="Animation category">
                                         <option value="walk" selected>Walk</option>
                                     </select>
@@ -7944,11 +7957,18 @@
                 }
                 if (rail && collapseBtn && !collapseBtn.__wired) {
                     collapseBtn.__wired = true;
-                    if (window.matchMedia('(max-width: 700px)').matches) rail.classList.add('is-collapsed');
-                    collapseBtn.addEventListener('click', () => {
-                        const collapsed = rail.classList.toggle('is-collapsed');
+                    const setAnimationRailCollapsed = (collapsed) => {
+                        rail.classList.toggle('is-collapsed', collapsed);
                         collapseBtn.title = collapsed ? 'Open animations' : 'Collapse animations';
                         collapseBtn.setAttribute('aria-label', collapseBtn.title);
+                        collapseBtn.setAttribute('aria-expanded', String(!collapsed));
+                    };
+                    setAnimationRailCollapsed(
+                        window.matchMedia('(max-width: 700px)').matches
+                        || rail.classList.contains('is-collapsed')
+                    );
+                    collapseBtn.addEventListener('click', () => {
+                        setAnimationRailCollapsed(!rail.classList.contains('is-collapsed'));
                     });
                 }
             },
@@ -14133,19 +14153,19 @@
                 normalCanvasSize.height = host.clientHeight;
                 window.taskDbg('[Viewer] Saved normal size:', normalCanvasSize);
 
-                // Enter fullscreen on the viewer host element (not the whole page)
-                const targetElement = host;
+                // Keep the overlay controls inside the Fullscreen API top layer.
+                const targetElement = document.getElementById('model-viewer-container') || host;
                 let fullscreenPromise;
                 
                 if (targetElement.requestFullscreen) {
                     fullscreenPromise = targetElement.requestFullscreen();
-                    window.taskDbg('[Viewer] Called host.requestFullscreen()');
+                    window.taskDbg('[Viewer] Called viewer container requestFullscreen()');
                 } else if (targetElement.webkitRequestFullscreen) {
                     fullscreenPromise = targetElement.webkitRequestFullscreen();
-                    window.taskDbg('[Viewer] Called host.webkitRequestFullscreen()');
+                    window.taskDbg('[Viewer] Called viewer container webkitRequestFullscreen()');
                 } else if (targetElement.msRequestFullscreen) {
                     fullscreenPromise = targetElement.msRequestFullscreen();
-                    window.taskDbg('[Viewer] Called host.msRequestFullscreen()');
+                    window.taskDbg('[Viewer] Called viewer container msRequestFullscreen()');
                 } else {
                     console.error('[Viewer] No fullscreen API available');
                     return;
