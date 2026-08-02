@@ -327,7 +327,7 @@ class CharacterGenManager:
         await self._persist(job)
         return job
 
-    async def record_messages(self, job_id: str, message_ids, at: float = 0.0):
+    async def record_messages(self, job_id: str, message_ids, at: float = 0.0, kind: str = ""):
         """Remember messages this job put in the chat, so it can remove them."""
         job = self._jobs.get(job_id)
         if job is None:
@@ -335,10 +335,19 @@ class CharacterGenManager:
         stamp = at or time.time()
         known = {m.id for m in job.telegram_messages}
         job.telegram_messages = list(job.telegram_messages) + [
-            SentMessage(id=int(mid), at=stamp)
+            SentMessage(id=int(mid), at=stamp, kind=kind)
             for mid in message_ids
             if int(mid or 0) and int(mid) not in known
         ]
+        await self._persist(job)
+        return job
+
+    async def set_status_message(self, job_id: str, message_id: int):
+        """Remember the job's progress line so later stages can edit it."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        job.telegram_status_message_id = int(message_id or 0)
         await self._persist(job)
         return job
 
@@ -401,7 +410,12 @@ class CharacterGenManager:
 
     def active_jobs(self) -> list:
         """Jobs a client may still be waiting on (used to re-attach watchers)."""
-        watchable = set(_ACTIVE_STAGES) | {CHARGEN_STAGE_AWAITING_IMAGE}
+        # READY is included on purpose: the bot auto-submits those, so a job
+        # sitting at ready is unfinished work someone has to pick up.
+        watchable = set(_ACTIVE_STAGES) | {
+            CHARGEN_STAGE_AWAITING_IMAGE,
+            CHARGEN_STAGE_READY,
+        }
         return [j for j in self._jobs.values() if j.stage in watchable]
 
     async def resume(self, job_id: str):

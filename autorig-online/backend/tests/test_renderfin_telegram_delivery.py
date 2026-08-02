@@ -20,6 +20,7 @@ from renderfin.telegram_delivery import (
     DELIVERY_FAILED,
     DELIVERY_IMAGE,
     DELIVERY_MODEL,
+    DELIVERY_PROGRESS,
     TelegramDeliveryService,
     pending_delivery,
 )
@@ -42,16 +43,20 @@ class _FakeManager:
     def stats(self):
         return {"total": len(self.jobs), "current_24h": 7, "previous_24h": 5, "delta_24h": 2}
 
-    async def record_messages(self, job_id, message_ids, at=0.0):
+    async def record_messages(self, job_id, message_ids, at=0.0, kind=""):
         job = self.jobs[job_id]
         stamp = at or time.time()
         known = {m.id for m in job.telegram_messages}
         job.telegram_messages = list(job.telegram_messages) + [
-            SentMessage(id=int(m), at=stamp)
+            SentMessage(id=int(m), at=stamp, kind=kind)
             for m in message_ids
             if int(m or 0) and int(m) not in known
         ]
         return job
+
+    async def set_status_message(self, job_id, message_id):
+        self.jobs[job_id].telegram_status_message_id = int(message_id or 0)
+        return self.jobs[job_id]
 
     async def set_telegram_messages(self, job_id, messages, *, undeletable=None):
         job = self.jobs[job_id]
@@ -106,7 +111,11 @@ class PendingDeliveryTests(unittest.TestCase):
         self.assertEqual(pending_delivery(failed), DELIVERY_FAILED)
 
     def test_in_progress_and_chatless_jobs_are_never_pending(self):
-        self.assertIsNone(pending_delivery(_job(stage=CHARGEN_STAGE_HUNYUAN)))
+        # an in-flight job owes its one progress line
+        self.assertEqual(pending_delivery(_job(stage=CHARGEN_STAGE_HUNYUAN)), DELIVERY_PROGRESS)
+        running = _job(stage=CHARGEN_STAGE_HUNYUAN)
+        running.delivered = {DELIVERY_PROGRESS: telegram_delivery._progress_marker(running)}
+        self.assertIsNone(pending_delivery(running))
         self.assertIsNone(
             pending_delivery(
                 _job(stage=CHARGEN_STAGE_READY, video_url="https://x/v.mp4", telegram_chat_id=0)
@@ -141,15 +150,14 @@ class DeliveryTickTests(unittest.TestCase):
 
             paths = [p for p, _ in sent]
             self.assertIn("/botT/sendPhoto", paths)
-            # the interim status message is cleaned up
-            self.assertIn("/botT/deleteMessage", paths)
             payload = dict(sent[0][1])
             self.assertEqual(payload["photo"], "https://x/a.png")
             markup = json.loads(payload["reply_markup"])
             data = [b["callback_data"] for row in markup["inline_keyboard"] for b in row]
             self.assertEqual(data, [f"rfa:{job.id}:a", f"rfr:{job.id}", f"rfd:{job.id}"])
+            # the interim progress line survives: it is the job's one line
+            self.assertNotIn("/botT/deleteMessage", paths[1:])
             self.assertEqual(manager.marks[0][1], DELIVERY_IMAGE)
-            self.assertEqual(job.telegram_status_message_id, 0)
 
         run(scenario())
 
@@ -210,7 +218,7 @@ class DeliveryTickTests(unittest.TestCase):
         job.delivered[DELIVERY_IMAGE] = "https://x/a.png|https://x/b.png"
         self.assertIsNone(pending_delivery(job))
 
-    def test_model_video_sent_with_submit_buttons(self):
+    def test_model_video_carries_no_buttons(self):
         async def scenario():
             sent = []
 
@@ -231,14 +239,13 @@ class DeliveryTickTests(unittest.TestCase):
             self.assertEqual(sent[0][0], "/botT/sendVideo")
             payload = dict(sent[0][1])
             self.assertEqual(payload["video"], "https://x/v.mp4")
-            markup = json.loads(payload["reply_markup"])
-            data = [b["callback_data"] for row in markup["inline_keyboard"] for b in row]
-            self.assertEqual(data, [f"rfs:{job.id}", f"rfd:{job.id}"])
+            # choosing a variant is the only decision: nothing to press here
+            self.assertNotIn("reply_markup", payload)
             self.assertEqual(job.delivered[DELIVERY_MODEL], "https://x/v.mp4")
 
         run(scenario())
 
-    def test_failure_sent_with_recovery_buttons(self):
+    def test_failure_carries_no_buttons(self):
         async def scenario():
             sent = []
 
@@ -253,9 +260,11 @@ class DeliveryTickTests(unittest.TestCase):
             await client.aclose()
 
             self.assertEqual(sent[0][0], "/botT/sendMessage")
-            markup = json.loads(dict(sent[0][1])["reply_markup"])
-            data = [b["callback_data"] for row in markup["inline_keyboard"] for b in row]
-            self.assertEqual(data, [f"rfe:{job.id}", f"rfr:{job.id}", f"rfd:{job.id}"])
+            payload = dict(sent[0][1])
+            # nothing to press: the pipeline retries by itself, and a dead
+            # button in a finished chat is exactly the clutter being removed
+            self.assertNotIn("reply_markup", payload)
+            self.assertIn("timed out", payload["text"])
 
         run(scenario())
 
@@ -359,53 +368,114 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class RetryNoticeTests(unittest.TestCase):
-    def test_scheduled_retry_is_reported_once_per_attempt(self):
-        """A long silent wait is indistinguishable from a hang: each automatic
-        retry tells the owner, but only once per attempt."""
+class ProgressLineTests(unittest.TestCase):
+    """A running job keeps exactly one line, rewritten as it moves."""
 
+    def test_a_retry_rewrites_the_line_instead_of_sending_another(self):
         async def scenario():
             sent = []
 
             def handler(request: httpx.Request) -> httpx.Response:
-                sent.append(dict(httpx.QueryParams(request.content.decode())))
+                sent.append((request.url.path, dict(httpx.QueryParams(request.content.decode()))))
                 return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
 
-            from renderfin.models import CHARGEN_STAGE_HUNYUAN
-            from renderfin.telegram_delivery import DELIVERY_RETRY
+            job = _job(stage=CHARGEN_STAGE_HUNYUAN)
+            manager = _FakeManager([job])
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            service = TelegramDeliveryService(manager, client=client)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.tick()          # first line
+                await service.tick()          # unchanged: nothing to say
+                job.attempts = {CHARGEN_STAGE_HUNYUAN: 1}
+                job.retry_at = 9e9
+                job.last_error = "worker rebooted"
+                await service.tick()          # a retry: same message, new text
+            await client.aclose()
 
-            job = _job(
-                stage=CHARGEN_STAGE_HUNYUAN,
-                retry_at=9e9,
-                last_error="worker rebooted",
-                attempts={CHARGEN_STAGE_HUNYUAN: 1},
-            )
-            self.assertEqual(pending_delivery(job), DELIVERY_RETRY)
+            methods = [path.rsplit("/", 1)[-1] for path, _ in sent]
+            self.assertEqual(methods, ["sendMessage", "editMessageText"])
+            self.assertIn("попытка 2", sent[1][1]["text"])
+            self.assertEqual(int(sent[1][1]["message_id"]), 7)
 
+        run(scenario())
+
+    def test_the_line_says_which_stage_is_running(self):
+        job = _job(stage=CHARGEN_STAGE_HUNYUAN)
+        self.assertIn("3D-модель", telegram_delivery.progress_text(job))
+
+    def test_a_finished_job_owes_no_line(self):
+        for stage in (CHARGEN_STAGE_DISCARDED, CHARGEN_STAGE_AWAITING_IMAGE):
+            job = _job(stage=stage)
+            self.assertNotEqual(pending_delivery(job), DELIVERY_PROGRESS)
+
+    def test_a_lost_progress_message_is_sent_again(self):
+        async def scenario():
+            sent = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                sent.append(request.url.path.rsplit("/", 1)[-1])
+                if request.url.path.endswith("editMessageText"):
+                    return httpx.Response(400, json={"ok": False, "description": "message to edit not found"})
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 9}})
+
+            job = _job(stage=CHARGEN_STAGE_HUNYUAN, telegram_status_message_id=5)
             manager = _FakeManager([job])
             client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
             service = TelegramDeliveryService(manager, client=client)
             with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
                 await service.tick()
-                await service.tick()   # same attempt: no second message
             await client.aclose()
-
-            self.assertEqual(len(sent), 1)
-            self.assertIn("Повторяю", sent[0]["text"])
-            self.assertIn("3D-модель", sent[0]["text"])
-            self.assertIsNone(pending_delivery(job))
-
-            # a further attempt is reported again
-            job.attempts = {CHARGEN_STAGE_HUNYUAN: 2}
-            self.assertEqual(pending_delivery(job), DELIVERY_RETRY)
+            self.assertEqual(sent, ["editMessageText", "sendMessage"])
+            self.assertEqual(job.telegram_status_message_id, 9)
 
         run(scenario())
 
-    def test_no_retry_notice_without_a_scheduled_retry(self):
-        from renderfin.models import CHARGEN_STAGE_HUNYUAN
 
-        job = _job(stage=CHARGEN_STAGE_HUNYUAN, last_error="", retry_at=0)
-        self.assertIsNone(pending_delivery(job))
+class StaleCardTests(unittest.TestCase):
+    """A card whose moment has passed does not stay in the chat."""
+
+    def test_the_variant_choice_goes_once_a_variant_is_chosen(self):
+        job = _job(stage=CHARGEN_STAGE_HUNYUAN)
+        self.assertIn(DELIVERY_IMAGE, telegram_delivery.stale_kinds(job))
+        waiting = _job(stage=CHARGEN_STAGE_AWAITING_IMAGE)
+        self.assertNotIn(DELIVERY_IMAGE, telegram_delivery.stale_kinds(waiting))
+
+    def test_a_failure_notice_goes_when_the_stage_runs_again(self):
+        job = _job(stage=CHARGEN_STAGE_HUNYUAN)
+        self.assertIn(DELIVERY_FAILED, telegram_delivery.stale_kinds(job))
+        failed = _job(stage=CHARGEN_STAGE_FAILED, error="boom")
+        self.assertNotIn(DELIVERY_FAILED, telegram_delivery.stale_kinds(failed))
+
+    def test_the_progress_line_is_never_stale_while_running(self):
+        for stage in (CHARGEN_STAGE_HUNYUAN, CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_FAILED):
+            self.assertNotIn(DELIVERY_PROGRESS, telegram_delivery.stale_kinds(_job(stage=stage)))
+
+    def test_only_the_stale_kind_is_deleted(self):
+        async def scenario():
+            sent = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                sent.append(dict(httpx.QueryParams(request.content.decode())))
+                return httpx.Response(200, json={"ok": True, "result": True})
+
+            job = _job(stage=CHARGEN_STAGE_HUNYUAN)
+            job.telegram_messages = [
+                SentMessage(id=1, at=time.time(), kind=DELIVERY_PROGRESS),
+                SentMessage(id=2, at=time.time(), kind=DELIVERY_IMAGE),
+                SentMessage(id=3, at=time.time(), kind=DELIVERY_IMAGE),
+            ]
+            job.delivered = {DELIVERY_PROGRESS: telegram_delivery._progress_marker(job)}
+            manager = _FakeManager([job])
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            service = TelegramDeliveryService(manager, client=client)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.cleanup_tick()
+            await client.aclose()
+
+            self.assertEqual([int(p["message_id"]) for p in sent], [2, 3])
+            self.assertEqual([m.id for m in job.telegram_messages], [1])
+
+        run(scenario())
 
 
 class RunningNumberTests(unittest.TestCase):

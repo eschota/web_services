@@ -30,7 +30,11 @@ from .models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
+    CHARGEN_STAGE_FLUX,
+    CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_SUBMITTED,
+    CHARGEN_STAGE_TURNTABLE,
     CharacterGenJob,
     SentMessage,
 )
@@ -39,6 +43,7 @@ DELIVERY_IMAGE = "image"
 DELIVERY_MODEL = "model"
 DELIVERY_FAILED = "failed"
 DELIVERY_RETRY = "retry"
+DELIVERY_PROGRESS = "progress"
 
 _MAX_ATTEMPTS = 6
 
@@ -94,27 +99,9 @@ def _image_markup(job_id: str, two_variants: bool = False) -> str:
     return json.dumps({"inline_keyboard": rows})
 
 
-def _model_markup(job_id: str) -> str:
-    return json.dumps({
-        "inline_keyboard": [
-            [
-                {"text": "✅ Сабмитить", "callback_data": f"rfs:{job_id}"},
-                {"text": "🗑 Удалить", "callback_data": f"rfd:{job_id}"},
-            ]
-        ]
-    })
-
-
-def _retry_markup(job_id: str) -> str:
-    return json.dumps({
-        "inline_keyboard": [
-            [
-                {"text": "♻️ Повторить 3D", "callback_data": f"rfe:{job_id}"},
-                {"text": "🔁 Перегенерировать", "callback_data": f"rfr:{job_id}"},
-            ],
-            [{"text": "🗑 Отмена", "callback_data": f"rfd:{job_id}"}],
-        ]
-    })
+# No keyboard after the variant is chosen. Picking a style is the one decision
+# asked of the operator; everything downstream runs to completion on its own,
+# and a dead button in a finished chat is exactly the clutter being removed.
 
 
 def _image_marker(job: CharacterGenJob) -> str:
@@ -254,7 +241,53 @@ async def deliver_model_review(
         "caption": caption,
         "parse_mode": "HTML",
         "supports_streaming": "true",
-        "reply_markup": _model_markup(job.id),
+    })
+    return _message_ids(result)
+
+
+def progress_text(job: CharacterGenJob, stats: Optional[Dict[str, int]] = None) -> str:
+    """What this job is doing right now, in one line plus its subject.
+
+    Every stage change rewrites this same message instead of sending a new
+    one, so a job occupies exactly one line of the chat from start to finish.
+    """
+    stage = _STAGE_LABELS.get(job.stage, job.stage)
+    attempt = int((job.attempts or {}).get(job.stage, 0))
+    line = f"⏳ <b>{html.escape(stage)}</b>"
+    if attempt:
+        line += f" · попытка {attempt + 1}"
+    if job.retry_at and job.last_error:
+        line += " · жду воркер" if "worker" in job.last_error.lower() else " · повтор"
+    return (
+        f"{line}\n"
+        f"<code>{format_stats(job, stats)}</code>\n"
+        f"<i>{_prompt_preview(job, 200)}</i>"
+    )
+
+
+async def deliver_progress(
+    client: httpx.AsyncClient, job: CharacterGenJob, stats: Optional[Dict[str, int]] = None
+) -> List[int]:
+    """Create or update this job's single progress message."""
+    text = progress_text(job, stats)
+    if job.telegram_status_message_id:
+        try:
+            await _call(client, "editMessageText", {
+                "chat_id": job.telegram_chat_id,
+                "message_id": job.telegram_status_message_id,
+                "text": text,
+                "parse_mode": "HTML",
+            })
+            return []
+        except Exception as exc:
+            # "message is not modified" is normal and means the state matched
+            if "not modified" in str(exc).lower():
+                return []
+            # the message is gone: fall through and make a new one
+    result = await _call(client, "sendMessage", {
+        "chat_id": job.telegram_chat_id,
+        "text": text,
+        "parse_mode": "HTML",
     })
     return _message_ids(result)
 
@@ -288,7 +321,6 @@ async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Li
         "chat_id": job.telegram_chat_id,
         "text": text,
         "parse_mode": "HTML",
-        "reply_markup": _retry_markup(job.id),
     })
     return _message_ids(result)
 
@@ -297,7 +329,42 @@ _STAGE_LABELS = {
     "flux_render": "рендер T-позы",
     "hunyuan": "3D-модель",
     "turntable": "видео-облёт",
+    "submitted": "полный пайплайн: ретопология, риг, анимации",
 }
+
+
+# Stages that keep a live progress line. `submitted` is included: the
+# conversion is the longest part of the job and silence there is what made the
+# chat impossible to read.
+PROGRESS_STAGES = (
+    CHARGEN_STAGE_FLUX,
+    CHARGEN_STAGE_HUNYUAN,
+    CHARGEN_STAGE_TURNTABLE,
+    CHARGEN_STAGE_SUBMITTED,
+)
+
+
+def stale_kinds(job: CharacterGenJob) -> set:
+    """Delivery kinds whose cards no longer describe this job.
+
+    The two renders and their buttons are meaningless once a variant has been
+    picked; a failure notice is meaningless once the stage is running again.
+    Removing them is what keeps the chat to one line per live job.
+    """
+    stale = set()
+    if job.stage != CHARGEN_STAGE_AWAITING_IMAGE:
+        stale.add(DELIVERY_IMAGE)
+    if job.stage != CHARGEN_STAGE_FAILED:
+        stale.add(DELIVERY_FAILED)
+    return stale
+
+
+def _progress_marker(job: CharacterGenJob) -> str:
+    """Identity of the progress text, so it is rewritten only when it changed."""
+    return (
+        f"{job.stage}:{(job.attempts or {}).get(job.stage, 0)}:"
+        f"{1 if job.retry_at else 0}"
+    )
 
 
 def pending_delivery(job: CharacterGenJob) -> Optional[str]:
@@ -305,11 +372,13 @@ def pending_delivery(job: CharacterGenJob) -> Optional[str]:
     if not job.telegram_chat_id:
         return None
     delivered = job.delivered or {}
-    # an automatic retry is progress worth reporting, not silence
-    if job.retry_at and job.last_error:
-        marker = f"{job.stage}:{(job.attempts or {}).get(job.stage, 0)}"
-        if delivered.get(DELIVERY_RETRY) != marker:
-            return DELIVERY_RETRY
+    # A running job keeps ONE line in the chat that is rewritten as it moves.
+    # Retries used to arrive as their own message each time, which is most of
+    # what made the chat unreadable.
+    if job.stage in PROGRESS_STAGES:
+        marker = _progress_marker(job)
+        if delivered.get(DELIVERY_PROGRESS) != marker:
+            return DELIVERY_PROGRESS
     if job.stage == CHARGEN_STAGE_AWAITING_IMAGE and job.image_url:
         if delivered.get(DELIVERY_IMAGE) != _image_marker(job):
             return DELIVERY_IMAGE
@@ -383,9 +452,11 @@ class TelegramDeliveryService:
             job.id, keep, undeletable=undeletable
         )
 
-    async def cleanup_chat(self, job: CharacterGenJob) -> int:
+    async def cleanup_chat(self, job: CharacterGenJob, only: Optional[set] = None) -> int:
         """Take this job's own messages back out of a private chat.
 
+        `only` limits the sweep to certain delivery kinds, which is how a card
+        whose moment has passed is removed while the job is still running.
         Returns how many were removed. Never raises: cleanup is hygiene, and a
         chat that refuses a delete must not stop anything else from happening.
         """
@@ -393,12 +464,16 @@ class TelegramDeliveryService:
             return 0
         if not is_private_chat(job.telegram_chat_id):
             return 0
+        if only is not None and not only:
+            return 0
         now = time.time()
         refused = set(job.telegram_undeletable or [])
         deleted: List[int] = []
         dead: List[int] = []
         for message in list(job.telegram_messages):
             if message.id in refused:
+                continue
+            if only is not None and message.kind not in only:
                 continue
             if now - message.at > DELETE_WINDOW_SECONDS:
                 # past the window Telegram allows; stop asking
@@ -429,14 +504,17 @@ class TelegramDeliveryService:
         return len(deleted)
 
     async def cleanup_tick(self) -> None:
-        """Sweep finished jobs. Isolated from delivery so it cannot wedge it."""
+        """Sweep finished jobs and stale cards. Isolated so it cannot wedge delivery."""
         if self._client is None:
             return
         for job in list(self.manager.all_jobs()):
-            if job.stage not in CLEANABLE_STAGES or not job.telegram_messages:
+            if not job.telegram_messages:
                 continue
             try:
-                await self.cleanup_chat(job)
+                if job.stage in CLEANABLE_STAGES:
+                    await self.cleanup_chat(job)
+                else:
+                    await self.cleanup_chat(job, only=stale_kinds(job))
             except Exception as exc:
                 print(f"[Renderfin][Delivery] cleanup failed for {job.id}: {exc}")
 
@@ -471,12 +549,20 @@ class TelegramDeliveryService:
 
     async def _deliver(self, job: CharacterGenJob, kind: str) -> None:
         assert self._client is not None
-        if kind == DELIVERY_RETRY:
-            sent = await deliver_retry_notice(self._client, job)
-            await self.manager.record_messages(job.id, sent)
-            marker = f"{job.stage}:{(job.attempts or {}).get(job.stage, 0)}"
-            await self.manager.mark_delivered(job.id, kind, marker, message_id=0)
-            print(f"[Renderfin][Delivery] retry notice sent for job {job.id}")
+        if kind == DELIVERY_PROGRESS:
+            stats = None
+            try:
+                stats = self.manager.stats()
+            except Exception:
+                stats = None
+            sent = await deliver_progress(self._client, job, stats)
+            if sent:
+                # a brand new progress line; an edit returns nothing
+                await self.manager.record_messages(job.id, sent, kind=DELIVERY_PROGRESS)
+                await self.manager.set_status_message(job.id, sent[-1])
+            await self.manager.mark_delivered(
+                job.id, kind, _progress_marker(job), message_id=0
+            )
             return
         stats = None
         try:
@@ -494,17 +580,13 @@ class TelegramDeliveryService:
             marker = job.error
         # record before anything else can fail: an id we sent but did not write
         # down is a card that can never be cleaned up
-        await self.manager.record_messages(job.id, sent)
-        # the interim "⏳ …" message has served its purpose
-        if job.telegram_status_message_id:
-            await _delete_message(
-                self._client, job.telegram_chat_id, job.telegram_status_message_id
-            )
+        await self.manager.record_messages(job.id, sent, kind=kind)
+        # the progress line is NOT deleted here: it is the job's one line in
+        # the chat and it keeps reporting until the job is finished
         await self.manager.mark_delivered(
             job.id,
             kind,
             marker,
             message_id=(sent[-1] if sent else 0),
-            clear_status_message=True,
         )
         print(f"[Renderfin][Delivery] {kind} delivered for job {job.id}")

@@ -2425,6 +2425,59 @@ async def _submit_generated_model(glb_url: str) -> tuple[str | None, str | None]
         return task.id, None
 
 
+async def _auto_submit_ready_jobs() -> None:
+    """Push every finished 3D model into the full pipeline by itself.
+
+    Choosing one of the two renders is the only decision asked of the owner.
+    Everything after it - retopology, bake, rig, animations, every format -
+    used to wait behind a second button that added nothing but a place for the
+    job to get stuck when nobody was looking.
+    """
+    import render_prompting
+
+    try:
+        jobs = await render_prompting.list_active_character_gen_jobs()
+    except Exception as exc:
+        print(f"[Telegram][Renderfin] cannot list jobs for auto-submit: {exc}")
+        return
+    for job in jobs or []:
+        if str(job.get("stage") or "") != "ready":
+            continue
+        job_id = str(job.get("job_id") or "")
+        glb_url = str(job.get("glb_url") or "")
+        chat_id = int(job.get("telegram_chat_id") or 0)
+        if not job_id or not glb_url:
+            continue
+        # one submit per job, even across bot restarts
+        if not await reserve_notification(chat_id or 0, "renderfin_submit", job_id):
+            continue
+        try:
+            task_id, error = await _submit_generated_model(glb_url)
+            if task_id is None:
+                raise RuntimeError(error or "не удалось создать задачу")
+            await render_prompting.mark_character_gen_submitted(job_id, task_id)
+            if chat_id:
+                await remember_task_reply_target(
+                    chat_id, task_id, int(job.get("telegram_message_id") or 0)
+                )
+            print(f"[Telegram][Renderfin] job {job_id} auto-submitted as task {task_id}")
+        except Exception as exc:
+            # the reservation would otherwise block the next attempt forever
+            await release_notification(chat_id or 0, "renderfin_submit", job_id)
+            print(f"[Telegram][Renderfin] auto-submit failed for {job_id}: {exc}")
+
+
+async def _auto_submit_loop() -> None:
+    while True:
+        try:
+            await _auto_submit_ready_jobs()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[Telegram][Renderfin] auto-submit loop error: {exc}")
+        await asyncio.sleep(20)
+
+
 async def _handle_submit_callback(update, context) -> None:
     import render_prompting
     from telegram.constants import ParseMode
@@ -2606,6 +2659,8 @@ async def run_polling() -> None:
     
     # Log startup info
     await _reattach_chargen_watchers(app.bot)
+    # a finished model no longer waits behind a button
+    asyncio.create_task(_auto_submit_loop())
 
     active_chats = await get_active_chat_ids()
     print(f"[Telegram] Bot started. Active subscribers: {len(active_chats)}")

@@ -117,6 +117,9 @@ class SentMessage(BaseModel):
 
     id: int
     at: float = Field(default_factory=time.time)
+    # which delivery put it there, so a card can be removed once the moment it
+    # belonged to has passed (the chosen variant, a failure that was retried)
+    kind: str = ""
 
 
 CHARGEN_STAGE_PROMPT = "prompt"
