@@ -427,6 +427,8 @@ async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> Li
 
 _STAGE_LABELS = {
     "flux_render": "рендер T-позы",
+    "awaiting_image_approval": "ждёт вашего выбора",
+    "ready": "готова к отправке",
     "hunyuan": "3D-модель",
     "turntable": "видео-облёт",
     "submitted": "полный пайплайн",

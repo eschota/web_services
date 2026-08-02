@@ -787,3 +787,11 @@ class PrivateChatTests(unittest.TestCase):
         self.assertTrue(telegram_delivery.is_private_chat(777))
         self.assertFalse(telegram_delivery.is_private_chat(-1001234))
         self.assertFalse(telegram_delivery.is_private_chat(0))
+
+
+class StageLabelTests(unittest.TestCase):
+    def test_every_listed_stage_reads_as_words(self):
+        """A raw constant like awaiting_image_approval in the queue is a bug."""
+        missing = [s for s in telegram_delivery.UNFINISHED_STAGES
+                   if s not in telegram_delivery._STAGE_LABELS]
+        self.assertEqual(missing, [], f"no label for {missing}")
