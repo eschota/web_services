@@ -57,6 +57,24 @@ the validated one, it was simply first in the candidate list.
 the converter still uses whatever the server resolved, which is correct — only
 the Hunyuan post-process was written against 4.3.
 
+**That pin does not activate on deploy.** `BLENDER_PATH` is assigned at module
+scope in `webserver_converter_glb.py`, so the resolved path is frozen when the
+server process starts, and the boxes serve from processes that outlive any
+deploy (see below). Until those processes are replaced the adapter's choice is
+whatever it resolved days ago.
+
+What *is* live is the bake script itself: Blender loads it from disk on every
+invocation, which is why the psutil fix above took effect with nothing
+restarted. `vertex_pbr.py` therefore re-runs itself under 4.3 when it finds it
+started under 5.x (`_reexec_under_43`, guarded by `AUTORIG_VERTEX_PBR_REEXEC`).
+Measured end to end on f13: 85.9s wall, manifest reporting 4.3.2.
+
+Two invariants that shim must keep. It deletes the manifest before starting the
+child, or a previous run's manifest reads as this run's success. And if the
+child produces nothing it falls through and bakes in place — slowly, but the
+shim can never be the reason a job dies. Delete it once the serving processes
+have been replaced; the adapter does the same job better.
+
 When a queue of 3D jobs is draining far slower than the ~10 minutes a
 generation actually takes, check which Blender the bake is running under:
 
