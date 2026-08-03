@@ -129,8 +129,7 @@ class CharacterGenManager:
         self._db: Optional[aiosqlite.Connection] = None
         self._jobs: Dict[str, CharacterGenJob] = {}
         self._runners: Dict[str, asyncio.Task] = {}
-        # Slots handed out but not yet persisted, keyed by worker name.
-        self._claimed: Dict[str, int] = {}
+        # Serialises submission so a slot count cannot be read stale.
         self._submit_lock = asyncio.Lock()
         self._retry_task: Optional[asyncio.Task] = None
         self._stopped = asyncio.Event()
@@ -458,11 +457,11 @@ class CharacterGenManager:
     def in_flight_by_worker(self) -> Dict[str, int]:
         """How many generations each box is holding for us right now.
 
-        Includes submissions still in flight (_claimed): the count is read
-        from persisted state, so without them thirty jobs woken at the same
-        moment all see the same idle worker and pile onto it.
+        Read from persisted state. That is only safe because submission holds
+        _submit_lock until the job is written down; without it thirty jobs
+        woken at the same moment all see the same idle worker.
         """
-        counts: Dict[str, int] = dict(self._claimed)
+        counts: Dict[str, int] = {}
         for job in self._jobs.values():
             if (
                 job.stage == CHARGEN_STAGE_HUNYUAN
@@ -823,28 +822,22 @@ class CharacterGenManager:
                     )
                     job.hunyuan_task_id = ""
             if worker is None:
-                # One submission at a time, so the slot count a job reads is
-                # the count that still holds when it acts on it.
+                # The lock is held until the job is written down, so the
+                # slot count the next job reads already includes this one.
+                # A separate "claimed but not yet persisted" counter is the
+                # obvious alternative and it leaks: any path that skips its
+                # release marks a worker busy forever, which is exactly what
+                # happened - an idle box reported at capacity with no job.
                 async with self._submit_lock:
                     worker, status_url = await hunyuan_client.submit(
                         client,
                         image_url=job.isolated_url,
                         in_flight=self.in_flight_by_worker(),
                     )
-                    name = worker["name"]
-                    self._claimed[name] = self._claimed.get(name, 0) + 1
-                try:
                     # store the status_url so a service restart can resume polling
                     job.hunyuan_task_id = status_url
                     job.hunyuan_worker = worker["name"]
                     await self._persist(job)
-                finally:
-                    # persisted now, so the job counts itself from here on
-                    remaining = self._claimed.get(worker["name"], 1) - 1
-                    if remaining > 0:
-                        self._claimed[worker["name"]] = remaining
-                    else:
-                        self._claimed.pop(worker["name"], None)
                 print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker['name']}")
             payload = await hunyuan_client.wait_for_model(
                 client,

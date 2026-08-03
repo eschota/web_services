@@ -942,8 +942,12 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
-    def test_a_claimed_slot_counts_before_it_is_persisted(self):
-        """Thirty jobs woken at once all read the same idle worker otherwise."""
+    def test_an_idle_worker_is_never_reported_busy(self):
+        """A separate claim counter leaked and marked an idle box busy forever.
+
+        The count comes from persisted jobs only; correctness rests on
+        submission holding the lock until the job is written down.
+        """
 
         async def scenario():
             with _Env():
@@ -952,12 +956,13 @@ class EmptyFleetTests(unittest.TestCase):
                 await manager.start()
                 try:
                     self.assertEqual(manager.in_flight_by_worker(), {})
-                    manager._claimed["f13"] = 1
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN,
+                                          hunyuan_task_id="https://f13/s/1",
+                                          hunyuan_worker="f13")
                     self.assertEqual(manager.in_flight_by_worker(), {"f13": 1})
-                    # a persisted job adds to the claim rather than replacing it
-                    await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN,
-                                    hunyuan_task_id="https://f13/s/1", hunyuan_worker="f13")
-                    self.assertEqual(manager.in_flight_by_worker(), {"f13": 2})
+                    # once it moves on, the slot is free again with nothing to release
+                    job.stage = CHARGEN_STAGE_TURNTABLE
+                    self.assertEqual(manager.in_flight_by_worker(), {})
                 finally:
                     await manager.stop()
                     await queue.stop()
