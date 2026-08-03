@@ -860,6 +860,35 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_a_parked_job_lets_go_of_the_worker_it_failed_on(self):
+        """Holding a finished task re-reads the same failure and, worse,
+        counts the job against that worker's slot for ever."""
+
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager, stage=CHARGEN_STAGE_HUNYUAN,
+                        hunyuan_task_id="https://f13/status/x", hunyuan_worker="f13",
+                    )
+                    self.assertEqual(manager.in_flight_by_worker(), {"f13": 1})
+                    await manager._handle_stage_error(
+                        job,
+                        RuntimeError("generation failed on f13: Vertex-PBR manifest is missing"),
+                    )
+                    self.assertEqual(job.hunyuan_task_id, "")
+                    self.assertEqual(job.hunyuan_worker, "")
+                    self.assertEqual(manager.in_flight_by_worker(), {}, "slot must be released")
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_a_job_already_failed_on_vram_is_revived(self):
         job = CharacterGenJob(error="generation failed on f2: Hunyuan VRAM gate failed: 6439 MiB free")
         self.assertTrue(character_gen._failed_on_empty_fleet(job))

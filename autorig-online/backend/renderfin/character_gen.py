@@ -622,6 +622,12 @@ class CharacterGenManager:
                 if "vram gate" in str(exc).lower()
                 else FARM_BREAKAGE_WAIT_SECONDS
             )
+            # The generation is over and it failed; the handle points at a
+            # finished task. Keeping it makes the retry re-read the same
+            # failure forever AND counts the job against that worker's slot,
+            # so a box ends up "holding" dozens of jobs it is not running.
+            job.hunyuan_task_id = ""
+            job.hunyuan_worker = ""
             job.retry_at = time.time() + wait
             job.stage_started_at = 0
             job.timed_stage = ""
