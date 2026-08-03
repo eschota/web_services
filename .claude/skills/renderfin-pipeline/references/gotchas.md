@@ -17,6 +17,8 @@ surprising, how it shows up, and what to do about it.
 - [A bot cannot delete a message older than 48 hours](#a-bot-cannot-delete-a-message-older-than-48-hours)
 - [callback_data is capped at 64 bytes](#callback_data-is-capped-at-64-bytes)
 - [A stage deadline must not restart with the service](#a-stage-deadline-must-not-restart-with-the-service)
+- [The render queue picks a box blind to everyone else's work](#the-render-queue-picks-a-box-blind-to-everyone-elses-work)
+- [A render's deadline must not restart with the service either](#a-renders-deadline-must-not-restart-with-the-service-either)
 - [Forgiving an attempt cannot be decided from last_error](#forgiving-an-attempt-cannot-be-decided-from-last_error)
 - [The GLB cache holds the last copy of deliverables](#the-glb-cache-holds-the-last-copy-of-deliverables)
 - [Test-suite traps](#test-suite-traps)
@@ -222,6 +224,44 @@ is a counter instead of a predicate: `attempts_refunded` allows exactly one
 refund per job, capping the worst case at six attempts rather than infinity.
 `POST /renderfin/api-character-gen/kick` does revive → refund → kick in that
 order.
+
+## The render queue picks a box blind to everyone else's work
+
+`_pick_server` sorted candidates by `average_render_time` and excluded only
+boxes busy with tasks **of ours**. These ComfyUI machines also serve
+renderfin.com, and that backlog is invisible to our dispatch records, so the
+historically fastest box is not the one that finishes first.
+
+Measured on the farm: f15 had 16 prompts queued, f5 had 8, Raptor was
+completely idle — and a t_pose render went to f15. The job it belonged to spent
+all three attempts on render timeouts and had to be resumed by hand.
+
+Depth now comes from each box's own `/queue` once per dispatch pass, with
+`average_render_time` only breaking ties. A box that cannot be probed sorts as
+`_UNKNOWN_DEPTH`, never as empty — a failed probe must not make the worst
+candidate look like the best.
+
+## A render's deadline must not restart with the service either
+
+The stage-clock trap above has a twin one layer down. `_resurrect` refreshed
+`started_at` on every render it kept following, so a stuck render got a fresh
+90-minute window on each service restart and `_poll_rendering`'s timeout never
+fired. Two things compound from there:
+
+- the task keeps its box in `_busy_servers()`, so we stop sending that box work
+  entirely;
+- `_handle_stage_error` clears `flux_task_id` only when the previous task is
+  gone or in `TASK_ERROR` — a task frozen at `Rendering` keeps its reference, so
+  the retry re-attaches to the same dead render and spends one attempt per
+  window.
+
+Three restarts in one afternoon killed a healthy job that way. The original
+clock is now preserved (`task.started_at or time.time()`, so a falsy value is
+still stamped rather than reading as 1970).
+
+**Rule for both:** a deadline measured from when the runner happened to start
+is not a deadline. Persist the start, and check it against the artifact, not
+against the process.
 
 ## The GLB cache holds the last copy of deliverables
 
