@@ -889,6 +889,41 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_a_converter_timeout_does_not_kill_the_job(self):
+        """The box's own two-hour ceiling says how slow the farm is today, not
+        that anything is wrong with this job."""
+
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager, stage=CHARGEN_STAGE_HUNYUAN,
+                        hunyuan_task_id="https://f1/status/x", hunyuan_worker="f1",
+                    )
+                    await manager._handle_stage_error(
+                        job,
+                        RuntimeError("generation failed on f1: Hunyuan generation timed out after 7192s"),
+                    )
+                    self.assertEqual(job.attempts, {}, "a farm-wide slowness is not the job's fault")
+                    self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertEqual(job.hunyuan_task_id, "", "the dead task must be let go")
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_job_already_killed_by_a_timeout_is_revived(self):
+        for message in ("generation timed out",
+                        "generation failed on f1: Hunyuan generation timed out after 7192s"):
+            self.assertTrue(
+                character_gen._failed_on_empty_fleet(CharacterGenJob(error=message)), message
+            )
+
     def test_a_job_already_failed_on_vram_is_revived(self):
         job = CharacterGenJob(error="generation failed on f2: Hunyuan VRAM gate failed: 6439 MiB free")
         self.assertTrue(character_gen._failed_on_empty_fleet(job))

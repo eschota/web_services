@@ -80,6 +80,12 @@ FARM_BREAKAGE_WAIT_SECONDS = float(
 # box then failed to finish its own post-processing. Nothing about the job is
 # wrong, so retrying the job harder cannot help and giving up is not allowed.
 _FARM_BREAKAGE_MARKERS = (
+    # The box gave up on its own two-hour task ceiling. That is a property of
+    # how long the farm currently takes per generation, not of the job, so
+    # spending the job's attempts on it would kill work that is fine the
+    # moment the farm gets faster.
+    "timed out after",
+    "generation timed out",
     # The box was busy, not broken: its own gate refused to start a
     # generation that would not fit alongside what it is already running.
     # Waiting for the card to free up is the whole remedy.
@@ -97,6 +103,8 @@ def _is_farm_breakage(text: str) -> bool:
 # They are indistinguishable from a real failure only by their message, so it
 # is matched here and they are revived rather than left for a human.
 _FLEET_ERROR_MARKERS = (
+    "timed out after",
+    "generation timed out",
     "vram gate failed",
     "task vanished on",
     "vertex-pbr manifest is missing",
