@@ -304,3 +304,83 @@ class StageTimeoutOrderingTests(unittest.TestCase):
 
         self.assertGreater(character_gen.FLUX_STAGE_TIMEOUT, config.TASK_TIMEOUT_SECONDS)
         self.assertGreater(character_gen.HUNYUAN_STAGE_TIMEOUT, config.HUNYUAN_TIMEOUT_SECONDS)
+
+
+class ServerChoiceTests(unittest.TestCase):
+    """The box that finishes first is the emptiest one, not the fastest one.
+
+    These ComfyUI machines also serve renderfin.com, so their backlog is
+    invisible to our own dispatch records. A t_pose render was handed to a box
+    with fifteen queued prompts while another sat completely idle, and the job
+    it belonged to spent all three attempts on render timeouts.
+    """
+
+    def _queue(self, registry):
+        return RenderQueue(registry, db_path=config.DB_PATH)
+
+    def test_an_idle_box_beats_a_faster_box_with_a_backlog(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                fast = _server("f15")
+                fast.average_render_time = 10.0
+                idle = _server("raptor")
+                idle.average_render_time = 90.0
+                registry.save(fast)
+                registry.save(idle)
+                queue = self._queue(registry)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    picked = queue._pick_server(
+                        "gen_image.json", {"f15": 16, "raptor": 0}
+                    )
+                    self.assertEqual(picked.render_server_name, "raptor")
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_speed_still_decides_between_equally_loaded_boxes(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                fast = _server("f15")
+                fast.average_render_time = 10.0
+                slow = _server("raptor")
+                slow.average_render_time = 90.0
+                registry.save(fast)
+                registry.save(slow)
+                queue = self._queue(registry)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    picked = queue._pick_server("gen_image.json", {"f15": 2, "raptor": 2})
+                    self.assertEqual(picked.render_server_name, "f15")
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_box_we_cannot_ask_is_not_treated_as_empty(self):
+        """Otherwise a probe failure makes the worst box look like the best."""
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                unknown = _server("f15")
+                unknown.average_render_time = 10.0
+                known = _server("raptor")
+                known.average_render_time = 90.0
+                registry.save(unknown)
+                registry.save(known)
+                queue = self._queue(registry)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    # f15 missing from depths entirely: unreachable, not idle
+                    picked = queue._pick_server("gen_image.json", {"raptor": 3})
+                    self.assertEqual(picked.render_server_name, "raptor")
+                finally:
+                    await queue.stop()
+
+        run(scenario())

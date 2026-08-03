@@ -23,6 +23,11 @@ from .models import (
 )
 from .registry import ServerRegistry
 
+# Where a box whose queue we could not read sorts. Above any plausible real
+# backlog, so an unreachable box is never mistaken for an idle one - but still
+# finite, so it stays usable when every box is unreadable.
+_UNKNOWN_DEPTH = 10_000
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS render_tasks (
     id TEXT PRIMARY KEY,
@@ -255,8 +260,23 @@ class RenderQueue:
                 busy[task.server_name] = task.id
         return busy
 
-    def _pick_server(self, token: str) -> Optional[RenderServer]:
+    def _pick_server(
+        self, token: str, depths: Optional[Dict[str, int]] = None
+    ) -> Optional[RenderServer]:
+        """Least-loaded box first, fastest box to break the tie.
+
+        Sorting on average_render_time alone picks the box that is *historically*
+        quickest, which is not the box that will finish first: these ComfyUI
+        machines also serve renderfin.com, and that backlog is invisible to our
+        own dispatch records. One t_pose render was handed to a box with fifteen
+        other prompts queued while another sat completely idle, and the job it
+        belonged to burned all three of its attempts on render timeouts.
+
+        A box we could not ask sorts as unknown rather than empty, so a probe
+        failure can never make a box look like the attractive choice.
+        """
         busy = self._busy_servers()
+        depths = depths or {}
         candidates = [
             s
             for s in self.registry.all()
@@ -264,16 +284,39 @@ class RenderQueue:
             and routing.server_can_run(s, token)
             and s.render_server_name not in busy
         ]
-        candidates.sort(key=lambda s: s.average_render_time or 1e9)
+        candidates.sort(
+            key=lambda s: (
+                depths.get(s.render_server_name, _UNKNOWN_DEPTH),
+                s.average_render_time or 1e9,
+            )
+        )
         return candidates[0] if candidates else None
+
+    async def _queue_depths(self) -> Dict[str, int]:
+        """Ask every online box how much work it is already sitting on."""
+        servers = [s for s in self.registry.all() if s.status == "online"]
+        if not servers:
+            return {}
+        depths: Dict[str, int] = {}
+        results = await asyncio.gather(
+            *(comfy_adapter.queue_depth(self._client, s) for s in servers),
+            return_exceptions=True,
+        )
+        for server, depth in zip(servers, results):
+            if isinstance(depth, int):
+                depths[server.render_server_name] = depth
+        return depths
 
     async def _dispatch_one(self) -> bool:
         pending = sorted(
             (t for t in self._tasks.values() if t.status == TASK_PENDING),
             key=lambda t: t.created_at,
         )
+        if not pending:
+            return False
+        depths = await self._queue_depths()
         for task in pending:
-            server = self._pick_server(task.workflow)
+            server = self._pick_server(task.workflow, depths)
             if server is None:
                 continue
             try:

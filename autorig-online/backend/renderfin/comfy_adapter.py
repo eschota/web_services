@@ -233,6 +233,28 @@ async def interrupt(client: httpx.AsyncClient, server: RenderServer) -> None:
     await client.post(f"{base}/interrupt", timeout=15.0, auth=_auth_for(server))
 
 
+async def queue_depth(client: httpx.AsyncClient, server: RenderServer) -> Optional[int]:
+    """How much work the box already has, including other clients' prompts.
+
+    We are not the only caller of these ComfyUI boxes, so our own dispatch
+    records say nothing about how long a prompt will actually wait. Returns
+    None when the box cannot be asked, which the caller must not read as
+    "empty".
+    """
+    try:
+        base = _validate_server_url(server.render_server_url)
+        resp = await client.get(f"{base}/queue", timeout=5.0, auth=_auth_for(server))
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return sum(
+            len(data.get(bucket) or [])
+            for bucket in ("queue_running", "queue_pending")
+        )
+    except Exception:
+        return None
+
+
 async def check_server_online(client: httpx.AsyncClient, server: RenderServer) -> bool:
     try:
         base = _validate_server_url(server.render_server_url)
