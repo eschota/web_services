@@ -35,6 +35,28 @@ class TaskVanished(RuntimeError):
     """
 
 
+class WorkerUnreachable(RuntimeError):
+    """We lost the route to the box while it was holding our generation.
+
+    Not a verdict on the task - the box may well still be running it - but we
+    cannot follow it any more, and a job that keeps polling an address that
+    refuses connections also keeps that worker's only slot. That is how a
+    tunnel outage turns into a stopped queue instead of a slow one: the whole
+    fleet ends up "busy" with generations nobody can see.
+
+    So the handle is dropped and the work is resubmitted. If the original
+    generation is still alive when the route comes back, the box refuses the
+    second one for being at capacity and the job simply waits - which is the
+    safe direction to be wrong in.
+    """
+
+
+# Poll failures are counted, not tolerated forever: at a 10s poll this is five
+# minutes, long enough to sit out a tunnel restart and short enough that a real
+# outage frees the slot instead of pinning it for the whole 4h ceiling.
+MAX_TRANSPORT_MISSES = int(os.getenv("RENDERFIN_HUNYUAN_TRANSPORT_MISSES", "30"))
+
+
 class NoWorkerAvailable(RuntimeError):
     """The whole 3D fleet is unusable right now.
 
@@ -228,13 +250,24 @@ async def wait_for_model(
     deadline = time.time() + (timeout or config.HUNYUAN_TIMEOUT_SECONDS)
     last_status = ""
     misses = 0
+    unreachable = 0
     while time.time() < deadline:
         try:
             resp = await client.get(status_url, headers=_headers(worker), timeout=30.0)
         except Exception as exc:
-            print(f"[Renderfin][Hunyuan] status poll error: {exc}")
+            unreachable += 1
+            print(
+                f"[Renderfin][Hunyuan] status poll error ({unreachable}/"
+                f"{MAX_TRANSPORT_MISSES}): {exc}"
+            )
+            if unreachable >= MAX_TRANSPORT_MISSES:
+                raise WorkerUnreachable(
+                    f"lost the route to {worker['name']} while it held our "
+                    f"generation ({exc})"
+                )
             await asyncio.sleep(config.HUNYUAN_POLL_SECONDS)
             continue
+        unreachable = 0
         if resp.status_code == 200:
             payload = resp.json()
             status = str(payload.get("status") or "")

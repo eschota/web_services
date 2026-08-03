@@ -220,6 +220,79 @@ class PollToleranceTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_a_tunnel_blip_is_ridden_out(self):
+        """The supervisor restarts a tunnel every 10s; that must not cost a job."""
+        async def scenario():
+            calls = {"n": 0}
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                calls["n"] += 1
+                if calls["n"] <= 3:
+                    raise httpx.ConnectError("All connection attempts failed")
+                return httpx.Response(200, json={
+                    "status": "Completed",
+                    "output_urls": {"model": "http://127.0.0.1:15131/out/model.glb"},
+                })
+
+            worker = POOL[0]
+            with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.01):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    payload = await hunyuan_client.wait_for_model(
+                        client, worker, worker["url"] + "/status/x", timeout=10
+                    )
+            self.assertEqual(payload["status"], "Completed")
+
+        run(scenario())
+
+    def test_a_route_that_stays_down_frees_the_slot_instead_of_pinning_it(self):
+        """Polling an address that refuses connections holds that worker's only
+        slot. Held to the 4h ceiling on every job, the fleet reads as fully busy
+        and the queue stops dead - which is exactly what happened when the
+        tunnel unit died on 2026-08-03."""
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                raise httpx.ConnectError("All connection attempts failed")
+
+            worker = POOL[0]
+            with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.001), \
+                 patch.object(hunyuan_client, "MAX_TRANSPORT_MISSES", 4):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(hunyuan_client.WorkerUnreachable) as ctx:
+                        await hunyuan_client.wait_for_model(
+                            client, worker, worker["url"] + "/status/x", timeout=30
+                        )
+            self.assertIn("f7", str(ctx.exception))
+
+        run(scenario())
+
+    def test_the_miss_counter_resets_on_any_answer(self):
+        """Otherwise a long generation with occasional blips eventually trips."""
+        async def scenario():
+            calls = {"n": 0}
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                calls["n"] += 1
+                # fail, answer, fail, answer, ... never 3 failures in a row
+                if calls["n"] % 2 == 1 and calls["n"] < 12:
+                    raise httpx.ConnectError("All connection attempts failed")
+                if calls["n"] < 12:
+                    return httpx.Response(200, json={"status": "Generating"})
+                return httpx.Response(200, json={
+                    "status": "Completed",
+                    "output_urls": {"model": "http://127.0.0.1:15131/out/model.glb"},
+                })
+
+            worker = POOL[0]
+            with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.001), \
+                 patch.object(hunyuan_client, "MAX_TRANSPORT_MISSES", 3):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    payload = await hunyuan_client.wait_for_model(
+                        client, worker, worker["url"] + "/status/x", timeout=30
+                    )
+            self.assertEqual(payload["status"], "Completed")
+
+        run(scenario())
+
     def test_failed_status_raises_with_worker_name(self):
         async def scenario():
             def handler(request: httpx.Request) -> httpx.Response:
