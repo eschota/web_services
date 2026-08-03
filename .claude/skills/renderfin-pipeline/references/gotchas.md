@@ -17,6 +17,7 @@ surprising, how it shows up, and what to do about it.
 - [A bot cannot delete a message older than 48 hours](#a-bot-cannot-delete-a-message-older-than-48-hours)
 - [callback_data is capped at 64 bytes](#callback_data-is-capped-at-64-bytes)
 - [A stage deadline must not restart with the service](#a-stage-deadline-must-not-restart-with-the-service)
+- [Forgiving an attempt cannot be decided from last_error](#forgiving-an-attempt-cannot-be-decided-from-last_error)
 - [The GLB cache holds the last copy of deliverables](#the-glb-cache-holds-the-last-copy-of-deliverables)
 - [Test-suite traps](#test-suite-traps)
 
@@ -185,6 +186,24 @@ never reached its retry path.
 The stage start is stamped on the job (`stage_started_at` + `timed_stage`) and
 persisted, so a restart resumes the same window. A genuine retry, resume or
 regenerate clears it — those have earned a fresh one.
+
+## Forgiving an attempt cannot be decided from last_error
+
+A stage gets three attempts. A farm-wide fault spends them on every job at
+once, so both the failed and the surviving jobs have to be forgiven — otherwise
+work that nothing was ever wrong with dies on the next unrelated hiccup.
+
+The tempting rule is "refund when the error looks farm-side". It does not work:
+`last_error` **survives** the refund, so the same job keeps matching forever and
+a genuinely broken one holds a GPU slot for good. This is why
+`_failed_on_empty_fleet` reads the terminal `error` and deliberately not
+`last_error`.
+
+For a job that is still alive there is no terminal field to read, so the bound
+is a counter instead of a predicate: `attempts_refunded` allows exactly one
+refund per job, capping the worst case at six attempts rather than infinity.
+`POST /renderfin/api-character-gen/kick` does revive → refund → kick in that
+order.
 
 ## The GLB cache holds the last copy of deliverables
 
