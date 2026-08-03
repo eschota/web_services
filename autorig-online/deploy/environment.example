@@ -22,6 +22,14 @@ MARKETING_POSTAL_ADDRESS=
 # TELEGRAM_BOT_TOKEN=...
 # TELEGRAM_NOTIFICATION_CHAT_ID=-1001234567890
 
+# Where autorig-healthcheck.timer reports to. WITHOUT THIS THE CHECK IS BLIND:
+# it detects everything correctly and then drops the result on the floor with
+# "notify skipped: no token/chat configured". That is how a 45-minute outage of
+# every farm tunnel went unnoticed on 2026-08-03 - the 12:11 run listed all
+# nine problems and told nobody. It only posts when something is broken, so a
+# healthy fleet stays silent. Falls back to TELEGRAM_NOTIFICATION_CHAT_ID.
+# HEALTHCHECK_CHAT_ID=223960353
+
 # Renderfin character generation (🎨 Сгенерировать button in the Telegram bot).
 # The bot needs the internal renderfin URL plus OPENAI_API_KEY/OPENROUTER_API_KEY
 # for Flux prompt generation (fallback template works without them).
