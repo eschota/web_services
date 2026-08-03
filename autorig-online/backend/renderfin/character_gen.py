@@ -445,6 +445,31 @@ class CharacterGenManager:
             print(f"[Renderfin][CharGen] kicked {kicked} parked job(s)")
         return kicked
 
+    async def refund_attempts(self) -> int:
+        """Clear the attempt debt of jobs that are still alive.
+
+        revive_failed forgives a farm outage only once a job has already died
+        of it. A job that survived carries the same debt and nothing ever pays
+        it back: two of the three attempts it is allowed can be gone before
+        anything was ever wrong with the job itself, so the next unrelated
+        hiccup kills it. Refund on the same grounds, while it still helps.
+        """
+        refunded = 0
+        for job in list(self._jobs.values()):
+            if job.attempts_refunded or job.stage not in _ACTIVE_STAGES:
+                continue
+            if not (job.attempts or {}).get(job.stage):
+                continue
+            attempts = dict(job.attempts)
+            attempts.pop(job.stage, None)
+            job.attempts = attempts
+            job.attempts_refunded = True
+            await self._persist(job)
+            refunded += 1
+        if refunded:
+            print(f"[Renderfin][CharGen] refunded attempts on {refunded} job(s)")
+        return refunded
+
     async def revive_failed(self) -> int:
         """Put failed jobs back in the pipeline with a fresh attempt budget.
 

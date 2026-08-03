@@ -182,6 +182,11 @@ class CharacterGenJob(BaseModel):
     timed_stage: str = ""
     # Automatic stage retries: attempts per stage and when to try again.
     attempts: Dict[str, int] = Field(default_factory=dict)
+    # A live job's attempt debt can be forgiven once, after the farm fault that
+    # ran it up is fixed. Once, because the reason is not re-checkable later:
+    # last_error survives a refund, so matching on it would forgive the same
+    # job forever and a genuinely broken one would hold a GPU slot for good.
+    attempts_refunded: bool = False
     retry_at: float = 0
     last_error: str = ""
     image_url: str = ""       # full t_pose render

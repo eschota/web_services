@@ -769,6 +769,40 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_a_live_job_gets_its_attempt_debt_back_once_and_only_once(self):
+        """A survivor of a farm fault must not be charged for it either.
+
+        The second refund is the one that matters: nothing re-checks *why* the
+        attempts were spent, so a repeatable refund would keep a genuinely
+        broken job alive forever on a GPU slot it never gives back.
+        """
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    job.attempts = {CHARGEN_STAGE_HUNYUAN: 2}
+                    await manager._persist(job)
+
+                    self.assertEqual(await manager.refund_attempts(), 1)
+                    self.assertEqual(job.attempts.get(CHARGEN_STAGE_HUNYUAN, 0), 0)
+
+                    # spend it again: the budget is not refilled a second time
+                    await manager._handle_stage_error(
+                        job, RuntimeError("generation failed on f13")
+                    )
+                    self.assertEqual(job.attempts.get(CHARGEN_STAGE_HUNYUAN), 1)
+                    self.assertEqual(await manager.refund_attempts(), 0)
+                    self.assertEqual(job.attempts.get(CHARGEN_STAGE_HUNYUAN), 1)
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_a_job_already_failed_by_an_empty_fleet_is_revived(self):
         async def scenario():
             with _Env():
