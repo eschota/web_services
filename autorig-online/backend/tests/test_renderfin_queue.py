@@ -384,3 +384,86 @@ class ServerChoiceTests(unittest.TestCase):
                     await queue.stop()
 
         run(scenario())
+
+
+class RenderClockTests(unittest.TestCase):
+    """A render's deadline must survive a service restart.
+
+    Refreshing it hands a stuck render a fresh window every restart, so the
+    timeout never fires: the render keeps its box marked busy, and the
+    character_gen job re-attaches to it - its status is Rendering, not Error -
+    and spends an attempt per window until the job dies. That killed a job on
+    2026-08-03 after three restarts in an afternoon.
+    """
+
+    def test_a_surviving_render_keeps_its_original_deadline(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                registry.save(_server())
+                queue = self._q(registry)
+                await queue.start()
+                queue._pump_task.cancel()
+                started = time.time() - 3600  # an hour in already
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="x", type="t_pose", user_name="u")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = "raptor"
+                    task.comfy_prompt_id = "p-1"
+                    task.started_at = started
+                    await queue._persist(task)
+                    await queue.stop()
+
+                    revived = self._q(registry)
+                    await revived.start()
+                    revived._pump_task.cancel()
+                    try:
+                        again = revived.get(task.id)
+                        self.assertEqual(again.status, TASK_RENDERING)
+                        self.assertAlmostEqual(again.started_at, started, delta=2)
+                    finally:
+                        await revived.stop()
+                except Exception:
+                    await queue.stop()
+                    raise
+
+        run(scenario())
+
+    def test_a_render_with_no_clock_gets_one(self):
+        """started_at 0 would otherwise read as 'running since 1970' and fail."""
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                registry.save(_server())
+                queue = self._q(registry)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="x", type="t_pose", user_name="u")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = "raptor"
+                    task.comfy_prompt_id = "p-2"
+                    task.started_at = 0
+                    await queue._persist(task)
+                    await queue.stop()
+
+                    revived = self._q(registry)
+                    await revived.start()
+                    revived._pump_task.cancel()
+                    try:
+                        again = revived.get(task.id)
+                        self.assertGreater(again.started_at, time.time() - 60)
+                    finally:
+                        await revived.stop()
+                except Exception:
+                    await queue.stop()
+                    raise
+
+        run(scenario())
+
+    def _q(self, registry):
+        return RenderQueue(registry, db_path=config.DB_PATH)

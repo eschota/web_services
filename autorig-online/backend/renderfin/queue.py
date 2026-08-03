@@ -132,7 +132,14 @@ class RenderQueue:
                     and self.registry.get(task.server_name) is not None
                 )
                 if still_known:
-                    task.started_at = time.time()
+                    # Keep the ORIGINAL clock. Restarting it hands a render a
+                    # fresh 90-minute window on every service restart, so a
+                    # render that is genuinely stuck never times out: it holds
+                    # its box in _busy_servers forever, and the character_gen
+                    # job re-attaches to it (its status is Rendering, not
+                    # Error) and spends an attempt per window until it dies.
+                    # One job was killed exactly this way on 2026-08-03.
+                    task.started_at = task.started_at or time.time()
                 else:
                     task.status = TASK_PENDING
                     task.server_name = ""
