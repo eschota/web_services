@@ -201,6 +201,15 @@ async def api_character_gen_discard(request: Request, job_id: str) -> Dict[str, 
     return job.public_dict()
 
 
+@router.post("/api-character-gen/kick")
+async def api_character_gen_kick(request: Request) -> Dict[str, Any]:
+    """The farm is fixed: stop serving out backoffs chosen for a broken one."""
+    manager = _chargen(request)
+    revived = await manager.revive_failed()
+    kicked = await manager.kick_parked()
+    return {"revived": revived, "kicked": kicked}
+
+
 @router.post("/api-character-gen/sweep-chats")
 async def api_character_gen_sweep_chats(request: Request) -> Dict[str, Any]:
     """Empty the private chats and let the next pass re-post the live queue.

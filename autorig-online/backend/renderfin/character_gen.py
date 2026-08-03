@@ -124,6 +124,9 @@ class CharacterGenManager:
         self._db: Optional[aiosqlite.Connection] = None
         self._jobs: Dict[str, CharacterGenJob] = {}
         self._runners: Dict[str, asyncio.Task] = {}
+        # Slots handed out but not yet persisted, keyed by worker name.
+        self._claimed: Dict[str, int] = {}
+        self._submit_lock = asyncio.Lock()
         self._retry_task: Optional[asyncio.Task] = None
         self._stopped = asyncio.Event()
 
@@ -410,9 +413,51 @@ class CharacterGenManager:
         await self._persist(job)
         return job
 
+    async def kick_parked(self) -> int:
+        """Stop waiting: re-run every parked stage right now.
+
+        Parked jobs are waiting out a condition on the farm — an empty pool, a
+        rejected token, a broken post-processor — with a delay chosen for a
+        farm that is down. Once it is fixed there is nothing left to wait for,
+        and sitting out the rest of a half-hour backoff is pure delay.
+        """
+        kicked = 0
+        for job in list(self._jobs.values()):
+            if job.stage not in _ACTIVE_STAGES or not job.retry_at:
+                continue
+            job.retry_at = 0
+            await self._persist(job)
+            self._spawn(job)
+            kicked += 1
+        if kicked:
+            print(f"[Renderfin][CharGen] kicked {kicked} parked job(s)")
+        return kicked
+
+    async def revive_failed(self) -> int:
+        """Put failed jobs back in the pipeline with a fresh attempt budget.
+
+        Their attempts were spent on a farm that was broken for every one of
+        them, so charging them for it would leave work permanently dead that
+        nothing was ever wrong with.
+        """
+        revived = 0
+        for job in list(self._jobs.values()):
+            if job.stage != CHARGEN_STAGE_FAILED:
+                continue
+            _, ok = await self.resume(job.id)
+            revived += 1 if ok else 0
+        if revived:
+            print(f"[Renderfin][CharGen] revived {revived} failed job(s)")
+        return revived
+
     def in_flight_by_worker(self) -> Dict[str, int]:
-        """How many generations each box is holding for us right now."""
-        counts: Dict[str, int] = {}
+        """How many generations each box is holding for us right now.
+
+        Includes submissions still in flight (_claimed): the count is read
+        from persisted state, so without them thirty jobs woken at the same
+        moment all see the same idle worker and pile onto it.
+        """
+        counts: Dict[str, int] = dict(self._claimed)
         for job in self._jobs.values():
             if (
                 job.stage == CHARGEN_STAGE_HUNYUAN
@@ -767,15 +812,28 @@ class CharacterGenManager:
                     )
                     job.hunyuan_task_id = ""
             if worker is None:
-                worker, status_url = await hunyuan_client.submit(
-                    client,
-                    image_url=job.isolated_url,
-                    in_flight=self.in_flight_by_worker(),
-                )
-                # store the status_url so a service restart can resume polling
-                job.hunyuan_task_id = status_url
-                job.hunyuan_worker = worker["name"]
-                await self._persist(job)
+                # One submission at a time, so the slot count a job reads is
+                # the count that still holds when it acts on it.
+                async with self._submit_lock:
+                    worker, status_url = await hunyuan_client.submit(
+                        client,
+                        image_url=job.isolated_url,
+                        in_flight=self.in_flight_by_worker(),
+                    )
+                    name = worker["name"]
+                    self._claimed[name] = self._claimed.get(name, 0) + 1
+                try:
+                    # store the status_url so a service restart can resume polling
+                    job.hunyuan_task_id = status_url
+                    job.hunyuan_worker = worker["name"]
+                    await self._persist(job)
+                finally:
+                    # persisted now, so the job counts itself from here on
+                    remaining = self._claimed.get(worker["name"], 1) - 1
+                    if remaining > 0:
+                        self._claimed[worker["name"]] = remaining
+                    else:
+                        self._claimed.pop(worker["name"], None)
                 print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker['name']}")
             payload = await hunyuan_client.wait_for_model(
                 client,

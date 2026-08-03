@@ -914,6 +914,28 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_a_claimed_slot_counts_before_it_is_persisted(self):
+        """Thirty jobs woken at once all read the same idle worker otherwise."""
+
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    self.assertEqual(manager.in_flight_by_worker(), {})
+                    manager._claimed["f13"] = 1
+                    self.assertEqual(manager.in_flight_by_worker(), {"f13": 1})
+                    # a persisted job adds to the claim rather than replacing it
+                    await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN,
+                                    hunyuan_task_id="https://f13/s/1", hunyuan_worker="f13")
+                    self.assertEqual(manager.in_flight_by_worker(), {"f13": 2})
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_in_flight_is_counted_per_worker(self):
         async def scenario():
             with _Env():
@@ -931,6 +953,59 @@ class EmptyFleetTests(unittest.TestCase):
                     await _idle_job(manager, stage=CHARGEN_STAGE_TURNTABLE,
                                     hunyuan_task_id="https://f13/s/3", hunyuan_worker="f13")
                     self.assertEqual(manager.in_flight_by_worker(), {"f13": 2})
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_kick_stops_serving_out_a_backoff_for_a_farm_that_is_fixed(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    parked = await _idle_job(
+                        manager, stage=CHARGEN_STAGE_HUNYUAN, retry_at=time.time() + 1800
+                    )
+                    dead = await _idle_job(
+                        manager, stage=CHARGEN_STAGE_FAILED,
+                        isolated_url="https://x/a_Isolated.png",
+                        error="generation timed out",
+                        attempts={CHARGEN_STAGE_HUNYUAN: 3},
+                    )
+                    revived = await manager.revive_failed()
+                    kicked = await manager.kick_parked()
+
+                    self.assertEqual(revived, 1)
+                    self.assertGreaterEqual(kicked, 1)
+                    self.assertEqual(parked.retry_at, 0)
+                    # a job whose attempts were spent on a broken farm gets them back
+                    self.assertEqual(manager.get(dead.id).attempts, {})
+                    self.assertNotEqual(manager.get(dead.id).stage, CHARGEN_STAGE_FAILED)
+                    for j in (parked, manager.get(dead.id)):
+                        runner = manager._runners.pop(j.id, None)
+                        if runner is not None:
+                            runner.cancel()
+                        await self._park(manager, j)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_kick_leaves_a_job_that_is_not_waiting_alone(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    running = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    done = await _idle_job(manager, stage=CHARGEN_STAGE_DISCARDED)
+                    self.assertEqual(await manager.kick_parked(), 0)
+                    self.assertEqual(done.stage, CHARGEN_STAGE_DISCARDED)
                 finally:
                     await manager.stop()
                     await queue.stop()
