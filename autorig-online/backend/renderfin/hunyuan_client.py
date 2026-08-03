@@ -56,27 +56,6 @@ class WorkerUnreachable(RuntimeError):
 # outage frees the slot instead of pinning it for the whole 4h ceiling.
 MAX_TRANSPORT_MISSES = int(os.getenv("RENDERFIN_HUNYUAN_TRANSPORT_MISSES", "30"))
 
-# How long a box may leave an accepted task at "Pending" before we stop
-# believing it will ever start. A box that is free begins within seconds; one
-# that is busy with someone else's conversion is a reason to go elsewhere, not
-# to wait. Ten minutes is well clear of both.
-STALLED_PENDING_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_PENDING_STALL", "600"))
-
-
-class TaskStalled(RuntimeError):
-    """The box accepted the task and never started it.
-
-    Seen in production: four boxes reporting service_state "idle" and
-    queue_size 0 while the task they had accepted sat at status "Pending",
-    progress 0, for over an hour. "Pending" is a perfectly ordinary
-    non-terminal status, so the poll waited for it - and the job held that
-    box's only slot the entire time. Four of five workers were pinned this
-    way and the queue ran at a fifth of its capacity.
-
-    Treated like a vanished task: the handle is dropped, the work is
-    resubmitted, and no attempt is spent.
-    """
-
 
 class NoWorkerAvailable(RuntimeError):
     """The whole 3D fleet is unusable right now.
@@ -272,7 +251,6 @@ async def wait_for_model(
     last_status = ""
     misses = 0
     unreachable = 0
-    pending_since = 0.0
     while time.time() < deadline:
         try:
             resp = await client.get(status_url, headers=_headers(worker), timeout=30.0)
@@ -311,16 +289,6 @@ async def wait_for_model(
                     f"generation failed on {worker['name']}: "
                     f"{payload.get('error') or 'unknown error'}"
                 )
-            if status == "Pending":
-                pending_since = pending_since or time.time()
-                waited = time.time() - pending_since
-                if waited >= STALLED_PENDING_SECONDS:
-                    raise TaskStalled(
-                        f"{worker['name']} never started our task "
-                        f"({int(waited)}s at Pending)"
-                    )
-            else:
-                pending_since = 0.0
         elif resp.status_code == 404:
             # Tolerate a transient miss (worker restart window) before giving up.
             misses += 1

@@ -293,54 +293,6 @@ class PollToleranceTests(unittest.TestCase):
 
         run(scenario())
 
-    def test_a_task_the_box_never_starts_frees_the_slot(self):
-        """Pending is an ordinary status, so the poll waits for it - and the job
-        holds that box's only slot while it does. Four boxes sat "idle" with
-        queue_size 0 while the task they had accepted stayed Pending for over
-        an hour, pinning four of five workers."""
-        async def scenario():
-            def handler(request: httpx.Request) -> httpx.Response:
-                return httpx.Response(200, json={"status": "Pending", "progress": 0})
-
-            worker = POOL[0]
-            with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.001), \
-                 patch.object(hunyuan_client, "STALLED_PENDING_SECONDS", 0.05):
-                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                    with self.assertRaises(hunyuan_client.TaskStalled) as ctx:
-                        await hunyuan_client.wait_for_model(
-                            client, worker, worker["url"] + "/status/x", timeout=30
-                        )
-            self.assertIn("f7", str(ctx.exception))
-
-        run(scenario())
-
-    def test_pending_that_turns_into_work_is_not_stalled(self):
-        """A box that is briefly busy must not have its task taken away."""
-        async def scenario():
-            calls = {"n": 0}
-
-            def handler(request: httpx.Request) -> httpx.Response:
-                calls["n"] += 1
-                if calls["n"] <= 3:
-                    return httpx.Response(200, json={"status": "Pending", "progress": 0})
-                if calls["n"] <= 5:
-                    return httpx.Response(200, json={"status": "GeneratingShape"})
-                return httpx.Response(200, json={
-                    "status": "Completed",
-                    "output_urls": {"model": "http://127.0.0.1:15131/out/model.glb"},
-                })
-
-            worker = POOL[0]
-            with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.001), \
-                 patch.object(hunyuan_client, "STALLED_PENDING_SECONDS", 5.0):
-                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                    payload = await hunyuan_client.wait_for_model(
-                        client, worker, worker["url"] + "/status/x", timeout=30
-                    )
-            self.assertEqual(payload["status"], "Completed")
-
-        run(scenario())
-
     def test_failed_status_raises_with_worker_name(self):
         async def scenario():
             def handler(request: httpx.Request) -> httpx.Response:

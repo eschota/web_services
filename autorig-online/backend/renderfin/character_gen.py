@@ -110,7 +110,6 @@ _FLEET_ERROR_MARKERS = (
     "vertex-pbr manifest is missing",
     "blender vertex-pbr pipeline failed",
     "lost the route to",
-    "never started our task",
     "no enabled hunyuan worker",
     "no hunyuan workers configured",
     "rejected our token",
@@ -674,11 +673,7 @@ class CharacterGenManager:
             )
             return
 
-        if isinstance(exc, (
-            hunyuan_client.TaskVanished,
-            hunyuan_client.WorkerUnreachable,
-            hunyuan_client.TaskStalled,
-        )):
+        if isinstance(exc, (hunyuan_client.TaskVanished, hunyuan_client.WorkerUnreachable)):
             # drop the dead handle so the stage submits again, and do not spend
             # an attempt: a crashing box would otherwise exhaust every job
             job.hunyuan_task_id = ""
