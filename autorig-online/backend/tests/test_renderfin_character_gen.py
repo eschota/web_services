@@ -836,6 +836,34 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_a_busy_gpu_is_a_short_wait_not_a_failure(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    await manager._handle_stage_error(
+                        job,
+                        RuntimeError("generation failed on f2: Hunyuan VRAM gate failed: "
+                                     "6439 MiB free; 7000 MiB required"),
+                    )
+                    self.assertEqual(job.attempts, {}, "a busy card is not the job's fault")
+                    self.assertEqual(job.error, "")
+                    # minutes, not the half hour a broken post-processor earns
+                    self.assertLess(job.retry_at - time.time(), 600)
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_job_already_failed_on_vram_is_revived(self):
+        job = CharacterGenJob(error="generation failed on f2: Hunyuan VRAM gate failed: 6439 MiB free")
+        self.assertTrue(character_gen._failed_on_empty_fleet(job))
+
     def test_a_job_already_failed_that_way_is_revived(self):
         job = CharacterGenJob(
             error="generation failed on f7: Vertex-PBR manifest is missing or invalid"

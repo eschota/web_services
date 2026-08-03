@@ -80,6 +80,10 @@ FARM_BREAKAGE_WAIT_SECONDS = float(
 # box then failed to finish its own post-processing. Nothing about the job is
 # wrong, so retrying the job harder cannot help and giving up is not allowed.
 _FARM_BREAKAGE_MARKERS = (
+    # The box was busy, not broken: its own gate refused to start a
+    # generation that would not fit alongside what it is already running.
+    # Waiting for the card to free up is the whole remedy.
+    "vram gate failed",
     "vertex-pbr manifest is missing",
     "vertex-pbr manifest contract",
     "blender vertex-pbr pipeline failed",
@@ -93,6 +97,7 @@ def _is_farm_breakage(text: str) -> bool:
 # They are indistinguishable from a real failure only by their message, so it
 # is matched here and they are revived rather than left for a human.
 _FLEET_ERROR_MARKERS = (
+    "vram gate failed",
     "task vanished on",
     "vertex-pbr manifest is missing",
     "blender vertex-pbr pipeline failed",
@@ -611,15 +616,21 @@ class CharacterGenManager:
         job.last_error = str(exc)[:1000]
 
         if _is_farm_breakage(str(exc)):
-            job.retry_at = time.time() + FARM_BREAKAGE_WAIT_SECONDS
+            # a card that is merely busy frees up in minutes; a broken
+            # post-processor does not, and re-checking it costs a GPU hour
+            wait = (
+                SLOT_WAIT_SECONDS
+                if "vram gate" in str(exc).lower()
+                else FARM_BREAKAGE_WAIT_SECONDS
+            )
+            job.retry_at = time.time() + wait
             job.stage_started_at = 0
             job.timed_stage = ""
             job.error = ""
             await self._persist(job)
             print(
                 f"[Renderfin][CharGen] job {job.id} parked on a farm-side "
-                f"post-processing failure ({exc}); re-checking in "
-                f"{int(FARM_BREAKAGE_WAIT_SECONDS / 60)}min"
+                f"condition ({exc}); re-checking in {int(wait)}s"
             )
             return
 
