@@ -6,6 +6,9 @@ surprising, how it shows up, and what to do about it.
 ## Contents
 
 - [Blender exits 0 when its script raises](#blender-exits-0-when-its-script-raises)
+- [The vertex-PBR bake is 30x slower on Blender 5.1](#the-vertex-pbr-bake-is-30x-slower-on-blender-51)
+- [The converter serves from a process that outlives your deploy](#the-converter-serves-from-a-process-that-outlives-your-deploy)
+- [A Blender script must not import the server's package](#a-blender-script-must-not-import-the-servers-package)
 - [The negative prompt reaches no model](#the-negative-prompt-reaches-no-model)
 - [The words "glass" and "glasses" are deleted](#the-words-glass-and-glasses-are-deleted)
 - [server-status does not check the bearer token](#server-status-does-not-check-the-bearer-token)
@@ -36,6 +39,67 @@ Verified directly on f13: a deliberately bad input produced
 **When calling Blender in background mode, never trust the exit code.** Check
 for the artifact the script was supposed to produce, and carry the stdout tail
 into the error when it is missing.
+
+## The vertex-PBR bake is 30x slower on Blender 5.1
+
+Measured on f13, same input, same box: **62 seconds on Blender 4.3 against more
+than 35 minutes on 5.1**, both producing a valid v5 manifest.
+
+Every farm box has 4.3 and 5.1 installed, and `_resolve_server_blender_path`
+returns the newest it finds, so the bake had been running on 5.1. The script's
+own docstring says "Run with Blender 4.3 or newer" and every known-good
+manifest on the boxes records `blender_version: 4.3.2` — the 5.1 path was never
+the validated one, it was simply first in the candidate list.
+
+`autorig_hunyuan/adapter.py` now picks 4.3 for this step specifically
+(`_vertex_pbr_blender`), with `HUNYUAN_BLENDER_PATH` to override. The rest of
+the converter still uses whatever the server resolved, which is correct — only
+the Hunyuan post-process was written against 4.3.
+
+When a queue of 3D jobs is draining far slower than the ~10 minutes a
+generation actually takes, check which Blender the bake is running under:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='blender.exe'" |
+  ForEach-Object { $_.CreationDate.ToString("HH:mm:ss") + "  " + $_.ExecutablePath }
+```
+
+## The converter serves from a process that outlives your deploy
+
+Copying a file to a box and restarting its scheduled task does **not**
+necessarily replace the process serving the converter port. Every box was found
+serving from a process started days earlier, holding the old module in memory,
+while the scheduled-task restart had started additional processes alongside it.
+
+Check the process that actually owns the port, not any process matching the
+name:
+
+```powershell
+$conn = Get-NetTCPConnection -State Listen -LocalPort <converter port>
+(Get-Process -Id $conn.OwningProcess).StartTime
+```
+
+Compare that to the mtime of the file you deployed. If the process is older,
+your change is not running, no matter what the file on disk says.
+
+`/api-converter-glb-restart-server` is the intended restart (auth via
+`X-GLB-Admin-Token`, the token is at `%LOCALAPPDATA%\AutoRig\converter_admin_token`),
+but it returns 409 while any converter task is active — and on a busy farm that
+window is very hard to catch. Plan a restart for a quiet period rather than
+expecting to slip one in.
+
+## A Blender script must not import the server's package
+
+`autorig_hunyuan/vertex_pbr.py` runs inside Blender's bundled Python, which has
+no `psutil`. Importing `autorig_hunyuan.fbx_contract` through the package
+executes `autorig_hunyuan/__init__.py`, which imports `.adapter`, which imports
+`psutil` — and the script died at module scope for a full day before anyone
+could see why, because of the exit-code trap above.
+
+Two rules follow. A Blender-side module loads its dependencies **by file path**,
+never through the package. And when loading by path, register the module in
+`sys.modules` before `exec_module`: `@dataclass` resolves its own module through
+`sys.modules[cls.__module__]` and dies on the first frozen dataclass otherwise.
 
 ## The negative prompt reaches no model
 

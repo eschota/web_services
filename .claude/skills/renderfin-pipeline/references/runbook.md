@@ -130,6 +130,31 @@ ssh autorig-vps "systemctl start autorig-disk-pressure-cleanup.service && sleep 
 `OVER CAP with nothing safe to delete` means everything left is a last copy —
 the cap cannot be honoured without losing data, and that is the correct outcome.
 
+## Restarting a converter on the farm
+
+The converter is the one component whose deploy does not take effect by copying
+a file. `autorig_hunyuan/vertex_pbr.py` is re-read by each Blender subprocess so
+changes there are live immediately, but `adapter.py` and the webserver are held
+in memory by the serving process.
+
+```bash
+# 1. read the admin token (never print it)
+TOKEN=$(ssh farm-f13 "powershell -NoProfile -Command   \"(Get-Content \$env:LOCALAPPDATA\AutoRig\converter_admin_token -Raw).Trim()\"" | tr -d '
+ ')
+
+# 2. ask the box to restart itself - 409 means it is busy, try again later
+curl -s -X POST -H "X-GLB-Admin-Token: $TOKEN"   http://127.0.0.1:15267/api-converter-glb-restart-server
+```
+
+It refuses while any converter task is active, which on a busy farm means the
+window is seconds wide. Either poll for it or, better, do converter deploys when
+the queue is quiet. Verify afterwards that the process owning the port is newer
+than the file you deployed — see the gotchas entry, this is the check that
+matters.
+
+Interrupted generations are safe: renderfin sees the task vanish and resubmits
+without charging the job an attempt.
+
 ## Services
 
 | Unit | What it does |
