@@ -30,6 +30,14 @@ CONTENT_CLASSIFIER_VERSION = "nudenet-320n-3.4"
 OPENAI_POSTER_MODEL = "gpt-4o-mini"
 PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
 
+# Closed free3d "Characters" taxonomy the LLM must pick a subcategory from.
+POSTER_SUBCATEGORIES = [
+    "Man", "Woman", "Child", "Cartoon", "Fantasy", "Sci-Fi", "Robot", "Monster",
+    "Creature", "Zombie", "Animatronics", "Anime", "Base Mesh", "Anatomy",
+    "Historic", "Military", "Superhero", "Animal", "Alien", "Undead",
+]
+POSTER_CATEGORY_DEFAULT = "Characters"
+
 _classifier_locks: Dict[str, asyncio.Lock] = {}
 _classifier_locks_guard = asyncio.Lock()
 
@@ -379,8 +387,10 @@ Return a single JSON object with exactly these keys:
 - "title": string, English, max 95 characters. Describe ONLY what is visible about the subject: role or archetype (soldier, knight, robot, …), clothing or uniform, notable gear (gas mask, sword, grenades, helmet, …), faction or style if clear. No marketing phrases, no "rigged for Unity/Unreal", no "3D character", no "perfect for games", no engine names.
 - "description": string, English, 2-4 short paragraphs for a YouTube video description: what appears in the render, tone/style, suitable for games/Blender; mention rig/animations only if relevant. Plain text, no HTML.
 - "keywords": JSON array of exactly 25 short English strings for YouTube tags. Order matters: put the MOST SPECIFIC tags first (role, outfit, weapons, props, art style). Put generic tags last (3d, character, rigging, game asset, unity, unreal, blender, animation, glb, fbx). No hashtags. No NSFW or policy-evading content.
+- "category": always the string "%s".
+- "subcategory": pick the SINGLE best fit for the visible subject from this list: %s. Return exactly one value from that list.
 
-Output only valid JSON, no markdown."""
+Output only valid JSON, no markdown.""" % (POSTER_CATEGORY_DEFAULT, POSTER_SUBCATEGORIES)
 
     client = OpenAI(api_key=OPENAI_API_KEY)
     resp = client.chat.completions.create(
@@ -411,11 +421,118 @@ Output only valid JSON, no markdown."""
     keywords = _normalize_keyword_list(kw_raw)
     if len(keywords) != 25:
         return None
+    category = (str(data.get("category") or "").strip() or POSTER_CATEGORY_DEFAULT)
+    subcategory = str(data.get("subcategory") or "").strip()
+    if subcategory not in POSTER_SUBCATEGORIES:
+        subcategory = "Cartoon"
     return {
         "title": title[:256],
         "description": desc[:5000],
         "keywords": keywords,
+        "category": category[:64],
+        "subcategory": subcategory,
     }
+
+
+def _renderfin_turntable_path_from_input_url(input_url: Optional[str]) -> Optional[str]:
+    """Map a public renderfin glb URL to its local *_turntable.mp4 sibling."""
+    from urllib.parse import urlparse
+    import os
+
+    path = urlparse(input_url or "").path or ""
+    marker = "/renderfin/render/"
+    i = path.find(marker)
+    if i < 0:
+        return None
+    tail = path[i + len(marker):]
+    local_glb = os.path.join("/var/autorig/renderfin/render", tail)
+    if not local_glb.lower().endswith(".glb"):
+        return None
+    return local_glb[:-4] + "_turntable.mp4"
+
+
+def _frame_bytes_from_video(mp4_path: Optional[str]) -> Optional[bytes]:
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not (mp4_path and os.path.isfile(mp4_path)):
+        return None
+    # The systemd unit runs with PATH=<venv>/bin only, which does NOT contain
+    # ffmpeg — resolve an absolute path so the call works under the service too.
+    ffmpeg_bin = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+    out = tempfile.mktemp(suffix=".jpg")
+    try:
+        proc = subprocess.run(
+            [ffmpeg_bin, "-y", "-ss", "1.0", "-i", mp4_path, "-frames:v", "1", "-q:v", "3", out],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60,
+        )
+        if proc.returncode != 0:
+            print(f"[PreConvertMeta] ffmpeg rc={proc.returncode} for {mp4_path}: "
+                  f"{(proc.stderr or b'')[-200:]!r}")
+            return None
+        if os.path.isfile(out) and os.path.getsize(out) > 0:
+            return open(out, "rb").read()
+    except Exception as e:
+        print(f"[PreConvertMeta] ffmpeg failed for {mp4_path}: {type(e).__name__}: {e}")
+        return None
+    finally:
+        try:
+            if os.path.isfile(out):
+                os.remove(out)
+        except Exception:
+            pass
+    return None
+
+
+def _preview_image_for_metadata(task_id: str, input_url: Optional[str]) -> Optional[bytes]:
+    """Pre-convert preview: browser preflight render first, else renderfin turntable frame."""
+    img = _load_preflight_render_image_bytes(task_id)
+    if img:
+        return img
+    return _frame_bytes_from_video(_renderfin_turntable_path_from_input_url(input_url))
+
+
+def build_pre_convert_metadata_sync(
+    task_id: str, input_url: Optional[str], task_type: str = "t_pose"
+) -> Optional[dict]:
+    """Best-effort metadata block for the converter payload (worker writes the full
+    request into *_rig.json, so these keys reach pipeline_config → keywords → animations).
+    Returns None if no preview image is available or OpenAI is unavailable."""
+    try:
+        img = _preview_image_for_metadata(task_id, input_url)
+        if not img:
+            print(f"[PreConvertMeta] no preview image for task {task_id} (url={input_url})")
+            return None
+        meta = analyze_poster_llm_metadata(img)
+        if not meta:
+            print(f"[PreConvertMeta] LLM returned nothing for task {task_id}")
+            return None
+        image_url = None
+        try:
+            from render_prompting import body_type_from_keywords, mask_url_for_body_type
+
+            bt = body_type_from_keywords(" ".join(meta["keywords"]) + " " + meta["title"])
+            image_url = mask_url_for_body_type(bt)
+        except Exception:
+            image_url = None
+        block = {
+            "title": meta["title"],
+            "category": meta.get("category") or POSTER_CATEGORY_DEFAULT,
+            "subcategory": meta.get("subcategory") or "Cartoon",
+            "image_description": {
+                "title": meta["title"],
+                "description": meta["description"],
+                "keywords": meta["keywords"],
+            },
+        }
+        if image_url:
+            block["image_url"] = image_url
+        return block
+    except Exception as e:
+        print(f"[PreConvertMeta] failed for task {task_id}: {e}")
+        return None
 
 
 def build_free3d_query_from_keywords(keywords: Optional[List[str]]) -> Optional[str]:

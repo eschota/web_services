@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.01.009 - Canonical pre-convert metadata dispatch
+
+- Recorded the production pre-convert poster metadata flow in the canonical repository.
+- Added closed character category/subcategory metadata and forwarded it to converter workers.
+- Kept preview/LLM failures non-fatal and bounded so metadata cannot block task dispatch.
+
 ## v0.01.008 - Task viewer GLB-first final preview
 
 - Fixed done-task viewer boot so it always tries `/api/task/{id}/animations.glb` before `animations.fbx`.

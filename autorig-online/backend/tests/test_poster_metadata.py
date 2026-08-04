@@ -1,6 +1,8 @@
 """Unit tests for poster keyword helpers (Free3D query + keyword padding)."""
 import unittest
+from unittest import mock
 
+import content_moderation
 from content_moderation import build_free3d_query_from_keywords
 from content_moderation import build_free3d_similar_query
 from content_moderation import _normalize_keyword_list
@@ -49,6 +51,37 @@ class PosterMetadataHelpersTests(unittest.TestCase):
         long_title = "word " * 80
         q = build_free3d_similar_query(long_title, ["a", "b"], max_len=50)
         self.assertLessEqual(len(q), 50)
+
+    def test_renderfin_input_maps_to_turntable(self):
+        self.assertEqual(
+            content_moderation._renderfin_turntable_path_from_input_url(
+                "https://autorig.online/renderfin/render/job/model.glb?download=1"
+            ),
+            "/var/autorig/renderfin/render/job/model_turntable.mp4",
+        )
+        self.assertIsNone(
+            content_moderation._renderfin_turntable_path_from_input_url(
+                "https://autorig.online/static/tasks/model.glb"
+            )
+        )
+
+    @mock.patch.object(content_moderation, "_preview_image_for_metadata", return_value=b"jpeg")
+    @mock.patch.object(content_moderation, "analyze_poster_llm_metadata")
+    def test_pre_convert_metadata_builds_worker_payload(self, analyze, _preview):
+        analyze.return_value = {
+            "title": "Sci-Fi Soldier",
+            "description": "Armored character.",
+            "keywords": [f"keyword-{i}" for i in range(25)],
+            "category": "Characters",
+            "subcategory": "Sci-Fi",
+        }
+        payload = content_moderation.build_pre_convert_metadata_sync(
+            "task-1", "https://example.invalid/model.glb"
+        )
+        self.assertEqual(payload["title"], "Sci-Fi Soldier")
+        self.assertEqual(payload["category"], "Characters")
+        self.assertEqual(payload["subcategory"], "Sci-Fi")
+        self.assertEqual(payload["image_description"]["keywords"], analyze.return_value["keywords"])
 
 
 if __name__ == "__main__":

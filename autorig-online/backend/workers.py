@@ -411,6 +411,7 @@ async def send_task_to_worker(
     mode: Optional[str] = None,
     animal_semantic_markers: Optional[Dict[str, List[float]]] = None,
     viewer_environment: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -460,7 +461,16 @@ async def send_task_to_worker(
                         payload["rig_orientation"] = rig_orientation
                     if transform_params.get("local_scale"):
                         payload["local_scale"] = transform_params["local_scale"]
-            
+
+            # Carry LLM poster metadata into the worker request. The converter
+            # writes the FULL request into <model>_rig.json, so these keys reach
+            # pipeline_config → keywords → animation selection and the listing.
+            if isinstance(metadata, dict) and metadata:
+                for _k in ("title", "category", "subcategory", "image_url", "image_description"):
+                    _v = metadata.get(_k)
+                    if _v:
+                        payload[_k] = _v
+
             request_started_at = time.time()
             response = await client.post(
                 worker_url,

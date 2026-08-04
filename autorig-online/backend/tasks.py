@@ -647,6 +647,36 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     await db.commit()
     await db.refresh(task)
 
+    # Best-effort: generate LLM poster metadata from the pre-convert preview
+    # (browser preflight render, else the renderfin turntable frame) so the
+    # converter receives title/description/keywords/category. The worker writes
+    # the full request into <model>_rig.json, so this drives animation selection
+    # and the listing. Fully non-fatal and time-bounded: a slow/absent preview
+    # or OpenAI outage must never delay or fail dispatch.
+    poster_metadata = None
+    try:
+        from content_moderation import build_pre_convert_metadata_sync
+
+        poster_metadata = await asyncio.wait_for(
+            asyncio.to_thread(
+                build_pre_convert_metadata_sync,
+                task.id,
+                task.input_url,
+                task_type_for_worker,
+            ),
+            timeout=45,
+        )
+    except Exception as _meta_err:
+        print(f"[PreConvertMeta] skipped for task {task.id}: {_meta_err}")
+        poster_metadata = None
+    if poster_metadata:
+        print(
+            f"[PreConvertMeta] task {task.id} ATTACHED pk={pk} "
+            f"subcategory={poster_metadata.get('subcategory')} title={poster_metadata.get('title')!r}"
+        )
+    else:
+        print(f"[PreConvertMeta] task {task.id} NO-METADATA pk={pk}")
+
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,
@@ -658,6 +688,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         mode=mode,
         animal_semantic_markers=animal_semantic_markers,
         viewer_environment=_viewer_environment_for_task(task) if pk == "rig" else None,
+        metadata=poster_metadata,
     )
     if not result.success:
         error = result.error or "Worker dispatch failed"
