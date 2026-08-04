@@ -45,7 +45,9 @@
 
 - Пока `status == processing`, фоновый воркер вызывает `update_task_progress()`:
   - по батчам проверяется **HEAD** по URL из `output_urls`; появившиеся попадают в `ready_urls`, растёт `ready_count`;
-  - при `ready_count >= total_count` → `status = done`;
+  - для legacy worker v1 при `ready_count >= total_count` → `status = done`;
+  - для worker completion v2 готовые URL означают только прогресс: `done` разрешён лишь при `status=Completed` и `finalized=true` в worker status;
+  - до v2-финализации `/model-files/{guid}` не заменяет исходный контракт `output_urls`; `finalization_errors` или worker `Failed` переводят задачу в `error`;
   - отдельно проверяется **видео:** `{worker_base}/converter/glb/{guid}/{guid}_video.mp4` — при 200 выставляются `video_ready`, `video_url`.
 - При переходе в `done`: опционально email владельцу, Telegram, GA4 `rig_completed`, **кэширование файлов** `cache_task_files()` в каталог статики таска (`TASK_CACHE_DIR / task_id`), выдача потом через `/api/file/...`.
 

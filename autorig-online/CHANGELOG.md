@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.02.001 - Strict worker completion gate
+
+- Read the additive worker completion-v2 fields from the task-status endpoint.
+- Keep central tasks processing when URLs are ready but the worker has not returned both `status=Completed` and `finalized=true`.
+- Treat early `/model-files` results as progress without replacing the original expected-output contract before finalization.
+- Convert worker `Failed` or `finalization_errors` into a central task error while retaining the v1 fallback for historical tasks and workers.
+
 ## v0.01.009 - Canonical pre-convert metadata dispatch
 
 - Recorded the production pre-convert poster metadata flow in the canonical repository.

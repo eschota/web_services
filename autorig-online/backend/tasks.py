@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 import httpx
 
 from sqlalchemy import select, desc, update
@@ -956,6 +956,57 @@ async def _fetch_worker_status_viewer_artifacts(
     )
 
 
+async def _fetch_worker_completion_contract(task: Task) -> Optional[dict]:
+    """Fetch the additive worker completion contract, if the worker exposes it."""
+    worker_api = str(getattr(task, "worker_api", None) or "").strip()
+    worker_task_id = str(getattr(task, "worker_task_id", None) or "").strip()
+    if not worker_api or not worker_task_id:
+        return None
+    status_url = f"{worker_api.rstrip('/')}/status/{quote(worker_task_id, safe='')}"
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            response = await client.get(status_url)
+        if response.status_code != 200:
+            return None
+        payload = response.json() if response.content else {}
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _completion_contract_v2_state(payload: Optional[dict]) -> Tuple[bool, bool, Optional[str]]:
+    """Return (is_v2, finalized_successfully, terminal_failure)."""
+    if not isinstance(payload, dict):
+        return False, False, None
+    try:
+        version = int(payload.get("completion_contract_version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    if version < 2:
+        return False, False, None
+    errors = payload.get("finalization_errors")
+    if isinstance(errors, list):
+        error_text = "; ".join(str(item).strip() for item in errors if str(item).strip())
+        if error_text:
+            return True, False, error_text
+    worker_status = str(payload.get("status") or "").strip().lower()
+    if worker_status in {"failed", "error"}:
+        error_text = str(payload.get("error") or "worker finalization failed").strip()
+        return True, False, error_text
+    finalized = bool(payload.get("finalized")) and worker_status == "completed"
+    return True, finalized, None
+
+
+def _task_declares_completion_v2(task: Task) -> bool:
+    """Read the persisted, migration-free v2 declaration from progress_page."""
+    try:
+        query = parse_qs(urlparse(str(getattr(task, "progress_page", None) or "")).query)
+        values = query.get("completion_contract_version", [])
+        return any(int(value) >= 2 for value in values)
+    except (TypeError, ValueError):
+        return False
+
+
 async def _probe_remote_glb_artifact(url: Optional[str]) -> bool:
     """Validate HTTP reachability plus GLB magic/version/declared total length."""
     candidate = str(url or "").strip()
@@ -1197,6 +1248,21 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     video_was_ready = task.video_ready
     previous_video_url = task.video_url
 
+    completion_payload = await _fetch_worker_completion_contract(task)
+    contract_v2, worker_finalized, finalization_failure = _completion_contract_v2_state(
+        completion_payload
+    )
+    expects_v2 = contract_v2 or _task_declares_completion_v2(task)
+    completion_probe_unavailable = expects_v2 and completion_payload is None
+    if contract_v2 and finalization_failure:
+        task.status = "error"
+        task.error_message = f"Worker failed: {finalization_failure}"
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(task)
+        _schedule_task_error_notification(task.id)
+        return task
+
     # Get already ready URLs
     already_ready = set(task.ready_urls)
     
@@ -1222,7 +1288,11 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         
         # Check if all URLs are ready
         if task.total_count > 0 and task.ready_count >= task.total_count:
-            if _is_animal_task(task) and not await _worker_conversion_completed(task):
+            if completion_probe_unavailable:
+                task.status = "processing"
+            elif contract_v2 and not worker_finalized:
+                task.status = "processing"
+            elif _is_animal_task(task) and not await _worker_conversion_completed(task):
                 task.status = "processing"
             else:
                 task.status = "done"
@@ -1251,12 +1321,16 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             task.status not in ("done", "error")
             and concrete_urls
             and _worker_outputs_look_complete(concrete_urls)
+            and not completion_probe_unavailable
+            and (not contract_v2 or worker_finalized)
         ):
             task.output_urls = concrete_urls
             task.ready_urls = concrete_urls
             task.total_count = len(concrete_urls)
             task.ready_count = len(concrete_urls)
-            conversion_completed = (not _is_animal_task(task)) or await _worker_conversion_completed(task)
+            conversion_completed = worker_finalized if contract_v2 else (
+                (not _is_animal_task(task)) or await _worker_conversion_completed(task)
+            )
             task.status = "done" if conversion_completed else "processing"
             task.last_progress_at = datetime.utcnow()
             preferred_video_url = _preferred_video_url_from_outputs(

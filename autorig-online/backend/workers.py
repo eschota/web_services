@@ -151,6 +151,21 @@ async def _recover_worker_task_after_post_timeout(
             guid = extract_guid(blob)
         if not guid:
             return None
+        declared_v2 = False
+        for bucket in ("active_tasks", "processing_tasks", "pending_tasks"):
+            value = data.get(bucket)
+            items = value.values() if isinstance(value, dict) else value if isinstance(value, list) else []
+            for item in items:
+                if not isinstance(item, dict) or guid not in "\n".join(_walk_json_strings(item)):
+                    continue
+                try:
+                    declared_v2 = int(item.get("completion_contract_version") or 0) >= 2
+                except (TypeError, ValueError):
+                    declared_v2 = False
+                if declared_v2:
+                    break
+            if declared_v2:
+                break
         progress_page = None
         output_urls: List[str] = []
         for ref in refs:
@@ -158,7 +173,11 @@ async def _recover_worker_task_after_post_timeout(
             if not s:
                 continue
             if guid in s and s.startswith(("http://", "https://")):
-                if "/converter/glb/" in s and s.endswith(".html") and not progress_page:
+                if (
+                    "/converter/glb/" in s
+                    and urlparse(s).path.endswith(".html")
+                    and not progress_page
+                ):
                     progress_page = s
                 output_urls.append(s)
         if not progress_page:
@@ -166,6 +185,9 @@ async def _recover_worker_task_after_post_timeout(
             if not worker_base:
                 return None
             progress_page = f"{worker_base}/converter/glb/{guid}/{guid}.html"
+        if declared_v2 and "completion_contract_version=" not in urlparse(progress_page).query:
+            separator = "&" if "?" in progress_page else "?"
+            progress_page += f"{separator}completion_contract_version=2"
         print(
             f"[Workers] POST timeout recovered active worker task: "
             f"worker={worker_url} guid={guid} progress_page={progress_page}"
