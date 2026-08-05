@@ -191,13 +191,15 @@
             <div class="home-convert-grid">
                 <div class="card convert-form-card">
                 <h1 class="home-convert-title">
-                    <span class="text-gradient" data-i18n="hero_title">Automatic 3D Model Rigging</span>
+                    <span class="text-gradient" data-i18n="hero_title">Automatic 3D Rigging and Character Generation</span>
                 </h1>
+                <p class="home-convert-subtitle" data-i18n="hero_subtitle">Upload a GLB, FBX or OBJ model and get it rigged with animations in minutes - or upload a picture of a character and get a ready 3D model with a full rig for 3 credits.</p>
                 <form id="convert-form">
                     <!-- Tabs -->
                     <div class="tabs">
                         <button type="button" class="tab active" data-tab="upload" data-i18n="tab_upload">Upload File</button>
                         <button type="button" class="tab" data-tab="link" data-i18n="tab_link">Paste Link</button>
+                        <button type="button" class="tab" data-tab="image" data-i18n="tab_image">Image &#8594; Character</button>
                     </div>
                     
                     <!-- Upload Panel -->
@@ -229,6 +231,24 @@
                     </div>
                     
                     <!-- Link Panel -->
+                    <!-- Image -> 3D model -> rig, as one task -->
+                    <div id="image-panel" class="hidden">
+                        <div class="upload-row">
+                            <div class="upload-zone" id="image-zone">
+                                <img src="/static/images/icons/upload.svg" alt="Upload" class="upload-zone-icon" width="64" height="64">
+                                <div class="upload-zone-title" data-i18n="image_gen_title">Drop a character image here</div>
+                                <div class="upload-zone-subtitle" data-i18n="image_gen_subtitle">PNG, JPG or WEBP. A T-pose or A-pose character comes back rigged; anything else still comes back as a 3D model. 3 credits.</div>
+                                <div class="upload-zone-file hidden" id="image-info">
+                                    <span>&#128444;</span>
+                                    <span id="image-name"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <input type="file" id="image-input" accept="image/png,image/jpeg,image/webp" hidden>
+                        <button type="button" class="btn btn-primary btn-block" id="image-generate-btn" data-i18n="image_gen_button">Generate character (3 credits)</button>
+                        <div id="image-gen-status" class="hidden"></div>
+                    </div>
+
                     <div id="link-panel" class="hidden">
                         <div class="form-group">
                             <label class="form-label" data-i18n="link_label">Model URL</label>
@@ -460,6 +480,6 @@
     <script src="/static/js/rig-icons.js?v=rigicons1"></script>
     <script src="/static/js/task-card.js?v=gallery-stats-rigtypes-1"></script>
     <script src="/static/js/home-demo-preview.js?v=20260516-home-demo"></script>
-    <script src="/static/js/app.js?v=site-orientation-20260622-1"></script>
+    <script src="/static/js/app.js?v=image-character-gen-20260805"></script>
 </body>
 </html>

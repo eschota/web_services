@@ -109,6 +109,12 @@ class CharacterGenRequest(BaseModel):
     telegram_chat_id: int = 0
 
 
+class CharacterGenFromImageRequest(BaseModel):
+    image_url: str = ""
+    user_name: str = "autorig-bot"
+    source_task_id: str = ""
+
+
 class TelegramContextRequest(BaseModel):
     chat_id: int = 0
     message_id: int = 0
@@ -128,6 +134,27 @@ async def api_character_gen(request: Request, body: CharacterGenRequest) -> Dict
         user_name=body.user_name,
         source_task_id=body.source_task_id,
         telegram_chat_id=body.telegram_chat_id,
+    )
+    return job.public_dict()
+
+
+@router.post("/api-character-gen/from-image")
+async def api_character_gen_from_image(
+    request: Request, body: CharacterGenFromImageRequest
+) -> Dict[str, Any]:
+    """Generate a 3D model from a picture the caller already has.
+
+    The Hunyuan API fetches the image itself, so the url has to be publicly
+    reachable over plain http(s) - a data url or an internal path fails inside
+    the worker, far from here, as a generic generation error.
+    """
+    image_url = (body.image_url or "").strip()
+    if not image_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="image_url must be a public http(s) url")
+    job = await _chargen(request).create_from_image(
+        image_url=image_url,
+        user_name=body.user_name,
+        source_task_id=body.source_task_id,
     )
     return job.public_dict()
 

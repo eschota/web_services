@@ -548,7 +548,7 @@ async def create_conversion_task(
     """
     task_type = normalize_task_type(task_type)
     pk = (pipeline_kind or "rig").strip().lower()
-    if pk not in ("rig", "convert"):
+    if pk not in ("rig", "convert", "generate"):
         pk = "rig"
 
     from main import ensure_disk_headroom_for_new_task, enforce_task_cache_max_size
@@ -1694,7 +1694,11 @@ async def get_stalled_processing_tasks_by_worker(
     lookup = get_worker_active_lookup(queue_status)
 
     result = await db.execute(
-        select(Task).where(Task.status == "processing")
+        select(Task).where(Task.status == "processing",
+            # a generation task has no worker progress to go stale on;
+            # its own pump owns the lifecycle until the mesh exists
+            Task.pipeline_kind != "generate",
+        )
     )
     processing_tasks = result.scalars().all()
 

@@ -535,6 +535,80 @@ def build_pre_convert_metadata_sync(
         return None
 
 
+CHARACTER_POSES = ("t_pose", "a_pose")
+
+
+def detect_character_for_generation(image_bytes: bytes) -> dict:
+    """Decide whether a picture can become a *rigged* character.
+
+    Image-to-3D will happily turn any picture into a mesh, but the rig that
+    follows only works on a character whose limbs are separated from the body -
+    a T-pose or an A-pose. A seated, posed or partially hidden figure produces a
+    mesh whose arms are fused to the torso, and the rig then fails deep in the
+    farm after the model has already been generated and paid for.
+
+    So the answer here decides the route, not the outcome: a riggable character
+    goes down generation+rig, anything else still gets its PBR model. On any
+    doubt - unreadable answer, no key, API failure - the caller gets
+    ``riggable: False`` and the user still receives a model.
+    """
+    verdict = {"is_character": False, "pose": "unknown", "riggable": False, "subject": "", "reason": ""}
+    from config import OPENAI_API_KEY
+
+    if not OPENAI_API_KEY:
+        verdict["reason"] = "vision unavailable"
+        return verdict
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        verdict["reason"] = f"openai package missing: {exc}"
+        return verdict
+
+    prompt = """Look at this picture and answer whether it can be turned into a RIGGED 3D character.
+Return a single JSON object with exactly these keys:
+- "is_character": true if the main subject is a single humanoid, creature, animal or robot character; false for scenery, props, vehicles, logos, text, collages or several separate characters.
+- "pose": one of "t_pose" (arms straight out to the sides), "a_pose" (arms lowered diagonally away from the body, clearly separated from the torso), or "other" for any other pose.
+- "limbs_separated": true only if arms and legs are clearly separated from the torso and from each other, with visible gaps, and the whole figure is inside the frame.
+- "subject": a short English noun phrase for the subject.
+- "reason": one short English sentence explaining the pose answer.
+Output only valid JSON, no markdown."""
+
+    try:
+        b64 = base64.standard_b64encode(image_bytes).decode("ascii")
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        resp = client.chat.completions.create(
+            model=OPENAI_POSTER_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    ],
+                }
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=400,
+            temperature=0.0,
+        )
+        data = json.loads(resp.choices[0].message.content or "{}")
+    except Exception as exc:
+        verdict["reason"] = f"vision failed: {str(exc)[:160]}"
+        return verdict
+
+    pose = str(data.get("pose") or "").strip().lower()
+    if pose not in CHARACTER_POSES:
+        pose = "other" if pose else "unknown"
+    verdict["is_character"] = bool(data.get("is_character"))
+    verdict["pose"] = pose
+    verdict["subject"] = str(data.get("subject") or "").strip()[:120]
+    verdict["reason"] = str(data.get("reason") or "").strip()[:200]
+    verdict["riggable"] = bool(
+        verdict["is_character"] and pose in CHARACTER_POSES and bool(data.get("limbs_separated"))
+    )
+    return verdict
+
+
 def build_free3d_query_from_keywords(keywords: Optional[List[str]]) -> Optional[str]:
     if not keywords:
         return None

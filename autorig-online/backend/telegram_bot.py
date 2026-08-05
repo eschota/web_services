@@ -2443,6 +2443,12 @@ async def _auto_submit_ready_jobs() -> None:
     for job in jobs or []:
         if str(job.get("stage") or "") != "ready":
             continue
+        # SITE_OWNED_JOB_GUARD: a generation started from the website is chained
+        # into its own conversion by generation_tasks, which owns that task row.
+        # Submitting it here as well produced a second, orphaned conversion of
+        # the same mesh.
+        if str(job.get("user_name") or "") != "autorig-bot":
+            continue
         job_id = str(job.get("job_id") or "")
         glb_url = str(job.get("glb_url") or "")
         chat_id = int(job.get("telegram_chat_id") or 0)

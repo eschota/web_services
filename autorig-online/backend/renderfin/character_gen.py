@@ -281,6 +281,37 @@ class CharacterGenManager:
         self._spawn(job)
         return job
 
+    async def create_from_image(
+        self,
+        *,
+        image_url: str,
+        user_name: str = "autorig-bot",
+        source_task_id: str = "",
+    ) -> CharacterGenJob:
+        """Start at the 3D stage from a picture the user already has.
+
+        The Flux stages exist to invent a T-pose render, and the approval stage
+        exists to choose between two invented ones. When the picture is supplied
+        there is nothing to invent and nothing to choose, so the job enters at
+        ``hunyuan`` with that picture standing in for the alpha-isolated render.
+        Everything downstream is the same code the prompt-driven jobs run: the
+        same worker pool and slot accounting, the same stage retries, the same
+        turntable - which is what keeps site generations and bot generations in
+        one queue instead of two that can each overfill the farm.
+        """
+        job = CharacterGenJob(
+            seq=self._next_seq(),
+            user_name=user_name,
+            source_task_id=source_task_id,
+            stage=CHARGEN_STAGE_HUNYUAN,
+            image_url=image_url,
+            isolated_url=image_url,
+        )
+        self._jobs[job.id] = job
+        await self._persist(job)
+        self._spawn(job)
+        return job
+
     def get(self, job_id: str) -> Optional[CharacterGenJob]:
         return self._jobs.get(job_id)
 

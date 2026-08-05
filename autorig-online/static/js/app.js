@@ -40,6 +40,7 @@ const App = {
         const hasConvertForm = !!document.getElementById('convert-form');
         if (hasConvertForm) {
             this.setupTabs();
+        this.setupImageGeneration();
             this.setupUploadZone();
             this.setupForm();
         }
@@ -1133,11 +1134,21 @@ const App = {
                 tabs.forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 
+                const imagePanel = document.getElementById('image-panel');
                 if (target === 'upload') {
                     uploadPanel?.classList.remove('hidden');
                     linkPanel?.classList.add('hidden');
+                    imagePanel?.classList.add('hidden');
+                    document.getElementById('start-btn')?.classList.add('hidden');
+                } else if (target === 'image') {
+                    // generation has its own button and its own endpoint, so the
+                    // shared start button stays out of the way
+                    uploadPanel?.classList.add('hidden');
+                    linkPanel?.classList.add('hidden');
+                    imagePanel?.classList.remove('hidden');
                     document.getElementById('start-btn')?.classList.add('hidden');
                 } else {
+                    imagePanel?.classList.add('hidden');
                     uploadPanel?.classList.add('hidden');
                     linkPanel?.classList.remove('hidden');
                     document.getElementById('start-btn')?.classList.remove('hidden');
@@ -1146,6 +1157,72 @@ const App = {
         });
     },
     
+    /**
+     * Image -> 3D model -> rig. Deliberately its own endpoint and its own
+     * button: the normal task form posts a model, this posts a picture, and
+     * mixing them would put generation in front of every ordinary conversion.
+     */
+    setupImageGeneration() {
+        const input = document.getElementById('image-input');
+        const zone = document.getElementById('image-zone');
+        const btn = document.getElementById('image-generate-btn');
+        const status = document.getElementById('image-gen-status');
+        const nameEl = document.getElementById('image-name');
+        const info = document.getElementById('image-info');
+        if (!input || !btn) return;
+
+        const say = (text, isError) => {
+            if (!status) return;
+            status.textContent = text;
+            status.classList.remove('hidden');
+            status.style.color = isError ? '#ff6b6b' : '';
+        };
+
+        zone?.addEventListener('click', () => input.click());
+        zone?.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+        zone?.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+        zone?.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('dragover');
+            if (e.dataTransfer?.files?.length) {
+                input.files = e.dataTransfer.files;
+                input.dispatchEvent(new Event('change'));
+            }
+        });
+        input.addEventListener('change', () => {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            if (nameEl) nameEl.textContent = file.name;
+            info?.classList.remove('hidden');
+            say('');
+            status?.classList.add('hidden');
+        });
+
+        btn.addEventListener('click', async () => {
+            const file = input.files && input.files[0];
+            if (!file) { say('Choose an image first', true); return; }
+            btn.disabled = true;
+            say('Uploading and detecting the character...');
+            try {
+                const body = new FormData();
+                body.append('file', file);
+                const resp = await fetch('/api/generate/from-image', { method: 'POST', body, credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    // 401/402 are the two the user can act on, so say which
+                    say(data.detail || `Generation could not start (HTTP ${resp.status})`, true);
+                    btn.disabled = false;
+                    return;
+                }
+                say('Generating your character...');
+                window.location.href = data.progress_url || `/task?id=${data.task_id}`;
+            } catch (err) {
+                say(`Generation could not start: ${err}`, true);
+                btn.disabled = false;
+            }
+        });
+    },
+
     /**
      * Setup upload zone
      */

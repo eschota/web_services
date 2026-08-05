@@ -454,6 +454,32 @@ async def start_character_gen(
     return job_id
 
 
+async def start_character_gen_from_image(
+    image_url: str,
+    *,
+    source_task_id: str = "",
+    user_name: str = "autorig-bot",
+) -> str:
+    """Start a 3D generation from a user-supplied picture. Returns job_id."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{RENDERFIN_INTERNAL_URL}/api-character-gen/from-image",
+            json={
+                "image_url": image_url,
+                "user_name": user_name,
+                "source_task_id": source_task_id,
+            },
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"character-gen from-image failed: HTTP {resp.status_code} {resp.text[:300]}"
+        )
+    job_id = str(resp.json().get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("character-gen from-image returned no job_id")
+    return job_id
+
+
 async def poll_character_gen(job_id: str) -> Dict[str, Any]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(f"{RENDERFIN_INTERNAL_URL}/api-character-gen/{job_id}")

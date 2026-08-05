@@ -679,7 +679,11 @@ async def background_task_updater():
         # Keep backend task rows aligned with terminal worker state before stall checks
         # and before dispatch can hand the same worker another queued task.
         result = await db.execute(
-            select(Task).where(Task.status == "processing")
+            select(Task).where(Task.status == "processing",
+                # a generation task has no worker progress to go stale on;
+                # its own pump owns the lifecycle until the mesh exists
+                Task.pipeline_kind != "generate",
+            )
         )
         processing_tasks = result.scalars().all()
 
@@ -744,6 +748,16 @@ async def background_task_updater():
                         except Exception as e:
                             print(f"[Background Worker] Stuck-hour policy error: {e}")
 
+                    # Image->model->rig tasks advance here, so a model that just
+                    # became riggable is dispatched in the same tick rather than
+                    # waiting a whole cycle for the next one.
+                    try:
+                        from generation_tasks import pump_generation_tasks
+
+                        await pump_generation_tasks(db)
+                    except Exception as e:
+                        print(f"[Background Worker] Generation pump error: {e}")
+
                     free_workers = await get_dispatchable_workers(db, queue_status)
                     if not free_workers:
                         fallback_workers = await get_dispatchable_workers(db, queue_status, allow_quarantined=True)
@@ -761,6 +775,7 @@ async def background_task_updater():
                             select(Task)
                             .where(
                                 Task.status == "created",
+                                Task.pipeline_kind != "generate",
                                 or_(
                                     Task.source_next_retry_at.is_(None),
                                     Task.source_next_retry_at <= dispatch_now,
@@ -16342,3 +16357,24 @@ async def add_model_to_scene(
     scene.task_ids = task_ids
     
     # Add transform
+
+
+# --- image -> model -> rig ---------------------------------------------------
+# Registered last so it binds the same dependencies every other route uses,
+# without generation_api having to import main (which imports it back).
+try:
+    from generation_api import register_generation_routes
+
+    register_generation_routes(
+        app,
+        {
+            "get_current_user": get_current_user,
+            "get_db": get_db,
+            "upload_dir": UPLOAD_DIR,
+            "app_url": APP_URL,
+            "create_conversion_task": create_conversion_task,
+        },
+    )
+    print("[Generation] image-to-rig routes registered")
+except Exception as _gen_routes_error:  # never take the API down over one feature
+    print(f"[Generation] route registration failed: {_gen_routes_error}")
