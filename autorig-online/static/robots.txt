@@ -86,6 +86,11 @@ Allow: /face-rig-animation-ru
 Allow: /face-rig-animation-zh
 Allow: /face-rig-animation-hi
 
+Allow: /image-to-rigged-3d-character
+Allow: /image-to-rigged-3d-character-ru
+Allow: /image-to-rigged-3d-character-zh
+Allow: /image-to-rigged-3d-character-hi
+
 Allow: /auto-rig-obj
 Allow: /auto-rig-obj-ru
 Allow: /auto-rig-obj-zh

@@ -1162,14 +1162,20 @@ const App = {
      * button: the normal task form posts a model, this posts a picture, and
      * mixing them would put generation in front of every ordinary conversion.
      */
+    /**
+     * AUTO_GENERATION_ON_DROP: choosing a picture *is* the request.
+     * There is no confirm button and no warning dialog - a person who dropped a
+     * character image already asked for the character. The two things that can
+     * stop it (no account, no credits) send them straight where they can fix
+     * it instead of explaining what went wrong.
+     */
     setupImageGeneration() {
         const input = document.getElementById('image-input');
         const zone = document.getElementById('image-zone');
-        const btn = document.getElementById('image-generate-btn');
         const status = document.getElementById('image-gen-status');
         const nameEl = document.getElementById('image-name');
         const info = document.getElementById('image-info');
-        if (!input || !btn) return;
+        if (!input) return;
 
         const say = (text, isError) => {
             if (!status) return;
@@ -1189,38 +1195,51 @@ const App = {
                 input.dispatchEvent(new Event('change'));
             }
         });
-        input.addEventListener('change', () => {
-            const file = input.files && input.files[0];
-            if (!file) return;
-            if (nameEl) nameEl.textContent = file.name;
-            info?.classList.remove('hidden');
-            say('');
-            status?.classList.add('hidden');
-        });
 
-        btn.addEventListener('click', async () => {
-            const file = input.files && input.files[0];
-            if (!file) { say('Choose an image first', true); return; }
-            btn.disabled = true;
-            say('Uploading and detecting the character...');
-            try {
-                const body = new FormData();
-                body.append('file', file);
-                const resp = await fetch('/api/generate/from-image', { method: 'POST', body, credentials: 'same-origin' });
-                const data = await resp.json().catch(() => ({}));
-                if (!resp.ok) {
-                    // 401/402 are the two the user can act on, so say which
-                    say(data.detail || `Generation could not start (HTTP ${resp.status})`, true);
-                    btn.disabled = false;
-                    return;
-                }
-                say('Generating your character...');
-                window.location.href = data.progress_url || `/task?id=${data.task_id}`;
-            } catch (err) {
-                say(`Generation could not start: ${err}`, true);
-                btn.disabled = false;
-            }
+        input.addEventListener('change', () => {
+            const chosen = Array.from(input.files || []);
+            if (!chosen.length) return;
+            if (nameEl) nameEl.textContent = chosen.length > 1
+                ? `${chosen.length} images` : chosen[0].name;
+            info?.classList.remove('hidden');
+            this.startBatchGeneration(chosen, say);
         });
+    },
+
+    async startImageGeneration(file, say, nameEl, info) {
+        if (this.state.imageGenerationInProgress) return;
+        this.state.imageGenerationInProgress = true;
+        if (nameEl) nameEl.textContent = file.name;
+        info?.classList.remove('hidden');
+        say('Uploading and detecting the character...');
+        try {
+            const body = new FormData();
+            body.append('file', file);
+            const resp = await fetch('/api/generate/from-image', {
+                method: 'POST', body, credentials: 'same-origin'
+            });
+            if (resp.status === 401) {
+                say('Signing you in...');
+                window.location.href = '/auth/login';
+                return;
+            }
+            if (resp.status === 402) {
+                say('Opening credits...');
+                window.location.href = '/buy-credits';
+                return;
+            }
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                say(data.detail || `Generation could not start (HTTP ${resp.status})`, true);
+                this.state.imageGenerationInProgress = false;
+                return;
+            }
+            say('Generating your character...');
+            window.location.href = data.progress_url || `/task?id=${data.task_id}`;
+        } catch (err) {
+            say(`Generation could not start: ${err}`, true);
+            this.state.imageGenerationInProgress = false;
+        }
     },
 
     /**
@@ -1265,7 +1284,7 @@ const App = {
 
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                this.handleFileSelect(files[0]);
+                this.handleFilesSelected(files);
             }
         });
         
@@ -1276,7 +1295,7 @@ const App = {
                 return;
             }
             if (input.files.length > 0) {
-                this.handleFileSelect(input.files[0]);
+                this.handleFilesSelected(input.files);
             }
         });
         
@@ -1292,15 +1311,108 @@ const App = {
         });
     },
     
+    routeImageToGeneration(fileOrFiles) {
+        const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+        const file = files[0];
+        document.querySelector('.tab[data-tab="image"]')?.click();
+        const input = document.getElementById('image-input');
+        if (input) {
+            try {
+                const transfer = new DataTransfer();
+                files.forEach((f) => transfer.items.add(f));
+                input.files = transfer.files;
+                input.dispatchEvent(new Event('change'));
+            } catch (_) {
+                // DataTransfer is unavailable in a few older browsers; the user
+                // can still pick the file through the panel's own input.
+            }
+        }
+        document.getElementById('image-panel')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    },
+
+    /**
+     * A dropped selection is a batch: ten pictures mean ten characters, not one.
+     * Models stay one-at-a-time because a rig task takes a single mesh, so only
+     * the images fan out.
+     */
+    handleFilesSelected(fileList) {
+        const files = Array.from(fileList || []);
+        if (!files.length) return;
+        const isImage = (f) => ['.png', '.jpg', '.jpeg', '.webp']
+            .includes('.' + String(f.name).split('.').pop().toLowerCase());
+        const images = files.filter(isImage);
+        const models = files.filter((f) => !isImage(f));
+        if (images.length) {
+            this.routeImageToGeneration(images);
+            return;
+        }
+        if (models.length > 1) {
+            alert('One model per rig task - starting with the first file. Drop images to create several tasks at once.');
+        }
+        this.handleFileSelect(models[0]);
+    },
+
+    async startBatchGeneration(files, say) {
+        if (this.state.imageGenerationInProgress) return;
+        this.state.imageGenerationInProgress = true;
+        const total = files.length;
+        const created = [];
+        for (let i = 0; i < total; i++) {
+            const file = files[i];
+            say(total > 1
+                ? `Starting ${i + 1} of ${total}: ${file.name}...`
+                : 'Uploading and detecting the character...');
+            try {
+                const body = new FormData();
+                body.append('file', file);
+                const resp = await fetch('/api/generate/from-image', {
+                    method: 'POST', body, credentials: 'same-origin'
+                });
+                if (resp.status === 401) { window.location.href = '/auth/login'; return; }
+                if (resp.status === 402) {
+                    // credits ran out part-way: keep what was started and send
+                    // the user where they can top up
+                    if (created.length) {
+                        say(`Started ${created.length} of ${total}; out of credits - opening the credits page...`);
+                        await new Promise((r) => setTimeout(r, 1200));
+                    }
+                    window.location.href = '/buy-credits';
+                    return;
+                }
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    say(`${file.name}: ${data.detail || `HTTP ${resp.status}`}`, true);
+                    continue;
+                }
+                created.push(data.task_id);
+            } catch (err) {
+                say(`${file.name}: ${err}`, true);
+            }
+        }
+        this.state.imageGenerationInProgress = false;
+        if (!created.length) { say('No task could be started', true); return; }
+        say(`Started ${created.length} task(s)`);
+        window.location.href = created.length === 1 ? `/task?id=${created[0]}` : '/tasks';
+    },
+
     handleFileSelect(file) {
         if (this.state.taskSubmitInProgress) {
             return;
         }
         const allowedExtensions = ['.glb', '.fbx', '.obj'];
+        const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
         const ext = '.' + file.name.split('.').pop().toLowerCase();
-        
+
+        if (imageExtensions.includes(ext)) {
+            // A picture dropped here is not a mistake - it is the other thing
+            // this page does. Rejecting it told the user their file was wrong
+            // when the site could simply generate a character from it.
+            this.routeImageToGeneration(file);
+            return;
+        }
+
         if (!allowedExtensions.includes(ext)) {
-            alert('Please select a GLB, FBX, or OBJ file');
+            alert('Please select a GLB, FBX or OBJ model - or drop a PNG/JPG/WEBP picture to generate a character from it');
             return;
         }
         

@@ -693,4 +693,89 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/turtle-auto-rig"/>
   </url>
 
+  <!-- Image to rigged 3D character article (4 languages) -->
+  <url>
+    <loc>https://autorig.online/image-to-rigged-3d-character</loc>
+    <lastmod>2026-08-06</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/image-to-rigged-3d-character"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/image-to-rigged-3d-character-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/image-to-rigged-3d-character-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character"/>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg</video:thumbnail_loc>
+      <video:title>Cute Pink Creature with Large Eyes and Playful Expression</video:title>
+      <video:description>Rigged pink creature character generated from a single uploaded image, playing a retargeted animation.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/image-to-rig/pink-creature.mp4</video:content_loc>
+      <video:duration>20</video:duration>
+      <video:publication_date>2026-08-06</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/image-to-rig/dwarf-poster.jpg</video:thumbnail_loc>
+      <video:title>Fantasy Dwarf Adventurer with Green Tunic and Beard</video:title>
+      <video:description>Rigged fantasy dwarf adventurer generated from one picture, animated in the AutoRig preview.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/image-to-rig/dwarf.mp4</video:content_loc>
+      <video:duration>20</video:duration>
+      <video:publication_date>2026-08-05</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/image-to-rig/knight-poster.jpg</video:thumbnail_loc>
+      <video:title>Armored Knight with Spiked Shoulder Pads and Mask</video:title>
+      <video:description>Rigged armored knight character created from a single T-pose image, playing retargeted animation.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/image-to-rig/knight.mp4</video:content_loc>
+      <video:duration>20</video:duration>
+      <video:publication_date>2026-08-06</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://autorig.online/static/videos/image-to-rig/bear-shaman-poster.jpg</video:thumbnail_loc>
+      <video:title>Mystical Bear Shaman with Staff and Orbs</video:title>
+      <video:description>Rigged bear shaman character generated from an image, animated with a retargeted animation set.</video:description>
+      <video:content_loc>https://autorig.online/static/videos/image-to-rig/bear-shaman.mp4</video:content_loc>
+      <video:duration>20</video:duration>
+      <video:publication_date>2026-08-06</video:publication_date>
+      <video:family_friendly>yes</video:family_friendly>
+    </video:video>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/image-to-rigged-3d-character-ru</loc>
+    <lastmod>2026-08-06</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/image-to-rigged-3d-character"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/image-to-rigged-3d-character-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/image-to-rigged-3d-character-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/image-to-rigged-3d-character-zh</loc>
+    <lastmod>2026-08-06</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/image-to-rigged-3d-character"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/image-to-rigged-3d-character-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/image-to-rigged-3d-character-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character"/>
+  </url>
+
+  <url>
+    <loc>https://autorig.online/image-to-rigged-3d-character-hi</loc>
+    <lastmod>2026-08-06</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://autorig.online/image-to-rigged-3d-character"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://autorig.online/image-to-rigged-3d-character-ru"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://autorig.online/image-to-rigged-3d-character-zh"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character"/>
+  </url>
+
 </urlset>

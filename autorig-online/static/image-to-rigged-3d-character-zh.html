@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片生成绑定 3D 角色：一张 T-pose 图片直接出骨骼动画 | AutoRig.online</title>
+    <meta name="description" content="上传一张 T-pose 或 A-pose 图片，直接获得已绑定并带动画的 3D 角色：GLB、含动画的 Unity FBX、HDRP unitypackage、Blender 文件和预览视频，全部在一个任务里。">
+    <meta name="keywords" content="图片生成3D角色, 图片转绑定模型, T-pose图片转3D, AI角色生成绑定, 单张图片生成3D角色, 图片自动绑定, image to glb, AI 3D角色动画, 一张图生成角色">
+    <link rel="canonical" href="https://autorig.online/image-to-rigged-3d-character-zh">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/image-to-rigged-3d-character">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/image-to-rigged-3d-character-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/image-to-rigged-3d-character-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="图片生成绑定 3D 角色：一张 T-pose 图片直接出骨骼动画">
+    <meta property="og:description" content="上传一张 T-pose 或 A-pose 图片，直接获得已绑定并带动画的 3D 角色：GLB、含动画的 Unity FBX、HDRP unitypackage、Blender 文件和预览视频，全部在一个任务里。">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/image-to-rigged-3d-character-zh">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:image" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
+    <meta property="og:image:secure_url" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1080">
+    <meta property="og:image:height" content="1920">
+    <meta property="og:image:alt" content="由一张上传图片生成的已绑定粉色生物角色，正在播放行走动画">
+    <meta property="og:video" content="https://autorig.online/static/videos/image-to-rig/pink-creature.mp4">
+    <meta property="og:video:secure_url" content="https://autorig.online/static/videos/image-to-rig/pink-creature.mp4">
+    <meta property="og:video:type" content="video/mp4">
+    <meta property="og:video:width" content="540">
+    <meta property="og:video:height" content="960">
+    <meta property="article:published_time" content="2026-08-06">
+    <meta property="article:modified_time" content="2026-08-06">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="图片生成绑定 3D 角色：一张 T-pose 图片直接出骨骼动画">
+    <meta name="twitter:description" content="上传一张 T-pose 或 A-pose 图片，直接获得已绑定并带动画的 3D 角色：GLB、含动画的 Unity FBX、HDRP unitypackage、Blender 文件和预览视频，全部在一个任务里。">
+    <meta name="twitter:image" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
+    <meta name="twitter:image:alt" content="由一张上传图片生成的已绑定粉色生物角色，正在播放行走动画">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="alternate icon" href="/static/images/logo/favicon.svg">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css?v=image-to-rig-20260806">
+    <style>
+        .img2rig-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        .img2rig-grid figure { margin: 0; padding: 1rem; text-align: center; }
+        .img2rig-video {
+            width: 100%;
+            max-width: 260px;
+            height: auto;
+            aspect-ratio: 9 / 16;
+            border-radius: 12px;
+            background: #000;
+            display: block;
+            margin: 0 auto 1rem;
+        }
+        .img2rig-steps { list-style: none; padding: 0; margin: 2rem 0 0; }
+        .img2rig-steps > li { counter-increment: img2rig-step; position: relative; }
+        .img2rig-steps > li h3::before {
+            content: counter(img2rig-step) ". ";
+            color: var(--accent);
+            font-weight: 700;
+        }
+        .img2rig-body { counter-reset: img2rig-step; }
+        .img2rig-checklist { margin: 1rem 0 0; padding-left: 1.25rem; line-height: 1.8; }
+        .img2rig-note { color: var(--text-secondary); margin-top: 1.5rem; }
+    </style>
+
+    <!-- Structured data -->
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "图片生成绑定 3D 角色：一张 T-pose 图片直接出骨骼动画",
+    "description": "上传一张 T-pose 或 A-pose 图片，直接获得已绑定并带动画的 3D 角色：GLB、含动画的 Unity FBX、HDRP unitypackage、Blender 文件和预览视频，全部在一个任务里。",
+    "inLanguage": "zh",
+    "url": "https://autorig.online/image-to-rigged-3d-character-zh",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://autorig.online/image-to-rigged-3d-character-zh"
+    },
+    "image": [
+        "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg"
+    ],
+    "author": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online"
+    },
+    "publisher": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+        }
+    },
+    "datePublished": "2026-08-06",
+    "dateModified": "2026-08-06",
+    "articleSection": "指南",
+    "keywords": "图片生成3D角色, 图片转绑定模型, T-pose图片转3D, AI角色生成绑定, 单张图片生成3D角色, 图片自动绑定, image to glb, AI 3D角色动画, 一张图生成角色",
+    "about": [
+        {
+            "@type": "Thing",
+            "name": "image to 3D character generation"
+        },
+        {
+            "@type": "Thing",
+            "name": "automatic character rigging"
+        },
+        {
+            "@type": "Thing",
+            "name": "animation retargeting"
+        }
+    ],
+    "breadcrumb": {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "首页",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "指南",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "图片生成绑定 3D 角色：一张 T-pose 图片直接出骨骼动画",
+                "item": "https://autorig.online/image-to-rigged-3d-character-zh"
+            }
+        ]
+    }
+}
+    </script>
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "把一张 T-pose 图片变成已绑定的 3D 角色",
+    "description": "把一张角色图片拖到 AutoRig 首页。只要它是四肢与身体分开的 T-pose 或 A-pose，你就会在同一个任务里拿到 3D 模型、骨骼、重定向动画和全部导出格式。",
+    "inLanguage": "zh",
+    "totalTime": "PT45M",
+    "image": "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg",
+    "estimatedCost": {
+        "@type": "MonetaryAmount",
+        "currency": "USD",
+        "value": "0.30"
+    },
+    "supply": [
+        {
+            "@type": "HowToSupply",
+            "name": "One PNG, JPG or WEBP image of a character in a T-pose or A-pose"
+        }
+    ],
+    "tool": [
+        {
+            "@type": "HowToTool",
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
+        }
+    ],
+    "step": [
+        {
+            "@type": "HowToStep",
+            "position": 1,
+            "name": "拖入图片",
+            "text": "打开 AutoRig 首页，把 PNG、JPG 或 WEBP 文件拖到上传区。一张图片对应一个角色。需要先登录，因为生成会从账户扣费。",
+            "url": "https://autorig.online/image-to-rigged-3d-character-zh#step-1"
+        },
+        {
+            "@type": "HowToStep",
+            "position": 2,
+            "name": "网站判断它看到的是什么",
+            "text": "检测会判断图片中是否有四肢离开躯干的 T-pose 或 A-pose 角色。这只决定路线：可绑定的图片进入生成加绑定，其余的只进入生成。",
+            "url": "https://autorig.online/image-to-rigged-3d-character-zh#step-2"
+        },
+        {
+            "@type": "HowToStep",
+            "position": 3,
+            "name": "生成 3D 模型",
+            "text": "图片送往 GPU 农场，返回时是带 PBR 材质的贴图网格，并经过重拓扑成为可用几何，而不是类似扫描的原始表面。",
+            "url": "https://autorig.online/image-to-rigged-3d-character-zh#step-3"
+        },
+        {
+            "@type": "HowToStep",
+            "position": 4,
+            "name": "模型被绑定并加上动画",
+            "text": "拟合骨骼、求解蒙皮权重，并把动画库重定向到新角色上。随后任务会发布 GLB、Unity FBX、HDRP unitypackage、Blender 文件和预览视频。",
+            "url": "https://autorig.online/image-to-rigged-3d-character-zh#step-4"
+        }
+    ]
+}
+    </script>
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@graph": [
+        {
+            "@type": "VideoObject",
+            "name": "有大眼睛和俏皮表情的粉色可爱生物",
+            "description": "由一张上传图片生成的已绑定粉色生物角色，正在播放行走动画",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg"
+            ],
+            "uploadDate": "2026-08-06",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/pink-creature.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-zh#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "zh",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        },
+        {
+            "@type": "VideoObject",
+            "name": "身穿绿色束腰外衣、留着胡须的奇幻矮人冒险者",
+            "description": "由一张图片生成的已绑定奇幻矮人冒险者，在浏览器预览中播放动画",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/dwarf-poster.jpg"
+            ],
+            "uploadDate": "2026-08-05",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/dwarf.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-zh#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "zh",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        },
+        {
+            "@type": "VideoObject",
+            "name": "带尖刺护肩与面具的重甲骑士",
+            "description": "由单张 T-pose 图片创建的已绑定重甲骑士角色，正在播放重定向动画",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/knight-poster.jpg"
+            ],
+            "uploadDate": "2026-08-06",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/knight.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-zh#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "zh",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        },
+        {
+            "@type": "VideoObject",
+            "name": "手持法杖与灵球的神秘熊萨满",
+            "description": "由图片生成的已绑定熊萨满角色，使用重定向动画集进行动画播放",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/bear-shaman-poster.jpg"
+            ],
+            "uploadDate": "2026-08-06",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/bear-shaman.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-zh#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "zh",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        }
+    ]
+}
+    </script>
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "inLanguage": "zh",
+    "mainEntity": [
+        {
+            "@type": "Question",
+            "name": "开始之前需要有 3D 模型吗？",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "不需要。这正是本页的重点——一张图片就够了。如果你已经有 GLB、FBX 或 OBJ，直接上传即可，完全跳过生成。"
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "角色必须是 T-pose 吗？",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "T-pose 和 A-pose 都可以，只要四肢与身体分开。姿势决定的是是否尝试绑定，绝不会决定你能否拿到模型。"
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "需要多长时间？",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "本页的示例从头到尾大约需要 20 到 50 分钟，其中包含在农场队列中的等待时间。任务页面会显示实时进度，你可以关闭标签页——任务会继续运行。"
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "如果我上传的不是角色怎么办？",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "你会得到那件东西的带贴图 PBR 3D 模型。检测只是给任务分流，并不会拒绝它。"
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "可以一次绑定多个角色吗？",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "可以。在上传区选择多张图片，每张都会成为独立任务并分别计费。"
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "需要账户吗？",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "从图片生成角色需要账户，因为积分绑定在账户上。上传你已有的 3D 模型并运行绑定则不需要。"
+            }
+        }
+    ]
+}
+    </script>
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body class="img2rig-body" data-layout-free3d-init="none">
+    <div id="site-header"></div>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>把一张 T-pose 图片变成已绑定的 3D 角色</h1>
+                <p class="hero-subtitle">把一张角色图片拖到 AutoRig 首页。只要它是四肢与身体分开的 T-pose 或 A-pose，你就会在同一个任务里拿到 3D 模型、骨骼、重定向动画和全部导出格式。</p>
+                <div class="hero-features">
+                    <div class="feature"><span>自动姿势检测</span></div>
+                    <div class="feature"><span>模型、绑定与动画同在一个任务</span></div>
+                    <div class="feature"><span>GLB、Unity FBX、HDRP 包、Blender</span></div>
+                </div>
+                <a href="/" class="cta-button">上传图片</a>
+            </div>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <h2>输入一张图，输出一个完整角色</h2>
+                <p>大多数 image-to-3D 工具止步于网格。你拿到一个静态模型，绑定仍然要自己熬夜做。AutoRig 把图片当作整条流水线的起点：图片变成带贴图的 3D 模型，模型获得骨骼和蒙皮权重，然后动画库被重定向到它身上。这一切都作为一个任务、一个进度页面交付。</p>
+                <p>路由决策只做一次，就在上传之后。网站查看你的图片，判断其中是否有能承载骨骼的角色。如果有，你会得到生成加绑定。如果没有——载具、道具、建筑，或四肢与身体粘连的角色——你依然会得到一个完整的 PBR 3D 模型，因为无论如何模型都是你付费购买的东西。</p>
+            </article>
+        </div>
+    </section>
+
+    <section class="content-section" id="examples">
+        <div class="container">
+            <h2>由单张图片生成的角色</h2>
+            <p>下面每个预览都是本站上已完成的公开任务。每一个都始于一张上传的图片，终于一个带动画的已绑定角色。点击播放，然后打开任务页面查看结果。</p>
+            <div class="img2rig-grid">
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/pink-creature-poster.jpg"
+                           aria-label="由一张上传图片生成的已绑定粉色生物角色，正在播放行走动画">
+                        <source src="/static/videos/image-to-rig/pink-creature.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>有大眼睛和俏皮表情的粉色可爱生物</h3>
+                        <p>交付 17 个文件</p>
+                        <a class="guide-link" href="/task?id=89752c3a-85b3-4800-93ca-a0693f8eb5fc">打开任务</a>
+                    </figcaption>
+                </figure>
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/dwarf-poster.jpg"
+                           aria-label="由一张图片生成的已绑定奇幻矮人冒险者，在浏览器预览中播放动画">
+                        <source src="/static/videos/image-to-rig/dwarf.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>身穿绿色束腰外衣、留着胡须的奇幻矮人冒险者</h3>
+                        <p>交付 17 个文件</p>
+                        <a class="guide-link" href="/task?id=94fa594c-9100-4d07-ba9c-0747d1de7030">打开任务</a>
+                    </figcaption>
+                </figure>
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/knight-poster.jpg"
+                           aria-label="由单张 T-pose 图片创建的已绑定重甲骑士角色，正在播放重定向动画">
+                        <source src="/static/videos/image-to-rig/knight.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>带尖刺护肩与面具的重甲骑士</h3>
+                        <p>交付 9 个文件</p>
+                        <a class="guide-link" href="/task?id=b8c36298-5387-442f-83c9-6b1a05d1b8aa">打开任务</a>
+                    </figcaption>
+                </figure>
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/bear-shaman-poster.jpg"
+                           aria-label="由图片生成的已绑定熊萨满角色，使用重定向动画集进行动画播放">
+                        <source src="/static/videos/image-to-rig/bear-shaman.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>手持法杖与灵球的神秘熊萨满</h3>
+                        <p>交付 9 个文件</p>
+                        <a class="guide-link" href="/task?id=214a6dc1-b400-4ed1-b604-8adb109cb5c1">打开任务</a>
+                    </figcaption>
+                </figure>
+            </div>
+            <p class="img2rig-note">这些片段是流水线为每个完成任务渲染的预览视频。它们展示的是生成角色真正在播放重定向动画，而不是静态网格的转台展示。</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="how-it-works">
+        <div class="container">
+            <h2>工作流程，一步一步来</h2>
+            <p>上传之后，四个阶段自动运行，无需你再做任何操作。</p>
+            <ol class="features-list img2rig-steps">
+                <li class="feature-item" id="step-1">
+                    <h3>拖入图片</h3>
+                    <p>打开 AutoRig 首页，把 PNG、JPG 或 WEBP 文件拖到上传区。一张图片对应一个角色。需要先登录，因为生成会从账户扣费。</p>
+                </li>
+                <li class="feature-item" id="step-2">
+                    <h3>网站判断它看到的是什么</h3>
+                    <p>检测会判断图片中是否有四肢离开躯干的 T-pose 或 A-pose 角色。这只决定路线：可绑定的图片进入生成加绑定，其余的只进入生成。</p>
+                </li>
+                <li class="feature-item" id="step-3">
+                    <h3>生成 3D 模型</h3>
+                    <p>图片送往 GPU 农场，返回时是带 PBR 材质的贴图网格，并经过重拓扑成为可用几何，而不是类似扫描的原始表面。</p>
+                </li>
+                <li class="feature-item" id="step-4">
+                    <h3>模型被绑定并加上动画</h3>
+                    <p>拟合骨骼、求解蒙皮权重，并把动画库重定向到新角色上。随后任务会发布 GLB、Unity FBX、HDRP unitypackage、Blender 文件和预览视频。</p>
+                </li>
+            </ol>
+        </div>
+    </section>
+
+    <section class="content-section" id="deliverables">
+        <div class="container">
+            <h2>任务完成后你会拿到什么</h2>
+            <p>完成的角色任务会发布一整套交付文件，而不是单个文件。本页示例每个都交付了 9 到 17 个产物。</p>
+            <div class="features-list">
+                <div class="feature-item">
+                    <h3>已绑定的 GLB</h3>
+                    <p>面向 Web 的原生格式。可以在任务页面的浏览器查看器里播放，也能直接放进 three.js、Babylon、Godot 或任何 glTF 流水线。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>含动画的 Unity FBX</h3>
+                    <p>骨骼网格，内含已烘焙的重定向动画集，可直接用于 Mecanim。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>HDRP unitypackage</h3>
+                    <p>为 High Definition Render Pipeline 接好材质的 Unity 包，导入后角色不会变成粉色。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Blender 文件</h3>
+                    <p>Blender 视角下的场景，可用于权重绘制、重拓扑修补，或导出为上面列表之外的格式。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>预览视频</h3>
+                    <p>角色播放动画的渲染片段——就是本页嵌入的那些视频。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content-section" id="riggable">
+        <div class="container">
+            <h2>什么样的图片可以绑定</h2>
+            <p>检测器要找的是可读的身体，而不是艺术水准。一张干净 T-pose 的粗略草图，胜过一张摆着夸张动作姿势的精美渲染图。</p>
+            <ul class="img2rig-checklist">
+                    <li>角色面向镜头，直立并大致居中。</li>
+                    <li>手臂离开躯干——T-pose 时水平伸直，A-pose 时向下张开。</li>
+                    <li>双腿分开，之间有可见的空隙。</li>
+                    <li>全身都在画面内，包括手和脚。</li>
+                    <li>背景简洁，至少不要与角色轮廓混在一起。</li>
+            </ul>
+            <h3>如果图片里不是角色</h3>
+            <p>没有任何图片会被拒绝。无法承载骨骼的图片依然会生成带贴图的 PBR 3D 模型——你只是拿到没有骨骼和动画的模型。这是针对每张图片的路由决策，而不是失败提示。</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="batch">
+        <div class="container">
+            <h2>一次上传多张图片</h2>
+            <p>一次拖入多张图片，每张都会成为自己的任务并一起排队。上传区支持多文件选择并按顺序启动，因此一组概念图可以在一轮里变成一组已绑定角色。只拖一个文件会进入该任务页面；拖多个则会进入你的任务列表。</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="pricing">
+        <div class="container">
+            <h2>费用如何，哪些免费</h2>
+            <div class="features-list">
+                <div class="feature-item">
+                    <h3>免费部分</h3>
+                    <p>上传你已有的 3D 模型并运行绑定是免费的，也不需要账户。查看结果同样免费——浏览器查看器、动画播放、预览视频和公开图库都对所有人开放。AutoRig 运行免费，观看免费。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>付费部分</h3>
+                    <p>有两件事会消耗积分。从图片生成角色需要 3 积分，在任务创建时扣除，因为它会占用农场的 GPU 时间。解锁已完成任务的下载需要 10 积分，可获得整套交付：ZIP、受保护文件、动物变体和自定义动画下载。单个额外动画为 1 积分。</p>
+                </div>
+            </div>
+            <p>积分按包出售：30 积分 3 美元，100 积分 10 美元，500 积分 50 美元，1000 积分 100 美元——每一档都是每积分 0.10 美元，使用加密货币支付约有 20% 折扣。按此价格，解锁一个任务是 1 美元，一次图片生成角色是 0.30 美元。</p>
+            <p>如果出问题的是流水线而不是图片，这 3 积分会自动退回你的余额。</p>
+            <p>有一点要说清楚：目前没有自动赠送的免费积分。新账户从零开始，所以第一次生成或第一次下载都需要先购买积分包。上面写明免费的内容，没有积分也依然免费。</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="faq">
+        <div class="container">
+            <h2>大家真正会问的问题</h2>
+            <div class="features-list">
+                <div class="feature-item">
+                    <h3>开始之前需要有 3D 模型吗？</h3>
+                    <p>不需要。这正是本页的重点——一张图片就够了。如果你已经有 GLB、FBX 或 OBJ，直接上传即可，完全跳过生成。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>角色必须是 T-pose 吗？</h3>
+                    <p>T-pose 和 A-pose 都可以，只要四肢与身体分开。姿势决定的是是否尝试绑定，绝不会决定你能否拿到模型。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>需要多长时间？</h3>
+                    <p>本页的示例从头到尾大约需要 20 到 50 分钟，其中包含在农场队列中的等待时间。任务页面会显示实时进度，你可以关闭标签页——任务会继续运行。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>如果我上传的不是角色怎么办？</h3>
+                    <p>你会得到那件东西的带贴图 PBR 3D 模型。检测只是给任务分流，并不会拒绝它。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>可以一次绑定多个角色吗？</h3>
+                    <p>可以。在上传区选择多张图片，每张都会成为独立任务并分别计费。</p>
+                </div>
+                <div class="feature-item">
+                    <h3>需要账户吗？</h3>
+                    <p>从图片生成角色需要账户，因为积分绑定在账户上。上传你已有的 3D 模型并运行绑定则不需要。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="related-section">
+        <div class="container">
+            <h2>相关指南</h2>
+            <p>更多关于姿势、格式，以及绑定之后会发生什么：</p>
+            <div class="related-links">
+                <a href="/t-pose-vs-a-pose-zh" class="related-link">T-Pose 与 A-Pose</a>
+                <a href="/glb-auto-rig" class="related-link">GLB 自动绑定</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX 自动绑定</a>
+                <a href="/animation-retargeting-zh" class="related-link">动画重定向</a>
+                <a href="/how-it-works" class="related-link">工作原理</a>
+                <a href="/gallery" class="related-link">图库</a>
+                <a href="/buy-credits" class="related-link">购买积分</a>
+                <a href="/faq" class="related-link">常见问题</a>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-section">
+        <div class="container">
+            <h2>用一张图片试试</h2>
+            <p>打开首页，拖入一张角色图片，看它带着骨骼回来。</p>
+            <a href="/" class="cta-button">上传图片</a>
+        </div>
+    </section>
+
+    <!-- Scripts -->
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js?v=image-to-rig-20260806"></script>
+    <script>
+        // The article body is static per URL and carries no data-i18n, so
+        // I18n.init() only localizes the shared header/footer chrome here.
+        // Switching language in the header must therefore move the visitor to
+        // the sibling URL rather than half-translate this page.
+        (function () {
+            var VARIANTS = {en: '/image-to-rigged-3d-character', ru: '/image-to-rigged-3d-character-ru', zh: '/image-to-rigged-3d-character-zh', hi: '/image-to-rigged-3d-character-hi'};
+            window.addEventListener('languageChanged', function (event) {
+                var lang = event && event.detail && event.detail.lang;
+                var target = VARIANTS[lang];
+                if (target && target !== window.location.pathname) {
+                    window.location.assign(target + window.location.hash);
+                }
+            });
+            document.addEventListener('DOMContentLoaded', function () {
+                Promise.resolve()
+                    .then(function () { return I18n.init(); })
+                    .catch(function (error) { console.error('i18n init failed', error); });
+            });
+        })();
+    </script>
+    <div id="site-footer"></div>
+</body>
+</html>

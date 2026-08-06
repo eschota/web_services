@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Изображение в риггед 3D-персонажа: генерация и риг из одной T-pose картинки | AutoRig.online</title>
+    <meta name="description" content="Загрузите одну картинку в T-pose или A-pose и получите риггед 3D-персонажа с анимациями: GLB, Unity FBX, HDRP unitypackage, файлы Blender и превью-видео в одной задаче.">
+    <meta name="keywords" content="изображение в 3d персонажа, картинка в риггед модель, t-pose картинка в 3d, генерация 3d персонажа из фото, риг из изображения, создать 3d персонажа из картинки, ai генератор 3d персонажей, image to glb, автоматический риггинг из фото">
+    <link rel="canonical" href="https://autorig.online/image-to-rigged-3d-character-ru">
+    <link rel="alternate" hreflang="en" href="https://autorig.online/image-to-rigged-3d-character">
+    <link rel="alternate" hreflang="ru" href="https://autorig.online/image-to-rigged-3d-character-ru">
+    <link rel="alternate" hreflang="zh" href="https://autorig.online/image-to-rigged-3d-character-zh">
+    <link rel="alternate" hreflang="hi" href="https://autorig.online/image-to-rigged-3d-character-hi">
+    <link rel="alternate" hreflang="x-default" href="https://autorig.online/image-to-rigged-3d-character">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Изображение в риггед 3D-персонажа: генерация и риг из одной T-pose картинки">
+    <meta property="og:description" content="Загрузите одну картинку в T-pose или A-pose и получите риггед 3D-персонажа с анимациями: GLB, Unity FBX, HDRP unitypackage, файлы Blender и превью-видео в одной задаче.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://autorig.online/image-to-rigged-3d-character-ru">
+    <meta property="og:site_name" content="AutoRig.online">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:image" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
+    <meta property="og:image:secure_url" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1080">
+    <meta property="og:image:height" content="1920">
+    <meta property="og:image:alt" content="Риггед розовое существо, сгенерированное из одной загруженной картинки, проигрывает анимацию ходьбы">
+    <meta property="og:video" content="https://autorig.online/static/videos/image-to-rig/pink-creature.mp4">
+    <meta property="og:video:secure_url" content="https://autorig.online/static/videos/image-to-rig/pink-creature.mp4">
+    <meta property="og:video:type" content="video/mp4">
+    <meta property="og:video:width" content="540">
+    <meta property="og:video:height" content="960">
+    <meta property="article:published_time" content="2026-08-06">
+    <meta property="article:modified_time" content="2026-08-06">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Изображение в риггед 3D-персонажа: генерация и риг из одной T-pose картинки">
+    <meta name="twitter:description" content="Загрузите одну картинку в T-pose или A-pose и получите риггед 3D-персонажа с анимациями: GLB, Unity FBX, HDRP unitypackage, файлы Blender и превью-видео в одной задаче.">
+    <meta name="twitter:image" content="https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg">
+    <meta name="twitter:image:alt" content="Риггед розовое существо, сгенерированное из одной загруженной картинки, проигрывает анимацию ходьбы">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo/favicon.svg">
+    <link rel="alternate icon" href="/static/images/logo/favicon.svg">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/styles.css?v=image-to-rig-20260806">
+    <style>
+        .img2rig-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        .img2rig-grid figure { margin: 0; padding: 1rem; text-align: center; }
+        .img2rig-video {
+            width: 100%;
+            max-width: 260px;
+            height: auto;
+            aspect-ratio: 9 / 16;
+            border-radius: 12px;
+            background: #000;
+            display: block;
+            margin: 0 auto 1rem;
+        }
+        .img2rig-steps { list-style: none; padding: 0; margin: 2rem 0 0; }
+        .img2rig-steps > li { counter-increment: img2rig-step; position: relative; }
+        .img2rig-steps > li h3::before {
+            content: counter(img2rig-step) ". ";
+            color: var(--accent);
+            font-weight: 700;
+        }
+        .img2rig-body { counter-reset: img2rig-step; }
+        .img2rig-checklist { margin: 1rem 0 0; padding-left: 1.25rem; line-height: 1.8; }
+        .img2rig-note { color: var(--text-secondary); margin-top: 1.5rem; }
+    </style>
+
+    <!-- Structured data -->
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Изображение в риггед 3D-персонажа: генерация и риг из одной T-pose картинки",
+    "description": "Загрузите одну картинку в T-pose или A-pose и получите риггед 3D-персонажа с анимациями: GLB, Unity FBX, HDRP unitypackage, файлы Blender и превью-видео в одной задаче.",
+    "inLanguage": "ru",
+    "url": "https://autorig.online/image-to-rigged-3d-character-ru",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://autorig.online/image-to-rigged-3d-character-ru"
+    },
+    "image": [
+        "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg"
+    ],
+    "author": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online"
+    },
+    "publisher": {
+        "@type": "Organization",
+        "name": "AutoRig Online",
+        "url": "https://autorig.online",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://autorig.online/static/images/logo/autorig-logo.png"
+        }
+    },
+    "datePublished": "2026-08-06",
+    "dateModified": "2026-08-06",
+    "articleSection": "Руководства",
+    "keywords": "изображение в 3d персонажа, картинка в риггед модель, t-pose картинка в 3d, генерация 3d персонажа из фото, риг из изображения, создать 3d персонажа из картинки, ai генератор 3d персонажей, image to glb, автоматический риггинг из фото",
+    "about": [
+        {
+            "@type": "Thing",
+            "name": "image to 3D character generation"
+        },
+        {
+            "@type": "Thing",
+            "name": "automatic character rigging"
+        },
+        {
+            "@type": "Thing",
+            "name": "animation retargeting"
+        }
+    ],
+    "breadcrumb": {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Главная",
+                "item": "https://autorig.online/"
+            },
+            {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Руководства",
+                "item": "https://autorig.online/guides"
+            },
+            {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "Изображение в риггед 3D-персонажа: генерация и риг из одной T-pose картинки",
+                "item": "https://autorig.online/image-to-rigged-3d-character-ru"
+            }
+        ]
+    }
+}
+    </script>
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "Превратите одну картинку в T-pose в риггед 3D-персонажа",
+    "description": "Перетащите одну картинку персонажа на главную страницу AutoRig. Если это T-pose или A-pose с разведёнными конечностями, вы получите 3D-модель, скелет, ретаргетед-анимации и все форматы экспорта одной задачей.",
+    "inLanguage": "ru",
+    "totalTime": "PT45M",
+    "image": "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg",
+    "estimatedCost": {
+        "@type": "MonetaryAmount",
+        "currency": "USD",
+        "value": "0.30"
+    },
+    "supply": [
+        {
+            "@type": "HowToSupply",
+            "name": "One PNG, JPG or WEBP image of a character in a T-pose or A-pose"
+        }
+    ],
+    "tool": [
+        {
+            "@type": "HowToTool",
+            "name": "AutoRig Online",
+            "url": "https://autorig.online/"
+        }
+    ],
+    "step": [
+        {
+            "@type": "HowToStep",
+            "position": 1,
+            "name": "Перетащите картинку",
+            "text": "Откройте главную страницу AutoRig и перетащите файл PNG, JPG или WEBP в зону загрузки. Одна картинка — один персонаж. Нужно быть авторизованным: генерация списывается с аккаунта.",
+            "url": "https://autorig.online/image-to-rigged-3d-character-ru#step-1"
+        },
+        {
+            "@type": "HowToStep",
+            "position": 2,
+            "name": "Сайт определяет, что перед ним",
+            "text": "Детекция проверяет, изображён ли на картинке персонаж в T-pose или A-pose с конечностями, отведёнными от корпуса. Это определяет только маршрут: пригодные для рига картинки идут на генерацию плюс риггинг, остальные — только на генерацию.",
+            "url": "https://autorig.online/image-to-rigged-3d-character-ru#step-2"
+        },
+        {
+            "@type": "HowToStep",
+            "position": 3,
+            "name": "Генерируется 3D-модель",
+            "text": "Картинка уходит на GPU-ферму и возвращается текстурированным мешем с PBR-материалами, ретопологизированным в пригодную геометрию, а не в сырую поверхность вроде скана.",
+            "url": "https://autorig.online/image-to-rigged-3d-character-ru#step-3"
+        },
+        {
+            "@type": "HowToStep",
+            "position": 4,
+            "name": "Модель риггится и анимируется",
+            "text": "Подгоняется скелет, рассчитываются веса скиннинга, и библиотека анимаций ретаргетится на нового персонажа. После этого задача публикует GLB, Unity FBX, HDRP unitypackage, файлы Blender и превью-видео.",
+            "url": "https://autorig.online/image-to-rigged-3d-character-ru#step-4"
+        }
+    ]
+}
+    </script>
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@graph": [
+        {
+            "@type": "VideoObject",
+            "name": "Милое розовое существо с большими глазами и игривым выражением",
+            "description": "Риггед розовое существо, сгенерированное из одной загруженной картинки, проигрывает анимацию ходьбы",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/pink-creature-poster.jpg"
+            ],
+            "uploadDate": "2026-08-06",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/pink-creature.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-ru#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "ru",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        },
+        {
+            "@type": "VideoObject",
+            "name": "Фэнтезийный гном-искатель приключений в зелёной тунике и с бородой",
+            "description": "Риггед фэнтезийный гном, сгенерированный из одной картинки, анимирован в браузерном превью",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/dwarf-poster.jpg"
+            ],
+            "uploadDate": "2026-08-05",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/dwarf.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-ru#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "ru",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        },
+        {
+            "@type": "VideoObject",
+            "name": "Бронированный рыцарь с шипастыми наплечниками и маской",
+            "description": "Риггед бронированный рыцарь, созданный из одной T-pose картинки, проигрывает ретаргетед-анимацию",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/knight-poster.jpg"
+            ],
+            "uploadDate": "2026-08-06",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/knight.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-ru#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "ru",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        },
+        {
+            "@type": "VideoObject",
+            "name": "Мистический медведь-шаман с посохом и сферами",
+            "description": "Риггед медведь-шаман, сгенерированный из изображения, анимирован ретаргетед-набором анимаций",
+            "thumbnailUrl": [
+                "https://autorig.online/static/videos/image-to-rig/bear-shaman-poster.jpg"
+            ],
+            "uploadDate": "2026-08-06",
+            "duration": "PT20S",
+            "contentUrl": "https://autorig.online/static/videos/image-to-rig/bear-shaman.mp4",
+            "embedUrl": "https://autorig.online/image-to-rigged-3d-character-ru#examples",
+            "isFamilyFriendly": true,
+            "inLanguage": "ru",
+            "publisher": {
+                "@type": "Organization",
+                "name": "AutoRig Online",
+                "url": "https://autorig.online"
+            }
+        }
+    ]
+}
+    </script>
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "inLanguage": "ru",
+    "mainEntity": [
+        {
+            "@type": "Question",
+            "name": "Нужна ли 3D-модель, чтобы начать?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Нет. В этом и смысл страницы: достаточно одной картинки. Если у вас уже есть GLB, FBX или OBJ, загрузите файл напрямую и пропустите генерацию."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Обязательно ли персонаж должен быть в T-pose?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Подходит и T-pose, и A-pose, лишь бы конечности были отведены от тела. Поза определяет, будет ли предпринят риггинг, но никогда не определяет, получите ли вы модель."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Сколько это занимает времени?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Примеры на этой странице заняли примерно от 20 до 50 минут целиком, включая ожидание в очереди фермы. Страница задачи показывает прогресс в реальном времени, и вкладку можно закрыть — задача продолжит выполняться."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "А если я загружу не персонажа?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Вы получите текстурированную PBR 3D-модель того, что было на картинке. Детекция маршрутизирует задачу, а не отклоняет её."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Можно ли риггить несколько персонажей сразу?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Да. Выберите несколько изображений в зоне загрузки — каждое станет отдельной задачей с отдельным списанием."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Нужен ли аккаунт?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Для генерации персонажа из картинки — да, кредиты привязаны к аккаунту. Для загрузки уже имеющейся 3D-модели и запуска рига — нет."
+            }
+        }
+    ]
+}
+    </script>
+
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-T4E781EHE4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-T4E781EHE4');
+    </script>
+</head>
+<body class="img2rig-body" data-layout-free3d-init="none">
+    <div id="site-header"></div>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>Превратите одну картинку в T-pose в риггед 3D-персонажа</h1>
+                <p class="hero-subtitle">Перетащите одну картинку персонажа на главную страницу AutoRig. Если это T-pose или A-pose с разведёнными конечностями, вы получите 3D-модель, скелет, ретаргетед-анимации и все форматы экспорта одной задачей.</p>
+                <div class="hero-features">
+                    <div class="feature"><span>Автоматическое определение позы</span></div>
+                    <div class="feature"><span>Модель, риг и анимации в одной задаче</span></div>
+                    <div class="feature"><span>GLB, Unity FBX, HDRP-пакет, Blender</span></div>
+                </div>
+                <a href="/" class="cta-button">Загрузить картинку</a>
+            </div>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <article>
+                <h2>На входе картинка, на выходе готовый персонаж</h2>
+                <p>Большинство image-to-3D инструментов останавливаются на меше. Вы получаете статичную модель, а риггинг остаётся вашей вечерней работой. AutoRig считает картинку началом всего пайплайна: изображение превращается в текстурированную 3D-модель, модель получает скелет и веса скиннинга, а сверху ретаргетится библиотека анимаций. Всё это приходит одной задачей с одной страницей прогресса.</p>
+                <p>Решение о маршруте принимается один раз, сразу после загрузки. Сайт смотрит на вашу картинку и определяет, есть ли на ней персонаж, который может нести скелет. Если да — вы получаете генерацию плюс риггинг. Если нет — машина, пропс, здание, персонаж со слитыми с телом конечностями — вы всё равно получаете полноценную PBR 3D-модель, потому что модель вы оплатили в любом случае.</p>
+            </article>
+        </div>
+    </section>
+
+    <section class="content-section" id="examples">
+        <div class="container">
+            <h2>Персонажи, созданные из одной картинки</h2>
+            <p>Каждое превью ниже — завершённая публичная задача на этом сайте. Каждая началась с одной загруженной картинки и закончилась риггед-персонажем с анимациями. Нажмите play, а затем откройте страницу задачи, чтобы изучить результат.</p>
+            <div class="img2rig-grid">
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/pink-creature-poster.jpg"
+                           aria-label="Риггед розовое существо, сгенерированное из одной загруженной картинки, проигрывает анимацию ходьбы">
+                        <source src="/static/videos/image-to-rig/pink-creature.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>Милое розовое существо с большими глазами и игривым выражением</h3>
+                        <p>17 файлов в выдаче</p>
+                        <a class="guide-link" href="/task?id=89752c3a-85b3-4800-93ca-a0693f8eb5fc">Открыть задачу</a>
+                    </figcaption>
+                </figure>
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/dwarf-poster.jpg"
+                           aria-label="Риггед фэнтезийный гном, сгенерированный из одной картинки, анимирован в браузерном превью">
+                        <source src="/static/videos/image-to-rig/dwarf.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>Фэнтезийный гном-искатель приключений в зелёной тунике и с бородой</h3>
+                        <p>17 файлов в выдаче</p>
+                        <a class="guide-link" href="/task?id=94fa594c-9100-4d07-ba9c-0747d1de7030">Открыть задачу</a>
+                    </figcaption>
+                </figure>
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/knight-poster.jpg"
+                           aria-label="Риггед бронированный рыцарь, созданный из одной T-pose картинки, проигрывает ретаргетед-анимацию">
+                        <source src="/static/videos/image-to-rig/knight.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>Бронированный рыцарь с шипастыми наплечниками и маской</h3>
+                        <p>9 файлов в выдаче</p>
+                        <a class="guide-link" href="/task?id=b8c36298-5387-442f-83c9-6b1a05d1b8aa">Открыть задачу</a>
+                    </figcaption>
+                </figure>
+                <figure class="guide-card">
+                    <video class="img2rig-video" controls preload="none" playsinline muted loop
+                           width="540" height="960"
+                           poster="/static/videos/image-to-rig/bear-shaman-poster.jpg"
+                           aria-label="Риггед медведь-шаман, сгенерированный из изображения, анимирован ретаргетед-набором анимаций">
+                        <source src="/static/videos/image-to-rig/bear-shaman.mp4" type="video/mp4">
+                    </video>
+                    <figcaption>
+                        <h3>Мистический медведь-шаман с посохом и сферами</h3>
+                        <p>9 файлов в выдаче</p>
+                        <a class="guide-link" href="/task?id=214a6dc1-b400-4ed1-b604-8adb109cb5c1">Открыть задачу</a>
+                    </figcaption>
+                </figure>
+            </div>
+            <p class="img2rig-note">Эти клипы — превью-видео, которые пайплайн рендерит для каждой завершённой задачи. На них сгенерированный персонаж реально проигрывает ретаргетед-анимацию, а не крутится статичным мешем на турнтейбле.</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="how-it-works">
+        <div class="container">
+            <h2>Как это работает, шаг за шагом</h2>
+            <p>После загрузки четыре стадии проходят без вашего участия.</p>
+            <ol class="features-list img2rig-steps">
+                <li class="feature-item" id="step-1">
+                    <h3>Перетащите картинку</h3>
+                    <p>Откройте главную страницу AutoRig и перетащите файл PNG, JPG или WEBP в зону загрузки. Одна картинка — один персонаж. Нужно быть авторизованным: генерация списывается с аккаунта.</p>
+                </li>
+                <li class="feature-item" id="step-2">
+                    <h3>Сайт определяет, что перед ним</h3>
+                    <p>Детекция проверяет, изображён ли на картинке персонаж в T-pose или A-pose с конечностями, отведёнными от корпуса. Это определяет только маршрут: пригодные для рига картинки идут на генерацию плюс риггинг, остальные — только на генерацию.</p>
+                </li>
+                <li class="feature-item" id="step-3">
+                    <h3>Генерируется 3D-модель</h3>
+                    <p>Картинка уходит на GPU-ферму и возвращается текстурированным мешем с PBR-материалами, ретопологизированным в пригодную геометрию, а не в сырую поверхность вроде скана.</p>
+                </li>
+                <li class="feature-item" id="step-4">
+                    <h3>Модель риггится и анимируется</h3>
+                    <p>Подгоняется скелет, рассчитываются веса скиннинга, и библиотека анимаций ретаргетится на нового персонажа. После этого задача публикует GLB, Unity FBX, HDRP unitypackage, файлы Blender и превью-видео.</p>
+                </li>
+            </ol>
+        </div>
+    </section>
+
+    <section class="content-section" id="deliverables">
+        <div class="container">
+            <h2>Что оказывается в задаче после завершения</h2>
+            <p>Завершённая задача персонажа публикует полный набор файлов, а не один файл. Примеры на этой странице отдали от 9 до 17 артефактов каждый.</p>
+            <div class="features-list">
+                <div class="feature-item">
+                    <h3>Риггед GLB</h3>
+                    <p>Веб-нативный формат. Проигрывается во вьюере прямо на странице задачи и без переделок ложится в three.js, Babylon, Godot или любой glTF-пайплайн.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Unity FBX с анимациями</h3>
+                    <p>Скелетный меш с запечённым набором ретаргетед-анимаций, готовый для Mecanim.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>HDRP unitypackage</h3>
+                    <p>Пакет Unity с материалами, настроенными под High Definition Render Pipeline, чтобы персонаж не оказался розовым при импорте.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Файлы Blender</h3>
+                    <p>Сцена в том виде, как её видит Blender: для weight painting, правок ретопологии или экспорта в то, чего нет в списке выше.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Превью-видео</h3>
+                    <p>Отрендеренный клип, где персонаж проигрывает свои анимации, — те самые видео, что встроены на этой странице.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content-section" id="riggable">
+        <div class="container">
+            <h2>Какая картинка пригодна для рига</h2>
+            <p>Детектор ищет читаемое тело, а не художественное качество. Грубый набросок в чистой T-pose выигрывает у красивого рендера персонажа, свёрнутого в драматичную боевую позу.</p>
+            <ul class="img2rig-checklist">
+                    <li>Персонаж повёрнут к камере, стоит прямо и примерно по центру.</li>
+                    <li>Руки отведены от корпуса — горизонтально для T-pose или под углом вниз для A-pose.</li>
+                    <li>Ноги разведены, между ними виден просвет.</li>
+                    <li>Тело полностью в кадре, включая кисти и стопы.</li>
+                    <li>Фон простой или хотя бы не сливается с силуэтом.</li>
+            </ul>
+            <h3>А если на картинке не персонаж</h3>
+            <p>Ничего не отклоняется. Картинка, которая не может нести скелет, всё равно даёт текстурированную PBR 3D-модель — вы просто получаете модель без скелета и анимаций. Это решение о маршруте для конкретной картинки, а не сообщение об ошибке.</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="batch">
+        <div class="container">
+            <h2>Несколько картинок сразу</h2>
+            <p>Перетащите несколько изображений — каждое станет отдельной задачей, поставленной в очередь вместе с остальными. Зона загрузки принимает выбор нескольких файлов и запускает их по очереди, так что пачка концепт-листов превращается в пачку риггед-персонажей за один проход. Один файл — вы попадаете на страницу этой задачи; несколько — на список ваших задач.</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="pricing">
+        <div class="container">
+            <h2>Сколько это стоит и что бесплатно</h2>
+            <div class="features-list">
+                <div class="feature-item">
+                    <h3>Бесплатно</h3>
+                    <p>Загрузить уже имеющуюся 3D-модель и прогнать риггинг — бесплатно и без аккаунта. Смотреть результат тоже бесплатно: вьюер в браузере, проигрывание анимаций, превью-видео и публичная галерея открыты. AutoRig бесплатен в запуске и бесплатен в просмотре.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Платно</h3>
+                    <p>Кредиты тратятся на две вещи. Генерация персонажа из картинки стоит 3 кредита и списывается при создании задачи, потому что бронирует время GPU на ферме. Разблокировка скачивания готовой задачи стоит 10 кредитов и открывает весь набор: ZIP, защищённые файлы, животные варианты и загрузку кастомных анимаций. Одна дополнительная анимация — 1 кредит.</p>
+                </div>
+            </div>
+            <p>Кредиты продаются пакетами: 30 за $3, 100 за $10, 500 за $50 и 1000 за $100 — ровно $0.10 за кредит на любом уровне, и примерно на 20% дешевле при оплате криптой. По этому курсу разблокировка одной задачи — $1, а одна генерация персонажа из картинки — $0.30.</p>
+            <p>Если ломается пайплайн, а не картинка, 3 кредита автоматически возвращаются на баланс.</p>
+            <p>Скажем прямо: автоматических бесплатных кредитов сейчас нет. Новые аккаунты начинают с нуля, поэтому для первой генерации или первого скачивания нужен пакет кредитов. Всё, что описано выше как бесплатное, остаётся бесплатным и без него.</p>
+        </div>
+    </section>
+
+    <section class="content-section" id="faq">
+        <div class="container">
+            <h2>Вопросы, которые действительно задают</h2>
+            <div class="features-list">
+                <div class="feature-item">
+                    <h3>Нужна ли 3D-модель, чтобы начать?</h3>
+                    <p>Нет. В этом и смысл страницы: достаточно одной картинки. Если у вас уже есть GLB, FBX или OBJ, загрузите файл напрямую и пропустите генерацию.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Обязательно ли персонаж должен быть в T-pose?</h3>
+                    <p>Подходит и T-pose, и A-pose, лишь бы конечности были отведены от тела. Поза определяет, будет ли предпринят риггинг, но никогда не определяет, получите ли вы модель.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Сколько это занимает времени?</h3>
+                    <p>Примеры на этой странице заняли примерно от 20 до 50 минут целиком, включая ожидание в очереди фермы. Страница задачи показывает прогресс в реальном времени, и вкладку можно закрыть — задача продолжит выполняться.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>А если я загружу не персонажа?</h3>
+                    <p>Вы получите текстурированную PBR 3D-модель того, что было на картинке. Детекция маршрутизирует задачу, а не отклоняет её.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Можно ли риггить несколько персонажей сразу?</h3>
+                    <p>Да. Выберите несколько изображений в зоне загрузки — каждое станет отдельной задачей с отдельным списанием.</p>
+                </div>
+                <div class="feature-item">
+                    <h3>Нужен ли аккаунт?</h3>
+                    <p>Для генерации персонажа из картинки — да, кредиты привязаны к аккаунту. Для загрузки уже имеющейся 3D-модели и запуска рига — нет.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="related-section">
+        <div class="container">
+            <h2>Связанные руководства</h2>
+            <p>Больше о позах, форматах и о том, что происходит после рига:</p>
+            <div class="related-links">
+                <a href="/t-pose-vs-a-pose-ru" class="related-link">T-Pose и A-Pose</a>
+                <a href="/glb-auto-rig" class="related-link">GLB авториггинг</a>
+                <a href="/fbx-auto-rig" class="related-link">FBX авториггинг</a>
+                <a href="/animation-retargeting-ru" class="related-link">Ретаргетинг анимаций</a>
+                <a href="/how-it-works" class="related-link">Как это работает</a>
+                <a href="/gallery" class="related-link">Галерея</a>
+                <a href="/buy-credits" class="related-link">Купить кредиты</a>
+                <a href="/faq" class="related-link">FAQ</a>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-section">
+        <div class="container">
+            <h2>Попробуйте с одной картинкой</h2>
+            <p>Откройте главную страницу, перетащите картинку персонажа и посмотрите, как он вернётся с ригом.</p>
+            <a href="/" class="cta-button">Загрузить картинку</a>
+        </div>
+    </section>
+
+    <!-- Scripts -->
+    <script src="/static/js/header.js?v=20260516-mobile-nav"></script>
+    <script src="/static/js/footer.js?v=image-to-rig-20260806"></script>
+    <script src="/static/js/site-layout.js?v=20260516-seo-layout"></script>
+    <script src="/static/js/i18n.js?v=image-to-rig-20260806"></script>
+    <script>
+        // The article body is static per URL and carries no data-i18n, so
+        // I18n.init() only localizes the shared header/footer chrome here.
+        // Switching language in the header must therefore move the visitor to
+        // the sibling URL rather than half-translate this page.
+        (function () {
+            var VARIANTS = {en: '/image-to-rigged-3d-character', ru: '/image-to-rigged-3d-character-ru', zh: '/image-to-rigged-3d-character-zh', hi: '/image-to-rigged-3d-character-hi'};
+            window.addEventListener('languageChanged', function (event) {
+                var lang = event && event.detail && event.detail.lang;
+                var target = VARIANTS[lang];
+                if (target && target !== window.location.pathname) {
+                    window.location.assign(target + window.location.hash);
+                }
+            });
+            document.addEventListener('DOMContentLoaded', function () {
+                Promise.resolve()
+                    .then(function () { return I18n.init(); })
+                    .catch(function (error) { console.error('i18n init failed', error); });
+            });
+        })();
+    </script>
+    <div id="site-footer"></div>
+</body>
+</html>
