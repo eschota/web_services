@@ -14675,6 +14675,10 @@ STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "auto-rig-obj-ru.html": "/auto-rig-obj-ru",
     "auto-rig-obj-zh.html": "/auto-rig-obj-zh",
     "auto-rig-obj-hi.html": "/auto-rig-obj-hi",
+    "image-to-rigged-3d-character.html": "/image-to-rigged-3d-character",
+    "image-to-rigged-3d-character-ru.html": "/image-to-rigged-3d-character-ru",
+    "image-to-rigged-3d-character-zh.html": "/image-to-rigged-3d-character-zh",
+    "image-to-rigged-3d-character-hi.html": "/image-to-rigged-3d-character-hi",
 }
 
 PUBLIC_QUERY_NOINDEX_PATHS = {"/", "/gallery"}
@@ -15912,6 +15916,27 @@ async def auto_rig_obj_zh_page():
 @app.get("/auto-rig-obj-hi")
 async def auto_rig_obj_hi_page():
     return _static_html_response("auto-rig-obj-hi.html")
+
+
+# Image -> rigged 3D character article (4 languages)
+@app.get("/image-to-rigged-3d-character")
+async def image_to_rigged_3d_character_page():
+    return _static_html_response("image-to-rigged-3d-character.html")
+
+
+@app.get("/image-to-rigged-3d-character-ru")
+async def image_to_rigged_3d_character_ru_page():
+    return _static_html_response("image-to-rigged-3d-character-ru.html")
+
+
+@app.get("/image-to-rigged-3d-character-zh")
+async def image_to_rigged_3d_character_zh_page():
+    return _static_html_response("image-to-rigged-3d-character-zh.html")
+
+
+@app.get("/image-to-rigged-3d-character-hi")
+async def image_to_rigged_3d_character_hi_page():
+    return _static_html_response("image-to-rigged-3d-character-hi.html")
 
 
 def _make_rig_article_endpoint(rig_key: str, lang: str):

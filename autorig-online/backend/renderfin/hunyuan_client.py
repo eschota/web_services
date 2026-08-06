@@ -26,6 +26,14 @@ from . import config
 # runs one at a time, so anything above one only buys an opaque backlog.
 WORKER_INFLIGHT_CAP = int(os.getenv("RENDERFIN_HUNYUAN_INFLIGHT_CAP", "1"))
 
+# The same boxes also run ordinary rig/convert tasks and the Flux T-pose
+# renders. A batch of a hundred generations would otherwise occupy every one of
+# them, and the regular queue - which has a real per-task deadline once it is
+# dispatched - starts timing out while the fleet is nominally healthy. Keep this
+# many boxes out of generation's reach so the rest of the service keeps moving;
+# generations queue on our side instead, which costs them nothing.
+RESERVED_FOR_OTHER_WORK = int(os.getenv("RENDERFIN_HUNYUAN_RESERVED_WORKERS", "1"))
+
 
 class TaskVanished(RuntimeError):
     """The worker forgot a task it had accepted.
@@ -159,10 +167,20 @@ async def pick_worker(
         raise NoWorkerAvailable("no Hunyuan workers configured")
     in_flight = in_flight or {}
     at_capacity: List[str] = []
+    # Boxes already carrying one of our generations. Spreading onto a fresh box
+    # is what eats the fleet, so that is what the reserve limits - a box already
+    # generating may keep doing so.
+    busy_with_ours = {name for name, count in in_flight.items() if count > 0}
+    max_generating = max(1, len(pool) - RESERVED_FOR_OTHER_WORK)
+    reserve_reached = len(busy_with_ours) >= max_generating
+    reserved_skipped: List[str] = []
     candidates: List[Tuple[int, int, Dict[str, str]]] = []
     for index, worker in enumerate(pool):
         if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
             at_capacity.append(worker["name"])
+            continue
+        if reserve_reached and worker["name"] not in busy_with_ours:
+            reserved_skipped.append(worker["name"])
             continue
         status = await server_status(client, worker)
         if not status:
@@ -174,6 +192,14 @@ async def pick_worker(
             continue
         candidates.append((_load_score(status, hunyuan), index, worker))
     if not candidates:
+        if reserved_skipped:
+            # Deliberate, not a fault: the same wait path as a full pool, so the
+            # job keeps its attempts and its stage clock while it holds off.
+            raise NoWorkerAvailable(
+                "every Hunyuan worker is at capacity: holding "
+                + ", ".join(reserved_skipped)
+                + " free for rig/convert work"
+            )
         if at_capacity:
             # not a fault: every box is busy with work of ours. Waiting for a
             # slot is the correct outcome and must not spend an attempt.

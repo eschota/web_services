@@ -65,6 +65,18 @@ def set_generation_meta(task: Task, **updates: Any) -> Dict[str, Any]:
     return meta
 
 
+def _merge_viewer_setting(task: Task, key: str, value: Any) -> None:
+    """Write one key into viewer_settings without disturbing the rest."""
+    try:
+        settings = json.loads(getattr(task, "viewer_settings", None) or "{}")
+        if not isinstance(settings, dict):
+            settings = {}
+    except (TypeError, ValueError):
+        settings = {}
+    settings[key] = value
+    task.viewer_settings = json.dumps(settings)
+
+
 async def refund_generation_credits(db, task: Task, reason: str) -> None:
     """Give the credits back when the pipeline, not the picture, was at fault."""
     from database import User
@@ -143,6 +155,7 @@ async def _start_generation(db, task: Task) -> None:
         subject=verdict.get("subject") or "",
         pose=verdict.get("pose") or "",
         detect_reason=verdict.get("reason") or "",
+        animal_type=verdict.get("animal_type") or "",
     )
     task.status = "processing"
     task.processing_started_at = task.processing_started_at or datetime.utcnow()
@@ -204,7 +217,26 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
     # Everything downstream then treats it as an ordinary conversion.
     task.input_url = glb_url
     task.pipeline_kind = "convert"
-    task.input_type = task.input_type or "t_pose"
+    animal_type = str(meta.get("animal_type") or "").strip().lower()
+    if animal_type:
+        # A quadruped needs the animal skeleton, not the humanoid one. The
+        # dispatcher refuses an animal task that cannot name its body type, so
+        # the detection is recorded in the shape it reads - marked accepted,
+        # because a picture the model already identified is as decided as a
+        # human picking from the dropdown.
+        task.input_type = "animal"
+        _merge_viewer_setting(
+            task,
+            "rig_v2_animal_detection",
+            {
+                "animal_type": animal_type,
+                "accepted": True,
+                "source": "generation_vision",
+                "subject": meta.get("subject") or "",
+            },
+        )
+    else:
+        task.input_type = "t_pose"
     task.status = "created"
     task.worker_api = None
     task.worker_task_id = None

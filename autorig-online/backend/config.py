@@ -110,6 +110,10 @@ WORKERS = [
 # =============================================================================
 ANON_FREE_LIMIT = 0  # Free conversions for anonymous users
 USER_FREE_LIMIT = 0  # Total free credits after login (0 credits for all registered users)
+# Credits a brand new account starts with, so a first-time visitor can run a
+# real generation (3 credits) instead of hitting a zero balance right after
+# the home page promised them something free.
+SIGNUP_BONUS_CREDITS = int(os.getenv("AUTORIG_SIGNUP_BONUS_CREDITS", "10"))
 USER_BONUS_AFTER_LOGIN = 27  # Additional credits after login (30 - max anon used)
 
 # =============================================================================

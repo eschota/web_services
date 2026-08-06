@@ -537,6 +537,15 @@ def build_pre_convert_metadata_sync(
 
 CHARACTER_POSES = ("t_pose", "a_pose")
 
+# The animal rig is a different pipeline with its own skeleton, and it only
+# knows these bodies. A four-legged character sent down the humanoid path comes
+# back with a humanoid rig on an animal mesh, so the body type has to be decided
+# here, from the picture, before anything is generated.
+GENERATION_ANIMAL_TYPES = (
+    "bear", "cat", "cow", "deer", "dog", "elephant",
+    "giraffe", "horse", "mouse", "pig", "rabbit", "turtle",
+)
+
 
 def detect_character_for_generation(image_bytes: bytes) -> dict:
     """Decide whether a picture can become a *rigged* character.
@@ -552,7 +561,14 @@ def detect_character_for_generation(image_bytes: bytes) -> dict:
     doubt - unreadable answer, no key, API failure - the caller gets
     ``riggable: False`` and the user still receives a model.
     """
-    verdict = {"is_character": False, "pose": "unknown", "riggable": False, "subject": "", "reason": ""}
+    verdict = {
+        "is_character": False,
+        "pose": "unknown",
+        "riggable": False,
+        "subject": "",
+        "reason": "",
+        "animal_type": "",
+    }
     from config import OPENAI_API_KEY
 
     if not OPENAI_API_KEY:
@@ -571,7 +587,8 @@ Return a single JSON object with exactly these keys:
 - "limbs_separated": true only if arms and legs are clearly separated from the torso and from each other, with visible gaps, and the whole figure is inside the frame.
 - "subject": a short English noun phrase for the subject.
 - "reason": one short English sentence explaining the pose answer.
-Output only valid JSON, no markdown."""
+- "animal_type": if the subject is a four-legged animal standing on all fours, the closest match from %s; otherwise "". A humanoid or upright cartoon creature with two legs and two arms is NOT an animal here, whatever species it resembles - answer "" for those.
+Output only valid JSON, no markdown.""" % (list(GENERATION_ANIMAL_TYPES),)
 
     try:
         b64 = base64.standard_b64encode(image_bytes).decode("ascii")
@@ -603,8 +620,16 @@ Output only valid JSON, no markdown."""
     verdict["pose"] = pose
     verdict["subject"] = str(data.get("subject") or "").strip()[:120]
     verdict["reason"] = str(data.get("reason") or "").strip()[:200]
+    animal = str(data.get("animal_type") or "").strip().lower()
+    verdict["animal_type"] = animal if animal in GENERATION_ANIMAL_TYPES else ""
+    # A quadruped is riggable by the animal pipeline, which has no use for a
+    # T-pose: the pose gate applies to the humanoid path only.
     verdict["riggable"] = bool(
-        verdict["is_character"] and pose in CHARACTER_POSES and bool(data.get("limbs_separated"))
+        verdict["is_character"]
+        and (
+            verdict["animal_type"]
+            or (pose in CHARACTER_POSES and bool(data.get("limbs_separated")))
+        )
     )
     return verdict
 

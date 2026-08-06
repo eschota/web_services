@@ -61,6 +61,16 @@ Base = declarative_base()
 # =============================================================================
 # Models
 # =============================================================================
+
+def _signup_bonus_credits() -> int:
+    try:
+        from config import SIGNUP_BONUS_CREDITS
+
+        return int(SIGNUP_BONUS_CREDITS)
+    except Exception:
+        return 0
+
+
 class User(Base):
     """Registered user (via Google OAuth)"""
     __tablename__ = "users"
@@ -71,7 +81,9 @@ class User(Base):
     nickname = Column(String(100), nullable=True)  # Public display name (preferred over email)
     picture = Column(String(512), nullable=True)
     gumroad_email = Column(String(255), nullable=True)
-    balance_credits = Column(Integer, default=0)
+    # New accounts start with a usable balance; existing rows are untouched,
+    # because a default only applies to inserts.
+    balance_credits = Column(Integer, default=lambda: _signup_bonus_credits())
     total_tasks = Column(Integer, default=0)
     youtube_bonus_received = Column(Boolean, default=False)
     email_task_completed = Column(Boolean, default=True, nullable=False)  # task-ready emails; False = unsubscribed

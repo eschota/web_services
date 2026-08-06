@@ -1968,7 +1968,10 @@ async def broadcast_task_done(
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
     generate_markup = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🎨 Сгенерировать", callback_data=f"rfg:{task_id}")]]
+        [[
+            InlineKeyboardButton("🎨 Сгенерировать", callback_data=f"rfg:{task_id}"),
+            InlineKeyboardButton("📦 Сабмитить", callback_data=f"rfc:{task_id}"),
+        ]]
     )
 
     if not video_path:
@@ -2348,6 +2351,89 @@ async def _handle_regen_callback(update, context) -> None:
         pass
 
 
+async def _handle_full_convert_callback(update, context) -> None:
+    """Send a finished model through the full convert scenario.
+
+    "Submit" means the same pipeline a generated character goes through:
+    retopology (1k/10k/100k), bake, autorig, animation retarget and every export
+    format. It resubmits the original source model, not the rigged result,
+    because the convert scenario starts from a raw mesh and does the rig itself -
+    handing it an already-rigged file would rig a rig.
+
+    The dispatcher attaches the LLM metadata on the way out, so the new task
+    reaches the worker with title/description/keywords already in rig.json.
+    """
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    match = re.match(r"^rfc:([0-9a-fA-F-]{8,64})$", query.data)
+    if not match:
+        await query.answer("Некорректные данные кнопки")
+        return
+    task_id = match.group(1)
+    chat = query.message.chat if query.message else None
+    origin_chat_id = int(chat.id) if chat is not None else 0
+
+    # one submit per task, even across bot restarts
+    if not await reserve_notification(origin_chat_id, "full_convert_submit", task_id):
+        await query.answer("Уже отправлено на конвертацию")
+        return
+
+    try:
+        from database import AsyncSessionLocal, Task
+        from sqlalchemy import select
+        from tasks import create_conversion_task
+
+        async with AsyncSessionLocal() as db:
+            source = await db.scalar(select(Task).where(Task.id == task_id))
+            if source is None or not source.input_url:
+                await query.answer("Исходная модель не найдена")
+                return
+            # The reservation only stops this button being pressed twice; it knows
+            # nothing about the automatic submit, or about the same model having
+            # been converted from another task. Both produce a second, identical
+            # conversion that burns a farm slot for nothing, so refuse on the
+            # model rather than on the click.
+            already_converting = await db.scalar(
+                select(Task.id).where(
+                    Task.input_url == source.input_url,
+                    Task.pipeline_kind == "convert",
+                    Task.id != task_id,
+                )
+            )
+            if already_converting:
+                await query.answer(
+                    "Эта модель уже отправлена на конвертацию: {0}".format(str(already_converting)[:8])
+                )
+                return
+            new_task, error = await create_conversion_task(
+                db,
+                input_url=source.input_url,
+                task_type=source.input_type or "t_pose",
+                owner_type=source.owner_type or "anon",
+                owner_id=source.owner_id or "telegram-bot",
+                created_via_api=True,
+                pipeline_kind="convert",
+            )
+        if new_task is None:
+            await query.answer((error or "Не удалось создать задачу")[:180])
+            return
+        await query.answer("Отправлено на полную конвертацию")
+        if origin_chat_id:
+            await context.bot.send_message(
+                chat_id=origin_chat_id,
+                text="📦 Отправлено на полную конвертацию\nЗадача: {0}/task?id={1}".format(APP_URL, new_task.id),
+                disable_web_page_preview=True,
+            )
+        print(f"[Telegram] task {task_id} resubmitted for full convert as {new_task.id}")
+    except Exception as exc:
+        print(f"[Telegram] full convert submit failed for {task_id}: {exc}")
+        try:
+            await query.answer("Ошибка: {0}".format(str(exc)[:150]))
+        except Exception:
+            pass
+
+
 async def _handle_generate_callback(update, context) -> None:
     query = update.callback_query
     if not query or not query.data:
@@ -2662,6 +2748,7 @@ async def run_polling() -> None:
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", _start_cmd))
     app.add_handler(CallbackQueryHandler(_handle_generate_callback, pattern=r"^rfg:[0-9a-fA-F-]{8,64}$"))
+    app.add_handler(CallbackQueryHandler(_handle_full_convert_callback, pattern=r"^rfc:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_approve_callback, pattern=_APPROVE_PATTERN))
     app.add_handler(CallbackQueryHandler(_handle_regen_callback, pattern=r"^rfr:[0-9a-fA-F-]{8,64}$"))
     app.add_handler(CallbackQueryHandler(_handle_resume_callback, pattern=r"^rfe:[0-9a-fA-F-]{8,64}$"))

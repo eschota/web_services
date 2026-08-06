@@ -3,6 +3,7 @@ Task management for AutoRig Online
 """
 import asyncio
 import json
+import os
 import re
 import time
 import uuid
@@ -1233,6 +1234,15 @@ def _preferred_video_url_from_outputs(urls: List[str], *, prefer_rig_preview: bo
     return None
 
 
+# Accounts that always want the full convert scenario (retopology, bake, all
+# formats) after a rig finishes, without pressing Submit in Telegram.
+AUTO_FULL_CONVERT_OWNERS = {
+    owner.strip().lower()
+    for owner in os.getenv("AUTORIG_AUTO_FULL_CONVERT_OWNERS", "eschota@gmail.com").split(",")
+    if owner.strip()
+}
+
+
 async def update_task_progress(db: AsyncSession, task: Task) -> Task:
     """
     Check and update task progress.
@@ -1417,6 +1427,46 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
                 )
         except Exception as e:
             print(f"[Tasks] Failed to send completion email for task {task.id}: {e}")
+
+    # Owners who always want the full convert scenario get it without pressing
+    # the button. Guarded three ways, because this runs inside the completion
+    # path and a mistake here would loop: only the original rig task qualifies
+    # (the convert task it creates has pipeline_kind="convert" and can never
+    # re-trigger), the source url must exist, and an identical convert task must
+    # not already be present - otherwise a re-run of this function would submit
+    # the same model twice.
+    if (
+        task.status == "done"
+        and task.owner_type == "user"
+        and str(task.owner_id or "").strip().lower() in AUTO_FULL_CONVERT_OWNERS
+        and (task.pipeline_kind or "rig") == "rig"
+        and task.input_url
+    ):
+        try:
+            existing = await db.scalar(
+                select(Task.id).where(
+                    Task.input_url == task.input_url,
+                    Task.pipeline_kind == "convert",
+                )
+            )
+            if existing:
+                print(f"[AutoSubmit] task {task.id}: convert already exists ({str(existing)[:8]}), skipping")
+            else:
+                auto_task, auto_error = await create_conversion_task(
+                    db,
+                    input_url=task.input_url,
+                    task_type=task.input_type or "t_pose",
+                    owner_type=task.owner_type,
+                    owner_id=task.owner_id,
+                    created_via_api=True,
+                    pipeline_kind="convert",
+                )
+                if auto_task is not None:
+                    print(f"[AutoSubmit] task {task.id} -> full convert {auto_task.id}")
+                else:
+                    print(f"[AutoSubmit] task {task.id} failed: {auto_error}")
+        except Exception as auto_exc:
+            print(f"[AutoSubmit] task {task.id} raised: {type(auto_exc).__name__}: {auto_exc}")
     
     # Cache task files to static directory when task completes (replaces ZIP)
     if was_processing and task.status == "done" and task.ready_urls:
@@ -1460,6 +1510,26 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
             await bump_admin_overlay_task_completed(db, task)
         except Exception as e:
             print(f"[Tasks] Admin overlay metrics bump: {e}")
+
+    # VIEWER_RECONCILE_ON_DONE: every reconcile pass above is gated on the task
+    # NOT being done, but the viewer export lands together with the last
+    # artifacts - so at the exact moment those urls become discoverable, nothing
+    # looks for them again. They were then only picked up if somebody happened
+    # to open the task page, which is why finished tasks sat with an empty 3D
+    # preview. One late pass here closes that window; it is throttled and
+    # scheduled, so it never delays the completion path.
+    if (
+        task.status == "done"
+        and task.guid
+        and task.worker_api
+        and not (task.viewer_prepared_glb_url and task.viewer_animations_glb_url)
+    ):
+        try:
+            from main import _schedule_viewer_artifact_reconciliation
+
+            _schedule_viewer_artifact_reconciliation(task.id)
+        except Exception as e:
+            print(f"[ViewerArtifacts] could not schedule reconcile for {task.id}: {e}")
 
     return task
 
