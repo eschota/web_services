@@ -449,12 +449,12 @@ async def _purge_uploaded_video_cache_until(
             continue
         if stat.st_mtime > cutoff_ts:
             continue
-        candidates.append((stat.st_mtime, stat.st_size, path))
+        candidates.append((stat.st_mtime, stat.st_size, path, upload_status))
 
     candidates.sort(key=lambda item: item[0])
     removed = 0
     freed = 0
-    for _mtime, size, path in candidates:
+    for _mtime, size, path, status in candidates:
         if _free_gb() >= target_free_gb:
             break
         try:
@@ -464,7 +464,7 @@ async def _purge_uploaded_video_cache_until(
         removed += 1
         freed += size
         print(
-            f"[Disk Video Cache] Removed {upload_status} YouTube video {path.name} "
+            f"[Disk Video Cache] Removed {status} YouTube video {path.name} "
             f"({size / (1024**2):.1f} MB); free now {_free_gb():.2f} GB"
         )
     return removed, freed
@@ -512,11 +512,12 @@ async def run() -> None:
             max_gb=float(PERIODIC_TASK_CACHE_MAX_GB),
             min_age_hours=float(PERIODIC_TASK_CACHE_MIN_AGE_HOURS),
         )
-        result = await cleanup_disk_space(
-            min_free_gb=target_free_gb,
-            db=db,
-            delete_task_rows=AUTOMATIC_TASK_DB_DELETION,
-        )
+        # Videos are purged before cleanup_disk_space, not after it. These MP4s
+        # are previews of tasks already uploaded to YouTube, so a second copy
+        # exists; a task's cached downloads are what the user came for and are
+        # routinely the last copy once the worker evicts its output. With the
+        # purge running last the pressure was always relieved by deleting
+        # deliverables first, and 8.7 GB of redundant video was never reached.
         video_cache_dir = Path("/var/autorig/videos")
         video_cache_gb_before = _dir_size_bytes(video_cache_dir) / (1024**3)
         video_deleted, video_freed_bytes = await _purge_uploaded_video_cache_until(
@@ -526,6 +527,11 @@ async def run() -> None:
             min_age_hours=float(VIDEO_CACHE_MIN_AGE_HOURS),
         )
         video_cache_gb_after = _dir_size_bytes(video_cache_dir) / (1024**3)
+        result = await cleanup_disk_space(
+            min_free_gb=target_free_gb,
+            db=db,
+            delete_task_rows=AUTOMATIC_TASK_DB_DELETION,
+        )
     after = _disk_snapshot()
 
     task_cache_gb = _dir_size_bytes(TASK_CACHE_DIR) / (1024**3)

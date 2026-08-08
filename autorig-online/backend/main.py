@@ -11983,6 +11983,38 @@ async def _task_cache_eviction_candidates(
 
 TASK_CACHE_PRESERVE_MARKER = ".preserve-download-cache"
 
+# Probing the worker costs a round trip per task, so a pressure run may not
+# spend an unbounded amount of time deciding what it is allowed to delete.
+TASK_CACHE_PRESSURE_MAX_PROBES = int(
+    os.getenv("TASK_CACHE_PRESSURE_MAX_PROBES", "40")
+)
+
+
+async def _task_cache_dir_is_last_copy(db: AsyncSession, task_id: str) -> bool:
+    """True when the worker no longer serves this task's files.
+
+    Workers drop their output directory as soon as they need the space, so a
+    cached download is regularly the only copy that still exists. Deleting it
+    under disk pressure is what turns a finished task into a permanent 404,
+    and that is the one failure the user has no way to work around.
+    """
+    try:
+        task = await get_task_by_id(db, task_id)
+    except Exception:
+        return True
+    if task is None:
+        return False
+    urls = _task_primary_download_urls(task)
+    if not urls:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            return not await _probe_http_asset_reachable(client, urls[0])
+    except Exception:
+        # Undecidable. A file kept by mistake costs disk space; a file deleted
+        # by mistake costs the user the model they came for.
+        return True
+
 
 def _task_cache_dir_is_preserved(path: Path) -> bool:
     """Keep manually recovered, non-regenerable downloads out of pressure eviction."""
@@ -12075,19 +12107,41 @@ async def evict_task_cache_until_free_space(
         return summary
 
     safety = 0
+    probes = 0
+    kept_last_copy: set = set()
     while shutil.disk_usage("/").free < target_bytes:
         safety += 1
         if safety > 50000:
             print("[TaskCachePressure] Safety stop: too many iterations")
             break
 
-        candidates = await _task_cache_eviction_candidates(db)
+        candidates = [
+            item
+            for item in await _task_cache_eviction_candidates(db)
+            if item[1] not in kept_last_copy
+        ]
         if not candidates:
             break
 
         _ts, dirname = candidates[0]
         target = TASK_CACHE_DIR / dirname
         if not target.is_dir():
+            kept_last_copy.add(dirname)
+            continue
+
+        if probes >= TASK_CACHE_PRESSURE_MAX_PROBES:
+            print(
+                "[TaskCachePressure] Probe budget reached; stopping rather than "
+                "deleting downloads that may be the last copy"
+            )
+            break
+        probes += 1
+        if await _task_cache_dir_is_last_copy(db, dirname):
+            kept_last_copy.add(dirname)
+            print(
+                f"[TaskCachePressure] Kept {dirname}: the worker no longer serves "
+                "these files, so this cache is the last copy"
+            )
             continue
 
         try:
@@ -12115,11 +12169,19 @@ async def evict_task_cache_until_free_space(
     final_free = shutil.disk_usage("/").free
     summary["final_free_gb"] = final_free / (1024**3)
     summary["final_task_cache_gb"] = _dir_size_bytes(TASK_CACHE_DIR) / (1024**3)
+    summary["kept_last_copy"] = len(kept_last_copy)
     if summary["dirs_removed"] > 0:
         print(
             f"[TaskCachePressure] Complete: removed {summary['dirs_removed']} dir(s), "
             f"freed {summary['bytes_freed'] / (1024**3):.2f} GB, "
             f"free now {summary['final_free_gb']:.2f} GB"
+        )
+    if kept_last_copy and final_free < target_bytes:
+        # Saying nothing here would read as "pressure handled" when in fact the
+        # disk is still full and every remaining candidate is irreplaceable.
+        print(
+            f"[TaskCachePressure] Still under target with nothing safe to delete: "
+            f"{len(kept_last_copy)} cached task(s) are the only surviving copy"
         )
     return summary
 
