@@ -7492,6 +7492,31 @@
                 }
             },
 
+            async restartExpiredTask(button) {
+                if (this._restartingExpiredTask) return;
+                this._restartingExpiredTask = true;
+                const original = button ? button.textContent : '';
+                if (button) {
+                    button.disabled = true;
+                    button.textContent = 'Starting...';
+                }
+                try {
+                    const resp = await fetch(`/api/task/${this.taskId}/restart`, { method: 'POST' });
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => ({}));
+                        throw new Error(data.detail || 'Restart failed');
+                    }
+                    window.location.reload();
+                } catch (e) {
+                    this._restartingExpiredTask = false;
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = original;
+                    }
+                    alert(e.message || 'Could not restart the task');
+                }
+            },
+
             async checkCachedFiles() {
                 try {
                     const resp = await fetch(`/api/task/${this.taskId}/cached-files`);
@@ -9012,6 +9037,32 @@
                     `;
                 }
                 
+                // The converter evicts its output when it needs the space, so a
+                // finished task can quietly stop being downloadable. Offering a
+                // dead Download button here is what produced the 404-then-500
+                // the user saw; say what happened and offer the way out.
+                if (this.cachedFilesData?.downloads_expired) {
+                    const canRestart = Boolean(this.cachedFilesData.restart_available);
+                    const explanation = canRestart
+                        ? 'The generated files are no longer stored on the server. Your original model is still here, so the task can be rebuilt - it will run through the pipeline again and produce a fresh set of downloads.'
+                        : 'The generated files are no longer stored on the server, and the original model is gone too. Upload it again to rebuild the rig.';
+                    const action = canRestart
+                        ? `<button type="button" class="btn btn-primary" id="restart-expired-task-btn" style="margin-top: 0.85rem;">Rebuild the files</button>`
+                        : `<a class="btn btn-primary" href="/" style="margin-top: 0.85rem; display: inline-block;">Upload the model again</a>`;
+                    list.innerHTML = `
+                        <li class="file-item" style="flex-direction: column; align-items: flex-start; gap: 0.35rem; padding: 1rem; text-align: left;">
+                            <div style="font-weight: 700; color: var(--text-primary);">Downloads have expired</div>
+                            <div style="color: var(--text-muted); line-height: 1.45;">${explanation}</div>
+                            ${action}
+                        </li>
+                    `;
+                    const restartBtn = list.querySelector('#restart-expired-task-btn');
+                    if (restartBtn) {
+                        restartBtn.addEventListener('click', () => this.restartExpiredTask(restartBtn));
+                    }
+                    return;
+                }
+
                 list.innerHTML = downloadAllHtml; // Only show "Download All" button, hide individual files
             },
             

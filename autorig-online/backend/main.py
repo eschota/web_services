@@ -9761,6 +9761,52 @@ async def _load_task_bundle_meta(
     )
 
 
+async def task_download_recovery_state(task: Task) -> Dict[str, Any]:
+    """Whether this task can still be downloaded, and what to offer if not.
+
+    Files live on the converter, which evicts its output whenever it needs the
+    space, so a finished task quietly stops being downloadable. When that
+    happens the only useful answer is to rebuild it - which is possible exactly
+    when the original upload is still on this box.
+    """
+    state: Dict[str, Any] = {
+        "downloads_expired": False,
+        "restart_available": False,
+        "restart_reason": "",
+    }
+    if task.status != "done":
+        return state
+
+    urls = _task_primary_download_urls(task)
+    if not urls:
+        return state
+    if _has_complete_primary_task_cache(task):
+        return state
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            if await _probe_http_asset_reachable(client, urls[0]):
+                return state
+    except Exception:
+        # Cannot reach the worker right now: that is an outage, not an expiry,
+        # and telling the user to re-run would throw away a good result.
+        return state
+
+    state["downloads_expired"] = True
+    source = str(task.input_url or "")
+    token = _extract_upload_token_from_input_url(source)
+    upload_path = _upload_path_for_token(token) if token else None
+    if upload_path is not None and upload_path.is_dir() and any(upload_path.iterdir()):
+        state["restart_available"] = True
+        state["restart_reason"] = "source_available"
+    elif source.startswith(("http://", "https://")) and not token:
+        # Pasted link rather than an upload: the pipeline can fetch it again.
+        state["restart_available"] = True
+        state["restart_reason"] = "source_is_remote_url"
+    else:
+        state["restart_reason"] = "source_deleted"
+    return state
+
+
 @app.get("/api/task/{task_id}/cached-files")
 async def api_task_cached_files(
     task_id: str,
@@ -9822,15 +9868,33 @@ async def api_task_cached_files(
             fallback_file_count=len(result["files"]),
             fallback_total_size=total_size,
         )
-        return {
+        # Nothing came back: this is the branch a finished task lands in once
+        # the converter has evicted its output, so it is where the page has to
+        # learn that the downloads are gone rather than showing a dead button.
+        recovery = (
+            await task_download_recovery_state(task)
+            if not result["files"]
+            else {"downloads_expired": False, "restart_available": False, "restart_reason": ""}
+        )
+        payload = {
             "cached": result["cached"],
             "task_id": task_id,
             "files": result["files"],
             "total_size": total_size,
             "file_count": len(result["files"]),
             "errors": result.get("errors", []),
+            **recovery,
             **bundle_meta,
         }
+        if recovery["downloads_expired"]:
+            payload["message"] = (
+                "The generated files are no longer stored. Re-run the task to "
+                "build a fresh set of downloads."
+                if recovery["restart_available"]
+                else "The generated files are no longer stored, and the original "
+                "model is gone too. Upload it again to rebuild the rig."
+            )
+        return payload
     
     # Task not ready yet
     bundle_meta = (
@@ -9838,13 +9902,25 @@ async def api_task_cached_files(
         if task.status == "done"
         else _bundle_meta_response(ready=False, source="task_not_done")
     )
+    recovery = await task_download_recovery_state(task)
+    if recovery["downloads_expired"]:
+        message = (
+            "The generated files are no longer stored. Re-run the task to build "
+            "a fresh set of downloads."
+            if recovery["restart_available"]
+            else "The generated files are no longer stored, and the original "
+            "model is gone too. Upload it again to rebuild the rig."
+        )
+    else:
+        message = "Task not completed yet" if task.status != "done" else "No files to cache"
     return {
         "cached": False,
         "task_id": task_id,
         "files": [],
         "total_size": 0,
         "file_count": 0,
-        "message": "Task not completed yet" if task.status != "done" else "No files to cache",
+        "message": message,
+        **recovery,
         **bundle_meta,
     }
 
@@ -9904,9 +9980,16 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
         )
     ] if cache_dir.exists() else []
     if not files:
+        recovery = await task_download_recovery_state(task)
         raise HTTPException(
             status_code=404,
-            detail="The worker bundle is unavailable and no primary task files could be restored",
+            detail=(
+                "These files are no longer stored. Re-run the task to build a "
+                "fresh set of downloads."
+                if recovery["restart_available"]
+                else "These files are no longer stored, and the original model is "
+                "gone too. Upload it again to rebuild the rig."
+            ),
         )
 
     safe_guid = (task.guid or task.id).strip()
@@ -15158,26 +15241,11 @@ async def cleanup_disk_space(
                 ):
                     task_cleanup_candidates.append(task)
 
-            ud, ub = await purge_terminal_upload_dirs(
-                cleanup_db,
-                target_free_bytes=min_free_bytes,
-                record_items=result["deleted_items"],
-            )
-            result["deleted_count"] += ud
-            result["freed_bytes"] += ub
-
-            disk_usage = shutil.disk_usage("/")
-            free_bytes = disk_usage.free
-            if free_bytes >= min_free_bytes:
-                result["freed_gb"] = result["freed_bytes"] / (1024**3)
-                result["final_free_gb"] = free_bytes / (1024**3)
-                if ud > 0:
-                    print(
-                        f"[Disk Cleanup] Target reached after terminal upload purge: "
-                        f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
-                    )
-                return result
-
+            # Cached output is given up before the original upload. A cached
+            # file the worker still serves costs nothing to lose, while the
+            # upload is the only thing a finished task can be rebuilt from -
+            # deleting it is what turns "I can re-run that for you" into
+            # "please upload it again".
             cd = await evict_task_cache_until_free_space(
                 cleanup_db,
                 min_free_gb=min_free_gb,
@@ -15196,6 +15264,26 @@ async def cleanup_disk_space(
                         f"[Disk Cleanup] Target reached after task cache pressure eviction: "
                         f"freed {result['freed_gb']:.2f} GB, {result['final_free_gb']:.2f} GB free now"
                     )
+                return result
+
+            ud, ub = await purge_terminal_upload_dirs(
+                cleanup_db,
+                target_free_bytes=min_free_bytes,
+                record_items=result["deleted_items"],
+            )
+            result["deleted_count"] += ud
+            result["freed_bytes"] += ub
+
+            disk_usage = shutil.disk_usage("/")
+            free_bytes = disk_usage.free
+            if ud > 0:
+                print(
+                    f"[Disk Cleanup] Gave up {ud} original upload(s) to reach the "
+                    f"target; those tasks can no longer be re-run without a new upload"
+                )
+            if free_bytes >= min_free_bytes:
+                result["freed_gb"] = result["freed_bytes"] / (1024**3)
+                result["final_free_gb"] = free_bytes / (1024**3)
                 return result
 
             if delete_task_rows:

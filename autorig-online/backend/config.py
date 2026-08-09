@@ -300,8 +300,12 @@ AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
 MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "2.5"))  # Critical free-space floor for background cleanup
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
+# The original upload is the only thing a finished task can be rebuilt from.
+# At one hour, a task was losing its source before the user had finished
+# looking at the result, which is why 87% of finished tasks could not be
+# re-run when their downloads expired.
 UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS = float(
-    os.getenv("UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS", "1")
+    os.getenv("UPLOAD_PRESSURE_CLEANUP_MIN_AGE_HOURS", "72")
 )  # Under disk pressure, terminal-task upload originals older than this may be removed
 DISK_ALERT_USED_PERCENT = float(
     os.getenv("DISK_ALERT_USED_PERCENT", "90")
