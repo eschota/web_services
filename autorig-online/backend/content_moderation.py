@@ -4,12 +4,16 @@ Server-side NSFW classification for task posters (images referenced in ready_url
 Uses NudeNet ONNX detector on a browser-rendered preflight image first, then
 poster bytes downloaded from the worker URL as fallback.
 Optional: OpenAI vision for YouTube title/description/keywords (same image bytes).
+The vision calls walk a list of credentials (env, then the web server's own
+vision config; OpenAI, then OpenRouter) so one dead key cannot strip metadata
+off every task - see _llm_candidates.
 """
 from __future__ import annotations
 
 import asyncio
 import base64
 import json
+import os
 import re
 import threading
 from datetime import datetime
@@ -37,6 +41,142 @@ POSTER_SUBCATEGORIES = [
     "Historic", "Military", "Superhero", "Animal", "Alien", "Undead",
 ]
 POSTER_CATEGORY_DEFAULT = "Characters"
+
+# The marketplace half of a product description: LOD ladder, formats, texture
+# set. It is identical for every model this pipeline builds, so it is appended
+# verbatim rather than asked of the model - a language model given these numbers
+# to write will eventually invent a different polycount or a texture map we do
+# not ship, and that lands in a store listing as a false claim.
+PRODUCT_DESCRIPTION_BOILERPLATE = """Each model has 3 levels of detail with QUAD polygons:
+* Low-poly    1000 triangles for mobile.
+* Middle-poly 10 000 triangles for environment.
+* High-poly 100 000 triangles.
+* Ultra detailed up to 1 500 000 triangles for close up (triangulated).
+
+This allows for the use of this model in:
+* production rendering(such as 3ds max, Maya,Cinema4d, Blender, Vray/Corona/Cycles and all other )
+
+* game engines(Unity and Unreal compatible - both included) and interactive presentations, providing a choice of detail based on the LOD System principle.
+
+The model's textures are PBR 4096x4096 pixels:
+* Diffuse
+* NormalMap
+* Reflection
+* Roughness
+* Metall
+* Ambient Occlusion
+
+which are suitable for any modern rendering engine. All models accurately unwrapped and has no overlapping UV.
+
+The character is rigged and comes with a full animation set, ready for use in game engines.
+
+If you like this model, please leave a comment!"""
+
+# Where the web server keeps its own vision credentials. The env vars are the
+# primary source but they have now gone stale TWICE while this file stayed
+# current - an invalid key in 2026-08-04, an exhausted credit balance in
+# 2026-08-09 - and each time every task went to the farm with no metadata at
+# all until someone noticed. So the file is a second set of candidates rather
+# than a last resort, exactly as render_prompting._llm_attempts already treats
+# it.
+VISION_CONFIG_PATH = Path(
+    os.getenv("AUTORIG_VISION_CONFIG", "/root/autorig/ai_vision_animal_type_detect.json")
+)
+_OPENROUTER_DEFAULT_URL = "https://openrouter.ai/api/v1/chat/completions"
+_OPENROUTER_HEADERS = {
+    "HTTP-Referer": "https://autorig.online",
+    "X-Title": "AutoRig Poster Metadata",
+}
+
+
+def _vision_config() -> Dict[str, Any]:
+    try:
+        data = json.loads(VISION_CONFIG_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _api_base(completions_url: str) -> Optional[str]:
+    """The SDK wants the API root; the config stores the completions endpoint."""
+    url = (completions_url or "").strip().rstrip("/")
+    suffix = "/chat/completions"
+    if url.endswith(suffix):
+        url = url[: -len(suffix)]
+    return url or None
+
+
+def _llm_candidates() -> List[Tuple[str, str, Optional[str], str, Dict[str, str]]]:
+    """(label, api_key, base_url, model, extra_headers), best first, deduped.
+
+    Mirrors the order render_prompting uses: env before file, OpenAI before
+    OpenRouter. OpenRouter matters because its allowance resets on its own,
+    so it is often alive precisely when a prepaid OpenAI balance is not.
+    """
+    from config import OPENAI_API_KEY
+
+    config = _vision_config()
+    openrouter_url = (
+        os.getenv("OPENROUTER_API_URL", "").strip()
+        or str(config.get("open_router_api_url_string") or "").strip()
+        or _OPENROUTER_DEFAULT_URL
+    )
+    openrouter_base = _api_base(openrouter_url)
+    openrouter_model = os.getenv(
+        "OPENROUTER_POSTER_MODEL", "openai/gpt-4o-mini"
+    ).strip()
+
+    raw = [
+        ("env openai", (OPENAI_API_KEY or "").strip(), None, OPENAI_POSTER_MODEL, {}),
+        ("env openrouter", os.getenv("OPENROUTER_API_KEY", "").strip(),
+         openrouter_base, openrouter_model, _OPENROUTER_HEADERS),
+        ("config openai", str(config.get("open_AI_api_key") or "").strip(),
+         None, OPENAI_POSTER_MODEL, {}),
+        ("config openrouter", str(config.get("open_router_api_key") or "").strip(),
+         openrouter_base, openrouter_model, _OPENROUTER_HEADERS),
+    ]
+    out, seen = [], set()
+    for label, key, base, model, headers in raw:
+        if not key or (key, base) in seen:
+            continue
+        seen.add((key, base))
+        out.append((label, key, base, model, headers))
+    return out
+
+
+def _vision_completion(messages: List[dict], *, max_tokens: int, temperature: float):
+    """Run one vision call against the first credential that answers.
+
+    Raises the last error if every candidate fails, so callers keep their
+    existing error handling. A credential that is merely out of credit must
+    not look the same as "no vision configured" - it isn't, there is another
+    key one line down.
+    """
+    from openai import OpenAI
+
+    candidates = _llm_candidates()
+    if not candidates:
+        raise RuntimeError("no vision credential configured (env or vision config)")
+    last: Optional[Exception] = None
+    for label, key, base_url, model, headers in candidates:
+        try:
+            client = OpenAI(api_key=key, base_url=base_url) if base_url else OpenAI(api_key=key)
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                max_tokens=max_tokens,
+                temperature=temperature,
+                extra_headers=headers or None,
+            )
+            if last is not None:
+                print(f"[ContentModeration] vision recovered on '{label}'")
+            return resp
+        except Exception as exc:
+            last = exc
+            print(f"[ContentModeration] vision candidate '{label}' failed: {str(exc)[:160]}")
+    raise last if last else RuntimeError("no vision credential answered")
+
 
 _classifier_locks: Dict[str, asyncio.Lock] = {}
 _classifier_locks_guard = asyncio.Lock()
@@ -369,12 +509,10 @@ def fallback_poster_metadata_for_task(task: Task) -> dict:
 
 
 def analyze_poster_llm_metadata(image_bytes: bytes) -> Optional[dict]:
-    from config import OPENAI_API_KEY
-
-    if not OPENAI_API_KEY:
+    if not _llm_candidates():
         return None
     try:
-        from openai import OpenAI
+        from openai import OpenAI  # noqa: F401  (presence check; _vision_completion imports it)
     except ImportError as e:
         print(f"[ContentModeration] openai package missing: {e}")
         return None
@@ -385,17 +523,15 @@ def analyze_poster_llm_metadata(image_bytes: bytes) -> Optional[dict]:
     prompt = """You look at a preview render of a 3D character (AutoRig Online task poster). The viewer already knows it is a 3D model — do NOT waste the title on that.
 Return a single JSON object with exactly these keys:
 - "title": string, English, max 95 characters. Describe ONLY what is visible about the subject: role or archetype (soldier, knight, robot, …), clothing or uniform, notable gear (gas mask, sword, grenades, helmet, …), faction or style if clear. No marketing phrases, no "rigged for Unity/Unreal", no "3D character", no "perfect for games", no engine names.
-- "description": string, English, 2-4 short paragraphs for a YouTube video description: what appears in the render, tone/style, suitable for games/Blender; mention rig/animations only if relevant. Plain text, no HTML.
+- "description": string, English, 2-3 sentences describing ONLY this specific model as a product listing opens: what the character is, its role or setting, its outfit and notable gear, and the art style. Write it the way a 3D marketplace listing begins, e.g. "This model represents a caregiver character designed for a cozy clinic setting." Do NOT mention polycounts, LODs, texture resolutions, file formats, engines or rigging - those are appended automatically and inventing them would be a false claim. Plain text, no HTML.
 - "keywords": JSON array of exactly 25 short English strings for YouTube tags. Order matters: put the MOST SPECIFIC tags first (role, outfit, weapons, props, art style). Put generic tags last (3d, character, rigging, game asset, unity, unreal, blender, animation, glb, fbx). No hashtags. No NSFW or policy-evading content.
 - "category": always the string "%s".
 - "subcategory": pick the SINGLE best fit for the visible subject from this list: %s. Return exactly one value from that list.
 
 Output only valid JSON, no markdown.""" % (POSTER_CATEGORY_DEFAULT, POSTER_SUBCATEGORIES)
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    resp = client.chat.completions.create(
-        model=OPENAI_POSTER_MODEL,
-        messages=[
+    resp = _vision_completion(
+        [
             {
                 "role": "user",
                 "content": [
@@ -404,7 +540,6 @@ Output only valid JSON, no markdown.""" % (POSTER_CATEGORY_DEFAULT, POSTER_SUBCA
                 ],
             }
         ],
-        response_format={"type": "json_object"},
         max_tokens=2500,
         temperature=0.4,
     )
@@ -425,9 +560,15 @@ Output only valid JSON, no markdown.""" % (POSTER_CATEGORY_DEFAULT, POSTER_SUBCA
     subcategory = str(data.get("subcategory") or "").strip()
     if subcategory not in POSTER_SUBCATEGORIES:
         subcategory = "Cartoon"
+    # Marketplace listings name the product type in the title; ours were bare
+    # subject phrases, which read as an image caption next to real listings.
+    if "3d model" not in title.lower():
+        title = f"{title} low-poly 3d model"
+    # Subject paragraph first, then the specs every model here actually ships.
+    description = f"{desc}\n\n{PRODUCT_DESCRIPTION_BOILERPLATE}"
     return {
         "title": title[:256],
-        "description": desc[:5000],
+        "description": description[:5000],
         "keywords": keywords,
         "category": category[:64],
         "subcategory": subcategory,
@@ -569,13 +710,11 @@ def detect_character_for_generation(image_bytes: bytes) -> dict:
         "reason": "",
         "animal_type": "",
     }
-    from config import OPENAI_API_KEY
-
-    if not OPENAI_API_KEY:
+    if not _llm_candidates():
         verdict["reason"] = "vision unavailable"
         return verdict
     try:
-        from openai import OpenAI
+        from openai import OpenAI  # noqa: F401  (presence check; _vision_completion imports it)
     except ImportError as exc:
         verdict["reason"] = f"openai package missing: {exc}"
         return verdict
@@ -592,10 +731,8 @@ Output only valid JSON, no markdown.""" % (list(GENERATION_ANIMAL_TYPES),)
 
     try:
         b64 = base64.standard_b64encode(image_bytes).decode("ascii")
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.chat.completions.create(
-            model=OPENAI_POSTER_MODEL,
-            messages=[
+        resp = _vision_completion(
+            [
                 {
                     "role": "user",
                     "content": [
@@ -604,7 +741,6 @@ Output only valid JSON, no markdown.""" % (list(GENERATION_ANIMAL_TYPES),)
                     ],
                 }
             ],
-            response_format={"type": "json_object"},
             max_tokens=400,
             temperature=0.0,
         )
@@ -704,8 +840,6 @@ def build_free3d_similar_query(
 
 
 async def _run_task_poster_classification_impl(task_id: str) -> None:
-    from config import OPENAI_API_KEY
-
     async with AsyncSessionLocal() as db:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task:
@@ -777,7 +911,7 @@ async def _run_task_poster_classification_impl(task_id: str) -> None:
         llm_at: Optional[datetime] = None
         cv = version
 
-        if OPENAI_API_KEY:
+        if _llm_candidates():
             try:
                 llm = await asyncio.to_thread(analyze_poster_llm_metadata, image_bytes)
             except Exception as e:
