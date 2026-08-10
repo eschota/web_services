@@ -1184,6 +1184,32 @@ const App = {
             status.style.color = isError ? '#ff6b6b' : '';
         };
 
+        // A batch has nowhere to be sent: there is no page that lists a user's
+        // tasks, only /task?id=<one>. It used to redirect to /tasks anyway, so
+        // finishing an upload of 25 images landed on a raw 404 and the ids
+        // scrolled away with it. Report on the spot instead, and keep every id
+        // reachable. Built as nodes rather than markup so an id can never be
+        // interpreted as HTML.
+        const sayCreated = (ids, total) => {
+            if (!status) return;
+            status.replaceChildren();
+            status.classList.remove('hidden');
+            status.style.color = '';
+            const label = ids.length === total
+                ? `${ids.length} task(s) created — open: `
+                : `${ids.length} of ${total} task(s) created — open: `;
+            status.appendChild(document.createTextNode(label));
+            ids.forEach((id, i) => {
+                if (i) status.appendChild(document.createTextNode(' · '));
+                const link = document.createElement('a');
+                link.href = `/task?id=${encodeURIComponent(id)}`;
+                link.textContent = String(i + 1);
+                link.target = '_blank';
+                link.rel = 'noopener';
+                status.appendChild(link);
+            });
+        };
+
         zone?.addEventListener('click', () => input.click());
         zone?.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
         zone?.addEventListener('dragleave', () => zone.classList.remove('dragover'));
@@ -1202,7 +1228,7 @@ const App = {
             if (nameEl) nameEl.textContent = chosen.length > 1
                 ? `${chosen.length} images` : chosen[0].name;
             info?.classList.remove('hidden');
-            this.startBatchGeneration(chosen, say);
+            this.startBatchGeneration(chosen, say, sayCreated);
         });
     },
 
@@ -1352,7 +1378,7 @@ const App = {
         this.handleFileSelect(models[0]);
     },
 
-    async startBatchGeneration(files, say) {
+    async startBatchGeneration(files, say, sayCreated) {
         if (this.state.imageGenerationInProgress) return;
         this.state.imageGenerationInProgress = true;
         const total = files.length;
@@ -1391,8 +1417,11 @@ const App = {
         }
         this.state.imageGenerationInProgress = false;
         if (!created.length) { say('No task could be started', true); return; }
-        say(`Started ${created.length} task(s)`);
-        window.location.href = created.length === 1 ? `/task?id=${created[0]}` : '/tasks';
+        if (created.length === 1) {
+            window.location.href = `/task?id=${created[0]}`;
+            return;
+        }
+        sayCreated(created, total);
     },
 
     handleFileSelect(file) {
