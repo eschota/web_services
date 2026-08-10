@@ -22,6 +22,8 @@ overfilling the farm.
 from __future__ import annotations
 
 import json
+import os
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -38,6 +40,21 @@ GEN_STAGE_MODEL = "model"          # renderfin is building the mesh
 GEN_STAGE_RIGGING = "rigging"      # handed over to the convert pipeline
 GEN_STAGE_DONE = "done"
 GEN_STAGE_FAILED = "failed"
+
+# How long a task waits for the detection to become answerable before it starts
+# anyway. Detection routes the job; when it cannot run, the honest answer is
+# "not known yet", not "not riggable" - reading an outage as a verdict sent 50
+# uploads down the model-only route in five minutes on 2026-08-09, each ending
+# as a bare mesh with no rig and no error the owner could see.
+#
+# The wait is bounded because a permanently broken vision must not hold a paid
+# job forever. Past the bound we route as riggable: the user paid for a rigged
+# character, and if the mesh truly cannot take a rig the rig step says so and
+# the model is still delivered - which is the safe direction to be wrong in.
+DETECT_RETRY_SECONDS = float(os.getenv("AUTORIG_GENERATION_DETECT_RETRY", "300"))
+DETECT_WAIT_CEILING_SECONDS = float(
+    os.getenv("AUTORIG_GENERATION_DETECT_CEILING", "21600")  # 6 hours
+)
 
 
 def generation_meta(task: Task) -> Dict[str, Any]:
@@ -112,6 +129,15 @@ async def _start_generation(db, task: Task) -> None:
     import content_moderation
     import render_prompting
 
+    # A task waiting for vision is re-entered on every pump tick, which is far
+    # too often to re-ask an API that is down - fifty of them would turn one
+    # outage into a flood of 429s. Space the retries out; the image fetch below
+    # is skipped too, since it would be thrown away anyway.
+    meta_now = generation_meta(task)
+    last_try = float(meta_now.get("detect_last_attempt") or 0)
+    if last_try and (time.time() - last_try) < DETECT_RETRY_SECONDS:
+        return
+
     image_bytes = await _fetch_image_bytes(task.input_url)
     if image_bytes is None:
         task.status = "error"
@@ -129,10 +155,49 @@ async def _start_generation(db, task: Task) -> None:
             content_moderation.detect_character_for_generation, image_bytes
         )
     except Exception as exc:
-        # Detection is an optimisation, not a gate: if it cannot run we still
-        # owe the user a model, so fall back to the plain PBR route.
         print(f"[Generation] detection failed for {task.id}: {exc}")
-        verdict = {"riggable": False, "reason": f"detection failed: {exc}"[:200]}
+        verdict = {
+            "riggable": False,
+            "vision_ok": False,
+            "reason": f"detection failed: {exc}"[:200],
+        }
+
+    if not verdict.get("vision_ok"):
+        # We could not ask, which is not the same as being told "no". Starting
+        # now would route the job on a guess and quietly cost the owner the rig
+        # they paid for, so wait for vision to come back instead.
+        meta = generation_meta(task)
+        waited_since = float(meta.get("detect_waiting_since") or 0) or time.time()
+        waited = time.time() - waited_since
+        if waited < DETECT_WAIT_CEILING_SECONDS:
+            set_generation_meta(
+                task,
+                stage=GEN_STAGE_DETECT,
+                detect_waiting_since=waited_since,
+                detect_last_attempt=time.time(),
+                detect_reason=str(verdict.get("reason") or "")[:200],
+            )
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            print(
+                f"[Generation] task {task.id} waiting for vision "
+                f"({int(waited)}s of {int(DETECT_WAIT_CEILING_SECONDS)}s): "
+                f"{str(verdict.get('reason'))[:120]}"
+            )
+            return
+        # Waited long enough. Route as riggable rather than silently downgrading
+        # what the owner paid for; a mesh that cannot take a rig fails at the
+        # rig step and is still delivered.
+        print(
+            f"[Generation] task {task.id} starting without a detection verdict "
+            f"after {int(waited)}s; routing as riggable"
+        )
+        verdict = dict(verdict)
+        verdict["riggable"] = True
+        verdict["reason"] = (
+            f"vision unavailable for {int(waited)}s; assumed riggable "
+            f"({str(verdict.get('reason') or '')[:100]})"
+        )
 
     try:
         job_id = await render_prompting.start_character_gen_from_image(

@@ -698,9 +698,15 @@ def detect_character_for_generation(image_bytes: bytes) -> dict:
     farm after the model has already been generated and paid for.
 
     So the answer here decides the route, not the outcome: a riggable character
-    goes down generation+rig, anything else still gets its PBR model. On any
-    doubt - unreadable answer, no key, API failure - the caller gets
-    ``riggable: False`` and the user still receives a model.
+    goes down generation+rig, anything else still gets its PBR model.
+
+    ``vision_ok`` says whether that answer was actually looked up. "I looked and
+    it is not riggable" and "I could not look" both leave ``riggable`` false,
+    and a caller that cannot tell them apart turns an outage into a product
+    decision: on 2026-08-09 an exhausted API key sent 50 uploads down the
+    model-only route in five minutes, each finishing as a bare mesh with no rig,
+    no LODs and no error the owner could see. Never route on ``riggable`` alone
+    without checking ``vision_ok`` first.
     """
     verdict = {
         "is_character": False,
@@ -709,6 +715,9 @@ def detect_character_for_generation(image_bytes: bytes) -> dict:
         "subject": "",
         "reason": "",
         "animal_type": "",
+        # False only when the question could not be asked at all, never when it
+        # was asked and answered "no".
+        "vision_ok": False,
     }
     if not _llm_candidates():
         verdict["reason"] = "vision unavailable"
@@ -749,6 +758,8 @@ Output only valid JSON, no markdown.""" % (list(GENERATION_ANIMAL_TYPES),)
         verdict["reason"] = f"vision failed: {str(exc)[:160]}"
         return verdict
 
+    # The question was asked and answered; everything below is a real verdict.
+    verdict["vision_ok"] = True
     pose = str(data.get("pose") or "").strip().lower()
     if pose not in CHARACTER_POSES:
         pose = "other" if pose else "unknown"
