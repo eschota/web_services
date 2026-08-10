@@ -93,6 +93,88 @@ def check_disk(report: Report) -> None:
         report.ok(text)
 
 
+VISION_CONFIG = "/root/autorig/ai_vision_animal_type_detect.json"
+BACKEND_ENV = "/etc/autorig-backend.env"
+
+
+def _llm_credentials() -> List[Tuple[str, str, str, str]]:
+    """(label, url, key, model) in the order content_moderation tries them."""
+    creds: List[Tuple[str, str, str, str]] = []
+    openai_url = "https://api.openai.com/v1/chat/completions"
+    try:
+        for line in open(BACKEND_ENV, encoding="utf-8"):
+            if line.strip().startswith("OPENAI_API_KEY"):
+                key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if key:
+                    creds.append(("env openai", openai_url, key, "gpt-4o-mini"))
+                break
+    except Exception:
+        pass
+    try:
+        cfg = json.load(open(VISION_CONFIG, encoding="utf-8"))
+    except Exception:
+        cfg = {}
+    key = str(cfg.get("open_AI_api_key") or "").strip()
+    if key:
+        creds.append(("config openai", openai_url, key, "gpt-4o-mini"))
+    key = str(cfg.get("open_router_api_key") or "").strip()
+    if key:
+        url = str(cfg.get("open_router_api_url_string") or "").strip() \
+            or "https://openrouter.ai/api/v1/chat/completions"
+        creds.append(("config openrouter", url, key, "openai/gpt-4o-mini"))
+    return creds
+
+
+def check_llm_credentials(report: Report) -> None:
+    """Ask every vision credential whether it still has money.
+
+    The pipeline alerts by itself when a call has to fall back, but that only
+    fires while calls are being made. A key can empty during a quiet night and
+    the first anyone hears of it is a morning of tasks with filename titles and
+    generations routed as "not riggable" - which is exactly how ten hours were
+    lost on 2026-08-09. So the balance is probed on a timer too, not only on
+    demand.
+    """
+    creds = _llm_credentials()
+    if not creds:
+        report.fail("no vision credential configured at all")
+        return
+    alive: List[str] = []
+    broke: List[str] = []
+    for label, url, key, model in creds:
+        body = json.dumps(
+            {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
+        ).encode()
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=25):
+                alive.append(label)
+        except urllib.error.HTTPError as exc:
+            text = exc.read().decode("utf-8", "replace")[:200].lower()
+            if "quota" in text or "credit" in text or "billing" in text:
+                broke.append(f"{label}: OUT OF CREDIT")
+            elif exc.code in (401, 403):
+                broke.append(f"{label}: key rejected ({exc.code})")
+            else:
+                broke.append(f"{label}: HTTP {exc.code}")
+        except Exception as exc:
+            broke.append(f"{label}: {repr(exc)[:40]}")
+
+    summary = f"vision credentials: {len(alive)} alive ({', '.join(alive) or 'none'})"
+    if not alive:
+        report.fail(f"{summary} — metadata and rig routing are DOWN: {'; '.join(broke)}")
+    elif broke:
+        # Still serving, but on the reserve. This is the warning worth acting
+        # on: the next one to empty takes the pipeline with it.
+        report.warn(f"{summary}; spent: {'; '.join(broke)}")
+    else:
+        report.ok(summary)
+
+
 def check_renderfin(report: Report) -> Dict[str, Any]:
     try:
         health = _get_json(f"{RENDERFIN}/health")
@@ -332,6 +414,7 @@ def main() -> int:
     check_site(report)
     check_services(report)
     check_disk(report)
+    check_llm_credentials(report)
     check_renderfin(report)
     check_generation_jobs(report)
     check_farm_tunnels(report)

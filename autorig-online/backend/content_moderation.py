@@ -153,11 +153,17 @@ def _vision_completion(messages: List[dict], *, max_tokens: int, temperature: fl
     key one line down.
     """
     from openai import OpenAI
+    import llm_credit_alert
 
     candidates = _llm_candidates()
     if not candidates:
         raise RuntimeError("no vision credential configured (env or vision config)")
     last: Optional[Exception] = None
+    # The credential that ran out of money, if a later one then covered for it.
+    # Falling back is the earliest moment anyone can learn the balance is gone:
+    # the request still succeeds, so nothing is degraded yet, but the reserve is
+    # now what is paying. That is the warning worth sending.
+    spent: Optional[tuple] = None
     for label, key, base_url, model, headers in candidates:
         try:
             client = OpenAI(api_key=key, base_url=base_url) if base_url else OpenAI(api_key=key)
@@ -171,11 +177,31 @@ def _vision_completion(messages: List[dict], *, max_tokens: int, temperature: fl
             )
             if last is not None:
                 print(f"[ContentModeration] vision recovered on '{label}'")
+            if spent is not None:
+                _safe_alert(
+                    llm_credit_alert.warn_running_on_reserve, spent[0], label, spent[1]
+                )
             return resp
         except Exception as exc:
             last = exc
-            print(f"[ContentModeration] vision candidate '{label}' failed: {str(exc)[:160]}")
+            detail = str(exc)[:300]
+            print(f"[ContentModeration] vision candidate '{label}' failed: {detail[:160]}")
+            if spent is None and (
+                llm_credit_alert.is_credit_error(detail)
+                or llm_credit_alert.is_auth_error(detail)
+            ):
+                spent = (label, detail)
+    detail = str(last)[:300] if last else "no candidate answered"
+    _safe_alert(llm_credit_alert.alert_all_credentials_down, detail)
     raise last if last else RuntimeError("no vision credential answered")
+
+
+def _safe_alert(fn, *args) -> None:
+    """An alert must never be the reason a generation fails."""
+    try:
+        fn(*args)
+    except Exception as exc:
+        print(f"[ContentModeration] credit alert failed: {exc}")
 
 
 _classifier_locks: Dict[str, asyncio.Lock] = {}
