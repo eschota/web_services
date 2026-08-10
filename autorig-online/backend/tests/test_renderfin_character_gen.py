@@ -186,11 +186,8 @@ class HunyuanConverterPathTests(unittest.TestCase):
                             with patch.object(config, "HUNYUAN_POLL_SECONDS", 0.01):
                                 with patch.object(cg_mod.httpx, "AsyncClient", side_effect=patched_client):
                                     with patch.object(cg_mod.turntable, "render_turntable", side_effect=fake_turntable):
+                                        # one variant, so it runs to the end without asking
                                         job = await manager.create(prompt="orc", user_name="bot")
-                                        job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_FAILED})
-                                        self.assertEqual(job.stage, CHARGEN_STAGE_AWAITING_IMAGE, job.error)
-                                        job, transitioned = await manager.approve_image(job.id)
-                                        self.assertTrue(transitioned)
                                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_READY, CHARGEN_STAGE_FAILED})
 
                     self.assertEqual(job.stage, CHARGEN_STAGE_READY, job.error)
@@ -229,9 +226,11 @@ class CharacterGenTests(unittest.TestCase):
                         side_effect=fake_turntable,
                     ):
                         job = await manager.create(
-                            prompt="orc warrior", mask_url="", user_name="bot"
+                            prompt="orc warrior", prompt_b="low-poly orc warrior",
+                            mask_url="", user_name="bot",
                         )
-                        # pipeline pauses for human validation of the Flux render
+                        # two styles rendered, so the pipeline pauses to ask
+                        # which one becomes the model
                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_FAILED})
                         self.assertEqual(job.stage, CHARGEN_STAGE_AWAITING_IMAGE, job.error)
                         self.assertTrue(job.image_url.endswith(".png"))
@@ -247,8 +246,10 @@ class CharacterGenTests(unittest.TestCase):
                     # flux stage got the default mask; hunyuan got the isolated image
                     self.assertEqual(queue.enqueued[0].prompt.type, "t_pose")
                     self.assertIn("/render/masks/t_pose.jpg", queue.enqueued[0].prompt.image_url)
-                    self.assertEqual(queue.enqueued[1].prompt.type, "image_to_3d")
-                    self.assertEqual(queue.enqueued[1].prompt.image_url, job.isolated_url)
+                    # by type, not by index: the second style renders in between
+                    to_3d = [t for t in queue.enqueued if t.prompt.type == "image_to_3d"]
+                    self.assertEqual(len(to_3d), 1)
+                    self.assertEqual(to_3d[0].prompt.image_url, job.isolated_url)
                 finally:
                     await manager.stop()
                     await queue.stop()
@@ -299,7 +300,7 @@ class CharacterGenTests(unittest.TestCase):
                         "renderfin.character_gen.turntable.render_turntable",
                         side_effect=fake_turntable,
                     ):
-                        job = await manager.create(prompt="orc", user_name="bot")
+                        job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                         await manager.approve_image(job.id)
                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_READY})
@@ -309,6 +310,77 @@ class CharacterGenTests(unittest.TestCase):
                     job = await manager.discard(job.id)
                     self.assertEqual(job.stage, CHARGEN_STAGE_DISCARDED)
                     self.assertFalse(video.is_file())
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_a_single_surviving_render_goes_straight_to_3d(self):
+        """The approval stage exists to choose between two invented T-poses.
+
+        With one render there is nothing to choose, so asking is pure friction:
+        every such job used to wait for a button nobody had a reason to press -
+        two were found sitting for eleven and eight hours - and each one spent a
+        card in a chat the operator asked to keep to decisions and results.
+        """
+
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    async def fake_turntable(glb_path, out_path, **kw):
+                        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                        Path(out_path).write_bytes(b"MP4!" * 500)
+                        return Path(out_path)
+
+                    with patch(
+                        "renderfin.character_gen.turntable.render_turntable",
+                        side_effect=fake_turntable,
+                    ):
+                        job = await manager.create(prompt="orc", user_name="bot")
+                        job = await _wait_stage(
+                            manager, job.id,
+                            {CHARGEN_STAGE_READY, CHARGEN_STAGE_AWAITING_IMAGE,
+                             CHARGEN_STAGE_FAILED},
+                        )
+                    self.assertEqual(
+                        job.stage, CHARGEN_STAGE_READY,
+                        f"one variant must not stop to ask; got {job.stage} {job.error}",
+                    )
+                    self.assertEqual(job.chosen_variant, "a")
+                    self.assertFalse(job.image_url_b)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_two_variants_still_stop_to_ask(self):
+        """The one case where the card earns its place: a real choice."""
+
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await manager.create(
+                        prompt="orc", prompt_b="low-poly orc", user_name="bot"
+                    )
+                    job = await _wait_stage(
+                        manager, job.id,
+                        {CHARGEN_STAGE_AWAITING_IMAGE, CHARGEN_STAGE_READY,
+                         CHARGEN_STAGE_FAILED},
+                    )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_AWAITING_IMAGE, job.error)
+                    self.assertTrue(job.image_url_b)
                 finally:
                     await manager.stop()
                     await queue.stop()
@@ -333,7 +405,7 @@ class CharacterGenTests(unittest.TestCase):
                         "renderfin.character_gen.turntable.render_turntable",
                         side_effect=stuck_turntable,
                     ):
-                        job = await manager.create(prompt="orc", user_name="bot")
+                        job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                         job_id = job.id
                         await _wait_stage(manager, job_id, {CHARGEN_STAGE_AWAITING_IMAGE})
                         await manager.approve_image(job_id)
@@ -373,7 +445,7 @@ class ImageApprovalGateTests(unittest.TestCase):
                 await queue.start()
                 manager = CharacterGenManager(queue, db_path=config.DB_PATH)
                 await manager.start()
-                job = await manager.create(prompt="orc", user_name="bot")
+                job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                 job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                 await manager.stop()
 
@@ -408,7 +480,10 @@ class ImageApprovalGateTests(unittest.TestCase):
                         "renderfin.character_gen.turntable.render_turntable",
                         side_effect=fake_turntable,
                     ):
-                        job = await manager.create(prompt="orc", user_name="bot")
+                        # two variants, so the job really does stop and ask
+                        job = await manager.create(
+                            prompt="orc", prompt_b="low-poly orc", user_name="bot"
+                        )
                         job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                         _, first = await manager.approve_image(job.id)
                         _, second = await manager.approve_image(job.id)
@@ -434,7 +509,7 @@ class ImageApprovalGateTests(unittest.TestCase):
                 manager = CharacterGenManager(queue, db_path=config.DB_PATH)
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                     job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                     first_flux = job.flux_task_id
                     first_image = job.image_url
@@ -443,7 +518,8 @@ class ImageApprovalGateTests(unittest.TestCase):
                     job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                     self.assertNotEqual(job.flux_task_id, first_flux)
                     self.assertNotEqual(job.image_url, first_image)
-                    self.assertEqual(len(queue.enqueued), 2)
+                    # two renders, each of the two styles
+                    self.assertEqual(len(queue.enqueued), 4)
                 finally:
                     await manager.stop()
                     await queue.stop()
@@ -515,9 +591,27 @@ class TwoVariantTests(unittest.TestCase):
                 manager = CharacterGenManager(queue, db_path=config.DB_PATH)
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="orc", user_name="bot")
-                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
-                    self.assertEqual(len(queue.enqueued), 1)
+                    async def fake_turntable(glb_path, out_path, **kw):
+                        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                        Path(out_path).write_bytes(b"MP4!" * 500)
+                        return Path(out_path)
+
+                    with patch(
+                        "renderfin.character_gen.turntable.render_turntable",
+                        side_effect=fake_turntable,
+                    ):
+                        job = await manager.create(prompt="orc", user_name="bot")
+                        # one prompt renders one variant, and one variant is not
+                        # a choice - the job does not stop to ask about it
+                        job = await _wait_stage(
+                            manager, job.id, {CHARGEN_STAGE_READY, CHARGEN_STAGE_FAILED}
+                        )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_READY, job.error)
+                    # count the T-pose renders only: the job now runs on to the
+                    # 3D stage, which enqueues its own task in the ComfyUI
+                    # fallback, so the total is no longer the variant count
+                    t_pose = [t for t in queue.enqueued if t.prompt.type == "t_pose"]
+                    self.assertEqual(len(t_pose), 1)
                     self.assertFalse(job.image_url_b)
                 finally:
                     await manager.stop()
@@ -546,8 +640,25 @@ class TwoVariantTests(unittest.TestCase):
                         return task
 
                     queue.enqueue = enqueue_second_fails
-                    job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
-                    job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
+
+                    async def fake_turntable(glb_path, out_path, **kw):
+                        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                        Path(out_path).write_bytes(b"MP4!" * 500)
+                        return Path(out_path)
+
+                    with patch(
+                        "renderfin.character_gen.turntable.render_turntable",
+                        side_effect=fake_turntable,
+                    ):
+                        job = await manager.create(
+                            prompt="orc", prompt_b="low-poly orc", user_name="bot"
+                        )
+                        # the surviving render carries the job on; with nothing
+                        # left to choose between it does not stop to ask either
+                        job = await _wait_stage(
+                            manager, job.id, {CHARGEN_STAGE_READY, CHARGEN_STAGE_FAILED}
+                        )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_READY, job.error)
                     self.assertTrue(job.image_url)
                     self.assertFalse(job.image_url_b)
                 finally:
@@ -1172,7 +1283,7 @@ class ResumeTests(unittest.TestCase):
                 manager = CharacterGenManager(queue, db_path=config.DB_PATH)
                 await manager.start()
                 try:
-                    job = await manager.create(prompt="orc", user_name="bot")
+                    job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                     job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                     flux_id = job.flux_task_id
                     # simulate a stage-timeout failure that lost the flux result
@@ -1187,7 +1298,7 @@ class ResumeTests(unittest.TestCase):
                     job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                     # reused the existing (already Done) render — no new enqueue
                     self.assertEqual(job.flux_task_id, flux_id)
-                    self.assertEqual(len(queue.enqueued), 1)
+                    self.assertEqual(len(queue.enqueued), 2)  # the two styles, rendered once
                     self.assertTrue(job.image_url)
 
                     # resume refuses non-failed jobs
@@ -1260,7 +1371,7 @@ class AutoRetryTests(unittest.TestCase):
                         with patch.object(cg_mod, "RETRY_TICK_SECONDS", 0.05):
                             with patch.object(cg_mod.turntable, "render_turntable",
                                               side_effect=flaky_turntable):
-                                job = await manager.create(prompt="orc", user_name="bot")
+                                job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                                 job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                                 await manager.approve_image(job.id)
                                 job = await _wait_stage(
@@ -1302,7 +1413,7 @@ class AutoRetryTests(unittest.TestCase):
                             with patch.object(cg_mod, "MAX_STAGE_ATTEMPTS", 3):
                                 with patch.object(cg_mod.turntable, "render_turntable",
                                                   side_effect=always_fails):
-                                    job = await manager.create(prompt="orc", user_name="bot")
+                                    job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                                     job = await _wait_stage(manager, job.id, {CHARGEN_STAGE_AWAITING_IMAGE})
                                     await manager.approve_image(job.id)
                                     job = await _wait_stage(
@@ -1337,7 +1448,7 @@ class AutoRetryTests(unittest.TestCase):
                     # long backoff: the retry is still pending when we restart
                     with patch.object(cg_mod, "RETRY_BACKOFF_SECONDS", (3600.0,)):
                         with patch.object(cg_mod.turntable, "render_turntable", side_effect=fails):
-                            job = await manager.create(prompt="orc", user_name="bot")
+                            job = await manager.create(prompt="orc", prompt_b="low-poly orc", user_name="bot")
                             job_id = job.id
                             job = await _wait_stage(manager, job_id, {CHARGEN_STAGE_AWAITING_IMAGE})
                             await manager.approve_image(job_id)

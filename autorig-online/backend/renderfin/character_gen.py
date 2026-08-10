@@ -853,11 +853,28 @@ class CharacterGenManager:
                 print(f"[Renderfin][CharGen] job {job.id} variant B failed: {exc}")
                 job.flux_task_id_b = ""
 
+        if not job.image_url_b:
+            # Only one render survived, so the approval stage has nothing to
+            # ask: its whole purpose is choosing between two invented T-poses.
+            # The same reasoning create_from_image already applies - nothing to
+            # invent, nothing to choose, enter at hunyuan - and the cost of not
+            # applying it here was real: every single-variant job sat waiting
+            # for a button nobody had a reason to press, two of them for eleven
+            # and eight hours, and each one also spent a card in a chat the
+            # operator asked to keep to decisions and results.
+            job.chosen_variant = "a"
+            job.stage = CHARGEN_STAGE_HUNYUAN
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id} flux done (1 variant, "
+                f"nothing to choose) -> 3D directly"
+            )
+            return
+
         job.stage = CHARGEN_STAGE_AWAITING_IMAGE
         await self._persist(job)
-        variants = 2 if job.image_url_b else 1
         print(
-            f"[Renderfin][CharGen] job {job.id} flux done ({variants} variant(s)), "
+            f"[Renderfin][CharGen] job {job.id} flux done (2 variants), "
             f"awaiting approval -> {job.image_url}"
         )
 
