@@ -784,6 +784,9 @@ const App = {
                     rejectedReason = 'animal_decision_rejected';
                 }
             }
+            const winningResult = results.find(
+                (result) => String(result?.animal_type_string || '').toLowerCase() === best
+            );
             const detection = {
                 type: acceptedAnimal ? 'animal' : 'humanoid',
                 animal_type: acceptedAnimal ? best : '',
@@ -807,6 +810,9 @@ const App = {
                 animal_decision_min_votes_int: animalDecisionMinVotes,
                 animal_decision_accepted_bool: acceptedAnimal,
                 animal_decision_rejected_reason_string: rejectedReason,
+                riggable_bool: best !== 'unsupported',
+                body_topology: String(winningResult?.body_topology || (acceptedAnimal ? 'quadruped' : 'unknown')),
+                rejection_code: String(winningResult?.rejection_code || rejectedReason || ''),
                 preflight_render_jpg_base64_string: preflightRender,
             };
 

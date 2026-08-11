@@ -15,6 +15,7 @@ import os
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 
@@ -159,7 +160,7 @@ async def _cache_entry_upstream_url(db, path: Path) -> str:
 
 
 def _glb_cache_candidates(glb_cache_dir: Path, cutoff_ts: float) -> list[tuple[float, int, Path]]:
-    candidates: list[tuple[float, int, Path]] = []
+    candidates: list[tuple[float, int, Path, object]] = []
     for path in glb_cache_dir.iterdir():
         if not path.is_file() or path.suffix.lower() not in GLB_CACHE_PRUNABLE_SUFFIXES:
             continue
@@ -406,42 +407,85 @@ async def _enforce_periodic_task_cache_max_size(db, *, max_gb: float, min_age_ho
     return summary
 
 
+def _task_has_preview_fallback(
+    task,
+    *,
+    task_cache_dir: Path,
+    glb_cache_dir: Path,
+    preflight_render_dir: Path,
+) -> bool:
+    """Require a retained poster or interactive GLB before deleting an MP4."""
+    task_id = str(getattr(task, "id", "") or "").strip()
+    if not task_id:
+        return False
+    poster = preflight_render_dir / f"{task_id}.jpg"
+    try:
+        if poster.is_file() and poster.stat().st_size > 0:
+            return True
+    except OSError:
+        pass
+    task_dir = task_cache_dir / task_id
+    if task_dir.is_dir():
+        for suffix in ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.glb"):
+            for path in task_dir.rglob(suffix):
+                try:
+                    if path.is_file() and path.stat().st_size > 0:
+                        return True
+                except OSError:
+                    continue
+    if glb_cache_dir.is_dir():
+        for path in glb_cache_dir.glob(f"{task_id}_*.glb"):
+            try:
+                if path.is_file() and path.stat().st_size > 0:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 async def _purge_uploaded_video_cache_until(
     db,
     *,
     video_cache_dir: Path,
     target_free_gb: float,
     min_age_hours: float,
+    task_cache_dir: Path | None = None,
+    glb_cache_dir: Path | None = None,
+    preflight_render_dir: Path | None = None,
 ) -> tuple[int, int]:
     """
     Last-resort pressure cleanup for backend-cached task previews.
 
-    Only remove old videos for completed tasks that either already have a
-    successful YouTube upload or reached the terminal ``failed`` upload state.
-    Deferred/not-yet-attempted tasks stay protected because the YouTube retry
-    worker may still need their local MP4 after worker URLs expire.
+    Once pressure is active, enforce preview retention for every terminal task.
+    A poster or viewer GLB must remain available. Deliverables are never touched.
     """
-    from database import Task
-    from sqlalchemy import select
-
     if _free_gb() >= target_free_gb or not video_cache_dir.exists():
         return 0, 0
 
-    result = await db.execute(
-        select(Task.id, Task.youtube_upload_status).where(
-            Task.status == "done",
-            Task.youtube_upload_status.in_(("uploaded", "failed")),
-        )
-    )
-    cleanable_task_statuses = {str(task_id): status for task_id, status in result.all()}
-    if not cleanable_task_statuses:
+    from database import Task
+    from sqlalchemy import select
+
+    result = await db.execute(select(Task).where(Task.status == "done"))
+    cleanable_tasks = {str(task.id): task for task in result.scalars().all()}
+    if not cleanable_tasks:
         return 0, 0
+
+    task_cache_dir = task_cache_dir or (Path(BACKEND).parent / "static" / "tasks")
+    glb_cache_dir = glb_cache_dir or (Path(BACKEND).parent / "static" / "glb_cache")
+    preflight_render_dir = preflight_render_dir or Path("/var/autorig/preflight-renders")
 
     cutoff_ts = _age_cutoff_timestamp(min_age_hours)
     candidates: list[tuple[float, int, Path]] = []
     for path in video_cache_dir.glob("*.mp4"):
-        upload_status = cleanable_task_statuses.get(path.stem)
-        if upload_status is None:
+        task = cleanable_tasks.get(path.stem)
+        if task is None:
+            continue
+        if not _task_has_preview_fallback(
+            task,
+            task_cache_dir=task_cache_dir,
+            glb_cache_dir=glb_cache_dir,
+            preflight_render_dir=preflight_render_dir,
+        ):
             continue
         try:
             stat = path.stat()
@@ -449,24 +493,31 @@ async def _purge_uploaded_video_cache_until(
             continue
         if stat.st_mtime > cutoff_ts:
             continue
-        candidates.append((stat.st_mtime, stat.st_size, path, upload_status))
+        candidates.append((stat.st_mtime, stat.st_size, path, task))
 
     candidates.sort(key=lambda item: item[0])
     removed = 0
     freed = 0
-    for _mtime, size, path, status in candidates:
-        if _free_gb() >= target_free_gb:
-            break
+    now = datetime.utcnow()
+    for _mtime, size, path, task in candidates:
         try:
             path.unlink()
         except FileNotFoundError:
             continue
         removed += 1
         freed += size
+        task.video_ready = False
+        task.video_url = None
+        if getattr(task, "youtube_video_id", None) is None and getattr(task, "youtube_upload_status", None) in (None, "deferred"):
+            task.youtube_upload_status = "skipped"
+            task.youtube_upload_error = "quota_window_expired"
+        task.updated_at = now
         print(
-            f"[Disk Video Cache] Removed {status} YouTube video {path.name} "
+            f"[Disk Video Cache] Removed expired preview {path.name} "
             f"({size / (1024**2):.1f} MB); free now {_free_gb():.2f} GB"
         )
+    if removed and hasattr(db, "commit"):
+        await db.commit()
     return removed, freed
 
 

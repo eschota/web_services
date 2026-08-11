@@ -21,6 +21,7 @@ from config import APP_URL
 from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
 from task_timeout_contract import task_hard_timeout_reference
+from animal_submission_policy import animal_detection_accepted
 from worker_artifact_urls import (
     canonical_worker_artifact_url,
     viewer_artifact_kind,
@@ -208,29 +209,10 @@ def _is_transient_worker_dispatch_error(error: Optional[str]) -> bool:
 
 
 def _animal_detection_confident_enough(detection: Any) -> bool:
-    if not isinstance(detection, dict):
-        return False
-    if detection.get("manual_selection") is True:
-        return True
-    if str(detection.get("source") or "").strip().lower() == "manual_task_restart":
-        return True
-    if detection.get("accepted") is True:
-        return True
-    if detection.get("user_selected_bool"):
-        return True
-    if detection.get("animal_decision_accepted_bool") is True:
-        return True
-    if "animal_decision_accepted_bool" in detection:
-        return False
-    try:
-        weight = float(detection.get("animal_decision_weight_float") or 0.0)
-    except Exception:
-        weight = 0.0
-    try:
-        threshold = float(detection.get("animal_decision_threshold_float") or RIG_V2_ANIMAL_DECISION_THRESHOLD)
-    except Exception:
-        threshold = RIG_V2_ANIMAL_DECISION_THRESHOLD
-    return weight >= threshold
+    return animal_detection_accepted(
+        detection,
+        default_threshold=RIG_V2_ANIMAL_DECISION_THRESHOLD,
+    )
 
 
 def _viewer_environment_for_task(task: Task) -> Optional[Dict[str, Any]]:

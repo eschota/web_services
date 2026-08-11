@@ -54,6 +54,8 @@ class TaskStatusResponse(BaseModel):
     ready_urls: List[str]  # Files that are ready for download
     video_ready: bool
     video_url: Optional[str]
+    preview_status: str = Field(default="pending", description="ready | pending | unavailable")
+    preview_error: Optional[str] = None
     blueprint_skeleton_ready: bool = False
     blueprint_skeleton_url: Optional[str] = None
     blueprint_rig_preview_ready: bool = False

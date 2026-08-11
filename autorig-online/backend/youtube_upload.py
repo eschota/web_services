@@ -23,7 +23,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,13 +38,16 @@ from config import (
 )
 from database import AsyncSessionLocal, Task, YoutubeCredentials, YoutubeUploadedHash
 from workers import get_worker_base_url
+from youtube_policy import rolling_budget_available, task_is_in_upload_window, upload_window_cutoff
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_VIDEO_CACHE_DIR = Path(os.getenv("YOUTUBE_VIDEO_CACHE_DIR", "/var/autorig/videos"))
 YOUTUBE_TASK_CACHE_DIR = Path(__file__).resolve().parent.parent / "static" / "tasks"
-YOUTUBE_UPLOAD_LIMIT_RETRY_SECONDS = int(os.getenv("YOUTUBE_UPLOAD_LIMIT_RETRY_SECONDS", "3600"))
+YOUTUBE_UPLOAD_LIMIT_RETRY_SECONDS = int(os.getenv("YOUTUBE_UPLOAD_LIMIT_RETRY_SECONDS", "86400"))
 YOUTUBE_VIDEO_SOURCE_RETRY_SECONDS = int(os.getenv("YOUTUBE_VIDEO_SOURCE_RETRY_SECONDS", "600"))
-YOUTUBE_RETRY_POLL_SECONDS = int(os.getenv("YOUTUBE_RETRY_POLL_SECONDS", "300"))
+YOUTUBE_RETRY_POLL_SECONDS = int(os.getenv("YOUTUBE_RETRY_POLL_SECONDS", "900"))
+YOUTUBE_ROLLING_UPLOAD_LIMIT = int(os.getenv("YOUTUBE_ROLLING_UPLOAD_LIMIT", "9"))
+YOUTUBE_UPLOAD_WINDOW_HOURS = float(os.getenv("YOUTUBE_UPLOAD_WINDOW_HOURS", "24"))
 
 # Fallback title used only when task-level model metadata is unavailable.
 YOUTUBE_VIDEO_TITLE = "autorig character"
@@ -324,6 +327,64 @@ async def _youtube_upload_limit_cooldown_active() -> bool:
     return bool(latest and latest > cutoff)
 
 
+def _youtube_window_cutoff(now: Optional[datetime] = None) -> datetime:
+    return upload_window_cutoff(now, window_hours=YOUTUBE_UPLOAD_WINDOW_HOURS)
+
+
+def _youtube_task_is_in_current_window(created_at: Optional[datetime], now: Optional[datetime] = None) -> bool:
+    return task_is_in_upload_window(
+        created_at,
+        now,
+        window_hours=YOUTUBE_UPLOAD_WINDOW_HOURS,
+    )
+
+
+async def _youtube_rolling_upload_count(now: Optional[datetime] = None) -> int:
+    cutoff = _youtube_window_cutoff(now)
+    async with AsyncSessionLocal() as db:
+        count = await db.scalar(
+            select(func.count(func.distinct(Task.youtube_video_id))).where(
+                Task.youtube_upload_status == "uploaded",
+                Task.youtube_video_id.isnot(None),
+                Task.youtube_uploaded_at.isnot(None),
+                Task.youtube_uploaded_at >= cutoff,
+            )
+        )
+    return int(count or 0)
+
+
+async def _youtube_rolling_budget_available(now: Optional[datetime] = None) -> bool:
+    return rolling_budget_available(
+        await _youtube_rolling_upload_count(now),
+        limit=YOUTUBE_ROLLING_UPLOAD_LIMIT,
+    )
+
+
+async def _expire_youtube_backlog(now: Optional[datetime] = None) -> int:
+    """Close stale deferred/NULL rows; historical videos are never retried."""
+    cutoff = _youtube_window_cutoff(now)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(Task)
+            .where(
+                Task.status == "done",
+                Task.created_at < cutoff,
+                Task.youtube_video_id.is_(None),
+                or_(
+                    Task.youtube_upload_status.is_(None),
+                    Task.youtube_upload_status == "deferred",
+                ),
+            )
+            .values(
+                youtube_upload_status="skipped",
+                youtube_upload_error="quota_window_expired",
+                updated_at=now or datetime.utcnow(),
+            )
+        )
+        await db.commit()
+        return int(result.rowcount or 0)
+
+
 async def _telegram_youtube_token_notice(detail: str) -> None:
     try:
         from telegram_bot import broadcast_youtube_token_refresh_needed
@@ -449,6 +510,12 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
         task = await db.scalar(select(Task).where(Task.id == task_id))
         if not task or task.status != "done":
             return
+        if not _youtube_task_is_in_current_window(task.created_at):
+            task.youtube_upload_status = "skipped"
+            task.youtube_upload_error = "quota_window_expired"
+            task.updated_at = datetime.utcnow()
+            await db.commit()
+            return
         if task.content_classified_at is None:
             return
         if task.youtube_video_id:
@@ -505,14 +572,10 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             print(f"[YouTube] No channel credentials (DB or YOUTUBE_REFRESH_TOKEN); skip task {task_id}")
             return
 
-        if not video_candidates:
+        if not local_video_candidates and not video_candidates:
             return
 
         tid = task.id
-
-    if await _youtube_upload_limit_cooldown_active():
-        await _mark_deferred(task_id, "upload_limit_cooldown")
-        return
 
     title = upload_title
     desc = upload_desc if upload_desc else _build_youtube_description(tid)
@@ -585,7 +648,10 @@ async def run_youtube_upload_for_task(task_id: str) -> None:
             try:
                 async with _youtube_upload_slot_lock:
                     if await _youtube_upload_limit_cooldown_active():
-                        await _mark_deferred(task_id, "upload_limit_cooldown")
+                        await _mark_skipped(task_id, "upload_limit_cooldown")
+                        return
+                    if not await _youtube_rolling_budget_available():
+                        await _mark_skipped(task_id, "rolling_upload_budget_reached")
                         return
                     video_id = await asyncio.to_thread(
                         _upload_video_file_blocking,
@@ -712,16 +778,31 @@ async def _mark_deferred(task_id: str, reason: str) -> None:
         await db.commit()
 
 
+async def _mark_skipped(task_id: str, reason: str) -> None:
+    async with AsyncSessionLocal() as db:
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task or task.youtube_video_id:
+            return
+        task.youtube_upload_status = "skipped"
+        task.youtube_upload_error = reason
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+
+
 async def youtube_retry_worker() -> None:
-    """Retry one recent deferred upload at a time without blocking task processing."""
+    """Retry only fresh source-pending tasks; quota failures never create a storm."""
     print("[YouTube Retry] Started")
     try:
         await asyncio.sleep(30)
         while True:
             try:
+                expired = await _expire_youtube_backlog()
+                if expired:
+                    print(f"[YouTube Retry] Expired {expired} stale deferred/NULL tasks")
                 if not await _youtube_upload_limit_cooldown_active():
                     now = datetime.utcnow()
                     source_cutoff = now - timedelta(seconds=max(60, YOUTUBE_VIDEO_SOURCE_RETRY_SECONDS))
+                    window_cutoff = _youtube_window_cutoff(now)
                     async with AsyncSessionLocal() as db:
                         task_id = await db.scalar(
                             select(Task.id)
@@ -729,12 +810,11 @@ async def youtube_retry_worker() -> None:
                                 Task.status == "done",
                                 Task.youtube_video_id.is_(None),
                                 Task.youtube_upload_status == "deferred",
+                                Task.youtube_upload_error == "video_source_pending",
+                                Task.created_at >= window_cutoff,
                                 Task.content_rating.in_(("safe", "suggestive")),
                                 Task.content_classified_at.isnot(None),
-                                or_(
-                                    Task.youtube_upload_error != "video_source_pending",
-                                    Task.updated_at <= source_cutoff,
-                                ),
+                                Task.updated_at <= source_cutoff,
                             )
                             .order_by(Task.created_at.desc())
                             .limit(1)

@@ -6053,6 +6053,13 @@
                         this.syncVideoPlayerWrapAspect();
                         video.play().catch(() => {});
                     }
+                } else if (task.preview_status === 'unavailable') {
+                    pending.classList.add('hidden');
+                    container.classList.add('hidden');
+                    window.__taskPageBoot?.markVideoReady('Interactive model ready; video preview unavailable');
+                    if (typeof this.pauseVideoPreview === 'function') {
+                        this.pauseVideoPreview('preview-unavailable');
+                    }
                 } else if (task.status === 'processing' || task.status === 'done') {
                     pending.classList.remove('hidden');
                     window.__taskPageBoot?.markVideoReady('Video preview pending');
@@ -16693,10 +16700,8 @@
                             animal_type_string: normalized,
                             mode: 'only_rig',
                             source: 'manual_task_create',
-                            accepted: true,
                             manual_selection: true,
                             user_selected_bool: true,
-                            animal_decision_accepted_bool: true,
                         },
                     };
                 }

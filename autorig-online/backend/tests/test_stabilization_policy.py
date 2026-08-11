@@ -1,0 +1,69 @@
+import unittest
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+
+BACKEND = Path(__file__).resolve().parents[1]
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+from animal_submission_policy import animal_detection_accepted, animal_rejection_code, detected_animal_type
+from rig_v2_vision_policy import extract_vision_assessment
+from youtube_policy import rolling_budget_available, task_is_in_upload_window
+
+
+class AnimalSubmissionPolicyTests(unittest.TestCase):
+    def test_unsupported_is_parsed_as_successful_rejection(self):
+        result = extract_vision_assessment(
+            '{"animal_type":"unsupported","confidence_float":0.91,"riggable_bool":false,'
+            '"body_topology":"vehicle","rejection_code":"vehicle_or_prop"}',
+            ["dog", "cat", "humanoid"],
+        )
+        self.assertTrue(result["success_bool"])
+        self.assertFalse(result["riggable_bool"])
+        self.assertEqual(result["body_topology"], "vehicle")
+        self.assertEqual(result["rejection_code"], "vehicle_or_prop")
+
+    def test_manual_selection_does_not_replace_ai_rejection(self):
+        detection = {
+            "manual_selection": True,
+            "user_selected_bool": True,
+            "accepted": True,
+            "animal_decision_accepted_bool": False,
+            "rejection_code": "preset_mismatch",
+        }
+        self.assertFalse(animal_detection_accepted(detection))
+        self.assertEqual(animal_rejection_code(detection), "preset_mismatch")
+
+    def test_admin_override_is_explicit(self):
+        self.assertTrue(animal_detection_accepted({
+            "riggable_bool": False,
+            "experimental_admin_override_bool": True,
+        }))
+
+    def test_original_ai_type_is_available_before_manual_preset_mutation(self):
+        self.assertEqual(
+            detected_animal_type({"animal_type": "cat", "user_selected_bool": True}),
+            "cat",
+        )
+
+
+class YoutubeWindowSourceContractTests(unittest.TestCase):
+    def test_rolling_budget_is_nine_in_any_24_hours(self):
+        now = datetime(2026, 8, 11, 12, 0, 0)
+        self.assertTrue(task_is_in_upload_window(now - timedelta(hours=23, minutes=59), now))
+        self.assertFalse(task_is_in_upload_window(now - timedelta(hours=24, seconds=1), now))
+        self.assertTrue(rolling_budget_available(8, limit=9))
+        self.assertFalse(rolling_budget_available(9, limit=9))
+
+    def test_youtube_source_contains_rolling_budget_and_no_quota_retry(self):
+        source = (Path(__file__).resolve().parents[1] / "youtube_upload.py").read_text(encoding="utf-8")
+        self.assertIn('YOUTUBE_ROLLING_UPLOAD_LIMIT', source)
+        self.assertIn('YOUTUBE_UPLOAD_WINDOW_HOURS', source)
+        self.assertIn('Task.youtube_upload_error == "video_source_pending"', source)
+        self.assertIn('youtube_upload_error="quota_window_expired"', source)
+        self.assertNotIn('Task.youtube_upload_error != "video_source_pending"', source)
+
+
+if __name__ == "__main__":
+    unittest.main()

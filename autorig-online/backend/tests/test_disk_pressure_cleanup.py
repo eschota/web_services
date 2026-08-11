@@ -48,17 +48,32 @@ class _ScalarRows:
 class _FakeDb:
     def __init__(self, cleanable_tasks):
         self.cleanable_tasks = cleanable_tasks
+        self.commits = 0
 
     async def execute(self, _query):
         return _ScalarRows(self.cleanable_tasks)
 
+    async def commit(self):
+        self.commits += 1
+
+
+class _FakeTask:
+    def __init__(self, task_id, upload_status=None):
+        self.id = task_id
+        self.youtube_upload_status = upload_status
+        self.youtube_upload_error = None
+        self.youtube_video_id = None
+        self.video_ready = True
+        self.video_url = f"https://worker/{task_id}.mp4"
+        self.updated_at = None
+
 
 class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
-    async def test_only_old_youtube_uploaded_video_is_removed(self):
+    async def test_old_preview_with_poster_is_removed_and_db_reference_cleared(self):
         with tempfile.TemporaryDirectory(prefix="autorig-video-pressure-") as tmp:
             video_dir = Path(tmp)
             old_uploaded = video_dir / "uploaded-old.mp4"
-            old_protected = video_dir / "deferred-old.mp4"
+            old_protected = video_dir / "no-fallback-old.mp4"
             fresh_uploaded = video_dir / "uploaded-fresh.mp4"
             for path in (old_uploaded, old_protected, fresh_uploaded):
                 path.write_bytes(b"video-bytes")
@@ -67,16 +82,23 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
             os.utime(old_uploaded, (old_time, old_time))
             os.utime(old_protected, (old_time, old_time))
 
-            db = _FakeDb([
-                ("uploaded-old", "uploaded"),
-                ("uploaded-fresh", "uploaded"),
-            ])
-            with patch.object(cleanup, "_free_gb", side_effect=[4.0, 4.0, 6.0]):
+            uploaded = _FakeTask("uploaded-old", "uploaded")
+            protected = _FakeTask("no-fallback-old", "deferred")
+            fresh = _FakeTask("uploaded-fresh", "uploaded")
+            db = _FakeDb([uploaded, protected, fresh])
+            fallback = video_dir / "posters"
+            fallback.mkdir()
+            (fallback / "uploaded-old.jpg").write_bytes(b"poster")
+            (fallback / "uploaded-fresh.jpg").write_bytes(b"poster")
+            with patch.object(cleanup, "_free_gb", side_effect=[4.0, 6.0]):
                 removed, freed = await cleanup._purge_uploaded_video_cache_until(
                     db,
                     video_cache_dir=video_dir,
                     target_free_gb=5.5,
                     min_age_hours=24,
+                    task_cache_dir=video_dir / "tasks",
+                    glb_cache_dir=video_dir / "glb",
+                    preflight_render_dir=fallback,
                 )
 
             self.assertEqual(removed, 1)
@@ -84,8 +106,11 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(old_uploaded.exists())
             self.assertTrue(old_protected.exists())
             self.assertTrue(fresh_uploaded.exists())
+            self.assertFalse(uploaded.video_ready)
+            self.assertIsNone(uploaded.video_url)
+            self.assertEqual(db.commits, 1)
 
-    async def test_old_failed_video_is_removed_but_deferred_stays_protected(self):
+    async def test_old_deferred_video_is_removed_when_viewer_glb_exists(self):
         with tempfile.TemporaryDirectory(prefix="autorig-video-pressure-") as tmp:
             video_dir = Path(tmp)
             old_failed = video_dir / "failed-old.mp4"
@@ -95,25 +120,35 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
                 old_time = time.time() - 48 * 3600
                 os.utime(path, (old_time, old_time))
 
-            db = _FakeDb([("failed-old", "failed")])
-            with patch.object(cleanup, "_free_gb", side_effect=[4.0, 4.0, 6.0]):
+            failed = _FakeTask("failed-old", "failed")
+            deferred = _FakeTask("deferred-old", "deferred")
+            db = _FakeDb([failed, deferred])
+            glb_dir = video_dir / "glb"
+            glb_dir.mkdir()
+            (glb_dir / "deferred-old_prepared_viewer.glb").write_bytes(b"glTF")
+            with patch.object(cleanup, "_free_gb", side_effect=[4.0, 6.0]):
                 removed, freed = await cleanup._purge_uploaded_video_cache_until(
                     db,
                     video_cache_dir=video_dir,
                     target_free_gb=5.5,
                     min_age_hours=24,
+                    task_cache_dir=video_dir / "tasks",
+                    glb_cache_dir=glb_dir,
+                    preflight_render_dir=video_dir / "posters",
                 )
 
             self.assertEqual(removed, 1)
             self.assertEqual(freed, len(b"video-bytes"))
-            self.assertFalse(old_failed.exists())
-            self.assertTrue(old_deferred.exists())
+            self.assertTrue(old_failed.exists())
+            self.assertFalse(old_deferred.exists())
+            self.assertEqual(deferred.youtube_upload_status, "skipped")
+            self.assertEqual(deferred.youtube_upload_error, "quota_window_expired")
 
     async def test_no_cleanup_when_headroom_is_healthy(self):
         with tempfile.TemporaryDirectory(prefix="autorig-video-pressure-") as tmp:
             video = Path(tmp) / "uploaded-old.mp4"
             video.write_bytes(b"video-bytes")
-            db = _FakeDb([("uploaded-old", "uploaded")])
+            db = _FakeDb([_FakeTask("uploaded-old", "uploaded")])
 
             with patch.object(cleanup, "_free_gb", return_value=6.0):
                 removed, freed = await cleanup._purge_uploaded_video_cache_until(

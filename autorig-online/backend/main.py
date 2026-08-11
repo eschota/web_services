@@ -144,6 +144,12 @@ from workers import (
     get_worker_effective_active,
 )
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
+from animal_submission_policy import (
+    animal_detection_accepted,
+    animal_rejection_code,
+    detected_animal_type,
+)
+from rig_v2_vision_policy import extract_vision_assessment
 from viewer_theme_vision import analyze_backdrop_theme_with_openai
 from auth import (
     get_google_auth_url, exchange_code_for_tokens, get_google_user_info,
@@ -4124,6 +4130,23 @@ async def api_create_task(
         or _pop_preflight_render_image_from_meta(rig_v2_detection_meta)
     )
 
+    if isinstance(rig_v2_detection_meta, dict):
+        vision_unsupported = bool(
+            rig_v2_detection_meta.get("riggable_bool") is False
+            or str(rig_v2_detection_meta.get("status_string") or "").strip().lower() == "unsupported"
+            or str(rig_v2_detection_meta.get("selected_type_string") or "").strip().lower() == "unsupported"
+        )
+        if vision_unsupported and not (user and is_admin_email(user.email) and rig_v2_manual_selection):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": animal_rejection_code(rig_v2_detection_meta),
+                    "message": "The detected model topology is unsupported for automatic rigging.",
+                    "riggable_bool": False,
+                    "body_topology": str(rig_v2_detection_meta.get("body_topology") or "unknown"),
+                },
+            )
+
     if pipeline == "convert" and not _url_path_endswith_glb(final_url):
         raise HTTPException(
             status_code=400,
@@ -4132,6 +4155,7 @@ async def api_create_task(
 
     animal_allowed = [x for x in RIG_V2_ALLOWED_ANIMAL_TYPES if x != "humanoid"]
     if input_type == "animal":
+        detected_type_before_override = detected_animal_type(rig_v2_detection_meta)
         if animal_type not in animal_allowed and isinstance(rig_v2_detection_meta, dict):
             candidate = str(rig_v2_detection_meta.get("animal_type") or "").strip().lower()
             if candidate in animal_allowed:
@@ -4159,14 +4183,46 @@ async def api_create_task(
         if animal_semantic_markers:
             rig_v2_detection_meta["animal_semantic_markers"] = animal_semantic_markers
             rig_v2_detection_meta["source"] = "blueprint_retarget"
+        admin_experimental_override = bool(
+            manual_animal_selection and user and is_admin_email(user.email)
+        )
+        if (
+            detected_type_before_override
+            and animal_type != detected_type_before_override
+            and not admin_experimental_override
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "animal_preset_override_rejected",
+                    "message": "The selected animal preset does not match the accepted AI classification.",
+                    "detected_animal_type": detected_type_before_override,
+                    "selected_animal_type": animal_type,
+                },
+            )
         if manual_animal_selection:
             rig_v2_detection_meta.update({
                 "source": rig_v2_detection_meta.get("source") or "manual_task_create",
-                "accepted": True,
                 "manual_selection": True,
                 "user_selected_bool": True,
-                "animal_decision_accepted_bool": True,
             })
+        if admin_experimental_override:
+            rig_v2_detection_meta.update({
+                "experimental_admin_override_bool": True,
+                "animal_decision_accepted_bool": True,
+                "riggable_bool": True,
+            })
+        if not animal_detection_accepted(rig_v2_detection_meta):
+            code = animal_rejection_code(rig_v2_detection_meta)
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": code,
+                    "message": "The model was rejected for automatic animal rigging before queue submission.",
+                    "riggable_bool": False,
+                    "body_topology": str(rig_v2_detection_meta.get("body_topology") or "unknown"),
+                },
+            )
 
     # Create task
     task, error = await create_conversion_task(
@@ -4340,14 +4396,18 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
     cfg.setdefault(
         "prompt",
         (
-            "Analyze this 3D model render. Choose exactly one animal_type from: "
+            "Analyze this 3D model render for automatic quadruped rigging. Return animal_type from: "
             + ", ".join(RIG_V2_ALLOWED_ANIMAL_TYPES)
-            + '. Return only valid JSON: {"animal_type":"<one_allowed_value>","confidence_float":0.0}. '
-            "confidence_float must be between 0 and 1 and should reflect visual certainty for this single view. "
+            + ', or "unsupported". Return only valid JSON: '
+            + '{"animal_type":"<allowed_or_unsupported>","confidence_float":0.0,'
+            + '"riggable_bool":true,"body_topology":"quadruped|humanoid|multi_legged|vehicle|prop|unknown",'
+            + '"rejection_code":""}. '
+            "Use unsupported with riggable_bool=false when the model is a vehicle, boat, prop, robot/mech, "
+            "disconnected assembly, or does not have a clear one-head/four-leg quadruped body. "
+            "confidence_float must be between 0 and 1. "
             "Choose humanoid only for a clearly upright human-like biped with a head, torso, two arms, and two legs. "
             "Do not choose humanoid for robots, spider/mech robots, vehicles, drones, or low multi-legged bodies. "
-            "For spider-like or multi-legged mechanical models, choose the closest non-humanoid quadruped/low-body animal type, often turtle, dog, cat, or mouse depending on silhouette. "
-            "If uncertain, choose the closest visual body type and lower confidence."
+            "Never force an unsupported object into the closest animal preset. If uncertain about riggability, reject it."
         ),
     )
     cfg.setdefault(
@@ -4359,6 +4419,20 @@ def _rig_v2_load_vision_config() -> Dict[str, Any]:
             "meta-llama/llama-3.2-11b-vision-instruct:free",
         ],
     )
+    # Production keeps credentials and an editable legacy prompt in an
+    # untracked JSON file. Append the safety contract so an old prompt cannot
+    # force boats/robots into the nearest animal preset after deployment.
+    safety_contract = (
+        "MANDATORY FINAL POLICY: animal_type may also be unsupported. Return "
+        "riggable_bool, body_topology, and rejection_code. Use animal_type=unsupported "
+        "and riggable_bool=false for vehicles, boats, props, robots/mechs, disconnected "
+        "assemblies, unclear body topology, or anything without a clear riggable humanoid "
+        "or one-head/four-leg quadruped structure. Never choose the closest animal for an "
+        "unsupported object."
+    )
+    configured_prompt = str(cfg.get("prompt") or "").strip()
+    if safety_contract not in configured_prompt:
+        cfg["prompt"] = f"{configured_prompt}\n\n{safety_contract}".strip()
     return cfg
 
 
@@ -4474,36 +4548,15 @@ async def _rig_v2_list_openai_models(cfg: Dict[str, Any]) -> List[str]:
 
 
 def _rig_v2_extract_vision_result(text: str, allowed: List[str]) -> Tuple[Optional[str], float]:
-    raw = (text or "").strip()
-    candidates = [raw]
-    m = re.search(r"\{.*\}", raw, re.DOTALL)
-    if m:
-        candidates.insert(0, m.group(0))
-    for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-        except Exception:
-            continue
-        if isinstance(data, dict):
-            animal = str(data.get("animal_type") or data.get("animal_type_string") or "").strip().lower()
-            if animal in allowed:
-                confidence_value = data.get("confidence_float")
-                if confidence_value is None:
-                    confidence_value = data.get("confidence")
-                if confidence_value is None:
-                    confidence_value = data.get("weight_float")
-                if confidence_value is None:
-                    confidence_value = 1.0
-                try:
-                    confidence = float(confidence_value)
-                except Exception:
-                    confidence = 1.0
-                return animal, max(0.0, min(1.0, confidence))
-    lowered = raw.lower()
-    for animal in allowed:
-        if re.search(rf"\b{re.escape(animal)}\b", lowered):
-            return animal, 1.0
-    return None, 0.0
+    assessment = extract_vision_assessment(text, allowed)
+    animal = str(assessment.get("animal_type_string") or "").strip().lower()
+    if animal not in allowed:
+        return None, float(assessment.get("confidence_float") or 0.0)
+    return animal, float(assessment.get("confidence_float") or 0.0)
+
+
+def _rig_v2_extract_vision_assessment(text: str, allowed: List[str]) -> Dict[str, Any]:
+    return extract_vision_assessment(text, allowed)
 
 
 async def _rig_v2_discover_free_vision_models(cfg: Dict[str, Any], api_key: str) -> List[str]:
@@ -4591,7 +4644,7 @@ async def _rig_v2_call_openrouter_vision(
         payload = {
             "model": model,
             "temperature": 0,
-            "max_tokens": 64,
+            "max_tokens": 160,
             "messages": [
                 {
                     "role": "user",
@@ -4628,13 +4681,10 @@ async def _rig_v2_call_openrouter_vision(
                     str(part.get("text") or part) if isinstance(part, dict) else str(part)
                     for part in content
                 )
-            animal_type, confidence_float = _rig_v2_extract_vision_result(str(content), allowed)
-            if animal_type:
+            assessment = _rig_v2_extract_vision_assessment(str(content), allowed)
+            if assessment.get("success_bool"):
                 return {
-                    "success_bool": True,
-                    "status_string": "ok",
-                    "animal_type_string": animal_type,
-                    "confidence_float": confidence_float,
+                    **assessment,
                     "model_used_string": model,
                     "server_time_unix_int": _rig_v2_server_time(),
                 }
@@ -4700,7 +4750,7 @@ async def _rig_v2_call_openai_vision(
         payload["max_completion_tokens"] = 256
     else:
         payload["temperature"] = 0
-        payload["max_tokens"] = 80
+        payload["max_tokens"] = 160
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -4728,13 +4778,15 @@ async def _rig_v2_call_openai_vision(
                 str(part.get("text") or part) if isinstance(part, dict) else str(part)
                 for part in content
             )
-        animal_type, confidence_float = _rig_v2_extract_vision_result(str(content), allowed)
-        if animal_type:
+        assessment = _rig_v2_extract_vision_assessment(str(content), allowed)
+        if assessment.get("success_bool"):
             return {
-                "success_bool": True,
-                "status_string": "ok_openai_fallback",
-                "animal_type_string": animal_type,
-                "confidence_float": confidence_float,
+                **assessment,
+                "status_string": (
+                    "unsupported"
+                    if assessment.get("status_string") == "unsupported"
+                    else "ok_openai_fallback"
+                ),
                 "model_used_string": f"openai/{model}",
                 "view_id_string": view_id,
                 "fallback_reason_string": fallback_reason[:500],
@@ -4786,6 +4838,9 @@ async def api_rig_v2_vision_animal_type_docs():
             "status_string": "ok",
             "animal_type_string": "rabbit",
             "confidence_float": 0.86,
+            "riggable_bool": True,
+            "body_topology": "quadruped",
+            "rejection_code": "",
             "model_used_string": "provider/model:free or openai/model",
             "server_time_unix_int": 0,
         },
@@ -5368,6 +5423,15 @@ async def api_get_task(
     blueprint_skeleton_url, blueprint_rig_preview_url = await _resolve_task_blueprint_urls(task)
     response_video_ready = bool(task.video_ready or blueprint_rig_preview_url)
     response_video_url = blueprint_rig_preview_url or task.video_url
+    if response_video_ready:
+        preview_status = "ready"
+        preview_error = None
+    elif task.status in {"created", "processing"}:
+        preview_status = "pending"
+        preview_error = None
+    else:
+        preview_status = "unavailable"
+        preview_error = "preview_artifact_unavailable" if task.status == "done" else None
     response_animal_type = _task_response_animal_type(rig_v2_animal_detection)
     timing_now = datetime.utcnow()
     timing_end = (
@@ -5419,6 +5483,8 @@ async def api_get_task(
         ready_urls=downloadable_ready_urls if can_download_task else [],
         video_ready=response_video_ready,
         video_url=response_video_url,
+        preview_status=preview_status,
+        preview_error=preview_error,
         blueprint_skeleton_ready=bool(blueprint_skeleton_url),
         blueprint_skeleton_url=blueprint_skeleton_url,
         blueprint_rig_preview_ready=bool(blueprint_rig_preview_url),
