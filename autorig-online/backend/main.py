@@ -973,15 +973,8 @@ async def restart_background_worker(app: FastAPI):
 # =============================================================================
 # App Setup
 # =============================================================================
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan - startup and shutdown"""
-    global background_task_running
-    
-    # Startup
-    await init_db()
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
+async def _run_startup_disk_maintenance() -> None:
+    """Run pressure cleanup without holding the HTTP listener startup gate."""
     try:
         async with AsyncSessionLocal() as startup_db:
             await enforce_task_cache_max_size(startup_db)
@@ -995,9 +988,25 @@ async def lifespan(app: FastAPI):
                     f"[Startup Disk] Cleanup freed {startup_cleanup.get('freed_gb', 0):.2f} GB, "
                     f"deleted {startup_cleanup.get('deleted_count', 0)} item(s)"
                 )
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         print(f"[Startup Disk] Cleanup failed: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan - startup and shutdown"""
+    global background_task_running
     
+    # Startup
+    await init_db()
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    # Cache eviction may probe hundreds of remote worker URLs under pressure.
+    # It must never prevent uvicorn from opening port 8000.
+    app.state.startup_disk_maintenance = asyncio.create_task(_run_startup_disk_maintenance())
+
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
     from youtube_upload import youtube_retry_worker
@@ -1029,13 +1038,21 @@ async def lifespan(app: FastAPI):
     background_task_running = False
     background_worker = getattr(app.state, "background_worker", None)
     youtube_worker = getattr(app.state, "youtube_retry_worker", None)
+    startup_disk_maintenance = getattr(app.state, "startup_disk_maintenance", None)
     if background_worker:
         background_worker.cancel()
     if youtube_worker:
         youtube_worker.cancel()
+    if startup_disk_maintenance:
+        startup_disk_maintenance.cancel()
     try:
         if background_worker:
             await background_worker
+    except asyncio.CancelledError:
+        pass
+    try:
+        if startup_disk_maintenance:
+            await startup_disk_maintenance
     except asyncio.CancelledError:
         pass
     try:

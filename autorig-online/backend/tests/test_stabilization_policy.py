@@ -64,6 +64,15 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         self.assertIn('youtube_upload_error="quota_window_expired"', source)
         self.assertNotIn('Task.youtube_upload_error != "video_source_pending"', source)
 
+    def test_slow_disk_maintenance_does_not_block_http_startup(self):
+        source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "app.state.startup_disk_maintenance = asyncio.create_task(_run_startup_disk_maintenance())",
+            source,
+        )
+        lifespan_source = source[source.index("async def lifespan"):source.index("limiter = Limiter")]
+        self.assertNotIn("await _run_startup_disk_maintenance()", lifespan_source)
+
 
 if __name__ == "__main__":
     unittest.main()
