@@ -73,6 +73,20 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         lifespan_source = source[source.index("async def lifespan"):source.index("limiter = Limiter")]
         self.assertNotIn("await _run_startup_disk_maintenance()", lifespan_source)
 
+    def test_restart_route_does_not_force_accept_animal_selection(self):
+        source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+        restart_start = source.index("async def api_restart_task")
+        restart_end = source.index("@app.get(\"/api/task/{task_id}/purchases\"", restart_start)
+        restart_source = source[restart_start:restart_end]
+        self.assertIn("animal_preset_override_rejected", restart_source)
+        self.assertIn("if not animal_detection_accepted(updated_detection)", restart_source)
+        animal_selection_start = restart_source.index("updated_detection = {")
+        animal_selection_end = restart_source.index(
+            'settings["rig_v2_animal_detection"] = updated_detection',
+            animal_selection_start,
+        )
+        self.assertNotIn('"accepted": True', restart_source[animal_selection_start:animal_selection_end])
+
 
 if __name__ == "__main__":
     unittest.main()

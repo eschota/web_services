@@ -7140,18 +7140,52 @@ async def api_restart_task(
             existing_detection = settings.get("rig_v2_animal_detection")
             if not isinstance(existing_detection, dict):
                 existing_detection = {}
-            settings["rig_v2_animal_detection"] = {
+            detected_type_before_restart = detected_animal_type(existing_detection)
+            admin_experimental_override = bool(
+                is_admin
+                and restart_body_data.get("experimental_admin_override_bool") is True
+            )
+            if (
+                detected_type_before_restart
+                and restart_animal_type != detected_type_before_restart
+                and not admin_experimental_override
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "animal_preset_override_rejected",
+                        "message": "The selected animal preset does not match the accepted AI classification.",
+                        "detected_animal_type": detected_type_before_restart,
+                        "selected_animal_type": restart_animal_type,
+                    },
+                )
+            updated_detection = {
                 **existing_detection,
                 "type": "animal",
                 "animal_type": restart_animal_type,
                 "animal_type_string": restart_animal_type,
                 "mode": restart_worker_mode or "only_rig",
                 "source": "manual_task_restart",
-                "accepted": True,
                 "manual_selection": True,
                 "user_selected_bool": True,
-                "animal_decision_accepted_bool": True,
             }
+            if admin_experimental_override:
+                updated_detection.update({
+                    "experimental_admin_override_bool": True,
+                    "animal_decision_accepted_bool": True,
+                    "riggable_bool": True,
+                })
+            if not animal_detection_accepted(updated_detection):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": animal_rejection_code(updated_detection),
+                        "message": "The model was rejected for automatic animal rigging before queue submission.",
+                        "riggable_bool": False,
+                        "body_topology": str(updated_detection.get("body_topology") or "unknown"),
+                    },
+                )
+            settings["rig_v2_animal_detection"] = updated_detection
         else:
             existing_detection = settings.get("rig_v2_animal_detection")
             if isinstance(existing_detection, dict):
