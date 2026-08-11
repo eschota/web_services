@@ -144,11 +144,17 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(deferred.youtube_upload_status, "skipped")
             self.assertEqual(deferred.youtube_upload_error, "quota_window_expired")
 
-    async def test_no_cleanup_when_headroom_is_healthy(self):
+    async def test_expired_preview_cleanup_runs_with_healthy_headroom(self):
         with tempfile.TemporaryDirectory(prefix="autorig-video-pressure-") as tmp:
             video = Path(tmp) / "uploaded-old.mp4"
             video.write_bytes(b"video-bytes")
-            db = _FakeDb([_FakeTask("uploaded-old", "uploaded")])
+            old_time = time.time() - 48 * 3600
+            os.utime(video, (old_time, old_time))
+            task = _FakeTask("uploaded-old", "uploaded")
+            db = _FakeDb([task])
+            poster_dir = Path(tmp) / "posters"
+            poster_dir.mkdir()
+            (poster_dir / "uploaded-old.jpg").write_bytes(b"poster")
 
             with patch.object(cleanup, "_free_gb", return_value=6.0):
                 removed, freed = await cleanup._purge_uploaded_video_cache_until(
@@ -156,10 +162,15 @@ class DiskPressureVideoCleanupTests(unittest.IsolatedAsyncioTestCase):
                     video_cache_dir=Path(tmp),
                     target_free_gb=5.5,
                     min_age_hours=24,
+                    task_cache_dir=Path(tmp) / "tasks",
+                    glb_cache_dir=Path(tmp) / "glb",
+                    preflight_render_dir=poster_dir,
                 )
 
-            self.assertEqual((removed, freed), (0, 0))
-            self.assertTrue(video.exists())
+            self.assertEqual((removed, freed), (1, len(b"video-bytes")))
+            self.assertFalse(video.exists())
+            self.assertFalse(task.video_ready)
+            self.assertIsNone(task.video_url)
 
 
 if __name__ == "__main__":

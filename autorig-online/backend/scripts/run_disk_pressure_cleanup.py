@@ -454,12 +454,14 @@ async def _purge_uploaded_video_cache_until(
     preflight_render_dir: Path | None = None,
 ) -> tuple[int, int]:
     """
-    Last-resort pressure cleanup for backend-cached task previews.
+    Enforce bounded retention for backend-cached task previews.
 
-    Once pressure is active, enforce preview retention for every terminal task.
-    A poster or viewer GLB must remain available. Deliverables are never touched.
+    Expired previews are removable even when disk headroom is currently healthy;
+    otherwise a 72-hour retention setting would only take effect after the next
+    pressure incident. A poster or viewer GLB must remain available.
+    Deliverables are never touched.
     """
-    if _free_gb() >= target_free_gb or not video_cache_dir.exists():
+    if not video_cache_dir.exists():
         return 0, 0
 
     from database import Task
