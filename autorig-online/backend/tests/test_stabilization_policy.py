@@ -108,7 +108,8 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         self.assertIn("MIN_FREE_GB = 5.49", source)
         self.assertIn("VIDEO_CACHE_WARN_GB = 1.5", source)
         self.assertIn("YOUTUBE_ROLLING_LIMIT = 9", source)
-        self.assertIn("terminal Unity missing-video errors in 24h", source)
+        self.assertIn('STABILIZATION_RELEASE_UTC = "2026-08-11 11:18:47"', source)
+        self.assertIn("terminal Unity missing-video errors since release (max 24h)", source)
 
 
 if __name__ == "__main__":

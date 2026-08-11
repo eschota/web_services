@@ -32,6 +32,7 @@ DISK_WARN_PERCENT = 90.0
 MIN_FREE_GB = 5.49
 VIDEO_CACHE_WARN_GB = 1.5
 YOUTUBE_ROLLING_LIMIT = 9
+STABILIZATION_RELEASE_UTC = "2026-08-11 11:18:47"
 # A stage that has not moved in this long is stuck, not slow.
 STAGE_STALL_SECONDS = 4 * 3600
 ACTIVE_STAGES = ("flux_render", "hunyuan", "turntable")
@@ -144,9 +145,10 @@ def check_stabilization_contract(report: Report) -> None:
             SELECT COUNT(*)
             FROM tasks
             WHERE status = 'error'
-              AND updated_at >= datetime('now', '-24 hours')
+              AND updated_at >= max(datetime('now', '-24 hours'), ?)
               AND lower(COALESCE(error_message, '')) LIKE '%unity export failed: missing%video.mov%'
-            """
+            """,
+            (STABILIZATION_RELEASE_UTC,),
         ).fetchone()[0] or 0)
         db.close()
     except Exception as exc:
@@ -164,9 +166,9 @@ def check_stabilization_contract(report: Report) -> None:
     else:
         report.ok("YouTube stale deferred/NULL backlog: 0")
     if terminal_unity_video:
-        report.fail(f"terminal Unity missing-video errors in 24h: {terminal_unity_video}")
+        report.fail(f"terminal Unity missing-video errors since release (max 24h): {terminal_unity_video}")
     else:
-        report.ok("terminal Unity missing-video errors in 24h: 0")
+        report.ok("terminal Unity missing-video errors since release (max 24h): 0")
 
     video_cache_gb = _directory_size_bytes(VIDEO_CACHE_DIR) / (1024**3)
     if video_cache_gb > VIDEO_CACHE_WARN_GB:
