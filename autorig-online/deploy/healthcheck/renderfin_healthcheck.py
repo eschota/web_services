@@ -26,7 +26,12 @@ RENDERFIN = "http://127.0.0.1:8010/renderfin"
 SITE = "https://autorig.online/"
 SERVICES = ("autorig", "autorig-renderfin", "autorig-telegram", "autorig-farm-tunnels")
 CHARGEN_DB = "/var/autorig/renderfin/db/renderfin.db"
+AUTORIG_DB = "/root/autorig-online/backend/db/autorig.db"
+VIDEO_CACHE_DIR = "/var/autorig/videos"
 DISK_WARN_PERCENT = 90.0
+MIN_FREE_GB = 5.49
+VIDEO_CACHE_WARN_GB = 1.5
+YOUTUBE_ROLLING_LIMIT = 9
 # A stage that has not moved in this long is stuck, not slow.
 STAGE_STALL_SECONDS = 4 * 3600
 ACTIVE_STAGES = ("flux_render", "hunyuan", "turntable")
@@ -87,10 +92,89 @@ def check_disk(report: Report) -> None:
     used_percent = (usage.total - usage.free) / usage.total * 100.0
     free_gb = usage.free / (1024**3)
     text = f"disk {used_percent:.1f}% used, {free_gb:.1f} GB free"
-    if used_percent >= DISK_WARN_PERCENT:
+    if free_gb < MIN_FREE_GB:
+        report.fail(f"{text}; below {MIN_FREE_GB:.2f} GB safety floor")
+    elif used_percent >= DISK_WARN_PERCENT:
         report.warn(text)
     else:
         report.ok(text)
+
+
+def _directory_size_bytes(root: str) -> int:
+    total = 0
+    if not os.path.isdir(root):
+        return 0
+    for current, _dirs, files in os.walk(root):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(current, name))
+            except OSError:
+                continue
+    return total
+
+
+def check_stabilization_contract(report: Report) -> None:
+    """Track the 24-hour release gates for preview retention and publishing."""
+    if not os.path.isfile(AUTORIG_DB):
+        report.fail(f"autorig db missing at {AUTORIG_DB}")
+        return
+    try:
+        db = sqlite3.connect(f"file:{AUTORIG_DB}?mode=ro", uri=True)
+        rolling_uploads = int(db.execute(
+            """
+            SELECT COUNT(DISTINCT youtube_video_id)
+            FROM tasks
+            WHERE youtube_upload_status = 'uploaded'
+              AND youtube_video_id IS NOT NULL
+              AND youtube_uploaded_at >= datetime('now', '-24 hours')
+            """
+        ).fetchone()[0] or 0)
+        stale_backlog = int(db.execute(
+            """
+            SELECT COUNT(*)
+            FROM tasks
+            WHERE status = 'done'
+              AND created_at < datetime('now', '-24 hours')
+              AND youtube_video_id IS NULL
+              AND (youtube_upload_status IS NULL OR youtube_upload_status = 'deferred')
+            """
+        ).fetchone()[0] or 0)
+        terminal_unity_video = int(db.execute(
+            """
+            SELECT COUNT(*)
+            FROM tasks
+            WHERE status = 'error'
+              AND updated_at >= datetime('now', '-24 hours')
+              AND lower(COALESCE(error_message, '')) LIKE '%unity export failed: missing%video.mov%'
+            """
+        ).fetchone()[0] or 0)
+        db.close()
+    except Exception as exc:
+        report.fail(f"stabilization metrics unreadable: {exc!r}")
+        return
+
+    if rolling_uploads > YOUTUBE_ROLLING_LIMIT:
+        report.warn(
+            f"YouTube rolling uploads: {rolling_uploads}/{YOUTUBE_ROLLING_LIMIT} in 24h"
+        )
+    else:
+        report.ok(f"YouTube rolling uploads: {rolling_uploads}/{YOUTUBE_ROLLING_LIMIT} in 24h")
+    if stale_backlog:
+        report.warn(f"YouTube stale deferred/NULL backlog: {stale_backlog}")
+    else:
+        report.ok("YouTube stale deferred/NULL backlog: 0")
+    if terminal_unity_video:
+        report.fail(f"terminal Unity missing-video errors in 24h: {terminal_unity_video}")
+    else:
+        report.ok("terminal Unity missing-video errors in 24h: 0")
+
+    video_cache_gb = _directory_size_bytes(VIDEO_CACHE_DIR) / (1024**3)
+    if video_cache_gb > VIDEO_CACHE_WARN_GB:
+        report.warn(
+            f"video cache {video_cache_gb:.2f} GB; target <= {VIDEO_CACHE_WARN_GB:.2f} GB"
+        )
+    else:
+        report.ok(f"video cache {video_cache_gb:.2f} GB")
 
 
 VISION_CONFIG = "/root/autorig/ai_vision_animal_type_detect.json"
@@ -414,6 +498,7 @@ def main() -> int:
     check_site(report)
     check_services(report)
     check_disk(report)
+    check_stabilization_contract(report)
     check_llm_credentials(report)
     check_renderfin(report)
     check_generation_jobs(report)

@@ -98,6 +98,18 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         )
         self.assertNotIn('"accepted": True', restart_source[animal_selection_start:animal_selection_end])
 
+    def test_six_hour_healthcheck_tracks_release_acceptance_metrics(self):
+        source = (
+            Path(__file__).resolve().parents[2]
+            / "deploy"
+            / "healthcheck"
+            / "renderfin_healthcheck.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("MIN_FREE_GB = 5.49", source)
+        self.assertIn("VIDEO_CACHE_WARN_GB = 1.5", source)
+        self.assertIn("YOUTUBE_ROLLING_LIMIT = 9", source)
+        self.assertIn("terminal Unity missing-video errors in 24h", source)
+
 
 if __name__ == "__main__":
     unittest.main()
