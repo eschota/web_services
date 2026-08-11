@@ -146,6 +146,7 @@ from workers import (
 from content_moderation import build_free3d_similar_query, schedule_task_poster_classification
 from animal_submission_policy import (
     animal_detection_accepted,
+    animal_preset_topology_compatible,
     animal_rejection_code,
     detected_animal_type,
 )
@@ -4217,6 +4218,20 @@ async def api_create_task(
                     "selected_animal_type": animal_type,
                 },
             )
+        body_topology = str(rig_v2_detection_meta.get("body_topology") or "").strip()
+        if (
+            not admin_experimental_override
+            and not animal_preset_topology_compatible(body_topology, animal_type)
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "animal_preset_topology_mismatch",
+                    "message": "The detected body topology is incompatible with the selected animal preset.",
+                    "body_topology": body_topology or "unknown",
+                    "selected_animal_type": animal_type,
+                },
+            )
         if manual_animal_selection:
             rig_v2_detection_meta.update({
                 "source": rig_v2_detection_meta.get("source") or "manual_task_create",
@@ -7175,6 +7190,23 @@ async def api_restart_task(
                     "animal_decision_accepted_bool": True,
                     "riggable_bool": True,
                 })
+            restart_body_topology = str(updated_detection.get("body_topology") or "").strip()
+            if (
+                not admin_experimental_override
+                and not animal_preset_topology_compatible(
+                    restart_body_topology,
+                    restart_animal_type,
+                )
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "animal_preset_topology_mismatch",
+                        "message": "The detected body topology is incompatible with the selected animal preset.",
+                        "body_topology": restart_body_topology or "unknown",
+                        "selected_animal_type": restart_animal_type,
+                    },
+                )
             if not animal_detection_accepted(updated_detection):
                 raise HTTPException(
                     status_code=422,

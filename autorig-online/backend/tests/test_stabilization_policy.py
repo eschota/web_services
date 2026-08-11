@@ -7,7 +7,12 @@ BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from animal_submission_policy import animal_detection_accepted, animal_rejection_code, detected_animal_type
+from animal_submission_policy import (
+    animal_detection_accepted,
+    animal_preset_topology_compatible,
+    animal_rejection_code,
+    detected_animal_type,
+)
 from rig_v2_vision_policy import extract_vision_assessment
 from youtube_policy import rolling_budget_available, task_is_in_upload_window
 
@@ -46,6 +51,12 @@ class AnimalSubmissionPolicyTests(unittest.TestCase):
             detected_animal_type({"animal_type": "cat", "user_selected_bool": True}),
             "cat",
         )
+
+    def test_larva_cannot_use_a_quadruped_preset(self):
+        self.assertFalse(animal_preset_topology_compatible("larva", "cat"))
+        self.assertFalse(animal_preset_topology_compatible("multipart robot", "dog"))
+        self.assertTrue(animal_preset_topology_compatible("compact quadruped", "dog"))
+        self.assertTrue(animal_preset_topology_compatible("", "dog"))
 
 
 class YoutubeWindowSourceContractTests(unittest.TestCase):

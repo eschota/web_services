@@ -573,6 +573,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         pk = "rig"
     task_type_for_worker = task.input_type or "t_pose"
     animal_type = None
+    body_topology = None
     mode = None
     transform_params = None
     animal_semantic_markers = None
@@ -583,6 +584,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
             if isinstance(detection, dict):
                 if _animal_detection_confident_enough(detection):
                     animal_type = _animal_type_from_detection_meta(detection)
+                    body_topology = str(detection.get("body_topology") or "").strip() or None
                     mode = str(detection.get("mode") or "").strip() or None
                     local_rotation = detection.get("local_rotation")
                     if isinstance(local_rotation, list) and len(local_rotation) == 3:
@@ -668,6 +670,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         transform_params=transform_params,
         pipeline_kind=pk,
         animal_type=animal_type,
+        body_topology=body_topology,
         mode=mode,
         animal_semantic_markers=animal_semantic_markers,
         viewer_environment=_viewer_environment_for_task(task) if pk == "rig" else None,

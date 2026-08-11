@@ -430,6 +430,7 @@ async def send_task_to_worker(
     *,
     pipeline_kind: str = "rig",
     animal_type: Optional[str] = None,
+    body_topology: Optional[str] = None,
     mode: Optional[str] = None,
     animal_semantic_markers: Optional[Dict[str, List[float]]] = None,
     viewer_environment: Optional[Dict[str, Any]] = None,
@@ -467,6 +468,8 @@ async def send_task_to_worker(
                 }
                 if animal_type:
                     payload["animal_type"] = animal_type
+                if body_topology:
+                    payload["body_topology"] = body_topology
                 if animal_semantic_markers:
                     payload["animal_semantic_markers"] = animal_semantic_markers
                 if isinstance(viewer_environment, dict) and viewer_environment:
