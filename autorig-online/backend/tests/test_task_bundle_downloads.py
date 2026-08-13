@@ -36,6 +36,7 @@ def _task():
         status="done",
         worker_api="https://worker.invalid/api-converter-glb",
         progress_page=None,
+        input_url="https://autorig.online/u/source/model.glb",
     )
 
 
@@ -343,7 +344,7 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as raised:
                 await main._build_task_bundle_zip_from_cache(task)
         self.assertEqual(raised.exception.status_code, 404)
-        self.assertIn("no primary task files", raised.exception.detail)
+        self.assertIn("no longer stored", raised.exception.detail)
 
     async def test_notification_failure_never_breaks_download(self):
         with patch(
