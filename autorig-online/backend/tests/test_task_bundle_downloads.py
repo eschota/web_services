@@ -96,7 +96,97 @@ class _RangeClient:
         return _RangeResponse(start, self.payload[start:end + 1], len(self.payload))
 
 
+class _BufferedRangeResponse:
+    status_code = 206
+
+    def __init__(self, payload, start, end):
+        self._payload = payload[start:end + 1]
+        self.headers = {"Content-Range": f"bytes {start}-{end}/{len(payload)}"}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def aread(self):
+        return self._payload
+
+
+class _BufferedRangeClient:
+    payload = b""
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    def stream(self, _method, _url, *, headers):
+        start, end = (
+            int(value)
+            for value in headers["Range"].removeprefix("bytes=").split("-", 1)
+        )
+        return _BufferedRangeResponse(self.payload, start, end)
+
+
 class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
+    def test_single_range_parser_supports_full_explicit_and_suffix_requests(self):
+        self.assertEqual(main._parse_single_http_byte_range(None, 10), (0, 9, False))
+        self.assertEqual(main._parse_single_http_byte_range("bytes=2-5", 10), (2, 5, True))
+        self.assertEqual(main._parse_single_http_byte_range("bytes=-3", 10), (7, 9, True))
+        with self.assertRaises(ValueError):
+            main._parse_single_http_byte_range("bytes=20-30", 10)
+
+    async def test_large_bundle_stream_is_reassembled_from_verified_ranges(self):
+        payload = b"0123456789abcdef"
+        _BufferedRangeClient.payload = payload
+        with patch.object(main.httpx, "AsyncClient", _BufferedRangeClient):
+            chunks = [
+                chunk
+                async for chunk in main._iter_worker_file_ranges(
+                    "https://worker.invalid/bundle.zip",
+                    0,
+                    len(payload) - 1,
+                    total_size=len(payload),
+                    chunk_bytes=5,
+                )
+            ]
+        self.assertEqual(b"".join(chunks), payload)
+        self.assertEqual([len(chunk) for chunk in chunks], [5, 5, 5, 1])
+
+    async def test_bundle_proxy_exposes_resume_headers_without_full_upstream_get(self):
+        request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/bundle.zip",
+            "headers": [(b"range", b"bytes=2-5")],
+        })
+
+        async def body():
+            yield b"2345"
+
+        with (
+            patch.object(
+                main,
+                "_probe_worker_file_range",
+                AsyncMock(return_value={"total_size": 10, "content_type": "application/zip"}),
+            ),
+            patch.object(main, "_iter_worker_file_ranges", return_value=body()),
+        ):
+            response = await main._proxy_worker_bundle_by_ranges(
+                "https://worker.invalid/bundle.zip",
+                "bundle.zip",
+                request,
+            )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.headers["content-range"], "bytes 2-5/10")
+        self.assertEqual(response.headers["content-length"], "4")
+        self.assertEqual(b"".join([chunk async for chunk in response.body_iterator]), b"2345")
+
     def test_preserved_task_cache_is_not_evictable(self):
         with tempfile.TemporaryDirectory() as tmp:
             task_dir = Path(tmp) / "task-id"

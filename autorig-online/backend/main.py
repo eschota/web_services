@@ -10112,6 +10112,149 @@ async def _ensure_purchased_worker_bundle_zip_url(
     return task, zip_url
 
 
+_WORKER_BUNDLE_RANGE_CHUNK_BYTES = 8 * 1024 * 1024
+_WORKER_BUNDLE_RANGE_ATTEMPTS = 3
+
+
+def _parse_single_http_byte_range(range_header: Optional[str], total_size: int) -> Tuple[int, int, bool]:
+    """Parse one RFC 7233 byte range for a known-size artifact."""
+    if total_size <= 0:
+        raise ValueError("artifact size must be positive")
+    value = str(range_header or "").strip()
+    if not value:
+        return 0, total_size - 1, False
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", value, flags=re.IGNORECASE)
+    if not match or (not match.group(1) and not match.group(2)):
+        raise ValueError("invalid or multipart byte range")
+    if match.group(1):
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else total_size - 1
+    else:
+        suffix_size = int(match.group(2))
+        if suffix_size <= 0:
+            raise ValueError("invalid suffix byte range")
+        start = max(0, total_size - suffix_size)
+        end = total_size - 1
+    end = min(end, total_size - 1)
+    if start < 0 or start >= total_size or end < start:
+        raise ValueError("unsatisfiable byte range")
+    return start, end, True
+
+
+async def _probe_worker_file_range(url: str) -> Dict[str, Any]:
+    """Get worker artifact size without asking the relay to buffer the full body."""
+    timeout = httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", url, headers={"Range": "bytes=0-0"}) as response:
+                if response.status_code != 206:
+                    raise HTTPException(
+                        status_code=404 if response.status_code == 404 else 502,
+                        detail=f"Worker bundle range probe returned HTTP {response.status_code}",
+                    )
+                content_range = str(response.headers.get("Content-Range") or "")
+                match = re.fullmatch(r"bytes\s+0-0/(\d+)", content_range, flags=re.IGNORECASE)
+                if not match or int(match.group(1)) <= 0:
+                    raise HTTPException(status_code=502, detail="Worker bundle returned invalid Content-Range")
+                return {
+                    "total_size": int(match.group(1)),
+                    "content_type": response.headers.get("Content-Type") or "application/zip",
+                    "etag": response.headers.get("ETag"),
+                    "last_modified": response.headers.get("Last-Modified"),
+                }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Worker bundle range probe failed: {exc}") from exc
+
+
+async def _iter_worker_file_ranges(
+    url: str,
+    start: int,
+    end: int,
+    *,
+    total_size: int,
+    chunk_bytes: int = _WORKER_BUNDLE_RANGE_CHUNK_BYTES,
+):
+    """Yield verified relay-friendly ranges, buffering one chunk before publishing it."""
+    timeout = httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0)
+    position = start
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        while position <= end:
+            range_end = min(end, position + max(1, int(chunk_bytes)) - 1)
+            expected_length = range_end - position + 1
+            payload: Optional[bytes] = None
+            last_error: Optional[Exception] = None
+            for _attempt in range(_WORKER_BUNDLE_RANGE_ATTEMPTS):
+                try:
+                    async with client.stream(
+                        "GET",
+                        url,
+                        headers={"Range": f"bytes={position}-{range_end}"},
+                    ) as response:
+                        if response.status_code != 206:
+                            raise RuntimeError(f"range request returned HTTP {response.status_code}")
+                        content_range = str(response.headers.get("Content-Range") or "")
+                        expected_range = f"bytes {position}-{range_end}/{total_size}"
+                        if content_range.lower() != expected_range.lower():
+                            raise RuntimeError(f"unexpected Content-Range {content_range!r}")
+                        candidate = await response.aread()
+                        if len(candidate) != expected_length:
+                            raise RuntimeError(
+                                f"range returned {len(candidate)} bytes, expected {expected_length}"
+                            )
+                        payload = candidate
+                        break
+                except Exception as exc:
+                    last_error = exc
+            if payload is None:
+                raise RuntimeError(
+                    f"worker bundle range {position}-{range_end} failed after "
+                    f"{_WORKER_BUNDLE_RANGE_ATTEMPTS} attempts: {last_error}"
+                )
+            yield payload
+            position = range_end + 1
+
+
+async def _proxy_worker_bundle_by_ranges(url: str, filename: str, request: Request) -> StreamingResponse:
+    """Stream a large worker ZIP without requiring a full response through the farm relay."""
+    probe = await _probe_worker_file_range(url)
+    total_size = int(probe["total_size"])
+    try:
+        start, end, is_partial = _parse_single_http_byte_range(
+            request.headers.get("range"),
+            total_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=416,
+            detail=str(exc),
+            headers={"Content-Range": f"bytes */{total_size}"},
+        ) from exc
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "private, max-age=0",
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Encoding": "identity",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+    }
+    if is_partial:
+        headers["Content-Range"] = f"bytes {start}-{end}/{total_size}"
+    if probe.get("etag"):
+        headers["ETag"] = str(probe["etag"])
+    if probe.get("last_modified"):
+        headers["Last-Modified"] = str(probe["last_modified"])
+    return StreamingResponse(
+        _iter_worker_file_ranges(url, start, end, total_size=total_size),
+        status_code=206 if is_partial else 200,
+        media_type=str(probe.get("content_type") or "application/zip"),
+        headers=headers,
+    )
+
+
 async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
     urls_to_cache = _task_primary_download_urls(task)
     expected_names = _task_primary_download_names(task)
@@ -10230,7 +10373,7 @@ async def _stream_purchased_task_bundle_zip(
         return await _build_task_bundle_zip_from_cache(task)
     if zip_url:
         try:
-            return await _proxy_model_file(zip_url, filename, as_attachment=True)
+            return await _proxy_worker_bundle_by_ranges(zip_url, filename, request)
         except HTTPException as exc:
             print(f"[Bundle] Worker ZIP unavailable for task {task_id}: {exc.detail}; building fallback")
     else:
