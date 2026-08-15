@@ -245,6 +245,26 @@ class RetentionTests(unittest.TestCase):
 
 
 class DurableQueueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_cancels_busy_workers_after_grace_period(self):
+        stop_event = asyncio.Event()
+        started = asyncio.Event()
+
+        async def busy_worker():
+            started.set()
+            await asyncio.Event().wait()
+
+        worker = asyncio.create_task(busy_worker())
+        await started.wait()
+        await artifact_cache.stop_artifact_cache_workers(
+            stop_event,
+            [worker],
+            grace_seconds=0.01,
+        )
+
+        self.assertTrue(stop_event.is_set())
+        self.assertTrue(worker.done())
+        self.assertTrue(worker.cancelled())
+
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory(prefix="autorig-cache-db-")
         db_path = Path(self.temp_dir.name) / "autorig.db"

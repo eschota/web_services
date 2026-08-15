@@ -787,12 +787,18 @@ async def start_artifact_cache_workers(
 async def stop_artifact_cache_workers(
     stop_event: Optional[asyncio.Event],
     workers: Iterable[asyncio.Task],
+    *,
+    grace_seconds: float = 5.0,
 ) -> None:
     if stop_event is not None:
         stop_event.set()
     tasks = list(workers)
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+    if not tasks:
+        return
+    _, pending = await asyncio.wait(tasks, timeout=max(0.0, float(grace_seconds)))
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def cache_usage_bytes(root: Optional[Path] = None) -> int:
