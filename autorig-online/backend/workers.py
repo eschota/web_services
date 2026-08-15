@@ -33,6 +33,24 @@ def normalize_task_type(value: Optional[str]) -> str:
     return s if s else "t_pose"
 
 
+def _normalize_worker_url(value: Optional[str]) -> str:
+    return str(value or "").strip().rstrip("/").lower()
+
+
+def disabled_worker_urls() -> set[str]:
+    """Worker endpoints that must never receive new tasks on this host."""
+    raw = os.getenv("AUTORIG_DISABLED_WORKERS", "")
+    return {
+        normalized
+        for item in re.split(r"[,;\s]+", raw)
+        if (normalized := _normalize_worker_url(item))
+    }
+
+
+def is_worker_disabled(worker_url: Optional[str]) -> bool:
+    return _normalize_worker_url(worker_url) in disabled_worker_urls()
+
+
 # =============================================================================
 # Data Classes
 # =============================================================================
@@ -212,7 +230,7 @@ async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) 
     worker disabled is an intentional maintenance drain and must stay empty.
     """
     if not db:
-        return [(u, 0) for u in WORKERS]
+        return [(u, 0) for u in WORKERS if not is_worker_disabled(u)]
 
     try:
         res = await db.execute(
@@ -221,7 +239,11 @@ async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) 
             .order_by(desc(WorkerEndpoint.weight), WorkerEndpoint.id)
         )
         rows = res.all()
-        workers = [(url, int(weight or 0)) for (url, weight) in rows if url]
+        workers = [
+            (url, int(weight or 0))
+            for (url, weight) in rows
+            if url and not is_worker_disabled(url)
+        ]
         if workers:
             return workers
 
@@ -231,7 +253,7 @@ async def get_configured_workers_with_weight(db: Optional[AsyncSession] = None) 
     except Exception:
         pass
 
-    return [(u, 0) for u in WORKERS]
+    return [(u, 0) for u in WORKERS if not is_worker_disabled(u)]
 
 
 async def get_configured_workers(db: Optional[AsyncSession] = None) -> List[str]:

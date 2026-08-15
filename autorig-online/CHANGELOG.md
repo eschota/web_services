@@ -7,6 +7,7 @@
 - Added cache-first authorized downloads through nginx `X-Accel-Redirect`, preserving byte ranges and existing viewer/download URLs.
 - Added read-only migration mode and isolated 8200/8210 systemd/nginx deployment files for the analytics storage host.
 - Preserved production Renderfin fixes for worker-local Hunyuan downloads and stable Telegram result cards across restarts.
+- Added a storage-host worker denylist so unhealthy farm nodes such as F7 cannot receive tasks even when an older database row still marks them enabled.
 
 ## v0.02.001 - Strict worker completion gate
 
