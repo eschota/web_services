@@ -126,6 +126,20 @@ class PostmigrationMonitorTests(unittest.TestCase):
         self.assertNotIn("user@example.com", value)
         self.assertNotIn("secret-value", value)
 
+    def test_journal_signature_ignores_time_pid_and_uuid(self):
+        first = (
+            "2026/08/15 16:29:21 [error] 901298#901298: failed task "
+            "11111111-2222-3333-4444-555555555555"
+        )
+        second = (
+            "2026/08/15 16:39:21 [error] 901999#901999: failed task "
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        )
+        self.assertEqual(
+            monitor.journal_signature("nginx.service", first),
+            monitor.journal_signature("nginx.service", second),
+        )
+
     def test_telegram_probe_and_notification_paths_execute(self):
         active, metrics = [], {}
         response = _JsonResponse(b'{"ok":true}')

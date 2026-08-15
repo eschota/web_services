@@ -99,6 +99,9 @@ ERROR_RE = re.compile(
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 SECRET_RE = re.compile(r"(?i)(authorization|bearer|token|api[_-]?key)([\s:=]+)([^\s,;]+)")
 BEARER_RE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f-]{27,36}\b", re.IGNORECASE)
+JOURNAL_TIME_RE = re.compile(r"\b\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}\b")
+JOURNAL_PID_RE = re.compile(r"\b\d+#\d+\b")
 
 
 def utc_iso(epoch: Optional[float] = None) -> str:
@@ -434,6 +437,14 @@ def _error_class(message: Any) -> str:
     return (text[:80] or "unknown").replace(",", ";")
 
 
+def journal_signature(unit: str, message: str) -> str:
+    normalized = scrub(message, 1000).lower()
+    normalized = JOURNAL_TIME_RE.sub("<time>", normalized)
+    normalized = JOURNAL_PID_RE.sub("<pid>", normalized)
+    normalized = UUID_RE.sub("<uuid>", normalized)
+    return hashlib.sha256(f"{unit}|{normalized}".encode("utf-8", "replace")).hexdigest()[:24]
+
+
 def collect_journal_errors(
     state: Dict[str, Any], since: float, now: float, events: List[str], metrics: Dict[str, Any]
 ) -> None:
@@ -454,6 +465,7 @@ def collect_journal_errors(
     seen = set(str(value) for value in state.get("seen_journal_events") or [])
     added: List[str] = []
     new_hashes: List[str] = []
+    occurrences: List[str] = []
     for line in result.stdout.splitlines():
         try:
             entry = json.loads(line)
@@ -464,24 +476,28 @@ def collect_journal_errors(
         if priority > 3 and not ERROR_RE.search(message):
             continue
         unit = str(entry.get("_SYSTEMD_UNIT") or entry.get("SYSLOG_IDENTIFIER") or "journal")
-        event_hash = hashlib.sha256(
-            f"{entry.get('__REALTIME_TIMESTAMP')}|{unit}|{message}".encode("utf-8", "replace")
-        ).hexdigest()[:24]
+        sample = f"{unit}: {scrub(message, 260)}"
+        occurrences.append(sample)
+        event_hash = journal_signature(unit, message)
         if event_hash in seen:
             continue
         seen.add(event_hash)
         new_hashes.append(event_hash)
-        added.append(f"{unit}: {scrub(message, 260)}")
+        added.append(sample)
     if added:
-        state["journal_errors_seen"] = int(state.get("journal_errors_seen") or 0) + len(added)
         events.append(
-            f"{len(added)} new journal error(s): " + " | ".join(added[:6])
+            f"{len(added)} new journal error signature(s): " + " | ".join(added[:6])
             + (" | …" if len(added) > 6 else "")
         )
+    state["journal_errors_seen"] = int(state.get("journal_errors_seen") or 0) + len(
+        occurrences
+    )
     state["seen_journal_events"] = (
         list(state.get("seen_journal_events") or []) + new_hashes
     )[-4000:]
-    metrics["new_journal_errors"] = len(added)
+    metrics["journal_error_occurrences"] = len(occurrences)
+    metrics["new_journal_error_signatures"] = len(added)
+    metrics["journal_error_samples"] = occurrences[:6]
 
 
 def run_full_healthcheck(state: Dict[str, Any], now: float, active: List[str]) -> None:
