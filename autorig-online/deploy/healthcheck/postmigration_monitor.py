@@ -609,6 +609,24 @@ def telegram_notify(title: str, lines: Iterable[str]) -> bool:
     if not token or not chat_id:
         print("[postmigration] Telegram notify skipped: token/chat missing")
         return False
+    body = "\n".join(scrub(line, 900) for line in lines)
+    data = urllib.parse.urlencode(
+        {
+            "chat_id": chat_id,
+            "text": f"🛡 <b>{html.escape(title)}</b>\n{html.escape(body)}"[:4000],
+            "parse_mode": "HTML",
+            "disable_web_page_preview": "true",
+        }
+    ).encode()
+    try:
+        with urllib.request.urlopen(
+            f"https://api.telegram.org/bot{token}/sendMessage", data=data, timeout=30
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return bool(payload.get("ok"))
+    except Exception as exc:
+        print(f"[postmigration] Telegram notify failed: {scrub(repr(exc), 180)}")
+        return False
 
 
 def check_telegram_api(active: List[str], metrics: Dict[str, Any]) -> None:
@@ -628,24 +646,6 @@ def check_telegram_api(active: List[str], metrics: Dict[str, Any]) -> None:
     except Exception as exc:
         metrics["telegram_api"] = scrub(repr(exc), 160)
         active.append(f"Telegram Bot API probe failed: {scrub(repr(exc), 160)}")
-    body = "\n".join(scrub(line, 900) for line in lines)
-    data = urllib.parse.urlencode(
-        {
-            "chat_id": chat_id,
-            "text": f"🛡 <b>{html.escape(title)}</b>\n{html.escape(body)}"[:4000],
-            "parse_mode": "HTML",
-            "disable_web_page_preview": "true",
-        }
-    ).encode()
-    try:
-        with urllib.request.urlopen(
-            f"https://api.telegram.org/bot{token}/sendMessage", data=data, timeout=30
-        ) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        return bool(payload.get("ok"))
-    except Exception as exc:
-        print(f"[postmigration] Telegram notify failed: {scrub(repr(exc), 180)}")
-        return False
 
 
 def _signature(values: Sequence[str]) -> str:

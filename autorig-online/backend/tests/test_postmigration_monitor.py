@@ -34,6 +34,20 @@ CREATE TABLE artifact_cache_jobs (task_id TEXT, status TEXT, updated_at TEXT);
 """
 
 
+class _JsonResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return self.payload
+
+
 class PostmigrationMonitorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="autorig-postmigration-")
@@ -111,6 +125,22 @@ class PostmigrationMonitorTests(unittest.TestCase):
         value = monitor.scrub("user@example.com Authorization: Bearer secret-value")
         self.assertNotIn("user@example.com", value)
         self.assertNotIn("secret-value", value)
+
+    def test_telegram_probe_and_notification_paths_execute(self):
+        active, metrics = [], {}
+        response = _JsonResponse(b'{"ok":true}')
+        with (
+            patch.dict(
+                monitor.os.environ,
+                {"TELEGRAM_BOT_TOKEN": "test-token", "HEALTHCHECK_CHAT_ID": "123"},
+            ),
+            patch.object(monitor.urllib.request, "urlopen", return_value=response),
+        ):
+            monitor.check_telegram_api(active, metrics)
+            sent = monitor.telegram_notify("Title <unsafe>", ["user@example.com failed"])
+        self.assertEqual(active, [])
+        self.assertEqual(metrics["telegram_api"], "ok")
+        self.assertTrue(sent)
 
     def test_state_window_is_exactly_configured_duration(self):
         with tempfile.TemporaryDirectory(prefix="autorig-monitor-state-") as folder:
