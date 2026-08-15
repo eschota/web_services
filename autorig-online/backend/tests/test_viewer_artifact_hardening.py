@@ -136,7 +136,10 @@ class ViewerArtifactHardeningTests(unittest.IsolatedAsyncioTestCase):
             tasks,
             "_validated_viewer_artifact_urls",
             AsyncMock(return_value=("https://worker/prepared.glb", None)),
-        ), patch.object(tasks, "update", return_value=update_stmt):
+        ), patch.object(tasks, "update", return_value=update_stmt), patch(
+            "artifact_cache.enqueue_artifact_cache",
+            new=AsyncMock(),
+        ) as enqueue_cache:
             await tasks.reconcile_task_viewer_artifacts(db, task, force=True)
         self.assertEqual(
             persisted["viewer_prepared_glb_url"],
@@ -145,9 +148,10 @@ class ViewerArtifactHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(persisted["updated_at"], tasks.Task.updated_at)
         self.assertEqual(len(where_args), 4)
         db.execute.assert_awaited_once_with(update_stmt)
-        db.commit.assert_awaited_once()
+        self.assertEqual(db.commit.await_count, 2)
         db.rollback.assert_not_awaited()
-        db.refresh.assert_awaited_once_with(task)
+        self.assertEqual(db.refresh.await_count, 2)
+        enqueue_cache.assert_awaited_once_with(db, task, force_refresh=True)
 
     async def test_late_reconcile_drops_stale_result_after_concurrent_restart(self):
         task = SimpleNamespace(
