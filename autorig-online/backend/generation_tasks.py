@@ -274,6 +274,9 @@ async def _advance_generation(db, task: Task, meta: Dict[str, Any]) -> None:
         task.total_count = 1
         set_generation_meta(task, stage=GEN_STAGE_DONE)
         task.updated_at = datetime.utcnow()
+        from artifact_cache import enqueue_artifact_cache
+
+        await enqueue_artifact_cache(db, task)
         await db.commit()
         print(f"[Generation] task {task.id} finished as a model (not riggable)")
         return

@@ -1130,6 +1130,15 @@ async def reconcile_task_viewer_artifacts(
             return task
         await db.commit()
         await db.refresh(task)
+        try:
+            from artifact_cache import enqueue_artifact_cache
+
+            await enqueue_artifact_cache(db, task, force_refresh=True)
+            await db.commit()
+            await db.refresh(task)
+        except Exception as exc:
+            await db.rollback()
+            print(f"[ArtifactCache] late viewer refresh enqueue failed for {task.id}: {exc}")
     return task
 
 async def _fetch_worker_failure_message(task: Task) -> Optional[str]:
@@ -1363,7 +1372,21 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
                         task.video_ready = True
                         task.video_url = video_url
                         task.updated_at = datetime.utcnow()
-    
+
+    if task.status == "done":
+        from artifact_cache import enqueue_artifact_cache
+
+        # This flush shares the task-completion transaction. A periodic
+        # backfill remains as recovery for rows completed before this release.
+        await enqueue_artifact_cache(
+            db,
+            task,
+            force_refresh=bool(
+                task.video_ready
+                and (not video_was_ready or previous_video_url != task.video_url)
+            ),
+        )
+
     await db.commit()
     await db.refresh(task)
 
@@ -1453,14 +1476,6 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
         except Exception as auto_exc:
             print(f"[AutoSubmit] task {task.id} raised: {type(auto_exc).__name__}: {auto_exc}")
     
-    # Cache task files to static directory when task completes (replaces ZIP)
-    if was_processing and task.status == "done" and task.ready_urls:
-        try:
-            from main import cache_task_files
-            print(f"[Tasks] Starting file caching for completed task {task.id}")
-            asyncio.create_task(cache_task_files(task.id, task.ready_urls, task.guid))
-        except Exception as e:
-            print(f"[Tasks] Failed to cache files for task {task.id}: {e}")
     if was_processing and task.status == "done":
         try:
             from content_moderation import schedule_task_poster_classification

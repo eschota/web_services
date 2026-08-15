@@ -1,0 +1,7 @@
+[Unit]
+Description=AutoRig isolated resource slice
+
+[Slice]
+MemoryHigh=8G
+MemoryMax=12G
+TasksMax=4096

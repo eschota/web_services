@@ -73,10 +73,21 @@ from config import (
     RATE_LIMIT_SUPPORT_CHAT_SESSION,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGE,
     RATE_LIMIT_SUPPORT_CHAT_MESSAGES_POLL,
+    AUTORIG_MIGRATION_READ_ONLY,
+    ARTIFACT_CACHE_RESERVE_GB,
 )
 from viewer_environment import build_viewer_environment_from_settings
 from viewer_theme_contract import validate_viewer_theme_lighting
 from worker_artifact_urls import canonical_worker_artifact_url, is_viewer_artifact_url
+from artifact_cache import (
+    ArtifactSource,
+    creation_block_reason as artifact_creation_block_reason,
+    lookup_cached_artifact,
+    run_retention as run_artifact_cache_retention,
+    start_artifact_cache_workers,
+    stop_artifact_cache_workers,
+    worker_identity as artifact_worker_identity,
+)
 from model_sale_offers import build_router as build_model_sale_router
 from database import (
     init_db, get_db, AsyncSessionLocal, User, AnonSession, ApiKey, Task, TaskLike, TaskFilePurchase,
@@ -995,14 +1006,51 @@ async def _run_startup_disk_maintenance() -> None:
         print(f"[Startup Disk] Cleanup failed: {e}")
 
 
+async def _artifact_cache_retention_loop() -> None:
+    """Keep the storage reserve without deleting last-copy deliverables."""
+    while True:
+        try:
+            result = await asyncio.to_thread(run_artifact_cache_retention)
+            if result.get("marker_created"):
+                from telegram_bot import broadcast_disk_space_low
+
+                await broadcast_disk_space_low(
+                    free_gb=float(result.get("free_bytes", 0)) / (1024**3),
+                    target_gb=float(ARTIFACT_CACHE_RESERVE_GB),
+                    zips_deleted=0,
+                    tasks_purged=0,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[ArtifactCache] retention failed: {exc}")
+        await asyncio.sleep(600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown"""
     global background_task_running
     
     # Startup
-    await init_db()
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    if AUTORIG_MIGRATION_READ_ONLY:
+        # The staging database is migrated once offline before this mode is
+        # enabled. Runtime startup performs no schema or filesystem writes.
+        print("[Migration] read-only staging mode enabled")
+    else:
+        await init_db()
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    app.state.background_worker = None
+    app.state.youtube_retry_worker = None
+    app.state.startup_disk_maintenance = None
+    app.state.artifact_cache_stop = None
+    app.state.artifact_cache_workers = []
+    app.state.artifact_cache_retention = None
+
+    if AUTORIG_MIGRATION_READ_ONLY:
+        yield
+        return
 
     # Cache eviction may probe hundreds of remote worker URLs under pressure.
     # It must never prevent uvicorn from opening port 8000.
@@ -1012,6 +1060,14 @@ async def lifespan(app: FastAPI):
     app.state.background_worker = asyncio.create_task(background_task_updater())
     from youtube_upload import youtube_retry_worker
     app.state.youtube_retry_worker = asyncio.create_task(youtube_retry_worker())
+    (
+        app.state.artifact_cache_stop,
+        app.state.artifact_cache_workers,
+    ) = await start_artifact_cache_workers(_discover_task_artifact_sources)
+    app.state.artifact_cache_retention = asyncio.create_task(
+        _artifact_cache_retention_loop(),
+        name="artifact-cache-retention",
+    )
     
     # Send Telegram startup notification (fire-and-forget)
     try:
@@ -1040,12 +1096,19 @@ async def lifespan(app: FastAPI):
     background_worker = getattr(app.state, "background_worker", None)
     youtube_worker = getattr(app.state, "youtube_retry_worker", None)
     startup_disk_maintenance = getattr(app.state, "startup_disk_maintenance", None)
+    artifact_cache_retention = getattr(app.state, "artifact_cache_retention", None)
     if background_worker:
         background_worker.cancel()
     if youtube_worker:
         youtube_worker.cancel()
     if startup_disk_maintenance:
         startup_disk_maintenance.cancel()
+    if artifact_cache_retention:
+        artifact_cache_retention.cancel()
+    await stop_artifact_cache_workers(
+        getattr(app.state, "artifact_cache_stop", None),
+        getattr(app.state, "artifact_cache_workers", []),
+    )
     try:
         if background_worker:
             await background_worker
@@ -1059,6 +1122,11 @@ async def lifespan(app: FastAPI):
     try:
         if youtube_worker:
             await youtube_worker
+    except asyncio.CancelledError:
+        pass
+    try:
+        if artifact_cache_retention:
+            await artifact_cache_retention
     except asyncio.CancelledError:
         pass
 
@@ -1079,6 +1147,17 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.state.limiter = limiter
 
 app.include_router(namecheap_remote_router)
+
+
+@app.middleware("http")
+async def migration_read_only_guard(request: Request, call_next):
+    if AUTORIG_MIGRATION_READ_ONLY and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "AutoRig migration staging is read-only"},
+            headers={"Retry-After": "300"},
+        )
+    return await call_next(request)
 
 
 def _disabled_viewer_feature_for_path(path: str) -> Optional[str]:
@@ -5328,14 +5407,15 @@ async def api_get_task(
         raise HTTPException(status_code=404, detail="Task not found")
     
     # Update progress if still processing, or check video for done tasks
-    if task.status == "processing":
+    if not AUTORIG_MIGRATION_READ_ONLY and task.status == "processing":
         task = await update_task_progress(db, task)
-    elif task.status == "done" and not task.video_ready:
+    elif not AUTORIG_MIGRATION_READ_ONLY and task.status == "done" and not task.video_ready:
         # Check video availability for completed tasks
         task = await update_task_progress(db, task)
 
     if (
-        task.status == "done"
+        not AUTORIG_MIGRATION_READ_ONLY
+        and task.status == "done"
         and (
             not getattr(task, "viewer_prepared_glb_url", None)
             or not getattr(task, "viewer_animations_glb_url", None)
@@ -5343,7 +5423,7 @@ async def api_get_task(
     ):
         _schedule_viewer_artifact_reconciliation(task.id)
 
-    if _task_needs_poster_classification(task):
+    if not AUTORIG_MIGRATION_READ_ONLY and _task_needs_poster_classification(task):
         _schedule_poster_recovery_throttled(task.id)
     
     # Find viewer HTML file (_100k .html)
@@ -5517,6 +5597,11 @@ async def api_get_task(
         video_url=response_video_url,
         preview_status=preview_status,
         preview_error=preview_error,
+        artifact_cache_status=getattr(task, "artifact_cache_status", None),
+        artifact_cache_file_count=int(getattr(task, "artifact_cache_file_count", 0) or 0),
+        artifact_cache_bytes=int(getattr(task, "artifact_cache_bytes", 0) or 0),
+        artifact_cache_full_until=getattr(task, "artifact_cache_full_until", None),
+        artifact_cache_error=getattr(task, "artifact_cache_error", None),
         blueprint_skeleton_ready=bool(blueprint_skeleton_url),
         blueprint_skeleton_url=blueprint_skeleton_url,
         blueprint_rig_preview_ready=bool(blueprint_rig_preview_url),
@@ -9449,6 +9534,15 @@ async def proxy_video(
     if not source_video_url:
         raise HTTPException(status_code=404, detail="Video not available")
 
+    durable_video = lookup_cached_artifact(task_id, source_url=source_video_url)
+    if durable_video:
+        return _x_accel_artifact_response(
+            durable_video,
+            filename=Path(urlsplit(source_video_url).path).name or f"{task_id}.mp4",
+            media_type="video/quicktime" if source_video_url.lower().endswith(".mov") else "video/mp4",
+            as_attachment=False,
+        )
+
     # Forward range headers so browser can seek to arbitrary frames.
     # Without 206 + Content-Range, timeline scrubbing in <video> is broken.
     upstream_headers: Dict[str, str] = {}
@@ -9554,6 +9648,31 @@ async def _has_paid_access(
     return file_index in purchased_indices
 
 
+def _x_accel_artifact_response(
+    entry: Dict[str, Any],
+    *,
+    filename: str,
+    media_type: str,
+    as_attachment: bool,
+) -> Response:
+    """Let nginx serve an authorized cached file, including native ranges."""
+    disposition = "attachment" if as_attachment else "inline"
+    headers = {
+        "X-Accel-Redirect": str(entry["internal_uri"]),
+        "Content-Disposition": f'{disposition}; filename="{Path(filename).name}"',
+        "Content-Type": media_type,
+        "Content-Encoding": "identity",
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, max-age=0" if as_attachment else "public, max-age=86400",
+        "X-Artifact-Cache": "hit",
+    }
+    if entry.get("etag"):
+        headers["ETag"] = str(entry["etag"])
+    if entry.get("last_modified"):
+        headers["Last-Modified"] = str(entry["last_modified"])
+    return Response(status_code=200, headers=headers, media_type=media_type)
+
+
 @app.get("/api/file/{task_id}/{file_index}")
 async def proxy_file(
     task_id: str,
@@ -9598,6 +9717,15 @@ async def proxy_file(
         "json": "application/json",
     }
     content_type = content_types.get(ext, "application/octet-stream")
+
+    durable_entry = lookup_cached_artifact(task_id, source_url=file_url)
+    if durable_entry:
+        return _x_accel_artifact_response(
+            durable_entry,
+            filename=clean_filename,
+            media_type=content_type,
+            as_attachment=True,
+        )
     
     # Serve from local cache if present
     cached_path = TASK_CACHE_DIR / task_id / clean_filename
@@ -9692,6 +9820,15 @@ async def proxy_file_by_name(
         "json": "application/json",
     }
     content_type = content_types.get(ext, "application/octet-stream")
+
+    durable_entry = lookup_cached_artifact(task_id, source_url=file_url)
+    if durable_entry:
+        return _x_accel_artifact_response(
+            durable_entry,
+            filename=clean_filename,
+            media_type=content_type,
+            as_attachment=True,
+        )
     
     if task.ga_client_id:
         asyncio.create_task(send_ga4_event(
@@ -9929,6 +10066,10 @@ async def task_download_recovery_state(task: Task) -> Dict[str, Any]:
     urls = _task_primary_download_urls(task)
     if not urls:
         return state
+    if lookup_cached_artifact(task.id, role="full_bundle"):
+        return state
+    if all(lookup_cached_artifact(task.id, source_url=url) for url in urls):
+        return state
     if _has_complete_primary_task_cache(task):
         return state
     try:
@@ -10005,45 +10146,63 @@ async def api_task_cached_files(
                 "file_count": len(files),
                 **bundle_meta,
             }
-    
-    # If task is done but not cached yet, trigger caching
-    if task.status == "done" and (task.ready_urls or task.output_urls):
-        urls_to_cache = _task_primary_download_urls(task)
-        # Start caching in background
-        result = await cache_task_files(task_id, urls_to_cache, task.guid)
-        total_size = sum(f["size"] for f in result["files"])
-        bundle_meta = await _load_task_bundle_meta(
-            task,
-            fallback_file_count=len(result["files"]),
-            fallback_total_size=total_size,
-        )
-        # Nothing came back: this is the branch a finished task lands in once
-        # the converter has evicted its output, so it is where the page has to
-        # learn that the downloads are gone rather than showing a dead button.
-        recovery = (
-            await task_download_recovery_state(task)
-            if not result["files"]
-            else {"downloads_expired": False, "restart_available": False, "restart_reason": ""}
-        )
-        payload = {
-            "cached": result["cached"],
+
+    durable_files = []
+    durable_total = 0
+    for source_url in _task_primary_download_urls(task):
+        entry = lookup_cached_artifact(task_id, source_url=source_url)
+        if not entry:
+            continue
+        name = _clean_filename_for_cache(source_url, task.guid)
+        size = int(entry.get("size") or 0)
+        durable_total += size
+        durable_files.append({
+            "name": name,
+            "size": size,
+            "url": f"/api/file/{task_id}/download/{quote(name)}",
+        })
+    durable_bundle = lookup_cached_artifact(task_id, role="full_bundle")
+    if durable_files or durable_bundle:
+        file_count = len(durable_files)
+        bundle_size = int((durable_bundle or {}).get("size") or 0)
+        return {
+            "cached": True,
             "task_id": task_id,
-            "files": result["files"],
-            "total_size": total_size,
-            "file_count": len(result["files"]),
-            "errors": result.get("errors", []),
-            **recovery,
-            **bundle_meta,
+            "files": durable_files,
+            "total_size": durable_total,
+            "file_count": file_count,
+            "bundle_file_count": file_count or None,
+            "bundle_file_count_ready": bool(file_count),
+            "bundle_file_count_source": "durable_cache",
+            "bundle_total_size": bundle_size or durable_total,
+            "artifact_cache_status": task.artifact_cache_status,
         }
-        if recovery["downloads_expired"]:
-            payload["message"] = (
-                "The generated files are no longer stored. Re-run the task to "
-                "build a fresh set of downloads."
-                if recovery["restart_available"]
-                else "The generated files are no longer stored, and the original "
-                "model is gone too. Upload it again to rebuild the rig."
-            )
-        return payload
+    
+    # If task is done but not cached yet, enqueue the durable worker. Never
+    # download synchronously from a user request: global/per-worker limits must
+    # apply equally to automatic and click-triggered caching.
+    if task.status == "done" and (task.ready_urls or task.output_urls):
+        try:
+            from artifact_cache import enqueue_artifact_cache
+
+            await enqueue_artifact_cache(db, task)
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            print(f"[ArtifactCache] click enqueue failed for {task_id}: {exc}")
+        recovery = await task_download_recovery_state(task)
+        return {
+            "cached": False,
+            "task_id": task_id,
+            "files": [],
+            "total_size": int(task.artifact_cache_bytes or 0),
+            "file_count": int(task.artifact_cache_file_count or 0),
+            "message": "Files are being copied to durable storage",
+            "artifact_cache_status": task.artifact_cache_status or "pending",
+            "errors": [task.artifact_cache_error] if task.artifact_cache_error else [],
+            **recovery,
+            **_bundle_meta_response(ready=False, source="durable_cache_pending"),
+        }
     
     # Task not ready yet
     bundle_meta = (
@@ -10369,6 +10528,14 @@ async def _stream_purchased_task_bundle_zip(
 
     safe_guid = (task.guid or task_id).strip()
     filename = f"{safe_guid}.zip"
+    durable_bundle = lookup_cached_artifact(task_id, role="full_bundle")
+    if durable_bundle:
+        return _x_accel_artifact_response(
+            durable_bundle,
+            filename=filename,
+            media_type="application/zip",
+            as_attachment=True,
+        )
     if _has_complete_primary_task_cache(task):
         return await _build_task_bundle_zip_from_cache(task)
     if zip_url:
@@ -12258,6 +12425,16 @@ async def ensure_request_disk_headroom(db: AsyncSession, *, context: str) -> Dic
     Request-path disk guard. It may remove regenerable bundle ZIPs, stale terminal
     upload originals, and orphan cache files, but it never deletes task DB rows.
     """
+    cache_block = artifact_creation_block_reason()
+    if cache_block:
+        await asyncio.to_thread(run_artifact_cache_retention)
+        cache_block = artifact_creation_block_reason()
+    if cache_block:
+        raise HTTPException(
+            status_code=503,
+            detail=cache_block,
+            headers={"Retry-After": "600"},
+        )
     try:
         await enforce_task_cache_max_size(db)
         result = await cleanup_disk_space(
@@ -12692,6 +12869,15 @@ async def _get_cached_glb(
     """
     cache_path = GLB_CACHE_DIR / f"{task_id}_{cache_name}.glb"
     validate_file = validator or _validate_glb_file
+
+    durable_glb = lookup_cached_artifact(task_id, source_url=url)
+    if durable_glb:
+        return _x_accel_artifact_response(
+            durable_glb,
+            filename=f"{task_id}_{cache_name}.glb",
+            media_type="model/gltf-binary",
+            as_attachment=False,
+        )
     
     # Check if already cached
     if cache_path.exists():
@@ -12786,6 +12972,18 @@ async def api_proxy_model_glb(
     from workers import get_worker_base_url
     worker_base = get_worker_base_url(task.worker_api)
     model_url = f"{worker_base}/converter/glb/{task.guid}/{task.guid}.glb"
+
+    durable_model = (
+        lookup_cached_artifact(task_id, source_url=model_url)
+        or lookup_cached_artifact(task_id, basename=f"{task.guid}.glb")
+    )
+    if durable_model:
+        return _x_accel_artifact_response(
+            durable_model,
+            filename=f"{task_id}_model.glb",
+            media_type="model/gltf-binary",
+            as_attachment=False,
+        )
     
     return await _proxy_model_file(model_url, f"{task_id}_model.glb")
 
@@ -13358,6 +13556,14 @@ async def _blueprint_file_response(
     source_url = await _resolve_task_worker_file_url(task, suffix)
     if not source_url:
         raise HTTPException(status_code=404, detail="Blueprint file not available yet")
+    durable_blueprint = lookup_cached_artifact(task_id, source_url=source_url)
+    if durable_blueprint:
+        return _x_accel_artifact_response(
+            durable_blueprint,
+            filename=public_filename,
+            media_type=media_type,
+            as_attachment=False,
+        )
     response = await _proxy_model_file(source_url, public_filename, as_attachment=False)
     if suffix == BLUEPRINT_SKELETON_SUFFIX:
         response.headers["Cache-Control"] = "no-store"
@@ -13440,6 +13646,17 @@ async def api_proxy_thumb(
     poster_url = resolve_poster_url_for_task(task)
     if not poster_url:
         raise HTTPException(status_code=404, detail="Thumbnail not available")
+
+    durable_poster = lookup_cached_artifact(task_id, source_url=poster_url)
+    if durable_poster:
+        suffix = Path(urlsplit(poster_url).path).suffix.lower()
+        media_type = "image/png" if suffix == ".png" else "image/webp" if suffix == ".webp" else "image/jpeg"
+        return _x_accel_artifact_response(
+            durable_poster,
+            filename=Path(urlsplit(poster_url).path).name or f"{task_id}_poster.jpg",
+            media_type=media_type,
+            as_attachment=False,
+        )
     
     # Download and return the image (not streaming - more compatible with HTTP/2)
     try:
@@ -15062,6 +15279,146 @@ GLB_CACHE_DIR = STATIC_DIR / "glb_cache"  # Cached GLB files for fast loading
 # Ensure cache directories exist
 TASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 GLB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _artifact_cache_relative_path(task: Task, url: str, *, rel_path: Optional[str] = None) -> str:
+    """Preserve worker-relative paths while keeping unrelated assets collision-free."""
+    if rel_path:
+        return f"files/model-files/{str(rel_path).replace(chr(92), '/').lstrip('/')}"
+    parsed = urlsplit(str(url or ""))
+    decoded_path = unquote(parsed.path or "")
+    guid = str(task.guid or "").strip()
+    marker = f"/{guid}/" if guid else ""
+    if marker and marker in decoded_path:
+        tail = decoded_path.split(marker, 1)[1].lstrip("/")
+        return f"files/model-files/{tail}"
+    basename = Path(decoded_path).name or "artifact.bin"
+    digest = hashlib.sha256(str(url).encode("utf-8")).hexdigest()[:16]
+    return f"files/extras/{digest}-{basename}"
+
+
+def _artifact_cache_role(url: str, *, explicit: Optional[str] = None) -> str:
+    if explicit:
+        return explicit
+    name = unquote(urlsplit(str(url or "")).path).lower()
+    if name.endswith((".mp4", ".mov", ".m4v")):
+        return "preview_video"
+    if name.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return "poster" if "poster" in name or "icon" in name or "render_1" in name else "preview_image"
+    if name.endswith(".fbx"):
+        return "primary_fbx"
+    if name.endswith(".glb"):
+        return "viewer_glb" if "viewer" in name or "prepared" in name else "primary_glb"
+    if name.endswith(".zip"):
+        return "deliverable_zip"
+    if name.endswith((".html", ".json", ".txt", ".log", ".mview")):
+        return "diagnostic"
+    return "artifact"
+
+
+def _artifact_worker_assignment(task: Task, source_url: str) -> str:
+    for value in (task.worker_api, task.progress_page):
+        if value and artifact_worker_identity(str(value)):
+            return str(value)
+    # Generation-only tasks have no converter assignment; their model is
+    # served by this same AutoRig origin. Exact-host pinning still blocks an
+    # unexpected redirect to a third party.
+    app_host = (urlsplit(APP_URL).hostname or "").lower()
+    source_host = (urlsplit(str(source_url or "")).hostname or "").lower()
+    if app_host and source_host == app_host:
+        return APP_URL
+    return str(task.worker_api or task.progress_page or source_url)
+
+
+def _is_worker_ui_artifact(name: str) -> bool:
+    lower = str(name or "").lower()
+    if lower.endswith((".mp4", ".mov", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".html", ".mview")):
+        return True
+    if lower.endswith(".json") and any(key in lower for key in ("skeleton", "manifest", "blueprint")):
+        return True
+    if lower.endswith(".glb") and any(key in lower for key in ("prepared", "viewer", "animation")):
+        return True
+    return False
+
+
+async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
+    """Build the verified cache contract from task URLs and model-files."""
+    candidates: List[ArtifactSource] = []
+
+    bundle_url = resolve_worker_full_bundle_zip_url(task)
+    if bundle_url:
+        safe_guid = str(task.guid or task.id)
+        candidates.append(
+            ArtifactSource(
+                url=bundle_url,
+                relative_path=f"deliverables/{safe_guid}.zip",
+                role="full_bundle",
+                assigned_worker=_artifact_worker_assignment(task, bundle_url),
+                required=True,
+                long_lived=True,
+            )
+        )
+
+    declared_urls = list(dict.fromkeys(
+        [
+            *(task.ready_urls or []),
+            *(task.output_urls or []),
+            str(task.viewer_prepared_glb_url or ""),
+            str(task.viewer_animations_glb_url or ""),
+            str(task.video_url or ""),
+        ]
+    ))
+    poster_url = resolve_poster_url_for_task(task)
+    if poster_url:
+        declared_urls.append(poster_url)
+
+    for url in declared_urls:
+        value = str(url or "").strip()
+        if not value:
+            continue
+        role = _artifact_cache_role(value)
+        if value in (task.viewer_prepared_glb_url, task.viewer_animations_glb_url):
+            role = "viewer_glb"
+        if poster_url and value == poster_url:
+            role = "poster"
+        candidates.append(
+            ArtifactSource(
+                url=value,
+                relative_path=_artifact_cache_relative_path(task, value),
+                role=role,
+                assigned_worker=_artifact_worker_assignment(task, value),
+                required=True,
+            )
+        )
+
+    ok, model_files, _raw, _error = await _fetch_worker_model_files(task)
+    if ok:
+        for item in model_files:
+            if not _is_worker_ui_artifact(str(item.get("name") or "")):
+                continue
+            value = str(item.get("url") or "").strip()
+            if not value:
+                continue
+            expected_size = item.get("size")
+            try:
+                expected_size = int(expected_size) if expected_size is not None else None
+            except (TypeError, ValueError):
+                expected_size = None
+            candidates.append(
+                ArtifactSource(
+                    url=value,
+                    relative_path=_artifact_cache_relative_path(
+                        task,
+                        value,
+                        rel_path=str(item.get("rel_path") or ""),
+                    ),
+                    role=_artifact_cache_role(value),
+                    assigned_worker=_artifact_worker_assignment(task, value),
+                    expected_size=expected_size,
+                    required=True,
+                )
+            )
+    return candidates
 
 STATIC_PAGE_CANONICAL_PATHS: Dict[str, str] = {
     "index.html": "/",

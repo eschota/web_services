@@ -344,6 +344,14 @@ class Task(Base):
     # SHA-256 hex of uploaded video bytes (dedupe + audit)
     youtube_source_sha256 = Column(String(64), nullable=True)
 
+    # Durable artifact cache on the web host. These fields are additive and
+    # intentionally do not replace worker URLs used by older clients.
+    artifact_cache_status = Column(String(16), nullable=True)
+    artifact_cache_file_count = Column(Integer, nullable=False, default=0)
+    artifact_cache_bytes = Column(BigInteger, nullable=False, default=0)
+    artifact_cache_full_until = Column(DateTime, nullable=True)
+    artifact_cache_error = Column(Text, nullable=True)
+
     @property
     def output_urls(self) -> list:
         return json.loads(self._output_urls) if self._output_urls else []
@@ -368,6 +376,35 @@ class Task(Base):
         if self.status == "processing":
             return min(value, 99)
         return value
+
+
+class ArtifactCacheJob(Base):
+    """Durable, restart-safe queue item for one completed task."""
+
+    __tablename__ = "artifact_cache_jobs"
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_artifact_cache_job_task_id"),
+        Index("ix_artifact_cache_jobs_due", "status", "next_attempt_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(
+        String(36),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    worker_key = Column(String(128), nullable=True, index=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    deadline_at = Column(DateTime, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class TaskAnimationCorrection(Base):
@@ -1212,6 +1249,11 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN source_attempt_count INTEGER DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN source_next_retry_at DATETIME")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN processing_started_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_status VARCHAR(16)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_file_count INTEGER DEFAULT 0")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_bytes BIGINT DEFAULT 0")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_full_until DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN artifact_cache_error TEXT")
             await _try_add_column(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN task_cache_max_gb REAL DEFAULT 22"
             )
@@ -1651,6 +1693,21 @@ async def init_db():
             )
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS artifact_cache_status VARCHAR(16)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS artifact_cache_file_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS artifact_cache_bytes BIGINT NOT NULL DEFAULT 0"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS artifact_cache_full_until TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS artifact_cache_error TEXT"
             )
             await _try_add_column_any(
                 "ALTER TABLE admin_overlay_counters ADD COLUMN IF NOT EXISTS task_cache_max_gb DOUBLE PRECISION NOT NULL DEFAULT 22"

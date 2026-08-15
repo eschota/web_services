@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.02.004 - Storage-host migration and durable task artifacts
+
+- Added a restart-safe artifact cache with verified 8 MiB range resume, worker-host pinning, atomic publication, ZIP CRC checks, and per-task SHA-256 manifests.
+- Guaranteed a 24-hour full-artifact window and protected the last ZIP, GLB, FBX, viewer model, and poster while enforcing a 250 GB soft cap and 120 GB disk reserve.
+- Added cache-first authorized downloads through nginx `X-Accel-Redirect`, preserving byte ranges and existing viewer/download URLs.
+- Added read-only migration mode and isolated 8200/8210 systemd/nginx deployment files for the analytics storage host.
+- Preserved production Renderfin fixes for worker-local Hunyuan downloads and stable Telegram result cards across restarts.
+
 ## v0.02.001 - Strict worker completion gate
 
 - Read the additive worker completion-v2 fields from the task-status endpoint.

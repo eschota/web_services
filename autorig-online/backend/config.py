@@ -29,6 +29,17 @@ APP_NAME = "AutoRig Online"
 APP_URL = os.getenv("APP_URL", "https://autorig.online")
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production-very-secret-key-123")
+AUTORIG_MIGRATION_READ_ONLY = os.getenv("AUTORIG_MIGRATION_READ_ONLY", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+
+# Durable result cache on the storage host. The 24-hour floor is a hard
+# contract; pressure cleanup may only touch secondary files older than it.
+ARTIFACT_CACHE_ROOT = os.getenv("ARTIFACT_CACHE_ROOT", "/var/autorig/artifact-cache").strip()
+ARTIFACT_CACHE_FULL_HOURS = max(24, int(os.getenv("ARTIFACT_CACHE_FULL_HOURS", "24")))
+ARTIFACT_CACHE_SOFT_CAP_GB = float(os.getenv("ARTIFACT_CACHE_SOFT_CAP_GB", "250"))
+ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("ARTIFACT_CACHE_RESERVE_GB", "120"))
+ARTIFACT_CACHE_CONCURRENCY = max(1, min(2, int(os.getenv("ARTIFACT_CACHE_CONCURRENCY", "2"))))
 
 # =============================================================================
 # Database

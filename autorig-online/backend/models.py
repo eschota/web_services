@@ -56,6 +56,11 @@ class TaskStatusResponse(BaseModel):
     video_url: Optional[str]
     preview_status: str = Field(default="pending", description="ready | pending | unavailable")
     preview_error: Optional[str] = None
+    artifact_cache_status: Optional[str] = None
+    artifact_cache_file_count: int = 0
+    artifact_cache_bytes: int = 0
+    artifact_cache_full_until: Optional[datetime] = None
+    artifact_cache_error: Optional[str] = None
     blueprint_skeleton_ready: bool = False
     blueprint_skeleton_url: Optional[str] = None
     blueprint_rig_preview_ready: bool = False
