@@ -37,3 +37,13 @@ timers from this directory. Disable the legacy VPS timers only after both new
 ones pass a manual run; otherwise both hosts can emit alerts with unrelated disk
 sizes. The health check is parameterized through `AUTORIG_HEALTHCHECK_*` so it
 checks ports 8200/8210, `/srv/autorig/data`, and the `autorig-storage-*` units.
+
+For the first three days after a storage/backend migration, also install and
+enable `autorig-storage-postmigration-monitor.timer`. It runs every ten minutes,
+persists its cursor and audit log under `/var/lib/autorig-postmigration-monitor`, performs a
+full farm/credential check hourly, and sends an end-to-end completion-email
+probe to Resend's non-user test sink every twelve hours. New journal errors,
+task failures, cache stalls, mail-ledger failures, and provider delivery failures
+are deduplicated before Telegram notification. Once the 72-hour window closes,
+the next scheduled pass writes `postmigration-72h.complete` and disables the
+timer.

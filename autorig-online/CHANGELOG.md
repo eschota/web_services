@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.02.006 — 2026-08-15
+
+- Added a self-expiring 72-hour post-migration production monitor for the new
+  AutoRig storage host. It checks the public site, APIs, systemd services,
+  listeners, disk reserve, SQLite, artifact-cache lag, task failures and new
+  journal errors every ten minutes, with the full Renderfin/farm health check
+  once per hour.
+- Added completion-email observability: missing durable ledger rows, failed or
+  stale sends, retries, duplicate provider IDs, Resend delivery events, and a
+  deterministic end-to-end probe to Resend's non-user test sink every 12 hours.
+- Monitor alerts are stateful and deduplicated, are written to a JSONL audit
+  log, and the timer disables itself on the first scheduled pass after its
+  72-hour window.
+
 ## v0.02.005 - Storage-host monitoring and completion-email idempotency
 
 - Added task-scoped completion-email claims plus Resend idempotency keys so concurrent progress requests cannot send duplicate ready emails.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch AutoRig every 10 minutes for the first 72 hours after migration
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
+

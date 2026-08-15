@@ -114,6 +114,19 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         self.assertIn('STABILIZATION_RELEASE_UTC = "2026-08-11 11:18:47"', source)
         self.assertIn("terminal Unity missing-video errors since release (max 24h)", source)
 
+    def test_storage_host_has_intensive_self_expiring_monitor(self):
+        storage_host = Path(__file__).resolve().parents[2] / "deploy" / "storage-host"
+        service = (storage_host / "autorig-storage-postmigration-monitor.service").read_text(
+            encoding="utf-8"
+        )
+        timer = (storage_host / "autorig-storage-postmigration-monitor.timer").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("AUTORIG_POSTMIGRATION_DURATION_HOURS=72", service)
+        self.assertIn("AUTORIG_POSTMIGRATION_EMAIL_PROBE_HOURS=12", service)
+        self.assertIn("SupplementaryGroups=systemd-journal", service)
+        self.assertIn("OnUnitActiveSec=10min", timer)
+
 
 if __name__ == "__main__":
     unittest.main()
