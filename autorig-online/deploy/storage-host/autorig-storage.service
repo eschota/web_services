@@ -12,6 +12,7 @@ Slice=autorig.slice
 WorkingDirectory=/srv/autorig/current/autorig-online/backend
 Environment="PATH=/srv/autorig/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-/srv/autorig/secrets/feature-flags.env
 EnvironmentFile=-/srv/autorig/secrets/backend.env
 EnvironmentFile=-/srv/autorig/secrets/telegram.env
 EnvironmentFile=/srv/autorig/secrets/storage-host.env
