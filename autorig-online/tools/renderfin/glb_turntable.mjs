@@ -261,9 +261,23 @@ async function stopChrome(runtime) {
     try {
         if (runtime.child.exitCode == null) runtime.child.kill();
         await Promise.race([new Promise((resolve) => runtime.child.once('exit', resolve)), delay(3000)]);
-        if (runtime.child.exitCode == null) runtime.child.kill('SIGKILL');
+        if (runtime.child.exitCode == null) {
+            runtime.child.kill('SIGKILL');
+            await Promise.race([new Promise((resolve) => runtime.child.once('exit', resolve)), delay(3000)]);
+        }
     } finally {
-        fs.rmSync(runtime.profileDirectory, { recursive: true, force: true });
+        try {
+            fs.rmSync(runtime.profileDirectory, {
+                recursive: true,
+                force: true,
+                maxRetries: 5,
+                retryDelay: 100,
+            });
+        } catch (error) {
+            // Chrome can briefly recreate files while it is shutting down. A
+            // disposable profile leak must not invalidate a verified MP4.
+            console.warn(`[glb_turntable] temporary profile cleanup failed: ${error?.message || error}`);
+        }
     }
 }
 
