@@ -316,12 +316,16 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(main, "cache_task_files", AsyncMock(return_value={"cached": True, "files": []})),
             ):
                 response = await main._build_task_bundle_zip_from_cache(task)
-                archive_path = Path(response.path)
+                archive_path = cache_dir / ".meta" / "primary-bundle.zip"
                 try:
                     with zipfile.ZipFile(archive_path) as archive:
                         names = archive.namelist()
                     self.assertEqual(len(names), 6)
                     self.assertNotIn("video.mp4", names)
+                    self.assertEqual(
+                        response.headers["x-accel-redirect"],
+                        f"/_autorig_task_cache/{task.id}/.meta/primary-bundle.zip",
+                    )
                 finally:
                     archive_path.unlink(missing_ok=True)
 
@@ -371,12 +375,13 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
             ):
                 recovery = await main.task_download_recovery_state(task)
                 response = await main._build_task_bundle_zip_from_cache(task)
-                archive_path = Path(response.path)
+                archive_path = cache_root / task.id / ".meta" / "primary-bundle.zip"
                 with zipfile.ZipFile(archive_path) as archive:
                     names = set(archive.namelist())
 
             self.assertFalse(recovery["downloads_expired"])
             self.assertEqual(names, {"model_prepared.glb", "all_animations.glb"})
+            self.assertEqual(response.headers["accept-ranges"], "bytes")
             cache_mock.assert_not_awaited()
 
     async def test_notification_failure_never_breaks_download(self):

@@ -9708,6 +9708,39 @@ def _x_accel_glb_cache_response(
     )
 
 
+def _x_accel_task_cache_response(
+    path: Path,
+    *,
+    filename: str,
+    media_type: str,
+) -> Response:
+    """Serve an authorized owner download through nginx with native ranges."""
+    root = Path(TASK_CACHE_DIR).resolve()
+    candidate = Path(path).resolve(strict=True)
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("task cache path escaped the configured root") from exc
+    if not candidate.is_file():
+        raise RuntimeError("task cache entry is not a regular file")
+    internal_uri = "/_autorig_task_cache/" + "/".join(
+        quote(part, safe="") for part in relative.parts
+    )
+    return Response(
+        status_code=200,
+        headers={
+            "X-Accel-Redirect": internal_uri,
+            "Content-Disposition": f'attachment; filename="{Path(filename).name}"',
+            "Content-Type": media_type,
+            "Content-Encoding": "identity",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=0",
+            "X-Task-Cache": "hit",
+        },
+        media_type=media_type,
+    )
+
+
 @app.get("/api/file/{task_id}/{file_index}")
 async def proxy_file(
     task_id: str,
@@ -9816,14 +9849,10 @@ async def proxy_file_by_name(
     recovery_files = _materialize_task_recovery_files(task)
     recovery_name = Path(unquote(filename)).name
     if recovery_name == filename and recovery_name in recovery_files:
-        return FileResponse(
+        return _x_accel_task_cache_response(
             recovery_files[recovery_name],
             media_type="model/gltf-binary",
             filename=recovery_name,
-            headers={
-                "Cache-Control": "private, max-age=0",
-                "Content-Encoding": "identity",
-            },
         )
     
     # Search in output_urls first, then ready_urls
@@ -10529,7 +10558,7 @@ async def _proxy_worker_bundle_by_ranges(url: str, filename: str, request: Reque
     )
 
 
-async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
+async def _build_task_bundle_zip_from_cache(task: Task) -> Response:
     urls_to_cache = _task_primary_download_urls(task)
     expected_names = _task_primary_download_names(task)
     cache_dir = TASK_CACHE_DIR / task.id
@@ -10581,11 +10610,10 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
     fallback_meta_cache["worker_zip_url"] = resolve_worker_full_bundle_zip_url(task)
     _write_cached_task_bundle_meta(task.id, fallback_meta_cache)
 
-    return FileResponse(
+    return _x_accel_task_cache_response(
         zip_path,
         media_type="application/zip",
         filename=f"{safe_guid}.zip",
-        headers={"Cache-Control": "private, max-age=0"},
     )
 
 
