@@ -9,4 +9,3 @@ AccuracySec=30s
 
 [Install]
 WantedBy=timers.target
-
