@@ -2,15 +2,20 @@
 Email Service for AutoRig Online
 Uses Resend API for sending emails
 """
+import asyncio
 import base64
 import hashlib
 import httpx
 import resend
+from datetime import datetime, timedelta
 from html import escape
 from typing import Optional
 from urllib.parse import quote
 
+from sqlalchemy import or_, update
+
 from config import RESEND_API_KEY, EMAIL_FROM, APP_URL, MARKETING_POSTAL_ADDRESS
+from database import AsyncSessionLocal, TaskCompletionEmail
 from unsubscribe_tokens import (
     build_unsubscribe_token,
     build_marketing_unsubscribe_token,
@@ -20,6 +25,93 @@ from unsubscribe_tokens import (
 
 # Initialize Resend
 resend.api_key = RESEND_API_KEY
+
+_completion_email_claim_lock = asyncio.Lock()
+_COMPLETION_EMAIL_RECLAIM_AFTER = timedelta(minutes=15)
+
+
+def _completion_email_recipient_hash(email: str) -> str:
+    return hashlib.sha256(str(email or "").strip().lower().encode("utf-8")).hexdigest()
+
+
+async def _reserve_task_completion_email(task_id: str, to_email: str) -> bool:
+    """Claim one completion email, allowing only stale/failed claims to retry."""
+    now = datetime.utcnow()
+    stale_before = now - _COMPLETION_EMAIL_RECLAIM_AFTER
+    recipient_hash = _completion_email_recipient_hash(to_email)
+    async with _completion_email_claim_lock:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(TaskCompletionEmail, task_id)
+            if row is None:
+                db.add(
+                    TaskCompletionEmail(
+                        task_id=task_id,
+                        recipient_hash=recipient_hash,
+                        status="sending",
+                        attempt_count=1,
+                        claimed_at=now,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                try:
+                    await db.commit()
+                    return True
+                except Exception:
+                    # Another process may have inserted the same task-scoped
+                    # claim. Re-read it and apply the same retry rules below.
+                    await db.rollback()
+                    row = await db.get(TaskCompletionEmail, task_id)
+
+            if row is None or row.status == "sent":
+                return False
+            if row.status == "sending" and row.claimed_at and row.claimed_at > stale_before:
+                return False
+
+            result = await db.execute(
+                update(TaskCompletionEmail)
+                .where(TaskCompletionEmail.task_id == task_id)
+                .where(
+                    or_(
+                        TaskCompletionEmail.status == "failed",
+                        TaskCompletionEmail.claimed_at <= stale_before,
+                    )
+                )
+                .values(
+                    recipient_hash=recipient_hash,
+                    status="sending",
+                    attempt_count=TaskCompletionEmail.attempt_count + 1,
+                    provider_message_id=None,
+                    last_error=None,
+                    claimed_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.commit()
+            return result.rowcount == 1
+
+
+async def _finish_task_completion_email(
+    task_id: str,
+    *,
+    sent: bool,
+    provider_message_id: Optional[str] = None,
+    error: Optional[str] = None,
+) -> None:
+    now = datetime.utcnow()
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(TaskCompletionEmail)
+            .where(TaskCompletionEmail.task_id == task_id)
+            .values(
+                status="sent" if sent else "failed",
+                provider_message_id=provider_message_id,
+                last_error=None if sent else str(error or "unknown email error")[:2000],
+                sent_at=now if sent else None,
+                updated_at=now,
+            )
+        )
+        await db.commit()
 
 
 async def download_image(image_url: str) -> Optional[bytes]:
@@ -158,6 +250,10 @@ async def send_task_completed_email(
     if not to_email:
         print("[Email] No recipient email, skipping")
         return False
+
+    if not await _reserve_task_completion_email(task_id, to_email):
+        print(f"[Email] Completion email already reserved or sent for task {task_id}, skipping")
+        return False
     
     try:
         base = APP_URL.rstrip("/")
@@ -206,11 +302,25 @@ async def send_task_completed_email(
             ]
         
         # Send email
-        response = resend.Emails.send(email_params)
+        response = resend.Emails.send(
+            email_params,
+            {"idempotency_key": f"task-completed/{task_id}"},
+        )
+        provider_message_id = None
+        if isinstance(response, dict):
+            provider_message_id = response.get("id")
+        else:
+            provider_message_id = getattr(response, "id", None)
+        await _finish_task_completion_email(
+            task_id,
+            sent=True,
+            provider_message_id=str(provider_message_id or "") or None,
+        )
         print(f"[Email] Sent successfully to {to_email}, response: {response}")
         return True
-        
+
     except Exception as e:
+        await _finish_task_completion_email(task_id, sent=False, error=str(e))
         print(f"[Email] Failed to send email to {to_email}: {e}")
         return False
 

@@ -378,6 +378,23 @@ class Task(Base):
         return value
 
 
+class TaskCompletionEmail(Base):
+    """Durable, task-scoped idempotency record for completion emails."""
+
+    __tablename__ = "task_completion_emails"
+
+    task_id = Column(String(36), primary_key=True)
+    recipient_hash = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="sending", index=True)
+    attempt_count = Column(Integer, nullable=False, default=1)
+    provider_message_id = Column(String(128), nullable=True)
+    last_error = Column(Text, nullable=True)
+    claimed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ArtifactCacheJob(Base):
     """Durable, restart-safe queue item for one completed task."""
 

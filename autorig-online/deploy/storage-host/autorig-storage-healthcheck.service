@@ -1,0 +1,32 @@
+[Unit]
+Description=AutoRig stability check (storage host)
+After=network-online.target autorig-storage.service autorig-storage-renderfin.service
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=oneshot
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/current/autorig-online/backend
+Environment="AUTORIG_HEALTHCHECK_RENDERFIN_URL=http://127.0.0.1:8210/renderfin"
+Environment="AUTORIG_HEALTHCHECK_SERVICES=autorig-storage,autorig-storage-renderfin,autorig-storage-telegram,autorig-storage-tunnels"
+Environment="AUTORIG_HEALTHCHECK_CHARGEN_DB=/srv/autorig/data/db/renderfin.db"
+Environment="AUTORIG_HEALTHCHECK_DB=/srv/autorig/data/db/autorig.db"
+Environment="AUTORIG_HEALTHCHECK_VIDEO_CACHE=/srv/autorig/data/var/videos"
+Environment="AUTORIG_HEALTHCHECK_BACKEND_ENV=/srv/autorig/secrets/backend.env"
+Environment="AUTORIG_HEALTHCHECK_HUNYUAN_WORKERS_FILE=/srv/autorig/secrets/renderfin-hunyuan.json"
+Environment="AUTORIG_HEALTHCHECK_TUNNELS_CONF=/srv/autorig/secrets/farm-tunnels.conf"
+Environment="AUTORIG_HEALTHCHECK_MIN_FREE_GB=120"
+Environment="AUTORIG_HEALTHCHECK_VIDEO_CACHE_WARN_GB=20"
+EnvironmentFile=-/srv/autorig/secrets/backend.env
+EnvironmentFile=/srv/autorig/secrets/telegram.env
+EnvironmentFile=/srv/autorig/secrets/storage-host.env
+ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/current/autorig-online/deploy/healthcheck/renderfin_healthcheck.py --notify
+SuccessExitStatus=0 1
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+

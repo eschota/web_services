@@ -22,15 +22,28 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Tuple
 
-RENDERFIN = "http://127.0.0.1:8010/renderfin"
-SITE = "https://autorig.online/"
-SERVICES = ("autorig", "autorig-renderfin", "autorig-telegram", "autorig-farm-tunnels")
-CHARGEN_DB = "/var/autorig/renderfin/db/renderfin.db"
-AUTORIG_DB = "/root/autorig-online/backend/db/autorig.db"
-VIDEO_CACHE_DIR = "/var/autorig/videos"
-DISK_WARN_PERCENT = 90.0
-MIN_FREE_GB = 5.49
-VIDEO_CACHE_WARN_GB = 1.5
+RENDERFIN = os.getenv("AUTORIG_HEALTHCHECK_RENDERFIN_URL", "http://127.0.0.1:8010/renderfin")
+SITE = os.getenv("AUTORIG_HEALTHCHECK_SITE_URL", "https://autorig.online/")
+SERVICES = tuple(
+    value.strip()
+    for value in os.getenv(
+        "AUTORIG_HEALTHCHECK_SERVICES",
+        "autorig,autorig-renderfin,autorig-telegram,autorig-farm-tunnels",
+    ).split(",")
+    if value.strip()
+)
+CHARGEN_DB = os.getenv(
+    "AUTORIG_HEALTHCHECK_CHARGEN_DB",
+    "/var/autorig/renderfin/db/renderfin.db",
+)
+AUTORIG_DB = os.getenv(
+    "AUTORIG_HEALTHCHECK_DB",
+    "/root/autorig-online/backend/db/autorig.db",
+)
+VIDEO_CACHE_DIR = os.getenv("AUTORIG_HEALTHCHECK_VIDEO_CACHE", "/var/autorig/videos")
+DISK_WARN_PERCENT = float(os.getenv("AUTORIG_HEALTHCHECK_DISK_WARN_PERCENT", "90"))
+MIN_FREE_GB = float(os.getenv("AUTORIG_HEALTHCHECK_MIN_FREE_GB", "5.49"))
+VIDEO_CACHE_WARN_GB = float(os.getenv("AUTORIG_HEALTHCHECK_VIDEO_CACHE_WARN_GB", "1.5"))
 YOUTUBE_ROLLING_LIMIT = 9
 STABILIZATION_RELEASE_UTC = "2026-08-11 11:18:47"
 # A stage that has not moved in this long is stuck, not slow.
@@ -183,7 +196,7 @@ VISION_CONFIG = os.getenv(
     "AUTORIG_VISION_CONFIG",
     "/root/autorig/ai_vision_animal_type_detect.json",
 )
-BACKEND_ENV = "/etc/autorig-backend.env"
+BACKEND_ENV = os.getenv("AUTORIG_HEALTHCHECK_BACKEND_ENV", "/etc/autorig-backend.env")
 
 
 def _llm_credentials() -> List[Tuple[str, str, str, str]]:
@@ -359,7 +372,10 @@ def check_generation_jobs(report: Report) -> None:
         report.fail(f"{len(undelivered)} finished job(s) never delivered: " + ", ".join(undelivered[:3]))
 
 
-HUNYUAN_WORKERS_FILE = "/etc/autorig-renderfin-hunyuan.json"
+HUNYUAN_WORKERS_FILE = os.getenv(
+    "AUTORIG_HEALTHCHECK_HUNYUAN_WORKERS_FILE",
+    "/etc/autorig-renderfin-hunyuan.json",
+)
 
 
 def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
@@ -431,14 +447,14 @@ def _hunyuan_auth_error(url: str, token: str) -> str:
         return ""
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
-            return f"rejects our token (HTTP {exc.code}) - refresh /etc/autorig-renderfin-hunyuan.json"
+            return f"rejects our token (HTTP {exc.code}) - refresh {HUNYUAN_WORKERS_FILE}"
         return ""
     except Exception as exc:
         return f"generate-3d unreachable ({repr(exc)[:50]})"
 
 
 def check_farm_tunnels(report: Report) -> None:
-    conf = "/etc/autorig-farm-tunnels.conf"
+    conf = os.getenv("AUTORIG_HEALTHCHECK_TUNNELS_CONF", "/etc/autorig-farm-tunnels.conf")
     if not os.path.isfile(conf):
         report.warn("no farm tunnel config; Hunyuan reachable only if facades pass auth")
         return

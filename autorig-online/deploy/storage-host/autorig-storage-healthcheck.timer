@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the AutoRig storage-host stability check every 6 hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
+

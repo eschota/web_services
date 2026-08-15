@@ -105,8 +105,10 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
             / "healthcheck"
             / "renderfin_healthcheck.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("MIN_FREE_GB = 5.49", source)
-        self.assertIn("VIDEO_CACHE_WARN_GB = 1.5", source)
+        self.assertIn('AUTORIG_HEALTHCHECK_MIN_FREE_GB", "5.49"', source)
+        self.assertIn('AUTORIG_HEALTHCHECK_VIDEO_CACHE_WARN_GB", "1.5"', source)
+        self.assertIn("AUTORIG_HEALTHCHECK_SERVICES", source)
+        self.assertIn("AUTORIG_HEALTHCHECK_RENDERFIN_URL", source)
         self.assertIn("YOUTUBE_ROLLING_LIMIT = 9", source)
         self.assertIn('STABILIZATION_RELEASE_UTC = "2026-08-11 11:18:47"', source)
         self.assertIn("terminal Unity missing-video errors since release (max 24h)", source)

@@ -1,0 +1,25 @@
+[Unit]
+Description=AutoRig pressure-only disk cleanup (storage host)
+After=network-online.target autorig-storage.service
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=oneshot
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/current/autorig-online/backend
+Environment="PATH=/srv/autorig/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+EnvironmentFile=-/srv/autorig/secrets/feature-flags.env
+EnvironmentFile=-/srv/autorig/secrets/backend.env
+EnvironmentFile=-/srv/autorig/secrets/telegram.env
+EnvironmentFile=/srv/autorig/secrets/storage-host.env
+ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/current/autorig-online/backend/scripts/run_disk_pressure_cleanup.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/data /srv/autorig/current/autorig-online/static/tasks /srv/autorig/current/autorig-online/static/glb_cache
+

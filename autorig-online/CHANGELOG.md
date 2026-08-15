@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.02.005 - Storage-host monitoring and completion-email idempotency
+
+- Added task-scoped completion-email claims plus Resend idempotency keys so concurrent progress requests cannot send duplicate ready emails.
+- Added storage-host-specific disk-pressure and six-hour health-check units for ports 8200/8210 and `/srv/autorig` runtime paths.
+- Made the stability checker configurable through `AUTORIG_HEALTHCHECK_*` without changing legacy VPS defaults.
+
 ## v0.02.004 - Storage-host migration and durable task artifacts
 
 - Added a restart-safe artifact cache with verified 8 MiB range resume, worker-host pinning, atomic publication, ZIP CRC checks, and per-task SHA-256 manifests.

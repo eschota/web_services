@@ -31,3 +31,9 @@ non-secret overlay; copy its values into `/srv/autorig/secrets/storage-host.env`
 without replacing migrated credentials. F7 remains excluded by
 `AUTORIG_DISABLED_WORKERS` until the worker has been separately repaired and
 validated.
+
+After cutover, install and enable the storage-host-specific cleanup and health
+timers from this directory. Disable the legacy VPS timers only after both new
+ones pass a manual run; otherwise both hosts can emit alerts with unrelated disk
+sizes. The health check is parameterized through `AUTORIG_HEALTHCHECK_*` so it
+checks ports 8200/8210, `/srv/autorig/data`, and the `autorig-storage-*` units.
