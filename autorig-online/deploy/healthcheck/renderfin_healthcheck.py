@@ -48,6 +48,9 @@ YOUTUBE_ROLLING_LIMIT = 9
 STABILIZATION_RELEASE_UTC = "2026-08-11 11:18:47"
 # A stage that has not moved in this long is stuck, not slow.
 STAGE_STALL_SECONDS = 4 * 3600
+FAILED_JOB_ALERT_SECONDS = float(
+    os.getenv("AUTORIG_HEALTHCHECK_FAILED_JOB_ALERT_SECONDS", str(24 * 3600))
+)
 ACTIVE_STAGES = ("flux_render", "hunyuan", "turntable")
 
 
@@ -351,7 +354,13 @@ def check_generation_jobs(report: Report) -> None:
         stage = job.get("stage", "?")
         stages[stage] = stages.get(stage, 0) + 1
         if stage == "failed":
-            failed.append(f"{job['id'][:8]}: {(job.get('error') or '')[:60]}")
+            failed_at = job.get("updated_at") or job.get("stage_started_at") or job.get("created_at")
+            try:
+                failed_age = now - float(failed_at or now)
+            except (TypeError, ValueError):
+                failed_age = 0.0
+            if failed_age <= FAILED_JOB_ALERT_SECONDS:
+                failed.append(f"{job['id'][:8]}: {(job.get('error') or '')[:60]}")
         if stage in ACTIVE_STAGES:
             # updated_at is refreshed by a service restart, so a job stuck for a
             # day looked minutes old; stage_started_at is the real stage clock
@@ -365,7 +374,10 @@ def check_generation_jobs(report: Report) -> None:
 
     report.ok("generation jobs: " + ", ".join(f"{k}={v}" for k, v in sorted(stages.items())))
     if failed:
-        report.fail(f"{len(failed)} job(s) failed: " + "; ".join(failed[:3]))
+        report.fail(
+            f"{len(failed)} job(s) failed in the last "
+            f"{FAILED_JOB_ALERT_SECONDS / 3600:.0f}h: " + "; ".join(failed[:3])
+        )
     if stalled:
         report.fail(f"{len(stalled)} job(s) stalled: " + "; ".join(stalled[:3]))
     if undelivered:

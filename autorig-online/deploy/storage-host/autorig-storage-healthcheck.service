@@ -29,4 +29,4 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-
+ReadWritePaths=/srv/autorig/data/db
