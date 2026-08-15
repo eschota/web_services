@@ -346,6 +346,35 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 404)
         self.assertIn("no longer stored", raised.exception.detail)
 
+    async def test_protected_recovery_glbs_replace_expired_worker_bundle(self):
+        task = _task()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_root = root / "tasks"
+            glb_root = root / "glb"
+            deliverables_root = root / "deliverables"
+            glb_root.mkdir()
+            deliverables_root.mkdir()
+            payload = b"glTF" + b"\x02\x00\x00\x00" + b"\x0c\x00\x00\x00"
+            (glb_root / f"{task.id}_prepared.glb").write_bytes(payload)
+            (deliverables_root / f"{task.id}_animations.glb").write_bytes(payload + b"animation")
+
+            with (
+                patch.object(main, "TASK_CACHE_DIR", cache_root),
+                patch.object(main, "GLB_CACHE_DIR", glb_root),
+                patch.object(main, "_RECOVERY_DELIVERABLES_DIR", deliverables_root),
+                patch.object(main, "cache_task_files", AsyncMock()) as cache_mock,
+            ):
+                recovery = await main.task_download_recovery_state(task)
+                response = await main._build_task_bundle_zip_from_cache(task)
+                archive_path = Path(response.path)
+                with zipfile.ZipFile(archive_path) as archive:
+                    names = set(archive.namelist())
+
+            self.assertFalse(recovery["downloads_expired"])
+            self.assertEqual(names, {"model_prepared.glb", "all_animations.glb"})
+            cache_mock.assert_not_awaited()
+
     async def test_notification_failure_never_breaks_download(self):
         with patch(
             "telegram_bot.broadcast_full_bundle_download",

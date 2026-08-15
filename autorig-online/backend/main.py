@@ -9809,6 +9809,22 @@ async def proxy_file_by_name(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     _require_task_download_access(task=task, user=user, request=request)
+
+    # Old converter outputs may already be gone while the storage host still
+    # owns protected viewer GLBs.  Expose only the fixed recovery filenames;
+    # never turn this into arbitrary task-cache path access.
+    recovery_files = _materialize_task_recovery_files(task)
+    recovery_name = Path(unquote(filename)).name
+    if recovery_name == filename and recovery_name in recovery_files:
+        return FileResponse(
+            recovery_files[recovery_name],
+            media_type="model/gltf-binary",
+            filename=recovery_name,
+            headers={
+                "Cache-Control": "private, max-age=0",
+                "Content-Encoding": "identity",
+            },
+        )
     
     # Search in output_urls first, then ready_urls
     file_url = None
@@ -9935,6 +9951,63 @@ def _task_primary_download_names(task: Task) -> set[str]:
         _clean_filename_for_cache(url, task.guid)
         for url in _task_primary_download_urls(task)
     }
+
+
+_RECOVERY_DELIVERABLES_DIR = Path(
+    os.getenv("AUTORIG_DELIVERABLES_DIR", "/var/autorig/deliverables")
+)
+
+
+def _valid_recovery_glb(path: Path) -> bool:
+    try:
+        if not path.is_file() or path.stat().st_size < 12:
+            return False
+        with path.open("rb") as stream:
+            return stream.read(4) == b"glTF"
+    except OSError:
+        return False
+
+
+def _task_recovery_sources(task: Task) -> Dict[str, Path]:
+    """Return protected local rig outputs that remain useful after worker expiry."""
+    specs = {
+        "model_prepared.glb": f"{task.id}_prepared.glb",
+        "all_animations.glb": f"{task.id}_animations.glb",
+    }
+    recovered: Dict[str, Path] = {}
+    for download_name, stored_name in specs.items():
+        for root in (GLB_CACHE_DIR, _RECOVERY_DELIVERABLES_DIR):
+            candidate = root / stored_name
+            if _valid_recovery_glb(candidate):
+                recovered[download_name] = candidate
+                break
+    return recovered
+
+
+def _materialize_task_recovery_files(task: Task) -> Dict[str, Path]:
+    """Hard-link protected outputs into the owner-download cache atomically."""
+    sources = _task_recovery_sources(task)
+    if not sources:
+        return {}
+    cache_dir = TASK_CACHE_DIR / str(task.id)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    materialized: Dict[str, Path] = {}
+    for download_name, source in sources.items():
+        destination = cache_dir / download_name
+        if not _valid_recovery_glb(destination):
+            temporary = cache_dir / f".{download_name}.{uuid.uuid4().hex}.tmp"
+            try:
+                try:
+                    os.link(source, temporary)
+                except OSError:
+                    shutil.copy2(source, temporary)
+                if not _valid_recovery_glb(temporary):
+                    raise RuntimeError(f"invalid recovery artifact {source}")
+                os.replace(temporary, destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+        materialized[download_name] = destination
+    return materialized
 
 
 def _bundle_meta_response(
@@ -10098,6 +10171,11 @@ async def task_download_recovery_state(task: Task) -> Dict[str, Any]:
     if task.status != "done":
         return state
 
+    # A protected prepared model plus animation GLB is still a downloadable
+    # rig even when the converter has evicted its larger format bundle.
+    if _task_recovery_sources(task):
+        return state
+
     urls = _task_primary_download_urls(task)
     if not urls:
         return state
@@ -10151,6 +10229,8 @@ async def api_task_cached_files(
     
     cache_dir = TASK_CACHE_DIR / task_id
     primary_names = _task_primary_download_names(task)
+    recovery_files = _materialize_task_recovery_files(task)
+    downloadable_names = primary_names | set(recovery_files)
     
     # If files are already cached, return them
     if cache_dir.exists():
@@ -10158,7 +10238,7 @@ async def api_task_cached_files(
         total_size = 0
         from urllib.parse import quote
         for f in sorted(cache_dir.iterdir()):
-            if f.is_file() and f.name in primary_names and not f.name.endswith('.tmp'):
+            if f.is_file() and f.name in downloadable_names and not f.name.endswith('.tmp'):
                 size = f.stat().st_size
                 total_size += size
                 files.append({
@@ -10453,14 +10533,16 @@ async def _build_task_bundle_zip_from_cache(task: Task) -> FileResponse:
     urls_to_cache = _task_primary_download_urls(task)
     expected_names = _task_primary_download_names(task)
     cache_dir = TASK_CACHE_DIR / task.id
-    if urls_to_cache:
+    recovery_files = _materialize_task_recovery_files(task)
+    bundle_names = expected_names | set(recovery_files)
+    if urls_to_cache and not recovery_files:
         await cache_task_files(task.id, urls_to_cache, task.guid)
 
     files = [
         p for p in sorted(cache_dir.iterdir())
         if (
             p.is_file()
-            and p.name in expected_names
+            and p.name in bundle_names
             and not p.name.endswith(".tmp")
             and not p.name.startswith(".")
         )
