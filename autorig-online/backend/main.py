@@ -9673,6 +9673,41 @@ def _x_accel_artifact_response(
     return Response(status_code=200, headers=headers, media_type=media_type)
 
 
+def _x_accel_glb_cache_response(
+    path: Path,
+    *,
+    filename: str,
+    headers: Optional[Dict[str, str]] = None,
+) -> Response:
+    """Serve a validated viewer GLB through nginx with native byte ranges."""
+    root = Path(GLB_CACHE_DIR).resolve()
+    candidate = Path(path).resolve(strict=True)
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("GLB cache path escaped the configured root") from exc
+    if not candidate.is_file():
+        raise RuntimeError("GLB cache entry is not a regular file")
+    internal_uri = "/_autorig_glb_cache/" + "/".join(
+        quote(part, safe="") for part in relative.parts
+    )
+    response_headers: Dict[str, str] = {
+        "X-Accel-Redirect": internal_uri,
+        "Content-Disposition": f'inline; filename="{Path(filename).name}"',
+        "Content-Type": "model/gltf-binary",
+        "Content-Encoding": "identity",
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=86400",
+        "X-GLB-Cache": "hit",
+    }
+    response_headers.update(headers or {})
+    return Response(
+        status_code=200,
+        headers=response_headers,
+        media_type="model/gltf-binary",
+    )
+
+
 @app.get("/api/file/{task_id}/{file_index}")
 async def proxy_file(
     task_id: str,
@@ -12861,10 +12896,11 @@ async def _get_cached_glb(
     timeout_seconds: float = 120.0,
     failure_backoff_seconds: float = 0.0,
     validator: Optional[Callable[[Path], bool]] = None,
-) -> Optional[FileResponse]:
+) -> Optional[Response]:
     """
     Get GLB file from local cache, or download and cache it.
-    Returns FileResponse for cached file, or None if download failed.
+    Returns an nginx internal-redirect response for a cached file, or None if
+    the download failed.
     Validates GLB integrity before caching and when serving.
     """
     cache_path = GLB_CACHE_DIR / f"{task_id}_{cache_name}.glb"
@@ -12887,9 +12923,8 @@ async def _get_cached_glb(
                 print(f"[GLB Cache] Cached file corrupted, deleting: {cache_path.name}")
                 cache_path.unlink()
             else:
-                return FileResponse(
-                    path=str(cache_path),
-                    media_type="model/gltf-binary",
+                return _x_accel_glb_cache_response(
+                    cache_path,
                     filename=f"{task_id}_{cache_name}.glb",
                     headers=_glb_viewer_headers(profile),
                 )
@@ -12940,9 +12975,8 @@ async def _get_cached_glb(
                 _GLB_FETCH_BACKOFF_UNTIL.pop(backoff_key, None)
                 print(f"[GLB Cache] Cached valid GLB: {cache_path.name} ({size_bytes} bytes)")
 
-                return FileResponse(
-                    path=str(cache_path),
-                    media_type="model/gltf-binary",
+                return _x_accel_glb_cache_response(
+                    cache_path,
                     filename=f"{task_id}_{cache_name}.glb",
                     headers=_glb_viewer_headers(profile),
                 )
@@ -13224,9 +13258,8 @@ async def api_proxy_animations_glb(
     if default_variant:
         optimized_cache_path = GLB_CACHE_DIR / f"{task_id}_animations_viewer.glb"
         if optimized_cache_path.exists() and _validate_viewer_animation_glb_file(optimized_cache_path):
-            return FileResponse(
-                path=str(optimized_cache_path),
-                media_type="model/gltf-binary",
+            return _x_accel_glb_cache_response(
+                optimized_cache_path,
                 filename=f"{task_id}_animations.glb",
                 headers=_glb_viewer_headers("optimized"),
             )
@@ -13275,9 +13308,8 @@ async def api_proxy_animations_glb(
     # Legacy cache for pre-library animal tasks and humanoid/T-pose tasks.
     cache_path = GLB_CACHE_DIR / f"{task_id}_animations.glb"
     if cache_path.exists() and _validate_viewer_animation_glb_file(cache_path):
-        return FileResponse(
-            path=str(cache_path),
-            media_type="model/gltf-binary",
+        return _x_accel_glb_cache_response(
+            cache_path,
             filename=f"{task_id}_animations.glb",
             headers=_glb_viewer_headers("runtime"),
         )
@@ -13455,9 +13487,8 @@ async def api_proxy_prepared_glb(
     # Optimized preview cache/URL always wins over the full prepared download.
     optimized_cache_path = GLB_CACHE_DIR / f"{task_id}_prepared_viewer.glb"
     if optimized_cache_path.exists() and _validate_glb_file(optimized_cache_path):
-        return FileResponse(
-            path=str(optimized_cache_path),
-            media_type="model/gltf-binary",
+        return _x_accel_glb_cache_response(
+            optimized_cache_path,
             filename=f"{task_id}_prepared.glb",
             headers=_glb_viewer_headers("optimized"),
         )
@@ -13477,9 +13508,8 @@ async def api_proxy_prepared_glb(
     # Check cache first (fastest path)
     cache_path = GLB_CACHE_DIR / f"{task_id}_prepared.glb"
     if cache_path.exists() and _validate_glb_file(cache_path):
-        return FileResponse(
-            path=str(cache_path),
-            media_type="model/gltf-binary",
+        return _x_accel_glb_cache_response(
+            cache_path,
             filename=f"{task_id}_prepared.glb",
             headers=_glb_viewer_headers("original"),
         )

@@ -100,7 +100,25 @@ class ViewerArtifactContractTests(unittest.IsolatedAsyncioTestCase):
                 db=None,
             )
         self.assertEqual(response.headers["x-autorig-viewer-profile"], "optimized")
-        self.assertEqual(Path(response.path), cache)
+        self.assertEqual(
+            response.headers["x-accel-redirect"],
+            f"/_autorig_glb_cache/{cache.name}",
+        )
+        self.assertEqual(response.headers["accept-ranges"], "bytes")
+
+    def test_glb_cache_accel_rejects_paths_outside_cache_root(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside, patch.object(
+            main,
+            "GLB_CACHE_DIR",
+            Path(tmp),
+        ):
+            candidate = Path(outside) / "escaped.glb"
+            candidate.write_bytes(_valid_glb())
+            with self.assertRaisesRegex(RuntimeError, "escaped"):
+                main._x_accel_glb_cache_response(
+                    candidate,
+                    filename="escaped.glb",
+                )
 
     async def test_prepared_endpoint_prefers_optimized_url_before_original_cache(self):
         task = _task(
