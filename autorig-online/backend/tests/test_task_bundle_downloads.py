@@ -311,6 +311,8 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
             (cache_dir / "video.mp4").write_bytes(b"preview")
             with (
                 patch.object(main, "TASK_CACHE_DIR", Path(tmp)),
+                patch.object(main, "GLB_CACHE_DIR", Path(tmp) / "glb"),
+                patch.object(main, "_RECOVERY_DELIVERABLES_DIR", Path(tmp) / "deliverables"),
                 patch.object(main, "cache_task_files", AsyncMock(return_value={"cached": True, "files": []})),
             ):
                 response = await main._build_task_bundle_zip_from_cache(task)
@@ -339,6 +341,8 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
         with (
             tempfile.TemporaryDirectory() as tmp,
             patch.object(main, "TASK_CACHE_DIR", Path(tmp)),
+            patch.object(main, "GLB_CACHE_DIR", Path(tmp) / "glb"),
+            patch.object(main, "_RECOVERY_DELIVERABLES_DIR", Path(tmp) / "deliverables"),
             patch.object(main, "cache_task_files", AsyncMock(return_value={"cached": False, "files": []})),
         ):
             with self.assertRaises(HTTPException) as raised:
