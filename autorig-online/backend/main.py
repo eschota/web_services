@@ -4418,7 +4418,9 @@ async def api_create_task(
 RIG_V2_ALLOWED_EXTS = {".fbx", ".glb", ".obj"}
 RIG_V2_ALLOWED_SUPPORT_EXTS = {".mtl"}
 RIG_V2_PREVIEW_STATUS = "rig_v2_preview"
-RIG_V2_VISION_CONFIG_PATH = Path("/root/autorig/ai_vision_animal_type_detect.json")
+RIG_V2_VISION_CONFIG_PATH = Path(
+    os.getenv("AUTORIG_VISION_CONFIG", "/root/autorig/ai_vision_animal_type_detect.json")
+)
 RIG_V2_ALLOWED_ANIMAL_TYPES = [
     "humanoid",
     "dog",

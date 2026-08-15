@@ -179,7 +179,10 @@ def check_stabilization_contract(report: Report) -> None:
         report.ok(f"video cache {video_cache_gb:.2f} GB")
 
 
-VISION_CONFIG = "/root/autorig/ai_vision_animal_type_detect.json"
+VISION_CONFIG = os.getenv(
+    "AUTORIG_VISION_CONFIG",
+    "/root/autorig/ai_vision_animal_type_detect.json",
+)
 BACKEND_ENV = "/etc/autorig-backend.env"
 
 
