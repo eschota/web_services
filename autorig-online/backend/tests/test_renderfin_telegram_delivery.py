@@ -16,6 +16,7 @@ from renderfin.models import (
     CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_SUBMITTED,
     CHARGEN_STAGE_TURNTABLE,
     CharacterGenJob,
     SentMessage,
@@ -490,7 +491,7 @@ class StartupSweepTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.addCleanup(self._dir.cleanup)
 
-    def test_everything_tracked_is_removed_whatever_its_kind_or_stage(self):
+    def test_everything_tracked_on_a_moving_job_is_removed_whatever_its_kind(self):
         async def scenario():
             deleted = []
 
@@ -520,6 +521,36 @@ class StartupSweepTests(unittest.TestCase):
             self.assertEqual(running.telegram_messages, [])
             # and the review must be owed again, or it is never re-posted
             self.assertEqual(pending_delivery(waiting), DELIVERY_IMAGE)
+
+        run(scenario())
+
+    def test_stopped_job_cards_are_not_reannounced_by_startup_sweep(self):
+        async def scenario():
+            deleted = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                deleted.append(int(dict(httpx.QueryParams(request.content.decode()))["message_id"]))
+                return httpx.Response(200, json={"ok": True, "result": True})
+
+            failed = _job(seq=1, stage=CHARGEN_STAGE_FAILED, error="boom")
+            failed.telegram_messages = [SentMessage(id=20, at=time.time(), kind=DELIVERY_FAILED)]
+            failed.delivered = {DELIVERY_FAILED: "boom"}
+            ready = _job(seq=2, stage=CHARGEN_STAGE_READY, video_url="https://x/a.mp4")
+            ready.telegram_messages = [SentMessage(id=21, at=time.time(), kind=DELIVERY_MODEL)]
+            ready.delivered = {DELIVERY_MODEL: "https://x/a.mp4"}
+            submitted = _job(seq=3, stage=CHARGEN_STAGE_SUBMITTED)
+            submitted.telegram_messages = [SentMessage(id=22, at=time.time(), kind=DELIVERY_MODEL)]
+
+            manager = _FakeManager([failed, ready, submitted])
+            client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            service = TelegramDeliveryService(manager, client=client)
+            with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"):
+                await service.sweep_private_chats()
+            await client.aclose()
+
+            self.assertEqual(deleted, [])
+            self.assertIsNone(pending_delivery(failed))
+            self.assertIsNone(pending_delivery(ready))
 
         run(scenario())
 

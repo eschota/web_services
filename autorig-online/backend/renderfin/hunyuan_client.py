@@ -328,14 +328,48 @@ async def wait_for_model(
     raise HunyuanClientError("generation timed out")
 
 
+def _rebase_on_worker(worker: Dict[str, str], url: str) -> str:
+    """Point a worker-advertised URL back at the worker's own origin."""
+    parts = urlsplit(url or "")
+    if not parts.path:
+        return ""
+    tail = parts.path + (f"?{parts.query}" if parts.query else "")
+    return f"{worker['url']}{tail}"
+
+
+_DOWNLOAD_ATTEMPTS = 3
+_DOWNLOAD_RETRY_SECONDS = 5.0
+
+
 async def download_model(
     client: httpx.AsyncClient, worker: Dict[str, str], model_url: str
 ) -> bytes:
-    resp = await client.get(
-        model_url, headers=_headers(worker), timeout=300.0, follow_redirects=True
-    )
-    if resp.status_code != 200:
-        raise HunyuanClientError(f"model download failed: HTTP {resp.status_code} {model_url}")
-    if len(resp.content) < 1024:
-        raise HunyuanClientError(f"model download suspiciously small: {len(resp.content)} bytes")
-    return resp.content
+    candidates = [u for u in (_rebase_on_worker(worker, model_url), model_url) if u]
+    if not candidates:
+        raise HunyuanClientError(f"model download failed: no usable url ({model_url!r})")
+    last_error = ""
+    for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        for url in candidates:
+            try:
+                resp = await client.get(
+                    url, headers=_headers(worker), timeout=300.0, follow_redirects=True
+                )
+            except Exception as exc:
+                last_error = f"model download failed: {exc} {url}"
+                continue
+            if resp.status_code != 200:
+                last_error = f"model download failed: HTTP {resp.status_code} {url}"
+                continue
+            if len(resp.content) < 1024:
+                last_error = (
+                    f"model download suspiciously small: {len(resp.content)} bytes"
+                )
+                continue
+            return resp.content
+        if attempt < _DOWNLOAD_ATTEMPTS:
+            print(
+                f"[Renderfin][Hunyuan] {worker['name']}: {last_error}; "
+                f"retrying ({attempt}/{_DOWNLOAD_ATTEMPTS})"
+            )
+            await asyncio.sleep(_DOWNLOAD_RETRY_SECONDS)
+    raise HunyuanClientError(last_error)

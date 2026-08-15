@@ -75,6 +75,47 @@ class StatusUrlRebaseTests(unittest.TestCase):
         run(scenario())
 
 
+class ModelDownloadTests(unittest.TestCase):
+    WORKER = {"name": "f13", "url": "http://127.0.0.1:15267", "token": "tok-f13"}
+    ADVERTISED = "https://converter-f13.freestock.online/api-converter-glb/output/x.glb"
+
+    def test_model_uses_worker_origin_before_public_facade(self):
+        async def scenario():
+            seen = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                seen.append(str(request.url))
+                return httpx.Response(200, content=b"G" * 2048)
+
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                data = await hunyuan_client.download_model(client, self.WORKER, self.ADVERTISED)
+            self.assertEqual(len(data), 2048)
+            self.assertEqual(
+                seen,
+                ["http://127.0.0.1:15267/api-converter-glb/output/x.glb"],
+            )
+
+        run(scenario())
+
+    def test_transient_502_is_retried(self):
+        async def scenario():
+            attempts = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                attempts.append(str(request.url))
+                if len(attempts) <= 2:
+                    return httpx.Response(502, text="bad gateway")
+                return httpx.Response(200, content=b"G" * 4096)
+
+            with patch.object(hunyuan_client, "_DOWNLOAD_RETRY_SECONDS", 0):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    data = await hunyuan_client.download_model(client, self.WORKER, self.ADVERTISED)
+            self.assertEqual(len(data), 4096)
+            self.assertEqual(attempts[1], self.ADVERTISED)
+
+        run(scenario())
+
+
 class WorkerSelectionTests(unittest.TestCase):
     def test_busy_worker_skipped_for_idle_one(self):
         async def scenario():
@@ -419,7 +460,9 @@ class InFlightCapTests(unittest.TestCase):
 
     def test_a_free_worker_is_still_offered(self):
         async def scenario():
-            with patch.object(config, "hunyuan_workers", lambda: POOL):
+            with patch.object(config, "hunyuan_workers", lambda: POOL), patch.object(
+                hunyuan_client, "RESERVED_FOR_OTHER_WORK", 0
+            ):
                 async with httpx.AsyncClient(transport=httpx.MockTransport(self._ok_handler)) as c:
                     worker = await hunyuan_client.pick_worker(c, {POOL[0]["name"]: 1})
             self.assertNotEqual(worker["name"], POOL[0]["name"])

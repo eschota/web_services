@@ -65,6 +65,11 @@ DELETE_WINDOW_SECONDS = 47 * 3600
 # job on. `submitted` is excluded too - the conversion is still running and
 # that message is the reply anchor for its completion notice.
 CLEANABLE_STAGES = (CHARGEN_STAGE_DISCARDED,)
+SWEEP_EXEMPT_STAGES = (
+    CHARGEN_STAGE_FAILED,
+    CHARGEN_STAGE_READY,
+    CHARGEN_STAGE_SUBMITTED,
+)
 
 
 def is_configured() -> bool:
@@ -637,6 +642,8 @@ class TelegramDeliveryService:
         removed = 0
         for job in list(self.manager.all_jobs()):
             if not job.telegram_messages or not is_private_chat(job.telegram_chat_id):
+                continue
+            if job.stage in SWEEP_EXEMPT_STAGES:
                 continue
             try:
                 removed += await self.cleanup_chat(job, sweep_all=True)
