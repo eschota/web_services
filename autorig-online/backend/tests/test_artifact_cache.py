@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import tempfile
 import unittest
