@@ -445,6 +445,14 @@ def journal_signature(unit: str, message: str) -> str:
     return hashlib.sha256(f"{unit}|{normalized}".encode("utf-8", "replace")).hexdigest()[:24]
 
 
+def is_journal_error(priority: int, message: str) -> bool:
+    # This heartbeat reports historical task status counts.  `Error: 3` in the
+    # payload is inventory, not a new exception in the service.
+    if "[renderfin][queue] heartbeat" in message.lower():
+        return False
+    return priority <= 3 or bool(ERROR_RE.search(message))
+
+
 def collect_journal_errors(
     state: Dict[str, Any], since: float, now: float, events: List[str], metrics: Dict[str, Any]
 ) -> None:
@@ -473,7 +481,7 @@ def collect_journal_errors(
             continue
         message = str(entry.get("MESSAGE") or "")
         priority = int(entry.get("PRIORITY") or 6)
-        if priority > 3 and not ERROR_RE.search(message):
+        if not is_journal_error(priority, message):
             continue
         unit = str(entry.get("_SYSTEMD_UNIT") or entry.get("SYSLOG_IDENTIFIER") or "journal")
         sample = f"{unit}: {scrub(message, 260)}"
