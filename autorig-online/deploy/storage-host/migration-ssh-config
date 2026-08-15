@@ -1,0 +1,18 @@
+Host autorig-migration-jump
+    HostName id-gw-01.freestock.online
+    User root
+    IdentityFile /srv/autorig/secrets/ssh/migration_transfer
+    IdentitiesOnly yes
+    BatchMode yes
+    StrictHostKeyChecking yes
+    UserKnownHostsFile /srv/autorig/secrets/ssh/migration_known_hosts
+
+Host autorig-migration-source
+    HostName 185.171.83.65
+    User root
+    ProxyJump autorig-migration-jump
+    IdentityFile /srv/autorig/secrets/ssh/migration_transfer
+    IdentitiesOnly yes
+    BatchMode yes
+    StrictHostKeyChecking yes
+    UserKnownHostsFile /srv/autorig/secrets/ssh/migration_known_hosts
