@@ -204,6 +204,46 @@ class DeliveryTickTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_owned_two_variant_images_are_uploaded_instead_of_remote_fetched(self):
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                if request.url.path.endswith("sendMediaGroup"):
+                    self.assertIn("multipart/form-data", request.headers["content-type"])
+                    body = request.content
+                    self.assertIn(b"attach://variant_a", body)
+                    self.assertIn(b"attach://variant_b", body)
+                    self.assertIn(b"variant-a-png", body)
+                    self.assertIn(b"variant-b-png", body)
+                    return httpx.Response(
+                        200,
+                        json={"ok": True, "result": [{"message_id": 500}, {"message_id": 501}]},
+                    )
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 502}})
+
+            with tempfile.TemporaryDirectory() as td:
+                render_dir = Path(td)
+                user_dir = render_dir / "autorig-bot"
+                user_dir.mkdir()
+                (user_dir / "a.png").write_bytes(b"variant-a-png")
+                (user_dir / "b.png").write_bytes(b"variant-b-png")
+                job = _job(
+                    stage=CHARGEN_STAGE_AWAITING_IMAGE,
+                    image_url="https://autorig.test/renderfin/render/autorig-bot/a.png",
+                    isolated_url="https://autorig.test/renderfin/render/autorig-bot/a.png",
+                    image_url_b="https://autorig.test/renderfin/render/autorig-bot/b.png",
+                    isolated_url_b="https://autorig.test/renderfin/render/autorig-bot/b.png",
+                )
+                service, manager, client = self._service([job], handler)
+                with patch.object(config, "TELEGRAM_BOT_TOKEN", "T"), patch.object(
+                    config, "PUBLIC_BASE_URL", "https://autorig.test/renderfin"
+                ), patch.object(config, "RENDER_DIR", render_dir):
+                    await service.tick()
+                await client.aclose()
+
+            self.assertEqual(manager.marks[0][1], DELIVERY_IMAGE)
+
+        run(scenario())
+
     def test_second_variant_alone_is_a_new_delivery(self):
         """A regenerated pair must not be suppressed by the first pair's marker."""
         job = _job(

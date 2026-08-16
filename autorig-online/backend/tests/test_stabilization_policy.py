@@ -125,7 +125,23 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         self.assertIn("AUTORIG_POSTMIGRATION_DURATION_HOURS=72", service)
         self.assertIn("AUTORIG_POSTMIGRATION_EMAIL_PROBE_HOURS=12", service)
         self.assertIn("SupplementaryGroups=systemd-journal", service)
+        self.assertIn(
+            "AUTORIG_HEALTHCHECK_CHARGEN_DB=/srv/autorig/data/var/renderfin/db/renderfin.db",
+            service,
+        )
         self.assertIn("OnUnitActiveSec=10min", timer)
+
+    def test_farm_tunnels_reconnect_independently(self):
+        source = (
+            Path(__file__).resolve().parents[2]
+            / "deploy"
+            / "renderfin-farm-tunnels"
+            / "farm-tunnels.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("reconnecting only this tunnel", source)
+        self.assertIn("ConnectTimeout", source)
+        self.assertIn("independent tunnel supervisors started", source)
+        self.assertNotIn("restarting all", source)
 
 
 if __name__ == "__main__":

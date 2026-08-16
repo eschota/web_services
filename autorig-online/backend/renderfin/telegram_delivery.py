@@ -20,9 +20,12 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import mimetypes
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
@@ -165,14 +168,51 @@ def format_stats(job: CharacterGenJob, stats: Optional[Dict[str, int]]) -> str:
     return f"#{seq} | 24ч {current} | {trend} {delta_str}"
 
 
-async def _call(client: httpx.AsyncClient, method: str, payload: Dict[str, Any]) -> Optional[dict]:
-    resp = await client.post(_api_url(method), data=payload, timeout=90.0)
+async def _call(
+    client: httpx.AsyncClient,
+    method: str,
+    payload: Dict[str, Any],
+    *,
+    files: Optional[Any] = None,
+) -> Optional[dict]:
+    resp = await client.post(
+        _api_url(method), data=payload, files=files, timeout=90.0
+    )
     if resp.status_code != 200:
         raise RuntimeError(f"{method} failed: HTTP {resp.status_code} {resp.text[:200]}")
     body = resp.json()
     if not body.get("ok"):
         raise RuntimeError(f"{method} rejected: {json.dumps(body)[:200]}")
     return body.get("result")
+
+
+def _local_render_file(url: str) -> Optional[Path]:
+    """Map one of our public Renderfin URLs back to its durable local file.
+
+    Telegram occasionally fails to fetch a perfectly healthy HTTPS image with
+    WEBPAGE_MEDIA_EMPTY. Uploading the owned file as multipart avoids that
+    external fetch, but the mapping must remain fail-closed against traversal.
+    """
+    prefix = f"{config.PUBLIC_BASE_URL.rstrip('/')}/render/"
+    if not (url or "").startswith(prefix):
+        return None
+    relative = unquote(urlsplit(url).path)
+    public_prefix = urlsplit(prefix).path
+    if not relative.startswith(public_prefix):
+        return None
+    relative = relative[len(public_prefix):].lstrip("/")
+    root = config.RENDER_DIR.resolve()
+    candidate = (root / relative).resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+def _upload_part(path: Path) -> tuple[str, bytes, str]:
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return path.name, path.read_bytes(), content_type
 
 
 async def _delete_message(client: httpx.AsyncClient, chat_id: int, message_id: int) -> None:
@@ -211,24 +251,33 @@ async def deliver_image_review(
 
     if job.image_url_b:
         # both styles in one album, then the choice under it
+        local_a = _local_render_file(job.image_url)
+        local_b = _local_render_file(job.image_url_b)
+        use_upload = local_a is not None and local_b is not None
         media = [
             {
                 "type": "photo",
-                "media": job.image_url,
+                "media": "attach://variant_a" if use_upload else job.image_url,
                 "caption": header + "\n1️⃣ базовый стиль",
                 "parse_mode": "HTML",
             },
             {
                 "type": "photo",
-                "media": job.image_url_b,
+                "media": "attach://variant_b" if use_upload else job.image_url_b,
                 "caption": "2️⃣ low-poly cartoon PBR",
                 "parse_mode": "HTML",
             },
         ]
+        files = None
+        if use_upload:
+            files = {
+                "variant_a": _upload_part(local_a),
+                "variant_b": _upload_part(local_b),
+            }
         album = await _call(client, "sendMediaGroup", {
             "chat_id": job.telegram_chat_id,
             "media": json.dumps(media),
-        })
+        }, files=files)
         result = await _call(client, "sendMessage", {
             "chat_id": job.telegram_chat_id,
             "text": (
@@ -241,13 +290,19 @@ async def deliver_image_review(
         })
         return _message_ids(album) + _message_ids(result)
 
-    result = await _call(client, "sendPhoto", {
+    payload = {
         "chat_id": job.telegram_chat_id,
         "photo": job.image_url,
         "caption": header + f'\n✂️ <a href="{html.escape(job.isolated_url)}">PNG с альфой</a>',
         "parse_mode": "HTML",
         "reply_markup": _image_markup(job.id),
-    })
+    }
+    local_image = _local_render_file(job.image_url)
+    files = None
+    if local_image is not None:
+        payload.pop("photo")
+        files = {"photo": _upload_part(local_image)}
+    result = await _call(client, "sendPhoto", payload, files=files)
     return _message_ids(result)
 
 
