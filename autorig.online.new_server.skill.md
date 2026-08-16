@@ -1,6 +1,6 @@
 # AutoRig.online на новом storage-сервере
 
-Актуально на: **2026-08-15**  
+Актуально на: **2026-08-16**
 Назначение: production runbook и контекст для оператора/AI-агента после переноса AutoRig.online.  
 Основной репозиторий: `https://github.com/eschota/web_services.git`  
 Converter-репозиторий: `https://github.com/eschota/autorig.online.git`
@@ -20,11 +20,13 @@ durable artifact cache и отдаются nginx с HTTP Range `200/206`.
 
 - production host: `way-fr` / `37.187.57.177`;
 - корневой RAID: `/dev/md3`, 878 ГБ, при последней проверке свободно около
-  351 ГБ;
-- runtime release: `d49035e31eea9ff3aa815f1662a48c5d74e7caab`;
-- migration release tag: `v0.02.004`;
+  296 ГБ;
+- post-migration runtime hotfix: `ced91f2eba0467b2f090b0e2b8d39012609abd69`;
+- migration release tag: `v0.02.004`, post-migration stabilization tag:
+  `v0.02.007`;
 - backend, Renderfin, Telegram, tunnels и nginx активны;
-- Hunyuan pool: F1, F2, F11, F13; F7 отключён;
+- Hunyuan pool: F1, F2, F11, F13; туннель F7 снова доступен, но F7 не входит
+  в основной Hunyuan pool;
 - authoritative DNS для `@` и `www`: `37.187.57.177`, TTL 300;
 - старый AutoRig остановлен и временно сохранён только как rollback/reference
   source.
@@ -345,6 +347,31 @@ Commit `d49035e31eea9ff3aa815f1662a48c5d74e7caab` добавляет HOME в uni
 дожидается завершения Chrome, повторяет удаление profile и не отбрасывает уже
 проверенный MP4 из-за ошибки disposable cleanup.
 
+### Стабилизация 2026-08-16
+
+Массовая недоступность farm оказалась не одновременным падением всех worker'ов,
+а каскадным рестартом общего SSH tunnel supervisor: потеря одного соединения
+завершала unit и роняла остальные шесть исправных туннелей. Начиная с
+`a359849a6e9f67a8aa170c1bcf1fbb8fefe50c5f` каждый туннель имеет собственный
+reconnect loop с backoff 5–60 секунд. Проверка принудительным завершением только
+F7 подтвердила, что F7 восстановился через 5 секунд, PID F1 не изменился, а
+systemd unit не перезапускался.
+
+Renderfin Telegram delivery теперь загружает принадлежащие storage host PNG как
+multipart-файлы, а не просит Telegram скачать их по публичному URL. Это устраняет
+повторяющийся `WEBPAGE_MEDIA_EMPTY`; path traversal и чужие URL не допускаются.
+
+Оба healthcheck unit используют только live Renderfin DB:
+`/srv/autorig/data/var/renderfin/db/renderfin.db`. Snapshot в `data/db` больше не
+создаёт ложные stalled alerts. Обычные зелёные heartbeat-строки с историческим
+`failed=N` не классифицируются как новые ошибки.
+
+Глобальный nginx resolver заменён с отказавшего OpenDNS `208.67.222.222` на
+локальный systemd-resolved `127.0.0.53 valid=300s ipv6=off`. Перед изменением
+сохранён `/etc/nginx/nginx.conf.before-autorig-ocsp-20260816`; после `nginx -t`
+и reload AutoRig, gallery и `way.qwertystock.com/map` отвечали HTTP 200, а
+повторяющийся `ocsp.sectigo.com ... Operation refused` прекратился.
+
 ### Converter asset drift после migration smoke
 
 Первый end-to-end smoke выявил общий blocker на F1/F2/F11/F13:
@@ -482,28 +509,46 @@ sqlite3.connect(
 
 ## Мониторинг после переноса
 
+Первые трое суток после стабилизации контролирует постоянный stateful monitor.
 Файлы:
 
 ```text
-/srv/autorig/monitoring/migration_24h_monitor.py
-/srv/autorig/monitoring/migration-24h.jsonl
+/srv/autorig/current/autorig-online/deploy/healthcheck/postmigration_monitor.py
+/var/lib/autorig-postmigration-monitor/postmigration-72h.json
 ```
 
 Units:
 
 ```text
-autorig-migration-monitor.timer
-autorig-migration-monitor.service
-autorig-migration-monitor-stop.timer
+autorig-storage-postmigration-monitor.timer
+autorig-storage-postmigration-monitor.service
 ```
 
-24-часовой monitor проверяет site/map, DNS, release, services, listeners,
-disk, DB quick_check, F7 dispatches, artifact cache failures, Unity
-missing-video errors, YouTube rolling budget и viewer Range. Stop timer должен
-отключить hourly monitor после окна; постоянный healthcheck остаётся отдельно.
+Monitor проверяет site/map, DNS, services, listeners, disk reserve, обе SQLite
+DB (`quick_check`), живую Renderfin queue, farm tunnels/workers, artifact cache,
+Unity missing-video errors, YouTube rolling budget, viewer Range, Telegram и
+completion email ledger. Новые сигнатуры отправляются один раз, активные
+неисправности повторяются до устранения.
 
-После нового hotfix обновлять expected release SHA monitor’а, иначе он будет
-ложно сообщать старый runtime release.
+Отдельный постоянный healthcheck остаётся включён через
+`autorig-storage-healthcheck.timer`; его Renderfin DB path должен совпадать с
+путём monitor'а.
+
+### Completion email
+
+Письмо считается успешно отправленным только если в
+`task_completion_emails` есть `status=sent`, `attempt_count`, непустой
+`provider_message_id` и отсутствует `last_error`. Monitor выполняет отдельный
+синтетический probe не чаще одного раза в 12 часов. Проверять только ledger и
+сервисные логи без вывода адреса пользователя или API token.
+
+После инцидента 16 августа три последовательных реальных completion email
+(`bac403c6…`, `6c3bffd0…`, `c9599804…`) отправились через Resend с первой
+попытки и provider message ID. На момент проверки все 13 ledger-записей имели
+`sent`, незавершённых email не было.
+
+После нового hotfix проверять, что оба unit читают скрипты через
+`/srv/autorig/current`, а не из устаревшего release или migration snapshot.
 
 ## Старый VPS и rollback
 
