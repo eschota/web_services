@@ -448,7 +448,14 @@ def journal_signature(unit: str, message: str) -> str:
 def is_journal_error(priority: int, message: str) -> bool:
     # This heartbeat reports historical task status counts.  `Error: 3` in the
     # payload is inventory, not a new exception in the service.
-    if "[renderfin][queue] heartbeat" in message.lower():
+    normalized = message.strip().lower()
+    if "[renderfin][queue] heartbeat" in normalized:
+        return False
+    # The six-hour healthcheck prints successful inventory lines such as
+    # "✅ generation jobs: failed=16".  The count is historical state and the
+    # leading verdict is authoritative; do not turn a healthy report into an
+    # incident merely because one counter is named "failed".
+    if normalized.startswith("✅"):
         return False
     return priority <= 3 or bool(ERROR_RE.search(message))
 

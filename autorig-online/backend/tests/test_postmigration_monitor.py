@@ -143,6 +143,12 @@ class PostmigrationMonitorTests(unittest.TestCase):
     def test_renderfin_heartbeat_error_count_is_not_an_exception(self):
         heartbeat = "[Renderfin][Queue] heartbeat tick=3600 tasks={'Done': 20, 'Error': 3}"
         self.assertFalse(monitor.is_journal_error(6, heartbeat))
+        self.assertFalse(
+            monitor.is_journal_error(
+                6,
+                "✅ generation jobs: awaiting_image_approval=1, failed=16, ready=180",
+            )
+        )
         self.assertTrue(monitor.is_journal_error(6, "[Renderfin] worker failed"))
         self.assertTrue(monitor.is_journal_error(3, "nginx resolver warning"))
 
