@@ -12,7 +12,7 @@ Slice=autorig.slice
 WorkingDirectory=/srv/autorig/current/autorig-online/backend
 Environment="AUTORIG_HEALTHCHECK_RENDERFIN_URL=http://127.0.0.1:8210/renderfin"
 Environment="AUTORIG_HEALTHCHECK_SERVICES=autorig-storage,autorig-storage-renderfin,autorig-storage-telegram,autorig-storage-tunnels"
-Environment="AUTORIG_HEALTHCHECK_CHARGEN_DB=/srv/autorig/data/db/renderfin.db"
+Environment="AUTORIG_HEALTHCHECK_CHARGEN_DB=/srv/autorig/data/var/renderfin/db/renderfin.db"
 Environment="AUTORIG_HEALTHCHECK_DB=/srv/autorig/data/db/autorig.db"
 Environment="AUTORIG_HEALTHCHECK_VIDEO_CACHE=/srv/autorig/data/var/videos"
 Environment="AUTORIG_HEALTHCHECK_BACKEND_ENV=/srv/autorig/secrets/backend.env"

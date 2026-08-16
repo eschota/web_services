@@ -131,6 +131,14 @@ class YoutubeWindowSourceContractTests(unittest.TestCase):
         )
         self.assertIn("OnUnitActiveSec=10min", timer)
 
+        healthcheck_service = (storage_host / "autorig-storage-healthcheck.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "AUTORIG_HEALTHCHECK_CHARGEN_DB=/srv/autorig/data/var/renderfin/db/renderfin.db",
+            healthcheck_service,
+        )
+
     def test_farm_tunnels_reconnect_independently(self):
         source = (
             Path(__file__).resolve().parents[2]
