@@ -135,6 +135,43 @@ class _BufferedRangeClient:
 
 
 class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cached_files_quotes_durable_urls_without_local_task_directory(self):
+        task = SimpleNamespace(
+            id="durable-only-task",
+            guid=GUID,
+            status="done",
+            artifact_cache_status="ready",
+        )
+
+        def cached_entry(_task_id, *, source_url=None, role=None):
+            if source_url:
+                return {"size": 123}
+            if role == "full_bundle":
+                return {"size": 456}
+            return None
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(main, "TASK_CACHE_DIR", Path(tmp)),
+            patch.object(main, "get_task_by_id", AsyncMock(return_value=task)),
+            patch.object(main, "_require_task_download_access"),
+            patch.object(main, "_task_primary_download_names", return_value=set()),
+            patch.object(main, "_materialize_task_recovery_files", return_value={}),
+            patch.object(main, "_task_primary_download_urls", return_value=["https://worker.invalid/model"]),
+            patch.object(main, "lookup_cached_artifact", side_effect=cached_entry),
+            patch.object(main, "_clean_filename_for_cache", return_value="model file.zip"),
+        ):
+            result = await main.api_task_cached_files(
+                task.id,
+                _request(),
+                user=SimpleNamespace(email="admin@example.com"),
+                db=object(),
+            )
+
+        self.assertTrue(result["cached"])
+        self.assertEqual(result["files"][0]["url"], "/api/file/durable-only-task/download/model%20file.zip")
+        self.assertEqual(result["bundle_total_size"], 456)
+
     def test_single_range_parser_supports_full_explicit_and_suffix_requests(self):
         self.assertEqual(main._parse_single_http_byte_range(None, 10), (0, 9, False))
         self.assertEqual(main._parse_single_http_byte_range("bytes=2-5", 10), (2, 5, True))

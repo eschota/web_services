@@ -10253,6 +10253,8 @@ async def api_task_cached_files(
     Returns files from /static/tasks/{task_id}/ if cached,
     otherwise triggers caching and returns status.
     """
+    from urllib.parse import quote
+
     task = await get_task_by_id(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -10267,7 +10269,6 @@ async def api_task_cached_files(
     if cache_dir.exists():
         files = []
         total_size = 0
-        from urllib.parse import quote
         for f in sorted(cache_dir.iterdir()):
             if f.is_file() and f.name in downloadable_names and not f.name.endswith('.tmp'):
                 size = f.stat().st_size
