@@ -880,6 +880,36 @@ class EmptyFleetTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_one_dns_failure_cools_the_worker_for_the_whole_batch(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    first = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                    await manager._handle_stage_error(
+                        first,
+                        hunyuan_client.WorkerInputFetchError(
+                            "f13", "f13 cannot resolve the input image host"
+                        ),
+                    )
+                    self.assertGreater(
+                        manager._input_fetch_worker_cooldowns.get("f13", 0),
+                        time.time(),
+                    )
+                    self.assertGreater(
+                        first.hunyuan_worker_cooldowns.get("f13", 0),
+                        time.time(),
+                    )
+                    self.assertEqual(first.attempts, {})
+                    await self._park(manager, first)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_a_live_job_gets_its_attempt_debt_back_once_and_only_once(self):
         """A survivor of a farm fault must not be charged for it either.
 

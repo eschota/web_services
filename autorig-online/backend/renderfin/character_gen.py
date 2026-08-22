@@ -145,6 +145,11 @@ class CharacterGenManager:
         self._runners: Dict[str, asyncio.Task] = {}
         # Serialises submission so a slot count cannot be read stale.
         self._submit_lock = asyncio.Lock()
+        # Worker-side DNS is a box property, not a model property. Persisted
+        # per-job cooldowns protect retries after a restart; this shared map
+        # prevents every member of a newly queued collection from first
+        # rediscovering the same broken resolver.
+        self._input_fetch_worker_cooldowns: Dict[str, float] = {}
         self._retry_task: Optional[asyncio.Task] = None
         self._stopped = asyncio.Event()
 
@@ -794,8 +799,10 @@ class CharacterGenManager:
             # box for the job so the least-loaded picker does not select its
             # broken DNS resolver again on every retry.
             cooldowns = dict(job.hunyuan_worker_cooldowns or {})
-            cooldowns[exc.worker_name] = time.time() + INPUT_FETCH_WORKER_COOLDOWN_SECONDS
+            cooldown_until = time.time() + INPUT_FETCH_WORKER_COOLDOWN_SECONDS
+            cooldowns[exc.worker_name] = cooldown_until
             job.hunyuan_worker_cooldowns = cooldowns
+            self._input_fetch_worker_cooldowns[exc.worker_name] = cooldown_until
             job.hunyuan_task_id = ""
             job.hunyuan_worker = ""
             job.retry_at = time.time() + RETRY_BACKOFF_SECONDS[0]
@@ -1028,7 +1035,10 @@ class CharacterGenManager:
                         in_flight=self.in_flight_by_worker(),
                         excluded={
                             name
-                            for name, until in (job.hunyuan_worker_cooldowns or {}).items()
+                            for name, until in {
+                                **self._input_fetch_worker_cooldowns,
+                                **(job.hunyuan_worker_cooldowns or {}),
+                            }.items()
                             if float(until or 0) > time.time()
                         },
                     )
