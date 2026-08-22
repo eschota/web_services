@@ -126,6 +126,33 @@ async def _idle_job(manager, **fields):
 
 
 class HunyuanConverterPathTests(unittest.TestCase):
+    def test_unreadable_worker_registry_parks_without_comfy_backlog(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                queue = _InstantQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                manager = CharacterGenManager(queue, db_path=config.DB_PATH)
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        isolated_url="https://autorig.online/render/source.png",
+                    )
+                    with patch.object(config, "hunyuan_workers", return_value=[]), patch.object(
+                        config, "hunyuan_workers_last_error", return_value="permission denied"
+                    ):
+                        with self.assertRaises(hunyuan_client.NoWorkerAvailable):
+                            await manager._stage_hunyuan(job)
+                    self.assertEqual(queue.enqueued, [])
+                    self.assertEqual(job.hunyuan_task_id, "")
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
     def test_converter_api_used_when_token_configured(self):
         import httpx
 

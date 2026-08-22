@@ -35,11 +35,12 @@ def _looks_like_server(body: Dict[str, Any]) -> bool:
 
 @router.get("/health")
 async def health(request: Request) -> Dict[str, Any]:
-    from . import hunyuan_client
+    from . import config, hunyuan_client
 
     queue = _queue(request)
     tasks = queue.all_tasks()
     pool = hunyuan_client.workers()
+    config_error = bool(config.hunyuan_workers_last_error())
     dedicated = [worker["name"] for worker in pool if worker.get("pool") == "dedicated"]
     shared = [worker["name"] for worker in pool if worker.get("pool") != "dedicated"]
     return {
@@ -54,7 +55,12 @@ async def health(request: Request) -> Dict[str, Any]:
             "shared_reserved": hunyuan_client.RESERVED_FOR_OTHER_WORK,
             "ordinary_conversion_waiting": hunyuan_client.ordinary_conversion_waiting(),
         },
-        "hunyuan_path": "converter-api" if pool else "comfy-fallback",
+        "hunyuan_path": (
+            "converter-api" if pool else
+            "parked-config-error" if config_error else
+            "comfy-fallback"
+        ),
+        "hunyuan_config_error": config_error,
         "active_jobs": len(_chargen(request).active_jobs()),
     }
 

@@ -53,6 +53,18 @@ HUNYUAN_WORKERS = [
     if u.strip()
 ]
 HUNYUAN_API_TOKEN = os.getenv("HUNYUAN_API_TOKEN", "").strip()
+_HUNYUAN_WORKERS_LAST_ERROR = ""
+
+
+def hunyuan_workers_last_error() -> str:
+    """Return the current farm-config resolution error, if any.
+
+    An unreadable authoritative file is different from a deliberately absent
+    farm.  Character generation must park in the central queue in that case;
+    silently falling back to ComfyUI creates one local image_to_3d task per
+    waiting character and defeats the Hunyuan admission controls.
+    """
+    return _HUNYUAN_WORKERS_LAST_ERROR
 
 
 def hunyuan_workers() -> list[dict]:
@@ -62,6 +74,8 @@ def hunyuan_workers() -> list[dict]:
     fallback and are protected by the ordinary-conversion admission checks in
     :mod:`renderfin.hunyuan_client`.
     """
+    global _HUNYUAN_WORKERS_LAST_ERROR
+    _HUNYUAN_WORKERS_LAST_ERROR = ""
     workers: list[dict] = []
     physical_nodes: set[str] = set()
     try:
@@ -118,6 +132,7 @@ def hunyuan_workers() -> list[dict]:
                         }
                     )
     except Exception as exc:  # a broken file must not take the service down
+        _HUNYUAN_WORKERS_LAST_ERROR = str(exc)
         print(f"[Renderfin] hunyuan workers file unreadable: {exc}")
     if workers:
         return workers

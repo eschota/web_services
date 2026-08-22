@@ -998,6 +998,11 @@ class CharacterGenManager:
                 + ", ".join(w["name"] for w in pool)
             )
             await self._stage_hunyuan_converter(job)
+        elif config.hunyuan_workers_last_error():
+            raise hunyuan_client.NoWorkerAvailable(
+                "Hunyuan worker configuration is temporarily unavailable; "
+                "keeping the job in the central queue"
+            )
         else:
             print(
                 f"[Renderfin][CharGen] job {job.id} 3D via ComfyUI fallback "

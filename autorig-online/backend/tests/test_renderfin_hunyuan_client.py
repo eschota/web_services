@@ -517,6 +517,21 @@ class ParkedWorkerTests(unittest.TestCase):
         ])
         self.assertEqual([w["name"] for w in pool], ["f13"])
 
+    def test_unreadable_authoritative_file_records_resolution_error(self):
+        import tempfile
+        from pathlib import Path as _P
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _P(tmp) / "workers.json"
+            path.write_text("[]", encoding="utf-8")
+            with patch.object(config, "HUNYUAN_WORKERS_FILE", path), patch.object(
+                _P, "read_text", side_effect=PermissionError("denied")
+            ):
+                self.assertEqual(config.hunyuan_workers(), [])
+                self.assertIn("denied", config.hunyuan_workers_last_error())
+        config.hunyuan_workers()
+        self.assertEqual(config.hunyuan_workers_last_error(), "")
+
     def test_the_disabled_alias_works_too(self):
         pool = self._pool_from([
             {"name": "f7", "url": "https://f7", "token": "t", "disabled": True},
