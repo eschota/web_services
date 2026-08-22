@@ -1,0 +1,26 @@
+[Unit]
+Description=AutoRig Raptor Hunyuan SSH tunnel (storage host)
+After=network-online.target
+Wants=network-online.target
+Before=autorig-storage-renderfin.service
+RequiresMountsFor=/srv/autorig
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+Environment="HOME=/srv/autorig/home"
+Environment="FARM_TUNNELS_CONF=/srv/autorig/secrets/raptor-tunnel.conf"
+Environment="FARM_TUNNELS_KEY=/srv/autorig/secrets/ssh/renderfin_farm_tunnel"
+ExecStart=/srv/autorig/current/autorig-online/deploy/renderfin-farm-tunnels/farm-tunnels.sh
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/home
+
+[Install]
+WantedBy=multi-user.target
