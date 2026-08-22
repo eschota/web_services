@@ -1,5 +1,5 @@
 """Flux render prompt generation + body-type mask selection for the Telegram
-"Сгенерировать" button.
+"Коллекция ×15" button and legacy single-character callers.
 
 Shared by the bot process and the backend (both run from /root/autorig-online/backend).
 LLM path mirrors idle_ltx_vision.py: OpenAI first, OpenRouter fallback, instruction
@@ -12,9 +12,9 @@ import base64
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -26,7 +26,11 @@ RENDERFIN_INTERNAL_URL = os.getenv(
 ).rstrip("/")
 
 _INSTRUCTION_PATH = Path(__file__).resolve().parent / "render_prompt_instruction.json"
+_COLLECTION_INSTRUCTION_PATH = (
+    Path(__file__).resolve().parent / "render_collection_prompt_instruction.json"
+)
 PREFLIGHT_RENDER_DIR = Path("/var/autorig/preflight-renders")
+COLLECTION_SIZE = 15
 
 BODY_TYPES = ("normal", "long", "fat", "dwarf", "goblin")
 
@@ -56,6 +60,26 @@ class RenderGenPlan:
     prompt_b: str = ""
 
 
+@dataclass
+class CollectionMemberPlan:
+    index: int
+    title: str
+    prompt: str
+    negative_prompt: str
+    body_type: str
+    mask_url: str
+
+
+@dataclass
+class RenderCollectionPlan:
+    collection_guid: str
+    collection_title: str
+    collection_description: str
+    collection_tags: List[str] = field(default_factory=list)
+    members: List[CollectionMemberPlan] = field(default_factory=list)
+    source: str = "llm"  # "llm" | "template"
+
+
 def mask_url_for_body_type(body_type: str) -> str:
     body_type = (body_type or "normal").strip().lower()
     if body_type not in BODY_TYPES:
@@ -78,6 +102,16 @@ def _load_instruction() -> str:
         return str(data.get("instruction") or "").strip()
     except Exception as exc:
         print(f"[RenderPrompting] instruction load failed: {exc}")
+        return ""
+
+
+def _load_collection_instruction() -> str:
+    """Instruction for one coherent, diverse 15-character roster."""
+    try:
+        data = json.loads(_COLLECTION_INSTRUCTION_PATH.read_text(encoding="utf-8"))
+        return str(data.get("instruction") or "").strip()
+    except Exception as exc:
+        print(f"[RenderPrompting] collection instruction load failed: {exc}")
         return ""
 
 
@@ -301,6 +335,154 @@ def _plan_from_llm_json(parsed: Dict[str, Any]) -> Optional[RenderGenPlan]:
     )
 
 
+def _clean_collection_tags(value: Any) -> List[str]:
+    if isinstance(value, str):
+        raw = re.split(r"[,;|]", value)
+    elif isinstance(value, list):
+        raw = value
+    else:
+        raw = []
+    result: List[str] = []
+    seen = set()
+    for item in raw:
+        tag = re.sub(r"\s+", " ", str(item or "").strip()).strip("# ,.;")
+        key = tag.casefold()
+        if len(tag) < 2 or key in seen:
+            continue
+        seen.add(key)
+        result.append(tag[:64])
+        if len(result) >= 20:
+            break
+    return result
+
+
+def _collection_from_llm_json(
+    parsed: Dict[str, Any], *, collection_guid: str
+) -> Optional[RenderCollectionPlan]:
+    """Validate the all-at-once collection response and compose render prompts."""
+    title = re.sub(r"\s+", " ", str(parsed.get("collection_title") or "").strip())
+    description = re.sub(
+        r"\s+", " ", str(parsed.get("collection_description") or "").strip()
+    )
+    tags = _clean_collection_tags(parsed.get("collection_tags"))
+    raw_members = parsed.get("members")
+    if (
+        len(title) < 3
+        or len(description) < 20
+        or len(tags) < 5
+        or not isinstance(raw_members, list)
+        or len(raw_members) != COLLECTION_SIZE
+    ):
+        return None
+
+    members: List[CollectionMemberPlan] = []
+    seen_titles = set()
+    seen_subjects = set()
+    for index, raw in enumerate(raw_members, start=1):
+        if not isinstance(raw, dict):
+            return None
+        member_title = re.sub(r"\s+", " ", str(raw.get("title") or "").strip())
+        subject = re.sub(r"\s+", " ", str(raw.get("subject") or "").strip())
+        outfit = re.sub(r"\s+", " ", str(raw.get("outfit") or "").strip())
+        body_type = str(raw.get("body_type") or "normal").strip().lower()
+        if body_type not in BODY_TYPES:
+            body_type = "normal"
+        title_key = member_title.casefold()
+        subject_key = subject.casefold()
+        if (
+            len(member_title) < 3
+            or len(subject) < 15
+            or title_key in seen_titles
+            or subject_key in seen_subjects
+        ):
+            return None
+        seen_titles.add(title_key)
+        seen_subjects.add(subject_key)
+        members.append(
+            CollectionMemberPlan(
+                index=index,
+                title=member_title[:120],
+                prompt=compose_prompt(subject, outfit),
+                negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+                body_type=body_type,
+                mask_url=mask_url_for_body_type(body_type),
+            )
+        )
+
+    return RenderCollectionPlan(
+        collection_guid=collection_guid,
+        collection_title=title[:256],
+        collection_description=description[:2000],
+        collection_tags=tags,
+        members=members,
+        source="llm",
+    )
+
+
+_FALLBACK_ROSTER = (
+    ("Lead Woman", "an adult woman lead with an athletic balanced build", "normal"),
+    ("Lead Man", "an adult man guardian with broad shoulders", "normal"),
+    ("Young Woman", "a young adult woman scout with a slim agile build", "goblin"),
+    ("Young Man", "a young adult man artisan with a lean practical build", "normal"),
+    ("Grandmother", "an elderly woman keeper with a compact sturdy build", "dwarf"),
+    ("Grandfather", "an elderly man scholar with a tall weathered build", "long"),
+    ("Teen Girl", "a teenage girl courier with a light energetic build", "normal"),
+    ("Teen Boy", "a teenage boy apprentice with a short wiry build", "goblin"),
+    ("Little Hero", "a childlike mascot hero with safe simplified proportions", "dwarf"),
+    ("Heavy Veteran", "a heavy-set veteran with a powerful rounded silhouette", "fat"),
+    ("Tall Watcher", "a very tall slender watcher with elongated proportions", "long"),
+    ("Compact Mechanic", "a short stocky mechanic with oversized work gloves", "dwarf"),
+    ("Weathered Wanderer", "a weathered nonbinary wanderer with an asymmetric outfit", "normal"),
+    ("Anthropomorphic Companion", "an upright anthropomorphic animal companion", "goblin"),
+    ("Mystic Elder", "an ageless mystical counterpart with a distinct regal silhouette", "normal"),
+)
+
+
+def build_template_collection(
+    meta: Dict[str, str], *, collection_guid: str
+) -> RenderCollectionPlan:
+    """Deterministic emergency roster; normal production uses the vision LLM."""
+    anchor = _clean_metadata_text(
+        meta.get("title") or meta.get("animal_type") or meta.get("detector") or "stylized character"
+    ) or "stylized character"
+    detail = _clean_metadata_text(
+        f"{meta.get('description', '')} {meta.get('keywords', '')}"
+    )[:140]
+    members: List[CollectionMemberPlan] = []
+    for index, (title, archetype, body_type) in enumerate(_FALLBACK_ROSTER, start=1):
+        subject = f"{archetype}, belonging to the same {anchor} themed world"
+        if detail:
+            subject += f", sharing these visual motifs: {detail}"
+        outfit = (
+            f"a unique role-appropriate variation of the {anchor} collection palette, "
+            "with compact opaque accessories and empty hands"
+        )
+        members.append(
+            CollectionMemberPlan(
+                index=index,
+                title=f"{anchor.title()} — {title}"[:120],
+                prompt=compose_prompt(subject, outfit),
+                negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+                body_type=body_type,
+                mask_url=mask_url_for_body_type(body_type),
+            )
+        )
+    return RenderCollectionPlan(
+        collection_guid=collection_guid,
+        collection_title=f"{anchor.title()} Character Collection"[:256],
+        collection_description=(
+            f"A cohesive collection of {COLLECTION_SIZE} distinct characters derived from the "
+            f"core theme, world and visual language of {anchor}, with varied ages, gender "
+            "presentation, roles and silhouettes."
+        ),
+        collection_tags=_clean_collection_tags(
+            [anchor, "character collection", "stylized", "3D", "game character", "themed pack"]
+        ),
+        members=members,
+        source="template",
+    )
+
+
 VISION_CONFIG_PATH = Path(
     os.getenv("AUTORIG_VISION_CONFIG", "/root/autorig/ai_vision_animal_type_detect.json")
 )
@@ -400,6 +582,73 @@ async def _llm_generate(
     return None
 
 
+async def _llm_generate_collection(
+    meta: Dict[str, str],
+    poster_data_url: Optional[str],
+    *,
+    collection_guid: str,
+) -> Optional[RenderCollectionPlan]:
+    """Ask vision once for the collection concept, metadata and all 15 members."""
+    instruction = _load_collection_instruction()
+    if not instruction:
+        return None
+    meta_text = "\n".join(f"{key}: {value}" for key, value in meta.items()) or "(no metadata)"
+    content: Any = [
+        {
+            "type": "text",
+            "text": f"{instruction}\n\nReference model metadata:\n{meta_text}",
+        }
+    ]
+    if poster_data_url:
+        content.append(
+            {"type": "image_url", "image_url": {"url": poster_data_url, "detail": "high"}}
+        )
+
+    attempts = _llm_attempts()
+    if not attempts:
+        print("[RenderPrompting] no LLM credentials; using collection template")
+        return None
+
+    for api_url, api_key, model, extra_headers in attempts:
+        payload = {
+            "model": model,
+            "temperature": 0.65,
+            "max_tokens": 6000,
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": content}],
+        }
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers.update(extra_headers)
+        try:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                resp = await client.post(api_url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                print(
+                    f"[RenderPrompting] collection LLM HTTP {resp.status_code}: "
+                    f"{resp.text[:200]}"
+                )
+                continue
+            data = resp.json()
+            raw = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "")
+            if isinstance(raw, list):
+                raw = " ".join(
+                    str(part.get("text") or part) if isinstance(part, dict) else str(part)
+                    for part in raw
+                )
+            parsed = _extract_json_object(str(raw))
+            plan = (
+                _collection_from_llm_json(parsed, collection_guid=collection_guid)
+                if parsed
+                else None
+            )
+            if plan is not None:
+                return plan
+            print("[RenderPrompting] collection LLM response failed the 15-member contract")
+        except Exception as exc:
+            print(f"[RenderPrompting] collection LLM call failed ({model}): {exc}")
+    return None
+
+
 async def build_render_request(task_id: str) -> RenderGenPlan:
     """Load task metadata and produce the Flux prompt + body-type mask plan."""
     task = None
@@ -422,6 +671,34 @@ async def build_render_request(task_id: str) -> RenderGenPlan:
     plan = await _llm_generate(meta, poster)
     if plan is None:
         plan = build_template_plan(meta)
+    return plan
+
+
+async def build_render_collection(task_id: str) -> RenderCollectionPlan:
+    """Build one durable collection id and all 15 member prompts in one LLM call."""
+    import uuid
+
+    task = None
+    try:
+        from database import AsyncSessionLocal, Task
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Task).where(Task.id == task_id))
+            task = result.scalar_one_or_none()
+    except Exception as exc:
+        print(f"[RenderPrompting] task load failed for collection {task_id}: {exc}")
+
+    meta = _task_metadata_summary(task) if task is not None else {}
+    poster = _poster_data_url(task_id)
+    collection_guid = str(uuid.uuid4())
+    plan = await _llm_generate_collection(
+        meta,
+        poster,
+        collection_guid=collection_guid,
+    )
+    if plan is None:
+        plan = build_template_collection(meta, collection_guid=collection_guid)
     return plan
 
 
@@ -452,6 +729,57 @@ async def start_character_gen(
     if not job_id:
         raise RuntimeError("character-gen start returned no job_id")
     return job_id
+
+
+async def start_character_collection(
+    plan: RenderCollectionPlan,
+    *,
+    source_task_id: str = "",
+    user_name: str = "autorig-bot",
+    telegram_chat_id: int = 0,
+    telegram_status_message_id: int = 0,
+) -> List[str]:
+    """Atomically hand one 15-member collection to the persisted render queue."""
+    body = {
+        "collection_guid": plan.collection_guid,
+        "collection_title": plan.collection_title,
+        "collection_description": plan.collection_description,
+        "collection_tags": list(plan.collection_tags),
+        "user_name": user_name,
+        "source_task_id": source_task_id,
+        "telegram_chat_id": telegram_chat_id,
+        "telegram_status_message_id": telegram_status_message_id,
+        "members": [
+            {
+                "index": member.index,
+                "title": member.title,
+                "prompt": member.prompt,
+                # Deliberately one render per member. There is no useful
+                # 15-times approval step; a coherent collection is the choice.
+                "prompt_b": "",
+                "negative_prompt": member.negative_prompt,
+                "mask_url": member.mask_url,
+            }
+            for member in plan.members
+        ],
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"{RENDERFIN_INTERNAL_URL}/api-character-gen/collection",
+            json=body,
+        )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"character collection start failed: HTTP {resp.status_code} {resp.text[:300]}"
+        )
+    payload = resp.json()
+    job_ids = [str(item.get("job_id") or "") for item in payload.get("jobs") or []]
+    job_ids = [job_id for job_id in job_ids if job_id]
+    if len(job_ids) != COLLECTION_SIZE:
+        raise RuntimeError(
+            f"character collection start returned {len(job_ids)}/{COLLECTION_SIZE} jobs"
+        )
+    return job_ids
 
 
 async def start_character_gen_from_image(

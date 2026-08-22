@@ -59,6 +59,14 @@ class WorkerUnreachable(RuntimeError):
     """
 
 
+class WorkerInputFetchError(WorkerUnreachable):
+    """One worker accepted our route but cannot resolve the public input host."""
+
+    def __init__(self, worker_name: str, message: str):
+        super().__init__(message)
+        self.worker_name = worker_name
+
+
 # Poll failures are counted, not tolerated forever: at a 10s poll this is five
 # minutes, long enough to sit out a tunnel restart and short enough that a real
 # outage frees the slot instead of pinning it for the whole 4h ceiling.
@@ -153,7 +161,9 @@ def _load_score(status: Dict[str, Any], hunyuan: Dict[str, Any]) -> int:
 
 
 async def pick_worker(
-    client: httpx.AsyncClient, in_flight: Optional[Dict[str, int]] = None
+    client: httpx.AsyncClient,
+    in_flight: Optional[Dict[str, int]] = None,
+    excluded: Optional[set[str]] = None,
 ) -> Dict[str, str]:
     """Pick the enabled worker with the shallowest overall queue.
 
@@ -166,6 +176,7 @@ async def pick_worker(
     if not pool:
         raise NoWorkerAvailable("no Hunyuan workers configured")
     in_flight = in_flight or {}
+    excluded = excluded or set()
     at_capacity: List[str] = []
     # Boxes already carrying one of our generations. Spreading onto a fresh box
     # is what eats the fleet, so that is what the reserve limits - a box already
@@ -176,6 +187,8 @@ async def pick_worker(
     reserved_skipped: List[str] = []
     candidates: List[Tuple[int, int, Dict[str, str]]] = []
     for index, worker in enumerate(pool):
+        if worker["name"] in excluded:
+            continue
         if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
             at_capacity.append(worker["name"])
             continue
@@ -221,9 +234,10 @@ async def submit(
     quality: Optional[str] = None,
     background_method: str = "auto",
     in_flight: Optional[Dict[str, int]] = None,
+    excluded: Optional[set[str]] = None,
 ) -> Tuple[Dict[str, str], str]:
     """Create a generation task. Returns (worker, status_url)."""
-    worker = await pick_worker(client, in_flight)
+    worker = await pick_worker(client, in_flight, excluded)
     body: Dict[str, Any] = {
         "image_url": image_url,
         "quality": quality or config.HUNYUAN_QUALITY,
@@ -245,9 +259,18 @@ async def submit(
         raise NoWorkerAvailable(
             f"{worker['name']} rejected our token (HTTP {resp.status_code})"
         )
+    response_text = resp.text[:1000]
+    if resp.status_code == 400 and (
+        "image_url host cannot be resolved" in response_text.lower()
+        or "getaddrinfo failed" in response_text.lower()
+    ):
+        raise WorkerInputFetchError(
+            worker["name"],
+            f"{worker['name']} cannot resolve the input image host: {response_text[:300]}",
+        )
     if resp.status_code not in (200, 202):
         raise HunyuanClientError(
-            f"generate-3d on {worker['name']} failed: HTTP {resp.status_code} {resp.text[:300]}"
+            f"generate-3d on {worker['name']} failed: HTTP {resp.status_code} {response_text[:300]}"
         )
     payload = resp.json()
     task_id = str(payload.get("task_id") or "")

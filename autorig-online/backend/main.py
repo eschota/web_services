@@ -5489,6 +5489,13 @@ async def api_get_task(
         return None
 
     kw_list = _poster_llm_keywords_list()
+    try:
+        collection_tags = json.loads(getattr(task, "collection_tags", None) or "[]")
+        if not isinstance(collection_tags, list):
+            collection_tags = []
+        collection_tags = [str(tag) for tag in collection_tags if str(tag).strip()]
+    except Exception:
+        collection_tags = []
     poster_free3d_query = build_free3d_similar_query(
         getattr(task, "poster_llm_title", None),
         kw_list,
@@ -5633,6 +5640,13 @@ async def api_get_task(
         poster_llm_description=getattr(task, "poster_llm_description", None),
         poster_llm_keywords=kw_list,
         poster_llm_at=getattr(task, "poster_llm_at", None),
+        collection_guid=getattr(task, "collection_guid", None),
+        collection_title=getattr(task, "collection_title", None),
+        collection_description=getattr(task, "collection_description", None),
+        collection_tags=collection_tags,
+        collection_index=getattr(task, "collection_index", None),
+        collection_size=getattr(task, "collection_size", None),
+        collection_member_title=getattr(task, "collection_member_title", None),
         poster_free3d_query=poster_free3d_query,
         created_at=task.created_at,
         updated_at=task.updated_at,

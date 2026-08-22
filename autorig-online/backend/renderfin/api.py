@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -115,6 +116,28 @@ class CharacterGenFromImageRequest(BaseModel):
     source_task_id: str = ""
 
 
+class CharacterCollectionMemberRequest(BaseModel):
+    index: int
+    title: str
+    prompt: str
+    prompt_b: str = ""
+    negative_prompt: str = ""
+    mask_url: str = ""
+    mask_url_b: str = ""
+
+
+class CharacterCollectionRequest(BaseModel):
+    collection_guid: str
+    collection_title: str
+    collection_description: str
+    collection_tags: List[str]
+    members: List[CharacterCollectionMemberRequest]
+    user_name: str = "autorig-bot"
+    source_task_id: str = ""
+    telegram_chat_id: int = 0
+    telegram_status_message_id: int = 0
+
+
 class TelegramContextRequest(BaseModel):
     chat_id: int = 0
     message_id: int = 0
@@ -136,6 +159,44 @@ async def api_character_gen(request: Request, body: CharacterGenRequest) -> Dict
         telegram_chat_id=body.telegram_chat_id,
     )
     return job.public_dict()
+
+
+@router.post("/api-character-gen/collection")
+async def api_character_gen_collection(
+    request: Request, body: CharacterCollectionRequest
+) -> Dict[str, Any]:
+    try:
+        guid = str(uuid.UUID(body.collection_guid))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="collection_guid must be a UUID")
+    if len(body.members) != 15:
+        raise HTTPException(status_code=400, detail="collection must contain exactly 15 members")
+    indexes = [int(member.index) for member in body.members]
+    if sorted(indexes) != list(range(1, 16)) or len(set(indexes)) != 15:
+        raise HTTPException(status_code=400, detail="member indexes must be unique 1..15")
+    if not body.collection_title.strip() or not body.collection_description.strip():
+        raise HTTPException(status_code=400, detail="collection metadata is incomplete")
+    if any(not member.prompt.strip() or not member.title.strip() for member in body.members):
+        raise HTTPException(status_code=400, detail="every member needs title and prompt")
+
+    jobs = await _chargen(request).create_collection(
+        collection_guid=guid,
+        collection_title=body.collection_title.strip()[:256],
+        collection_description=body.collection_description.strip()[:2000],
+        collection_tags=[str(tag).strip()[:64] for tag in body.collection_tags if str(tag).strip()][
+            :20
+        ],
+        members=[member.model_dump() for member in sorted(body.members, key=lambda item: item.index)],
+        user_name=body.user_name,
+        source_task_id=body.source_task_id,
+        telegram_chat_id=body.telegram_chat_id,
+        telegram_status_message_id=body.telegram_status_message_id,
+    )
+    return {
+        "collection_guid": guid,
+        "collection_size": len(jobs),
+        "jobs": [job.public_dict() for job in jobs],
+    }
 
 
 @router.post("/api-character-gen/from-image")

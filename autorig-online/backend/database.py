@@ -336,6 +336,16 @@ class Task(Base):
     poster_llm_keywords = Column(Text, nullable=True)
     poster_llm_at = Column(DateTime, nullable=True)
 
+    # Thematic collection grouping for generated models. These values are
+    # copied into the worker request and therefore every converter rig.json.
+    collection_guid = Column(String(36), nullable=True, index=True)
+    collection_title = Column(String(256), nullable=True)
+    collection_description = Column(Text, nullable=True)
+    collection_tags = Column(Text, nullable=True)  # JSON array
+    collection_index = Column(Integer, nullable=True)
+    collection_size = Column(Integer, nullable=True)
+    collection_member_title = Column(String(256), nullable=True)
+
     # YouTube auto-upload (server uses OAuth refresh token; see youtube_upload.py)
     youtube_video_id = Column(String(64), nullable=True)
     youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
@@ -1262,6 +1272,19 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_description TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_keywords TEXT")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN poster_llm_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_guid VARCHAR(36)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_title VARCHAR(256)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_description TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_tags TEXT")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_index INTEGER")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_size INTEGER")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_member_title VARCHAR(256)")
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_collection_guid ON tasks (collection_guid)"
+                )
+            except Exception:
+                pass
             await _try_add_column("ALTER TABLE tasks ADD COLUMN stuck_hour_requeue_count INTEGER DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN source_attempt_count INTEGER DEFAULT 0")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN source_next_retry_at DATETIME")
@@ -1699,6 +1722,33 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS poster_llm_at TIMESTAMP"
             )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_guid VARCHAR(36)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_title VARCHAR(256)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_description TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_tags TEXT"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_index INTEGER"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_size INTEGER"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_member_title VARCHAR(256)"
+            )
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_collection_guid ON tasks (collection_guid)"
+                )
+            except Exception:
+                pass
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS stuck_hour_requeue_count INTEGER NOT NULL DEFAULT 0"
             )

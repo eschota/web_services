@@ -102,6 +102,13 @@ class TaskStatusResponse(BaseModel):
     poster_llm_description: Optional[str] = None
     poster_llm_keywords: Optional[List[str]] = None
     poster_llm_at: Optional[datetime] = None
+    collection_guid: Optional[str] = None
+    collection_title: Optional[str] = None
+    collection_description: Optional[str] = None
+    collection_tags: List[str] = []
+    collection_index: Optional[int] = None
+    collection_size: Optional[int] = None
+    collection_member_title: Optional[str] = None
     # Semantic search string for Similar 3D models (title + top keywords); server-computed
     poster_free3d_query: Optional[str] = None
     created_at: datetime

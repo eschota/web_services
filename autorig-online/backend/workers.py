@@ -513,7 +513,20 @@ async def send_task_to_worker(
             # writes the FULL request into <model>_rig.json, so these keys reach
             # pipeline_config → keywords → animation selection and the listing.
             if isinstance(metadata, dict) and metadata:
-                for _k in ("title", "category", "subcategory", "image_url", "image_description"):
+                for _k in (
+                    "title",
+                    "category",
+                    "subcategory",
+                    "image_url",
+                    "image_description",
+                    "collection_guid",
+                    "collection_title",
+                    "collection_description",
+                    "collection_tags",
+                    "collection_index",
+                    "collection_size",
+                    "collection_member_title",
+                ):
                     _v = metadata.get(_k)
                     if _v:
                         payload[_k] = _v

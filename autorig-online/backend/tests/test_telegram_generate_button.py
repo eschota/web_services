@@ -91,44 +91,53 @@ class RunGenerationTests(unittest.TestCase):
             release = AsyncMock()
             import render_prompting
 
-            with patch.object(render_prompting, "build_render_request", new=AsyncMock(side_effect=RuntimeError("llm down"))):
+            with patch.object(render_prompting, "build_render_collection", new=AsyncMock(side_effect=RuntimeError("llm down"))):
                 with patch.object(telegram_bot, "release_notification", new=release):
                     await telegram_bot._run_generation(bot, 777, "task-1", 42, 99)
             release.assert_awaited_once_with(777, "renderfin_gen", "task-1")
             bot.edit_message_text.assert_awaited()
             text = bot.edit_message_text.await_args.kwargs["text"]
-            self.assertIn("Ошибка генерации", text)
+            self.assertIn("Ошибка запуска коллекции", text)
 
         run(scenario())
 
-    def test_generation_creates_job_and_registers_chat(self):
-        """The bot only has to create the job: renderfin owns delivery."""
+    def test_generation_creates_collection_and_registers_chat(self):
+        """The bot creates one batch; renderfin owns all 15 durable jobs."""
 
         async def scenario():
             bot = AsyncMock()
             import render_prompting
-            from render_prompting import RenderGenPlan
+            from render_prompting import CollectionMemberPlan, RenderCollectionPlan
 
-            plan = RenderGenPlan(
-                prompt="a detailed orc warrior full body T-pose front view",
-                negative_prompt="blurry",
-                body_type="normal",
-                mask_url="https://x/render/masks/t_pose.jpg",
+            plan = RenderCollectionPlan(
+                collection_guid="11111111-2222-3333-4444-555566667777",
+                collection_title="Orc Frontier Clan",
+                collection_description="Fifteen varied orc characters from one frontier world.",
+                collection_tags=["orc", "fantasy", "character collection", "3D", "stylized"],
+                members=[
+                    CollectionMemberPlan(
+                        index=index,
+                        title=f"Orc {index}",
+                        prompt=f"a distinct detailed orc character number {index}",
+                        negative_prompt="blurry",
+                        body_type="normal",
+                        mask_url="https://x/render/masks/t_pose.jpg",
+                    )
+                    for index in range(1, 16)
+                ],
                 source="llm",
             )
-            ctx = {}
-
-            async def fake_ctx(job_id, **kwargs):
-                ctx.update({"job_id": job_id, **kwargs})
-
-            with patch.object(render_prompting, "build_render_request", new=AsyncMock(return_value=plan)):
-                with patch.object(render_prompting, "start_character_gen", new=AsyncMock(return_value="j1")) as start:
-                    with patch.object(render_prompting, "set_character_gen_telegram_context", new=fake_ctx):
-                        await telegram_bot._run_generation(bot, 777, "task-1", 42, 99)
+            with patch.object(render_prompting, "build_render_collection", new=AsyncMock(return_value=plan)):
+                with patch.object(
+                    render_prompting,
+                    "start_character_collection",
+                    new=AsyncMock(return_value=[f"j{index}" for index in range(1, 16)]),
+                ) as start:
+                    await telegram_bot._run_generation(bot, 777, "task-1", 42, 99)
 
             self.assertEqual(start.await_args.kwargs["telegram_chat_id"], 777)
             self.assertEqual(start.await_args.kwargs["source_task_id"], "task-1")
-            self.assertEqual(ctx, {"job_id": "j1", "chat_id": 777, "status_message_id": 99})
+            self.assertEqual(start.await_args.kwargs["telegram_status_message_id"], 99)
             # no result is sent from the bot process
             bot.send_photo.assert_not_awaited()
             bot.send_video.assert_not_awaited()
@@ -350,13 +359,24 @@ class SubmitPipelineKindTests(unittest.TestCase):
             with patch.object(telegram_bot, "AsyncSessionLocal", _FakeSession):
                 with patch.object(tasks_module, "create_conversion_task", new=fake_create):
                     task_id, error = await telegram_bot._submit_generated_model(
-                        "https://x/render/bot/model.glb"
+                        "https://x/render/bot/model.glb",
+                        collection_metadata={
+                            "collection_guid": "11111111-2222-3333-4444-555566667777",
+                            "collection_title": "Orc Frontier Clan",
+                            "collection_tags": ["orc", "fantasy"],
+                            "collection_index": 3,
+                            "collection_size": 15,
+                        },
                     )
             self.assertEqual(task_id, "new-task-id")
             self.assertIsNone(error)
             self.assertEqual(captured["pipeline_kind"], "convert")
             self.assertEqual(captured["task_type"], "t_pose")
             self.assertTrue(captured["input_url"].endswith(".glb"))
+            self.assertEqual(
+                captured["collection_metadata"]["collection_guid"],
+                "11111111-2222-3333-4444-555566667777",
+            )
 
         run(scenario())
 

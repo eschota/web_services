@@ -309,8 +309,16 @@ async def deliver_image_review(
 async def deliver_model_review(
     client: httpx.AsyncClient, job: CharacterGenJob, stats: Optional[Dict[str, int]] = None
 ) -> List[int]:
+    collection_line = ""
+    if job.collection_guid:
+        collection_line = (
+            f"🧩 <b>{html.escape(job.collection_title[:120])}</b> · "
+            f"{int(job.collection_index or 0)}/{int(job.collection_size or 0)}\n"
+            f"<b>{html.escape(job.collection_member_title[:120])}</b>\n"
+        )
     caption = (
         f"🎨 <b>3D-модель готова</b>\n"
+        f"{collection_line}"
         f"<code>{format_stats(job, stats)}</code>\n"
         f"<i>{_prompt_preview(job)}</i>\n"
         f'🧊 <a href="{html.escape(job.glb_url)}">GLB</a>'
@@ -391,7 +399,13 @@ def digest_text(jobs: List[CharacterGenJob], stats: Optional[Dict[str, int]] = N
             row += f" · попытка {attempt + 1}"
         if job.retry_at and job.last_error:
             row += " · жду воркер" if "worker" in job.last_error.lower() else " · повтор"
-        subject = (job.prompt or "").split(",")[0].strip()[:48]
+        if job.collection_guid:
+            subject = (
+                f"{int(job.collection_index or 0)}/{int(job.collection_size or 0)} "
+                f"{job.collection_member_title}"
+            )[:64]
+        else:
+            subject = (job.prompt or "").split(",")[0].strip()[:48]
         if subject:
             row += f" — <i>{html.escape(subject)}</i>"
         lines.append(row)
@@ -470,8 +484,16 @@ async def deliver_retry_notice(client: httpx.AsyncClient, job: CharacterGenJob) 
 
 
 async def deliver_failure(client: httpx.AsyncClient, job: CharacterGenJob) -> List[int]:
+    collection_line = ""
+    if job.collection_guid:
+        collection_line = (
+            f"🧩 {html.escape(job.collection_title[:100])} · "
+            f"{int(job.collection_index or 0)}/{int(job.collection_size or 0)} · "
+            f"{html.escape(job.collection_member_title[:100])}\n"
+        )
     text = (
         f"❌ <b>Генерация не удалась</b>\n"
+        f"{collection_line}"
         f"<code>#{int(job.seq or 0)}</code>\n"
         f"<i>{_prompt_preview(job, 200)}</i>\n"
         f"{html.escape((job.error or '')[:250])}\n"

@@ -10,12 +10,39 @@ from render_prompting import (
     BODY_TYPES,
     DEFAULT_NEGATIVE_PROMPT,
     RenderGenPlan,
+    _collection_from_llm_json,
     body_type_from_keywords,
+    build_template_collection,
     build_template_plan,
     mask_url_for_body_type,
     _extract_json_object,
     _plan_from_llm_json,
 )
+
+
+def _collection_json(count=15):
+    return {
+        "collection_title": "Afterlight Zombie Neighbors",
+        "collection_description": (
+            "A darkly playful neighborhood of stylized undead characters. "
+            "Shared grey-green skin and worn autumn colors unite varied ages and roles."
+        ),
+        "collection_tags": [
+            "zombie", "undead", "character collection", "stylized", "3D", "horror comedy"
+        ],
+        "members": [
+            {
+                "title": f"Neighbor {index}",
+                "subject": (
+                    f"a distinct stylized undead neighbor number {index} with a unique age, "
+                    "gender presentation, build, face and grey-green palette"
+                ),
+                "outfit": f"fitted worn neighborhood clothing variation {index} with opaque fabric",
+                "body_type": ("fat" if index == 2 else "normal"),
+            }
+            for index in range(1, count + 1)
+        ],
+    }
 
 
 def run(coro):
@@ -35,6 +62,71 @@ class BodyTypeHeuristicTests(unittest.TestCase):
         self.assertTrue(mask_url_for_body_type("normal").endswith("/render/masks/t_pose.jpg"))
         self.assertTrue(mask_url_for_body_type("fat").endswith("/render/masks/t_pose_fat.jpg"))
         self.assertTrue(mask_url_for_body_type("bogus").endswith("/render/masks/t_pose.jpg"))
+
+
+class CollectionPlanTests(unittest.TestCase):
+    def test_all_fifteen_prompts_and_metadata_use_one_llm_request(self):
+        async def scenario():
+            calls = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                calls.append(json.loads(request.content))
+                return httpx.Response(
+                    200,
+                    json={"choices": [{"message": {"content": json.dumps(_collection_json())}}]},
+                )
+
+            transport = httpx.MockTransport(handler)
+            real_client = httpx.AsyncClient
+
+            def patched_client(*args, **kwargs):
+                kwargs["transport"] = transport
+                return real_client(*args, **kwargs)
+
+            with patch.object(render_prompting, "_load_collection_instruction", return_value="Return JSON"):
+                with patch.object(
+                    render_prompting,
+                    "_llm_attempts",
+                    return_value=[("https://llm.test/chat", "key", "gpt-test", {})],
+                ):
+                    with patch.object(render_prompting.httpx, "AsyncClient", side_effect=patched_client):
+                        plan = await render_prompting._llm_generate_collection(
+                            {"title": "cartoon zombie"},
+                            "data:image/jpeg;base64,AA==",
+                            collection_guid="11111111-2222-3333-4444-555566667777",
+                        )
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(plan.members), 15)
+
+        run(scenario())
+
+    def test_exactly_fifteen_members_share_one_collection_identity(self):
+        plan = _collection_from_llm_json(
+            _collection_json(), collection_guid="11111111-2222-3333-4444-555566667777"
+        )
+        self.assertIsNotNone(plan)
+        self.assertEqual(len(plan.members), 15)
+        self.assertEqual([member.index for member in plan.members], list(range(1, 16)))
+        self.assertEqual(plan.members[1].body_type, "fat")
+        self.assertIn("t_pose_fat.jpg", plan.members[1].mask_url)
+        self.assertEqual(len({member.title for member in plan.members}), 15)
+
+    def test_wrong_member_count_is_rejected(self):
+        self.assertIsNone(
+            _collection_from_llm_json(
+                _collection_json(14),
+                collection_guid="11111111-2222-3333-4444-555566667777",
+            )
+        )
+
+    def test_template_fallback_is_also_a_complete_collection(self):
+        plan = build_template_collection(
+            {"title": "cartoon zombie"},
+            collection_guid="11111111-2222-3333-4444-555566667777",
+        )
+        self.assertEqual(len(plan.members), 15)
+        self.assertEqual(plan.source, "template")
+        self.assertTrue(all(member.prompt for member in plan.members))
 
 
 class TemplatePlanTests(unittest.TestCase):

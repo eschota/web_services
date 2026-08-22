@@ -18,6 +18,53 @@ POOL = [
 
 
 class StatusUrlRebaseTests(unittest.TestCase):
+    def test_worker_dns_failure_is_rotatable_infrastructure_error(self):
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                if request.url.path.endswith("/server-status"):
+                    return httpx.Response(200, json={
+                        "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"}
+                    })
+                return httpx.Response(
+                    400,
+                    json={
+                        "error": "invalid_request",
+                        "message": "image_url host cannot be resolved: getaddrinfo failed",
+                    },
+                )
+
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(hunyuan_client.WorkerInputFetchError) as caught:
+                        await hunyuan_client.submit(client, image_url="https://autorig.online/i.png")
+            self.assertEqual(caught.exception.worker_name, "f7")
+
+        run(scenario())
+
+    def test_excluded_worker_rotates_to_next_box(self):
+        async def scenario():
+            seen = []
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                seen.append(str(request.url))
+                if request.url.path.endswith("/server-status"):
+                    return httpx.Response(200, json={
+                        "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"}
+                    })
+                return httpx.Response(202, json={"task_id": "h-rotated"})
+
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    worker, _ = await hunyuan_client.submit(
+                        client,
+                        image_url="https://autorig.online/i.png",
+                        excluded={"f7"},
+                    )
+            self.assertEqual(worker["name"], "f13")
+            self.assertFalse(any("15131" in url for url in seen))
+
+        run(scenario())
+
     def test_status_url_is_rebased_on_the_worker(self):
         """The worker builds status_url from the Host header and drops the port,
         which would point the client at an unrelated service."""

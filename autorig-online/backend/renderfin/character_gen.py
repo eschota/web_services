@@ -11,7 +11,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiosqlite
 import httpx
@@ -76,6 +76,9 @@ SLOT_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_SLOT_WAIT", "60"))
 FARM_BREAKAGE_WAIT_SECONDS = float(
     os.getenv("RENDERFIN_CHARGEN_FARM_BREAKAGE_WAIT", "1800")
 )
+INPUT_FETCH_WORKER_COOLDOWN_SECONDS = float(
+    os.getenv("RENDERFIN_HUNYUAN_INPUT_FETCH_COOLDOWN", "3600")
+)
 # Known farm-side pipeline breakages: the generation itself succeeded and the
 # box then failed to finish its own post-processing. Nothing about the job is
 # wrong, so retrying the job harder cannot help and giving up is not allowed.
@@ -117,6 +120,8 @@ _FLEET_ERROR_MARKERS = (
     '"error":"unauthorized"',
     "http 401",
     "http 403",
+    "image_url host cannot be resolved",
+    "getaddrinfo failed",
 )
 
 
@@ -250,6 +255,23 @@ class CharacterGenManager:
         )
         await self._db.commit()
 
+    async def _persist_many(self, jobs: List[CharacterGenJob]) -> None:
+        """Write a collection in one sqlite transaction."""
+        now = time.time()
+        for job in jobs:
+            job.updated_at = now
+        if self._db is None:
+            return
+        await self._db.executemany(
+            "INSERT INTO chargen_jobs(id, payload, stage, created_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, stage=excluded.stage",
+            [
+                (job.id, job.model_dump_json(), job.stage, job.created_at)
+                for job in jobs
+            ],
+        )
+        await self._db.commit()
+
     # ---------- public API ----------
 
     async def create(
@@ -280,6 +302,69 @@ class CharacterGenManager:
         await self._persist(job)
         self._spawn(job)
         return job
+
+    async def create_collection(
+        self,
+        *,
+        collection_guid: str,
+        collection_title: str,
+        collection_description: str,
+        collection_tags: List[str],
+        members: List[Dict[str, Any]],
+        user_name: str = "autorig-bot",
+        source_task_id: str = "",
+        telegram_chat_id: int = 0,
+        telegram_status_message_id: int = 0,
+    ) -> List[CharacterGenJob]:
+        """Persist and start a pre-validated collection as 15 ordinary jobs.
+
+        The ordinary queue, retry and worker-slot accounting remains the sole
+        execution path. A collection is grouping metadata, never a bypass
+        around the capacity controls that protect normal conversion work.
+        """
+        size = len(members)
+        jobs: List[CharacterGenJob] = []
+        for position, member in enumerate(members, start=1):
+            mask_url = str(member.get("mask_url") or "").strip() or (
+                f"{config.PUBLIC_BASE_URL}/render/masks/t_pose.jpg"
+            )
+            job = CharacterGenJob(
+                seq=self._next_seq(),
+                prompt=str(member.get("prompt") or ""),
+                prompt_b=str(member.get("prompt_b") or ""),
+                negative_prompt=str(member.get("negative_prompt") or ""),
+                mask_url=mask_url,
+                mask_url_b=str(member.get("mask_url_b") or "").strip(),
+                user_name=user_name,
+                source_task_id=source_task_id,
+                telegram_chat_id=int(telegram_chat_id or 0),
+                telegram_status_message_id=int(telegram_status_message_id or 0),
+                collection_guid=collection_guid,
+                collection_title=collection_title,
+                collection_description=collection_description,
+                collection_tags=list(collection_tags or []),
+                collection_index=int(member.get("index") or position),
+                collection_size=size,
+                collection_member_title=str(member.get("title") or ""),
+            )
+            self._jobs[job.id] = job
+            jobs.append(job)
+
+        try:
+            await self._persist_many(jobs)
+        except Exception:
+            if self._db is not None:
+                await self._db.rollback()
+            for job in jobs:
+                self._jobs.pop(job.id, None)
+            raise
+        for job in jobs:
+            self._spawn(job)
+        print(
+            f"[Renderfin][CharGen] collection {collection_guid} started: "
+            f"{len(jobs)} jobs"
+        )
+        return jobs
 
     async def create_from_image(
         self,
@@ -704,6 +789,26 @@ class CharacterGenManager:
             )
             return
 
+        if isinstance(exc, hunyuan_client.WorkerInputFetchError):
+            # The same owned input succeeds on other boxes. Cool down this
+            # box for the job so the least-loaded picker does not select its
+            # broken DNS resolver again on every retry.
+            cooldowns = dict(job.hunyuan_worker_cooldowns or {})
+            cooldowns[exc.worker_name] = time.time() + INPUT_FETCH_WORKER_COOLDOWN_SECONDS
+            job.hunyuan_worker_cooldowns = cooldowns
+            job.hunyuan_task_id = ""
+            job.hunyuan_worker = ""
+            job.retry_at = time.time() + RETRY_BACKOFF_SECONDS[0]
+            job.stage_started_at = 0
+            job.timed_stage = ""
+            job.error = ""
+            await self._persist(job)
+            print(
+                f"[Renderfin][CharGen] job {job.id}: {exc.worker_name} cannot "
+                "resolve the input host; rotating to another worker"
+            )
+            return
+
         if isinstance(exc, (hunyuan_client.TaskVanished, hunyuan_client.WorkerUnreachable)):
             # drop the dead handle so the stage submits again, and do not spend
             # an attempt: a crashing box would otherwise exhaust every job
@@ -921,6 +1026,11 @@ class CharacterGenManager:
                         client,
                         image_url=job.isolated_url,
                         in_flight=self.in_flight_by_worker(),
+                        excluded={
+                            name
+                            for name, until in (job.hunyuan_worker_cooldowns or {}).items()
+                            if float(until or 0) > time.time()
+                        },
                     )
                     # store the status_url so a service restart can resume polling
                     job.hunyuan_task_id = status_url

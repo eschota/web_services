@@ -524,6 +524,7 @@ async def create_conversion_task(
     created_via_api: bool = False,
     pipeline_kind: str = "rig",
     input_bytes: Optional[int] = None,
+    collection_metadata: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
@@ -541,6 +542,13 @@ async def create_conversion_task(
 
     # Create task record
     task_id = str(uuid.uuid4())
+    collection = collection_metadata if isinstance(collection_metadata, dict) else {}
+    collection_tags = collection.get("collection_tags")
+    if not isinstance(collection_tags, list):
+        collection_tags = []
+    collection_tags = [
+        str(tag).strip()[:64] for tag in collection_tags if str(tag).strip()
+    ][:20]
     task = Task(
         id=task_id,
         owner_type=owner_type,
@@ -551,6 +559,17 @@ async def create_conversion_task(
         created_via_api=created_via_api,
         pipeline_kind=pk,
         input_bytes=input_bytes,
+        collection_guid=str(collection.get("collection_guid") or "").strip()[:36] or None,
+        collection_title=str(collection.get("collection_title") or "").strip()[:256] or None,
+        collection_description=(
+            str(collection.get("collection_description") or "").strip()[:2000] or None
+        ),
+        collection_tags=(json.dumps(collection_tags, ensure_ascii=False) if collection_tags else None),
+        collection_index=(int(collection.get("collection_index") or 0) or None),
+        collection_size=(int(collection.get("collection_size") or 0) or None),
+        collection_member_title=(
+            str(collection.get("collection_member_title") or "").strip()[:256] or None
+        ),
     )
 
     db.add(task)
@@ -662,6 +681,28 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
     else:
         print(f"[PreConvertMeta] task {task.id} NO-METADATA pk={pk}")
 
+    worker_metadata: Dict[str, Any] = dict(poster_metadata or {})
+    if getattr(task, "collection_guid", None):
+        try:
+            tags = json.loads(getattr(task, "collection_tags", None) or "[]")
+        except Exception:
+            tags = []
+        worker_metadata.update(
+            {
+                "collection_guid": task.collection_guid,
+                "collection_title": task.collection_title,
+                "collection_description": task.collection_description,
+                "collection_tags": tags if isinstance(tags, list) else [],
+                "collection_index": task.collection_index,
+                "collection_size": task.collection_size,
+                "collection_member_title": task.collection_member_title,
+            }
+        )
+        print(
+            f"[CollectionMeta] task {task.id} ATTACHED "
+            f"guid={task.collection_guid} member={task.collection_index}/{task.collection_size}"
+        )
+
     # Send task directly to worker (workers handle GLB, FBX, OBJ natively)
     result = await send_task_to_worker(
         worker_url,
@@ -674,7 +715,7 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         mode=mode,
         animal_semantic_markers=animal_semantic_markers,
         viewer_environment=_viewer_environment_for_task(task) if pk == "rig" else None,
-        metadata=poster_metadata,
+        metadata=worker_metadata or None,
     )
     if not result.success:
         error = result.error or "Worker dispatch failed"

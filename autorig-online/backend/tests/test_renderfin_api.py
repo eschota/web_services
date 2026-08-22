@@ -122,6 +122,52 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(discard.status_code, 200)
         self.assertEqual(discard.json()["stage"], "discarded")
 
+    def test_character_collection_creates_exactly_fifteen_grouped_jobs(self):
+        members = [
+            {
+                "index": index,
+                "title": f"Zombie Neighbor {index}",
+                "prompt": f"distinct upright zombie neighbor number {index}",
+                "mask_url": "https://www.autorig.online/renderfin/render/masks/t_pose.jpg",
+            }
+            for index in range(1, 16)
+        ]
+        resp = self.client.post(
+            "/renderfin/api-character-gen/collection",
+            json={
+                "collection_guid": "11111111-2222-3333-4444-555566667777",
+                "collection_title": "Afterlight Zombie Neighbors",
+                "collection_description": "A cohesive but varied undead neighborhood collection.",
+                "collection_tags": ["zombie", "undead", "stylized", "collection", "3D"],
+                "members": members,
+                "telegram_chat_id": 777,
+                "telegram_status_message_id": 99,
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        jobs = resp.json()["jobs"]
+        self.assertEqual(len(jobs), 15)
+        self.assertEqual({job["collection_guid"] for job in jobs}, {
+            "11111111-2222-3333-4444-555566667777"
+        })
+        self.assertEqual([job["collection_index"] for job in jobs], list(range(1, 16)))
+        self.assertTrue(all(job["collection_size"] == 15 for job in jobs))
+
+    def test_character_collection_rejects_partial_roster(self):
+        resp = self.client.post(
+            "/renderfin/api-character-gen/collection",
+            json={
+                "collection_guid": "11111111-2222-3333-4444-555566667777",
+                "collection_title": "Incomplete",
+                "collection_description": "This deliberately has the wrong member count.",
+                "collection_tags": ["test"],
+                "members": [
+                    {"index": 1, "title": "Only One", "prompt": "one upright character"}
+                ],
+            },
+        )
+        self.assertEqual(resp.status_code, 400)
+
     def test_character_gen_404(self):
         self.assertEqual(
             self.client.get("/renderfin/api-character-gen/deadbeef").status_code, 404

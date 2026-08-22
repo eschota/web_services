@@ -149,6 +149,15 @@ class CharacterGenJob(BaseModel):
     mask_url_b: str = ""
     user_name: str = "autorig-bot"
     source_task_id: str = ""
+    # Collection identity is copied into every downstream conversion task and
+    # therefore into every *_rig.json written by the converter worker.
+    collection_guid: str = ""
+    collection_title: str = ""
+    collection_description: str = ""
+    collection_tags: List[str] = Field(default_factory=list)
+    collection_index: int = 0
+    collection_size: int = 0
+    collection_member_title: str = ""
     # The conversion task this job became when it was submitted. Its
     # completion is what makes the job finished, so it is what triggers the
     # chat cleanup.
@@ -161,6 +170,10 @@ class CharacterGenJob(BaseModel):
     chosen_variant: str = ""
     hunyuan_task_id: str = ""
     hunyuan_worker: str = ""
+    # A worker that cannot DNS-resolve our owned image URL is temporarily
+    # skipped for this job; otherwise the least-loaded picker selects the same
+    # broken box on every automatic retry.
+    hunyuan_worker_cooldowns: Dict[str, float] = Field(default_factory=dict)
     # Telegram context: renderfin delivers results itself so they survive
     # bot restarts. `delivered` maps delivery kind -> the content marker that
     # was delivered (image/video url, error text), keeping it idempotent.
@@ -208,6 +221,13 @@ class CharacterGenJob(BaseModel):
             "mask_url_b": self.mask_url_b or None,
             "user_name": self.user_name,
             "source_task_id": self.source_task_id,
+            "collection_guid": self.collection_guid or None,
+            "collection_title": self.collection_title or None,
+            "collection_description": self.collection_description or None,
+            "collection_tags": list(self.collection_tags or []),
+            "collection_index": self.collection_index or None,
+            "collection_size": self.collection_size or None,
+            "collection_member_title": self.collection_member_title or None,
             "submitted_task_id": self.submitted_task_id or None,
             "prompt_b": self.prompt_b or None,
             "image_url": self.image_url or None,
@@ -223,6 +243,7 @@ class CharacterGenJob(BaseModel):
             "attempts": dict(self.attempts or {}),
             "retry_at": self.retry_at or None,
             "last_error": self.last_error or None,
+            "hunyuan_worker_cooldowns": dict(self.hunyuan_worker_cooldowns or {}),
             "telegram_chat_id": self.telegram_chat_id or None,
             "telegram_message_id": self.telegram_message_id or None,
             "telegram_messages": [m.model_dump() for m in self.telegram_messages],

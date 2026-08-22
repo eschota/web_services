@@ -13,6 +13,7 @@ import os
 import asyncio
 import hashlib
 import html
+import json
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1900,6 +1901,10 @@ async def broadcast_task_done(
 
     owner_email = None
     content_rating = "unknown"
+    collection_title = None
+    collection_member_title = None
+    collection_index = None
+    collection_size = None
     resolved_progress = progress_page
     try:
         async with AsyncSessionLocal() as db:
@@ -1911,6 +1916,10 @@ async def broadcast_task_done(
                 cr = getattr(task, "content_rating", None)
                 if cr:
                     content_rating = str(cr).strip().lower()
+                collection_title = getattr(task, "collection_title", None)
+                collection_member_title = getattr(task, "collection_member_title", None)
+                collection_index = getattr(task, "collection_index", None)
+                collection_size = getattr(task, "collection_size", None)
                 if not resolved_progress and task.guid and task.worker_api:
                     parsed = urlparse(task.worker_api)
                     worker_base = f"{parsed.scheme}://{parsed.netloc}"
@@ -1937,6 +1946,13 @@ async def broadcast_task_done(
     done_parts.append(html.escape(metrics_line))
 
     text = f"✅ <b>Task completed</b>\n{rating_line}\n" + " | ".join(done_parts)
+    if collection_title:
+        text += (
+            f"\n🧩 <b>{html.escape(str(collection_title)[:160])}</b> · "
+            f"{int(collection_index or 0)}/{int(collection_size or 0)}"
+        )
+        if collection_member_title:
+            text += f" · {html.escape(str(collection_member_title)[:120])}"
     if resolved_progress:
         text += f'\n🔧 <a href="{html.escape(resolved_progress)}">Worker Logs</a>'
 
@@ -1969,7 +1985,7 @@ async def broadcast_task_done(
 
     generate_markup = InlineKeyboardMarkup(
         [[
-            InlineKeyboardButton("🎨 Сгенерировать", callback_data=f"rfg:{task_id}"),
+            InlineKeyboardButton("🎨 Коллекция ×15", callback_data=f"rfg:{task_id}"),
             InlineKeyboardButton("📦 Сабмитить", callback_data=f"rfc:{task_id}"),
         ]]
     )
@@ -2198,7 +2214,7 @@ async def _start_cmd(update, context):
 
 
 # ---------------------------------------------------------------------------
-# Renderfin character generation (🎨 Сгенерировать button on done notifications)
+# Renderfin collection generation (🎨 Коллекция ×15 button on done notifications)
 # ---------------------------------------------------------------------------
 
 CHARGEN_POLL_INTERVAL_SECONDS = 10
@@ -2256,7 +2272,7 @@ async def _chargen_edit_status(bot, chat_id: int, message_id: int, text: str) ->
 
 async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: int | None,
                           status_message_id: int) -> None:
-    """🎨 button: build the prompt and hand the job to renderfin.
+    """🎨 button: design and enqueue one coherent 15-character collection.
 
     Delivery of every result (image review, model video, failures) is done by
     the renderfin service itself, so it survives a bot restart. This coroutine
@@ -2265,25 +2281,45 @@ async def _run_generation(bot, chat_id: int, task_id: str, reply_to_message_id: 
     import render_prompting
 
     try:
-        plan = await render_prompting.build_render_request(task_id)
-        prompt_preview = html.escape(plan.prompt[:300])
+        plan = await render_prompting.build_render_collection(task_id)
+        title = html.escape(plan.collection_title[:200])
+        description = html.escape(plan.collection_description[:700])
+        tags = html.escape(", ".join(plan.collection_tags[:12]))
+        roster = "\n".join(
+            f"{member.index:02d}. {html.escape(member.title[:80])}"
+            for member in plan.members
+        )
         await _chargen_edit_status(
             bot, chat_id, status_message_id,
-            f"⏳ Промпт готов ({plan.source}, телосложение: {plan.body_type}), рендерим T-позу…\n"
-            f"<i>{prompt_preview}</i>",
+            f"🧩 <b>{title}</b>\n{description}\n"
+            f"🏷 {tags}\n\n{roster}\n\n"
+            f"⏳ План готов ({plan.source}), запускаю 15 T-поз…",
         )
-        job_id = await render_prompting.start_character_gen(
-            plan, source_task_id=task_id, telegram_chat_id=chat_id
+        job_ids = await render_prompting.start_character_collection(
+            plan,
+            source_task_id=task_id,
+            telegram_chat_id=chat_id,
+            telegram_status_message_id=status_message_id,
         )
-        await render_prompting.set_character_gen_telegram_context(
-            job_id, chat_id=chat_id, status_message_id=status_message_id
+        await _chargen_edit_status(
+            bot,
+            chat_id,
+            status_message_id,
+            f"🧩 <b>{title}</b>\n"
+            f"✅ Запущено {len(job_ids)}/15 моделей одной коллекции. "
+            "Рендеры, 3D и полная конвертация идут автоматически; "
+            "результаты будут приходить по мере готовности.",
         )
-        print(f"[Telegram][Renderfin] job {job_id} started for task {task_id}")
+        print(
+            f"[Telegram][Renderfin] collection {plan.collection_guid} "
+            f"started with {len(job_ids)} jobs for task {task_id}"
+        )
     except Exception as e:
         print(f"[Telegram][Renderfin] generation failed for task {task_id}: {e}")
         await _chargen_edit_status(
             bot, chat_id, status_message_id,
-            f"❌ Ошибка генерации: {html.escape(str(e)[:300])}\nКнопку можно нажать ещё раз.",
+            f"❌ Ошибка запуска коллекции: {html.escape(str(e)[:300])}\n"
+            "Кнопку можно нажать ещё раз.",
         )
         await release_notification(chat_id, "renderfin_gen", task_id)
 
@@ -2406,6 +2442,28 @@ async def _handle_full_convert_callback(update, context) -> None:
                     "Эта модель уже отправлена на конвертацию: {0}".format(str(already_converting)[:8])
                 )
                 return
+            try:
+                source_collection_tags = json.loads(
+                    getattr(source, "collection_tags", None) or "[]"
+                )
+            except Exception:
+                source_collection_tags = []
+            source_collection = {
+                "collection_guid": getattr(source, "collection_guid", None),
+                "collection_title": getattr(source, "collection_title", None),
+                "collection_description": getattr(source, "collection_description", None),
+                "collection_tags": (
+                    source_collection_tags if isinstance(source_collection_tags, list) else []
+                ),
+                "collection_index": getattr(source, "collection_index", None),
+                "collection_size": getattr(source, "collection_size", None),
+                "collection_member_title": getattr(source, "collection_member_title", None),
+            }
+            source_collection = {
+                key: value
+                for key, value in source_collection.items()
+                if value not in (None, "", [])
+            }
             new_task, error = await create_conversion_task(
                 db,
                 input_url=source.input_url,
@@ -2414,6 +2472,7 @@ async def _handle_full_convert_callback(update, context) -> None:
                 owner_id=source.owner_id or "telegram-bot",
                 created_via_api=True,
                 pipeline_kind="convert",
+                collection_metadata=source_collection or None,
             )
         if new_task is None:
             await query.answer((error or "Не удалось создать задачу")[:180])
@@ -2464,7 +2523,7 @@ async def _handle_generate_callback(update, context) -> None:
         try:
             dm = await bot.send_message(
                 chat_id=user_id,
-                text="⏳ Генерация запущена: строим промпт…",
+                text="⏳ Создаю концепцию и 15 персонажей коллекции одним запросом…",
             )
             chat_id, status_message_id, reply_to = user_id, dm.message_id, None
             await query.answer("Запускаю генерацию — результат пришлю в личку")
@@ -2475,7 +2534,7 @@ async def _handle_generate_callback(update, context) -> None:
         await query.answer("Запускаю генерацию…")
         status_message = await bot.send_message(
             chat_id=chat_id,
-            text="⏳ Генерация запущена: строим промпт…",
+            text="⏳ Создаю концепцию и 15 персонажей коллекции одним запросом…",
             reply_to_message_id=reply_to,
         )
         status_message_id = status_message.message_id
@@ -2485,7 +2544,9 @@ async def _handle_generate_callback(update, context) -> None:
     )
 
 
-async def _submit_generated_model(glb_url: str) -> tuple[str | None, str | None]:
+async def _submit_generated_model(
+    glb_url: str, *, collection_metadata: dict | None = None
+) -> tuple[str | None, str | None]:
     """Create the FULL conversion task from the generated GLB.
 
     pipeline_kind="convert" with type="t_pose" runs the complete worker
@@ -2505,6 +2566,7 @@ async def _submit_generated_model(glb_url: str) -> tuple[str | None, str | None]
             owner_id="telegram-bot",
             created_via_api=True,
             pipeline_kind="convert",
+            collection_metadata=collection_metadata,
         )
         if task is None:
             return None, error or "task creation failed"
@@ -2544,7 +2606,23 @@ async def _auto_submit_ready_jobs() -> None:
         if not await reserve_notification(chat_id or 0, "renderfin_submit", job_id):
             continue
         try:
-            task_id, error = await _submit_generated_model(glb_url)
+            collection_metadata = {
+                key: job.get(key)
+                for key in (
+                    "collection_guid",
+                    "collection_title",
+                    "collection_description",
+                    "collection_tags",
+                    "collection_index",
+                    "collection_size",
+                    "collection_member_title",
+                )
+                if job.get(key) not in (None, "", [])
+            }
+            task_id, error = await _submit_generated_model(
+                glb_url,
+                collection_metadata=collection_metadata or None,
+            )
             if task_id is None:
                 raise RuntimeError(error or "не удалось создать задачу")
             await render_prompting.mark_character_gen_submitted(job_id, task_id)
