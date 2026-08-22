@@ -56,8 +56,14 @@ HUNYUAN_API_TOKEN = os.getenv("HUNYUAN_API_TOKEN", "").strip()
 
 
 def hunyuan_workers() -> list[dict]:
-    """Resolve the Hunyuan worker pool as [{name, url, token}]."""
+    """Resolve and de-duplicate the tiered Hunyuan worker pool.
+
+    ``dedicated`` workers are tried first.  ``shared_converter`` workers are a
+    fallback and are protected by the ordinary-conversion admission checks in
+    :mod:`renderfin.hunyuan_client`.
+    """
     workers: list[dict] = []
+    physical_nodes: set[str] = set()
     try:
         if HUNYUAN_WORKERS_FILE.is_file():
             data = json.loads(HUNYUAN_WORKERS_FILE.read_text(encoding="utf-8"))
@@ -74,12 +80,41 @@ def hunyuan_workers() -> list[dict]:
                         f"{entry.get('disabled_reason') or 'no reason given'}"
                     )
                     continue
+                canary_approved = entry.get("canary_approved", True) is not False
+                if not canary_approved:
+                    print(
+                        f"[Renderfin] hunyuan worker {entry.get('name') or url} "
+                        "is parked until its standard/PBR canary is approved"
+                    )
+                    continue
+                name = str(entry.get("name") or url)
+                physical_node = str(entry.get("physical_node") or name).strip().lower()
+                if physical_node in physical_nodes:
+                    print(
+                        f"[Renderfin] ignoring duplicate Hunyuan physical node "
+                        f"{name} ({physical_node})"
+                    )
+                    continue
                 if url and token:
+                    physical_nodes.add(physical_node)
                     workers.append(
                         {
-                            "name": str(entry.get("name") or url),
+                            "name": name,
                             "url": url,
                             "token": token,
+                            "pool": (
+                                "dedicated"
+                                if str(entry.get("pool") or "").strip().lower() == "dedicated"
+                                else "shared_converter"
+                            ),
+                            "priority": int(entry.get("priority") or 100),
+                            "canary_approved": canary_approved,
+                            "capability_mode": str(
+                                entry.get("capability_mode")
+                                or entry.get("mode")
+                                or "full"
+                            ),
+                            "physical_node": physical_node,
                         }
                     )
     except Exception as exc:  # a broken file must not take the service down
@@ -91,7 +126,16 @@ def hunyuan_workers() -> list[dict]:
     # authenticate against at most one of them.
     if HUNYUAN_API_TOKEN and len(HUNYUAN_WORKERS) == 1:
         url = HUNYUAN_WORKERS[0]
-        return [{"name": url, "url": url, "token": HUNYUAN_API_TOKEN}]
+        return [{
+            "name": url,
+            "url": url,
+            "token": HUNYUAN_API_TOKEN,
+            "pool": "shared_converter",
+            "priority": 100,
+            "canary_approved": True,
+            "capability_mode": "full",
+            "physical_node": url.lower(),
+        }]
     if HUNYUAN_WORKERS and not HUNYUAN_API_TOKEN:
         print("[Renderfin] RENDERFIN_HUNYUAN_WORKERS set but no token configured")
     elif len(HUNYUAN_WORKERS) > 1:
@@ -105,6 +149,15 @@ HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))
 # A standard-quality generation takes ~65 min on the farm's GTX 1080 Ti boxes
 # and queues behind conversion jobs, so the ceiling has to be generous.
 HUNYUAN_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_TIMEOUT_SECONDS", "14400"))
+
+# A shared converter is only borrowed when the normal AutoRig queue is empty.
+# Production overrides this path in storage-host.env.
+AUTORIG_QUEUE_DB_PATH = Path(
+    os.getenv("RENDERFIN_AUTORIG_QUEUE_DB_PATH", "/var/autorig/autorig.db")
+)
+AUTORIG_QUEUE_CACHE_SECONDS = float(
+    os.getenv("RENDERFIN_AUTORIG_QUEUE_CACHE_SECONDS", "5")
+)
 
 # Telegram delivery (renderfin owns delivery so results survive bot restarts)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()

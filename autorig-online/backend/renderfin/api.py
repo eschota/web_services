@@ -40,12 +40,20 @@ async def health(request: Request) -> Dict[str, Any]:
     queue = _queue(request)
     tasks = queue.all_tasks()
     pool = hunyuan_client.workers()
+    dedicated = [worker["name"] for worker in pool if worker.get("pool") == "dedicated"]
+    shared = [worker["name"] for worker in pool if worker.get("pool") != "dedicated"]
     return {
         "ok": True,
         "servers": len(_registry(request).all()),
         "pending": sum(1 for t in tasks if t.status == "Pending"),
         "rendering": sum(1 for t in tasks if t.status == "Rendering"),
         "hunyuan_workers": [w["name"] for w in pool],
+        "hunyuan_pools": {
+            "dedicated": dedicated,
+            "shared_converter": shared,
+            "shared_reserved": hunyuan_client.RESERVED_FOR_OTHER_WORK,
+            "ordinary_conversion_waiting": hunyuan_client.ordinary_conversion_waiting(),
+        },
         "hunyuan_path": "converter-api" if pool else "comfy-fallback",
         "active_jobs": len(_chargen(request).active_jobs()),
     }

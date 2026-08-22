@@ -329,6 +329,19 @@ class RenderQueue:
             try:
                 await self._submit_task(task, server)
                 return True
+            except comfy_adapter.ComfyCapacityWait as exc:
+                # The render node atomically switched to Hunyuan after our
+                # queue probe. Keep the render pending without charging a
+                # submit failure; the next server refresh re-enables it after
+                # ComfyUI is restored.
+                print(
+                    f"[Renderfin][Queue] capacity wait {task.id} on "
+                    f"{server.render_server_name}: {exc}"
+                )
+                await self._persist(task)
+                server.status = "offline"
+                self.registry.save(server)
+                return False
             except (ValueError, KeyError) as exc:
                 # bad workflow/template/prompt: the task is broken, not the box
                 print(f"[Renderfin][Queue] task {task.id} rejected: {exc}")

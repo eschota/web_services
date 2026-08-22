@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import time
 import os
+import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -33,6 +34,16 @@ WORKER_INFLIGHT_CAP = int(os.getenv("RENDERFIN_HUNYUAN_INFLIGHT_CAP", "1"))
 # many boxes out of generation's reach so the rest of the service keeps moving;
 # generations queue on our side instead, which costs them nothing.
 RESERVED_FOR_OTHER_WORK = int(os.getenv("RENDERFIN_HUNYUAN_RESERVED_WORKERS", "1"))
+
+_ORDINARY_QUEUE_CACHE: Tuple[float, bool] = (0.0, False)
+_ORDINARY_ACTIVE_STATES = {
+    "created",
+    "queued",
+    "pending",
+    "assigned",
+    "starting",
+    "processing",
+}
 
 
 class TaskVanished(RuntimeError):
@@ -84,6 +95,44 @@ class NoWorkerAvailable(RuntimeError):
 
 class HunyuanClientError(RuntimeError):
     pass
+
+
+def ordinary_conversion_waiting() -> bool:
+    """Return True while the normal AutoRig queue needs converter capacity.
+
+    A missing optional database means this protection is not configured (the
+    legacy VPS layout).  An existing but unreadable database fails closed so a
+    broken probe cannot make shared converters look free.
+    """
+    global _ORDINARY_QUEUE_CACHE
+    now = time.monotonic()
+    cached_at, cached_value = _ORDINARY_QUEUE_CACHE
+    if now - cached_at < max(0.1, config.AUTORIG_QUEUE_CACHE_SECONDS):
+        return cached_value
+    path = config.AUTORIG_QUEUE_DB_PATH
+    if not path.is_file():
+        _ORDINARY_QUEUE_CACHE = (now, False)
+        return False
+    try:
+        connection = sqlite3.connect(
+            f"file:{path.as_posix()}?mode=ro",
+            uri=True,
+            timeout=0.5,
+        )
+        try:
+            rows = connection.execute(
+                "SELECT lower(status), count(*) FROM tasks GROUP BY lower(status)"
+            ).fetchall()
+        finally:
+            connection.close()
+        waiting = any(str(status or "") in _ORDINARY_ACTIVE_STATES and int(count) > 0
+                      for status, count in rows)
+        _ORDINARY_QUEUE_CACHE = (now, waiting)
+        return waiting
+    except Exception as exc:
+        print(f"[Renderfin][Hunyuan] ordinary queue probe failed closed: {exc}")
+        _ORDINARY_QUEUE_CACHE = (now, True)
+        return True
 
 
 def workers() -> List[Dict[str, str]]:
@@ -164,13 +213,13 @@ async def pick_worker(
     client: httpx.AsyncClient,
     in_flight: Optional[Dict[str, int]] = None,
     excluded: Optional[set[str]] = None,
-) -> Dict[str, str]:
-    """Pick the enabled worker with the shallowest overall queue.
+) -> Dict[str, Any]:
+    """Pick dedicated capacity first, then an empty protected converter.
 
-    `in_flight` is how many of OUR jobs each worker is already holding. A box
-    that runs one generation at a time gains nothing from being handed more,
-    and a job waiting in its queue is invisible to us, so a worker at its cap
-    is not a candidate and the job waits on our side instead.
+    No worker receives a local Hunyuan backlog.  Shared converters are eligible
+    only when the ordinary AutoRig queue is empty, their complete box queue is
+    empty, and at least ``RESERVED_FOR_OTHER_WORK`` other idle shared workers
+    remain available for conversion.
     """
     pool = workers()
     if not pool:
@@ -178,52 +227,75 @@ async def pick_worker(
     in_flight = in_flight or {}
     excluded = excluded or set()
     at_capacity: List[str] = []
-    # Boxes already carrying one of our generations. Spreading onto a fresh box
-    # is what eats the fleet, so that is what the reserve limits - a box already
-    # generating may keep doing so.
-    busy_with_ours = {name for name, count in in_flight.items() if count > 0}
-    max_generating = max(1, len(pool) - RESERVED_FOR_OTHER_WORK)
-    reserve_reached = len(busy_with_ours) >= max_generating
-    reserved_skipped: List[str] = []
-    candidates: List[Tuple[int, int, Dict[str, str]]] = []
+    unreachable: List[str] = []
+    dedicated: List[Tuple[int, int, int, Dict[str, Any]]] = []
+    shared_idle: List[Tuple[int, int, Dict[str, Any]]] = []
     for index, worker in enumerate(pool):
         if worker["name"] in excluded:
             continue
         if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
             at_capacity.append(worker["name"])
             continue
-        if reserve_reached and worker["name"] not in busy_with_ours:
-            reserved_skipped.append(worker["name"])
-            continue
         status = await server_status(client, worker)
         if not status:
+            unreachable.append(worker["name"])
             continue
         hunyuan = status.get("hunyuan")
         if not isinstance(hunyuan, dict):
             continue
         if not hunyuan.get("enabled") or not hunyuan.get("installed"):
             continue
-        candidates.append((_load_score(status, hunyuan), index, worker))
-    if not candidates:
-        if reserved_skipped:
-            # Deliberate, not a fault: the same wait path as a full pool, so the
-            # job keeps its attempts and its stage clock while it holds off.
-            raise NoWorkerAvailable(
-                "every Hunyuan worker is at capacity: holding "
-                + ", ".join(reserved_skipped)
-                + " free for rig/convert work"
-            )
-        if at_capacity:
-            # not a fault: every box is busy with work of ours. Waiting for a
-            # slot is the correct outcome and must not spend an attempt.
-            raise NoWorkerAvailable(
-                "every Hunyuan worker is at capacity: " + ", ".join(at_capacity)
-            )
+        score = _load_score(status, hunyuan)
+        worker_pool = str(worker.get("pool") or "shared_converter")
+        priority = int(worker.get("priority") or 100)
+        accepting_flag = status.get("accepting_hunyuan")
+        if worker_pool == "dedicated":
+            # New render nodes expose an atomic arbiter admission flag.  F12 is
+            # dedicated too but predates that field, so its queue/service state
+            # remains the compatibility signal.
+            if accepting_flag is False:
+                at_capacity.append(worker["name"])
+                continue
+            if accepting_flag is None and score > 0:
+                at_capacity.append(worker["name"])
+                continue
+            dedicated.append((score, priority, index, worker))
+            continue
+        # A shared converter is borrowed only while its complete queue is idle;
+        # the central queue keeps the Hunyuan job instead of hiding it locally.
+        if score == 0 and accepting_flag is not False:
+            shared_idle.append((priority, index, worker))
+
+    if dedicated:
+        dedicated.sort(key=lambda item: (item[0], item[1], item[2]))
+        return dedicated[0][3]
+
+    if ordinary_conversion_waiting():
         raise NoWorkerAvailable(
-            "no enabled Hunyuan worker among " + ", ".join(w["name"] for w in pool)
+            "dedicated Hunyuan pool has no capacity; shared fallback paused for ordinary conversion"
         )
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    return candidates[0][2]
+
+    reserve = max(0, RESERVED_FOR_OTHER_WORK)
+    if len(shared_idle) > reserve:
+        shared_idle.sort(key=lambda item: (item[0], item[1]))
+        return shared_idle[0][2]
+    if shared_idle and reserve:
+        raise NoWorkerAvailable(
+            "dedicated Hunyuan pool has no capacity: holding "
+            + ", ".join(item[2]["name"] for item in shared_idle)
+            + " free for rig/convert work"
+        )
+    if at_capacity:
+        raise NoWorkerAvailable(
+            "every Hunyuan worker is at capacity: " + ", ".join(at_capacity)
+        )
+    if unreachable:
+        raise NoWorkerAvailable(
+            "no reachable Hunyuan worker among " + ", ".join(unreachable)
+        )
+    raise NoWorkerAvailable(
+        "no enabled Hunyuan worker among " + ", ".join(w["name"] for w in pool)
+    )
 
 
 async def submit(
@@ -260,6 +332,23 @@ async def submit(
             f"{worker['name']} rejected our token (HTTP {resp.status_code})"
         )
     response_text = resp.text[:1000]
+    if resp.status_code in (409, 423, 429, 503):
+        try:
+            rejection = resp.json()
+        except ValueError:
+            rejection = {}
+        error = str(rejection.get("error") or "").strip().lower()
+        if rejection.get("retryable") is True or error in {
+            "gpu_busy_comfy",
+            "gpu_leased",
+            "worker_capacity",
+            "gpu_arbiter_unavailable",
+            "gpu_arbiter_failure",
+        }:
+            raise NoWorkerAvailable(
+                f"{worker['name']} is temporarily unavailable: "
+                f"{error or response_text[:200]}"
+            )
     if resp.status_code == 400 and (
         "image_url host cannot be resolved" in response_text.lower()
         or "getaddrinfo failed" in response_text.lower()

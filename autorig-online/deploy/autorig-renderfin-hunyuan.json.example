@@ -4,10 +4,15 @@
     "Every converter box provisions its OWN Hunyuan bearer token in",
     "%LOCALAPPDATA%\\AutoRig\\hunyuan_api_token — one shared token does not work.",
     "The public converter facades drop the Authorization header, so point url at",
-    "the loopback port published by autorig-farm-tunnels.service."
+    "the loopback port published by autorig-farm-tunnels.service.",
+    "Dedicated Hunyuan-only render nodes are selected before shared converters.",
+    "canary_approved=false parks a provisioned node without losing its config."
   ],
   "workers": [
-    {"name": "f7", "url": "http://127.0.0.1:15131", "token": "<f7 hunyuan_api_token>"},
-    {"name": "f13", "url": "http://127.0.0.1:15267", "token": "<f13 hunyuan_api_token>"}
+    {"name": "f12", "url": "http://127.0.0.1:15198", "token": "<f12 token>", "pool": "dedicated", "priority": 10, "canary_approved": true, "capability_mode": "hunyuan_only", "physical_node": "f12"},
+    {"name": "raptor", "url": "http://127.0.0.1:15188", "token": "<raptor token>", "pool": "dedicated", "priority": 20, "canary_approved": true, "capability_mode": "hunyuan_only", "physical_node": "ryzen-server"},
+    {"name": "f5", "url": "http://127.0.0.1:15185", "token": "<f5 token>", "pool": "dedicated", "priority": 30, "canary_approved": false, "capability_mode": "hunyuan_only", "physical_node": "f5"},
+    {"name": "f15", "url": "http://127.0.0.1:15195", "token": "<f15 token>", "pool": "dedicated", "priority": 40, "canary_approved": false, "capability_mode": "hunyuan_only", "physical_node": "f15"},
+    {"name": "f13", "url": "http://127.0.0.1:15267", "token": "<f13 token>", "pool": "shared_converter", "priority": 100, "canary_approved": true, "capability_mode": "full", "physical_node": "f13"}
   ]
 }

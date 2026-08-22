@@ -12,9 +12,10 @@ def run(coro):
 
 
 POOL = [
-    {"name": "f7", "url": "http://127.0.0.1:15131", "token": "tok-f7"},
-    {"name": "f13", "url": "http://127.0.0.1:15267", "token": "tok-f13"},
+    {"name": "f7", "url": "http://127.0.0.1:15131", "token": "tok-f7", "pool": "dedicated"},
+    {"name": "f13", "url": "http://127.0.0.1:15267", "token": "tok-f13", "pool": "dedicated"},
 ]
+SHARED_POOL = [dict(worker, pool="shared_converter") for worker in POOL]
 
 
 class StatusUrlRebaseTests(unittest.TestCase):
@@ -183,7 +184,7 @@ class WorkerSelectionTests(unittest.TestCase):
 
         run(scenario())
 
-    def test_all_busy_picks_shortest_queue(self):
+    def test_all_busy_waits_in_the_central_queue(self):
         async def scenario():
             def handler(request: httpx.Request) -> httpx.Response:
                 q = 5 if "15131" in str(request.url) else 1
@@ -194,8 +195,8 @@ class WorkerSelectionTests(unittest.TestCase):
 
             with patch.object(config, "hunyuan_workers", lambda: POOL):
                 async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                    worker = await hunyuan_client.pick_worker(client)
-            self.assertEqual(worker["name"], "f13")
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable):
+                        await hunyuan_client.pick_worker(client)
 
         run(scenario())
 
@@ -211,7 +212,7 @@ class WorkerSelectionTests(unittest.TestCase):
                                 "service_state": "idle", "queue_size": 0},
                     "tasks_summary": {
                         "queue_size": 2 if busy else 0,
-                        "processing": 1,
+                        "processing": 1 if busy else 0,
                     },
                 })
 
@@ -267,6 +268,65 @@ class WorkerSelectionTests(unittest.TestCase):
             self.assertIsNotNone(w)
             self.assertEqual(w["name"], "f13")
             self.assertIsNone(hunyuan_client.worker_for_url("http://otherhost/x"))
+
+    def test_dedicated_worker_wins_over_an_idle_shared_converter(self):
+        async def scenario():
+            tiered = [
+                dict(SHARED_POOL[0], priority=1),
+                dict(POOL[1], priority=100),
+            ]
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(200, json={
+                    "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"},
+                    "accepting_hunyuan": True,
+                    "tasks_summary": {"queue_size": 0, "processing": 0},
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: tiered):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    worker = await hunyuan_client.pick_worker(client)
+            self.assertEqual(worker["name"], "f13")
+
+        run(scenario())
+
+    def test_gpu_busy_response_parks_without_spending_a_job_attempt(self):
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                if request.url.path.endswith("/server-status"):
+                    return httpx.Response(200, json={
+                        "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"},
+                        "accepting_hunyuan": True,
+                    })
+                return httpx.Response(503, json={
+                    "error": "gpu_busy_comfy",
+                    "retryable": True,
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: POOL):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+                        await hunyuan_client.submit(client, image_url="https://x/i.png")
+            self.assertIn("gpu_busy_comfy", str(caught.exception))
+
+        run(scenario())
+
+    def test_ordinary_queue_blocks_shared_fallback(self):
+        async def scenario():
+            def handler(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(200, json={
+                    "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"},
+                    "tasks_summary": {"queue_size": 0, "processing": 0},
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: SHARED_POOL), \
+                 patch.object(hunyuan_client, "ordinary_conversion_waiting", return_value=True):
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+                        await hunyuan_client.pick_worker(client)
+            self.assertIn("ordinary conversion", str(caught.exception))
+
+        run(scenario())
 
 
 class PollToleranceTests(unittest.TestCase):
@@ -468,6 +528,32 @@ class ParkedWorkerTests(unittest.TestCase):
         entry = {"name": "f7", "url": "https://f7", "token": "t", "enabled": True}
         self.assertEqual([w["name"] for w in self._pool_from([entry])], ["f7"])
 
+    def test_canary_gate_keeps_unapproved_render_node_parked(self):
+        pool = self._pool_from([
+            {"name": "f5", "url": "https://f5", "token": "t", "pool": "dedicated",
+             "canary_approved": False},
+            {"name": "f12", "url": "https://f12", "token": "t", "pool": "dedicated"},
+        ])
+        self.assertEqual([worker["name"] for worker in pool], ["f12"])
+
+    def test_physical_node_alias_is_not_counted_twice(self):
+        pool = self._pool_from([
+            {"name": "Raptor", "url": "https://raptor", "token": "t",
+             "pool": "dedicated", "physical_node": "ryzen-server"},
+            {"name": "RYZEN-SERVER", "url": "https://duplicate", "token": "t",
+             "pool": "dedicated", "physical_node": "ryzen-server"},
+        ])
+        self.assertEqual([worker["name"] for worker in pool], ["Raptor"])
+
+    def test_tier_fields_are_preserved(self):
+        pool = self._pool_from([
+            {"name": "f12", "url": "https://f12", "token": "t", "pool": "dedicated",
+             "priority": 10, "capability_mode": "hunyuan_only"},
+        ])
+        self.assertEqual(pool[0]["pool"], "dedicated")
+        self.assertEqual(pool[0]["priority"], 10)
+        self.assertEqual(pool[0]["capability_mode"], "hunyuan_only")
+
     def test_a_parked_worker_cannot_be_picked(self):
         async def scenario():
             def handler(request: httpx.Request) -> httpx.Response:
@@ -495,9 +581,9 @@ class InFlightCapTests(unittest.TestCase):
 
     def test_a_busy_worker_is_not_offered(self):
         async def scenario():
-            with patch.object(config, "hunyuan_workers", lambda: POOL):
+            with patch.object(config, "hunyuan_workers", lambda: SHARED_POOL):
                 async with httpx.AsyncClient(transport=httpx.MockTransport(self._ok_handler)) as c:
-                    busy = {w["name"]: 1 for w in POOL}
+                    busy = {w["name"]: 1 for w in SHARED_POOL}
                     with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
                         await hunyuan_client.pick_worker(c, busy)
             # the message must say queue, not outage: they are handled differently
@@ -507,12 +593,12 @@ class InFlightCapTests(unittest.TestCase):
 
     def test_a_free_worker_is_still_offered(self):
         async def scenario():
-            with patch.object(config, "hunyuan_workers", lambda: POOL), patch.object(
+            with patch.object(config, "hunyuan_workers", lambda: SHARED_POOL), patch.object(
                 hunyuan_client, "RESERVED_FOR_OTHER_WORK", 0
             ):
                 async with httpx.AsyncClient(transport=httpx.MockTransport(self._ok_handler)) as c:
-                    worker = await hunyuan_client.pick_worker(c, {POOL[0]["name"]: 1})
-            self.assertNotEqual(worker["name"], POOL[0]["name"])
+                    worker = await hunyuan_client.pick_worker(c, {SHARED_POOL[0]["name"]: 1})
+            self.assertNotEqual(worker["name"], SHARED_POOL[0]["name"])
 
         run(scenario())
 

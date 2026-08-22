@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from renderfin import config
+from renderfin import comfy_adapter, config
 from renderfin.models import (
     TASK_DONE,
     TASK_ERROR,
@@ -60,6 +60,32 @@ def _server(name="raptor", workflows=("gen_image.json",)):
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_gpu_lease_race_keeps_render_pending_without_submit_failure(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                registry.save(_server())
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    with patch.object(queue, "_queue_depths", return_value={"raptor": 0}), \
+                         patch.object(
+                             queue,
+                             "_submit_task",
+                             side_effect=comfy_adapter.ComfyCapacityWait("gpu leased"),
+                         ):
+                        dispatched = await queue._dispatch_one()
+                    self.assertFalse(dispatched)
+                    self.assertEqual(task.status, TASK_PENDING)
+                    self.assertEqual(task.submit_failures, 0)
+                    self.assertEqual(registry.get("raptor").status, "offline")
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
     def test_one_in_flight_per_server_and_token_rule(self):
         async def scenario():
             with _Env():

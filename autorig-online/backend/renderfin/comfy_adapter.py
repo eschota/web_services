@@ -27,6 +27,31 @@ class ComfyAdapterError(RuntimeError):
     pass
 
 
+class ComfyCapacityWait(RuntimeError):
+    """The shared GPU is temporarily leased to Hunyuan.
+
+    This is normal capacity pressure, not a render attempt and not evidence
+    that the workflow or worker is broken.
+    """
+
+
+def _capacity_wait(resp: httpx.Response) -> bool:
+    if resp.status_code not in (409, 423, 429, 503):
+        return False
+    try:
+        payload = resp.json()
+    except ValueError:
+        payload = {}
+    return bool(
+        payload.get("retryable") is True
+        or str(payload.get("error") or "").lower() in {
+            "gpu_leased",
+            "gpu_busy_comfy",
+            "comfy_backend_unavailable",
+        }
+    )
+
+
 def _validate_server_url(url: str) -> str:
     url = (url or "").rstrip("/")
     parsed = urlparse(url)
@@ -81,6 +106,8 @@ async def upload_image(
         f"{base}/upload/image", files=files, data={"overwrite": "true"},
         timeout=60.0, auth=_auth_for(server),
     )
+    if _capacity_wait(resp):
+        raise ComfyCapacityWait(f"Comfy GPU temporarily leased: HTTP {resp.status_code}")
     if resp.status_code != 200:
         raise ComfyAdapterError(f"upload/image failed: HTTP {resp.status_code} {resp.text[:200]}")
     try:
@@ -99,6 +126,8 @@ async def submit(
     base = _validate_server_url(server.render_server_url)
     body = {"prompt": workflow, "client_id": CLIENT_ID}
     resp = await client.post(f"{base}/prompt", json=body, timeout=60.0, auth=_auth_for(server))
+    if _capacity_wait(resp):
+        raise ComfyCapacityWait(f"Comfy GPU temporarily leased: HTTP {resp.status_code}")
     if resp.status_code != 200:
         raise ComfyAdapterError(f"prompt submit failed: HTTP {resp.status_code} {resp.text[:500]}")
     payload = resp.json()

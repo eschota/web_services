@@ -180,6 +180,7 @@ class HunyuanConverterPathTests(unittest.TestCase):
                         "name": "f2",
                         "url": "https://converter-f2.freestock.online",
                         "token": "test-token",
+                        "pool": "dedicated",
                     }]
                     with patch.object(config, "hunyuan_workers", lambda: fake_pool):
                         with patch.object(config, "HUNYUAN_API_TOKEN", "test-token"):

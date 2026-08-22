@@ -292,6 +292,16 @@ def check_renderfin(report: Report) -> Dict[str, Any]:
     else:
         usable, unusable = _hunyuan_worker_health()
         report.ok(f"hunyuan workers: {', '.join(workers)} ({health.get('hunyuan_path')})")
+        pools = health.get("hunyuan_pools") or {}
+        if pools:
+            report.ok(
+                "hunyuan pools: dedicated="
+                + ",".join(pools.get("dedicated") or [])
+                + " shared="
+                + ",".join(pools.get("shared_converter") or [])
+                + f" reserve={pools.get('shared_reserved')}"
+                + (" ordinary-queue=busy" if pools.get("ordinary_conversion_waiting") else "")
+            )
         if unusable:
             # a configured box that cannot take a job is not a spare: every job
             # piles onto whatever is left, and throughput drops with no error
@@ -400,6 +410,7 @@ def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
     entries = data.get("workers") if isinstance(data, dict) else data
     usable: List[str] = []
     unusable: List[str] = []
+    physical_nodes = set()
     for entry in entries or []:
         name = str(entry.get("name") or entry.get("url") or "?")
         url = str(entry.get("url") or "").rstrip("/")
@@ -410,6 +421,14 @@ def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
             # parked on purpose: reported, but not as something to fix
             usable.append(f"{name} (parked: {entry.get('disabled_reason') or 'no reason'})")
             continue
+        if entry.get("canary_approved") is False:
+            usable.append(f"{name} (parked: awaiting standard/PBR canary)")
+            continue
+        physical_node = str(entry.get("physical_node") or name).strip().lower()
+        if physical_node in physical_nodes:
+            unusable.append(f"{name} duplicates physical node {physical_node}")
+            continue
+        physical_nodes.add(physical_node)
         request = urllib.request.Request(
             f"{url}/api-converter-glb/server-status",
             headers={"Authorization": f"Bearer {token}"},
@@ -430,6 +449,21 @@ def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
                 f"installed={hunyuan.get('installed')}"
             )
             continue
+        gpu_mode = str(status.get("gpu_mode") or "")
+        if gpu_mode == "degraded":
+            unusable.append(f"{name} GPU arbiter degraded: {status.get('last_error') or 'unknown'}")
+            continue
+        if gpu_mode in {"draining", "restoring"}:
+            try:
+                transition_age = time.time() - float(status.get("last_transition") or time.time())
+            except (TypeError, ValueError):
+                transition_age = 0
+            if transition_age > 180:
+                unusable.append(
+                    f"{name} GPU arbiter stuck in {gpu_mode} for {int(transition_age)}s: "
+                    f"{status.get('last_error') or 'no error'}"
+                )
+                continue
         # server-status does not check the bearer, so a stale token only shows
         # up on the endpoint that matters. Jobs wait out a rejection rather
         # than failing, which is right for them and silent for everyone else -
@@ -438,7 +472,14 @@ def _hunyuan_worker_health() -> Tuple[List[str], List[str]]:
         if reason:
             unusable.append(f"{name} {reason}")
         else:
-            usable.append(name)
+            suffix = ""
+            if gpu_mode == "hunyuan":
+                suffix = " (Hunyuan active)"
+            elif status.get("accepting_hunyuan") is False:
+                running = status.get("comfy_running")
+                pending = status.get("comfy_pending")
+                suffix = f" (Comfy busy {running}/{pending})"
+            usable.append(name + suffix)
     return usable, unusable
 
 
