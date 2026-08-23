@@ -1,0 +1,10 @@
+[Unit]
+Description=Retired legacy RenderFarmer monitor (do not enable)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/true
+RemainAfterExit=yes
+
+# This tombstone intentionally has no Telegram token and no Install section.
+# The live replacement is renderfarmer-monitor.service on way-fr.

@@ -15,6 +15,7 @@ WorkingDirectory=/srv/autorig/current
 Environment="HOME=/srv/autorig/home"
 Environment="PATH=/srv/autorig/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
 Environment="RENDERFARMER_DATA_DIR=/srv/autorig/data/var/renderfarmer-monitor"
 Environment="RENDERFARMER_DISK_PATH=/srv/autorig"
 Environment="RENDERFARMER_QUEUE_URL=http://127.0.0.1:8200/api/queue/status"
