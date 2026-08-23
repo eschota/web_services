@@ -2,7 +2,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import time
 
@@ -25,6 +25,72 @@ from renderfin.registry import ServerRegistry
 
 def run(coro):
     return asyncio.get_event_loop_policy().new_event_loop().run_until_complete(coro)
+
+
+class HunyuanAdmissionOrderTests(unittest.TestCase):
+    def test_interactive_fifo_precedes_background_under_submit_lock(self):
+        async def scenario():
+            manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+            background = CharacterGenJob(
+                id="background",
+                seq=1,
+                stage=CHARGEN_STAGE_HUNYUAN,
+                queue_class="collection_background",
+            )
+            interactive_old = CharacterGenJob(
+                id="interactive-old",
+                seq=2,
+                stage=CHARGEN_STAGE_HUNYUAN,
+                queue_class="interactive",
+                retry_at=time.time() + 30,
+                hunyuan_waiting_for_capacity=True,
+            )
+            interactive_new = CharacterGenJob(
+                id="interactive-new",
+                seq=3,
+                stage=CHARGEN_STAGE_HUNYUAN,
+                queue_class="interactive",
+            )
+            manager._jobs = {
+                job.id: job for job in (background, interactive_new, interactive_old)
+            }
+            manager._persist = AsyncMock()
+            with patch.object(manager, "_spawn") as spawn:
+                async with manager._submit_lock:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable):
+                        await manager._require_hunyuan_admission(background)
+            self.assertEqual(interactive_old.retry_at, 0)
+            spawn.assert_called_once_with(interactive_old)
+            ordered = manager._hunyuan_admission_candidates(interactive_new)
+            self.assertEqual(
+                [job.id for job in ordered],
+                ["interactive-old", "interactive-new", "background"],
+            )
+
+        run(scenario())
+
+    def test_preemption_cooldown_excludes_background_until_due(self):
+        manager = CharacterGenManager(object(), db_path=Path("unused.db"))
+        now = time.time()
+        cooling = CharacterGenJob(
+            id="cooling",
+            seq=1,
+            stage=CHARGEN_STAGE_HUNYUAN,
+            queue_class="collection_background",
+            dispatch_not_before=now + 60,
+            hunyuan_waiting_for_capacity=True,
+        )
+        current = CharacterGenJob(
+            id="current",
+            seq=2,
+            stage=CHARGEN_STAGE_HUNYUAN,
+            queue_class="collection_background",
+        )
+        manager._jobs = {cooling.id: cooling, current.id: current}
+        self.assertEqual(
+            [job.id for job in manager._hunyuan_admission_candidates(current, now=now)],
+            ["current"],
+        )
 
 
 class _Env:

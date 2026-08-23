@@ -15,7 +15,268 @@ POOL = [
     {"name": "f7", "url": "http://127.0.0.1:15131", "token": "tok-f7", "pool": "dedicated"},
     {"name": "f13", "url": "http://127.0.0.1:15267", "token": "tok-f13", "pool": "dedicated"},
 ]
-SHARED_POOL = [dict(worker, pool="shared_converter") for worker in POOL]
+SHARED_POOL = [
+    dict(worker, pool="shared_converter", capability_mode="full") for worker in POOL
+]
+
+
+class PriorityPreemptionTests(unittest.TestCase):
+    def test_multiple_hunyuan_victims_are_recalled_in_one_parallel_window(self):
+        async def scenario():
+            entered = []
+            both_entered = asyncio.Event()
+            release = asyncio.Event()
+
+            async def fake_status(_client, worker):
+                return {
+                    "feature_flags": {
+                        "collection_preemption_v1": True,
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "processing_tasks": [{
+                        "task_id": f"h-{worker['name']}",
+                        "backend_task_id": f"job-{worker['name']}",
+                        "type": "HunyuanGenerationTask",
+                        "queue_class": "collection_background",
+                        "preemptible": True,
+                    }],
+                    "pending_tasks": [],
+                }
+
+            async def fake_preempt(_client, candidate, **_kwargs):
+                entered.append(candidate[3]["name"])
+                if len(entered) == 2:
+                    both_entered.set()
+                await asyncio.wait_for(both_entered.wait(), timeout=0.5)
+                await release.wait()
+                return candidate[3]
+
+            with patch.object(hunyuan_client, "workers", lambda: SHARED_POOL), patch.object(
+                hunyuan_client, "server_status", new=fake_status
+            ), patch.object(
+                hunyuan_client, "_preempt_hunyuan_candidate", new=fake_preempt
+            ):
+                recall = asyncio.create_task(
+                    hunyuan_client.preempt_background_hunyuan_many(
+                        object(), limit=2, shared_full_converter_only=True
+                    )
+                )
+                await asyncio.wait_for(both_entered.wait(), timeout=0.5)
+                release.set()
+                released = await recall
+
+            self.assertEqual(set(entered), {"f7", "f13"})
+            self.assertEqual({worker["name"] for worker in released}, {"f7", "f13"})
+
+        run(scenario())
+
+    def test_shared_recall_requires_explicit_full_converter_capability(self):
+        self.assertFalse(
+            hunyuan_client._status_is_full_converter({
+                "feature_flags": {
+                    "collection_preemption_v1": True,
+                    "converter_capability_mode": "hunyuan_only",
+                    "legacy_conversion_enabled": False,
+                },
+                "capabilities": {
+                    "mode": "hunyuan_only",
+                    "legacy_conversion": False,
+                },
+            })
+        )
+        self.assertTrue(
+            hunyuan_client._status_is_full_converter({
+                "feature_flags": {
+                    "collection_preemption_v1": True,
+                    "converter_capability_mode": "full",
+                    "legacy_conversion_enabled": True,
+                },
+                "capabilities": {"mode": "full", "legacy_conversion": True},
+            })
+        )
+
+    def test_shared_recall_requires_full_capability_in_registry_too(self):
+        async def scenario():
+            probed = []
+
+            async def fake_status(_client, worker):
+                probed.append(worker["name"])
+                return {
+                    "feature_flags": {
+                        "collection_preemption_v1": True,
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                }
+
+            contradictory = [
+                dict(SHARED_POOL[0], capability_mode="hunyuan_only")
+            ]
+            with patch.object(
+                hunyuan_client, "workers", lambda: contradictory
+            ), patch.object(hunyuan_client, "server_status", new=fake_status):
+                released = await hunyuan_client.preempt_background_hunyuan_many(
+                    object(), limit=1, shared_full_converter_only=True
+                )
+            self.assertEqual(released, [])
+            self.assertEqual(probed, [])
+
+        run(scenario())
+
+    def test_hunyuan_preempt_http_cannot_run_past_absolute_deadline(self):
+        async def scenario():
+            class SlowClient:
+                async def post(self, *_args, **_kwargs):
+                    await asyncio.sleep(0.2)
+                    return httpx.Response(202)
+
+            candidate = (
+                0.0,
+                0.0,
+                "h-bg",
+                SHARED_POOL[0],
+                {"backend_task_id": "job-bg"},
+            )
+            started = asyncio.get_running_loop().time()
+            with self.assertRaises(asyncio.TimeoutError):
+                await hunyuan_client._preempt_hunyuan_candidate(
+                    SlowClient(),
+                    candidate,
+                    deadline=asyncio.get_running_loop().time() + 0.03,
+                )
+            self.assertLess(asyncio.get_running_loop().time() - started, 0.15)
+
+        run(scenario())
+
+    def test_full_converter_recall_never_uses_dedicated_hunyuan_nodes(self):
+        async def scenario():
+            probes = []
+
+            async def fake_status(_client, worker):
+                probes.append(worker["name"])
+                return {
+                    "feature_flags": {"collection_preemption_v1": True},
+                    "processing_tasks": [{
+                        "task_id": "h-bg",
+                        "backend_task_id": "job-bg",
+                        "queue_class": "collection_background",
+                        "preemptible": True,
+                    }],
+                }
+
+            with patch.object(config, "hunyuan_workers", lambda: POOL), patch.object(
+                hunyuan_client, "server_status", new=fake_status
+            ):
+                released = await hunyuan_client.preempt_background_hunyuan(
+                    object(), shared_full_converter_only=True
+                )
+            self.assertIsNone(released)
+            self.assertEqual(probes, [])
+
+        run(scenario())
+
+    def test_accepted_pending_hunyuan_task_is_a_recall_candidate(self):
+        async def scenario():
+            selected = []
+
+            async def fake_status(_client, worker):
+                return {
+                    "feature_flags": {
+                        "collection_preemption_v1": True,
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "processing_tasks": [],
+                    "pending_tasks": [{
+                        "task_id": "h-pending",
+                        "backend_task_id": "job-pending",
+                        "type": "HunyuanGenerationTask",
+                        "queue_class": "collection_background",
+                        "preemptible": True,
+                    }],
+                }
+
+            async def fake_preempt(_client, candidate, **_kwargs):
+                selected.append(candidate[2])
+                return candidate[3]
+
+            with patch.object(
+                hunyuan_client, "workers", lambda: [SHARED_POOL[0]]
+            ), patch.object(
+                hunyuan_client, "server_status", new=fake_status
+            ), patch.object(
+                hunyuan_client, "_preempt_hunyuan_candidate", new=fake_preempt
+            ):
+                released = await hunyuan_client.preempt_background_hunyuan_many(
+                    object(), limit=1, shared_full_converter_only=True
+                )
+            self.assertEqual(selected, ["h-pending"])
+            self.assertEqual(released[0]["name"], SHARED_POOL[0]["name"])
+
+        run(scenario())
+
+    def test_release_proof_requires_explicit_zero_queue_telemetry(self):
+        for payload in (
+            {},
+            {"processing_tasks": []},
+            {"processing_tasks": "none", "tasks_summary": {}},
+            {
+                "processing_tasks": [],
+                "tasks_summary": {"processing": 0, "pending": 0},
+            },
+        ):
+            self.assertFalse(
+                hunyuan_client._status_proves_hunyuan_idle(payload, "h-bg")
+            )
+        self.assertTrue(
+            hunyuan_client._status_proves_hunyuan_idle(
+                {
+                    "processing_tasks": [],
+                    "pending_tasks": [],
+                    "tasks_summary": {"processing": 0, "pending": 0, "queue_size": 0},
+                },
+                "h-bg",
+            )
+        )
+
+    def test_released_victim_is_removed_from_in_flight_before_repick(self):
+        async def scenario():
+            seen_in_flight = []
+
+            async def fake_pick(_client, in_flight=None, excluded=None):
+                seen_in_flight.append(dict(in_flight or {}))
+                if len(seen_in_flight) == 1:
+                    raise hunyuan_client.NoWorkerAvailable("at capacity")
+                return POOL[0]
+
+            async def fake_preempt(_client):
+                return POOL[0]
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                if request.url.path.endswith("/generate-3d"):
+                    return httpx.Response(202, json={"task_id": "h-interactive"})
+                return httpx.Response(404)
+
+            with patch.object(hunyuan_client, "pick_worker", new=fake_pick), patch.object(
+                hunyuan_client, "preempt_background_hunyuan", new=fake_preempt
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    worker, _status = await hunyuan_client.submit(
+                        client,
+                        image_url="https://autorig.online/i.png",
+                        queue_class="interactive",
+                        in_flight={"f7": 1},
+                    )
+            self.assertEqual(worker["name"], "f7")
+            self.assertEqual(seen_in_flight, [{"f7": 1}, {}])
+
+        run(scenario())
 
 
 class StatusUrlRebaseTests(unittest.TestCase):

@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 import aiosqlite
 import httpx
 
+from fleet_admission import fleet_admission_lock
+
 from . import config, hunyuan_client, turntable
 from .models import (
     CHARGEN_STAGE_AWAITING_IMAGE,
@@ -226,14 +228,31 @@ class CharacterGenManager:
 
     async def _load(self) -> None:
         assert self._db is not None
+        priority_backfill: List[CharacterGenJob] = []
         async with self._db.execute("SELECT payload FROM chargen_jobs") as cur:
             rows = await cur.fetchall()
         for (payload,) in rows:
             try:
-                job = CharacterGenJob(**json.loads(payload))
+                raw = json.loads(payload)
+                legacy_collection = bool(
+                    isinstance(raw, dict)
+                    and raw.get("collection_guid")
+                    and "queue_class" not in raw
+                )
+                if legacy_collection:
+                    raw["queue_class"] = "collection_background"
+                job = CharacterGenJob(**raw)
                 self._jobs[job.id] = job
+                if legacy_collection:
+                    priority_backfill.append(job)
             except Exception as exc:
                 print(f"[Renderfin][CharGen] load skip: {exc}")
+        if priority_backfill:
+            await self._persist_many(priority_backfill)
+            print(
+                f"[Renderfin][CharGen] priority backfill: {len(priority_backfill)} "
+                "legacy collection job(s) marked collection_background"
+            )
 
     async def _backfill_seq(self) -> None:
         """Number the jobs that predate the running counter, oldest first."""
@@ -342,6 +361,7 @@ class CharacterGenManager:
                 mask_url_b=str(member.get("mask_url_b") or "").strip(),
                 user_name=user_name,
                 source_task_id=source_task_id,
+                queue_class="collection_background",
                 telegram_chat_id=int(telegram_chat_id or 0),
                 telegram_status_message_id=int(telegram_status_message_id or 0),
                 collection_guid=collection_guid,
@@ -626,6 +646,55 @@ class CharacterGenManager:
                 counts[job.hunyuan_worker] = counts.get(job.hunyuan_worker, 0) + 1
         return counts
 
+    def _hunyuan_admission_candidates(
+        self, current: CharacterGenJob, *, now: Optional[float] = None
+    ) -> List[CharacterGenJob]:
+        """Eligible central waiters ordered as interactive FIFO then background FIFO."""
+        current_time = float(now if now is not None else time.time())
+        candidates: List[CharacterGenJob] = []
+        for candidate in self._jobs.values():
+            if candidate.stage != CHARGEN_STAGE_HUNYUAN or candidate.hunyuan_task_id:
+                continue
+            if float(candidate.dispatch_not_before or 0) > current_time:
+                continue
+            eligible_now = not candidate.retry_at or float(candidate.retry_at) <= current_time
+            if not (
+                candidate.id == current.id
+                or eligible_now
+                or bool(candidate.hunyuan_waiting_for_capacity)
+            ):
+                continue
+            candidates.append(candidate)
+        return sorted(
+            candidates,
+            key=lambda candidate: (
+                1
+                if str(candidate.queue_class or "").strip().lower()
+                == "collection_background"
+                else 0,
+                int(candidate.seq or 0),
+                float(candidate.created_at or 0),
+                candidate.id,
+            ),
+        )
+
+    async def _require_hunyuan_admission(self, job: CharacterGenJob) -> None:
+        """Admit only the head job while the shared submission lock is held."""
+        candidates = self._hunyuan_admission_candidates(job)
+        if not candidates or candidates[0].id == job.id:
+            return
+        head = candidates[0]
+        if head.hunyuan_waiting_for_capacity and float(head.dispatch_not_before or 0) <= time.time():
+            # A free slot may have appeared before its bounded retry tick. Wake
+            # it now so background work cannot steal the newly available GPU.
+            # The original durable retry remains valid if the process exits
+            # before this opportunistic in-memory wake finishes.
+            head.retry_at = 0
+            self._spawn(head)
+        raise hunyuan_client.NoWorkerAvailable(
+            f"higher-priority Hunyuan job {head.id} is ahead of {job.id}"
+        )
+
     def _next_seq(self) -> int:
         """Running number over every job ever created (gaps are fine)."""
         return max((int(j.seq or 0) for j in self._jobs.values()), default=0) + 1
@@ -768,6 +837,7 @@ class CharacterGenManager:
         """
         stage = job.stage
         job.last_error = str(exc)[:1000]
+        job.hunyuan_waiting_for_capacity = False
 
         if _is_farm_breakage(str(exc)):
             # a card that is merely busy frees up in minutes; a broken
@@ -816,12 +886,23 @@ class CharacterGenManager:
             )
             return
 
-        if isinstance(exc, (hunyuan_client.TaskVanished, hunyuan_client.WorkerUnreachable)):
+        if isinstance(exc, (
+            hunyuan_client.TaskVanished,
+            hunyuan_client.TaskPreempted,
+            hunyuan_client.WorkerUnreachable,
+        )):
             # drop the dead handle so the stage submits again, and do not spend
             # an attempt: a crashing box would otherwise exhaust every job
             job.hunyuan_task_id = ""
             job.hunyuan_worker = ""
-            job.retry_at = time.time() + FLEET_WAIT_SECONDS
+            if isinstance(exc, hunyuan_client.TaskPreempted):
+                cooldown = 300.0
+                job.preemption_count = int(job.preemption_count or 0) + 1
+                job.preempted_at = time.time()
+                job.dispatch_not_before = job.preempted_at + cooldown
+                job.retry_at = job.dispatch_not_before
+            else:
+                job.retry_at = time.time() + FLEET_WAIT_SECONDS
             job.stage_started_at = 0
             job.timed_stage = ""
             job.error = ""
@@ -842,6 +923,7 @@ class CharacterGenManager:
             # Not this job's fault and not fixable by retrying harder: park it
             # in place and keep checking. Attempts are untouched, and the stage
             # clock is pushed along so waiting for the farm cannot time it out.
+            job.hunyuan_waiting_for_capacity = True
             job.retry_at = time.time() + wait
             job.stage_started_at = 0
             job.timed_stage = ""
@@ -1033,10 +1115,13 @@ class CharacterGenManager:
                 # obvious alternative and it leaks: any path that skips its
                 # release marks a worker busy forever, which is exactly what
                 # happened - an idle box reported at capacity with no job.
-                async with self._submit_lock:
+                async with self._submit_lock, fleet_admission_lock():
+                    await self._require_hunyuan_admission(job)
                     worker, status_url = await hunyuan_client.submit(
                         client,
                         image_url=job.isolated_url,
+                        backend_task_id=job.id,
+                        queue_class=job.queue_class,
                         in_flight=self.in_flight_by_worker(),
                         excluded={
                             name
@@ -1050,6 +1135,7 @@ class CharacterGenManager:
                     # store the status_url so a service restart can resume polling
                     job.hunyuan_task_id = status_url
                     job.hunyuan_worker = worker["name"]
+                    job.hunyuan_waiting_for_capacity = False
                     await self._persist(job)
                 print(f"[Renderfin][CharGen] job {job.id} hunyuan on {worker['name']}")
             payload = await hunyuan_client.wait_for_model(

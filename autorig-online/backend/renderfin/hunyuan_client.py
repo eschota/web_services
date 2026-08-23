@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 import os
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
@@ -52,6 +53,10 @@ class TaskVanished(RuntimeError):
     Distinct from a generation failure: the box restarted, so there is nothing
     to report and nothing to fix - the work is resubmitted.
     """
+
+
+class TaskPreempted(RuntimeError):
+    """A background generation yielded its GPU slot to interactive work."""
 
 
 class WorkerUnreachable(RuntimeError):
@@ -120,9 +125,20 @@ def ordinary_conversion_waiting() -> bool:
             timeout=0.5,
         )
         try:
-            rows = connection.execute(
-                "SELECT lower(status), count(*) FROM tasks GROUP BY lower(status)"
-            ).fetchall()
+            try:
+                rows = connection.execute(
+                    "SELECT lower(status), count(*) FROM tasks "
+                    "WHERE lower(coalesce(queue_class, 'interactive')) = 'interactive' "
+                    "GROUP BY lower(status)"
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if "queue_class" not in str(exc).lower():
+                    raise
+                # Rolling-upgrade compatibility: before the additive migration,
+                # every existing task is interactive by definition.
+                rows = connection.execute(
+                    "SELECT lower(status), count(*) FROM tasks GROUP BY lower(status)"
+                ).fetchall()
         finally:
             connection.close()
         waiting = any(str(status or "") in _ORDINARY_ACTIVE_STATES and int(count) > 0
@@ -305,15 +321,41 @@ async def submit(
     seed: Optional[int] = None,
     quality: Optional[str] = None,
     background_method: str = "auto",
+    backend_task_id: str = "",
+    queue_class: str = "interactive",
     in_flight: Optional[Dict[str, int]] = None,
     excluded: Optional[set[str]] = None,
 ) -> Tuple[Dict[str, str], str]:
     """Create a generation task. Returns (worker, status_url)."""
-    worker = await pick_worker(client, in_flight, excluded)
+    try:
+        worker = await pick_worker(client, in_flight, excluded)
+    except NoWorkerAvailable:
+        if str(queue_class or "").strip().lower() != "collection_background":
+            released = await preempt_background_hunyuan(client)
+            if released:
+                adjusted_in_flight = dict(in_flight or {})
+                released_name = str(released.get("name") or "")
+                if released_name in adjusted_in_flight:
+                    remaining = max(0, int(adjusted_in_flight[released_name]) - 1)
+                    if remaining:
+                        adjusted_in_flight[released_name] = remaining
+                    else:
+                        adjusted_in_flight.pop(released_name, None)
+                worker = await pick_worker(client, adjusted_in_flight, excluded)
+            else:
+                raise
+        else:
+            raise
     body: Dict[str, Any] = {
         "image_url": image_url,
         "quality": quality or config.HUNYUAN_QUALITY,
         "background_method": background_method,
+        "backend_task_id": str(backend_task_id or ""),
+        "queue_class": (
+            "collection_background"
+            if str(queue_class or "").strip().lower() == "collection_background"
+            else "interactive"
+        ),
     }
     if seed:
         body["seed"] = int(seed) & 0xFFFFFFFF
@@ -376,6 +418,233 @@ async def submit(
     return worker, status_url
 
 
+def _status_slot_items(status: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Return active and accepted-pending identities, or fail closed."""
+    combined: List[Dict[str, Any]] = []
+    for key in ("processing_tasks", "pending_tasks"):
+        if key not in status:
+            return None
+        value = status.get(key)
+        if isinstance(value, dict):
+            value = list(value.values())
+        if not isinstance(value, list) or any(
+            not isinstance(item, dict) for item in value
+        ):
+            return None
+        combined.extend(value)
+    return combined
+
+
+def _processing_items(status: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Compatibility name: recall scans both running and accepted-pending."""
+    return _status_slot_items(status) or []
+
+
+def _status_proves_hunyuan_idle(status: Dict[str, Any], task_id: str) -> bool:
+    """Fail closed unless the worker explicitly reports a zero-length queue."""
+    if not isinstance(status, dict):
+        return False
+    raw = _status_slot_items(status)
+    if raw is None:
+        return False
+    if any(str(item.get("task_id") or "") == task_id for item in raw):
+        return False
+    summary = status.get("tasks_summary")
+    if not isinstance(summary, dict):
+        return False
+    counters: List[int] = []
+    for key in ("processing", "pending", "queue_size"):
+        value = summary.get(key)
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, float) and not value.is_integer():
+            return False
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return False
+        if parsed < 0:
+            return False
+        counters.append(parsed)
+    return not raw and counters == [0, 0, 0]
+
+
+def _status_is_full_converter(status: Dict[str, Any]) -> bool:
+    """Fail closed when a Hunyuan-only node is presented as a shared worker."""
+    capabilities = status.get("capabilities")
+    flags = status.get("feature_flags")
+    if not isinstance(capabilities, dict) or not isinstance(flags, dict):
+        return False
+    return (
+        str(capabilities.get("mode") or "").strip().lower() == "full"
+        and capabilities.get("legacy_conversion") is True
+        and str(flags.get("converter_capability_mode") or "").strip().lower()
+        == "full"
+        and flags.get("legacy_conversion_enabled") is True
+    )
+
+
+async def _preempt_hunyuan_candidate(
+    client: httpx.AsyncClient,
+    candidate: Tuple[float, float, str, Dict[str, Any], Dict[str, Any]],
+    *,
+    deadline: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    _progress, _running, task_id, worker, item = candidate
+    deadline = float(deadline or (time.monotonic() + 60.0))
+    request_id = str(uuid.uuid4())
+    post_timeout = min(15.0, deadline - time.monotonic())
+    if post_timeout <= 0:
+        return None
+    response = await asyncio.wait_for(
+        client.post(
+            f"{worker['url']}/api-converter-glb/control/tasks/{task_id}/preempt",
+            json={
+                "backend_task_id": str(item.get("backend_task_id") or ""),
+                "preemption_request_id": request_id,
+            },
+            headers=_headers(worker),
+            timeout=post_timeout,
+        ),
+        timeout=post_timeout,
+    )
+    if response.status_code not in (200, 202):
+        return None
+    status_url = f"{worker['url']}/api-converter-glb/generate-3d/status/{task_id}"
+    while time.monotonic() < deadline:
+        status_timeout = min(12.0, deadline - time.monotonic())
+        if status_timeout <= 0:
+            break
+        task_response = await asyncio.wait_for(
+            client.get(
+                status_url, headers=_headers(worker), timeout=status_timeout
+            ),
+            timeout=status_timeout,
+        )
+        if task_response.status_code == 200:
+            payload = task_response.json()
+            if str(payload.get("status") or "") in {"Completed", "Preempted"}:
+                proof_timeout = min(12.0, deadline - time.monotonic())
+                if proof_timeout <= 0:
+                    break
+                try:
+                    current = await asyncio.wait_for(
+                        server_status(client, worker), timeout=proof_timeout
+                    )
+                except asyncio.TimeoutError:
+                    current = None
+                if current and _status_proves_hunyuan_idle(current, task_id):
+                    if str(payload.get("status") or "") == "Preempted":
+                        print(
+                            f"[Renderfin][Hunyuan] preempted background task {task_id} "
+                            f"on {worker['name']} for interactive work"
+                        )
+                    return worker
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            await asyncio.sleep(min(1.0, remaining))
+    return None
+
+
+async def preempt_background_hunyuan_many(
+    client: httpx.AsyncClient,
+    *,
+    limit: int,
+    shared_full_converter_only: bool = False,
+) -> List[Dict[str, Any]]:
+    """Free up to ``limit`` compatible Hunyuan slots in one 60-second window.
+
+    Full conversion tasks are deliberately not recalled here: their AutoRig DB
+    row is owned by the full-converter scheduler.  A shared worker is eligible
+    only when its active task is explicitly a Hunyuan generation.
+    """
+    deadline = time.monotonic() + 60.0
+    candidates: List[Tuple[float, float, str, Dict[str, Any], Dict[str, Any]]] = []
+    pool = [
+        worker
+        for worker in workers()
+        if not (
+            shared_full_converter_only
+            and (
+                str(worker.get("pool") or "") == "dedicated"
+                or str(worker.get("capability_mode") or "").strip().lower()
+                != "full"
+            )
+        )
+    ]
+
+    async def probe(worker: Dict[str, Any]):
+        timeout = min(12.0, deadline - time.monotonic())
+        if timeout <= 0:
+            return worker, None
+        try:
+            status = await asyncio.wait_for(
+                server_status(client, worker), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            status = None
+        return worker, status
+
+    probes = await asyncio.gather(*(probe(worker) for worker in pool))
+    for worker, status in probes:
+        if shared_full_converter_only and str(worker.get("pool") or "") == "dedicated":
+            continue
+        if not status:
+            continue
+        if shared_full_converter_only and not _status_is_full_converter(status):
+            continue
+        flags = status.get("feature_flags") if isinstance(status.get("feature_flags"), dict) else {}
+        if flags.get("collection_preemption_v1") is not True:
+            continue
+        for item in _processing_items(status):
+            task_type = str(item.get("type") or "")
+            if worker.get("pool") != "dedicated" and task_type != "HunyuanGenerationTask":
+                continue
+            if str(item.get("queue_class") or "") != "collection_background":
+                continue
+            if item.get("preemptible") is not True:
+                continue
+            task_id = str(item.get("task_id") or "")
+            backend_task_id = str(item.get("backend_task_id") or "")
+            if not task_id or not backend_task_id:
+                continue
+            try:
+                progress = float(item.get("progress_percent") or 0)
+            except (TypeError, ValueError):
+                progress = 0.0
+            try:
+                running = float(item.get("running_time") or 0)
+            except (TypeError, ValueError):
+                running = 0.0
+            candidates.append((progress, running, task_id, worker, item))
+    if not candidates:
+        return []
+    selected = sorted(
+        candidates, key=lambda value: (value[0], value[1], value[2])
+    )[: max(0, int(limit or 0))]
+    results = await asyncio.gather(
+        *(
+            _preempt_hunyuan_candidate(client, candidate, deadline=deadline)
+            for candidate in selected
+        ),
+        return_exceptions=True,
+    )
+    return [result for result in results if isinstance(result, dict)]
+
+
+async def preempt_background_hunyuan(
+    client: httpx.AsyncClient,
+    *,
+    shared_full_converter_only: bool = False,
+) -> Optional[Dict[str, Any]]:
+    released = await preempt_background_hunyuan_many(
+        client,
+        limit=1,
+        shared_full_converter_only=shared_full_converter_only,
+    )
+    return released[0] if released else None
+
+
 async def wait_for_model(
     client: httpx.AsyncClient,
     worker: Dict[str, str],
@@ -426,6 +695,10 @@ async def wait_for_model(
                 raise HunyuanClientError(
                     f"generation failed on {worker['name']}: "
                     f"{payload.get('error') or 'unknown error'}"
+                )
+            if status == "Preempted":
+                raise TaskPreempted(
+                    f"background Hunyuan task preempted on {worker['name']}"
                 )
         elif resp.status_code == 404:
             # Tolerate a transient miss (worker restart window) before giving up.

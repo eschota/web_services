@@ -2561,7 +2561,8 @@ async def _handle_generate_callback(update, context) -> None:
 
 
 async def _submit_generated_model(
-    glb_url: str, *, collection_metadata: dict | None = None
+    glb_url: str, *, collection_metadata: dict | None = None,
+    queue_class: str = "interactive",
 ) -> tuple[str | None, str | None]:
     """Create the FULL conversion task from the generated GLB.
 
@@ -2583,6 +2584,7 @@ async def _submit_generated_model(
             created_via_api=True,
             pipeline_kind="convert",
             collection_metadata=collection_metadata,
+            queue_class=queue_class,
         )
         if task is None:
             return None, error or "task creation failed"
@@ -2638,6 +2640,11 @@ async def _auto_submit_ready_jobs() -> None:
             task_id, error = await _submit_generated_model(
                 glb_url,
                 collection_metadata=collection_metadata or None,
+                queue_class=(
+                    "collection_background"
+                    if collection_metadata.get("collection_guid")
+                    else "interactive"
+                ),
             )
             if task_id is None:
                 raise RuntimeError(error or "не удалось создать задачу")

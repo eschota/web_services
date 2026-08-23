@@ -149,6 +149,15 @@ class CharacterGenJob(BaseModel):
     mask_url_b: str = ""
     user_name: str = "autorig-bot"
     source_task_id: str = ""
+    # Single generations are interactive.  Only create_collection changes this
+    # to the background class; collection metadata by itself never implies it.
+    queue_class: str = "interactive"
+    preemption_count: int = 0
+    preempted_at: float = 0
+    dispatch_not_before: float = 0
+    # Persisted so a capacity-waiting interactive job remains ahead of
+    # collection runners across service restarts and retry sleeps.
+    hunyuan_waiting_for_capacity: bool = False
     # Collection identity is copied into every downstream conversion task and
     # therefore into every *_rig.json written by the converter worker.
     collection_guid: str = ""

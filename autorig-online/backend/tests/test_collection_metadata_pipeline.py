@@ -38,7 +38,9 @@ class CollectionWorkerPayloadTests(unittest.TestCase):
                 enforce_task_cache_max_size=no_op,
             )
             db = FakeDb()
-            with patch.dict(sys.modules, {"main": fake_main}):
+            with patch.dict(sys.modules, {"main": fake_main}), patch.object(
+                tasks, "notify_scheduler"
+            ) as wake:
                 task, error = await tasks.create_conversion_task(
                     db,
                     "https://autorig.online/renderfin/render/bot/member.glb",
@@ -56,11 +58,14 @@ class CollectionWorkerPayloadTests(unittest.TestCase):
                         "collection_member_title": "The Bicycle Courier",
                     },
                 )
+            wake.assert_called_once_with()
             self.assertIsNone(error)
             self.assertIs(task, db.task)
             self.assertEqual(task.collection_guid, "11111111-2222-3333-4444-555566667777")
             self.assertEqual(json.loads(task.collection_tags), ["zombie", "undead", "collection"])
             self.assertEqual((task.collection_index, task.collection_size), (7, 15))
+            # Metadata alone never demotes a manual/API submit.
+            self.assertEqual(task.queue_class, "interactive")
 
         run(scenario())
 
@@ -105,10 +110,14 @@ class CollectionWorkerPayloadTests(unittest.TestCase):
                     "t_pose",
                     pipeline_kind="convert",
                     metadata=metadata,
+                    backend_task_id="backend-task-7",
+                    queue_class="collection_background",
                 )
             self.assertTrue(result.success)
             for key, value in metadata.items():
                 self.assertEqual(captured[key], value)
+            self.assertEqual(captured["backend_task_id"], "backend-task-7")
+            self.assertEqual(captured["queue_class"], "collection_background")
 
         run(scenario())
 

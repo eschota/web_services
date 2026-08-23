@@ -22,6 +22,8 @@ from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
 from task_timeout_contract import task_hard_timeout_reference
 from collection_retry_policy import collection_error_retry_due
+from task_priority import normalize_queue_class, preemption_in_progress
+from scheduler_wakeup import notify_scheduler
 from animal_submission_policy import animal_detection_accepted
 from worker_artifact_urls import (
     canonical_worker_artifact_url,
@@ -526,6 +528,7 @@ async def create_conversion_task(
     pipeline_kind: str = "rig",
     input_bytes: Optional[int] = None,
     collection_metadata: Optional[Dict[str, Any]] = None,
+    queue_class: str = "interactive",
 ) -> Tuple[Optional[Task], Optional[str]]:
     """
     Create a new conversion task.
@@ -560,6 +563,8 @@ async def create_conversion_task(
         created_via_api=created_via_api,
         pipeline_kind=pk,
         input_bytes=input_bytes,
+        queue_class=normalize_queue_class(queue_class),
+        preemption_state="none",
         collection_guid=str(collection.get("collection_guid") or "").strip()[:36] or None,
         collection_title=str(collection.get("collection_title") or "").strip()[:256] or None,
         collection_description=(
@@ -576,6 +581,10 @@ async def create_conversion_task(
     db.add(task)
     await db.commit()
     await db.refresh(task)
+
+    # This function also runs in the Telegram service.  Use the loopback UDP
+    # control path instead of setting an Event that belongs to that process.
+    notify_scheduler()
     
     # Note: Telegram notification moved to start_task_on_worker (when we have progress_page)
     
@@ -717,6 +726,8 @@ async def start_task_on_worker(db: AsyncSession, task: Task, worker_url: str) ->
         animal_semantic_markers=animal_semantic_markers,
         viewer_environment=_viewer_environment_for_task(task) if pk == "rig" else None,
         metadata=worker_metadata or None,
+        backend_task_id=task.id,
+        queue_class=normalize_queue_class(getattr(task, "queue_class", None)),
     )
     if not result.success:
         error = result.error or "Worker dispatch failed"
@@ -1579,11 +1590,14 @@ async def update_task_progress(db: AsyncSession, task: Task) -> Task:
 # =============================================================================
 # Stale Task Detection & Auto-Restart
 # =============================================================================
-async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
+async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> bool:
     """
     Operator recovery: move task back to queue like stale reset but restart_count := 0
     (does not increment). Caller should commit.
     """
+    if preemption_in_progress(task):
+        print(f"[Priority] Refusing admin requeue during preemption: {task.id}")
+        return False
     task.status = "created"
     task.ready_count = 0
     task.ready_urls = []
@@ -1610,6 +1624,7 @@ async def admin_requeue_task_to_created(db: AsyncSession, task: Task) -> None:
     task.processing_started_at = None
     task.source_attempt_count = 0
     task.source_next_retry_at = None
+    return True
 
 
 async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
@@ -1618,6 +1633,10 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     Returns True if task was reset, False if max restarts exceeded.
     """
     from config import MAX_TASK_RESTARTS
+
+    if preemption_in_progress(task):
+        print(f"[Priority] Skipping stale reset during preemption: {task.id}")
+        return False
     
     # Check if we've exceeded max restarts
     current_restarts = task.restart_count or 0
@@ -1745,6 +1764,8 @@ async def find_and_reset_stale_tasks(
     action_count = 0
     terminal_error_task_ids: list[str] = []
     for task in active_tasks:
+        if preemption_in_progress(task):
+            continue
         # 1. Hard timeout from the current dispatch/progress epoch. Using the
         # original creation time here made every redispatch of an old task
         # immediately stale again, producing misleading multi-worker failures.
@@ -1858,12 +1879,15 @@ async def get_stalled_processing_tasks_by_worker(
             # a generation task has no worker progress to go stale on;
             # its own pump owns the lifecycle until the mesh exists
             Task.pipeline_kind != "generate",
+            Task.preemption_state.notin_(("requested", "stopping")),
         )
     )
     processing_tasks = result.scalars().all()
 
     grouped: dict[str, list[Task]] = {}
     for task in processing_tasks:
+        if preemption_in_progress(task):
+            continue
         ref = get_task_progress_reference_time(task)
         if not ref:
             continue

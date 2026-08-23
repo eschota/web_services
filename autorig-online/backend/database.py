@@ -346,6 +346,19 @@ class Task(Base):
     collection_size = Column(Integer, nullable=True)
     collection_member_title = Column(String(256), nullable=True)
 
+    # Scheduling priority.  Interactive is deliberately the database default:
+    # only the automatic Renderfin collection submitter opts into background.
+    queue_class = Column(String(32), nullable=False, default="interactive", index=True)
+    preemption_state = Column(String(16), nullable=False, default="none")
+    preemption_count = Column(Integer, nullable=False, default=0)
+    preempted_at = Column(DateTime, nullable=True)
+    dispatch_not_before = Column(DateTime, nullable=True)
+    preemption_request_id = Column(String(36), nullable=True)
+    # Immutable identity of the worker process that accepted the recalled
+    # attempt.  This lets restart recovery prove that an orphan cannot survive
+    # a worker reboot without guessing from a missing in-memory task record.
+    preemption_worker_boot_id = Column(String(64), nullable=True)
+
     # YouTube auto-upload (server uses OAuth refresh token; see youtube_upload.py)
     youtube_video_id = Column(String(64), nullable=True)
     youtube_upload_status = Column(String(32), nullable=True)  # uploaded | skipped | failed
@@ -1279,9 +1292,25 @@ async def init_db():
             await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_index INTEGER")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_size INTEGER")
             await _try_add_column("ALTER TABLE tasks ADD COLUMN collection_member_title VARCHAR(256)")
+            await _try_add_column(
+                "ALTER TABLE tasks ADD COLUMN queue_class VARCHAR(32) NOT NULL DEFAULT 'interactive'"
+            )
+            await _try_add_column(
+                "ALTER TABLE tasks ADD COLUMN preemption_state VARCHAR(16) NOT NULL DEFAULT 'none'"
+            )
+            await _try_add_column(
+                "ALTER TABLE tasks ADD COLUMN preemption_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN preempted_at DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN dispatch_not_before DATETIME")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN preemption_request_id VARCHAR(36)")
+            await _try_add_column("ALTER TABLE tasks ADD COLUMN preemption_worker_boot_id VARCHAR(64)")
             try:
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_collection_guid ON tasks (collection_guid)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_queue_class ON tasks (queue_class)"
                 )
             except Exception:
                 pass
@@ -1743,9 +1772,33 @@ async def init_db():
             await _try_add_column_any(
                 "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS collection_member_title VARCHAR(256)"
             )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queue_class VARCHAR(32) NOT NULL DEFAULT 'interactive'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preemption_state VARCHAR(16) NOT NULL DEFAULT 'none'"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preemption_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preempted_at TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS dispatch_not_before TIMESTAMP"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preemption_request_id VARCHAR(36)"
+            )
+            await _try_add_column_any(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preemption_worker_boot_id VARCHAR(64)"
+            )
             try:
                 await conn.exec_driver_sql(
                     "CREATE INDEX IF NOT EXISTS ix_tasks_collection_guid ON tasks (collection_guid)"
+                )
+                await conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_tasks_queue_class ON tasks (queue_class)"
                 )
             except Exception:
                 pass

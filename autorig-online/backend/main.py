@@ -186,6 +186,23 @@ from tasks import (
     persist_validated_worker_viewer_artifacts,
     reconcile_task_viewer_artifacts,
 )
+from task_priority import (
+    PREEMPTION_ENABLED,
+    QUEUE_CLASS_BACKGROUND,
+    QUEUE_CLASS_INTERACTIVE,
+    background_dispatch_budget,
+    backfill_active_collection_tasks,
+    dispatch_fifo_candidate,
+    dispatch_queue_statement,
+    dispatch_sort_key,
+    metrics_snapshot as priority_metrics_snapshot,
+    preempt_background_task,
+    recover_incomplete_preemptions,
+    select_preemption_victims,
+    worker_supports_preemption,
+)
+from fleet_admission import fleet_admission_lock
+from scheduler_wakeup import enqueue_wake, start_wake_listener, wait_for_wake
 
 from animation_corrections import (
     MAX_PAYLOAD_BYTES as ANIMATION_CORRECTION_MAX_PAYLOAD_BYTES,
@@ -562,6 +579,127 @@ def _atomic_write_json_file(path: str, data: dict) -> None:
 # =============================================================================
 background_task_running = False
 background_worker_cycle_count = 0  # Track cycles for periodic stale task checks
+_task_scheduler_queue: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+_task_scheduler_lock = asyncio.Lock()
+
+
+def wake_task_scheduler() -> None:
+    """Wake the single dispatch path after an interactive task is committed."""
+    enqueue_wake(_task_scheduler_queue)
+
+
+async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
+    """Dispatch full-converter work with interactive priority and one-slot reserve."""
+    async with _task_scheduler_lock, fleet_admission_lock():
+        # The caller's status can predate a concurrent Renderfin Hunyuan
+        # admission. Refresh it only after both dispatch paths are serialized.
+        queue_status = await get_global_queue_status(db=db)
+        dispatch_now = datetime.utcnow()
+        queued_result = await db.execute(dispatch_queue_statement(Task, dispatch_now))
+        queued_tasks = sorted(queued_result.scalars().all(), key=dispatch_sort_key)
+        interactive = [
+            task for task in queued_tasks if task.queue_class != QUEUE_CLASS_BACKGROUND
+        ]
+        background = [
+            task for task in queued_tasks if task.queue_class == QUEUE_CLASS_BACKGROUND
+        ]
+
+        free_workers = await get_dispatchable_workers(db, queue_status)
+        if not free_workers and interactive:
+            fallback_workers = await get_dispatchable_workers(
+                db, queue_status, allow_quarantined=True
+            )
+            if fallback_workers:
+                free_workers = fallback_workers
+                print(
+                    "[Priority] All free workers quarantined; degraded fallback "
+                    "is available to interactive work only"
+                )
+
+        async def _try_dispatch(worker, candidates: List[Task]) -> bool:
+            async def _attempt(task: Task):
+                return await start_task_on_worker(db, task, worker.url)
+
+            return await dispatch_fifo_candidate(candidates, _attempt)
+
+        used_workers: set[str] = set()
+        for worker in free_workers:
+            if not interactive:
+                break
+            if await _try_dispatch(worker, interactive):
+                used_workers.add(worker.url)
+
+        remaining_free = [w for w in free_workers if w.url not in used_workers]
+        background_workers = [
+            worker
+            for worker in remaining_free
+            if worker_supports_preemption(worker) and not is_worker_quarantined(worker.url)
+        ]
+        background_budget = min(
+            len(background),
+            len(background_workers),
+            background_dispatch_budget(remaining_free, len(interactive)),
+        )
+        for worker in background_workers[:background_budget]:
+            await _try_dispatch(worker, background)
+
+        if interactive and PREEMPTION_ENABLED:
+            active_result = await db.execute(
+                select(Task).where(
+                    Task.status == "processing",
+                    Task.pipeline_kind != "generate",
+                    Task.queue_class == QUEUE_CLASS_BACKGROUND,
+                    Task.preemption_state == "none",
+                )
+            )
+            active_background = []
+            for task in active_result.scalars().all():
+                worker = next(
+                    (
+                        item
+                        for item in queue_status.workers
+                        if item.url.rstrip("/") == str(task.worker_api or "").rstrip("/")
+                    ),
+                    None,
+                )
+                if worker and worker.available and worker_supports_preemption(worker):
+                    active_background.append(task)
+            victims = select_preemption_victims(active_background, len(interactive))
+            released_slots = 0
+            if victims:
+                print(
+                    f"[Priority] Recalling {len(victims)} background task(s) "
+                    f"for {len(interactive)} waiting interactive task(s)"
+                )
+                results = await asyncio.gather(
+                    *(preempt_background_task(task.id) for task in victims),
+                    return_exceptions=True,
+                )
+                released_slots = sum(result is True for result in results)
+
+            # A collection Hunyuan stage can occupy a shared full-converter
+            # slot without having an AutoRig Task row in processing. Recall
+            # only shared/full nodes here; dedicated Hunyuan capacity cannot
+            # satisfy an interactive full-conversion job.
+            hunyuan_needed = max(0, len(interactive) - released_slots)
+            if hunyuan_needed:
+                from renderfin import hunyuan_client
+
+                async with httpx.AsyncClient(follow_redirects=True) as client:
+                    released = await hunyuan_client.preempt_background_hunyuan_many(
+                        client,
+                        limit=hunyuan_needed,
+                        shared_full_converter_only=True,
+                    )
+                    released_slots += len(released)
+            if released_slots:
+                wake_task_scheduler()
+
+        if queued_tasks and not free_workers and not (interactive and PREEMPTION_ENABLED):
+            print(
+                f"[Priority] queued interactive={len(interactive)} "
+                f"background={len(background)}; no free full-converter slot"
+            )
 
 
 def _try_acquire_gallery_purge_lock():
@@ -694,6 +832,9 @@ async def background_task_updater():
     background_worker_cycle_count = 0
     
     print("[Background Worker] Started task updater")
+    recovered = await recover_incomplete_preemptions()
+    if recovered:
+        print(f"[Priority] Recovered {recovered} interrupted preemption(s) at startup")
 
     async def _sync_processing_tasks(db):
         # Keep backend task rows aligned with terminal worker state before stall checks
@@ -788,94 +929,7 @@ async def background_task_updater():
                     except Exception as e:
                         print(f"[Background Worker] Generation pump error: {e}")
 
-                    free_workers = await get_dispatchable_workers(db, queue_status)
-                    if not free_workers:
-                        fallback_workers = await get_dispatchable_workers(db, queue_status, allow_quarantined=True)
-                        if fallback_workers:
-                            free_workers = fallback_workers
-                            print("[Background Worker] All free workers are quarantined, using degraded dispatch fallback")
-
-                    if free_workers:
-                        # Pull a bounded FIFO batch, excluding tasks whose
-                        # source preflight is in backoff. A bad oldest source
-                        # must not consume the only dispatch candidate and
-                        # block every healthy task behind it.
-                        dispatch_now = datetime.utcnow()
-                        queued_result = await db.execute(
-                            select(Task)
-                            .where(
-                                Task.status == "created",
-                                Task.pipeline_kind != "generate",
-                                or_(
-                                    Task.source_next_retry_at.is_(None),
-                                    Task.source_next_retry_at <= dispatch_now,
-                                ),
-                            )
-                            .order_by(Task.created_at)
-                            .limit(max(50, len(free_workers) * 10))
-                        )
-                        queued_tasks = queued_result.scalars().all()
-
-                        queued_index = 0
-                        for worker in free_workers:
-                            while queued_index < len(queued_tasks):
-                                task = queued_tasks[queued_index]
-                                queued_index += 1
-                                source_attempts_before = int(
-                                    getattr(task, "source_attempt_count", 0) or 0
-                                )
-                                try:
-                                    started_task, dispatch_error = await start_task_on_worker(
-                                        db,
-                                        task,
-                                        worker.url,
-                                    )
-                                except Exception as e:
-                                    print(f"[Background Worker] Error dispatching task {task.id}: {e}")
-                                    break
-
-                                if started_task.status == "processing":
-                                    break
-
-                                source_attempts_after = int(
-                                    getattr(started_task, "source_attempt_count", 0) or 0
-                                )
-                                if (
-                                    started_task.status == "error"
-                                    or source_attempts_after > source_attempts_before
-                                ):
-                                    print(
-                                        f"[Background Worker] Skipping task {task.id} "
-                                        f"after task-specific dispatch rejection; trying next queued task"
-                                    )
-                                    continue
-
-                                # A transient POST failure quarantines this
-                                # worker in start_task_on_worker. Do not use it
-                                # for another task during the same snapshot.
-                                if dispatch_error:
-                                    break
-                    else:
-                        c_q = await db.execute(
-                            select(func.count()).select_from(Task).where(Task.status == "created")
-                        )
-                        n_created = int(c_q.scalar() or 0)
-                        if n_created > 0:
-                            backend_processing = await get_backend_worker_processing_counts(db)
-                            for w in queue_status.workers:
-                                print(
-                                    f"[Background Worker] No free worker: url={w.url} "
-                                    f"available={w.available} err={w.error!r} "
-                                    f"active={w.total_active} "
-                                    f"backend_active={backend_processing.get(w.url.rstrip('/'), 0)} "
-                                    f"effective_active={get_worker_effective_active(w, backend_processing)} "
-                                    f"max={w.max_concurrent} "
-                                    f"queue_size={w.queue_size} quarantined={is_worker_quarantined(w.url)}"
-                                )
-                            print(
-                                f"[Background Worker] {n_created} task(s) in status=created but "
-                                f"no worker passed filters (available, capacity, queue_size<=0)"
-                            )
+                    await _dispatch_priority_queue(db, queue_status)
                 except Exception as e:
                     print(f"[Background Worker] Queue dispatch error: {e}")
 
@@ -968,8 +1022,10 @@ async def background_task_updater():
         except Exception as e:
             print(f"[Background Worker] Error: {e}")
         
-        # Wait 30 seconds between checks
-        await asyncio.sleep(30)
+        # Local and UDP wakeups accumulate in a coalescing queue.  There is no
+        # Event.clear() window that can erase a concurrent notification; the
+        # timeout remains a fail-safe database poll.
+        await wait_for_wake(_task_scheduler_queue, timeout=5.0)
     
     print("[Background Worker] Stopped")
 
@@ -1052,8 +1108,15 @@ async def lifespan(app: FastAPI):
     else:
         await init_db()
         os.makedirs(UPLOAD_DIR, exist_ok=True)
+        classified = await backfill_active_collection_tasks()
+        if classified:
+            print(
+                f"[Priority] Classified {classified} active Renderfin auto-submit(s) "
+                "as collection_background"
+            )
 
     app.state.background_worker = None
+    app.state.scheduler_wake_transport = None
     app.state.youtube_retry_worker = None
     app.state.startup_disk_maintenance = None
     app.state.artifact_cache_stop = None
@@ -1067,6 +1130,10 @@ async def lifespan(app: FastAPI):
     # Cache eviction may probe hundreds of remote worker URLs under pressure.
     # It must never prevent uvicorn from opening port 8000.
     app.state.startup_disk_maintenance = asyncio.create_task(_run_startup_disk_maintenance())
+
+    app.state.scheduler_wake_transport = await start_wake_listener(
+        _task_scheduler_queue
+    )
 
     # Start background worker
     app.state.background_worker = asyncio.create_task(background_task_updater())
@@ -1117,6 +1184,9 @@ async def lifespan(app: FastAPI):
         startup_disk_maintenance.cancel()
     if artifact_cache_retention:
         artifact_cache_retention.cancel()
+    scheduler_wake_transport = getattr(app.state, "scheduler_wake_transport", None)
+    if scheduler_wake_transport:
+        scheduler_wake_transport.close()
     await stop_artifact_cache_workers(
         getattr(app.state, "artifact_cache_stop", None),
         getattr(app.state, "artifact_cache_workers", []),
@@ -4404,20 +4474,9 @@ async def api_create_task(
             {"source": source, "type": input_type, "pipeline": pipeline},
         ))
     
-    # Try to dispatch immediately to a free worker (don't wait for background cycle)
-    try:
-        queue_status = await get_global_queue_status(db=db)
-        free_workers = await get_dispatchable_workers(db, queue_status)
-        free_worker = free_workers[0] if free_workers else None
-        if free_worker:
-            # Refresh task from DB and dispatch
-            await db.refresh(task)
-            if task.status == "created":
-                await start_task_on_worker(db, task, free_worker.url)
-                print(f"[Immediate Dispatch] Task {task.id} sent to {free_worker.url}")
-    except Exception as e:
-        # Don't fail task creation if immediate dispatch fails - background worker will pick it up
-        print(f"[Immediate Dispatch] Failed for task {task.id}: {e}")
+    # Creation only wakes the one locked scheduler path.  Direct dispatch here
+    # used to bypass both FIFO priority and the collection reserve.
+    wake_task_scheduler()
 
     await db.refresh(task)
 
@@ -5110,17 +5169,7 @@ async def api_create_convert_from_rig_task(
     if error and not task:
         raise HTTPException(status_code=500, detail=error)
 
-    try:
-        queue_status = await get_global_queue_status(db=db)
-        free_workers = await get_dispatchable_workers(db, queue_status)
-        free_worker = free_workers[0] if free_workers else None
-        if free_worker:
-            await db.refresh(task)
-            if task.status == "created":
-                await start_task_on_worker(db, task, free_worker.url)
-                print(f"[Immediate Dispatch] Convert task {task.id} sent to {free_worker.url}")
-    except Exception as e:
-        print(f"[Immediate Dispatch] Failed for convert task {task.id}: {e}")
+    wake_task_scheduler()
 
     await db.refresh(task)
 
@@ -8436,6 +8485,36 @@ async def api_queue_status(db: AsyncSession = Depends(get_db)):
 # =============================================================================
 # Admin Endpoints
 # =============================================================================
+@app.get("/api/admin/scheduler-priority")
+async def api_admin_scheduler_priority(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Operational counters for the interactive/background scheduler."""
+    rows = await db.execute(
+        select(Task.queue_class, Task.status, func.count())
+        .where(Task.status.in_(("created", "processing")))
+        .group_by(Task.queue_class, Task.status)
+    )
+    counts = {
+        (str(queue_class or QUEUE_CLASS_INTERACTIVE), str(status)): int(count or 0)
+        for queue_class, status, count in rows.all()
+    }
+    queue_status = await get_global_queue_status(db=db)
+    healthy_full = sum(
+        1
+        for worker in queue_status.workers
+        if worker.available and not is_worker_quarantined(worker.url)
+    )
+    return priority_metrics_snapshot(
+        interactive_queued=counts.get((QUEUE_CLASS_INTERACTIVE, "created"), 0),
+        background_queued=counts.get((QUEUE_CLASS_BACKGROUND, "created"), 0),
+        interactive_active=counts.get((QUEUE_CLASS_INTERACTIVE, "processing"), 0),
+        background_active=counts.get((QUEUE_CLASS_BACKGROUND, "processing"), 0),
+        reserved_full_slots=1 if healthy_full > 0 else 0,
+    )
+
+
 @app.get("/api/admin/workers", response_model=AdminWorkerListResponse)
 async def api_admin_workers(
     admin: User = Depends(require_admin),
@@ -8976,7 +9055,8 @@ async def api_admin_bulk_restart_count(
         if not task:
             continue
         if task.status == "error":
-            await admin_requeue_task_to_created(db, task)
+            if not await admin_requeue_task_to_created(db, task):
+                continue
         else:
             task.restart_count = 0
             task.updated_at = datetime.utcnow()
@@ -9016,8 +9096,8 @@ async def api_admin_bulk_requeue(
     for tid in ids:
         task = await get_task_by_id(db, tid)
         if task:
-            await admin_requeue_task_to_created(db, task)
-            n += 1
+            if await admin_requeue_task_to_created(db, task):
+                n += 1
     if n:
         await db.commit()
     return AdminBulkAffectedResponse(affected=n)
@@ -12298,7 +12378,12 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
     legacy standalone tasks retain the existing cleanup behavior.
     """
     now = datetime.utcnow()
-    r = await db.execute(select(Task).where(Task.status == "processing"))
+    r = await db.execute(
+        select(Task).where(
+            Task.status == "processing",
+            Task.preemption_state.notin_(("requested", "stopping")),
+        )
+    )
     processing = list(r.scalars().all())
     to_requeue: List[Task] = []
     collection_recovery: List[Task] = []
@@ -12319,7 +12404,8 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
     actions = 0
     for task in to_requeue:
         try:
-            await admin_requeue_task_to_created(db, task)
+            if not await admin_requeue_task_to_created(db, task):
+                continue
             task.stuck_hour_requeue_count = (task.stuck_hour_requeue_count or 0) + 1
             actions += 1
             print(

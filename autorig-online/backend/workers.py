@@ -457,6 +457,8 @@ async def send_task_to_worker(
     animal_semantic_markers: Optional[Dict[str, List[float]]] = None,
     viewer_environment: Optional[Dict[str, Any]] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    backend_task_id: Optional[str] = None,
+    queue_class: str = "interactive",
 ) -> WorkerTaskResult:
     """Send task to worker.
 
@@ -530,6 +532,17 @@ async def send_task_to_worker(
                     _v = metadata.get(_k)
                     if _v:
                         payload[_k] = _v
+
+            # Scheduling identity is not listing metadata.  It is used solely
+            # by the authenticated control plane to prove that a worker-side
+            # task belongs to the same backend row and is safe to recall.
+            if backend_task_id:
+                payload["backend_task_id"] = str(backend_task_id)
+            payload["queue_class"] = (
+                "collection_background"
+                if str(queue_class or "").strip().lower() == "collection_background"
+                else "interactive"
+            )
 
             request_started_at = time.time()
             response = await client.post(
