@@ -20,6 +20,7 @@ class TaskTimeoutContractTests(unittest.TestCase):
             task_hard_timeout_reference(
                 status="created",
                 created_at=now - timedelta(hours=3),
+                processing_started_at=None,
                 updated_at=now,
                 last_progress_at=None,
             ),
@@ -31,6 +32,7 @@ class TaskTimeoutContractTests(unittest.TestCase):
             task_hard_timeout_reference(
                 status="created",
                 created_at=now - timedelta(days=2),
+                processing_started_at=None,
                 updated_at=now - timedelta(hours=3),
                 last_progress_at=None,
             ),
@@ -44,6 +46,7 @@ class TaskTimeoutContractTests(unittest.TestCase):
             task_hard_timeout_reference(
                 status="processing",
                 created_at=now - timedelta(hours=1),
+                processing_started_at=now - timedelta(minutes=35),
                 updated_at=now,
                 last_progress_at=last_progress,
             ),
@@ -57,6 +60,21 @@ class TaskTimeoutContractTests(unittest.TestCase):
             task_hard_timeout_reference(
                 status="processing",
                 created_at=created,
+                processing_started_at=None,
+                updated_at=now,
+                last_progress_at=None,
+            ),
+        )
+
+    def test_old_queued_task_gets_fresh_dispatch_epoch(self):
+        now = datetime(2026, 7, 10, 12, 0, 0)
+        processing_started = now - timedelta(minutes=5)
+        self.assertEqual(
+            processing_started,
+            task_hard_timeout_reference(
+                status="processing",
+                created_at=now - timedelta(hours=4),
+                processing_started_at=processing_started,
                 updated_at=now,
                 last_progress_at=None,
             ),

@@ -29,6 +29,7 @@ from config import (
     APP_URL,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_NOTIFICATION_CHAT_ID,
+    COLLECTION_ERROR_MAX_RETRIES,
 )
 from workers import get_worker_base_url
 
@@ -1748,10 +1749,25 @@ async def reserve_and_broadcast_task_error(task_id: str) -> None:
     notifications so each terminal state emits at most one operator alert.
     """
     async with AsyncSessionLocal() as db:
+        task = await db.scalar(select(Task).where(Task.id == task_id))
+        if not task:
+            return
+        if (
+            str(task.collection_guid or "").strip()
+            and task.status == "error"
+            and int(task.restart_count or 0) < COLLECTION_ERROR_MAX_RETRIES
+        ):
+            print(
+                f"[Telegram] Suppressing retryable collection error for task {task_id} "
+                f"(attempt {int(task.restart_count or 0)}/{COLLECTION_ERROR_MAX_RETRIES})"
+            )
+            return
+
         now = datetime.utcnow()
         stmt = (
             update(Task)
             .where(Task.id == task_id)
+            .where(Task.status == "error")
             .where(Task.telegram_done_notified_at.is_(None))
             .values(telegram_done_notified_at=now)
         )

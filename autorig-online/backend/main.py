@@ -176,6 +176,8 @@ from tasks import (
     get_all_users, update_user_balance,
     get_gallery_items, format_time_ago,
     find_and_reset_stale_tasks,
+    find_and_retry_failed_collection_tasks,
+    reset_stale_task,
     find_file_by_pattern,
     get_stalled_processing_tasks_by_worker,
     get_task_no_progress_minutes,
@@ -765,6 +767,16 @@ async def background_task_updater():
                                 print(f"[Background Worker] Stuck-hour policy: {sh} action(s)")
                         except Exception as e:
                             print(f"[Background Worker] Stuck-hour policy error: {e}")
+
+                    try:
+                        collection_retries = await find_and_retry_failed_collection_tasks(db)
+                        if collection_retries > 0:
+                            print(
+                                f"[Background Worker] Requeued {collection_retries} "
+                                "failed collection member(s)"
+                            )
+                    except Exception as e:
+                        print(f"[Background Worker] Collection retry error: {e}")
 
                     # Image->model->rig tasks advance here, so a model that just
                     # became riggable is dispatched in the same tick rather than
@@ -12281,12 +12293,15 @@ async def admin_delete_task_full(db: AsyncSession, task_id: str) -> bool:
 async def process_stuck_hour_tasks(db: AsyncSession) -> int:
     """
     processing + 0 ready, no real progress for >= STUCK_HOUR_MINUTES:
-    requeue (admin-style) up to STUCK_HOUR_MAX_REQUEUES times, then delete task + artifacts.
+    requeue (admin-style) up to STUCK_HOUR_MAX_REQUEUES times. Collection
+    members then use the bounded restart policy and are never deleted here;
+    legacy standalone tasks retain the existing cleanup behavior.
     """
     now = datetime.utcnow()
     r = await db.execute(select(Task).where(Task.status == "processing"))
     processing = list(r.scalars().all())
     to_requeue: List[Task] = []
+    collection_recovery: List[Task] = []
     to_delete_ids: List[str] = []
     for task in processing:
         if (task.ready_count or 0) != 0:
@@ -12295,7 +12310,10 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
             continue
         cnt = task.stuck_hour_requeue_count or 0
         if cnt >= STUCK_HOUR_MAX_REQUEUES:
-            to_delete_ids.append(task.id)
+            if str(task.collection_guid or "").strip():
+                collection_recovery.append(task)
+            else:
+                to_delete_ids.append(task.id)
         else:
             to_requeue.append(task)
     actions = 0
@@ -12311,6 +12329,21 @@ async def process_stuck_hour_tasks(db: AsyncSession) -> int:
             print(f"[StuckHour] Requeue failed {task.id}: {e}")
     if to_requeue:
         await db.commit()
+    for task in collection_recovery:
+        try:
+            reset = await reset_stale_task(db, task)
+            actions += 1
+            if reset:
+                print(
+                    f"[StuckHour] Preserved and requeued collection task {task.id} "
+                    f"(restart_count={task.restart_count})"
+                )
+            else:
+                print(
+                    f"[StuckHour] Preserved exhausted collection task {task.id} as error"
+                )
+        except Exception as e:
+            print(f"[StuckHour] Collection recovery failed {task.id}: {e}")
     for tid in to_delete_ids:
         try:
             t = await get_task_by_id(db, tid)

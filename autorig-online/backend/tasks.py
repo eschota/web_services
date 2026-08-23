@@ -21,6 +21,7 @@ from config import APP_URL
 from viewer_environment import build_viewer_environment_from_settings
 from worker_progress_contract import latest_terminal_failure_reason
 from task_timeout_contract import task_hard_timeout_reference
+from collection_retry_policy import collection_error_retry_due
 from animal_submission_policy import animal_detection_accepted
 from worker_artifact_urls import (
     canonical_worker_artifact_url,
@@ -1646,14 +1647,61 @@ async def reset_stale_task(db: AsyncSession, task: Task) -> bool:
     task.restart_count = current_restarts + 1
     task.last_progress_at = None
     task.processing_started_at = None
+    task.source_attempt_count = 0
     task.source_next_retry_at = None
+    task.fbx_glb_output_url = None
+    task.fbx_glb_model_name = None
+    task.fbx_glb_ready = False
+    task.fbx_glb_error = None
     task.viewer_prepared_glb_url = None
     task.viewer_animations_glb_url = None
+    # A transient terminal notification must not suppress the eventual done
+    # notification after this same task id succeeds on a later attempt.
+    task.telegram_done_notified_at = None
     task.updated_at = datetime.utcnow()
     
     await db.commit()
     print(f"[Stale Task] Task {task.id} reset for re-processing (restart #{task.restart_count})")
     return True
+
+
+async def find_and_retry_failed_collection_tasks(db: AsyncSession) -> int:
+    """Requeue retryable terminal collection members without creating duplicates."""
+    from config import (
+        COLLECTION_ERROR_MAX_RETRIES,
+        COLLECTION_ERROR_RETRY_DELAY_MINUTES,
+    )
+
+    now = datetime.utcnow()
+    result = await db.execute(
+        select(Task).where(
+            Task.status == "error",
+            Task.collection_guid.is_not(None),
+        )
+    )
+    failed_members = list(result.scalars().all())
+    retried = 0
+    for task in failed_members:
+        if not collection_error_retry_due(
+            status=task.status,
+            collection_guid=task.collection_guid,
+            restart_count=task.restart_count or 0,
+            updated_at=task.updated_at,
+            now=now,
+            max_retries=COLLECTION_ERROR_MAX_RETRIES,
+            retry_delay_minutes=COLLECTION_ERROR_RETRY_DELAY_MINUTES,
+        ):
+            continue
+        previous_error = re.sub(r"\s+", " ", str(task.error_message or "unknown"))[:240]
+        if await reset_stale_task(db, task):
+            retried += 1
+            print(
+                f"[Collection Retry] Requeued {task.id} "
+                f"({task.collection_guid} member {task.collection_index}/{task.collection_size}, "
+                f"attempt {task.restart_count}/{COLLECTION_ERROR_MAX_RETRIES}); "
+                f"previous_error={previous_error}"
+            )
+    return retried
 
 
 async def find_and_reset_stale_tasks(
@@ -1703,6 +1751,7 @@ async def find_and_reset_stale_tasks(
         hard_timeout_reference = task_hard_timeout_reference(
             status=task.status,
             created_at=task.created_at,
+            processing_started_at=task.processing_started_at,
             updated_at=task.updated_at,
             last_progress_at=task.last_progress_at,
         )

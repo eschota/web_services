@@ -170,7 +170,18 @@ GLOBAL_TASK_TIMEOUT_MINUTES = int(os.getenv("GLOBAL_TASK_TIMEOUT_MINUTES", "120"
 PARTIAL_PROGRESS_STALE_MINUTES = int(os.getenv("PARTIAL_PROGRESS_STALE_MINUTES", "120"))
 MAX_TASK_RESTARTS = 3  # Maximum number of auto-restarts before marking as error
 STALE_CHECK_INTERVAL_CYCLES = int(os.getenv("STALE_CHECK_INTERVAL_CYCLES", "1"))
-# Stuck processing (0% progress) longer than this -> auto requeue up to STUCK_HOUR_MAX_REQUEUES, then delete
+# A terminal converter error must not strand the other members of a collection.
+# Reuse the same task row/id and retry with a fresh worker assignment; keeping
+# this bounded prevents a permanently unriggable mesh from consuming the farm
+# forever while still recovering ordinary worker/export failures.
+COLLECTION_ERROR_MAX_RETRIES = int(
+    os.getenv("COLLECTION_ERROR_MAX_RETRIES", str(MAX_TASK_RESTARTS))
+)
+COLLECTION_ERROR_RETRY_DELAY_MINUTES = int(
+    os.getenv("COLLECTION_ERROR_RETRY_DELAY_MINUTES", "2")
+)
+# Stuck processing (0% progress) longer than this -> auto requeue up to
+# STUCK_HOUR_MAX_REQUEUES; collection rows/artifacts are preserved afterwards.
 STUCK_HOUR_MINUTES = int(os.getenv("STUCK_HOUR_MINUTES", "60"))
 STUCK_HOUR_MAX_REQUEUES = int(os.getenv("STUCK_HOUR_MAX_REQUEUES", "3"))
 

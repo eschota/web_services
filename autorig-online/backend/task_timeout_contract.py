@@ -8,6 +8,7 @@ def task_hard_timeout_reference(
     *,
     status: str,
     created_at: Optional[datetime],
+    processing_started_at: Optional[datetime],
     updated_at: Optional[datetime],
     last_progress_at: Optional[datetime],
 ) -> Optional[datetime]:
@@ -21,4 +22,4 @@ def task_hard_timeout_reference(
     """
     if str(status or "").strip().lower() != "processing":
         return None
-    return last_progress_at or created_at
+    return last_progress_at or processing_started_at or created_at
