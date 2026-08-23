@@ -1249,6 +1249,46 @@ class EmptyFleetTests(unittest.TestCase):
                     self.assertEqual(job.hunyuan_task_id, "")
                     self.assertEqual(job.hunyuan_worker, "")
                     self.assertEqual(manager.in_flight_by_worker(), {}, "slot must be released")
+                    self.assertGreater(
+                        manager._farm_worker_cooldowns.get("f13", 0), time.time()
+                    )
+                    self.assertGreater(
+                        job.hunyuan_worker_cooldowns.get("f13", 0), time.time()
+                    )
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_one_vram_gate_cools_the_worker_for_the_whole_batch(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        hunyuan_task_id="https://f11/status/x",
+                        hunyuan_worker="f11",
+                    )
+                    await manager._handle_stage_error(
+                        job,
+                        RuntimeError(
+                            "generation failed on f11: Hunyuan VRAM gate failed: "
+                            "94 MiB free; 7000 MiB required"
+                        ),
+                    )
+                    self.assertEqual(job.attempts, {})
+                    self.assertGreater(
+                        manager._farm_worker_cooldowns.get("f11", 0), time.time()
+                    )
+                    self.assertLess(
+                        manager._farm_worker_cooldowns["f11"] - time.time(), 600
+                    )
                     await self._park(manager, job)
                 finally:
                     await manager.stop()

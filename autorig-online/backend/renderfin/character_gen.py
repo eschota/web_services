@@ -81,6 +81,12 @@ FARM_BREAKAGE_WAIT_SECONDS = float(
 INPUT_FETCH_WORKER_COOLDOWN_SECONDS = float(
     os.getenv("RENDERFIN_HUNYUAN_INPUT_FETCH_COOLDOWN", "3600")
 )
+FARM_WORKER_COOLDOWN_SECONDS = float(
+    os.getenv("RENDERFIN_HUNYUAN_FARM_WORKER_COOLDOWN", "1800")
+)
+VRAM_WORKER_COOLDOWN_SECONDS = float(
+    os.getenv("RENDERFIN_HUNYUAN_VRAM_WORKER_COOLDOWN", "300")
+)
 # Known farm-side pipeline breakages: the generation itself succeeded and the
 # box then failed to finish its own post-processing. Nothing about the job is
 # wrong, so retrying the job harder cannot help and giving up is not allowed.
@@ -200,6 +206,11 @@ class CharacterGenManager:
         # prevents every member of a newly queued collection from first
         # rediscovering the same broken resolver.
         self._input_fetch_worker_cooldowns: Dict[str, float] = {}
+        # Farm faults are worker properties, not model properties. Without a
+        # shared cooldown every waiting collection member immediately probes
+        # the same just-failed box and turns one crash/VRAM conflict into a
+        # fleet-wide failure burst.
+        self._farm_worker_cooldowns: Dict[str, float] = {}
         self._retry_task: Optional[asyncio.Task] = None
         self._stopped = asyncio.Event()
 
@@ -904,7 +915,19 @@ class CharacterGenManager:
             # finished task. Keeping it makes the retry re-read the same
             # failure forever AND counts the job against that worker's slot,
             # so a box ends up "holding" dozens of jobs it is not running.
+            failed_worker = job.hunyuan_worker
             if stage == CHARGEN_STAGE_HUNYUAN:
+                if failed_worker:
+                    worker_wait = (
+                        VRAM_WORKER_COOLDOWN_SECONDS
+                        if "vram gate" in str(exc).lower()
+                        else FARM_WORKER_COOLDOWN_SECONDS
+                    )
+                    cooldown_until = time.time() + worker_wait
+                    cooldowns = dict(job.hunyuan_worker_cooldowns or {})
+                    cooldowns[failed_worker] = cooldown_until
+                    job.hunyuan_worker_cooldowns = cooldowns
+                    self._farm_worker_cooldowns[failed_worker] = cooldown_until
                 job.hunyuan_task_id = ""
                 job.hunyuan_worker = ""
             elif stage == CHARGEN_STAGE_FLUX:
@@ -1190,6 +1213,7 @@ class CharacterGenManager:
                         excluded={
                             name
                             for name, until in {
+                                **self._farm_worker_cooldowns,
                                 **self._input_fetch_worker_cooldowns,
                                 **(job.hunyuan_worker_cooldowns or {}),
                             }.items()
