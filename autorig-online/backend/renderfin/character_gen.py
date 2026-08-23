@@ -140,6 +140,22 @@ def _is_collection_infrastructure_failure(
         code in low for code in ("http 500", "http 502", "http 503", "http 504")
     ):
         return True
+    # A worker can accept the task and then fail while fetching the owned
+    # autorig.online input URL. Requests reports that transport failure inside
+    # the worker's terminal error instead of as an HTTP status. It is a box or
+    # route fault, not a verdict on the model, so a background collection must
+    # rotate/retry instead of becoming terminal after three identical misses.
+    if "generation failed on " in low and any(
+        marker in low
+        for marker in (
+            "connectionpool(",
+            "read timed out",
+            "connect timeout",
+            "connection reset",
+            "remote end closed connection",
+        )
+    ):
+        return True
     return any(
         marker in low
         for marker in (

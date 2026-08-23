@@ -1063,10 +1063,33 @@ class EmptyFleetTests(unittest.TestCase):
             collection_guid="collection-1",
             error="render task x failed: artifact download failed: ",
         )
+        worker_input_timeout = CharacterGenJob(
+            stage=CHARGEN_STAGE_FAILED,
+            queue_class="collection_background",
+            collection_guid="collection-1",
+            error=(
+                "generation failed on f12: HTTPSConnectionPool(host='autorig.online', "
+                "port=443): Read timed out. (read timeout=5)"
+            ),
+        )
+        interactive_input_timeout = CharacterGenJob(
+            stage=CHARGEN_STAGE_FAILED,
+            queue_class="interactive",
+            collection_guid="collection-1",
+            error=worker_input_timeout.error,
+        )
         self.assertTrue(character_gen._failed_on_recoverable_infrastructure(collection))
         self.assertTrue(
             character_gen._failed_on_recoverable_infrastructure(
                 empty_artifact_transport_error
+            )
+        )
+        self.assertTrue(
+            character_gen._failed_on_recoverable_infrastructure(worker_input_timeout)
+        )
+        self.assertFalse(
+            character_gen._failed_on_recoverable_infrastructure(
+                interactive_input_timeout
             )
         )
         self.assertFalse(character_gen._failed_on_recoverable_infrastructure(interactive))
