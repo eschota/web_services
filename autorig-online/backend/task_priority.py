@@ -357,7 +357,7 @@ async def preempt_background_task(task_id: str) -> bool:
         return False
 
     from database import AsyncSessionLocal, Task
-    from workers import quarantine_worker
+    from workers import clear_worker_quarantine, quarantine_worker
 
     started = time.monotonic()
     deadline = started + PREEMPT_DEADLINE_SECONDS
@@ -653,6 +653,7 @@ async def preempt_background_task(task_id: str) -> bool:
         _METRICS["preemption_succeeded"] += 1
         _METRICS["preemption_resumed"] += 1
         _METRICS["preemption_latency_seconds_total"] += elapsed
+        clear_worker_quarantine(worker_api)
         print(f"[Priority] Preempted background task {task_id} in {elapsed:.1f}s; same row requeued")
         return True
     except Exception as exc:

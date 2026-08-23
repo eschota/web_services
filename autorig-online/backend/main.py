@@ -958,6 +958,12 @@ async def background_task_updater():
                 #    (reset must run before dispatch so tasks moved to "created" post in the same tick)
                 # =============================================================
                 try:
+                    recovered = await recover_incomplete_preemptions()
+                    if recovered:
+                        print(
+                            f"[Priority] Recovered {recovered} late preemption "
+                            "confirmation(s)"
+                        )
                     await _sync_processing_tasks(db)
 
                     queue_status = await get_global_queue_status(db=db)
