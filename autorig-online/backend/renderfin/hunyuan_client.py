@@ -102,7 +102,7 @@ class HunyuanClientError(RuntimeError):
     pass
 
 
-def ordinary_conversion_waiting() -> bool:
+def ordinary_conversion_waiting(*, force_refresh: bool = False) -> bool:
     """Return True while the normal AutoRig queue needs converter capacity.
 
     A missing optional database means this protection is not configured (the
@@ -112,7 +112,7 @@ def ordinary_conversion_waiting() -> bool:
     global _ORDINARY_QUEUE_CACHE
     now = time.monotonic()
     cached_at, cached_value = _ORDINARY_QUEUE_CACHE
-    if now - cached_at < max(0.1, config.AUTORIG_QUEUE_CACHE_SECONDS):
+    if not force_refresh and now - cached_at < max(0.1, config.AUTORIG_QUEUE_CACHE_SECONDS):
         return cached_value
     path = config.AUTORIG_QUEUE_DB_PATH
     if not path.is_file():
@@ -175,6 +175,90 @@ def worker_for_url(url: str) -> Optional[Dict[str, str]]:
     return None
 
 
+def _worker_name_for_binding(
+    worker_url: str, pool: List[Dict[str, Any]]
+) -> Optional[str]:
+    """Resolve an AutoRig worker binding to the matching Hunyuan registry row.
+
+    AutoRig may persist either the public converter hostname or the storage-host
+    tunnel URL.  Matching both hostname labels and the configured host/port
+    keeps the reserve calculation independent of which route dispatched it.
+    """
+    raw = str(worker_url or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return None
+    host = str(parsed.hostname or "").strip().lower()
+    first_label = host.split(".", 1)[0]
+    public_name = (
+        first_label.split("converter-", 1)[1]
+        if first_label.startswith("converter-")
+        else first_label
+    )
+    for worker in pool:
+        name = str(worker.get("name") or "").strip()
+        if name and public_name == name.lower():
+            return name
+        try:
+            candidate = urlsplit(str(worker.get("url") or ""))
+        except ValueError:
+            continue
+        if (
+            host
+            and host == str(candidate.hostname or "").strip().lower()
+            and parsed.port == candidate.port
+        ):
+            return name or None
+    return None
+
+
+def background_conversion_workers(
+    pool: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[set[str]]:
+    """Return full workers occupied by persisted background AutoRig tasks.
+
+    A missing optional database is the legacy layout and contributes no rows.
+    An existing but unreadable or incompatible database fails closed by
+    returning ``None``: background Hunyuan must not borrow a shared converter
+    when the reserve cannot be proved.
+    """
+    path = config.AUTORIG_QUEUE_DB_PATH
+    if not path.is_file():
+        return set()
+    registry = list(pool if pool is not None else workers())
+    try:
+        connection = sqlite3.connect(
+            f"file:{path.as_posix()}?mode=ro",
+            uri=True,
+            timeout=0.5,
+        )
+        try:
+            rows = connection.execute(
+                "SELECT worker_api FROM tasks "
+                "WHERE lower(status) = 'processing' "
+                "AND lower(coalesce(queue_class, 'interactive')) = "
+                "'collection_background' "
+                "AND worker_api IS NOT NULL"
+            ).fetchall()
+        finally:
+            connection.close()
+    except Exception as exc:
+        print(
+            "[Renderfin][Hunyuan] background occupancy probe failed closed: "
+            f"{exc}"
+        )
+        return None
+    occupied: set[str] = set()
+    for (binding,) in rows:
+        name = _worker_name_for_binding(str(binding or ""), registry)
+        if name:
+            occupied.add(name)
+    return occupied
+
+
 def _headers(worker: Dict[str, str]) -> Dict[str, str]:
     return {"Authorization": f"Bearer {worker['token']}"}
 
@@ -229,6 +313,8 @@ async def pick_worker(
     client: httpx.AsyncClient,
     in_flight: Optional[Dict[str, int]] = None,
     excluded: Optional[set[str]] = None,
+    *,
+    queue_class: str = "collection_background",
 ) -> Dict[str, Any]:
     """Pick dedicated capacity first, then an empty protected converter.
 
@@ -242,15 +328,14 @@ async def pick_worker(
         raise NoWorkerAvailable("no Hunyuan workers configured")
     in_flight = in_flight or {}
     excluded = excluded or set()
+    background = str(queue_class or "").strip().lower() == "collection_background"
     at_capacity: List[str] = []
     unreachable: List[str] = []
     dedicated: List[Tuple[int, int, int, Dict[str, Any]]] = []
     shared_idle: List[Tuple[int, int, Dict[str, Any]]] = []
+    shared_full_statuses: Dict[str, Dict[str, Any]] = {}
     for index, worker in enumerate(pool):
         if worker["name"] in excluded:
-            continue
-        if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
-            at_capacity.append(worker["name"])
             continue
         status = await server_status(client, worker)
         if not status:
@@ -261,8 +346,13 @@ async def pick_worker(
             continue
         if not hunyuan.get("enabled") or not hunyuan.get("installed"):
             continue
-        score = _load_score(status, hunyuan)
         worker_pool = str(worker.get("pool") or "shared_converter")
+        if worker_pool != "dedicated" and _status_is_full_converter(status):
+            shared_full_statuses[str(worker["name"])] = status
+        if in_flight.get(worker["name"], 0) >= WORKER_INFLIGHT_CAP:
+            at_capacity.append(worker["name"])
+            continue
+        score = _load_score(status, hunyuan)
         priority = int(worker.get("priority") or 100)
         accepting_flag = status.get("accepting_hunyuan")
         if worker_pool == "dedicated":
@@ -277,6 +367,10 @@ async def pick_worker(
                 continue
             dedicated.append((score, priority, index, worker))
             continue
+        if str(worker["name"]) not in shared_full_statuses and background:
+            # Background work is admitted only on workers that expose the
+            # deployed full-converter/preemption capability contract.
+            continue
         # A shared converter is borrowed only while its complete queue is idle;
         # the central queue keeps the Hunyuan job instead of hiding it locally.
         if score == 0 and accepting_flag is not False:
@@ -286,21 +380,54 @@ async def pick_worker(
         dedicated.sort(key=lambda item: (item[0], item[1], item[2]))
         return dedicated[0][3]
 
-    if ordinary_conversion_waiting():
+    if ordinary_conversion_waiting(force_refresh=background):
         raise NoWorkerAvailable(
             "dedicated Hunyuan pool has no capacity; shared fallback paused for ordinary conversion"
         )
 
-    reserve = max(0, RESERVED_FOR_OTHER_WORK)
-    if len(shared_idle) > reserve:
+    if shared_full_statuses and set(shared_full_statuses).issubset(set(at_capacity)):
+        raise NoWorkerAvailable(
+            "every Hunyuan worker is at capacity: " + ", ".join(at_capacity)
+        )
+
+    reserve = max(0, RESERVED_FOR_OTHER_WORK) if background else 0
+    if background:
+        persisted_occupied = background_conversion_workers(pool)
+        if persisted_occupied is None:
+            raise NoWorkerAvailable(
+                "shared Hunyuan fallback paused: background full-worker occupancy is unknown"
+            )
+        background_occupied = {
+            name for name in persisted_occupied if name in shared_full_statuses
+        }
+        background_occupied.update(
+            name
+            for name, count in in_flight.items()
+            if int(count or 0) > 0 and name in shared_full_statuses
+        )
+        for name, status in shared_full_statuses.items():
+            slots = _status_slot_items(status)
+            if slots is None:
+                raise NoWorkerAvailable(
+                    "shared Hunyuan fallback paused: exact slot telemetry is "
+                    f"unavailable on {name}"
+                )
+            if any(
+                str(item.get("queue_class") or "").strip().lower()
+                == "collection_background"
+                for item in slots
+            ):
+                background_occupied.add(name)
+        background_limit = max(0, len(shared_full_statuses) - reserve)
+        if len(background_occupied) >= background_limit:
+            raise NoWorkerAvailable(
+                "shared Hunyuan fallback paused: background work already occupies "
+                f"{len(background_occupied)}/{len(shared_full_statuses)} healthy "
+                f"full converters (reserve={reserve})"
+            )
+    if shared_idle:
         shared_idle.sort(key=lambda item: (item[0], item[1]))
         return shared_idle[0][2]
-    if shared_idle and reserve:
-        raise NoWorkerAvailable(
-            "dedicated Hunyuan pool has no capacity: holding "
-            + ", ".join(item[2]["name"] for item in shared_idle)
-            + " free for rig/convert work"
-        )
     if at_capacity:
         raise NoWorkerAvailable(
             "every Hunyuan worker is at capacity: " + ", ".join(at_capacity)
@@ -328,7 +455,12 @@ async def submit(
 ) -> Tuple[Dict[str, str], str]:
     """Create a generation task. Returns (worker, status_url)."""
     try:
-        worker = await pick_worker(client, in_flight, excluded)
+        worker = await pick_worker(
+            client,
+            in_flight,
+            excluded,
+            queue_class=queue_class,
+        )
     except NoWorkerAvailable:
         if str(queue_class or "").strip().lower() != "collection_background":
             released = await preempt_background_hunyuan(client)
@@ -341,7 +473,12 @@ async def submit(
                         adjusted_in_flight[released_name] = remaining
                     else:
                         adjusted_in_flight.pop(released_name, None)
-                worker = await pick_worker(client, adjusted_in_flight, excluded)
+                worker = await pick_worker(
+                    client,
+                    adjusted_in_flight,
+                    excluded,
+                    queue_class=queue_class,
+                )
             else:
                 raise
         else:

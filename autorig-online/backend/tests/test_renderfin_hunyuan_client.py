@@ -1,5 +1,8 @@
 import asyncio
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -247,7 +250,9 @@ class PriorityPreemptionTests(unittest.TestCase):
         async def scenario():
             seen_in_flight = []
 
-            async def fake_pick(_client, in_flight=None, excluded=None):
+            async def fake_pick(
+                _client, in_flight=None, excluded=None, *, queue_class="interactive"
+            ):
                 seen_in_flight.append(dict(in_flight or {}))
                 if len(seen_in_flight) == 1:
                     raise hunyuan_client.NoWorkerAvailable("at capacity")
@@ -589,6 +594,209 @@ class WorkerSelectionTests(unittest.TestCase):
 
         run(scenario())
 
+    def test_background_hunyuan_counts_persisted_full_converter_occupancy(self):
+        async def scenario(database: Path):
+            pool = [
+                {
+                    "name": name,
+                    "url": f"http://127.0.0.1:{port}",
+                    "token": f"tok-{name}",
+                    "pool": "shared_converter",
+                    "capability_mode": "full",
+                }
+                for name, port in (
+                    ("f11", 15533),
+                    ("f2", 15279),
+                    ("f1", 15132),
+                    ("f13", 15267),
+                )
+            ]
+            busy = {"f11", "f1", "f13"}
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                name = next(
+                    worker["name"]
+                    for worker in pool
+                    if request.url.port == int(worker["url"].rsplit(":", 1)[1])
+                )
+                processing = name in busy
+                return httpx.Response(200, json={
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "feature_flags": {
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "hunyuan": {
+                        "enabled": True,
+                        "installed": True,
+                        "service_state": "idle",
+                    },
+                    # Simulate rolling-upgrade tasks whose worker payload still
+                    # says interactive; the durable AutoRig row is authoritative.
+                    "processing_tasks": ([{
+                        "task_id": f"convert-{name}",
+                        "queue_class": "interactive",
+                    }] if processing else []),
+                    "pending_tasks": [],
+                    "tasks_summary": {
+                        "queue_size": 0,
+                        "processing": 1 if processing else 0,
+                    },
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: pool), patch.object(
+                config, "AUTORIG_QUEUE_DB_PATH", database
+            ), patch.object(hunyuan_client, "RESERVED_FOR_OTHER_WORK", 1):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+                        await hunyuan_client.pick_worker(
+                            client, queue_class="collection_background"
+                        )
+            self.assertIn("3/4", str(caught.exception))
+            self.assertIn("reserve=1", str(caught.exception))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "autorig.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "CREATE TABLE tasks (worker_api TEXT, status TEXT, queue_class TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO tasks VALUES (?, 'processing', 'collection_background')",
+                    [
+                        ("https://converter-f11.freestock.online/api-converter-glb",),
+                        ("http://127.0.0.1:15132/api-converter-glb",),
+                        ("https://converter-f13.freestock.online/api-converter-glb",),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            run(scenario(database))
+
+    def test_interactive_hunyuan_can_use_the_reserved_shared_slot(self):
+        async def scenario(database: Path):
+            pool = [
+                {
+                    "name": name,
+                    "url": f"http://127.0.0.1:{port}",
+                    "token": f"tok-{name}",
+                    "pool": "shared_converter",
+                    "capability_mode": "full",
+                }
+                for name, port in (
+                    ("f11", 15533),
+                    ("f2", 15279),
+                    ("f1", 15132),
+                    ("f13", 15267),
+                )
+            ]
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                idle = request.url.port == 15279
+                return httpx.Response(200, json={
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "feature_flags": {
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "hunyuan": {
+                        "enabled": True,
+                        "installed": True,
+                        "service_state": "idle",
+                    },
+                    "processing_tasks": [] if idle else [{
+                        "task_id": "background-conversion",
+                        "queue_class": "collection_background",
+                    }],
+                    "pending_tasks": [],
+                    "tasks_summary": {
+                        "queue_size": 0,
+                        "processing": 0 if idle else 1,
+                    },
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: pool), patch.object(
+                config, "AUTORIG_QUEUE_DB_PATH", database
+            ), patch.object(hunyuan_client, "RESERVED_FOR_OTHER_WORK", 1):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    worker = await hunyuan_client.pick_worker(
+                        client, queue_class="interactive"
+                    )
+            self.assertEqual(worker["name"], "f2")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "autorig.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "CREATE TABLE tasks (worker_api TEXT, status TEXT, queue_class TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO tasks VALUES (?, 'processing', 'collection_background')",
+                    [
+                        ("https://converter-f11.freestock.online/api-converter-glb",),
+                        ("https://converter-f1.freestock.online/api-converter-glb",),
+                        ("https://converter-f13.freestock.online/api-converter-glb",),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            run(scenario(database))
+
+    def test_background_hunyuan_never_uses_the_only_full_converter(self):
+        async def scenario():
+            worker = {
+                "name": "f2",
+                "url": "http://127.0.0.1:15279",
+                "token": "tok-f2",
+                "pool": "shared_converter",
+                "capability_mode": "full",
+            }
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(200, json={
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "feature_flags": {
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "hunyuan": {
+                        "enabled": True,
+                        "installed": True,
+                        "service_state": "idle",
+                    },
+                    "processing_tasks": [],
+                    "pending_tasks": [],
+                    "tasks_summary": {
+                        "queue_size": 0,
+                        "processing": 0,
+                        "pending": 0,
+                    },
+                })
+
+            with tempfile.TemporaryDirectory() as tmp, patch.object(
+                config, "hunyuan_workers", lambda: [worker]
+            ), patch.object(
+                config, "AUTORIG_QUEUE_DB_PATH", Path(tmp) / "missing.db"
+            ), patch.object(hunyuan_client, "RESERVED_FOR_OTHER_WORK", 1):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(hunyuan_client.NoWorkerAvailable) as caught:
+                        await hunyuan_client.pick_worker(
+                            client, queue_class="collection_background"
+                        )
+            self.assertIn("0/1", str(caught.exception))
+
+        run(scenario())
+
 
 class PollToleranceTests(unittest.TestCase):
     def test_transient_404_tolerated_then_completes(self):
@@ -851,8 +1059,15 @@ class InFlightCapTests(unittest.TestCase):
     @staticmethod
     def _ok_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={
+            "capabilities": {"mode": "full", "legacy_conversion": True},
+            "feature_flags": {
+                "converter_capability_mode": "full",
+                "legacy_conversion_enabled": True,
+            },
             "hunyuan": {"enabled": True, "installed": True, "service_state": "idle"},
-            "tasks_summary": {"queue_size": 0},
+            "processing_tasks": [],
+            "pending_tasks": [],
+            "tasks_summary": {"queue_size": 0, "processing": 0, "pending": 0},
         })
 
     def test_a_busy_worker_is_not_offered(self):
