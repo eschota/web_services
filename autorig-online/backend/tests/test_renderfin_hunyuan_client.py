@@ -750,6 +750,86 @@ class WorkerSelectionTests(unittest.TestCase):
                 connection.close()
             run(scenario(database))
 
+    def test_cross_pipeline_snapshot_reports_and_repairs_one_excess_slot(self):
+        async def scenario(database: Path):
+            pool = [
+                {
+                    "name": name,
+                    "url": f"http://127.0.0.1:{port}",
+                    "token": f"tok-{name}",
+                    "pool": "shared_converter",
+                    "capability_mode": "full",
+                }
+                for name, port in (
+                    ("f11", 15533),
+                    ("f2", 15279),
+                    ("f1", 15132),
+                    ("f13", 15267),
+                )
+            ]
+
+            def handler(request: httpx.Request) -> httpx.Response:
+                name = next(
+                    worker["name"]
+                    for worker in pool
+                    if request.url.port == int(worker["url"].rsplit(":", 1)[1])
+                )
+                return httpx.Response(200, json={
+                    "capabilities": {"mode": "full", "legacy_conversion": True},
+                    "feature_flags": {
+                        "converter_capability_mode": "full",
+                        "legacy_conversion_enabled": True,
+                    },
+                    "hunyuan": {
+                        "enabled": True,
+                        "installed": True,
+                        "service_state": "idle",
+                    },
+                    "processing_tasks": ([{
+                        "task_id": f"hunyuan-{name}",
+                        "queue_class": "collection_background",
+                    }] if name in {"f2", "f13"} else [{
+                        "task_id": f"convert-{name}",
+                        "queue_class": "collection_background",
+                    }]),
+                    "pending_tasks": [],
+                    "tasks_summary": {"queue_size": 0, "processing": 1},
+                })
+
+            with patch.object(config, "hunyuan_workers", lambda: pool), patch.object(
+                config, "AUTORIG_QUEUE_DB_PATH", database
+            ), patch.object(hunyuan_client, "RESERVED_FOR_OTHER_WORK", 1):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    snapshot = await hunyuan_client.shared_full_background_capacity(
+                        client
+                    )
+            self.assertEqual(snapshot["healthy"], 4)
+            self.assertEqual(snapshot["background_occupied"], 4)
+            self.assertEqual(snapshot["background_limit"], 3)
+            self.assertEqual(snapshot["available_background_slots"], 0)
+            self.assertEqual(snapshot["excess_background_slots"], 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "autorig.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    "CREATE TABLE tasks (worker_api TEXT, status TEXT, queue_class TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO tasks VALUES (?, 'processing', 'collection_background')",
+                    [
+                        ("https://converter-f11.freestock.online/api-converter-glb",),
+                        ("https://converter-f1.freestock.online/api-converter-glb",),
+                    ],
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            run(scenario(database))
+
     def test_background_hunyuan_never_uses_the_only_full_converter(self):
         async def scenario():
             worker = {

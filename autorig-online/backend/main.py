@@ -616,6 +616,74 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
                     "is available to interactive work only"
                 )
 
+        cross_background_capacity = None
+        if PREEMPTION_ENABLED:
+            try:
+                from renderfin import hunyuan_client
+
+                async with httpx.AsyncClient(follow_redirects=True) as client:
+                    cross_background_capacity = (
+                        await hunyuan_client.shared_full_background_capacity(client)
+                    )
+            except Exception as exc:
+                # Background work fails closed; interactive dispatch and recall
+                # continue below without depending on this observability probe.
+                print(f"[Priority] Cross-pipeline capacity probe failed: {exc}")
+
+        reserve_excess = int(
+            (cross_background_capacity or {}).get("excess_background_slots") or 0
+        )
+        if reserve_excess and PREEMPTION_ENABLED:
+            active_result = await db.execute(
+                select(Task).where(
+                    Task.status == "processing",
+                    Task.pipeline_kind != "generate",
+                    Task.queue_class == QUEUE_CLASS_BACKGROUND,
+                    Task.preemption_state == "none",
+                )
+            )
+            active_background = []
+            for task in active_result.scalars().all():
+                worker = next(
+                    (
+                        item
+                        for item in queue_status.workers
+                        if item.url.rstrip("/")
+                        == str(task.worker_api or "").rstrip("/")
+                    ),
+                    None,
+                )
+                if worker and worker.available and worker_supports_preemption(worker):
+                    active_background.append(task)
+            victims = select_preemption_victims(active_background, reserve_excess)
+            print(
+                "[Priority] Repairing background reserve: "
+                f"healthy={cross_background_capacity['healthy']} "
+                f"occupied={cross_background_capacity['background_occupied']} "
+                f"limit={cross_background_capacity['background_limit']}"
+            )
+            results = await asyncio.gather(
+                *(preempt_background_task(task.id) for task in victims),
+                return_exceptions=True,
+            )
+            released_slots = sum(result is True for result in results)
+            remaining_excess = max(0, reserve_excess - released_slots)
+            if remaining_excess:
+                from renderfin import hunyuan_client
+
+                async with httpx.AsyncClient(follow_redirects=True) as client:
+                    released = await hunyuan_client.preempt_background_hunyuan_many(
+                        client,
+                        limit=remaining_excess,
+                        shared_full_converter_only=True,
+                    )
+                    released_slots += len(released)
+            if released_slots:
+                wake_task_scheduler()
+            # Re-read both DB bindings and worker telemetry on the next locked
+            # cycle; do not dispatch from the stale over-capacity snapshot.
+            return
+
         async def _try_dispatch(worker, candidates: List[Task]) -> bool:
             async def _attempt(task: Task):
                 return await start_task_on_worker(db, task, worker.url)
@@ -639,6 +707,13 @@ async def _dispatch_priority_queue(db: AsyncSession, queue_status) -> None:
             len(background),
             len(background_workers),
             background_dispatch_budget(remaining_free, len(interactive)),
+            (
+                int(cross_background_capacity["available_background_slots"])
+                if cross_background_capacity is not None
+                else 0
+            )
+            if PREEMPTION_ENABLED
+            else len(background_workers),
         )
         for worker in background_workers[:background_budget]:
             await _try_dispatch(worker, background)

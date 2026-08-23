@@ -392,32 +392,15 @@ async def pick_worker(
 
     reserve = max(0, RESERVED_FOR_OTHER_WORK) if background else 0
     if background:
-        persisted_occupied = background_conversion_workers(pool)
-        if persisted_occupied is None:
+        background_occupied = _background_occupied_workers(
+            pool,
+            shared_full_statuses,
+            in_flight=in_flight,
+        )
+        if background_occupied is None:
             raise NoWorkerAvailable(
                 "shared Hunyuan fallback paused: background full-worker occupancy is unknown"
             )
-        background_occupied = {
-            name for name in persisted_occupied if name in shared_full_statuses
-        }
-        background_occupied.update(
-            name
-            for name, count in in_flight.items()
-            if int(count or 0) > 0 and name in shared_full_statuses
-        )
-        for name, status in shared_full_statuses.items():
-            slots = _status_slot_items(status)
-            if slots is None:
-                raise NoWorkerAvailable(
-                    "shared Hunyuan fallback paused: exact slot telemetry is "
-                    f"unavailable on {name}"
-                )
-            if any(
-                str(item.get("queue_class") or "").strip().lower()
-                == "collection_background"
-                for item in slots
-            ):
-                background_occupied.add(name)
         background_limit = max(0, len(shared_full_statuses) - reserve)
         if len(background_occupied) >= background_limit:
             raise NoWorkerAvailable(
@@ -570,6 +553,91 @@ def _status_slot_items(status: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]
             return None
         combined.extend(value)
     return combined
+
+
+def _background_occupied_workers(
+    pool: List[Dict[str, Any]],
+    shared_full_statuses: Dict[str, Dict[str, Any]],
+    *,
+    in_flight: Optional[Dict[str, int]] = None,
+) -> Optional[set[str]]:
+    """Merge durable AutoRig bindings with exact worker slot telemetry."""
+    persisted_occupied = background_conversion_workers(pool)
+    if persisted_occupied is None:
+        return None
+    occupied = {
+        name for name in persisted_occupied if name in shared_full_statuses
+    }
+    occupied.update(
+        name
+        for name, count in (in_flight or {}).items()
+        if int(count or 0) > 0 and name in shared_full_statuses
+    )
+    for name, status in shared_full_statuses.items():
+        slots = _status_slot_items(status)
+        if slots is None:
+            print(
+                "[Renderfin][Hunyuan] exact background slot telemetry is "
+                f"unavailable on {name}; failing closed"
+            )
+            return None
+        if any(
+            str(item.get("queue_class") or "").strip().lower()
+            == "collection_background"
+            for item in slots
+        ):
+            occupied.add(name)
+    return occupied
+
+
+async def shared_full_background_capacity(
+    client: httpx.AsyncClient,
+) -> Optional[Dict[str, Any]]:
+    """Read the cross-pipeline background occupancy of healthy full workers.
+
+    This is used by the AutoRig full scheduler as well as Hunyuan admission so
+    both sides apply the same N-1 budget while holding ``fleet_admission_lock``.
+    ``None`` means the occupancy proof is incomplete and background dispatch
+    must fail closed.
+    """
+    pool = workers()
+    shared = [
+        worker
+        for worker in pool
+        if str(worker.get("pool") or "shared_converter") != "dedicated"
+        and str(worker.get("capability_mode") or "").strip().lower() == "full"
+    ]
+    results = await asyncio.gather(
+        *(server_status(client, worker) for worker in shared),
+        return_exceptions=True,
+    )
+    statuses: Dict[str, Dict[str, Any]] = {}
+    for worker, result in zip(shared, results):
+        if isinstance(result, Exception) or not isinstance(result, dict):
+            continue
+        hunyuan = result.get("hunyuan")
+        if (
+            isinstance(hunyuan, dict)
+            and hunyuan.get("enabled") is True
+            and hunyuan.get("installed") is True
+            and _status_is_full_converter(result)
+        ):
+            statuses[str(worker["name"])] = result
+    occupied = _background_occupied_workers(pool, statuses)
+    if occupied is None:
+        return None
+    healthy = len(statuses)
+    reserve = max(0, RESERVED_FOR_OTHER_WORK)
+    limit = max(0, healthy - reserve)
+    return {
+        "healthy": healthy,
+        "reserve": reserve,
+        "background_limit": limit,
+        "background_occupied": len(occupied),
+        "background_workers": sorted(occupied),
+        "available_background_slots": max(0, limit - len(occupied)),
+        "excess_background_slots": max(0, len(occupied) - limit),
+    }
 
 
 def _processing_items(status: Dict[str, Any]) -> List[Dict[str, Any]]:
