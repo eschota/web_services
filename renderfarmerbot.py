@@ -1,1144 +1,642 @@
 #!/usr/bin/env python3
-"""
-RenderFarmer Telegram Bot
+"""Low-noise Telegram dashboard for the live AutoRig/Renderfin farm.
 
-Monitors disk space and converter server status, sends updates to subscribed Telegram chats.
+The monitor intentionally owns one status message per subscribed chat. It
+polls every minute, but edits Telegram only when a semantic farm state changes.
+It never emits automatic media groups, completion videos, or startup messages.
 """
 
+from __future__ import annotations
+
+import argparse
 import asyncio
-import dataclasses
+import contextlib
+import hashlib
+import html
 import json
 import logging
 import os
 import shutil
-import uuid
-from dataclasses import dataclass
-from typing import Dict, List, Optional
-from collections import deque
-import time
+import tempfile
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
 
-import aiohttp
-import psutil
-from telegram import Bot, InputMediaPhoto, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import BadRequest
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+import httpx
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest, Forbidden, TelegramError
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
-# Configure logging
+
+VERSION = "v3.0.0"
+DEFAULT_DATA_DIR = "/srv/autorig/data/var/renderfarmer-monitor"
+DEFAULT_CONVERTERS = {
+    "F1": "https://converter-f1.freestock.online/api-converter-glb",
+    "F2": "https://converter-f2.freestock.online/api-converter-glb",
+    "F11": "https://converter-f11.freestock.online/api-converter-glb",
+    "F13": "https://converter-f13.freestock.online/api-converter-glb",
+}
+PARKED_CONVERTERS = ("F7",)
+
+
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=os.getenv("RENDERFARMER_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("renderfarmer-monitor")
+
+# python-telegram-bot uses httpx internally. INFO request logs contain the bot
+# token as part of the Telegram URL, so they must never reach journald.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram.request").setLevel(logging.WARNING)
+
+
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _worker_sort_key(item: "ConverterStatus") -> tuple[bool, int, str]:
+    suffix = item.name[1:] if item.name.upper().startswith("F") else ""
+    number = int(suffix) if suffix.isdigit() else 1_000_000
+    return (not item.enabled, number, item.name)
 
 
 @dataclass
 class ConverterStatus:
-    """Status information for a converter server."""
     name: str
+    enabled: bool = True
     online: bool = False
-    active_tasks: int = 0
-    queue_size: int = 0
-    server_version: str = ""
-    total_completed: int = 0
-    active_tasks_data: dict = dataclasses.field(default_factory=dict)
-    task_durations: dict = dataclasses.field(default_factory=dict)  # {task_id: duration_seconds}
+    healthy: bool = False
+    active: int = 0
+    pending: int = 0
+    queue: int = 0
+    stuck: int = 0
+    completed: int = 0
+    hunyuan_state: str = ""
+    hostname: str = ""
+    error: str = ""
 
 
-class SpyServer:
-    """Monitors disk space and converter servers."""
+@dataclass
+class FarmSnapshot:
+    converter_queue: dict[str, Any]
+    renderfin: dict[str, Any]
+    converters: list[ConverterStatus]
+    disk_free_gb: float
+    disk_used_percent: float
+    checked_at: str
+    errors: list[str] = field(default_factory=list)
 
-    def __init__(self):
-        self.converter_servers = {
-            'F1': 'https://converter-f1.freestock.online/api-converter-glb',
-            'F2': 'https://converter-f2.freestock.online/api-converter-glb',
-            'F7': 'https://converter-f7.freestock.online/api-converter-glb',
-            'F11': 'https://converter-f11.freestock.online/api-converter-glb',
-            'F13': 'https://converter-f13.freestock.online/api-converter-glb'
+    def semantic_payload(self) -> dict[str, Any]:
+        """Return stable state; deliberately exclude time and noisy host CPU."""
+        disk_band = "critical" if self.disk_free_gb < 10 else "warning" if self.disk_free_gb < 50 else "ok"
+        queue = self.converter_queue
+        renderfin = self.renderfin
+        pools = renderfin.get("hunyuan_pools") or {}
+        return {
+            "converter_queue": {
+                "ok": bool(queue.get("ok")),
+                "active": _int(queue.get("total_active")),
+                "pending": _int(queue.get("total_pending")),
+                "queued": _int(queue.get("total_queue")),
+                "available": _int(queue.get("available_workers")),
+                "total": _int(queue.get("total_workers")),
+            },
+            "renderfin": {
+                "ok": bool(renderfin.get("ok")),
+                "servers": _int(renderfin.get("servers")),
+                "pending": _int(renderfin.get("pending")),
+                "rendering": _int(renderfin.get("rendering")),
+                "dedicated": sorted(str(v) for v in pools.get("dedicated", [])),
+                "shared": sorted(str(v) for v in pools.get("shared_converter", [])),
+                "reserved": _int(pools.get("shared_reserved")),
+                "ordinary_waiting": bool(pools.get("ordinary_conversion_waiting")),
+                "config_error": bool(renderfin.get("hunyuan_config_error")),
+            },
+            "converters": [
+                {
+                    "name": item.name,
+                    "enabled": item.enabled,
+                    "online": item.online,
+                    "healthy": item.healthy,
+                    "active": item.active,
+                    "pending": item.pending,
+                    "queue": item.queue,
+                    "stuck": item.stuck,
+                    "completed": item.completed,
+                    "hunyuan_state": item.hunyuan_state,
+                }
+                for item in self.converters
+            ],
+            "disk_band": disk_band,
+            "errors": sorted(self.errors),
         }
 
-        # CPU monitoring - store measurements for 10 minutes (60 measurements at 10-sec intervals)
-        self.cpu_history = deque(maxlen=60)
-        self.last_cpu_check = 0
-
-        # Main API status
-        self.api_status = {'online': False, 'servers_count': 0, 'tasks_count': 0, 'pending_count': 0}
-
-        # Task timing - track when tasks started
-        self.task_start_times = {}  # {server_name: {task_id: start_time}}
-
-        # Completed tasks tracking - for sending completion videos
-        self.completed_tasks = set()  # Track task_ids we've already processed
-
-    async def poll_disk_space(self) -> int:
-        """Get free disk space in GB, rounded."""
-        try:
-            stat = shutil.disk_usage('/')
-            free_gb = round(stat.free / (1024 ** 3))
-            return free_gb
-        except Exception as e:
-            logger.error(f"Failed to poll disk space: {e}")
-            return 0
-
-    async def poll_cpu_usage(self) -> float:
-        """Get current CPU usage and maintain history for average calculation (10 minutes)."""
-        try:
-            current_time = time.time()
-
-            # Check CPU every 10 seconds minimum
-            if current_time - self.last_cpu_check >= 10:
-                # Get CPU usage percentage (blocking call, but should be fast)
-                cpu_percent = psutil.cpu_percent(interval=1)
-                self.cpu_history.append(cpu_percent)
-                self.last_cpu_check = current_time
-
-                logger.debug(f"CPU usage measured: {cpu_percent}%")
-
-            # Return average of available measurements
-            if self.cpu_history:
-                return round(sum(self.cpu_history) / len(self.cpu_history), 1)
-            else:
-                # Fallback to current measurement
-                return round(psutil.cpu_percent(interval=0.1), 1)
-
-        except Exception as e:
-            logger.error(f"Failed to poll CPU usage: {e}")
-            return 0.0
-
-    async def poll_api_status(self):
-        """Poll main API status from https://renderfin.com/api-render."""
-        api_url = "https://renderfin.com/api-render"
-
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-                'Accept': 'application/json, text/plain, */*'
-            }
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), headers=headers) as session:
-                async with session.get(api_url) as response:
-                    logger.debug(f"API status response: {response.status}")
-
-                    if response.status == 200:
-                        try:
-                            data = await response.json()
-                            servers = data.get('servers', [])
-                            tasks = data.get('tasks', [])
-
-                            # Count pending tasks
-                            pending_count = sum(1 for task in tasks if hasattr(task, 'status') and task.get('status') == 'Pending')
-
-                            self.api_status = {
-                                'online': True,
-                                'servers_count': len(servers),
-                                'tasks_count': len(tasks),
-                                'pending_count': pending_count
-                            }
-                            logger.info(f"✅ API online: {len(servers)} servers, {len(tasks)} tasks, {pending_count} pending")
-                        except Exception as e:
-                            logger.warning(f"Could not parse API JSON: {e}")
-                            self.api_status = {'online': False, 'servers_count': 0, 'tasks_count': 0, 'pending_count': 0}
-                    else:
-                        logger.warning(f"API returned HTTP {response.status}")
-                        self.api_status = {'online': False, 'servers_count': 0, 'tasks_count': 0, 'pending_count': 0}
-
-        except Exception as e:
-            logger.warning(f"Failed to poll API: {e}")
-            self.api_status = {'online': False, 'servers_count': 0, 'tasks_count': 0, 'pending_count': 0}
-
-    async def poll_converter(self, name: str, url: str) -> ConverterStatus:
-        """Poll a converter server for status information."""
-        status = ConverterStatus(name=name)
-        # Use the base URL directly (according to TЗ, it's /api-converter-glb)
-        full_url = url
-
-        logger.debug(f"Polling converter {name} at {url}")
-
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-                'Accept': 'application/json, text/plain, */*'
-            }
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), headers=headers) as session:
-                async with session.get(url) as response:
-                    logger.debug(f"Server {name} responded with status {response.status}")
-
-                    if response.status == 200:
-                        try:
-                            data = await response.json()
-                            logger.info(f"✅ {name}: active={data.get('total_active', 0)}, completed={data.get('total_completed_tasks', 0)}")
-                            status.online = True
-                            status.active_tasks = data.get('total_active', 0)
-                            status.queue_size = data.get('queue_size', 0)
-                            status.server_version = data.get('server_version', '')
-                            status.total_completed = data.get('total_completed_tasks', 0)
-
-                            # Store active tasks data for image processing
-                            status.active_tasks_data = data.get('active_tasks', {})
-
-                            # Track task start times for timing
-                            current_active_task_ids = set(status.active_tasks_data.keys())
-
-                            # Initialize server tracking if not exists
-                            if name not in self.task_start_times:
-                                self.task_start_times[name] = {}
-
-                            # Remove completed tasks
-                            completed_tasks = []
-                            for task_id in self.task_start_times[name]:
-                                if task_id not in current_active_task_ids:
-                                    completed_tasks.append(task_id)
-
-                            for task_id in completed_tasks:
-                                del self.task_start_times[name][task_id]
-                                logger.debug(f"Task {task_id} on {name} completed, removed timing")
-
-                            # Add new tasks with start time and calculate durations
-                            import time
-                            current_time = time.time()
-
-                            # Calculate durations for active tasks and store output URLs
-                            status.task_durations = {}
-                            for task_id in current_active_task_ids:
-                                if task_id not in self.task_start_times[name]:
-                                    self.task_start_times[name][task_id] = current_time
-                                    logger.debug(f"Task {task_id} on {name} started at {current_time}")
-                                    status.task_durations[task_id] = 0
-                                else:
-                                    duration = int(current_time - self.task_start_times[name][task_id])
-                                    status.task_durations[task_id] = duration
+    def fingerprint(self) -> str:
+        raw = json.dumps(self.semantic_payload(), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-                            # Check for completed tasks and send completion videos
-                            for task_id in completed_tasks:
-                                if task_id not in self.completed_tasks:
-                                    # Check if task has video output and send completion message
-                                    await self.check_and_send_completion_video(name, task_id, status.active_tasks_data.get(task_id, {}))
-                                    self.completed_tasks.add(task_id)
+class StateStore:
+    """Atomic persistent subscriptions, message IDs, and delivered fingerprints."""
 
-                        except Exception as e:
-                            logger.warning(f"Could not parse JSON from {name}: {e}")
-                            status.online = False
-                    else:
-                        logger.warning(f"Server {name} returned HTTP {response.status}")
-                        status.online = False
-        except Exception as e:
-            logger.warning(f"Failed to poll converter {name}: {e}")
-            status.online = False
+    def __init__(self, data_dir: str) -> None:
+        self.data_dir = Path(data_dir)
+        self.path = self.data_dir / "state.json"
+        self.state: dict[str, Any] = {
+            "schema": 3,
+            "subscribed_chats": [],
+            "status_messages": {},
+            "fingerprints": {},
+        }
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._load()
 
-        logger.debug(f"Final status for {name}: online={status.online}")
-        return status
-
-    async def check_task_images(self, converter_statuses: Dict[str, ConverterStatus]) -> List[str]:
-        """Check for available *_view.jpg images from active tasks on all servers."""
-        available_images = []
-
-        try:
-            # Process active tasks from all online servers
-            for status in converter_statuses.values():
-                if status.online and status.active_tasks_data:
-                    logger.debug(f"Checking images for server {status.name} with {len(status.active_tasks_data)} active tasks")
-
-                    for task_id, task_data in status.active_tasks_data.items():
-                        if 'output_urls' in task_data and task_data['output_urls']:
-                            for url in task_data['output_urls']:
-                                if url.endswith('_view.jpg'):
-                                    try:
-                                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                                            async with session.head(url) as response:
-                                                if response.status == 200:
-                                                    available_images.append(url)
-                                                    logger.debug(f"✅ Found available image: {url}")
-                                                else:
-                                                    logger.debug(f"❌ Image not available (HTTP {response.status}): {url}")
-                                    except Exception as e:
-                                        logger.debug(f"Failed to check image {url}: {e}")
-
-            # Limit to 10 images max
-            available_images = available_images[:10]
-
-            if available_images:
-                logger.info(f"📸 Found {len(available_images)} active task images to display")
-            else:
-                logger.debug("No active task images found")
-
-        except Exception as e:
-            logger.error(f"Error checking task images: {e}")
-
-        return available_images
-
-    async def check_and_send_completion_video(self, server_name: str, task_id: str, task_data: dict):
-        """Check for completion video and send to Telegram if found."""
-        try:
-            # Get server URL for API call
-            server_url = self.converter_servers.get(server_name)
-            if not server_url:
-                logger.error(f"Unknown server {server_name} for task {task_id}")
-                return
-
-            # Query task status from server API
-            task_status_url = f"{server_url}/status/{task_id}"
-            logger.debug(f"Checking task status: {task_status_url}")
-
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(task_status_url) as response:
-                    if response.status != 200:
-                        logger.debug(f"Task status not available: {task_status_url} (HTTP {response.status})")
-                        return
-
-                    task_info = await response.json()
-                    logger.debug(f"Got task info for {task_id}: {task_info}")
-
-            # Get output URLs from task info
-            output_urls = task_info.get('output_urls', [])
-            if not output_urls:
-                logger.debug(f"No output URLs for completed task {task_id}")
-                return
-
-            # Find video files (.mp4 priority, then .mov)
-            video_urls = []
-            for url in output_urls:
-                if isinstance(url, str):
-                    if url.endswith('.mp4'):
-                        video_urls.append(url)
-                    elif url.endswith('.mov'):
-                        video_urls.append(url)
-
-            # Sort by priority (.mp4 first)
-            video_urls.sort(key=lambda x: 0 if x.endswith('.mp4') else 1)
-
-            if not video_urls:
-                logger.debug(f"No video files found for completed task {task_id}")
-                return
-
-            # Check if video is accessible (HEAD request)
-            video_url = video_urls[0]  # Use first (highest priority) video
+    def _load(self) -> None:
+        if self.path.exists():
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                    async with session.head(video_url) as response:
-                        if response.status != 200:
-                            logger.debug(f"Video not accessible: {video_url} (HTTP {response.status})")
-                            return
-            except Exception as e:
-                logger.debug(f"Failed to check video accessibility: {video_url} - {e}")
-                return
+                loaded = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    self.state.update(loaded)
+                    return
+            except (OSError, ValueError) as exc:
+                logger.error("State file is invalid; preserving it and starting with legacy import: %s", exc)
+        self._import_legacy()
 
-            # Send completion message with video
-            await self.send_completion_video(server_name, task_id, video_url, task_info)
-
-            logger.info(f"✅ Sent completion video for task {task_id} on {server_name}")
-
-        except Exception as e:
-            logger.error(f"Error checking completion video for task {task_id}: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-
-    async def send_completion_video(self, server_name: str, task_id: str, video_url: str, task_info: dict):
-        """Send completion video to all subscribed chats."""
+    def _import_legacy(self) -> None:
+        """Import v2 files without deleting or recreating existing Telegram messages."""
+        chats_file = self.data_dir / "chats.json"
+        sessions_file = self.data_dir / "sessions.json"
         try:
-            # Get task duration if available
-            duration_text = ""
-            start_time = None
-            for server_tasks in self.task_start_times.values():
-                if task_id in server_tasks:
-                    start_time = server_tasks[task_id]
-                    break
-
-            if start_time:
-                import time
-                total_duration = int(time.time() - start_time)
-                minutes = total_duration // 60
-                seconds = total_duration % 60
-                duration_text = f" ⏱️ {minutes:02d}:{seconds:02d}"
-
-            # Get additional task info
-            task_type = "Unknown"
-            if 'output_urls' in task_info:
-                output_urls = task_info['output_urls']
-                if any('.mp4' in url for url in output_urls if isinstance(url, str)):
-                    task_type = "Video Render"
-                elif any('.mov' in url for url in output_urls if isinstance(url, str)):
-                    task_type = "Animation"
-                elif any('.png' in url for url in output_urls if isinstance(url, str)):
-                    task_type = "Image Render"
-                elif any('.glb' in url for url in output_urls if isinstance(url, str)):
-                    task_type = "3D Model"
-
-            # Create completion message
-            from datetime import datetime
-            current_time = datetime.now().strftime("%H:%M")
-
-            caption = f"""🎬 <b>Task Completed Successfully! 🎉</b>
-
-📍 <b>Server:</b> {server_name}
-🆔 <b>Task ID:</b> {task_id[:8]}...
-🎯 <b>Type:</b> {task_type}
-{duration_text}
-✅ <b>Status:</b> Render Complete
-
-📎 <b>Output:</b> {len(task_info.get('output_urls', []))} files generated
-
-⏰ <b>Completed at {current_time}</b>"""
-
-            # Send video to all subscribed chats
-            tasks = []
-            for chat_id in self.session_manager.subscribed_chats:
-                task = self.bot.send_video(
-                    chat_id=chat_id,
-                    video=video_url,
-                    caption=caption,
-                    parse_mode='HTML',
-                    supports_streaming=True
+            if chats_file.exists():
+                chats = json.loads(chats_file.read_text(encoding="utf-8")).get("chats", [])
+                self.state["subscribed_chats"] = [_int(chat) for chat in chats]
+            if sessions_file.exists():
+                messages = json.loads(sessions_file.read_text(encoding="utf-8")).get("messages", [])
+                for message in messages:
+                    if message.get("type") == "status":
+                        self.state["status_messages"][str(_int(message.get("chat_id")))] = _int(
+                            message.get("message_id")
+                        )
+            if chats_file.exists() or sessions_file.exists():
+                logger.info(
+                    "Imported legacy monitor state: %d subscriptions, %d dashboard IDs",
+                    len(self.state["subscribed_chats"]),
+                    len(self.state["status_messages"]),
                 )
-                tasks.append(task)
+                self.save()
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error("Legacy state import failed without modifying source files: %s", exc)
 
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                success_count = sum(1 for r in results if not isinstance(r, Exception))
-                logger.info(f"Sent completion video to {success_count}/{len(tasks)} chats")
+    @property
+    def chats(self) -> list[int]:
+        return list(dict.fromkeys(_int(chat) for chat in self.state.get("subscribed_chats", [])))
 
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Failed to send completion video to chat {self.session_manager.subscribed_chats[i]}: {result}")
+    def subscribe(self, chat_id: int) -> bool:
+        if chat_id in self.chats:
+            return False
+        self.state["subscribed_chats"] = self.chats + [chat_id]
+        self.save()
+        return True
 
-        except Exception as e:
-            logger.error(f"Error sending completion video for task {task_id}: {e}")
-            import traceback
-            logger.error(f"Video send traceback: {traceback.format_exc()}")
+    def unsubscribe(self, chat_id: int) -> bool:
+        if chat_id not in self.chats:
+            return False
+        self.state["subscribed_chats"] = [chat for chat in self.chats if chat != chat_id]
+        self.state["status_messages"].pop(str(chat_id), None)
+        self.state["fingerprints"].pop(str(chat_id), None)
+        self.save()
+        return True
 
-    async def get_all_status(self) -> tuple[int, float, Dict[str, ConverterStatus], List[str]]:
-        """Get comprehensive status: disk space, CPU usage, converter statuses, API status, and available images."""
-        # Poll API status
-        await self.poll_api_status()
+    def message_id(self, chat_id: int) -> int | None:
+        value = _int(self.state.get("status_messages", {}).get(str(chat_id)))
+        return value or None
 
-        # Poll disk space and CPU usage in parallel
-        disk_task = self.poll_disk_space()
-        cpu_task = self.poll_cpu_usage()
+    def fingerprint(self, chat_id: int) -> str:
+        return str(self.state.get("fingerprints", {}).get(str(chat_id), ""))
 
-        disk_free, cpu_usage = await asyncio.gather(disk_task, cpu_task)
+    def mark_delivered(self, chat_id: int, message_id: int, fingerprint: str) -> None:
+        self.state.setdefault("status_messages", {})[str(chat_id)] = int(message_id)
+        self.state.setdefault("fingerprints", {})[str(chat_id)] = fingerprint
+        self.save()
 
-        # Poll all converters in parallel
-        tasks = []
-        for name, url in self.converter_servers.items():
-            tasks.append(self.poll_converter(name, url))
+    def forget_message(self, chat_id: int) -> None:
+        self.state.setdefault("status_messages", {}).pop(str(chat_id), None)
+        self.state.setdefault("fingerprints", {}).pop(str(chat_id), None)
+        self.save()
 
-        converter_statuses = {}
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for i, result in enumerate(results):
-            name = list(self.converter_servers.keys())[i]
-            if isinstance(result, Exception):
-                logger.error(f"Error polling {name}: {result}")
-                converter_statuses[name] = ConverterStatus(name=name)
-            else:
-                converter_statuses[name] = result
-
-        # Check for available images from active tasks
-        available_images = await self.check_task_images(converter_statuses)
-
-        return disk_free, cpu_usage, converter_statuses, available_images
-
-
-class SessionManager:
-    """Tracks messages for cleanup between sessions."""
-
-    def __init__(self, data_dir: str = "renderfarmer_data"):
-        self.data_dir = data_dir
-        self.sessions_file = os.path.join(data_dir, "sessions.json")
-        self.chats_file = os.path.join(data_dir, "chats.json")
-        self.session_id = str(uuid.uuid4())
-        self.sent_messages: List[Dict] = []
-        self.subscribed_chats: List[int] = []
-
-        # Ensure data directory exists
-        os.makedirs(data_dir, exist_ok=True)
-
-        # Load persisted data
-        self._load_sessions()
-        self._load_chats()
-
-    def _load_sessions(self):
-        """Load previous session data."""
+    def save(self) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(self.state, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        tmp_name = ""
         try:
-            if os.path.exists(self.sessions_file):
-                with open(self.sessions_file, 'r') as f:
-                    data = json.load(f)
-                    # Only load messages from previous sessions
-                    self.sent_messages = [
-                        msg for msg in data.get('messages', [])
-                        if msg.get('session_id') != self.session_id
-                    ]
-        except Exception as e:
-            logger.error(f"Failed to load sessions: {e}")
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=self.data_dir, prefix=".state-", suffix=".tmp", delete=False
+            ) as handle:
+                tmp_name = handle.name
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(tmp_name, 0o600)
+            os.replace(tmp_name, self.path)
+        finally:
+            if tmp_name and os.path.exists(tmp_name):
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_name)
 
-    def _load_chats(self):
-        """Load subscribed chat IDs."""
+
+class FarmPoller:
+    def __init__(self) -> None:
+        self.queue_url = os.getenv("RENDERFARMER_QUEUE_URL", "http://127.0.0.1:8200/api/queue/status")
+        self.renderfin_url = os.getenv("RENDERFARMER_RENDERFIN_URL", "http://127.0.0.1:8210/renderfin/health")
+        self.disk_path = os.getenv("RENDERFARMER_DISK_PATH", "/srv/autorig")
+        self.converters = self._converter_config()
+
+    @staticmethod
+    def _converter_config() -> dict[str, str]:
+        raw = os.getenv("RENDERFARMER_CONVERTERS_JSON", "").strip()
+        if not raw:
+            return dict(DEFAULT_CONVERTERS)
         try:
-            if os.path.exists(self.chats_file):
-                with open(self.chats_file, 'r') as f:
-                    data = json.load(f)
-                    self.subscribed_chats = data.get('chats', [])
-        except Exception as e:
-            logger.error(f"Failed to load chats: {e}")
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("expected an object")
+            return {str(name): str(url).rstrip("/") for name, url in parsed.items() if str(url).strip()}
+        except (TypeError, ValueError) as exc:
+            logger.error("Invalid RENDERFARMER_CONVERTERS_JSON; using defaults: %s", exc)
+            return dict(DEFAULT_CONVERTERS)
 
-    def save_message(self, chat_id: int, message_id: int, message_type: str = "status"):
-        """Save a sent message for later cleanup."""
-        message_data = {
-            'session_id': self.session_id,
-            'chat_id': chat_id,
-            'message_id': message_id,
-            'type': message_type
-        }
-        self.sent_messages.append(message_data)
-        self.persist_to_json()
+    async def _fetch_json(self, client: httpx.AsyncClient, url: str, attempts: int = 2) -> dict[str, Any]:
+        last_error = "unknown error"
+        for attempt in range(attempts):
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
+                if not isinstance(data, dict):
+                    raise ValueError("JSON root is not an object")
+                return data
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(1)
+        raise RuntimeError(last_error)
 
-    def subscribe_chat(self, chat_id: int):
-        """Subscribe a chat to receive updates."""
-        if chat_id not in self.subscribed_chats:
-            self.subscribed_chats.append(chat_id)
-            self._save_chats()
-
-    def unsubscribe_chat(self, chat_id: int):
-        """Unsubscribe a chat from updates."""
-        if chat_id in self.subscribed_chats:
-            self.subscribed_chats.remove(chat_id)
-            self._save_chats()
-
-    def _save_chats(self):
-        """Save subscribed chats to JSON."""
+    async def _poll_converter(self, client: httpx.AsyncClient, name: str, base_url: str) -> ConverterStatus:
+        item = ConverterStatus(name=name)
         try:
-            data = {'chats': self.subscribed_chats}
-            with open(self.chats_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save chats: {e}")
+            data = await self._fetch_json(client, f"{base_url.rstrip('/')}/server-status")
+            summary = data.get("tasks_summary") or {}
+            item.online = True
+            item.healthy = bool(data.get("healthy", True)) and not bool(data.get("issues"))
+            item.active = _int(summary.get("processing", data.get("total_active")))
+            item.pending = _int(summary.get("pending", data.get("total_pending")))
+            item.queue = _int(summary.get("queue_size", data.get("queue_size")))
+            item.stuck = _int(summary.get("stuck"))
+            item.completed = _int(summary.get("completed", data.get("total_completed_tasks")))
+            item.hostname = str(data.get("hostname") or "")
+            item.hunyuan_state = str((data.get("hunyuan") or {}).get("service_state") or "")
+        except RuntimeError as exc:
+            item.error = str(exc)[:160]
+        return item
 
-    async def clear_previous_session(self, bot: Bot):
-        """Delete all messages from previous sessions."""
-        current_session_messages = [msg for msg in self.sent_messages if msg['session_id'] == self.session_id]
+    async def snapshot(self) -> FarmSnapshot:
+        timeout = httpx.Timeout(12.0, connect=5.0)
+        errors: list[str] = []
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            queue_task = asyncio.create_task(self._fetch_json(client, self.queue_url))
+            renderfin_task = asyncio.create_task(self._fetch_json(client, self.renderfin_url))
+            converter_tasks = [
+                asyncio.create_task(self._poll_converter(client, name, url))
+                for name, url in self.converters.items()
+            ]
 
-        for message in self.sent_messages:
-            if message['session_id'] != self.session_id:
-                try:
-                    await bot.delete_message(
-                        chat_id=message['chat_id'],
-                        message_id=message['message_id']
-                    )
-                    logger.info(f"Deleted message {message['message_id']} from chat {message['chat_id']}")
-                except BadRequest as e:
-                    if "message to delete not found" in str(e):
-                        logger.debug(f"Message {message['message_id']} already deleted")
-                    else:
-                        logger.warning(f"Failed to delete message {message['message_id']}: {e}")
-                except Exception as e:
-                    logger.error(f"Unexpected error deleting message {message['message_id']}: {e}")
+            try:
+                queue = await queue_task
+                queue["ok"] = True
+            except RuntimeError as exc:
+                queue = {"ok": False}
+                errors.append(f"AutoRig queue: {exc}")
+            try:
+                renderfin = await renderfin_task
+            except RuntimeError as exc:
+                renderfin = {"ok": False}
+                errors.append(f"Renderfin: {exc}")
 
-        # Keep only current session messages
-        self.sent_messages = current_session_messages
-        self.persist_to_json()
+            converter_results = await asyncio.gather(*converter_tasks)
+            for item in converter_results:
+                if not item.online:
+                    errors.append(f"{item.name}: offline")
 
-    def persist_to_json(self):
-        """Save current session messages to JSON."""
+        for parked in PARKED_CONVERTERS:
+            if parked not in self.converters:
+                converter_results.append(ConverterStatus(name=parked, enabled=False))
+        converter_results.sort(key=_worker_sort_key)
+
         try:
-            data = {'messages': self.sent_messages}
-            with open(self.sessions_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to persist sessions: {e}")
+            disk = shutil.disk_usage(self.disk_path)
+            disk_free_gb = disk.free / (1024**3)
+            disk_used_percent = 100.0 * disk.used / disk.total if disk.total else 0.0
+        except OSError as exc:
+            disk_free_gb = 0.0
+            disk_used_percent = 100.0
+            errors.append(f"disk: {exc}")
+
+        checked_at = datetime.now(ZoneInfo(os.getenv("RENDERFARMER_TIMEZONE", "Asia/Novosibirsk"))).isoformat(
+            timespec="seconds"
+        )
+        return FarmSnapshot(
+            converter_queue=queue,
+            renderfin=renderfin,
+            converters=converter_results,
+            disk_free_gb=disk_free_gb,
+            disk_used_percent=disk_used_percent,
+            checked_at=checked_at,
+            errors=errors,
+        )
 
 
-class RenderFarmerBot:
-    """Main bot class coordinating all functionality."""
+def _state_icon(ok: bool) -> str:
+    return "🟢" if ok else "🔴"
 
-    def __init__(self, token: str):
-        self.token = token
-        self.bot = Bot(token=token)
-        self.spy_server = SpyServer()
-        self.session_manager = SessionManager()
-        self.application = Application.builder().token(token).build()
 
-        # Load version info
-        self.version = self.load_version()
+def format_snapshot(snapshot: FarmSnapshot) -> str:
+    queue = snapshot.converter_queue
+    renderfin = snapshot.renderfin
+    pools = renderfin.get("hunyuan_pools") or {}
+    queue_ok = bool(queue.get("ok"))
+    renderfin_ok = bool(renderfin.get("ok")) and not bool(renderfin.get("hunyuan_config_error"))
+    disk_icon = "🟢" if snapshot.disk_free_gb >= 50 else "🟠" if snapshot.disk_free_gb >= 10 else "🔴"
 
-        # Set up command handlers
+    lines = [
+        f"🖥 <b>RenderFarm Status {VERSION}</b>",
+        "",
+        (
+            f"{_state_icon(queue_ok)} <b>AutoRig:</b> "
+            f"{_int(queue.get('total_active'))} active · {_int(queue.get('total_pending'))} pending · "
+            f"{_int(queue.get('total_queue'))} queued · {_int(queue.get('available_workers'))}/"
+            f"{_int(queue.get('total_workers'))} workers free"
+        ),
+        (
+            f"{_state_icon(renderfin_ok)} <b>Renderfin:</b> "
+            f"{_int(renderfin.get('rendering'))} rendering · {_int(renderfin.get('pending'))} pending · "
+            f"{_int(renderfin.get('servers'))} Comfy nodes"
+        ),
+        (
+            f"{disk_icon} <b>way-fr disk:</b> {snapshot.disk_free_gb:.0f} GB free · "
+            f"{snapshot.disk_used_percent:.0f}% used"
+        ),
+        "",
+        "<b>Conversion workers</b>",
+    ]
+
+    enabled = [item for item in snapshot.converters if item.enabled]
+    for item in snapshot.converters:
+        name = html.escape(item.name)
+        if not item.enabled:
+            lines.append(f"⏸ <b>{name}:</b> parked / disabled")
+        elif not item.online:
+            lines.append(f"🔴 <b>{name}:</b> offline")
+        elif item.active:
+            extra = f" · {item.stuck} stuck" if item.stuck else ""
+            lines.append(
+                f"🟢 <b>{name}:</b> {item.active} active · {item.pending} pending · "
+                f"{item.queue} queued{extra} · ✅ {item.completed} done"
+            )
+        else:
+            icon = "🟡" if item.healthy else "🟠"
+            extra = f" · {item.stuck} stuck" if item.stuck else ""
+            lines.append(f"{icon} <b>{name}:</b> idle{extra} · ✅ {item.completed} done")
+
+    online = sum(1 for item in enabled if item.online)
+    lines.append(f"📊 <b>Converters:</b> {online}/{len(enabled)} enabled online")
+
+    dedicated = [html.escape(str(name)) for name in pools.get("dedicated", [])]
+    shared = [html.escape(str(name)) for name in pools.get("shared_converter", [])]
+    lines.extend(
+        [
+            "",
+            "<b>Hunyuan pool</b>",
+            f"🎯 Dedicated: {', '.join(dedicated) if dedicated else 'none'}",
+            f"↪️ Shared fallback: {', '.join(shared) if shared else 'none'}",
+            f"🛡 Converter reserve: {_int(pools.get('shared_reserved'))}",
+        ]
+    )
+    if pools.get("ordinary_conversion_waiting"):
+        lines.append("⏳ Shared Hunyuan admission paused: ordinary conversion is waiting")
+    if snapshot.errors:
+        lines.extend(["", f"⚠️ <b>Issues:</b> {html.escape('; '.join(snapshot.errors[:4]))}"])
+
+    stamp = datetime.fromisoformat(snapshot.checked_at).strftime("%d.%m %H:%M:%S")
+    lines.extend(
+        [
+            "",
+            f"🕒 <b>State snapshot:</b> {stamp}",
+            "ℹ️ Unchanged state is not resent; polling continues every minute.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def dashboard_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="refresh_status"),
+                InlineKeyboardButton("📋 Tasks", url="https://autorig.online/gallery"),
+            ],
+            [
+                InlineKeyboardButton("F1", url="https://converter-f1.freestock.online/api-converter-glb-ui"),
+                InlineKeyboardButton("F2", url="https://converter-f2.freestock.online/api-converter-glb-ui"),
+                InlineKeyboardButton("F11", url="https://converter-f11.freestock.online/api-converter-glb-ui"),
+                InlineKeyboardButton("F13", url="https://converter-f13.freestock.online/api-converter-glb-ui"),
+            ],
+        ]
+    )
+
+
+class RenderFarmerMonitor:
+    def __init__(self, token: str) -> None:
+        self.store = StateStore(os.getenv("RENDERFARMER_DATA_DIR", DEFAULT_DATA_DIR))
+        self.poller = FarmPoller()
+        self.poll_interval = max(30, _int(os.getenv("RENDERFARMER_POLL_SECONDS", "60"), 60))
+        self._poll_task: asyncio.Task[None] | None = None
+        self._stop = asyncio.Event()
+        self.application = (
+            Application.builder().token(token).post_init(self._post_init).post_shutdown(self._post_shutdown).build()
+        )
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("stop", self.stop_command))
         self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("version", self.version_command))
+        self.application.add_handler(CallbackQueryHandler(self.callback_query))
 
-        # Set up callback query handler for inline keyboard buttons
-        self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+    async def _post_init(self, application: Application) -> None:
+        # There is no startup broadcast. Existing dashboard IDs are reused.
+        await self.refresh_all(force=False)
+        self._poll_task = asyncio.create_task(self._poll_loop(), name="renderfarmer-poll")
+        logger.info("Monitor started with %d subscriptions; interval=%ds", len(self.store.chats), self.poll_interval)
 
-        # Set up post-init function to schedule jobs after application starts
-        self.application.post_init = self.post_init
+    async def _post_shutdown(self, application: Application) -> None:
+        self._stop.set()
+        if self._poll_task:
+            self._poll_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._poll_task
 
-        # Track the two permanent messages per chat
-        self.status_messages: Dict[int, int] = {}  # status_message ID per chat
-        self.results_messages: Dict[int, int] = {}  # last_results_message ID per chat
-
-        # Track content to avoid unnecessary edits
-        self.last_status_content: Dict[int, str] = {}
-        self.last_results_content: Dict[int, str] = {}
-
-    def load_version(self) -> str:
-        """Load version information from file."""
-        try:
-            with open('/root/renderfarmerbot_version.txt', 'r') as f:
-                return f.readline().strip()
-        except:
-            return "v2.1.0"
-
-    def format_status_text(self, disk_free: int, cpu_usage: float, converter_statuses: Dict[str, ConverterStatus]) -> tuple[str, object]:
-        """Format status information as HTML text with inline keyboard."""
-        # API Status with better formatting
-        api_emoji = "🟢" if self.spy_server.api_status['online'] else "🔴"
-        api_status_line = f"{api_emoji} <b>API Status:</b> {self.spy_server.api_status['servers_count']} servers, {self.spy_server.api_status['tasks_count']} tasks"
-
-        # System status
-        disk_line = f"💾 <b>Disk:</b> {disk_free} GB free"
-        cpu_line = f"⚡ <b>CPU:</b> {cpu_usage}% avg (10 min)"
-
-        # Calculate totals for prominent display
-        online_servers = [s for s in converter_statuses.values() if s.online]
-        total_active = sum(s.active_tasks for s in online_servers)
-        total_queue = sum(s.queue_size for s in online_servers)
-        total_completed = sum(s.total_completed for s in online_servers)
-        online_count = len(online_servers)
-
-        # ACTIVE TASKS - make it very prominent
-        if total_active > 0:
-            active_header = f"\n🎯 <b>⚠️ ACTIVE RENDERING: {total_active} tasks running ⚠️</b>"
-        else:
-            active_header = f"\n🎯 <b>No active tasks</b>"
-
-        # Queue status - make it prominent if there are queued tasks
-        if total_queue > 0:
-            queue_header = f"\n📋 <b>🔶 QUEUED: {total_queue} tasks waiting 🔶</b>"
-        else:
-            queue_header = ""
-
-        # Server status lines with color coding
-        server_lines = []
-        for name in ['F1', 'F2', 'F7', 'F11', 'F13']:
-            status = converter_statuses.get(name, ConverterStatus(name=name))
-            if status.online:
-                if status.active_tasks > 0:
-                    # Show task durations for active servers
-                    duration_text = ""
-                    if status.task_durations:
-                        durations = []
-                        for task_id, duration in status.task_durations.items():
-                            minutes = duration // 60
-                            seconds = duration % 60
-                            durations.append(f"{minutes:02d}:{seconds:02d}")
-                        duration_text = f" ⏱️ {', '.join(durations)}"
-
-                    # Green: actively rendering
-                    server_lines.append(f"🟢 <b>{name}:</b> 🔥 <b>{status.active_tasks} ACTIVE</b> | {status.queue_size} queued | ✅ {status.total_completed} done{duration_text}")
-                else:
-                    # Yellow: online but idle
-                    server_lines.append(f"🟡 <b>{name}:</b> idle | {status.queue_size} queued | ✅ {status.total_completed} done")
-            else:
-                # Red: offline
-                server_lines.append(f"🔴 <b>{name}:</b> ❌ offline")
-
-        servers_text = "\n".join(server_lines)
-
-        # Summary
-        summary_line = f"\n📊 <b>Summary:</b> {online_count}/5 servers online | Total completed: {total_completed}"
-
-        # Add timestamp signature with alarm clock emoji
-        from datetime import datetime
-        current_time = datetime.now().strftime("%H:%M")
-        timestamp_line = f"\n\n⏰ <b>Updated at {current_time}</b>"
-
-        # Main message text
-        message_text = f"🖥 <b>RenderFarm Status</b> {self.version}\n\n{api_status_line}\n{disk_line}\n{cpu_line}{active_header}{queue_header}\n\n{servers_text}{summary_line}{timestamp_line}"
-
-        # Create inline keyboard
-        keyboard = [
-            # API and refresh buttons
-            [
-                InlineKeyboardButton("🌐 API", url="https://renderfin.com/api-render"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="refresh_status")
-            ],
-            # Server management buttons (first row)
-            [
-                InlineKeyboardButton("⚙️ F1", url="https://converter-f1.freestock.online/api-converter-glb-ui"),
-                InlineKeyboardButton("⚙️ F2", url="https://converter-f2.freestock.online/api-converter-glb-ui"),
-                InlineKeyboardButton("⚙️ F7", url="https://converter-f7.freestock.online/api-converter-glb-ui")
-            ],
-            # Server management buttons (second row)
-            [
-                InlineKeyboardButton("⚙️ F11", url="https://converter-f11.freestock.online/api-converter-glb-ui"),
-                InlineKeyboardButton("⚙️ F13", url="https://converter-f13.freestock.online/api-converter-glb-ui"),
-                InlineKeyboardButton("📊 Tasks", callback_data="show_tasks")
-            ],
-            # Test links section
-            [
-                InlineKeyboardButton("🔄 Перезапуск F1", url="https://converter-f1.freestock.online/api-converter-glb-restart-server"),
-                InlineKeyboardButton("⚙️ Управление F2", url="https://converter-f2.freestock.online/api-converter-glb-ui")
-            ]
-        ]
-
-        # Restart buttons for offline servers (only show if there are offline servers)
-        if online_count < 5:
-            keyboard.extend([
-                [
-                    InlineKeyboardButton("🔄 F1", url="https://converter-f1.freestock.online/api-converter-glb-restart-server"),
-                    InlineKeyboardButton("🔄 F2", url="https://converter-f2.freestock.online/api-converter-glb-restart-server"),
-                    InlineKeyboardButton("🔄 F7", url="https://converter-f7.freestock.online/api-converter-glb-restart-server")
-                ],
-                [
-                    InlineKeyboardButton("🔄 F11", url="https://converter-f11.freestock.online/api-converter-glb-restart-server"),
-                    InlineKeyboardButton("🔄 F13", url="https://converter-f13.freestock.online/api-converter-glb-restart-server")
-                ]
-            ])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        return message_text, reply_markup
-
-    async def download_image(self, url: str, filename: str) -> Optional[bytes]:
-        """Download an image from URL."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        return await response.read()
-        except Exception as e:
-            logger.error(f"Failed to download image {url}: {e}")
-        return None
-
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command."""
-        if not update.effective_chat:
-            return
-
-        chat_id = update.effective_chat.id
-        logger.info(f"Received /start command from chat {chat_id}")
-
-        was_already_subscribed = chat_id in self.session_manager.subscribed_chats
-
-        if not was_already_subscribed:
-            self.session_manager.subscribe_chat(chat_id)
-
-            # Create permanent messages for new subscriber
+    async def _poll_loop(self) -> None:
+        while not self._stop.is_set():
             try:
-                # Create status message
-                status_text = "🖥 RenderFarm Status\n💾 Initializing..."
-                status_msg = await self.bot.send_message(chat_id=chat_id, text=status_text)
-                self.status_messages[chat_id] = status_msg.message_id
-                self.last_status_content[chat_id] = status_text
-                self.session_manager.save_message(chat_id, status_msg.message_id, "status")
+                await asyncio.wait_for(self._stop.wait(), timeout=self.poll_interval)
+                break
+            except asyncio.TimeoutError:
+                pass
+            try:
+                await self.refresh_all(force=False)
+            except Exception:
+                logger.exception("Periodic refresh failed")
 
-                # Create results message
-                results_text = "📊 Completed Tasks\n⏳ Loading..."
-                results_msg = await self.bot.send_message(chat_id=chat_id, text=results_text)
-                self.results_messages[chat_id] = results_msg.message_id
-                self.last_results_content[chat_id] = results_text
-                self.session_manager.save_message(chat_id, results_msg.message_id, "results")
+    async def refresh_all(self, force: bool = False) -> FarmSnapshot:
+        snapshot = await self.poller.snapshot()
+        results = await asyncio.gather(
+            *(self._upsert_dashboard(chat_id, snapshot, force=force) for chat_id in self.store.chats),
+            return_exceptions=True,
+        )
+        failures = sum(1 for result in results if isinstance(result, Exception))
+        if failures:
+            logger.error("Dashboard refresh had %d unexpected failures", failures)
+        return snapshot
 
-                # Send immediate update
-                disk_free, converter_statuses, _ = await self.spy_server.get_all_status()
-                await self.update_status_message(chat_id, disk_free, converter_statuses)
-                await self.update_results_message(chat_id, converter_statuses)
+    async def _upsert_dashboard(self, chat_id: int, snapshot: FarmSnapshot, force: bool = False) -> str:
+        fingerprint = snapshot.fingerprint()
+        if not force and self.store.fingerprint(chat_id) == fingerprint:
+            return "unchanged"
 
-                await update.message.reply_text("✅ Subscribed! You now have 2 permanent status messages.")
-                logger.info(f"Created permanent messages for new subscriber {chat_id}")
-
-            except Exception as e:
-                logger.error(f"Failed to create permanent messages for chat {chat_id}: {e}")
-                await update.message.reply_text("❌ Failed to set up status messages. Please try again.")
-        else:
-            await update.message.reply_text("✅ You are already subscribed to RenderFarm updates!")
-
-        logger.info(f"Total subscribed chats: {len(self.session_manager.subscribed_chats)}")
-
-    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /stop command."""
-        if not update.effective_chat:
-            return
-
-        chat_id = update.effective_chat.id
-        self.session_manager.unsubscribe_chat(chat_id)
-
-        # Remove from last status messages
-        self.last_status_messages.pop(chat_id, None)
-
-        await update.message.reply_text("❌ Unsubscribed from RenderFarm status updates.")
-
-    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /status command - force immediate status update."""
-        if not update.effective_chat:
-            return
-
-        chat_id = update.effective_chat.id
-
-        # Get current status
-        disk_free, cpu_usage, converter_statuses, image_urls = await self.spy_server.get_all_status()
-
-        # Force update by clearing cached content
-        self.last_status_content.pop(chat_id, None)
-        self.last_results_content.pop(chat_id, None)
-
-        # Update both permanent messages
-        await self.update_status_message(chat_id, disk_free, cpu_usage, converter_statuses, image_urls)
-        await self.update_results_message(chat_id, converter_statuses)
-
-        await update.message.reply_text("✅ Status updated!")
-
-    async def version_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /version command - show bot version and info."""
-        if not update.effective_chat:
-            return
-
+        text = format_snapshot(snapshot)
+        message_id = self.store.message_id(chat_id)
+        bot = self.application.bot
         try:
-            with open('/root/renderfarmerbot_version.txt', 'r') as f:
-                version_info = f.read()
-        except:
-            version_info = f"{self.version}\n\nVersion file not found."
+            if message_id:
+                try:
+                    await bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        parse_mode="HTML",
+                        reply_markup=dashboard_keyboard(),
+                        disable_web_page_preview=True,
+                    )
+                except BadRequest as exc:
+                    message = str(exc).lower()
+                    if "message is not modified" in message:
+                        self.store.mark_delivered(chat_id, message_id, fingerprint)
+                        return "unchanged"
+                    if "message to edit not found" not in message and "message identifier is not specified" not in message:
+                        raise
+                    self.store.forget_message(chat_id)
+                    message_id = None
 
-        await update.message.reply_text(
-            f"🤖 <b>RenderFarmer Bot</b>\n\n{version_info}",
-            parse_mode='HTML'
+            if not message_id:
+                sent = await bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=dashboard_keyboard(),
+                    disable_web_page_preview=True,
+                )
+                message_id = sent.message_id
+
+            self.store.mark_delivered(chat_id, message_id, fingerprint)
+            return "updated"
+        except Forbidden:
+            # A blocked/deleted chat must not be retried every minute.
+            self.store.unsubscribe(chat_id)
+            logger.warning("Removed one unreachable Telegram subscription")
+            return "unsubscribed"
+        except TelegramError as exc:
+            # Keep the old ID and fingerprint so a transient failure never creates
+            # a replacement message on the next poll.
+            logger.warning("Telegram dashboard update failed: %s", type(exc).__name__)
+            return "failed"
+
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_chat or not update.effective_message:
+            return
+        chat_id = update.effective_chat.id
+        created = self.store.subscribe(chat_id)
+        snapshot = await self.poller.snapshot()
+        await self._upsert_dashboard(chat_id, snapshot, force=True)
+        await update.effective_message.reply_text(
+            "✅ Monitoring enabled. One dashboard will be edited only when farm state changes."
+            if created
+            else "✅ Monitoring is already enabled; dashboard refreshed."
         )
 
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle callback queries from inline keyboard buttons."""
+    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_chat or not update.effective_message:
+            return
+        removed = self.store.unsubscribe(update.effective_chat.id)
+        await update.effective_message.reply_text(
+            "✅ Monitoring disabled." if removed else "Monitoring was already disabled."
+        )
+
+    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_chat or not update.effective_message:
+            return
+        chat_id = update.effective_chat.id
+        if chat_id not in self.store.chats:
+            await update.effective_message.reply_text("Use /start once to enable the single farm dashboard.")
+            return
+        snapshot = await self.poller.snapshot()
+        await self._upsert_dashboard(chat_id, snapshot, force=True)
+        await update.effective_message.reply_text("✅ Dashboard refreshed.")
+
+    async def version_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                f"RenderFarmer Monitor {VERSION}\nSemantic deduplication, persistent dashboard IDs, no automatic media."
+            )
+
+    async def callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        if not query:
+        if not query or not query.message:
             return
+        await query.answer("Refreshing…")
+        if query.data == "refresh_status":
+            snapshot = await self.poller.snapshot()
+            await self._upsert_dashboard(query.message.chat_id, snapshot, force=True)
 
-        await query.answer()  # Acknowledge the callback
+    def run(self) -> None:
+        self.application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
-        chat_id = query.message.chat_id
-        data = query.data
 
-        if data == "refresh_status":
-            # Force refresh status
-            logger.info(f"Manual refresh requested for chat {chat_id}")
-            disk_free, cpu_usage, converter_statuses, image_urls = await self.spy_server.get_all_status()
+async def _check_once() -> int:
+    snapshot = await FarmPoller().snapshot()
+    print(format_snapshot(snapshot))
+    print("fingerprint=" + snapshot.fingerprint())
+    return 0 if not snapshot.errors else 1
 
-            # Force update by clearing cached content
-            self.last_status_content.pop(chat_id, None)
-            self.last_results_content.pop(chat_id, None)
 
-            # Update both permanent messages
-            await self.update_status_message(chat_id, disk_free, cpu_usage, converter_statuses)
-            await self.update_results_message(chat_id, converter_statuses)
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="poll once and print without contacting Telegram")
+    args = parser.parse_args()
+    if args.check:
+        return asyncio.run(_check_once())
 
-        elif data == "show_tasks":
-            # Show detailed task information
-            disk_free, cpu_usage, converter_statuses, image_urls = await self.spy_server.get_all_status()
-
-            task_info = ["📋 <b>Detailed Task Status:</b>"]
-            for name in ['F1', 'F2', 'F7', 'F11', 'F13']:
-                status = converter_statuses.get(name, ConverterStatus(name=name))
-                if status.online:
-                    task_info.append(f"🟢 <b>{name}:</b> {status.active_tasks} active, {status.queue_size} queued, {status.total_completed} total")
-                else:
-                    task_info.append(f"🔴 <b>{name}:</b> Server offline")
-
-            await query.message.reply_text(
-                "\n".join(task_info),
-                parse_mode='HTML'
-            )
-
-    async def create_permanent_messages(self):
-        """Create the two permanent messages for all subscribed chats."""
-        logger.info(f"Creating permanent messages for {len(self.session_manager.subscribed_chats)} chats")
-
-        for chat_id in self.session_manager.subscribed_chats:
-            try:
-                logger.info(f"Creating messages for chat {chat_id}")
-
-                # Get initial status - ensure API status is polled first
-                await self.spy_server.poll_api_status()
-                disk_free, cpu_usage, converter_statuses, image_urls = await self.spy_server.get_all_status()
-                logger.info(f"Got status data: disk={disk_free}, cpu={cpu_usage}, servers={len(converter_statuses)}, api_online={self.spy_server.api_status['online']}")
-
-                # Create status message with inline keyboard
-                status_text, reply_markup = self.format_status_text(disk_free, cpu_usage, converter_statuses)
-                logger.info(f"Status text length: {len(status_text)}")
-
-                status_msg = await self.bot.send_message(
-                    chat_id=chat_id,
-                    text=status_text,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
-                logger.info(f"Status message sent with ID {status_msg.message_id}")
-
-                self.status_messages[chat_id] = status_msg.message_id
-                self.last_status_content[chat_id] = status_text
-                self.session_manager.save_message(chat_id, status_msg.message_id, "status")
-
-                # Create results message
-                await self.update_results_message(chat_id, converter_statuses)
-
-                # Send media group if there are active task images
-                if image_urls:
-                    await self.send_media_group(chat_id, status_text, image_urls)
-
-                logger.info(f"✅ Created permanent messages for chat {chat_id}")
-
-            except Exception as e:
-                logger.error(f"❌ Failed to create permanent messages for chat {chat_id}: {e}")
-                import traceback
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-
-    async def update_status_message(self, chat_id: int, disk_free: int, cpu_usage: float, converter_statuses: Dict[str, ConverterStatus], available_images: List[str] = None):
-        """Update the status message for a chat with inline keyboard and optional media group."""
-        status_text, reply_markup = self.format_status_text(disk_free, cpu_usage, converter_statuses)
-
-        if available_images is None:
-            available_images = []
-
-        logger.debug(f"Status text for chat {chat_id}: {status_text[:100]}...")
-
-        if chat_id in self.last_status_content and self.last_status_content[chat_id] == status_text:
-            # Content hasn't changed, skip update
-            logger.debug(f"Status content unchanged for chat {chat_id}, skipping update")
-            return
-
-        try:
-            if chat_id in self.status_messages:
-                # Edit existing message
-                logger.info(f"Editing status message {self.status_messages[chat_id]} for chat {chat_id}")
-                await self.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=self.status_messages[chat_id],
-                    text=status_text,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
-                logger.info(f"✅ Updated status message for chat {chat_id}")
-            else:
-                # Create new message if it doesn't exist
-                logger.info(f"Creating new status message for chat {chat_id}")
-                msg = await self.bot.send_message(
-                    chat_id=chat_id,
-                    text=status_text,
-                    parse_mode='HTML',
-                    reply_markup=reply_markup
-                )
-                self.status_messages[chat_id] = msg.message_id
-                self.session_manager.save_message(chat_id, msg.message_id, "status")
-                logger.info(f"✅ Created status message {msg.message_id} for chat {chat_id}")
-
-            self.last_status_content[chat_id] = status_text
-
-            # Send media group if there are active task images
-            if available_images:
-                await self.send_media_group(chat_id, status_text, available_images)
-
-        except Exception as e:
-            logger.error(f"Failed to update status message for chat {chat_id}: {e}")
-
-    async def send_media_group(self, chat_id: int, caption: str, image_urls: List[str]):
-        """Send media group with active task images."""
-        try:
-            if not image_urls:
-                return
-
-            logger.info(f"📸 Sending media group with {len(image_urls)} images to chat {chat_id}")
-
-            # Prepare media group with timestamp
-            from telegram import InputMediaPhoto
-            from datetime import datetime
-
-            # Add timestamp to caption
-            current_time = datetime.now().strftime("%H:%M")
-            timestamped_caption = f"{caption}\n\n⏰ <b>Updated at {current_time}</b>"
-
-            media = []
-            for i, url in enumerate(image_urls):
-                if i == 0:
-                    # First image gets the timestamped caption
-                    media.append(InputMediaPhoto(media=url, caption=timestamped_caption, parse_mode='HTML'))
-                else:
-                    media.append(InputMediaPhoto(media=url))
-
-            # Send media group
-            await self.bot.send_media_group(chat_id=chat_id, media=media)
-
-            logger.info(f"✅ Sent media group with {len(media)} images to chat {chat_id}")
-
-        except Exception as e:
-            logger.error(f"❌ Failed to send media group to chat {chat_id}: {e}")
-            import traceback
-            logger.error(f"Media group traceback: {traceback.format_exc()}")
-
-    async def update_results_message(self, chat_id: int, converter_statuses: Dict[str, ConverterStatus]):
-        """Update the results message for a chat with HTML formatting."""
-        # Show completed tasks count for each server
-        lines = ["📊 <b>Completed Tasks by Server</b>"]
-        total_completed = 0
-
-        for name in ['F1', 'F2', 'F7', 'F11', 'F13']:
-            status = converter_statuses.get(name, ConverterStatus(name=name))
-            if status.online:
-                lines.append(f"🟢 <b>{name}:</b> ✅ {status.total_completed} completed")
-                total_completed += status.total_completed
-            else:
-                lines.append(f"🔴 <b>{name}:</b> ❌ offline")
-
-        lines.append(f"\n🎯 <b>Total:</b> {total_completed} tasks completed")
-
-        results_text = "\n".join(lines)
-
-        if chat_id in self.last_results_content and self.last_results_content[chat_id] == results_text:
-            # Content hasn't changed, skip update
-            return
-
-        try:
-            if chat_id in self.results_messages:
-                # Edit existing message
-                await self.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=self.results_messages[chat_id],
-                    text=results_text,
-                    parse_mode='HTML'
-                )
-                logger.debug(f"Updated results message for chat {chat_id}")
-            else:
-                # Create new message if it doesn't exist
-                msg = await self.bot.send_message(
-                    chat_id=chat_id,
-                    text=results_text,
-                    parse_mode='HTML'
-                )
-                self.results_messages[chat_id] = msg.message_id
-                self.session_manager.save_message(chat_id, msg.message_id, "results")
-
-            self.last_results_content[chat_id] = results_text
-
-        except Exception as e:
-            logger.error(f"Failed to update results message for chat {chat_id}: {e}")
-
-    async def send_test_message(self):
-        """Send test message with HTML formatting and version info."""
-        try:
-            from datetime import datetime
-            current_time = datetime.now().strftime("%H:%M:%S")
-
-            # Test message with HTML formatting and timestamp
-            timestamp = f"⏰ <b>Sent at {current_time}</b>"
-            test_message = f"""🤖 <b>RenderFarmer Bot {self.version}</b>
-
-✅ Бот запущен и работает!
-📊 Система готова к мониторингу
-
-🔗 <b>Тестовые ссылки:</b>
-🔄 Перезапуск F1 (<a href="https://converter-f1.freestock.online/api-converter-glb-restart-server">ссылка</a>)
-⚙️ Управление F2 (<a href="https://converter-f2.freestock.online/api-converter-glb-ui">ссылка</a>)
-
-{timestamp}"""
-
-            tasks = []
-            for chat_id in self.session_manager.subscribed_chats:
-                task = self.bot.send_message(
-                    chat_id=chat_id,
-                    text=test_message,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-                tasks.append(task)
-
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                success_count = sum(1 for r in results if not isinstance(r, Exception))
-                logger.info(f"Sent test message to {success_count}/{len(tasks)} chats")
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Failed to send test message to chat {self.session_manager.subscribed_chats[i]}: {result}")
-            else:
-                logger.info("No subscribed chats for test message")
-
-        except Exception as e:
-            logger.error(f"Error sending test message: {e}")
-
-    async def cleanup_old_messages(self, chat_id: int):
-        """Remove old messages that are not the two permanent ones."""
-        # This will be called periodically to clean up any stray messages
-        pass  # For now, we'll rely on session cleanup
-
-    async def status_update_job(self, context):
-        """Job that runs every 60 seconds to update status and results messages."""
-        try:
-            logger.debug("Running status update job")
-
-            # Get current status
-            disk_free, cpu_usage, converter_statuses, image_urls = await self.spy_server.get_all_status()
-
-            # Update both messages for all subscribed chats
-            for chat_id in self.session_manager.subscribed_chats:
-                await self.update_status_message(chat_id, disk_free, cpu_usage, converter_statuses, image_urls)
-                await self.update_results_message(chat_id, converter_statuses)
-
-            logger.debug(f"Updated messages for {len(self.session_manager.subscribed_chats)} chats")
-
-        except Exception as e:
-            logger.error(f"Error in status update job: {e}")
-
-    async def post_init(self, application):
-        """Called after application initialization."""
-        # Schedule status updates every 60 seconds
-        application.job_queue.run_repeating(self.status_update_job, interval=60, first=10)
-
-        # Create permanent messages for all subscribed chats
-        await self.create_permanent_messages()
-
-        # Send test message with markdown links
-        await self.send_test_message()
-
-    async def run(self):
-        """Start the bot."""
-        # Clear previous session messages
-        await self.session_manager.clear_previous_session(self.bot)
-
-        # Start the bot
-        logger.info("Starting RenderFarmer Telegram Bot...")
-        try:
-            await self.application.run_polling(
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=True
-            )
-        except RuntimeError as e:
-            if "Cannot close a running event loop" in str(e):
-                logger.info("Event loop closure prevented - this is normal in systemd environment")
-                # Keep the application alive manually
-                import signal
-                import asyncio
-
-                # Create a future that never completes to keep the event loop running
-                stop_future = asyncio.Future()
-
-                def signal_handler(signum, frame):
-                    logger.info("Received signal, shutting down...")
-                    stop_future.set_result(None)
-
-                signal.signal(signal.SIGTERM, signal_handler)
-                signal.signal(signal.SIGINT, signal_handler)
-
-                await stop_future
-            else:
-                raise
-
-
-async def main():
-    """Main entry point."""
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
-        return
-
-    bot = RenderFarmerBot(token)
-    await bot.run()
+        logger.error("TELEGRAM_BOT_TOKEN is required")
+        return 2
+    RenderFarmerMonitor(token).run()
+    return 0
 
 
 if __name__ == "__main__":
-    # Fix nested event loop issues
-    import nest_asyncio
-    nest_asyncio.apply()
-
-    asyncio.run(main())
+    raise SystemExit(main())

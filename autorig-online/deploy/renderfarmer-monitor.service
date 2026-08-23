@@ -1,0 +1,35 @@
+[Unit]
+Description=Low-noise RenderFarm Telegram monitor (storage host)
+After=network-online.target autorig-storage.service autorig-storage-renderfin.service
+Wants=network-online.target
+RequiresMountsFor=/srv/autorig
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=autorig
+Group=autorig
+Slice=autorig.slice
+WorkingDirectory=/srv/autorig/current
+Environment="HOME=/srv/autorig/home"
+Environment="PATH=/srv/autorig/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="RENDERFARMER_DATA_DIR=/srv/autorig/data/var/renderfarmer-monitor"
+Environment="RENDERFARMER_DISK_PATH=/srv/autorig"
+Environment="RENDERFARMER_QUEUE_URL=http://127.0.0.1:8200/api/queue/status"
+Environment="RENDERFARMER_RENDERFIN_URL=http://127.0.0.1:8210/renderfin/health"
+Environment="RENDERFARMER_POLL_SECONDS=60"
+EnvironmentFile=/srv/autorig/secrets/renderfarmer-monitor.env
+ExecStart=/srv/autorig/venv/bin/python3 /srv/autorig/current/renderfarmerbot.py
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/autorig/data/var/renderfarmer-monitor
+
+[Install]
+WantedBy=multi-user.target

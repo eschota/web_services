@@ -1,7 +1,9 @@
-v2.1.0 - Advanced RenderFarm Monitor
-- CPU monitoring with 10-minute average
-- HTML formatting with inline keyboards
-- API status monitoring
-- Auto-restart watchdogg
-- Real-time server status updates
-- Test links for server management
+v3.0.0
+
+Low-noise production monitor for the way-fr AutoRig/Renderfin farm.
+
+- One persistent dashboard message per subscribed chat
+- Semantic state deduplication across service restarts
+- Live AutoRig queue and Renderfin Hunyuan pool data from way-fr
+- No automatic media groups, completion videos, or startup broadcasts
+- Telegram token stored in a root-owned EnvironmentFile
