@@ -244,6 +244,30 @@ class RetentionTests(unittest.TestCase):
             self.assertEqual(int(first.exists()) + int(second.exists()), 1)
             self.assertEqual(result["removed_count"], 1)
 
+    def test_soft_cap_alone_does_not_block_last_copy_deliverables(self):
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-soft-cap-") as tmp:
+            root = Path(tmp)
+            durable = self._write_entry(
+                root,
+                "00000000-0000-0000-0000-000000000916",
+                "files/model.glb",
+                full_until=now - timedelta(hours=1),
+                long_lived=True,
+                role="primary_glb",
+            )
+            result = artifact_cache.run_retention(
+                root=root,
+                now=now,
+                soft_cap_gb=0,
+                reserve_gb=1,
+                disk_usage_fn=lambda _path: SimpleNamespace(free=2 * 1024**3),
+            )
+            self.assertTrue(result["pressure"])
+            self.assertFalse(result["blocked"])
+            self.assertTrue(durable.exists())
+            self.assertFalse((root / artifact_cache.PAUSE_MARKER).exists())
+
 
 class DurableQueueTests(unittest.IsolatedAsyncioTestCase):
     async def test_stop_cancels_busy_workers_after_grace_period(self):

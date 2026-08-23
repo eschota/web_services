@@ -935,7 +935,12 @@ def run_retention(
     for task_id, manifest in manifests.items():
         write_manifest(cache_root, task_id, manifest)
 
-    blocked = usage > soft_cap or free + freed < reserve
+    # The cache cap is deliberately soft: it triggers pruning, but it must not
+    # stop production when the only remaining files are last-copy
+    # deliverables. New work is blocked only when the filesystem reserve is
+    # actually exhausted. The next retention pass will keep trying to bring
+    # the cache below the soft cap as redundant/short-lived files expire.
+    blocked = free + freed < reserve
     marker = cache_root / PAUSE_MARKER
     marker_created = False
     if blocked:
