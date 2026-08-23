@@ -13,9 +13,11 @@ from renderfin.models import (
     CharacterGenJob,
     CHARGEN_STAGE_DISCARDED,
     CHARGEN_STAGE_FAILED,
+    CHARGEN_STAGE_FLUX,
     CHARGEN_STAGE_HUNYUAN,
     CHARGEN_STAGE_READY,
     CHARGEN_STAGE_TURNTABLE,
+    RenderPrompt,
     TASK_DONE,
     TASK_ERROR,
 )
@@ -973,6 +975,102 @@ class EmptyFleetTests(unittest.TestCase):
                     await queue.stop()
 
         run(scenario())
+
+    def test_collection_comfy_5xx_parks_and_releases_failed_render(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_FLUX,
+                        queue_class="collection_background",
+                        collection_guid="collection-1",
+                    )
+                    task = await queue.enqueue(RenderPrompt(prompt="a", type="t_pose"))
+                    task.status = TASK_ERROR
+                    task.error = "submit failed 3x: upload/image failed: HTTP 500"
+                    job.flux_task_id = task.id
+                    await manager._handle_stage_error(
+                        job,
+                        RuntimeError(f"render task {task.id} failed: {task.error}"),
+                    )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_FLUX)
+                    self.assertEqual(job.attempts, {})
+                    self.assertEqual(job.flux_task_id, "")
+                    self.assertGreater(job.retry_at, time.time())
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_collection_hunyuan_5xx_parks_and_releases_worker(self):
+        async def scenario():
+            with _Env():
+                queue, manager = self._manager()
+                await queue.start()
+                await manager.start()
+                try:
+                    job = await _idle_job(
+                        manager,
+                        stage=CHARGEN_STAGE_HUNYUAN,
+                        queue_class="collection_background",
+                        collection_guid="collection-1",
+                        hunyuan_task_id="https://raptor/status/x",
+                        hunyuan_worker="raptor",
+                    )
+                    await manager._handle_stage_error(
+                        job,
+                        RuntimeError("generate-3d on Raptor failed: HTTP 500 disk full"),
+                    )
+                    self.assertEqual(job.stage, CHARGEN_STAGE_HUNYUAN)
+                    self.assertEqual(job.attempts, {})
+                    self.assertEqual(job.hunyuan_task_id, "")
+                    self.assertEqual(job.hunyuan_worker, "")
+                    self.assertGreater(job.retry_at, time.time())
+                    await self._park(manager, job)
+                finally:
+                    await manager.stop()
+                    await queue.stop()
+
+        run(scenario())
+
+    def test_only_background_collection_gets_transient_farm_revival(self):
+        error = "render task x failed: submit failed 3x: upload/image failed: HTTP 500"
+        collection = CharacterGenJob(
+            stage=CHARGEN_STAGE_FAILED,
+            queue_class="collection_background",
+            collection_guid="collection-1",
+            error=error,
+        )
+        interactive = CharacterGenJob(
+            stage=CHARGEN_STAGE_FAILED,
+            queue_class="interactive",
+            collection_guid="collection-1",
+            error=error,
+        )
+        missing_source = CharacterGenJob(
+            stage=CHARGEN_STAGE_FAILED,
+            error="image_url returned HTTP 404",
+        )
+        empty_artifact_transport_error = CharacterGenJob(
+            stage=CHARGEN_STAGE_FAILED,
+            queue_class="collection_background",
+            collection_guid="collection-1",
+            error="render task x failed: artifact download failed: ",
+        )
+        self.assertTrue(character_gen._failed_on_recoverable_infrastructure(collection))
+        self.assertTrue(
+            character_gen._failed_on_recoverable_infrastructure(
+                empty_artifact_transport_error
+            )
+        )
+        self.assertFalse(character_gen._failed_on_recoverable_infrastructure(interactive))
+        self.assertFalse(character_gen._failed_on_recoverable_infrastructure(missing_source))
 
     def test_one_dns_failure_cools_the_worker_for_the_whole_batch(self):
         async def scenario():

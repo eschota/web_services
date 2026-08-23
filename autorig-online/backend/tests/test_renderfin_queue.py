@@ -60,6 +60,34 @@ def _server(name="raptor", workflows=("gen_image.json",)):
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_submit_failure_cooldown_rotates_to_a_healthy_peer(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                registry.save(_server("raptor"))
+                registry.save(_server("f5"))
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    queue._server_submit_cooldowns["raptor"] = time.time() + 600
+                    chosen = queue._pick_server(
+                        "gen_image.json", {"raptor": 0, "f5": 0}
+                    )
+                    self.assertIsNotNone(chosen)
+                    self.assertEqual(chosen.render_server_name, "f5")
+
+                    queue._server_submit_cooldowns["raptor"] = time.time() - 1
+                    chosen = queue._pick_server(
+                        "gen_image.json", {"raptor": 0, "f5": 1}
+                    )
+                    self.assertIsNotNone(chosen)
+                    self.assertEqual(chosen.render_server_name, "raptor")
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
     def test_gpu_lease_race_keeps_render_pending_without_submit_failure(self):
         async def scenario():
             with _Env():

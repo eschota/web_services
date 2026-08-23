@@ -39,6 +39,9 @@ TASK_TIMEOUT_SECONDS = float(os.getenv("RENDERFIN_TASK_TIMEOUT_SECONDS", "5400")
 PUMP_TICK_SECONDS = float(os.getenv("RENDERFIN_PUMP_TICK_SECONDS", "1.5"))
 DISPATCH_INTERVAL_SECONDS = float(os.getenv("RENDERFIN_DISPATCH_INTERVAL_SECONDS", "5"))
 STATUS_REFRESH_TICKS = int(os.getenv("RENDERFIN_STATUS_REFRESH_TICKS", "10"))
+SUBMIT_FAILURE_COOLDOWN_SECONDS = float(
+    os.getenv("RENDERFIN_SUBMIT_FAILURE_COOLDOWN_SECONDS", "600")
+)
 
 # Hunyuan3D image-to-3D via converter workers (POST /api-converter-glb/generate-3d).
 # Each farm box provisions its OWN bearer token, so the authoritative source is a

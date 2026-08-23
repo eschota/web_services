@@ -104,6 +104,46 @@ _FARM_BREAKAGE_MARKERS = (
 def _is_farm_breakage(text: str) -> bool:
     low = (text or "").lower()
     return any(marker in low for marker in _FARM_BREAKAGE_MARKERS)
+
+
+def _is_collection_infrastructure_failure(
+    job: CharacterGenJob, text: str
+) -> bool:
+    """Recognise transient farm faults only for automatic collection work.
+
+    A manual generation must still surface a repeatable bad input or workflow
+    after its normal retry budget. Collection members, however, are explicitly
+    background work and must survive renderer disk pressure, leased GPUs,
+    worker restarts and transient 5xx responses without terminating the whole
+    collection.
+    """
+    if not job.collection_guid or job.queue_class != "collection_background":
+        return False
+    low = (text or "").lower()
+    if "upload/image failed:" in low and any(
+        code in low for code in ("http 500", "http 502", "http 503", "http 504")
+    ):
+        return True
+    # Artifact transfer is downstream of a successfully completed render. An
+    # empty exception string is common for a disconnected HTTP stream, so the
+    # prefix itself is enough evidence that the collection member should be
+    # retried instead of terminated.
+    if "artifact download failed:" in low:
+        return True
+    if "generate-3d on " in low and any(
+        code in low for code in ("http 500", "http 502", "http 503", "http 504")
+    ):
+        return True
+    return any(
+        marker in low
+        for marker in (
+            "hunyuan worker exited with code",
+            "render timeout",
+            "render task ",
+        )
+    ) and ("timeout" in low or "timed out" in low or "hunyuan worker exited" in low)
+
+
 # Jobs that were failed by an empty fleet before it was treated as a wait.
 # They are indistinguishable from a real failure only by their message, so it
 # is matched here and they are revived rather than left for a human.
@@ -135,6 +175,14 @@ def _failed_on_empty_fleet(job: CharacterGenJob) -> bool:
     forever.
     """
     return any(marker in (job.error or "").lower() for marker in _FLEET_ERROR_MARKERS)
+
+
+def _failed_on_recoverable_infrastructure(job: CharacterGenJob) -> bool:
+    return _failed_on_empty_fleet(job) or _is_collection_infrastructure_failure(
+        job, job.error
+    )
+
+
 RETRY_TICK_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_RETRY_TICK", "15"))
 
 
@@ -176,13 +224,16 @@ class CharacterGenManager:
             try:
                 now = time.time()
                 for job in list(self._jobs.values()):
-                    if job.stage == CHARGEN_STAGE_FAILED and _failed_on_empty_fleet(job):
+                    if (
+                        job.stage == CHARGEN_STAGE_FAILED
+                        and _failed_on_recoverable_infrastructure(job)
+                    ):
                         # the farm, not the job, was broken: put it back in the
                         # pipeline. If the fleet is still empty it parks again,
                         # so this costs one check per FLEET_WAIT_SECONDS.
                         print(
                             f"[Renderfin][CharGen] reviving job {job.id}: it was "
-                            f"failed by an empty 3D fleet"
+                            f"failed by recoverable farm infrastructure"
                         )
                         await self.resume(job.id)
                         continue
@@ -839,7 +890,9 @@ class CharacterGenManager:
         job.last_error = str(exc)[:1000]
         job.hunyuan_waiting_for_capacity = False
 
-        if _is_farm_breakage(str(exc)):
+        if _is_farm_breakage(str(exc)) or _is_collection_infrastructure_failure(
+            job, str(exc)
+        ):
             # a card that is merely busy frees up in minutes; a broken
             # post-processor does not, and re-checking it costs a GPU hour
             wait = (
@@ -851,8 +904,19 @@ class CharacterGenManager:
             # finished task. Keeping it makes the retry re-read the same
             # failure forever AND counts the job against that worker's slot,
             # so a box ends up "holding" dozens of jobs it is not running.
-            job.hunyuan_task_id = ""
-            job.hunyuan_worker = ""
+            if stage == CHARGEN_STAGE_HUNYUAN:
+                job.hunyuan_task_id = ""
+                job.hunyuan_worker = ""
+            elif stage == CHARGEN_STAGE_FLUX:
+                # Only discard terminal/missing render handles. A rare stage
+                # timeout while Comfy still owns the prompt must not create a
+                # duplicate or orphan process; the next pass will observe its
+                # eventual terminal state.
+                for attr in ("flux_task_id", "flux_task_id_b"):
+                    task_id = getattr(job, attr)
+                    previous = self.queue.get(task_id) if task_id else None
+                    if previous is None or previous.status == TASK_ERROR:
+                        setattr(job, attr, "")
             job.retry_at = time.time() + wait
             job.stage_started_at = 0
             job.timed_stage = ""

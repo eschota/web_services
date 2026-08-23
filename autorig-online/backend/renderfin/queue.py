@@ -71,6 +71,11 @@ class RenderQueue:
         self._tick_count = 0
         self._finishers: Dict[str, asyncio.Task] = {}
         self._download_slots = asyncio.Semaphore(3)
+        # A node that accepted health probes but failed the actual upload or
+        # prompt submission must not be selected again on the next refresh.
+        # Without a cooldown, one broken disk/proxy can spend all three task
+        # attempts while healthy renderers sit unused.
+        self._server_submit_cooldowns: Dict[str, float] = {}
 
     # ---------- lifecycle ----------
 
@@ -284,12 +289,19 @@ class RenderQueue:
         """
         busy = self._busy_servers()
         depths = depths or {}
+        now = time.time()
+        self._server_submit_cooldowns = {
+            name: until
+            for name, until in self._server_submit_cooldowns.items()
+            if until > now
+        }
         candidates = [
             s
             for s in self.registry.all()
             if s.status == "online"
             and routing.server_can_run(s, token)
             and s.render_server_name not in busy
+            and self._server_submit_cooldowns.get(s.render_server_name, 0) <= now
         ]
         candidates.sort(
             key=lambda s: (
@@ -353,6 +365,9 @@ class RenderQueue:
                     f"{server.render_server_name} failed: {exc}"
                 )
                 task.submit_failures += 1
+                self._server_submit_cooldowns[server.render_server_name] = (
+                    time.time() + config.SUBMIT_FAILURE_COOLDOWN_SECONDS
+                )
                 if task.submit_failures >= 3:
                     await self._fail(task, f"submit failed 3x: {exc}")
                 else:
@@ -398,6 +413,7 @@ class RenderQueue:
         prompt_id = await comfy_adapter.submit(self._client, server, workflow)
         task.comfy_prompt_id = prompt_id
         task.server_name = server.render_server_name
+        self._server_submit_cooldowns.pop(server.render_server_name, None)
         task.status = TASK_RENDERING
         task.started_at = time.time()
         await self._persist(task)
