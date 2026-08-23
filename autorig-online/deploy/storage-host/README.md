@@ -37,6 +37,9 @@ timers from this directory. Disable the legacy VPS timers only after both new
 ones pass a manual run; otherwise both hosts can emit alerts with unrelated disk
 sizes. The health check is parameterized through `AUTORIG_HEALTHCHECK_*` so it
 checks ports 8200/8210, `/srv/autorig/data`, and the `autorig-storage-*` units.
+Install `nginx-home-logrotate.conf` as `/etc/logrotate.d/nginx-home` because the
+global nginx logs live under `/home/log/nginx` and are not covered by Debian's
+default `/var/log/nginx/*.log` rule.
 
 For the first three days after a storage/backend migration, also install and
 enable `autorig-storage-postmigration-monitor.timer`. It runs every ten minutes,
