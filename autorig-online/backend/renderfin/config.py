@@ -57,6 +57,7 @@ HUNYUAN_WORKERS = [
 ]
 HUNYUAN_API_TOKEN = os.getenv("HUNYUAN_API_TOKEN", "").strip()
 _HUNYUAN_WORKERS_LAST_ERROR = ""
+_HUNYUAN_WORKER_NOTICE_STATE: set[str] = set()
 
 
 def hunyuan_workers_last_error() -> str:
@@ -70,6 +71,22 @@ def hunyuan_workers_last_error() -> str:
     return _HUNYUAN_WORKERS_LAST_ERROR
 
 
+def _emit_hunyuan_worker_notices(notices: set[str]) -> None:
+    """Log farm-config state transitions once, without caching the config.
+
+    ``hunyuan_workers`` is deliberately resolved on every admission pass so a
+    worker can be parked or restored without stale routing.  Emitting the same
+    parked-worker notice on every one of those reads turns normal queueing into
+    hundreds of journal lines.  Remember only the currently announced text;
+    when a condition clears it leaves the set and will be announced again if
+    it later returns.
+    """
+    global _HUNYUAN_WORKER_NOTICE_STATE
+    for notice in sorted(notices - _HUNYUAN_WORKER_NOTICE_STATE):
+        print(notice)
+    _HUNYUAN_WORKER_NOTICE_STATE = set(notices)
+
+
 def hunyuan_workers() -> list[dict]:
     """Resolve and de-duplicate the tiered Hunyuan worker pool.
 
@@ -81,6 +98,7 @@ def hunyuan_workers() -> list[dict]:
     _HUNYUAN_WORKERS_LAST_ERROR = ""
     workers: list[dict] = []
     physical_nodes: set[str] = set()
+    notices: set[str] = set()
     try:
         if HUNYUAN_WORKERS_FILE.is_file():
             data = json.loads(HUNYUAN_WORKERS_FILE.read_text(encoding="utf-8"))
@@ -91,7 +109,7 @@ def hunyuan_workers() -> list[dict]:
                 # A box can be parked without deleting how to reach it, so
                 # putting it back is one word rather than a reconstruction.
                 if entry.get("enabled") is False or entry.get("disabled") is True:
-                    print(
+                    notices.add(
                         f"[Renderfin] hunyuan worker {entry.get('name') or url} "
                         f"is disabled in {HUNYUAN_WORKERS_FILE.name}: "
                         f"{entry.get('disabled_reason') or 'no reason given'}"
@@ -99,7 +117,7 @@ def hunyuan_workers() -> list[dict]:
                     continue
                 canary_approved = entry.get("canary_approved", True) is not False
                 if not canary_approved:
-                    print(
+                    notices.add(
                         f"[Renderfin] hunyuan worker {entry.get('name') or url} "
                         "is parked until its standard/PBR canary is approved"
                     )
@@ -107,7 +125,7 @@ def hunyuan_workers() -> list[dict]:
                 name = str(entry.get("name") or url)
                 physical_node = str(entry.get("physical_node") or name).strip().lower()
                 if physical_node in physical_nodes:
-                    print(
+                    notices.add(
                         f"[Renderfin] ignoring duplicate Hunyuan physical node "
                         f"{name} ({physical_node})"
                     )
@@ -136,14 +154,16 @@ def hunyuan_workers() -> list[dict]:
                     )
     except Exception as exc:  # a broken file must not take the service down
         _HUNYUAN_WORKERS_LAST_ERROR = str(exc)
-        print(f"[Renderfin] hunyuan workers file unreadable: {exc}")
+        notices.add(f"[Renderfin] hunyuan workers file unreadable: {exc}")
     if workers:
+        _emit_hunyuan_worker_notices(notices)
         return workers
     # Single-token fallback only makes sense for one box: farm boxes each
     # provision their own token, so pairing many URLs with one token would
     # authenticate against at most one of them.
     if HUNYUAN_API_TOKEN and len(HUNYUAN_WORKERS) == 1:
         url = HUNYUAN_WORKERS[0]
+        _emit_hunyuan_worker_notices(notices)
         return [{
             "name": url,
             "url": url,
@@ -155,12 +175,13 @@ def hunyuan_workers() -> list[dict]:
             "physical_node": url.lower(),
         }]
     if HUNYUAN_WORKERS and not HUNYUAN_API_TOKEN:
-        print("[Renderfin] RENDERFIN_HUNYUAN_WORKERS set but no token configured")
+        notices.add("[Renderfin] RENDERFIN_HUNYUAN_WORKERS set but no token configured")
     elif len(HUNYUAN_WORKERS) > 1:
-        print(
+        notices.add(
             "[Renderfin] ignoring RENDERFIN_HUNYUAN_WORKERS: several boxes need "
             f"per-worker tokens in {HUNYUAN_WORKERS_FILE}"
         )
+    _emit_hunyuan_worker_notices(notices)
     return []
 HUNYUAN_QUALITY = os.getenv("RENDERFIN_HUNYUAN_QUALITY", "standard").strip() or "standard"
 HUNYUAN_POLL_SECONDS = float(os.getenv("RENDERFIN_HUNYUAN_POLL_SECONDS", "10"))

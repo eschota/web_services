@@ -1066,6 +1066,51 @@ class ParkedWorkerTests(unittest.TestCase):
         ])
         self.assertEqual([w["name"] for w in pool], ["f13"])
 
+    def test_unchanged_parked_worker_notice_is_logged_once(self):
+        import json as _json
+        import tempfile
+        from pathlib import Path as _P
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _P(tmp) / "workers.json"
+            path.write_text(_json.dumps([
+                {"name": "f7", "url": "https://f7", "token": "t", "enabled": False,
+                 "disabled_reason": "maintenance"},
+                {"name": "f13", "url": "https://f13", "token": "t"},
+            ]), encoding="utf-8")
+            with patch.object(config, "HUNYUAN_WORKERS_FILE", path), patch.object(
+                config, "_HUNYUAN_WORKER_NOTICE_STATE", set()
+            ), patch("builtins.print") as output:
+                config.hunyuan_workers()
+                config.hunyuan_workers()
+
+        self.assertEqual(output.call_count, 1)
+        self.assertIn("maintenance", str(output.call_args))
+
+    def test_cleared_parked_notice_is_logged_again_if_it_returns(self):
+        import json as _json
+        import tempfile
+        from pathlib import Path as _P
+
+        disabled = [
+            {"name": "f7", "url": "https://f7", "token": "t", "enabled": False},
+            {"name": "f13", "url": "https://f13", "token": "t"},
+        ]
+        enabled = [dict(disabled[0], enabled=True), disabled[1]]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _P(tmp) / "workers.json"
+            with patch.object(config, "HUNYUAN_WORKERS_FILE", path), patch.object(
+                config, "_HUNYUAN_WORKER_NOTICE_STATE", set()
+            ), patch("builtins.print") as output:
+                path.write_text(_json.dumps(disabled), encoding="utf-8")
+                config.hunyuan_workers()
+                path.write_text(_json.dumps(enabled), encoding="utf-8")
+                config.hunyuan_workers()
+                path.write_text(_json.dumps(disabled), encoding="utf-8")
+                config.hunyuan_workers()
+
+        self.assertEqual(output.call_count, 2)
+
     def test_unreadable_authoritative_file_records_resolution_error(self):
         import tempfile
         from pathlib import Path as _P
