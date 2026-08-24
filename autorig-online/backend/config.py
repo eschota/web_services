@@ -38,7 +38,7 @@ AUTORIG_MIGRATION_READ_ONLY = os.getenv("AUTORIG_MIGRATION_READ_ONLY", "0").stri
 ARTIFACT_CACHE_ROOT = os.getenv("ARTIFACT_CACHE_ROOT", "/var/autorig/artifact-cache").strip()
 ARTIFACT_CACHE_FULL_HOURS = max(24, int(os.getenv("ARTIFACT_CACHE_FULL_HOURS", "24")))
 ARTIFACT_CACHE_SOFT_CAP_GB = float(os.getenv("ARTIFACT_CACHE_SOFT_CAP_GB", "250"))
-ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("ARTIFACT_CACHE_RESERVE_GB", "120"))
+ARTIFACT_CACHE_RESERVE_GB = float(os.getenv("ARTIFACT_CACHE_RESERVE_GB", "60"))
 ARTIFACT_CACHE_CONCURRENCY = max(1, min(2, int(os.getenv("ARTIFACT_CACHE_CONCURRENCY", "2"))))
 
 # =============================================================================
@@ -319,7 +319,7 @@ SUPPORT_CHAT_MESSAGE_MAX_CHARS = int(os.getenv("SUPPORT_CHAT_MESSAGE_MAX_CHARS",
 # Set AUTOMATIC_TASK_DB_DELETION=1 to restore legacy automatic DB row deletion.
 AUTOMATIC_TASK_DB_DELETION = os.getenv("AUTOMATIC_TASK_DB_DELETION", "0") == "1"
 
-MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "2.5"))  # Critical free-space floor for background cleanup
+MIN_FREE_SPACE_GB = float(os.getenv("MIN_FREE_SPACE_GB", "60"))  # Critical free-space floor for background cleanup
 CLEANUP_CHECK_INTERVAL_CYCLES = 10  # Check disk space every N background worker cycles (~5 min)
 CLEANUP_MIN_AGE_HOURS = 1  # Never delete files younger than this (safety for processing tasks)
 # The original upload is the only thing a finished task can be rebuilt from.
@@ -355,7 +355,7 @@ VIDEO_CACHE_MIN_AGE_HOURS = float(
 )  # Pressure-triggered preview retention; requires poster/viewer fallback
 
 # Before each new task: try to reach at least this much free space on /
-NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "2.1"))
+NEW_TASK_MIN_FREE_GB = float(os.getenv("NEW_TASK_MIN_FREE_GB", "60"))
 # If ZIP purge is not enough: delete oldest done/error tasks, but free at most this many GB from disk in that phase
 # (must be >= typical gap to NEW_TASK_MIN_FREE_GB or Telegram low-disk alerts will repeat)
 NEW_TASK_PURGE_TASKS_MAX_FREED_GB = float(os.getenv("NEW_TASK_PURGE_TASKS_MAX_FREED_GB", "8"))

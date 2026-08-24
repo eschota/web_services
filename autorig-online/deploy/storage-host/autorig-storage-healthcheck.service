@@ -18,7 +18,7 @@ Environment="AUTORIG_HEALTHCHECK_VIDEO_CACHE=/srv/autorig/data/var/videos"
 Environment="AUTORIG_HEALTHCHECK_BACKEND_ENV=/srv/autorig/secrets/backend.env"
 Environment="AUTORIG_HEALTHCHECK_HUNYUAN_WORKERS_FILE=/srv/autorig/secrets/renderfin-hunyuan.json"
 Environment="AUTORIG_HEALTHCHECK_TUNNELS_CONF=/srv/autorig/secrets/farm-tunnels.conf"
-Environment="AUTORIG_HEALTHCHECK_MIN_FREE_GB=120"
+Environment="AUTORIG_HEALTHCHECK_MIN_FREE_GB=60"
 Environment="AUTORIG_HEALTHCHECK_VIDEO_CACHE_WARN_GB=20"
 EnvironmentFile=-/srv/autorig/secrets/backend.env
 EnvironmentFile=/srv/autorig/secrets/telegram.env
