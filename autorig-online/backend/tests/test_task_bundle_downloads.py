@@ -174,6 +174,24 @@ class TaskBundleDownloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(matching[0].role, "full_bundle")
         self.assertEqual(matching[0].relative_path, f"deliverables/{GUID}.zip")
 
+    async def test_artifact_discovery_does_not_require_synthesized_bundle(self):
+        task = _task()
+        task.viewer_prepared_glb_url = None
+        task.viewer_animations_glb_url = None
+        task.video_url = None
+
+        with (
+            patch.object(
+                main,
+                "_fetch_worker_model_files",
+                AsyncMock(return_value=(False, [], None, "not needed")),
+            ),
+            patch.object(main, "resolve_poster_url_for_task", return_value=None),
+        ):
+            sources = await main._discover_task_artifact_sources(task)
+
+        self.assertFalse(any(source.role == "full_bundle" for source in sources))
+
     async def test_cached_files_quotes_durable_urls_without_local_task_directory(self):
         task = SimpleNamespace(
             id="durable-only-task",

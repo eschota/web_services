@@ -45,6 +45,10 @@ _claim_lock = asyncio.Lock()
 _worker_locks: dict[str, asyncio.Lock] = {}
 
 
+class ArtifactCacheReserveError(RuntimeError):
+    """The next write would consume the filesystem reserve."""
+
+
 @dataclass(frozen=True)
 class ArtifactSource:
     url: str
@@ -277,6 +281,24 @@ def _parse_content_range(value: str) -> tuple[int, int, int]:
     return start, end, total
 
 
+def _ensure_cache_write_capacity(path: Path, incoming_bytes: int) -> None:
+    """Fail before a cache write would cross the production disk reserve."""
+    required = max(0, int(incoming_bytes or 0))
+    if required <= 0:
+        return
+    probe_path = path.parent
+    while not probe_path.exists() and probe_path != probe_path.parent:
+        probe_path = probe_path.parent
+    free = int(shutil.disk_usage(probe_path).free)
+    reserve = int(ARTIFACT_CACHE_RESERVE_GB * 1024**3)
+    if free - required < reserve:
+        raise ArtifactCacheReserveError(
+            f"artifact cache write paused: free={free / 1024**3:.2f}GB "
+            f"reserve={ARTIFACT_CACHE_RESERVE_GB:.0f}GB "
+            f"next_write={required / 1024**2:.2f}MiB"
+        )
+
+
 async def _probe_source(
     client: httpx.AsyncClient,
     source: ArtifactSource,
@@ -351,6 +373,7 @@ async def _download_to_partial(
             written = 0
             with partial.open("wb") as output:
                 async for chunk in response.aiter_bytes(1024 * 1024):
+                    _ensure_cache_write_capacity(partial, len(chunk))
                     output.write(chunk)
                     written += len(chunk)
                     if written > total:
@@ -381,6 +404,7 @@ async def _download_to_partial(
                     raise RuntimeError("range response does not match requested block")
                 written = 0
                 async for chunk in response.aiter_bytes(1024 * 1024):
+                    _ensure_cache_write_capacity(partial, len(chunk))
                     output.write(chunk)
                     written += len(chunk)
                 if written != end - start + 1:
@@ -529,6 +553,10 @@ async def cache_sources(
                 existing[item["relative_path"]] = item
                 manifest["files"] = sorted(existing.values(), key=lambda row: row["relative_path"])
                 write_manifest(cache_root, task_id, manifest)
+            except ArtifactCacheReserveError:
+                manifest["files"] = sorted(existing.values(), key=lambda row: row["relative_path"])
+                write_manifest(cache_root, task_id, manifest)
+                raise
             except Exception as exc:
                 errors.append(f"{source.role}:{source.url}: {exc}")
     manifest["files"] = sorted(existing.values(), key=lambda row: row["relative_path"])
@@ -703,6 +731,39 @@ async def _finish_job(
         await db.commit()
 
 
+async def _defer_job_for_reserve(
+    job_id: int,
+    *,
+    manifest: Optional[dict[str, Any]],
+    error: str,
+) -> None:
+    """Pause infrastructure-limited cache work without spending an attempt."""
+    async with AsyncSessionLocal() as db:
+        job = await db.get(ArtifactCacheJob, job_id)
+        if job is None:
+            return
+        task = await db.get(Task, job.task_id)
+        moment = utcnow()
+        count, size = manifest_stats(manifest or {"files": []})
+        message = str(error)[:8000]
+        if moment >= job.deadline_at:
+            job.status = "failed"
+            job.finished_at = moment
+        else:
+            job.status = "pending"
+            job.next_attempt_at = moment + timedelta(minutes=5)
+        job.last_error = message
+        job.updated_at = moment
+        if task is not None:
+            task.artifact_cache_file_count = count
+            task.artifact_cache_bytes = size
+            task.artifact_cache_error = message
+            task.artifact_cache_status = "partial" if count else (
+                "failed" if job.status == "failed" else "pending"
+            )
+        await db.commit()
+
+
 async def _process_claimed_job(
     job_id: int,
     task_id: str,
@@ -710,6 +771,7 @@ async def _process_claimed_job(
 ) -> None:
     manifest: Optional[dict[str, Any]] = None
     errors: list[str] = []
+    reserve_error: Optional[str] = None
     try:
         full_until: Optional[datetime] = None
         async with AsyncSessionLocal() as db:
@@ -742,8 +804,17 @@ async def _process_claimed_job(
         }
         missing = sorted(required_paths - cached_paths)
         errors.extend(f"required artifact missing: {path}" for path in missing)
+    except ArtifactCacheReserveError as exc:
+        reserve_error = str(exc)
+        try:
+            manifest = read_manifest(Path(ARTIFACT_CACHE_ROOT), task_id)
+        except (OSError, ValueError):
+            manifest = None
     except Exception as exc:
         errors.append(str(exc))
+    if reserve_error is not None:
+        await _defer_job_for_reserve(job_id, manifest=manifest, error=reserve_error)
+        return
     await _finish_job(job_id, manifest=manifest, errors=errors)
 
 

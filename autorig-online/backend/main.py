@@ -15760,8 +15760,22 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
     """Build the verified cache contract from task URLs and model-files."""
     candidates: List[ArtifactSource] = []
 
+    declared_task_urls = list(dict.fromkeys(
+        [
+            *(task.ready_urls or []),
+            *(task.output_urls or []),
+        ]
+    ))
     bundle_url = resolve_worker_full_bundle_zip_url(task)
-    if bundle_url:
+    bundle_is_declared = bool(
+        bundle_url
+        and any(
+            str(value or "").strip() == str(bundle_url).strip()
+            for value in declared_task_urls
+            if str(value or "").strip()
+        )
+    )
+    if bundle_is_declared:
         safe_guid = str(task.guid or task.id)
         candidates.append(
             ArtifactSource(
@@ -15776,14 +15790,13 @@ async def _discover_task_artifact_sources(task: Task) -> List[ArtifactSource]:
 
     declared_urls = list(dict.fromkeys(
         [
-            *(task.ready_urls or []),
-            *(task.output_urls or []),
+            *declared_task_urls,
             str(task.viewer_prepared_glb_url or ""),
             str(task.viewer_animations_glb_url or ""),
             str(task.video_url or ""),
         ]
     ))
-    if bundle_url:
+    if bundle_is_declared:
         # The full bundle already has a durable cache role/path above.  Current
         # workers also declare the same ZIP in ready_urls; caching it again as
         # a generic model file doubles both worker traffic and central storage.

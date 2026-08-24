@@ -6,6 +6,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import httpx
 from sqlalchemy import select
@@ -92,6 +93,50 @@ class RangeResumeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(partial.read_bytes(), payload)
         self.assertEqual(seen_ranges[0][0], 1024)
         self.assertTrue(all(end - start + 1 <= 8 * 1024 * 1024 for start, end in seen_ranges))
+
+    async def test_download_stops_before_crossing_disk_reserve(self):
+        payload = b"glTF" + (2).to_bytes(4, "little") + b"x" * 4096
+        requests = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal requests
+            requests += 1
+            start, end = [
+                int(value)
+                for value in request.headers["range"][6:].split("-", 1)
+            ]
+            return httpx.Response(
+                206,
+                content=payload[start : end + 1],
+                headers={"Content-Range": f"bytes {start}-{end}/{len(payload)}"},
+            )
+
+        source = ArtifactSource(
+            url="https://converter-f1.freestock.online/task/model.glb",
+            relative_path="files/model.glb",
+            role="primary_glb",
+            assigned_worker=WORKER,
+        )
+        with tempfile.TemporaryDirectory(prefix="autorig-cache-reserve-") as tmp:
+            partial = Path(tmp) / "partial"
+            reserve = int(artifact_cache.ARTIFACT_CACHE_RESERVE_GB * 1024**3)
+            with patch.object(
+                artifact_cache.shutil,
+                "disk_usage",
+                return_value=SimpleNamespace(free=reserve + 512),
+            ):
+                async with httpx.AsyncClient(
+                    transport=httpx.MockTransport(handler)
+                ) as client:
+                    with self.assertRaises(artifact_cache.ArtifactCacheReserveError):
+                        await artifact_cache._download_to_partial(
+                            client,
+                            source,
+                            partial,
+                            {"size": len(payload), "ranges": True},
+                        )
+            self.assertEqual(partial.stat().st_size, 0)
+        self.assertEqual(requests, 1)
 
 
 class ArtifactValidationTests(unittest.TestCase):
@@ -363,6 +408,52 @@ class DurableQueueTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             self.assertEqual(task.artifact_cache_status, "failed")
             self.assertEqual(task.artifact_cache_error, "worker copy expired")
+
+    async def test_disk_reserve_deferral_does_not_spend_attempt(self):
+        now = datetime.utcnow()
+        task_id = "00000000-0000-0000-0000-000000000903"
+        async with self.sessions() as db:
+            task = Task(
+                id=task_id,
+                owner_type="anon",
+                owner_id="cache-test",
+                input_url="https://example.test/model.glb",
+                input_type="t_pose",
+                worker_api=WORKER,
+                status="done",
+                artifact_cache_status="caching",
+            )
+            db.add(task)
+            job = ArtifactCacheJob(
+                task_id=task.id,
+                worker_key="f1",
+                status="caching",
+                attempt_count=7,
+                next_attempt_at=now,
+                deadline_at=now + timedelta(hours=1),
+            )
+            db.add(job)
+            await db.commit()
+            job_id = job.id
+
+        original_sessions = artifact_cache.AsyncSessionLocal
+        artifact_cache.AsyncSessionLocal = self.sessions
+        try:
+            await artifact_cache._defer_job_for_reserve(
+                job_id,
+                manifest={"files": []},
+                error="disk reserve",
+            )
+        finally:
+            artifact_cache.AsyncSessionLocal = original_sessions
+
+        async with self.sessions() as db:
+            job = await db.get(ArtifactCacheJob, job_id)
+            task = await db.get(Task, task_id)
+            self.assertEqual(job.status, "pending")
+            self.assertEqual(job.attempt_count, 7)
+            self.assertGreaterEqual(job.next_attempt_at, now + timedelta(minutes=4))
+            self.assertEqual(task.artifact_cache_status, "pending")
 
 
 if __name__ == "__main__":
