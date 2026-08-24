@@ -72,6 +72,19 @@ FLEET_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_FLEET_WAIT", "300"))
 # Waiting for a busy box to free up is ordinary queueing, so it is re-checked
 # far more often than a farm that is actually down.
 SLOT_WAIT_SECONDS = float(os.getenv("RENDERFIN_CHARGEN_SLOT_WAIT", "60"))
+# Admission-control responses describe a healthy queue, not a dead fleet. The
+# wording comes from the central FIFO, shared-converter reserve and worker GPU
+# gate, so matching only "at capacity" can leave idle dedicated cards waiting
+# for the five-minute outage poll.
+_HUNYUAN_CAPACITY_WAIT_MARKERS = (
+    "at capacity",
+    "no capacity",
+    "higher-priority hunyuan job",
+    "shared hunyuan fallback paused",
+    "gpu_busy_comfy",
+    "gpu_leased",
+    "worker_capacity",
+)
 # Some failures arrive only AFTER a full 3D generation has been paid for, so
 # re-checking every five minutes would burn a GPU-hour to rediscover the same
 # broken post-processor. They still must not fail the job.
@@ -110,6 +123,12 @@ _FARM_BREAKAGE_MARKERS = (
 def _is_farm_breakage(text: str) -> bool:
     low = (text or "").lower()
     return any(marker in low for marker in _FARM_BREAKAGE_MARKERS)
+
+
+def _is_hunyuan_capacity_wait(text: str) -> bool:
+    """Return true for healthy admission/slot waits that merit a fast poll."""
+    low = (text or "").lower()
+    return any(marker in low for marker in _HUNYUAN_CAPACITY_WAIT_MARKERS)
 
 
 def _is_collection_infrastructure_failure(
@@ -1020,7 +1039,7 @@ class CharacterGenManager:
             # a full pool is a queue, not an outage: look again soon
             wait = (
                 SLOT_WAIT_SECONDS
-                if "at capacity" in str(exc)
+                if _is_hunyuan_capacity_wait(str(exc))
                 else FLEET_WAIT_SECONDS
             )
             # Not this job's fault and not fixable by retrying harder: park it

@@ -1409,14 +1409,29 @@ class EmptyFleetTests(unittest.TestCase):
                 await queue.start()
                 await manager.start()
                 try:
-                    slot = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
-                    await manager._handle_stage_error(
-                        slot,
-                        hunyuan_client.NoWorkerAvailable(
-                            "every Hunyuan worker is at capacity: f13"
-                        ),
+                    capacity_messages = (
+                        "every Hunyuan worker is at capacity: f13",
+                        "higher-priority Hunyuan job first is ahead of second",
+                        "shared Hunyuan fallback paused: background work already "
+                        "occupies 2/3 healthy full converters (reserve=1)",
+                        "f12 is temporarily unavailable: gpu_busy_comfy",
                     )
-                    slot_wait = slot.retry_at - time.time()
+                    slots = []
+                    for message in capacity_messages:
+                        slot = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
+                        await manager._handle_stage_error(
+                            slot,
+                            hunyuan_client.NoWorkerAvailable(message),
+                        )
+                        slot_wait = slot.retry_at - time.time()
+                        self.assertAlmostEqual(
+                            slot_wait,
+                            character_gen.SLOT_WAIT_SECONDS,
+                            delta=2,
+                        )
+                        self.assertEqual(slot.attempts, {})
+                        self.assertEqual(slot.error, "")
+                        slots.append(slot)
 
                     outage = await _idle_job(manager, stage=CHARGEN_STAGE_HUNYUAN)
                     await manager._handle_stage_error(
@@ -1425,10 +1440,14 @@ class EmptyFleetTests(unittest.TestCase):
                     )
                     outage_wait = outage.retry_at - time.time()
 
-                    self.assertLess(slot_wait, outage_wait)
-                    self.assertEqual(slot.attempts, {})
+                    self.assertAlmostEqual(
+                        outage_wait,
+                        character_gen.FLEET_WAIT_SECONDS,
+                        delta=2,
+                    )
                     self.assertEqual(outage.attempts, {})
-                    await self._park(manager, slot)
+                    for slot in slots:
+                        await self._park(manager, slot)
                     await self._park(manager, outage)
                 finally:
                     await manager.stop()
