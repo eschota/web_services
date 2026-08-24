@@ -26,6 +26,21 @@ Deploy an immutable directory named after the published commit SHA under
 then atomically repoint `/srv/autorig/current`. Never run a blind `git pull` on
 the production host.
 
+Before switching `current`, recreate the two runtime mount targets that are
+intentionally absent from a Git archive.  The backend systemd namespace will
+fail closed with `status=226/NAMESPACE` if either path is missing:
+
+```bash
+release=/srv/autorig/releases/<published-commit-sha>
+ln -s /srv/autorig/data/static/tasks "$release/autorig-online/static/tasks"
+ln -s /srv/autorig/data/static/glb_cache "$release/autorig-online/static/glb_cache"
+test "$(readlink -f "$release/autorig-online/static/tasks")" = /srv/autorig/data/static/tasks
+test "$(readlink -f "$release/autorig-online/static/glb_cache")" = /srv/autorig/data/static/glb_cache
+```
+
+Create these links in the staged release, never in the shared data directory,
+and verify them before restarting `autorig-storage.service`.
+
 Keep secrets in `/srv/autorig/secrets`. The checked-in `storage-host.env` is a
 non-secret overlay; copy its values into `/srv/autorig/secrets/storage-host.env`
 without replacing migrated credentials. F7 remains excluded by
