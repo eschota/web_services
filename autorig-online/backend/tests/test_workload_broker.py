@@ -109,9 +109,9 @@ def _run(callback):
         return asyncio.run(_with_database(callback))
 
 
-def test_physical_aliases_dedupe_f7_raptor_and_preserve_machine_hash():
-    assert canonical_physical_resource_id("F7") == "raptor"
-    assert canonical_physical_resource_id("FARM-F7") == "raptor"
+def test_physical_aliases_keep_f7_distinct_and_preserve_machine_hash():
+    assert canonical_physical_resource_id("F7") == "f7"
+    assert canonical_physical_resource_id("FARM-F7") == "farm-f7"
     assert canonical_physical_resource_id("RYZEN-SERVER") == "raptor"
     assert canonical_physical_resource_id("Raptor-GPU0") == "raptor"
     fingerprint = "a1234567890bcdefa1234567890bcdef"
@@ -125,7 +125,7 @@ def test_all_raptor_aliases_share_one_physical_lease_slot():
         )
         assert code == 200
         assert first["lease_by_key"]["physical_resource_id_string"] == "raptor"
-        for index, alias in enumerate(("f7", "RYZEN-SERVER", "Raptor-GPU0"), 1):
+        for index, alias in enumerate(("RYZEN-SERVER", "Raptor-GPU0"), 1):
             code, busy = await acquire_lease(
                 db,
                 _request(alias, "ai_vision", f"vision-{index}", f"request-{index}"),
@@ -789,7 +789,7 @@ def test_freestock_flat_heartbeat_aliases_are_fail_closed_and_expiry_is_canonica
             now=start,
         )
         assert code == 200
-        assert heartbeat["physical_resource_id_string"] == "raptor"
+        assert heartbeat["physical_resource_id_string"] == "farm-f7"
         code, acquired = await acquire_lease(
             db,
             _request(

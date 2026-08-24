@@ -77,8 +77,6 @@ WORKLOAD_CLASS_PRIORITY = {
 }
 
 _DEFAULT_PHYSICAL_ALIASES = {
-    "f7": "raptor",
-    "farm-f7": "raptor",
     "raptor": "raptor",
     "ryzen-server": "raptor",
     "ryzen_server": "raptor",
@@ -174,7 +172,7 @@ def canonical_physical_resource_id(physical_resource_id: Any, node_id: Any = "")
     if len(raw) >= 24 and re.fullmatch(r"[a-f0-9:_-]+", raw):
         return raw
     if re.fullmatch(
-        r"(?:raptor|f7|farm-f7|ryzen-server|ryzen_server)(?:[-_:]?gpu[-_:]?0)",
+        r"(?:raptor|ryzen-server|ryzen_server)(?:[-_:]?gpu[-_:]?0)",
         raw,
     ):
         return "raptor"
