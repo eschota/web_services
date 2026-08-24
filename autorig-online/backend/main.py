@@ -82,7 +82,10 @@ from worker_artifact_urls import canonical_worker_artifact_url, is_viewer_artifa
 from artifact_cache import (
     ArtifactSource,
     creation_block_reason as artifact_creation_block_reason,
+    iter_cached_archive_member,
+    lookup_cached_archive_member,
     lookup_cached_artifact,
+    read_cached_archive_member,
     run_retention as run_artifact_cache_retention,
     start_artifact_cache_workers,
     stop_artifact_cache_workers,
@@ -10030,6 +10033,54 @@ def _x_accel_artifact_response(
     return Response(status_code=200, headers=headers, media_type=media_type)
 
 
+def _cached_archive_member_response(
+    entry: Dict[str, Any],
+    request: Request,
+    *,
+    filename: str,
+    media_type: str,
+    as_attachment: bool = False,
+) -> StreamingResponse:
+    """Serve a byte-range directly from a central cached ZIP member."""
+    total_size = int(entry["member_size"])
+    try:
+        start, end, is_partial = _parse_single_http_byte_range(
+            request.headers.get("range"),
+            total_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=416,
+            detail=str(exc),
+            headers={"Content-Range": f"bytes */{total_size}"},
+        ) from exc
+    etag = str(entry.get("etag") or "")
+    if etag and _request_etag_matches(request, etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    disposition = "attachment" if as_attachment else "inline"
+    headers = {
+        "Content-Disposition": f'{disposition}; filename="{Path(filename).name}"',
+        "Content-Type": media_type,
+        "Content-Encoding": "identity",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+        "Cache-Control": "private, max-age=0" if as_attachment else "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "X-Artifact-Cache": "archive-member",
+    }
+    if is_partial:
+        headers["Content-Range"] = f"bytes {start}-{end}/{total_size}"
+    if etag:
+        headers["ETag"] = etag
+    return StreamingResponse(
+        iter_cached_archive_member(entry, start=start, end=end),
+        status_code=206 if is_partial else 200,
+        media_type=media_type,
+        headers=headers,
+    )
+
+
 def _x_accel_glb_cache_response(
     path: Path,
     *,
@@ -13485,9 +13536,14 @@ async def _get_cached_glb(
         return None
 
 
+_CACHED_SOURCE_GLB_MAX_BYTES = 1024 * 1024 * 1024
+_CACHED_RIG_JSON_MAX_BYTES = 2 * 1024 * 1024
+
+
 @app.get("/api/task/{task_id}/model.glb")
 async def api_proxy_model_glb(
     task_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Proxy the main model GLB file from worker"""
@@ -13513,8 +13569,95 @@ async def api_proxy_model_glb(
             media_type="model/gltf-binary",
             as_attachment=False,
         )
+
+    archived_model = lookup_cached_archive_member(
+        task_id,
+        basename=f"{task.guid}.glb",
+        max_uncompressed_bytes=_CACHED_SOURCE_GLB_MAX_BYTES,
+    )
+    if archived_model:
+        header = bytes(archived_model.get("prefix") or b"")
+        declared_size = int(archived_model.get("member_size") or 0)
+        if (
+            len(header) >= 12
+            and header[:4] == b"glTF"
+            and int.from_bytes(header[4:8], "little") == 2
+            and int.from_bytes(header[8:12], "little") == declared_size
+        ):
+            return _cached_archive_member_response(
+                archived_model,
+                request,
+                filename=f"{task_id}_model.glb",
+                media_type="model/gltf-binary",
+            )
     
     return await _proxy_model_file(model_url, f"{task_id}_model.glb")
+
+
+@app.get("/api/task/{task_id}/rig.json")
+async def api_task_rig_json(
+    task_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return converter rig metadata from durable central storage."""
+    task = await get_task_by_id(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != "done" or not task.guid:
+        raise HTTPException(status_code=404, detail="Rig metadata is not available yet")
+
+    rig_name = f"{task.guid}_rig.json"
+    durable_rig = lookup_cached_artifact(task_id, basename=rig_name)
+    if durable_rig:
+        return _x_accel_artifact_response(
+            durable_rig,
+            filename=rig_name,
+            media_type="application/json",
+            as_attachment=False,
+        )
+    archived_rig = lookup_cached_archive_member(
+        task_id,
+        basename=rig_name,
+        max_uncompressed_bytes=_CACHED_RIG_JSON_MAX_BYTES,
+    )
+    if not archived_rig:
+        raise HTTPException(status_code=404, detail="Rig metadata is not available")
+    try:
+        raw = read_cached_archive_member(
+            archived_rig,
+            max_bytes=_CACHED_RIG_JSON_MAX_BYTES,
+        )
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, RuntimeError, UnicodeDecodeError, ValueError, zipfile.BadZipFile) as exc:
+        print(f"[ArtifactCache] Invalid cached rig metadata for task {task_id}: {exc}")
+        raise HTTPException(status_code=503, detail="Cached rig metadata is invalid") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=503, detail="Cached rig metadata is invalid")
+    task_collection_guid = str(getattr(task, "collection_guid", None) or "").strip()
+    if task_collection_guid and str(payload.get("collection_guid") or "").strip() != task_collection_guid:
+        raise HTTPException(status_code=503, detail="Cached rig collection metadata does not match task")
+    task_collection_index = getattr(task, "collection_index", None)
+    if task_collection_index is not None:
+        try:
+            index_matches = int(payload.get("collection_index")) == int(task_collection_index)
+        except (TypeError, ValueError):
+            index_matches = False
+        if not index_matches:
+            raise HTTPException(status_code=503, detail="Cached rig collection metadata does not match task")
+    etag = str(archived_rig.get("etag") or "")
+    if etag and _request_etag_matches(request, etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    headers = {
+        "Content-Disposition": f'inline; filename="{rig_name}"',
+        "Cache-Control": "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "X-Artifact-Cache": "archive-member",
+    }
+    if etag:
+        headers["ETag"] = etag
+    return Response(content=raw, media_type="application/json", headers=headers)
 
 
 async def _resolve_task_matrix_animation_artifact(
@@ -13813,6 +13956,27 @@ async def api_proxy_animations_glb(
             cache_path.unlink()
         except OSError:
             pass
+
+    # The durable cache may still hold the worker's 100k/10k/1k animation GLB
+    # after the converter has evicted its public directory. Prefer the highest
+    # available LOD and serve it through nginx without copying it back.
+    cached_animation_name = f"{task.guid}_all_animations.glb"
+    for lod in ("100k", "10k", "1k"):
+        durable_animations = lookup_cached_artifact(
+            task_id,
+            role="primary_glb",
+            basename=cached_animation_name,
+            relative_path_fragment=f"_{lod}/",
+        )
+        if durable_animations and _validate_viewer_animation_glb_file(
+            Path(durable_animations["path"])
+        ):
+            return _x_accel_artifact_response(
+                durable_animations,
+                filename=f"{task_id}_animations.glb",
+                media_type="model/gltf-binary",
+                as_attachment=False,
+            )
     
     # Try to find animations GLB in ready_urls (must end with .glb, not .blend).
     animations_url = _find_file_in_ready_urls(task.ready_urls or [], "_all_animations", ".glb")
