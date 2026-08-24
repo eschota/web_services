@@ -51,6 +51,12 @@ STAGE_STALL_SECONDS = 4 * 3600
 FAILED_JOB_ALERT_SECONDS = float(
     os.getenv("AUTORIG_HEALTHCHECK_FAILED_JOB_ALERT_SECONDS", str(24 * 3600))
 )
+# Delivery runs asynchronously after a job enters ready.  Do not page on the
+# small, normal interval between persisting READY and recording Telegram's
+# successful response.
+DELIVERY_GRACE_SECONDS = float(
+    os.getenv("AUTORIG_HEALTHCHECK_DELIVERY_GRACE_SECONDS", "600")
+)
 ACTIVE_STAGES = ("flux_render", "hunyuan", "turntable")
 
 
@@ -380,7 +386,17 @@ def check_generation_jobs(report: Report) -> None:
                 stalled.append(f"{job['id'][:8]} at {stage} for {idle / 3600:.1f}h")
         delivered = job.get("delivered") or {}
         if stage == "ready" and job.get("telegram_chat_id") and not delivered.get("model"):
-            undelivered.append(job["id"][:8])
+            ready_at = (
+                job.get("stage_started_at")
+                or job.get("updated_at")
+                or job.get("created_at")
+            )
+            try:
+                delivery_age = now - float(ready_at)
+            except (TypeError, ValueError):
+                delivery_age = DELIVERY_GRACE_SECONDS + 1
+            if delivery_age > DELIVERY_GRACE_SECONDS:
+                undelivered.append(job["id"][:8])
 
     report.ok("generation jobs: " + ", ".join(f"{k}={v}" for k, v in sorted(stages.items())))
     if failed:
