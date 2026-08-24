@@ -249,6 +249,10 @@ async def download_artifact(
     resp = await client.get(
         f"{base}/view", params=params, timeout=300.0, auth=_auth_for(server)
     )
+    if _capacity_wait(resp):
+        raise ComfyCapacityWait(
+            f"Comfy artifact temporarily gated by GPU lease: HTTP {resp.status_code}"
+        )
     if resp.status_code != 200:
         raise ComfyAdapterError(
             f"artifact download failed: HTTP {resp.status_code} {params['filename']}"

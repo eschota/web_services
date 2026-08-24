@@ -484,6 +484,13 @@ class RenderQueue:
                 await self._finish(task, server, entry)
         except asyncio.CancelledError:
             raise
+        except comfy_adapter.ComfyCapacityWait as exc:
+            # The prompt has already completed and its history entry is durable,
+            # but a shared node may grant Hunyuan the GPU lease before we fetch
+            # /view.  Keep following the same prompt: once Comfy is restored the
+            # next poll will retry the artifact without spending a render attempt
+            # or holding the character job in a long fleet-error cooldown.
+            print(f"[Renderfin][Queue] task {task.id} artifact gated; retrying: {exc}")
         except Exception as exc:
             await self._fail(task, f"artifact download failed: {exc}")
         finally:

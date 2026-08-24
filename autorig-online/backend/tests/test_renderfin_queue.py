@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
+
 from renderfin import comfy_adapter, config
 from renderfin.models import (
     TASK_DONE,
@@ -60,6 +62,65 @@ def _server(name="raptor", workflows=("gen_image.json",)):
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_artifact_download_gpu_lease_is_capacity_wait(self):
+        async def scenario():
+            server = _server()
+
+            def handler(_request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    423, json={"error": "gpu_leased", "retryable": True}
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            ) as client:
+                with self.assertRaises(comfy_adapter.ComfyCapacityWait):
+                    await comfy_adapter.download_artifact(
+                        client,
+                        server,
+                        {"filename": "done.png", "subfolder": "", "type": "output"},
+                    )
+
+        run(scenario())
+
+    def test_artifact_gpu_lease_keeps_completed_prompt_bound_for_retry(self):
+        async def scenario():
+            with _Env():
+                registry = ServerRegistry()
+                server = _server()
+                registry.save(server)
+                queue = RenderQueue(registry, db_path=config.DB_PATH)
+                await queue.start()
+                queue._pump_task.cancel()
+                try:
+                    task = await queue.enqueue(
+                        RenderPrompt(prompt="a", type="t_pose", image_url="https://h/m.jpg")
+                    )
+                    task.status = TASK_RENDERING
+                    task.server_name = server.render_server_name
+                    task.comfy_prompt_id = "completed-prompt"
+                    task.started_at = time.time()
+                    await queue._persist(task)
+
+                    with patch.object(
+                        queue,
+                        "_finish",
+                        side_effect=comfy_adapter.ComfyCapacityWait("gpu leased"),
+                    ):
+                        await queue._finish_guarded(task, server, {})
+
+                    self.assertEqual(task.status, TASK_RENDERING)
+                    self.assertEqual(task.server_name, server.render_server_name)
+                    self.assertEqual(task.comfy_prompt_id, "completed-prompt")
+                    self.assertEqual(task.error, "")
+                    persisted = queue.get(task.id)
+                    self.assertEqual(persisted.status, TASK_RENDERING)
+                    self.assertEqual(persisted.comfy_prompt_id, "completed-prompt")
+                finally:
+                    await queue.stop()
+
+        run(scenario())
+
     def test_submit_failure_cooldown_rotates_to_a_healthy_peer(self):
         async def scenario():
             with _Env():
